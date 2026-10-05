@@ -484,6 +484,8 @@ export interface DroppedRecordRef {
   /** The unit the user stated, alongside `value`. Same conditions, same source. */
   readonly unit?: string;
   readonly reason:
+    | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
+    | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
     | import("./quantity-evidence.js").UnitRefusal
     | import("./quantity-evidence.js").LiteralRefusal
     | "unparseable_ref"
@@ -1658,27 +1660,22 @@ function quotedEffectForEdge(args: {
   const source = nodes.find((node) => node.id === edge.from);
   const target = nodes.find((node) => node.id === edge.to);
   if (source === undefined || target === undefined) return undefined;
-  const detail = claim?.effect_detail;
-  if (claim?.claim_kind !== "causal_link" || detail === undefined) return undefined;
-  const basis = [...new Set(claim.basis ?? [])];
-  if (basis.length !== 1 || !Number.isInteger(basis[0])) return undefined;
-  const item = statedItems[basis[0]!];
-  const quote = item?.source_quote;
-  const authority = item?.relationship;
-  if (item?.kind !== "cause" || authority === undefined || typeof quote !== "string" || quote.length === 0 || !brief.includes(quote)) return undefined;
-  // Endpoint identity is compulsory even for singleton effects; labels supply nothing.
-  if (source.quantity_ref !== authority.from_quantity || target.quantity_ref !== authority.to_quantity) return undefined;
-  const fromQuantity = statedItems[authority.from_quantity];
-  const toQuantity = statedItems[authority.to_quantity];
-  if (fromQuantity?.unit === undefined || toQuantity?.unit === undefined
-    || !brief.includes(fromQuantity.source_quote) || !brief.includes(toQuantity.source_quote)
-    || !sameUnit(fromQuantity.unit, detail.per_source_change_unit) || !sameUnit(toQuantity.unit, detail.amount_unit)) return undefined;
-  return { ...detail, quote, authority };
+  const entries = statedItems.filter(item => item.kind === "cause" && item.relationship?.from_quantity === source.quantity_ref
+    && item.relationship?.to_quantity === target.quantity_ref && item.source_quote.length > 0 && brief.includes(item.source_quote));
+  if(entries.length !== 1) return undefined;
+  const item=entries[0]!, authority=item.relationship!, quote=item.source_quote;
+  if(authority.amount === undefined || authority.per_source_change === undefined || authority.amount_unit === undefined || authority.per_source_change_unit === undefined) return undefined;
+  const detail=claim?.effect_detail;
+  if(detail !== undefined && (detail.amount !== authority.amount || detail.per_source_change !== authority.per_source_change
+    || !sameUnit(detail.amount_unit,authority.amount_unit) || !sameUnit(detail.per_source_change_unit,authority.per_source_change_unit))) return undefined;
+  return { amount:authority.amount,amount_unit:authority.amount_unit,per_source_change:authority.per_source_change,
+    per_source_change_unit:authority.per_source_change_unit,quote,authority };
+
 }
 
 interface StatedEdgeEffectCandidate {
   readonly edge: ProjectedEdge;
-  readonly claim: DraftInferenceClaim;
+  readonly claim: DraftInferenceClaim | undefined;
   readonly effect: NonNullable<ReturnType<typeof quotedEffectForEdge>>;
 }
 
@@ -1692,7 +1689,7 @@ function effectForEdge(
   if (pairs.size > 1) return undefined;
   if (!statedEffectQuoteMatches(effect.quote, effect, effect.authority)) return undefined;
   const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? "negative" : "positive";
-  if (claim.effect !== direction) return undefined;
+  if ((claim?.effect ?? candidate.edge.effect_direction) !== direction) return undefined;
   return effect;
 }
 
@@ -3778,6 +3775,47 @@ function projectOnce(
     });
   });
 
+  // Relationship endpoints are resolved solely by quantity identity, before connectivity pruning.
+  const carrier = (q: number): { node?: ProjectedNode; reason?: DroppedRecordRef["reason"] } => {
+    const claimIds=new Set(claimIdByIndex.values());
+    const own=nodes.filter(n=>n.kind !== "goal" && n.kind !== "option" && claimIds.has(n.id) && n.quantity_ref===q);
+    if(own.length>1)return {reason:"relationship_endpoint_ambiguous"};
+    if(own.length===1)return {node:own[0]};
+    const goals=nodes.filter(n=>n.kind==="goal" && n.quantity_ref===q);
+    return goals.length>1 ? {reason:"relationship_endpoint_ambiguous"} : goals.length===1 ? {node:goals[0]} : {reason:"relationship_endpoint_missing"};
+  };
+  statedItems.forEach((item,stated_index)=>{
+    const r=item.relationship;
+    if(item.kind!=="cause" || r===undefined || r.amount===undefined || r.per_source_change===undefined) return;
+    const refuse=(reason:DroppedRecordRef["reason"])=>{
+      dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index,label:item.source_quote,reason});
+      // An unresolved authority cannot leak back through an existing model link.
+      delete r.amount_span;delete r.source_span;
+    };
+    const from=carrier(r.from_quantity),to=carrier(r.to_quantity);
+    if(from.reason || to.reason){refuse(from.reason ?? to.reason!);return;}
+    const source=from.node!,target=to.node!;
+    const fromKind=PROJECTED_KIND_AFTER_NORMALISATION[source.kind] ?? source.kind;
+    const toKind=PROJECTED_KIND_AFTER_NORMALISATION[target.kind] ?? target.kind;
+    if(source.id===target.id || UNRESCUABLE_EDGE_SHAPES.has(`${fromKind}->${toKind}`)
+      || fromKind==="factor" && toKind==="factor" && isOptionControlledFactor(target.id,kindAtLinkTime,provisionalOptionTargets)) {refuse("relationship_endpoint_illegal");return;}
+    if(r.amount_unit===undefined || r.per_source_change_unit===undefined
+      || !statedEffectQuoteMatches(item.source_quote,{amount:r.amount,amount_unit:r.amount_unit,per_source_change:r.per_source_change,per_source_change_unit:r.per_source_change_unit},r)) return;
+    const direction=Math.sign(r.amount*r.per_source_change)<0 ? "negative" : "positive";
+    const matches=edges.filter(e=>e.from===source.id && e.to===target.id);
+    for(const e of matches){
+      const origin=claimOriginByEdgeId.get(e.id), claim=origin===undefined ? undefined : claims[origin.index];
+      if(claim?.effect!==undefined && claim.effect!==direction){refuse("relationship_sign_conflicts_with_link");return;}
+      const d=claim?.effect_detail;
+      if(d!==undefined && (d.amount!==r.amount || d.per_source_change!==r.per_source_change || !sameUnit(d.amount_unit,r.amount_unit) || !sameUnit(d.per_source_change_unit,r.per_source_change_unit))){refuse("effect_detail_conflicts_with_relationship");return;}
+    }
+    if(matches.length>0)return;
+    const id=mintUnique(sha8("edge", "stated-relationship",source.id,target.id),usedIds);
+    const prov:RecordProvenance={provenance_class:"ai_inferred",...EDGE_ATTRIBUTION.ai_inferred,basis:[statedIdByIndex.get(stated_index)!],unbased:false};
+    provenance[id]=prov;
+    edges.push({id,from:source.id,to:target.id,effect_direction:direction,origin:"ai",provenance_source:"inferred",provenance:prov});
+  });
+
   // ── Pass 3b: DISCLOSE what the model never connected; never force it in. ───
   //
   // MEASURED, and this is the finding the whole slice turned on. A record set is
@@ -4431,7 +4469,7 @@ function projectOnce(
         const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief });
         const target = nodes.find(node => node.id === edge.to);
         const source = current.get(edge.from);
-        if (effect === undefined || claim === undefined || target === undefined || source === undefined
+        if (effect === undefined || target === undefined || source === undefined
           || target.kind === "goal" || target.scale_frame !== undefined
           || !statedEffectQuoteMatches(effect.quote, effect, effect.authority)) continue;
         const targetUnit = target.data?.unit;
@@ -4440,7 +4478,7 @@ function projectOnce(
         if (typeof sourceUnit !== "string" || !sameUnit(sourceUnit, effect.per_source_change_unit)) continue;
         const sourceFrame = resolveMagnitudeFrame(source);
         if (sourceFrame === undefined) continue;
-        const ownedRange = admittedValueRange(claim.effect_detail?.range, effect.quote, Math.abs(effect.amount), effect.amount_unit);
+        const ownedRange = admittedValueRange(effect.authority.range ?? claim?.effect_detail?.range, effect.quote, Math.abs(effect.amount), effect.amount_unit);
         const amount = ownedRange === undefined ? Math.abs(effect.amount) : Math.max(Math.abs(ownedRange.low), Math.abs(ownedRange.high));
         const frame = amount / Math.abs(effect.per_source_change) * sourceFrame;
         if (!Number.isFinite(frame) || frame <= 1) continue;
@@ -4484,7 +4522,7 @@ function projectOnce(
       const origin = claimOriginByEdgeId.get(edge.id);
       const claim = origin === undefined ? undefined : claims[origin.index];
       const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief });
-      if (claim === undefined || effect === undefined) continue;
+      if (effect === undefined) continue;
       const key = JSON.stringify([effect.quote, effect.authority.from_quantity, effect.authority.to_quantity, effect.amount, effect.per_source_change]);
       const group = groups.get(key) ?? [];
       group.push({ edge, claim, effect });
@@ -4518,6 +4556,7 @@ function projectOnce(
       };
       const prov: RecordProvenance = {
         ...baseProvenance,
+        basis: statedItems.flatMap((item,index)=>item.relationship===effect.authority ? [statedIdByIndex.get(index)!] : []),
         source: "brief_extraction",
         quote: effect.quote.slice(0, 100),
         source_quote: effect.quote,
