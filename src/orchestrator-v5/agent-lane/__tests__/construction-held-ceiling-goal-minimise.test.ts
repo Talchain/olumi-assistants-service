@@ -166,15 +166,15 @@ describe('a ceiling the user WROTE: the run minimises, and the stated current le
     expect(said(result)).toContain('The current level of "Monthly spend" (50) is outside the range the target of 36 is measured on (0 to 45)');
   });
 
-  it('row 6 (R1 S1, AIQ 5871459631): held `<` → the level stays refused exactly as today, so there is no proof the target is a level of the node → nothing sent (authored operator variant)', async () => {
+  it('row 6 (R1 S1, AIQ 5871459631; RT-10): held `<` → the level stays refused exactly as today, and the held ceiling on a level target still MINIMISES (Science 5 Oct (1): the sense is the comparator\'s, not the level\'s) (authored operator variant)', async () => {
     const brief = 'Should we switch our cloud provider from AWS to GCP? Monthly spend is £45k; we want to cut it to under £36k a month without more than 2 weeks of migration downtime risk.';
     const { result, graph, goal } = await build(brief, withGoal('cloud-2', { operator: '<' }));
     expect(goal.goal_direction).toBe('<');
     expect(Object.hasOwn(goal, 'observed_state')).toBe(false);
     expect(said(result)).toContain('"Monthly spend" is a goal to stay below 36, and the chance of meeting a goal of that kind cannot be calculated correctly yet');
     const req = await plotRequestFor(graph);
-    expect('goal_direction' in req).toBe(false);
-    expect(directionLogs()).toEqual([]);
+    expect(req.goal_direction).toBe('minimise');
+    expect(directionLogs()).toEqual([expect.objectContaining({ goal_node_id: goal.id, provenance: 'stated_comparator' })]);
   });
 
   it('⭐ RED row 9 (R1 S1, AIQ 5871459631): "reduce costs by at most 10%" — a held `<=` on a CHANGE target ("% reduction") → nothing sent, the comparator still held (authored variant of the real cloud-2 draft)', async () => {
@@ -186,23 +186,23 @@ describe('a ceiling the user WROTE: the run minimises, and the stated current le
     expect(directionLogs()).toEqual([]);
   });
 
-  it('⭐ RED row 11 (R1 S1, AIQ 5872082179): a held `<=` in PERCENT beside a stated level in the same unit → the level is NOT admitted and nothing is sent (level and target share one unit, so "at most 4%" cannot be told from "reduce by at most 4%" until S4)', async () => {
+  it('⭐ RED row 11 (R1 S1, AIQ 5872082179; RT-10): a held `<=` in PERCENT beside a stated level in the same unit → the level is still NOT admitted, and the run MINIMISES (the target is typed a level; Science 5 Oct (1))', async () => {
     const brief = 'Should we switch our cloud provider from AWS to GCP? Downtime is 4.5% of hours today; we want to keep it to at most 4% without more than 2 weeks of migration risk.';
     const { result, graph, goal } = await build(brief, withGoal('cloud-2', { metric: 'Downtime', operator: '<=', value: 4, unit: '%', baseline_value: 4.5 }));
     expect(goal.goal_direction).toBe('<=');
     expect(Object.hasOwn(goal, 'observed_state')).toBe(false);
     expect(said(result)).toMatch(/cannot be calculated correctly yet/);
     const req = await plotRequestFor(graph);
-    expect('goal_direction' in req).toBe(false);
+    expect(req.goal_direction).toBe('minimise');
   });
 
-  it('⭐ RED row 10 (R1 S1): a held `<=` with NO stated current level ("at most £36k", today not given) → nothing sent (authored variant)', async () => {
+  it('⭐ RED row 10 (R1 S1; RT-10): a held `<=` with NO stated current level ("at most £36k", today not given) → the run MINIMISES (the sense is the comparator\'s, Science 5 Oct (1)) (authored variant)', async () => {
     const brief = 'Should we switch our cloud provider from AWS to GCP? We want monthly spend to be at most £36k a month without more than 2 weeks of migration downtime risk.';
     const { graph, goal } = await build(brief, withGoal('cloud-2', { baseline_value: null, baseline_known: false }));
     expect(goal.goal_direction).toBe('<=');
     expect(Object.hasOwn(goal, 'observed_state')).toBe(false);
     const req = await plotRequestFor(graph);
-    expect('goal_direction' in req).toBe(false);
+    expect(req.goal_direction).toBe('minimise');
   });
 });
 
@@ -259,7 +259,7 @@ describe('CONTROLS — what the user did not write a ceiling for is exactly as b
     expect(directionLogs()).toEqual([expect.objectContaining({ provenance: 'derived_from_goal_label' })]);
   });
 
-  it('⭐ RED row 12 (DL E12, 5872375159): the brief never states today\'s level, the drafter gives one "explicit" (the real cloud-2 draft: 45 £k/month) → NOT stored as the user\'s, nothing sent', async () => {
+  it('⭐ RED row 12 (DL E12, 5872375159; RT-10): the brief never states today\'s level, the drafter gives one "explicit" (the real cloud-2 draft: 45 £k/month) → NOT stored as the user\'s; the held ceiling still MINIMISES', async () => {
     const brief = 'Should we switch our cloud provider from AWS to GCP? We want monthly spend to be at most £36k a month without more than 2 weeks of migration downtime risk.';
     const d = draft('cloud-2');
     expect((d.goal as Rec).baseline_value, 'the real draft carries a level the brief does not state').toBe(45);
@@ -267,6 +267,6 @@ describe('CONTROLS — what the user did not write a ceiling for is exactly as b
     expect(goal.goal_direction).toBe('<=');
     expect(Object.hasOwn(goal, 'observed_state'), 'no level stored as the user\'s').toBe(false);
     const req = await plotRequestFor(graph);
-    expect('goal_direction' in req).toBe(false);
+    expect(req.goal_direction).toBe('minimise');
   });
 });

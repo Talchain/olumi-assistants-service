@@ -226,9 +226,12 @@ describe('S4G — the held comparator is the direction of a TYPED change', () =>
     expect(resolveGoalDirection(graph('change_abs', '<'), 'goal_bill')).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
   });
 
-  it('S4G-10: CONTROL — a LEVEL ceiling still needs S1\'s proof (the user\'s level in the target\'s unit)', () => {
+  it('S4G-10: CONTROL — a LEVEL ceiling with NO held target figure is not attested (RT-10 reads a held target typed level)', () => {
     const r = resolveGoalDirection(graph('level', '<='), 'goal_bill');
     expect(r?.provenance).not.toBe('stated_comparator');
+    // RT-10 (Science 5 Oct (1)): the same ceiling beside a held target typed level IS the user's sense, no level needed.
+    const held = { nodes: [{ ...graph('level', '<=').nodes[0], goal_threshold_raw: 40000 }] };
+    expect(resolveGoalDirection(held, 'goal_bill')).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
   });
 
   it('S4G-11: a typed change FLOOR ("grow by 10%", held >=) sends nothing new — the maximiser, as before', () => {

@@ -62,6 +62,7 @@
  *   | the goal node holds  | sent                          | provenance              |
  *   |----------------------|-------------------------------|-------------------------|
  *   | `'<='` or `'<'`, PROVEN (below) | `'minimise'`       | `stated_comparator`     |
+ *   | `'<='` or `'<'` beside a target TYPED as a LEVEL (RT-10, below), in any unit, with or without today's level | `'minimise'` | `stated_comparator` |
  *   | no proven ceiling; Olumi's `goal_sense_reading` of a NEGATIVE typed change ("cut by 20%") | `'minimise'` | `typed_change_sign` |
  *   | anything else (a held floor, an unproven ceiling, none) | the label classifier, exactly as base | `derived_from_goal_label` |
  *
@@ -72,6 +73,15 @@
  * 20 % reduction", would otherwise be attested a false maximiser, MG 5871403407).
  * `maximise` is still never sent — the one-sided argument above is unchanged. A held floor (and an unproven ceiling)
  * reads exactly as base — the label classifier (DL E13, 5872375159); the held floor's own sense belongs to S4.
+ *
+ * ⛔ RT-10 (red team #87 5992802436 / 5992853052, staging AND production; Science ruling (1), 5 Oct): "Get monthly churn
+ * below 2%" holds `'<'` beside 2 `%` on a target the drafter TYPED `level`, and the S1 proof above can never pass for it
+ * (a percent target; no current level stated), so nothing was sent and ISL ranked the option that MAXIMISES churn
+ * first. S1 waited "until S4 types the frame": the frame is typed now (the drafter must state it, `build-model.ts`), so
+ * a held ceiling beside a held target typed `level` IS the user's sense, in any unit, whether or not today's level is
+ * known. The sense is the comparator's; today's level matters only to the goal chance, which keeps its own gates
+ * (admission, `target-testability.ts`). A target unit that itself names a change ("% reduction", a pre-R1 draft whose
+ * frame defaulted to `level`) is still no level: nothing is sent for it.
  */
 
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
@@ -168,6 +178,23 @@ function ceilingTargetIsALevelOnItsNode(graph: unknown, goalNodeId: unknown): bo
     && targetUnit !== null && unit(level.unit) === targetUnit;
 }
 
+/** A word in a target unit that makes the figure a CHANGE from today ("% reduction", "% increase"), not a level. */
+const CHANGE_WORD_IN_UNIT = /\b(?:reductions?|decreases?|cuts?|savings?|drops?|falls?|declines?|increases?|rises?|growth|uplifts?|changes?)\b/i;
+
+/**
+ * ⭐ RT-10 (Science ruling (1), 5 Oct): the goal holds a target figure (`goal_threshold_raw`) TYPED as a level
+ * (`goal_threshold_frame` `'level'`, which the drafter must state), in a unit that does not itself name a change. Beside
+ * a held ceiling that is the user's own sense, in any unit (percent included), with or without today's level.
+ */
+function heldTargetIsATypedLevel(graph: unknown, goalNodeId: unknown): boolean {
+  if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
+  const node = readNodes(graph).find((n) => n.id === goalNodeId);
+  if (node?.goal_threshold_frame !== 'level') return false;
+  const raw = node.goal_threshold_raw;
+  const unit = node.goal_threshold_unit;
+  return typeof raw === 'number' && Number.isFinite(raw) && !(typeof unit === 'string' && CHANGE_WORD_IN_UNIT.test(unit));
+}
+
 /** R1 S4-core: the goal's target is typed as a change from today (`goal_threshold_frame` `change_abs` | `change_rel`). */
 function goalTargetIsATypedChange(graph: unknown, goalNodeId: unknown): boolean {
   if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
@@ -239,6 +266,11 @@ export function resolveGoalDirection(
   // held floor, an unproven ceiling, no comparator — reads exactly as base: the label classifier (DL E13, 5872375159:
   // "nothing else moves"; a held floor's own sense belongs to S4, with the typed frame).
   if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && ceilingTargetIsALevelOnItsNode(graph, goalNodeId)) {
+    return { direction: 'minimise', provenance: 'stated_comparator' };
+  }
+  // ⛔ RT-10 (Science ruling (1)): a held ceiling beside a target TYPED as a level is the user's sense in any unit, with
+  // or without today's level ("monthly churn below 2%" was ranked by the LARGEST churn).
+  if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && heldTargetIsATypedLevel(graph, goalNodeId)) {
     return { direction: 'minimise', provenance: 'stated_comparator' };
   }
   // ⭐ R1 S4-core: a target TYPED as a change from today ("cut by 15%" → `change_rel` −0.15, held `<=`) needs no level
