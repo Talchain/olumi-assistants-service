@@ -1,4 +1,4 @@
-import { runLedgerFor, withLedgerRuns } from '../context/run-ledger.js';
+import { ledgerRunsBeyondWindow, runLedgerFor } from '../context/run-ledger.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 /**
  * V5 deterministic chip-click dispatch.
@@ -1897,10 +1897,11 @@ export async function dispatchChipClickRunAnalysis(
       // `lifecycle` at all, so without this line the amendment would be dead on
       // exactly the journey it was measured against. Already loaded for the turn
       // — no extra DB read.
-      // ⭐ A5 (lease output/rc-00351a/A5-LEASE.md, reader 3): the window plus every ledger Run it has lost, so a Run after
-      // 20 quiet turn rows still replays the lens the previous Run showed (no immediate repeat). Fail-safe: no durable
-      // authority = the window, as before.
-      priorTurnFactsForLensHistory: withLedgerRuns(context.prior_facts, runLedgerFor({
+      priorTurnFactsForLensHistory: context.prior_facts,
+      // ⭐ A5 (lease output/rc-00351a/A5-LEASE.md, reader 3): every ledger Run the window has lost, so a Run after 20
+      // quiet turn rows still replays the lens the previous Run showed (no immediate repeat). Lens replay ONLY — the
+      // judgement signals keep the window above (Codex #2572 P2). No durable authority = none, as before.
+      lensReplayRunsBeyondWindow: ledgerRunsBeyondWindow(context.prior_facts, runLedgerFor({
         scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set,
       })),
     });

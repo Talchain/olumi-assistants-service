@@ -369,6 +369,14 @@ export interface ComposeToolCallInput {
   readonly priorTurnFactsForLensHistory?: readonly HandlerFact[];
 
   /**
+   * ⭐ A5 (lease `output/rc-00351a/A5-LEASE.md`, reader 3): the scenario's Runs the 20-row window has lost
+   * (`run-ledger.ts` `ledgerRunsBeyondWindow`). Read by the LENS REPLAY ONLY, which orders Runs by their own
+   * `computed_at`. `deriveJudgementSignals` takes Run boundaries from array position, so it keeps
+   * `priorTurnFactsForLensHistory` alone (Codex #2572 P2). Ignored without `priorTurnFactsForLensHistory`.
+   */
+  readonly lensReplayRunsBeyondWindow?: readonly HandlerFact[];
+
+  /**
    * §2.1 row 4 — the factor id this turn's `what_would_flip` proposal targets
    * ("Test <factor> at <N>"), as selected by `selectFlipProposal` in the turn
    * executor and surfaced by `buildFlipProposalEmit`.
@@ -405,6 +413,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.analysisReadyStatus,
     input.analysisReady,
     input.freshness,
+    input.lensReplayRunsBeyondWindow,
   );
 
   return {
@@ -469,6 +478,7 @@ function buildBlocksFromFacts(
   analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
   analysisReady?: unknown,
   freshness?: FreshnessDerivation,
+  lensReplayRunsBeyondWindow?: readonly HandlerFact[],
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
@@ -488,7 +498,9 @@ function buildBlocksFromFacts(
     priorTurnFactsForLensHistory === undefined
       ? null
       : derivePreviousAnalysisLens(
-          priorTurnFactsForLensHistory,
+          lensReplayRunsBeyondWindow !== undefined && lensReplayRunsBeyondWindow.length > 0
+            ? [...priorTurnFactsForLensHistory, ...lensReplayRunsBeyondWindow]
+            : priorTurnFactsForLensHistory,
           liveLensExecutorAvailability(),
         );
 

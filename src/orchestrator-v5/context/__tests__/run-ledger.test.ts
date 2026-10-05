@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { reconcileScenarioAnalysisFacts, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT } from '../reconcile-scenario-analysis-facts.js';
-import { RUN_LEDGER_VERSION, runLedgerFor, withLedgerRuns } from '../run-ledger.js';
+import { ledgerRunsBeyondWindow, RUN_LEDGER_VERSION, runLedgerFor, withLedgerRuns } from '../run-ledger.js';
 import { bindRecentMutationHistoryToPriorFacts, readRecentMutationHistoryFromPriorFacts } from '../reconcile-recent-mutation-facts.js';
 import { createSetFactorValueHandler, STALENESS_NARRATIVE } from '../../tools/handlers/set-factor-value.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
@@ -20,12 +20,17 @@ const run = (label: string, at: string): HandlerFact => ({
 const EDIT = { fact_type: 'set_factor_value', fact_version: 1, noop: false, result: { node_id: 'f-churn' } } as unknown as HandlerFact;
 const R1 = run('1', '2026-10-04T23:55:32.000Z');
 const R2 = run('2', '2026-10-04T23:56:54.000Z');
+/** Two LEGITIMATE Runs whose facts are byte-identical, persisted on different rows (Codex #2572 P2). */
+const T_OLD = run('t', '2026-10-04T23:50:00.000Z');
+const T_NEW = run('t', '2026-10-04T23:50:00.000Z');
 
 /** Each Run's ONE persisted identity: the window and the durable read name the same row (production maps priorFacts
  *  from priorFactsWithTurn, so the window's fact objects ARE the identified ones). */
 const ROW = new Map<HandlerFact, { readonly id: string; readonly at: string }>([
   [R1, { id: 'row-r1', at: '2026-10-04T23:55:32.100Z' }],
   [R2, { id: 'row-r2', at: '2026-10-04T23:56:54.100Z' }],
+  [T_OLD, { id: 'row-t-old', at: '2026-10-04T23:50:00.100Z' }],
+  [T_NEW, { id: 'row-t-new', at: '2026-10-04T23:51:00.100Z' }],
 ]);
 const durable = (newestFirst: readonly HandlerFact[], hotWindowFacts: readonly HandlerFact[], scenarioId = SID) => reconcileScenarioAnalysisFacts({
   scenarioId, hotWindowFacts,
@@ -109,5 +114,31 @@ describe('a value edit after 20 quiet rows still says the last analysis is out o
   it('CONTROL: the window alone (today\'s input) → no staleness sentence', async () => {
     const out = await invoke(window);
     expect(out.assistant_text).not.toContain(STALENESS_NARRATIVE.trim());
+  });
+});
+
+describe('ledgerRunsBeyondWindow: a MULTISET difference — byte-identical Runs on different rows are two Runs', () => {
+  it('PRECONDITION: the reconciler keeps both occurrences, and the window holds one of them', () => {
+    const set = durable([T_NEW, T_OLD], [EDIT, T_NEW]);
+    expect(set.status).toBe('complete');
+    expect(runLedgerFor({ scenarioId: SID, hotWindow: [EDIT, T_NEW], durable: set }).runs).toHaveLength(2);
+  });
+
+  it('RED: the window holds ONE of two identical Runs → the other is beyond it, and the merge carries both', () => {
+    const window = [EDIT, T_NEW];
+    const ledger = runLedgerFor({ scenarioId: SID, hotWindow: window, durable: durable([T_NEW, T_OLD], window) });
+    expect(ledgerRunsBeyondWindow(window, ledger)).toEqual([T_OLD]);
+    expect(withLedgerRuns(window, ledger)).toEqual([EDIT, T_NEW, T_OLD]);
+  });
+
+  it('CONTROL: the window holds BOTH → nothing beyond it, the window itself', () => {
+    const window = [T_NEW, EDIT, T_OLD];
+    const ledger = runLedgerFor({ scenarioId: SID, hotWindow: window, durable: durable([T_NEW, T_OLD], window) });
+    expect(ledgerRunsBeyondWindow(window, ledger)).toEqual([]);
+    expect(withLedgerRuns(window, ledger)).toBe(window);
+  });
+
+  it('CONTROL: a window ledger has nothing beyond the window', () => {
+    expect(ledgerRunsBeyondWindow([EDIT], runLedgerFor({ scenarioId: SID, hotWindow: [EDIT], durable: undefined }))).toEqual([]);
   });
 });

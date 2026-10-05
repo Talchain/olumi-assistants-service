@@ -4,7 +4,9 @@
  *
  * The no-immediate-repeat lens tie-break replays the prior Runs (`derivePreviousAnalysisLens`). The chip Run handed it
  * the 20-row window only, so once the previous Run had left it the replay had no history and the next Run could show
- * the same lens again. The Run now hands it the window plus every ledger Run the window has lost (`run-ledger.ts`).
+ * the same lens again. The Run now hands it the window as before (`priorTurnFactsForLensHistory`, which the POSITIONAL
+ * judgement signals also read) and, on its own input, every ledger Run the window has lost (`lensReplayRunsBeyondWindow`,
+ * read by the lens replay only — Codex #2572 P2: those Runs are not proven older than the window).
  * That the replay alternates when it HAS the prior Run is pinned in `compose/__tests__/lens-history.test.ts`
  * ("turn 2 … ships the PRE-MORTEM lens"); this file pins the seam that feeds it.
  *
@@ -36,8 +38,10 @@ vi.mock('../../compose.js', async () => {
   const actual = await vi.importActual<typeof import('../../compose.js')>('../../compose.js');
   return {
     ...actual,
-    composeToolCallResponse: (input: { priorTurnFactsForLensHistory?: unknown }) => {
-      lensHistories.push(input.priorTurnFactsForLensHistory);
+    composeToolCallResponse: (input: { priorTurnFactsForLensHistory?: unknown; lensReplayRunsBeyondWindow?: unknown }) => {
+      if (input.priorTurnFactsForLensHistory !== undefined) {
+        lensHistories.push({ window: input.priorTurnFactsForLensHistory, beyond: input.lensReplayRunsBeyondWindow });
+      }
       return actual.composeToolCallResponse(input as never);
     },
   };
@@ -82,9 +86,8 @@ const runOnce = async () => {
   });
   expect(out.outcome, 'the composed success exit').toBe('ok');
   // The Run composes more than once; exactly one compose threads the lens history (the others pass none).
-  const threaded = lensHistories.filter((h) => h !== undefined);
-  expect(threaded).toHaveLength(1);
-  return threaded[0] as readonly HandlerFact[];
+  expect(lensHistories).toHaveLength(1);
+  return lensHistories[0] as { window: readonly HandlerFact[]; beyond: readonly HandlerFact[] | undefined };
 };
 
 beforeEach(() => { turn.window = []; turn.durable = undefined; });
@@ -95,22 +98,30 @@ describe('the chip Run\'s lens history is the scenario\'s Runs, not only the 20-
     expect(durableWith([EDIT, PRIOR]).status).toBe('complete');
   });
 
-  it('RED: the prior Run has left the window → the lens history still holds it', async () => {
+  it('RED: the prior Run has left the window → the lens replay still receives it, beyond the window', async () => {
     const window = Array.from({ length: 20 }, () => EDIT);
     turn.window = window; turn.durable = durableWith(window);
-    const history = await runOnce();
-    expect(history.slice(0, 20)).toEqual(window);
-    expect(history.filter((f) => f.fact_type === 'run_analysis')).toEqual([PRIOR]);
+    expect((await runOnce()).beyond).toEqual([PRIOR]);
   });
 
-  it('CONTROL: the prior Run still in the window → the window itself, the Run once', async () => {
+  it('RED (Codex #2572 P2): …and the positional input the judgement signals read is the window itself, untouched', async () => {
+    const window = Array.from({ length: 20 }, () => EDIT);
+    turn.window = window; turn.durable = durableWith(window);
+    expect((await runOnce()).window).toBe(window);
+  });
+
+  it('CONTROL: the prior Run still in the window → nothing beyond it', async () => {
     const window = [EDIT, PRIOR];
     turn.window = window; turn.durable = durableWith(window);
-    expect(await runOnce()).toEqual(window);
+    const out = await runOnce();
+    expect(out.window).toBe(window);
+    expect(out.beyond).toEqual([]);
   });
 
-  it('CONTROL: no durable authority → the window (today, fail-safe)', async () => {
+  it('CONTROL: no durable authority → nothing beyond the window (today, fail-safe)', async () => {
     turn.window = [EDIT];
-    expect(await runOnce()).toEqual([EDIT]);
+    const out = await runOnce();
+    expect(out.window).toEqual([EDIT]);
+    expect(out.beyond).toEqual([]);
   });
 });

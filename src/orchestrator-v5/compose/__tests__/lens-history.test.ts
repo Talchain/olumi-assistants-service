@@ -569,3 +569,57 @@ describe('2.211 A2 — a fact that CANNOT have emitted a lens is excluded, both 
     expect(derivePreviousAnalysisLens([noGraphHashFact('2026-07-31T10:00:00.000Z')])).toBeNull();
   });
 });
+
+// ============================================================================
+// 4. ⭐ A5 — the lens replay also reads the Runs the 20-row window has lost
+//    (lease output/rc-00351a/A5-LEASE.md, reader 3; Codex #2572 P2)
+// ============================================================================
+
+describe('A5 — lensReplayRunsBeyondWindow feeds the lens replay', () => {
+  const QUIET_WINDOW = [mutationFact(), mutationFact(), mutationFact()];
+
+  it('RED: the previous Run has left the window → its lens still counts (turn 2 ships PRE-MORTEM)', () => {
+    const response = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [bothTriggerFact('2026-07-31T11:00:00.000Z')],
+      persistedGraph: GRAPH,
+      persistedGraphHash: GRAPH_HASH,
+      priorTurnFactsForLensHistory: QUIET_WINDOW,
+      lensReplayRunsBeyondWindow: [bothTriggerFact('2026-07-31T10:00:00.000Z')],
+    });
+    expect(lensBodyOfResponse(response)).toBe(BODY_BY_RATIONALE.WIN_PROB_MODERATE);
+  });
+
+  it('CONTROL: nothing beyond the window → the quiet window has no history (turn 1\'s lens)', () => {
+    const response = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [bothTriggerFact('2026-07-31T11:00:00.000Z')],
+      persistedGraph: GRAPH,
+      persistedGraphHash: GRAPH_HASH,
+      priorTurnFactsForLensHistory: QUIET_WINDOW,
+      lensReplayRunsBeyondWindow: [],
+    });
+    expect(lensBodyOfResponse(response)).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
+  });
+
+  it('CONTROL: without priorTurnFactsForLensHistory the Runs beyond are ignored (unthreaded stays fail-safe)', () => {
+    const response = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [bothTriggerFact('2026-07-31T11:00:00.000Z')],
+      persistedGraph: GRAPH,
+      persistedGraphHash: GRAPH_HASH,
+      lensReplayRunsBeyondWindow: [bothTriggerFact('2026-07-31T10:00:00.000Z')],
+    });
+    expect(lensBodyOfResponse(response)).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
+  });
+});
+
+function lensBodyOfResponse(response: { blocks: readonly unknown[] }): string | null {
+  for (const raw of response.blocks) {
+    const b = raw as Record<string, unknown>;
+    if (b.type === 'coaching' && b.source === 'deterministic_signal' && b.coaching_kind === 'strengthen') {
+      return typeof b.body === 'string' ? b.body : null;
+    }
+  }
+  return null;
+}

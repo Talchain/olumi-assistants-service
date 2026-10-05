@@ -11,8 +11,11 @@
  * fail-safe). Pure; no read, no write, no migration — the durable set is already loaded on every turn.
  *
  * Identity: the reconciler admits a durable set only when every window Run is in it byte-equal (`fact_row_id` and
- * `stableFactKey`, `reconcile-scenario-analysis-facts.ts` `identifiedSnapshotIncludes`), so a Run's stable encoding
- * names it in both histories and {@link withLedgerRuns} never carries one Run twice.
+ * `stableFactKey`, `reconcile-scenario-analysis-facts.ts` `identifiedSnapshotIncludes`). So, per stable encoding, the
+ * window holds AT MOST as many occurrences as the ledger, and the ledger Runs the window has lost are the MULTISET
+ * difference ({@link ledgerRunsBeyondWindow}): two legitimate Runs can be byte-identical on different rows (the
+ * reconciler keeps both), and a set difference would silently drop the older one (Codex #2572 P2). No Run is carried
+ * twice; none is lost.
  */
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
@@ -52,18 +55,45 @@ export function runLedgerFor(input: {
 
 /**
  * What a Run-history reader reads: the window's own facts (every type, in order), then each ledger Run the window has
- * lost. Those are older than every window row, so newest-first order holds. A `window` ledger adds nothing.
+ * lost, appended. Appended is not proven older (see {@link ledgerRunsBeyondWindow}), so this merged array serves only a
+ * reader that asks whether a Run exists and prefers the window's own (reader 2's `set_factor_value`). A `window`
+ * ledger adds nothing.
  *
  * ⛔ The window array can CARRY the turn's reconciled recent-mutation history as non-enumerable properties
  * (`bindRecentMutationHistoryToPriorFacts`); a plain spread would drop it, and its readers would then read "no history".
  * So a carried history is re-bound, unchanged, onto the result.
  */
 export function withLedgerRuns(hotWindow: readonly HandlerFact[], ledger: RunLedgerV1): readonly HandlerFact[] {
-  if (ledger.source === 'window') return hotWindow;
-  const held = new Set(hotWindow.filter(isRun).map((f) => stableStringify(f)));
-  const lost = ledger.runs.filter((f) => !held.has(stableStringify(f)));
+  const lost = ledgerRunsBeyondWindow(hotWindow, ledger);
   if (lost.length === 0) return hotWindow;
   const merged = [...hotWindow, ...lost];
   const history = readRecentMutationHistoryFromPriorFacts(hotWindow);
   return history === null ? merged : bindRecentMutationHistoryToPriorFacts(merged, history);
+}
+
+/**
+ * The ledger Runs the window does not hold, in ledger order (newest first): each ledger occurrence of an encoding past
+ * the number of times the window holds it. A `window` ledger has none.
+ *
+ * ⚠ ONLY FOR A READER THAT ORDERS RUNS BY THEIR OWN TIMES. The reconciler proves the window's Runs are in the ledger,
+ * not that the ones it lacks are older than every window row (a Run persisted after the window was read). A reader that
+ * takes Run boundaries from ARRAY POSITION — `deriveJudgementSignals` — must keep the window alone (Codex #2572 P2), so
+ * the lens replay takes these on their own input (`compose.ts` `lensReplayRunsBeyondWindow`).
+ */
+export function ledgerRunsBeyondWindow(hotWindow: readonly HandlerFact[], ledger: RunLedgerV1): readonly HandlerFact[] {
+  if (ledger.source === 'window') return [];
+  const held = new Map<string, number>();
+  for (const f of hotWindow) {
+    if (!isRun(f)) continue;
+    const key = stableStringify(f);
+    held.set(key, (held.get(key) ?? 0) + 1);
+  }
+  const beyond: HandlerFact[] = [];
+  for (const f of ledger.runs) {
+    const key = stableStringify(f);
+    const remaining = held.get(key) ?? 0;
+    if (remaining > 0) held.set(key, remaining - 1);
+    else beyond.push(f);
+  }
+  return beyond;
 }
