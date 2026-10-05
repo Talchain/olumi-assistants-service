@@ -11,15 +11,16 @@
  * fail-safe). Pure; no read, no write, no migration — the durable set is already loaded on every turn.
  *
  * Identity: the reconciler admits a durable set only when every window Run is in it byte-equal (`fact_row_id` and
- * `stableFactKey`, `reconcile-scenario-analysis-facts.ts` `identifiedSnapshotIncludes`). So the readers never merge the
+ * `stableFactKey`, `reconcile-scenario-analysis-facts.ts` `identifiedSnapshotIncludes`). So the reader never merges the
  * two histories Run by Run (Codex #2572 r1/r2): the lens replay reads the ledger's Runs instead of the window's
- * ({@link lensReplayRunsFor}), and the value edit adds them only to a window that holds no Run ({@link withLedgerRuns}).
+ * ({@link lensReplayRunsFor}).
+ *
+ * ⏸ PARKED, reader 2 (the value edit's "This makes the last analysis stale."; Codex #2572 r3): handing the edit writer
+ * an aged-out Run newly claims staleness on a value restored to the analysed one, and lets that Run's enrichment claim
+ * inertness about a model that has changed since. Its fix is a typed post-commit freshness for the sentence, and Run
+ * existence separated from enrichment authority — not more history.
  */
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
-import {
-  bindRecentMutationHistoryToPriorFacts,
-  readRecentMutationHistoryFromPriorFacts,
-} from './reconcile-recent-mutation-facts.js';
 import {
   isReconciledScenarioAnalysisFactSet,
   isScenarioAnalysisReasoningAuthority,
@@ -48,25 +49,6 @@ export function runLedgerFor(input: {
     return { version: RUN_LEDGER_VERSION, source: 'scenario', runs: durable.facts.filter(isRun) };
   }
   return { version: RUN_LEDGER_VERSION, source: 'window', runs: input.hotWindow.filter(isRun) };
-}
-
-/**
- * Reader 2's input (`set_factor_value`, which asks only whether a Run exists and which is the newest successful one):
- * the window itself while it holds ANY Run; once it holds none — A5's measured case, 20 rows with no Run — the window
- * followed by the ledger's Runs, in the ledger's own (persisted, newest-first) order. Nothing is merged with the
- * window's own Runs, so no occurrence can be miscounted and no chronology reconciled (Codex #2572 r2: a multiset
- * difference miscounts a capped carrier's lookahead row; appending reverses tied or absent times). A `window` ledger
- * adds nothing.
- *
- * ⛔ The window array can CARRY the turn's reconciled recent-mutation history as non-enumerable properties
- * (`bindRecentMutationHistoryToPriorFacts`); a plain spread would drop it, and its readers would then read "no history".
- * So a carried history is re-bound, unchanged, onto the result.
- */
-export function withLedgerRuns(hotWindow: readonly HandlerFact[], ledger: RunLedgerV1): readonly HandlerFact[] {
-  if (ledger.source === 'window' || ledger.runs.length === 0 || hotWindow.some(isRun)) return hotWindow;
-  const merged = [...hotWindow, ...ledger.runs];
-  const history = readRecentMutationHistoryFromPriorFacts(hotWindow);
-  return history === null ? merged : bindRecentMutationHistoryToPriorFacts(merged, history);
 }
 
 /**

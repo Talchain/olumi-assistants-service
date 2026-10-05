@@ -1,4 +1,3 @@
-import { runLedgerFor, withLedgerRuns } from '../context/run-ledger.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
 
@@ -2409,12 +2408,7 @@ async function dispatchFactorValueEdit(
    */
   const analysisInputs = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
   const { hotWindow: priorFactsRead } = analysisInputs;
-  // ⭐ A5 (lease output/rc-00351a/A5-LEASE.md, reader 2): the window, plus every ledger Run it has lost. After 20 board
-  // edits with no Run the window holds none, and the writer dropped "the last analysis is now out of date" while this
-  // reply's own freshness (the durable set, above) still said stale. A non-authoritative durable set adds nothing.
-  const priorFacts = withLedgerRuns(priorFactsRead.facts, runLedgerFor({
-    scenarioId: payload.scenario_id, hotWindow: priorFactsRead.facts, durable: analysisInputs.factSet,
-  }));
+  const priorFacts = priorFactsRead.facts;
 
   const cas = computeExpectedGraphCasHashes(persistedGraph);
   const rangeFact = event.kind === 'prior_range_edit' ? buildJudgementFact(event) : null;
