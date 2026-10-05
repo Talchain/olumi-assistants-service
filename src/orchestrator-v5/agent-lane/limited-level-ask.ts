@@ -43,6 +43,21 @@ interface LimitRow {
   readonly value: number;
   readonly unit?: string;
   readonly value_frame?: 'level' | 'delta' | 'change_abs' | 'change_rel';
+  /** `GoalConstraintSchema.provenance_unit_relabelled` (by presence): the unit LABEL was rewritten, never the value. */
+  readonly provenance_unit_relabelled?: { readonly rule?: unknown };
+}
+
+/**
+ * ⭐ #2576 item B (DL): a limit the compound-goal extractor RELABELLED from "%" to "fraction"
+ * (`normaliseConstraintUnits`, rule `percent_label_to_fraction_label`: a sub-unit "%" value that is a fraction) is said
+ * as the percent it is, "4%", never "0.04 fraction". Read off that rule's own stamp; no unit is parsed here.
+ */
+const PERCENT_FROM_FRACTION_RULE = 'percent_label_to_fraction_label';
+function statedFigure(row: LimitRow): { readonly value: number; readonly unit: string } {
+  const unit = typeof row.unit === 'string' ? row.unit.trim() : '';
+  return row.provenance_unit_relabelled?.rule === PERCENT_FROM_FRACTION_RULE && unit === 'fraction'
+    ? { value: row.value * 100, unit: '%' }
+    : { value: row.value, unit };
 }
 
 interface GraphNode {
@@ -56,7 +71,8 @@ function sayLimit(row: LimitRow): string {
   const op = statedOperatorOf(row);
   // A relative change is a stored FRACTION; it is said as the change it is, never as "at most 0.1".
   if (row.value_frame === 'change_rel' && op !== undefined) return sayRelativeChange(op, row.value);
-  const figure = sayFigure(row.value, typeof row.unit === 'string' ? row.unit.trim() : '');
+  const stated = statedFigure(row);
+  const figure = sayFigure(stated.value, stated.unit);
   return op === undefined ? figure : `${LIMIT_OPERATOR_WORDS[op]} ${figure}`;
 }
 
