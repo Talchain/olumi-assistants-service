@@ -66,6 +66,10 @@ An option naming its own setting ("lease 5 more vans") sets quantity to the leve
 it sets, the declaring index, which is its own index when it first declares that
 lever. It also sets value and value_literal. Do not add a duplicate figure merely
 to cite the option's setting. The compiler binds the option to that one lever.
+Type how the option sets that lever in setting: "change_by" when it changes the
+lever by an amount ("lease 5 more vans" is setting "change_by", value 5; a cut
+is negative), "sets_to" when it names the level itself ("run 12 vans in total").
+A change_by needs the lever's current level stated elsewhere; never assume zero.
 Keep sets_to for other option-to-factor links. The same range shape belongs to
 a figure's value or an option link's sets_to, never to a neighbouring quantity.
 

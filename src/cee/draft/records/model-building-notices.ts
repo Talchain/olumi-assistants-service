@@ -114,6 +114,7 @@ export const NOTICE_KIND_BY_REASON: Record<
   option_value_unbound: "relationship_not_used",
   option_lever_link_conflict: "relationship_not_used",
   lever_endpoint_ambiguous: "relationship_not_used",
+  option_change_by_baseline_unknown: "relationship_not_used",
   // ── A RELATIONSHIP THE MODEL ASSERTED WAS NOT USED ────────────────────────
   // Each of these is a LINK that did not make it onto the graph. The reference
   // was malformed, unresolvable, ambiguous, self-referential, an illegal kind

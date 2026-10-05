@@ -205,6 +205,9 @@ export type DraftRecordRole = (typeof DRAFT_RECORD_ROLES)[number];
 
 /** The GATE's language. Never the wire operator — see design note 4. */
 export const DRAFT_RECORD_DIRECTIONS = ["floor", "ceiling"] as const;
+/** P2-A1: how an option sets its lever: an absolute level, or a change to the lever's current level. */
+export const DRAFT_RECORD_OPTION_SETTINGS = ["sets_to", "change_by"] as const;
+export type DraftRecordOptionSetting = (typeof DRAFT_RECORD_OPTION_SETTINGS)[number];
 export type DraftRecordDirection = (typeof DRAFT_RECORD_DIRECTIONS)[number];
 
 /**
@@ -514,6 +517,8 @@ export interface DraftStatedItem {
   value_literal?: string;
   unit_literals?: string[];
   direction_literal?: string;
+  /** v-next only, option only: absent or `sets_to` is an absolute level; `change_by` is the signed change to the lever. */
+  setting?: DraftRecordOptionSetting;
   /** Seam-only compatibility and typed conflict diagnostics. */
   legacy_evidence?: true;
   evidence_conflicts?: string[];
@@ -1014,6 +1019,7 @@ export function buildVNextDraftRecordsSchema(): Record<string, unknown> {
             quantity: { type: "integer" }, baseline_ref: { type: "integer" },
             range: VALUE_RANGE_SCHEMA, relationship: STATED_RELATIONSHIP_SCHEMA,
             horizon_months: { type: "number" }, horizon_ref: { type: "integer" }, direction_literal: { type: "string" },
+            setting: { type: "string", enum: [...DRAFT_RECORD_OPTION_SETTINGS] },
             unit: { type: "string" },
             role: { type: "string", enum: [...DRAFT_RECORD_ROLES] },
             // What convention `value` is written in. See the interface note:

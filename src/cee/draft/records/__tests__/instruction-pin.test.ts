@@ -1945,13 +1945,16 @@ describe("v20 — the current-level ask reaches risk and outcome claims", () => 
 });
 
 // INERT compiler lease. New identity, extraction-unproven; all historic pins remain untouched.
-const PREREGISTERED_VNEXT_INSTRUCTION_SHA256 = 'fe150807d06c4c25fe41cb2e88eaf8cf87026fd67d5bbbf808e8148b01b4ab3e';
+// Pass 2 P2-A1 re-pin (reason): the v-next rule for an option's typed `setting` (change_by vs sets_to) was added;
+// was fe150807d06c4c25fe41cb2e88eaf8cf87026fd67d5bbbf808e8148b01b4ab3e. The served v25 pins above are unchanged.
+const PREREGISTERED_VNEXT_INSTRUCTION_SHA256 = '2b2f88fa70bd3797955197380daea3d3f0701cc708f120e8a71255b99c12930c';
 describe('inert v-next instruction identity', () => {
   it('pins new generic relationship/literal rules separately from served v25', () => {
     expect(vNextDraftRecordsInstructionHash()).toBe(PREREGISTERED_VNEXT_INSTRUCTION_SHA256);
     expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).toContain('One quantity, one declaration.');
     expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).toContain('Repainting the vans will not change late deliveries');
     expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).toContain('lease 5 more vans');
+    expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).toContain('setting "change_by"');
     for(const retired of ['effect_detail','value_span','unit_span','direction_span','low_span','high_span','amount_unit','per_source_change_unit'])expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain(retired);
     expect(vNextDraftRecordsInstructionHash()).not.toBe(draftRecordsInstructionHash());
   });

@@ -492,6 +492,8 @@ export interface DroppedRecordRef {
     | "change_of_index_invalid" | "change_of_self" | "change_of_unit_mismatch" | "change_of_horizon_mismatch" | "change_of_target_not_quantity" | "change_of_not_definitional"
     | "range_bounds_inverted" | "range_excludes_point" | "range_straddles_zero" | "relationship_unsized"
     | "option_lever_undeclared" | "option_lever_is_goal" | "option_value_unbound" | "option_lever_link_conflict" | "lever_endpoint_ambiguous"
+    // P2-A1: a `change_by` option whose lever has no stated current level. Unknown is an ask, never a zero baseline.
+    | "option_change_by_baseline_unknown"
     | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
     | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
     | import("./quantity-evidence.js").UnitRefusal
@@ -1782,6 +1784,8 @@ interface ProjectedInterventionBinding {
   readonly stated_index?: number;
   readonly range?: InterventionV3T["range"];
   readonly raw_value: number;
+  /** P2-A1: the signed change a `change_by` option makes to its lever; `raw_value` is its compile-time absolute. */
+  readonly change_by?: number;
   readonly unit?: string;
   readonly source: "brief_extraction" | "cee_hypothesis";
   readonly reasoning: string;
@@ -3514,8 +3518,23 @@ function projectOnce(
       lever={id,kind:"factor",label:declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
       nodes.push(lever);provenance[id]=prov;leverByQuantity.set(q,lever);
     }
-    ownOptionSettings.set(statedIdByIndex.get(index)!,{index,lever,binding:{stated_index:index,raw_value:literalConventionValue(item.value,declaration.unit,declaration.value_scale),unit:declaration.unit,source:"brief_extraction",
-      reasoning:`Stated option value bound to stated_items[${index}]: ${item.source_quote}`}});
+    // ⭐ P2-A1 (Science ruling, 5 Oct; a994c38a): a typed `change_by` is a CHANGE of the lever, never its level. The
+    // delta is this option's own bound literal value; the absolute written here is only the compile-time reading
+    // against the declaring item's stated level, and the Run assembly re-resolves `change_by` against the CURRENT
+    // baseline (`plot-intervention-scale.ts`). No wording heuristic decides which: the model types `setting`.
+    const settingValue=literalConventionValue(item.value,declaration.unit,declaration.value_scale);
+    let changeBy:number|undefined;
+    let rawValue=settingValue;
+    if(item.setting==="change_by"){
+      const level=q===index ? undefined : declaration.value;
+      if(typeof level!=="number" || !Number.isFinite(level)){refuse("option_change_by_baseline_unknown");return;}
+      changeBy=settingValue;
+      rawValue=literalConventionValue(level,declaration.unit,declaration.value_scale)+settingValue;
+    }
+    ownOptionSettings.set(statedIdByIndex.get(index)!,{index,lever,binding:{stated_index:index,raw_value:rawValue,unit:declaration.unit,source:"brief_extraction",
+      ...(changeBy!==undefined ? {change_by:changeBy} : {}),
+      reasoning:changeBy===undefined ? `Stated option value bound to stated_items[${index}]: ${item.source_quote}`
+        : `Stated option change bound to stated_items[${index}]: ${item.source_quote}`}});
   });
 
   // ── Pass 3: causal_link claims → edges. Runs AFTER both node passes so a

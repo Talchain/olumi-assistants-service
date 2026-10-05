@@ -872,6 +872,12 @@ export const InterventionV3 = z.object({
   display_value: z.string().optional(),
   /** TEMPORAL: the stated range for this value (schemas 0.66.0 S1). Absent = no range stated. */
   range: InterventionRangeV3.optional(),
+  /**
+   * CEE-local (P2-A1): the signed change a delta option makes to its factor. `value`/`raw_value` hold the
+   * compile-time absolute; the Run assembly resolves `change_by` against the factor's CURRENT raw baseline
+   * (`plot-intervention-scale.ts`), so PLoT still receives one absolute level. Absent = an absolute setting.
+   */
+  change_by: z.number().optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type InterventionV3T = z.infer<typeof InterventionV3>;
 

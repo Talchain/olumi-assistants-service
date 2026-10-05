@@ -16,6 +16,7 @@ import { holdsByDefinition, nodeUnitOf } from '../../../../../orchestrator/conte
 import { resolveAnalysisAdmission } from '../../../../../orchestrator-v5/admission/analysis-admission.js';
 import { projectGraphForPersistence } from '../../../../../orchestrator-v5/persisted-graph-projection.js';
 import { assignEntityRefs } from '../../../../../orchestrator-v5/graph/entity-refs.js';
+import { buildFactorScaleMap, projectRequestInterventionsToWireScale } from '../../../../../orchestrator-v5/tools/plot-intervention-scale.js';
 
 function project(records: DraftRecordSet, brief = BRIEF) {
   const r = projectDraftRecords(records, brief); expect(r.ok).toBe(true);
@@ -70,8 +71,10 @@ describe('v-next inert flip ladder', () => {
     expect(new Ajv({strict:false}).compile(frozen)(wire)).toBe(false);
     expect(findGrammarFieldsDroppedBySeam()).toEqual({claims:[],statedItems:[]});
     // Budget reason: nullable strict parameters are OpenAI inputs, not Anthropic optional parameters.
-    expect(measureDraftRecordsSchemaBudget(schema)).toMatchObject({serializedBytes:4967,optionalParams:0,objectSchemas:7});
-    expect(measureDraftRecordsSchemaBudget(buildVNextDraftRecordsSchema())).toMatchObject({serializedBytes:3180,optionalParams:44,objectSchemas:7});
+    // P2-A1 re-pin (reason): +1 optional `setting` enum on v-next stated items (4967→5064 strict bytes; 3180→3239 and
+    // 44→45 optional on the unstrict builder). Anthropic bytes are unchanged and pinned by the G0 row above.
+    expect(measureDraftRecordsSchemaBudget(schema)).toMatchObject({serializedBytes:5064,optionalParams:0,objectSchemas:7});
+    expect(measureDraftRecordsSchemaBudget(buildVNextDraftRecordsSchema())).toMatchObject({serializedBytes:3239,optionalParams:45,objectSchemas:7});
   });
   it('B5 literal offsets are stored by relationship identity', () => {
     const r=sealedRecords();const i=r.stated_items[10]!;const a=i.relationship!;delete a.amount_span;delete a.source_span; a.amount_literal='£300';a.per_source_literal='Each';
@@ -117,7 +120,8 @@ describe('v-next inert flip ladder', () => {
   it('B1a EXTRACTION-UNPROVEN decimal bounds keep one relationship clause',()=>{const r=vans();const item=r.stated_items[5]!;item.source_quote='Adding 5 vans changes deliveries by 18.5 to 36.5 every month.';item.relationship!.per_source_literal='5 vans';item.relationship!.range={low:18.5,high:36.5,low_literal:'18.5',high_literal:'36.5'};expect(edgeFor(project(r,VANS+' '+item.source_quote),5,r)?.provenance?.natural_effect?.amount).toBe(27.5);});
   it('B1a EXTRACTION-UNPROVEN currency bounds contradict a count quantity',()=>{const r=vans();const item=r.stated_items[5]!;item.source_quote='Adding 5 vans changes deliveries by £18 to £36 every month.';item.relationship!.per_source_literal='5 vans';item.relationship!.range={low:18,high:36,low_literal:'£18',high_literal:'£36'};const p=project(r,VANS+' '+item.source_quote);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'unit_literal_contradicts_unit'}));expect(edgeFor(p,5,r)?.provenance?.natural_effect).toBeUndefined();});
   it('B4 EXTRACTION-UNPROVEN a calendar determiner cannot stand for a van',()=>{const r=vans();const item=r.stated_items[5]!;delete item.relationship!.range;Object.assign(item.relationship!,{amount:18,amount_literal:'18',per_source_change:1,per_source_literal:'every month'});const p=project(r,VANS);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'unit_literal_contradicts_unit'}));expect(edgeFor(p,5,r)?.provenance?.natural_effect).toBeUndefined();});
-  it('instruction new generic v-next hash is pinned without moving v25',()=>{expect(createHash('sha256').update(V_NEXT_DRAFT_RECORDS_INSTRUCTION).digest('hex')).toBe('fe150807d06c4c25fe41cb2e88eaf8cf87026fd67d5bbbf808e8148b01b4ab3e');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('effect_detail');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('value_span');});
+  // P2-A1 re-pin (reason): the v-next option `setting` rule; was fe150807…ab3e. v25 is pinned in instruction-pin.
+  it('instruction new generic v-next hash is pinned without moving v25',()=>{expect(createHash('sha256').update(V_NEXT_DRAFT_RECORDS_INSTRUCTION).digest('hex')).toBe('2b2f88fa70bd3797955197380daea3d3f0701cc708f120e8a71255b99c12930c');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('effect_detail');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('value_span');});
   it('determinism is byte identical',async()=>{expect(JSON.stringify(await registered())).toBe(JSON.stringify(await registered()));expect(projectionFingerprint(project(sealedRecordsVNext()))).toBe(projectionFingerprint(project(sealedRecordsVNext())));});
 });
 
@@ -176,5 +180,61 @@ describe('pass 2 P2-0: the connectivity prune withdraws every kind readiness wou
     expect(fuel?.kind).toBe('outcome');
     expect(p.goalConstraints.map(c => c.node_id)).toContain(fuel!.id);
     expect(p.dropped.some(d => d.node_id === fuel!.id)).toBe(false);
+  });
+});
+
+async function registeredWith(records: DraftRecordSet, brief: string) {
+  let body: any;
+  const result = await buildModelFromRecords('11111111-1111-4111-8111-111111111111', brief,
+    async (path, b) => { if (path.endsWith('/register')) { body = b; return { status: 200, json: { model_version: 1 } }; } return { status: 200, json: { graph: { nodes: [], edges: [] } } }; },
+    async () => ({ text: JSON.stringify(records), status: 'completed' }));
+  expect(result.ok, JSON.stringify(result)).toBe(true); return stored(body.graph);
+}
+// EXTRACTION-UNPROVEN: "Lease 5 vans." typed by hand as a CHANGE of the van count (a994c38a class, Science 5 Oct).
+function vansDelta(): DraftRecordSet { const r = vans(); r.stated_items[2]!.setting = 'change_by'; return r; }
+/** The Run assembly's own egress projection: option intervention objects → the numbers PLoT receives. */
+function wireLevel(graph: any, optionQuote: string, factorId: string): number | undefined {
+  const option = graph.nodes.find((n: any) => n.kind === 'option' && n.source_quote === optionQuote);
+  return projectRequestInterventionsToWireScale([option.interventions], buildFactorScaleMap(graph.nodes)).perOption[0]![factorId];
+}
+
+describe('pass 2 P2-A1: a delta option is a change_by resolved at Run assembly', () => {
+  it('P2-A1 a delta option compiles as change_by on its own lever, from its own literal and value', async () => {
+    const r = vansDelta(); const p = project(r, VANS);
+    const option = p.graph.nodes.find(n => n.provenance?.source_quote === r.stated_items[2]!.source_quote)!;
+    const lever = p.graph.nodes.find(n => n.kind === 'factor' && n.quantity_ref === 0)!;
+    expect(option.data?.intervention_details?.[lever.id]).toMatchObject({ stated_index: 2, change_by: 5, raw_value: 13 });
+    const graph = await registeredWith(r, VANS);
+    const storedLever = graph.nodes.find((n: any) => n.kind === 'factor' && n.label === lever.label)!;
+    const storedOption = graph.nodes.find((n: any) => n.kind === 'option' && n.source_quote === r.stated_items[2]!.source_quote)!;
+    expect(storedOption.interventions?.[storedLever.id]).toMatchObject({ change_by: 5, raw_value: 13 });
+  });
+  it('P2-A1 a baseline edit leaves a change_by option still different from the status quo', async () => {
+    const r = vansDelta(); const graph: any = await registeredWith(r, VANS);
+    const lever = graph.nodes.find((n: any) => n.kind === 'factor' && n.label === 'Vans')!;
+    expect(wireLevel(graph, r.stated_items[2]!.source_quote, lever.id)).toBe(13);
+    lever.observed_state = { ...lever.observed_state, raw_value: 10, value: 10 };
+    const resolved = wireLevel(graph, r.stated_items[2]!.source_quote, lever.id);
+    expect(resolved).toBe(15);
+    expect(resolved).not.toBe(lever.observed_state.raw_value);
+  });
+  it('P2-A1 CONTRAST an absolute option keeps sets_to across a baseline edit', async () => {
+    const r = vans(); const p = project(r, VANS);
+    const option = p.graph.nodes.find(n => n.provenance?.source_quote === r.stated_items[2]!.source_quote)!;
+    const leverId = p.graph.nodes.find(n => n.kind === 'factor' && n.quantity_ref === 0)!.id;
+    expect(option.data?.intervention_details?.[leverId]).toMatchObject({ stated_index: 2, raw_value: 5 });
+    expect(option.data?.intervention_details?.[leverId]).not.toHaveProperty('change_by');
+    const graph: any = await registeredWith(r, VANS);
+    const lever = graph.nodes.find((n: any) => n.kind === 'factor' && n.label === 'Vans')!;
+    lever.observed_state = { ...lever.observed_state, raw_value: 10, value: 10 };
+    expect(wireLevel(graph, r.stated_items[2]!.source_quote, lever.id)).toBe(5);
+  });
+  it('P2-A1 a change_by option with no stated baseline is refused, never resolved from zero', () => {
+    const r = vansDelta(); r.stated_items[0] = { ...r.stated_items[0]!, value: undefined, value_literal: undefined } as any;
+    delete (r.stated_items[0] as any).value; delete (r.stated_items[0] as any).value_literal; delete (r.stated_items[0] as any).role;
+    const p = project(r, VANS);
+    expect(p.dropped).toContainEqual(expect.objectContaining({ stated_index: 2, reason: 'option_change_by_baseline_unknown' }));
+    const option = p.graph.nodes.find(n => n.provenance?.source_quote === r.stated_items[2]!.source_quote);
+    expect(Object.values(option?.data?.intervention_details ?? {}).some((d: any) => d?.stated_index === 2)).toBe(false);
   });
 });
