@@ -101,21 +101,29 @@ const LOCAL_FUNCTION_WORD = new Set(["a", "an", "the", "and", "or", "to", "of", 
   "per", "each", "every", "into", "over", "under", "across", "between", "about", "around", "roughly", "approximately", "up", "down",
   "is", "are", "was", "were", "be", "would", "will", "could", "should", "if", "when", "while", "but"]);
 
-/** The noun phrase (at most two words) and the period written at a plain numeral. Nothing here supplies a unit. */
-function localCountUnit(quote: string, amount: LocatedAmount): { readonly nouns: readonly string[]; readonly period: string | null } {
+/**
+ * The noun phrase and the period written at a plain numeral. Nothing here supplies a unit. `closed` says the phrase
+ * visibly ends inside the scan (a period, a non-coordinating function word, or the sentence end): only then is a noun
+ * that is not the declared one a contradiction. A phrase that runs on ("highly experienced, senior hires") or past the
+ * scan is a noun the scanner did not place, which is no evidence either way (Codex R2 F2).
+ */
+function localCountUnit(quote: string, amount: LocatedAmount): { readonly nouns: readonly string[]; readonly period: string | null; readonly closed: boolean } {
   // "/" is its own word, so "deliveries/year" reads its period like "deliveries per year".
-  const words = quote.slice(amount.index + amount.matchedText.length).match(/^\s+((?:(?:[A-Za-z][A-Za-z-]*|\/)\s*){1,6})/u)?.[1]
-    .replace(/\//gu, " / ").trim().split(/\s+/u).map(word => word.toLowerCase()) ?? [];
+  const tail = quote.slice(amount.index + amount.matchedText.length);
+  const scanned = tail.match(/^\s+((?:(?:[A-Za-z][A-Za-z-]*|\/)\s*){1,6})/u);
+  const words = scanned?.[1]?.replace(/\//gu, " / ").trim().split(/\s+/u).map(word => word.toLowerCase()) ?? [];
+  const after = scanned === null ? undefined : tail.charAt(scanned[0].length);
   let i = 0, period: string | null = null;
   while (i < words.length && (LOCAL_QUALIFIER.has(words[i]!) || PERIOD_ADJECTIVE.test(words[i]!))) {
     if (PERIOD_ADJECTIVE.test(words[i]!)) period = localPeriod(words[i])!;
     i++;
   }
   const nouns: string[] = [];
-  while (i < words.length && nouns.length < 2 && !LOCAL_FUNCTION_WORD.has(words[i]!) && words[i] !== "/" && localPeriod(words[i]) === undefined) nouns.push(words[i++]!);
+  while (i < words.length && !LOCAL_FUNCTION_WORD.has(words[i]!) && words[i] !== "/" && localPeriod(words[i]) === undefined) nouns.push(words[i++]!);
+  const closed = i < words.length ? words[i] !== "and" && words[i] !== "or" : after !== undefined && (after === "" || /[.!?;]/u.test(after));
   if (PERIOD_ADJECTIVE.test(words[i] ?? "")) period = localPeriod(words[i])!;
   else if (PERIOD_CONNECTOR.has(words[i] ?? "") && localPeriod(words[i + 1]) !== undefined) period = localPeriod(words[i + 1])!;
-  return { nouns, period };
+  return { nouns, period, closed };
 }
 
 /**
@@ -134,7 +142,7 @@ function unitAgrees(amount: LocatedAmount, expected: string, other: string, quot
   if(amount.implicitSource!==true){
     const local=localCountUnit(quote,amount);
     const runs=local.nouns.flatMap((_,start)=>local.nouns.slice(start).map((__,end)=>local.nouns.slice(start,start+end+1).join(' ')));
-    if(local.nouns.length>0 && !runs.some(run=>sameNoun(run,count.noun)))return false;
+    if(local.nouns.length>0 && local.closed && !runs.some(run=>sameNoun(run,count.noun)))return false;
     if(local.period!==null && local.period!==count.period)return false;
   }
   if(amount.units.some(u=>sameNoun(u,count.noun)))return true;

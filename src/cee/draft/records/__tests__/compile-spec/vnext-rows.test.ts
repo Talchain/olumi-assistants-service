@@ -514,3 +514,37 @@ describe('Codex R2 F1: the period written at the numeral is read across "/" and 
     }
   });
 });
+
+const HIRES = 'We have 8 recruiters. We make 640 hires every month. Hire 5 recruiters. Goal: at least 900 hires every month within 7 months.';
+function hiresEffect(quote: string): DraftRecordSet { return { stated_items: [
+  {kind:'figure',source_quote:'We have 8 recruiters.',quantity:0,value:8,value_literal:'8',unit:'recruiters',unit_literals:['recruiters'],role:'baseline'},
+  {kind:'figure',source_quote:'We make 640 hires every month.',quantity:1,value:640,value_literal:'640',unit:'hires/month',unit_literals:['hires','every month'],role:'baseline'},
+  {kind:'option',source_quote:'Hire 5 recruiters.',quantity:0,value:5,value_literal:'5',is_baseline:false},
+  {kind:'goal',source_quote:'Goal: at least 900 hires every month within 7 months.',quantity:1,role:'target',value:900,value_literal:'900',direction:'floor',direction_literal:'at least',baseline_ref:1,horizon_ref:4,horizon_months:7},
+  {kind:'figure',source_quote:'within 7 months',value:7,value_literal:'7',unit:'months',unit_literals:['months']},
+  {kind:'cause',source_quote:quote,relationship:{from_quantity:0,to_quantity:1,amount:3,amount_literal:'3',per_source_change:1,per_source_literal:'Each'}},
+ ], claims:[{claim_kind:'factor',label:'Recruiters',quantity:0,value:8},{claim_kind:'causal_link',label:'hire setting',from_stated:2,to_claim:0,effect:'positive'}] }; }
+describe('Codex R2 F2: a noun the scanner cannot place is no contradiction; only a written contradictory noun or period refuses', () => {
+  it('R3-2 "Each recruiter adds 3 highly experienced hires a month." against hires/month earns user_stated', () => {
+    const quote = 'Each recruiter adds 3 highly experienced hires a month.';
+    const r = hiresEffect(quote); const p = project(r, HIRES + ' ' + quote);
+    expect(p.dropped.filter(d => d.stated_index === 5 && d.reason !== 'unconnected_to_goal')).toEqual([]);
+    expect(edgeFor(p, 5, r)?.provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: 3, amount_unit: 'hires/month' } });
+  });
+  it('R3-2 a noun phrase that runs on past a comma or "and" is unplaced, so it is no contradiction', () => {
+    // The source noun sits outside the 3-word window before the numeral, so this exercises the placement rule alone
+    // (the round-1 other-endpoint rule, unchanged here, reads a source noun inside that window).
+    for (const quote of ['Each recruiter we sign adds 3 highly experienced, carefully vetted hires a month.', 'Each recruiter we sign adds 3 seasoned and vetted hires a month.']) {
+      const r = hiresEffect(quote); const p = project(r, HIRES + ' ' + quote);
+      expect(p.dropped.filter(d => d.stated_index === 5 && d.reason !== 'unconnected_to_goal'), quote).toEqual([]);
+      expect(edgeFor(p, 5, r)?.provenance, quote).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: 3, amount_unit: 'hires/month' } });
+    }
+  });
+  it('R3-2 CONTROL after the same qualifiers, a written contradictory period or noun still refuses', () => {
+    for (const quote of ['Each recruiter adds 3 highly experienced hires a year.', 'Each recruiter we sign adds 3 highly experienced elephants.']) {
+      const r = hiresEffect(quote); const p = project(r, HIRES + ' ' + quote);
+      expect(p.dropped, quote).toContainEqual(expect.objectContaining({ stated_index: 5, reason: 'unit_literal_contradicts_unit' }));
+      expect(edgeFor(p, 5, r)?.provenance?.natural_effect, quote).toBeUndefined();
+    }
+  });
+});
