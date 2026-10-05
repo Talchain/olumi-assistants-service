@@ -154,3 +154,54 @@ describe('P2-P3: an oversized records draft is refused model_too_large by the le
     expect('admitted_over_limit_because' in result).toBe(false);
   });
 });
+
+describe('P2-ACCEPT: build-result keys a SERVED reader keys on are mapped to their records equivalent', () => {
+  it('admitted_graph_invalid: a graph GraphV3 cannot read is refused with the legacy code and issue paths, nothing written', async () => {
+    const { vi } = await import('vitest');
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const { constructionRecords } = await import('./records-wire-fixture.js');
+    const { narrateWriteOutcome, withWriteOutcome } = await import('../write-outcome.js');
+    const spy = vi.spyOn(GraphV3, 'safeParse').mockReturnValueOnce(GraphV3.safeParse({ nodes: 'not-an-array', edges: [] }));
+    try {
+      const { result, writes } = await build(constructionRecords(), 'Hire a tech lead for Delivery reliability.');
+      expect(writes).toHaveLength(0);
+      expect(result).toEqual({ ok: false, mutated: false, refusal: 'admitted_graph_invalid', issues: ['nodes'] });
+      // The served reader: its own words for this code, not the generic construction failure.
+      const reply = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [result]);
+      expect(withWriteOutcome(reply.text, reply.status))
+        .toBe('The model was not built: what came back did not form a valid model, so nothing was saved — ask me to try again.');
+    } finally { spy.mockRestore(); }
+  });
+
+  it('left_out_to_stay_compact: records never compacts, so the served reader says nothing was left out', async () => {
+    const { constructionRecords } = await import('./records-wire-fixture.js');
+    const { narrateWriteOutcome, withWriteOutcome } = await import('../write-outcome.js');
+    const { result } = await build(constructionRecords(), 'Hire a tech lead for Delivery reliability.');
+    expect(result).toMatchObject({ ok: true, size_retried: false });
+    expect('left_out_to_stay_compact' in result).toBe(false);
+    const reply = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [result]);
+    const said = withWriteOutcome(reply.text, reply.status);
+    expect(said, 'control: the success line was produced').not.toBe('');
+    expect(said).not.toContain('To keep it readable');
+  });
+
+  it('option_name_ambiguous: an option and a factor sharing one name stay two identities (index-bound), so no refusal applies', async () => {
+    const records: DraftRecordSet = {
+      stated_items: [{ kind: 'goal', source_quote: 'Delivery reliability' }, { kind: 'option', source_quote: 'Hire a tech lead' }],
+      claims: [
+        { claim_kind: 'factor', label: 'Hire a tech lead', value: 0, unit: 'people', value_scale: 'raw_count' },
+        { claim_kind: 'outcome', label: 'Delivery reliability' },
+        { claim_kind: 'causal_link', label: 'Option sets it', from_stated: 1, to_claim: 0, sets_to: 1, effect: 'positive' },
+        { claim_kind: 'causal_link', label: 'It affects result', from_claim: 0, to_claim: 1, effect: 'positive', strength: 0.5 },
+        { claim_kind: 'causal_link', label: 'Result reaches goal', from_claim: 1, to_stated: 0, effect: 'positive', strength: 1 },
+      ],
+    };
+    const { result, writes } = await build(records, 'Hire a tech lead for Delivery reliability.');
+    expect(result).toMatchObject({ ok: true, mutated: true });
+    const nodes = (writes[0]!.graph as SentGraph).nodes;
+    const option = nodes.filter((n) => n.kind === 'option'); const factor = nodes.filter((n) => n.kind === 'factor');
+    expect(option).toHaveLength(1); expect(factor).toHaveLength(1);
+    expect(factor[0]!.label).toBe('Hire a tech lead');
+    expect(option[0]!.id).not.toBe(factor[0]!.id);
+  });
+});

@@ -23,22 +23,16 @@ async function build(records: DraftRecordSet, brief: string) {
 }
 
 describe('DL: accept the loss or port the build-time output', () => {
+  // STILL RED, NOT ACCEPTABLE: served readers key on open_questions (write-outcome.ts openQuestionsOf; agent-v1-turn.ts
+  // `_agent.open_questions`; UI serverOpenQuestions.ts:84-88). No DL port ruling yet.
   it('asks whether the stated deadline is met on the first reply', async () => {
     const { result } = await build(sealedRecords(), BRIEF);
     expect(result.ok).toBe(true);
     expect(result.open_questions).toContain('Does "Monthly recurring revenue" get there within 9 months? The model holds the deadline; no result answers that yet.');
   });
 
-  it('returns typed level_asks for a limited quantity estimated by Olumi', async () => {
-    const records = constructionRecords('Raise Pro to £59', 'MRR', 'Monthly churn');
-    records.claims[0] = { claim_kind: 'factor', label: 'Monthly churn', value: 3, unit: '%', value_scale: 'raw_count' };
-    records.stated_items.push({ kind: 'constraint', source_quote: 'monthly churn under 4%', value: 4, unit: '%',
-      direction: 'ceiling', direction_span: { start: 14, end: 19 }, value_span: { start: 20, end: 21 }, applies_to_claim: 0 });
-    const { result } = await build(records, 'Raise Pro to £59 to lift MRR, with monthly churn under 4%.');
-    expect(result.ok).toBe(true);
-    expect(result.level_asks).toHaveLength(1);
-  });
-
+  // STILL RED, NOT ACCEPTABLE: served readers key on pending_action reconcile_goal_scope (agent-v1-turn.ts:2993,
+  // commit.ts:628/1459, persist-graph-write.ts:352, compose/goal-scope-claim-input.ts:18). Needs a records scope carrier.
   it('holds a reconcile_goal_scope action for an ambiguous part-or-whole MRR goal', async () => {
     const records = constructionRecords('Raise Pro to £59', 'MRR', 'Pro plan price');
     const { result } = await build(records, 'Should we raise the Pro plan from £49 to £59 to reach £20k MRR?');
@@ -71,6 +65,8 @@ describe('DL: accept the loss or port the build-time output', () => {
     expect(option!.proposed_by).toBe('olumi');
   });
 
+  // STILL RED, NOT ACCEPTABLE: served readers key on provenance.clamped_from / natural_effect (refit-frames.ts:116,
+  // adjust-edge-strength.ts:509, link-effect-edit.ts:230; UI naturalEffect.ts, edgeSizePhrase.ts). No DL port ruling yet.
   it('stores an unfit stated effect at one with its full coefficient clamped_from', async () => {
     const records = sealedRecords();
     // Keep the user's effect evidence. Widening the source frame makes this coefficient exceed one.
@@ -96,21 +92,41 @@ describe('DL: accept the loss or port the build-time output', () => {
   });
 });
 
-// These fields were present on EVERY legacy successful build, independent of a conditional disclosure.
-// Keep their requirements visible without synthesising a verdict from the records graph.
-describe('DL: remaining unconditional ToolResult metadata lost at this seam', () => {
+// ⭐ P2-ACCEPT (DL 5 Oct ~02:1xZ: "a loss may be accepted ONLY where no SERVED reader keys on it"). Each row below is
+// KEPT, unedited, as `it.fails`: it still runs, and it turns RED the day a producer ports the output, so the acceptance
+// cannot go stale silently. Evidence per key: a full grep of CEE src/ at this branch (excluding the legacy producer
+// runtime/build-model.ts and tests) and of the whole UI tree at staging dade7fe8 (tarball, 5,594 src files; contrast
+// GRAPH_READY 34 files, proposed_by 18). The table is in REPORT-PASS2.txt.
+describe('accepted-losses', () => {
+  // level_asks: 0 readers outside runtime/build-model.ts in CEE src (grep -rn level_asks src), 0 in UI src @dade7fe8.
+  it.fails('returns typed level_asks for a limited quantity estimated by Olumi', async () => {
+    const records = constructionRecords('Raise Pro to £59', 'MRR', 'Monthly churn');
+    records.claims[0] = { claim_kind: 'factor', label: 'Monthly churn', value: 3, unit: '%', value_scale: 'raw_count' };
+    records.stated_items.push({ kind: 'constraint', source_quote: 'monthly churn under 4%', value: 4, unit: '%',
+      direction: 'ceiling', direction_span: { start: 14, end: 19 }, value_span: { start: 20, end: 21 }, applies_to_claim: 0 });
+    const { result } = await build(records, 'Raise Pro to £59 to lift MRR, with monthly churn under 4%.');
+    expect(result.ok).toBe(true);
+    expect(result.level_asks).toHaveLength(1);
+  });
+
+  // These fields were present on EVERY legacy successful build, independent of a conditional disclosure.
+  // construction_retried: 0 CEE readers / 0 UI; the route trace still reports {retried:false} (records-wiring.test.ts).
+  // withheld: 0 readers of the BUILD result's key (the route's `withheld` matches are standing/tool-withholding); 0 UI.
+  // options_that_change_nothing: 0 readers of the build result's key; the served capability result carries the same
+  //   fact from the readback as `structure.options_that_change_nothing` (agent-capabilities.ts structuralFacts); 0 UI.
   for (const [key, expected] of [
     ['construction_retried', false],
     ['withheld', []],
     ['options_that_change_nothing', []],
   ] as const) {
-    it(`preserves ${key} on a successful first build`, async () => {
+    it.fails(`preserves ${key} on a successful first build`, async () => {
       const { result } = await build(constructionRecords(), 'Hire a tech lead for Delivery reliability.');
       expect(result.ok).toBe(true);
       expect(result[key]).toEqual(expected);
     });
   }
-  it('reports the projected field count for its construction disclosures', async () => {
+  // projected_field_count: 0 CEE readers outside its legacy producer (build-model.ts:2013); 0 UI.
+  it.fails('reports the projected field count for its construction disclosures', async () => {
     const { result } = await build(constructionRecords(), 'Hire a tech lead for Delivery reliability.');
     expect(result.ok).toBe(true);
     expect(result.projected_field_count).toBeTypeOf('number');

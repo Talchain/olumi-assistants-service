@@ -212,7 +212,12 @@ export async function buildModelFromRecords(
   const authored = { ...projected.graph, nodes: markRecordsOlumiOptions(projectedNodes, origins) };
   const parsed = GraphV3.safeParse(limits.constraints.length > 0
     ? { ...authored, goal_constraints: limits.constraints } : authored);
-  if (!parsed.success) return { ok: false, mutated: false, refusal: 'construction_failed', detail: parsed.error.message };
+  // P2-ACCEPT (mapped): the legacy constructor's own code for a graph the product could not then read
+  // (`write-outcome.ts` REFUSAL_WORDS.admitted_graph_invalid keys on it), with the same `issues` shape.
+  if (!parsed.success) return {
+    ok: false, mutated: false, refusal: 'admitted_graph_invalid',
+    issues: parsed.error.issues.slice(0, 5).map((issue) => issue.path.join('.')),
+  };
   const graph = parsed.data;
   /**
    * ⭐ P2-P3: THE SAME SIZE GATE AND REFUSAL AS THE LEGACY CONSTRUCTOR, after compile and before any write. One limit
