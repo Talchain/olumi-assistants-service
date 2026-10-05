@@ -495,6 +495,7 @@ export interface DroppedRecordRef {
     | "option_lever_undeclared" | "option_lever_is_goal" | "option_value_unbound" | "option_lever_link_conflict" | "lever_endpoint_ambiguous"
     // P2-A1: a `change_by` option whose lever has no stated current level. Unknown is an ask, never a zero baseline.
     | "option_change_by_baseline_unknown"
+    | "option_change_by_baseline_unbound"
     // P2-B6x (a994c38a): a deadline goal that names no measurable quantity. An ASK for the quantity, never a guess
     // and never a default "higher is better" direction.
     | "goal_quantity_missing"
@@ -3539,6 +3540,9 @@ function projectOnce(
     if(item.setting==="change_by"){
       const level=q===index ? undefined : declaration.value;
       if(typeof level!=="number" || !Number.isFinite(level)){refuse("option_change_by_baseline_unknown");return;}
+      // The level a delta resolves against is evidence like any stated value: unbound to its own quote ("We have 8
+      // vans" typed 9), it is refused, never written as a brief-derived absolute.
+      if(!statedValueIsBound(declaration,brief)){refuse("option_change_by_baseline_unbound");return;}
       changeBy=settingValue;
       rawValue=literalConventionValue(level,declaration.unit,declaration.value_scale)+settingValue;
     }

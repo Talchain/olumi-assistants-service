@@ -115,6 +115,7 @@ export const NOTICE_KIND_BY_REASON: Record<
   option_lever_link_conflict: "relationship_not_used",
   lever_endpoint_ambiguous: "relationship_not_used",
   option_change_by_baseline_unknown: "relationship_not_used",
+  option_change_by_baseline_unbound: "relationship_not_used",
   // P2-B6x: the ask for a deadline goal's measurable quantity; nothing was guessed.
   goal_quantity_missing: "conflict_resolved_conservatively",
   // ── A RELATIONSHIP THE MODEL ASSERTED WAS NOT USED ────────────────────────

@@ -16,7 +16,7 @@ import { holdsByDefinition, nodeUnitOf } from '../../../../../orchestrator/conte
 import { resolveAnalysisAdmission } from '../../../../../orchestrator-v5/admission/analysis-admission.js';
 import { projectGraphForPersistence } from '../../../../../orchestrator-v5/persisted-graph-projection.js';
 import { assignEntityRefs } from '../../../../../orchestrator-v5/graph/entity-refs.js';
-import { buildFactorScaleMap, projectRequestInterventionsToWireScale } from '../../../../../orchestrator-v5/tools/plot-intervention-scale.js';
+import { buildFactorScaleMap, projectRequestInterventionsToWireScale, resolveRawInterventionValue, decideAnalysisScaleBlock } from '../../../../../orchestrator-v5/tools/plot-intervention-scale.js';
 import { defaultFrameFor, framedObservedState } from '../../../../../orchestrator-v5/agent-lane/admit-model.js';
 
 function project(records: DraftRecordSet, brief = BRIEF) {
@@ -355,5 +355,36 @@ describe('Codex R1 F2: a count-unit contradiction is refused, never user_stated'
       expect(p.dropped.filter(d => d.stated_index === 5 && d.reason !== 'unconnected_to_goal'), quote).toEqual([]);
       expect(edgeFor(p, 5, r)?.provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: 18, amount_unit: 'deliveries/month' } });
     }
+  });
+});
+describe('Codex R1 F3: a change_by never resolves from an unbound or missing baseline', () => {
+  it('F3a "We have 8 vans" typed 9 with a delta of 5 is refused, never written as a brief-derived 14', () => {
+    const r = vansDelta(); r.stated_items[0]!.value = 9;
+    const p = project(r, VANS);
+    expect(p.dropped).toContainEqual(expect.objectContaining({ stated_index: 2, reason: 'option_change_by_baseline_unbound' }));
+    const option = p.graph.nodes.find(n => n.provenance?.source_quote === r.stated_items[2]!.source_quote);
+    expect(Object.values(details(option) ?? {}).some((d: any) => d?.stated_index === 2)).toBe(false);
+    expect(Object.values(details(option) ?? {}).some((d: any) => d?.raw_value === 14)).toBe(false);
+  });
+  it('F3a CONTRAST the bound baseline 8 still compiles change_by 5 → 13', () => {
+    const r = vansDelta(); const p = project(r, VANS);
+    const option = p.graph.nodes.find(n => n.provenance?.source_quote === r.stated_items[2]!.source_quote)!;
+    const lever = p.graph.nodes.find(n => n.kind === 'factor' && n.quantity_ref === 0)!;
+    expect(details(option)?.[lever.id]).toMatchObject({ stated_index: 2, change_by: 5, raw_value: 13, source: 'brief_extraction' });
+  });
+  it('F3b current value 10 with no raw baseline, change_by 5, stale raw_value 13: refused with a typed reason, never 13', async () => {
+    const r = vansDelta(); const graph: any = await registeredWith(r, VANS);
+    const lever = graph.nodes.find((n: any) => n.kind === 'factor' && n.label === 'Vans')!;
+    lever.observed_state = { ...lever.observed_state, value: 10 }; delete lever.observed_state.raw_value;
+    const option = graph.nodes.find((n: any) => n.kind === 'option' && n.source_quote === r.stated_items[2]!.source_quote);
+    expect(option.interventions[lever.id]).toMatchObject({ change_by: 5, raw_value: 13 });
+    const scale = buildFactorScaleMap(graph.nodes);
+    expect(scale.get(lever.id)?.baselineRaw).toBeUndefined();
+    expect(resolveRawInterventionValue(option.interventions[lever.id], scale.get(lever.id))).toMatchObject({ value: null, refusal: 'change_by_baseline_missing' });
+    const projection = projectRequestInterventionsToWireScale([option.interventions], scale);
+    expect(projection.perOption[0]![lever.id]).toBeUndefined();
+    expect(projection).toMatchObject({ mixedUnresolved: true });
+    expect(projection.unresolvedFactorIds).toContain(lever.id);
+    expect(decideAnalysisScaleBlock(projection, [])).toMatchObject({ blocked: true, unresolvedFactorIds: [lever.id] });
   });
 });

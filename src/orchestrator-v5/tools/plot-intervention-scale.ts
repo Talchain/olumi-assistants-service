@@ -134,6 +134,11 @@ export interface InterventionScaleResult {
   /** Encoded-looking carrier failed the singular raw/type/map/domain proof. */
   readonly invalidEncodedContract?: boolean;
   /**
+   * A typed refusal: a `change_by` (P2-A1) whose factor has no CURRENT raw baseline. The delta has nothing to resolve
+   * against, and the compile-time absolute beside it is stale by definition, so neither is sent (Codex R1 F3b).
+   */
+  readonly refusal?: 'change_by_baseline_missing';
+  /**
    * The FAITHFUL unit-interval representation of this emission, when one is
    * KNOWN — the precondition for request-level demotion:
    *   - `cap_denormalised`: the input value (the promotion's own pre-image);
@@ -265,8 +270,12 @@ export function resolveRawInterventionValue(
   }
   // ⭐ P2-A1: a delta option (`change_by`) is a CHANGE of its factor, resolved HERE, at Run assembly, against the
   // factor's CURRENT raw baseline, so a user's baseline edit moves it with the baseline instead of freezing it into
-  // a no-op. With no current raw baseline the compile-time absolute stands (never a zero baseline).
+  // a no-op. With no current raw baseline the request is REFUSED with a typed reason: the compile-time absolute
+  // beside the delta is stale by definition, and a zero baseline is never assumed (Codex R1 F3b).
   const changeBy = coerceFiniteNumber(obj.change_by);
+  if (changeBy !== undefined && factor?.baselineRaw === undefined) {
+    return { value: null, rule: 'dropped', inputValue: value, inconsistent: false, refusal: 'change_by_baseline_missing' };
+  }
   if (changeBy !== undefined && factor?.baselineRaw !== undefined) {
     const resolvedRaw = factor.baselineRaw + changeBy;
     const cap = factor.cap;
@@ -687,6 +696,11 @@ export function projectRequestInterventionsToWireScale(
   const encodedContractInvalid = present.filter(
     (r) => r.result.invalidEncodedContract === true,
   );
+  // A refused `change_by` is excluded from `present` (it has no value to send), so it is read from every entry: the
+  // request is unresolved and names the factor, never shipped without the option's change.
+  const changeByBaselineMissing = resolved.flat().filter(
+    (r) => r.result.refusal === 'change_by_baseline_missing',
+  );
   /**
    * ⛔ AN ALL-IN-RANGE REQUEST CARRYING A RAW VALUE IS READ AS UNIT SCALE (DL #70 5858285859; PLoT #373 KNOWN RESIDUAL).
    * PLoT reads a request as raw only when some value lies outside [0,1]. "Cut churn to 0.8%" on a framed churn node
@@ -766,6 +780,9 @@ export function projectRequestInterventionsToWireScale(
   for (const r of encodedContractInvalid) {
     if (!unresolvedFactorIds.includes(r.factorId)) unresolvedFactorIds.push(r.factorId);
   }
+  for (const r of changeByBaselineMissing) {
+    if (!unresolvedFactorIds.includes(r.factorId)) unresolvedFactorIds.push(r.factorId);
+  }
   return {
     perOption,
     conversions,
@@ -780,6 +797,7 @@ export function projectRequestInterventionsToWireScale(
     mixedUnresolved:
       (mixed && undemotable.length > 0)
       || encodedContractInvalid.length > 0
+      || changeByBaselineMissing.length > 0
       || postconditionViolated,
     unresolvedFactorIds,
   };
