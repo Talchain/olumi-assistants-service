@@ -283,7 +283,7 @@ describe('the real route: "What would change the result?" → measured tipping p
           withhold();
           const again = await post(PRESS.id, PRESS.message, turn);
           expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
-          expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip\. No single option can be put forward yet/); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
+          expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
           expect(dispatch.calls).toHaveLength(1);
           expect(modelCalls).toBe(0);
         });
@@ -309,7 +309,7 @@ describe('the real route: "What would change the result?" → measured tipping p
             withhold();
             const again = await retryChipless(app, turn, chip);
             expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
-            expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip\. No single option can be put forward yet/); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
+            expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
             expect(dispatch.calls).toHaveLength(1);
           });
         }
@@ -386,7 +386,28 @@ describe('the real route: "What would change the result?" → measured tipping p
       WITHHELD['admission exploratory']();
       const again = await appendRepairRetry(turn);
       expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
-      expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip\. No single option can be put forward yet/); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
+      expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
+    });
+
+    // ⭐ Codex P1 #2569: the words take the licence of the read the RESPONSE is composed from, on the SAME Run. The
+    // press read and the final read differ only in the leader claim (computed_at and the hash are untouched).
+    it('L1 licence RESTORED after the press read: the licensed coaching, never "nothing to flip"', async () => {
+      WITHHELD['leader claim revoked']();
+      served.afterRead = (reads) => { if (reads === 1) served.state = D3.body.analysis_state; };
+      const body = await post(PRESS.id, PRESS.message);
+      expect(served.reads).toBeGreaterThan(1);
+      expect(dispatch.calls).toHaveLength(0); // the press read withheld the leader, so nothing was measured
+      expect(body.assistant_text).not.toMatch(/nothing yet for a change to flip/);
+      expect(body.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\.$/);
+    });
+
+    it('L2 licence REVOKED after the press read: "nothing to flip", never the measured words', async () => {
+      served.afterRead = (reads) => { if (reads === 1) WITHHELD['leader claim revoked'](); };
+      const body = await post(PRESS.id, PRESS.message);
+      expect(served.reads).toBeGreaterThan(1);
+      expect(dispatch.calls).toHaveLength(1); // the press read licensed it, so it was measured
+      expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+      expect(body.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\.$/);
     });
 
     it('OR1 contrast: a chipless retry of ANOTHER chip keeps its recorded words and never reaches the what-changes owner', async () => {
@@ -421,7 +442,7 @@ describe('the real route: "What would change the result?" → measured tipping p
               ? (await restarted.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: PRESS.message, source: 'chip', chip: { id: PRESS.id }, turn_id: turn } })).json() as { assistant_text: string }
               : await retryChipless(restarted, turn, form);
             expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
-            expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip\. No single option can be put forward yet/); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
+            expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
             expect(dispatch.calls).toHaveLength(1);
           });
         }

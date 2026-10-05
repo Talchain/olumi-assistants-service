@@ -359,14 +359,16 @@ function rememberStructuralChallenge(key: string, turn: StructuralChallengeTurn)
   presentedStructuralChallenges.set(key, turn);
 }
 function whatWouldChangeAnswer(scenarioId: string, read: Parameters<typeof tippingPointCoachingFor>[1] & { readonly analysisReady?: unknown },
-  measured: MeasuredWhatChanges | null, sentText?: string | null): {
+  measured: MeasuredWhatChanges | null, sentText?: string | null,
+  /** ⭐ Codex P1 #2569: the licence of the read the RESPONSE is composed from (same Run), never an earlier snapshot's. */
+  licence: { readonly analysisState?: unknown; readonly analysisReady?: unknown } = read): {
   readonly text: string; readonly tippingTurn: TippingPointCoaching | null; readonly measured: MeasuredWhatChanges | null;
 } {
   if (measured !== null && config.features.whatChangesMeasuredEnabled && runExplanationMatches(measured.runKey, scenarioId, read)
-    && leaderLicenceFromState(read.analysisState, read.analysisReady) !== 'withheld') {
+    && leaderLicenceFromState(licence.analysisState, licence.analysisReady) !== 'withheld') {
     return { text: sentText ?? measured.turn.reply, tippingTurn: null, measured };
   }
-  const tippingTurn = tippingPointCoachingFor(scenarioId, read);
+  const tippingTurn = tippingPointCoachingFor(scenarioId, read, licence);
   return { text: tippingTurn.kind === 'found' ? settleTippingPointCoaching(tippingTurn, tippingTurn.reply).reply : tippingTurn.reply,
     tippingTurn, measured: null };
 }
@@ -3077,7 +3079,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const { analysisState, analysisResult } = composedRead;
     if (whatChangesRead !== undefined) {
       const answer = whatWouldChangeAnswer(scenarioId,
-        await withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues, String(req.id)), measuredCandidate);
+        await withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues, String(req.id)), measuredCandidate,
+        undefined, composedRead);
       text = answer.text;
       result = { ...result, assistant_text: text };
       tippingTurn = answer.tippingTurn;
