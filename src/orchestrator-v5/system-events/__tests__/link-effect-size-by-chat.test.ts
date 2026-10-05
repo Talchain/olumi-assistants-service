@@ -81,7 +81,9 @@ function unsizedGraph(): Json {
 }
 
 /** Serialized bytes are the store boundary; no writer or commit function is replaced. */
-function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead?: string; useInProcessDoor?: boolean } = {}) {
+function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead?: string; useInProcessDoor?: boolean;
+  /** Changes the stored graph after approval's dry run, just before the real commit re-reads it (Codex r2 timing). */
+  beforeCommit?: (graph: Json) => Json } = {}) {
   let graphJson = JSON.stringify(initial);
   const proposals = new ProposalStore();
   const attempts: SessionTurnWrite[] = [];
@@ -112,6 +114,7 @@ function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead
   const commits: CommitOptionLevelsInput[] = [];
   const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
     commits.push(input);
+    if (options.beforeCommit !== undefined) graphJson = JSON.stringify(options.beforeCommit(graph()));
     if (options.useInProcessDoor === true) {
       session.store = store;
       try { return await commitOptionLevelsInProcess(input, 'rt6-real-in-process-door'); }
@@ -809,6 +812,21 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(String(out.detail)).toContain(`"${FOOTFALL}" in GBP`);
     expect(String(out.detail)).not.toMatch(/no unit or scale/);
     expect(w.attempts).toEqual([]);
+  });
+
+  // Codex r2: the same stale reading, arriving AFTER approval's dry run and before the real commit re-reads the graph.
+  // Whatever door answers (the commit's refusal, or its stale check), the words never put the refused % back.
+  it('stale adoption AT COMMIT: the words read the graph the commit refused on, never the refused %', async () => {
+    const w = world(unsizedGraph(), { beforeCommit: (g) => { nodeOf(g, SOURCE).unit_reading = reading('GBP', 'Each £5'); return g; } });
+    const proposed = await propose(w);
+    expect(proposed, JSON.stringify(proposed)).toMatchObject({ ok: true });
+    const { out } = await approve(w, proposed);
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false });
+    expect(w.commits).toHaveLength(1);
+    expect(String(out.detail)).not.toContain(`"${FOOTFALL}" in %`);
+    expect(String(out.detail)).toContain(`"${FOOTFALL}" in GBP`);
+    expect(String(out.detail)).not.toMatch(/no unit or scale/);
+    expect(linkOf(w.graph()).provenance).not.toHaveProperty('natural_effect');
   });
 
   it('readback checks each adopted unit by node id before reporting an applied approval', async () => {

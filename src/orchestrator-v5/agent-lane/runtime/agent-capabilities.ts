@@ -2781,8 +2781,12 @@ export function createAgentCapabilities(
       const from = { id: failed.from, label: approvedRead.nodes.find((n) => n.id === failed.from)?.label ?? failed.from };
       const to = { id: failed.to, label: approvedRead.nodes.find((n) => n.id === failed.to)?.label ?? failed.to };
       const approved = approvedEffects.find((e) => e.from === failed.from && e.to === failed.to);
-      return notApplied('link_effect_refused', linkEffectRefusalWords(reason, approvedRead.raw, from, to, approved?.effect,
-        approved === undefined ? undefined : stillReadUnitReadings(approvedRead.raw, approved)));
+      // Codex r2: the canonical writer refused on the graph IT re-read at commit, which may differ from approval's read
+      // (a reading changed in between; the analysis hash unchanged). The words read that current graph and keep only the
+      // readings it still makes. If it cannot be re-read, no reading is put back.
+      const now = await readGraph(ctx.scenario_id);
+      return notApplied('link_effect_refused', linkEffectRefusalWords(reason, now?.raw ?? approvedRead.raw, from, to, approved?.effect,
+        approved === undefined || now === null ? undefined : stillReadUnitReadings(now.raw, approved)));
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
