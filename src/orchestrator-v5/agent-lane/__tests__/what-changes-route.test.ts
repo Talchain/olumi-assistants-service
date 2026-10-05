@@ -142,7 +142,7 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(modelCalls).toBe(0);
     expect(dispatch.calls).toHaveLength(1);
     expect(dispatch.calls[0].payload.scenario_id).toBe(SCENARIO);
-    const answer = "‘Stay on AWS’ would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
+    const answer = "In this model, ‘Stay on AWS’ would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
       + "‘Switch to GCP’ would still lead even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
     // The turn's answer is the reply's last paragraph, intact. This served Run is quantified-provisional (the user's
     // own estimates are off the deciding path), so the leader wire gate puts its caveat first: the governing egress
