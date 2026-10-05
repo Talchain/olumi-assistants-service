@@ -200,6 +200,7 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
+import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
@@ -2363,6 +2364,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       status_kind: headlineStatusKind,
       // A goal the user held as a floor points up by their own words: not "direction assumed" (AIQ #75 5901136155).
       goal_points_up_as_held: heldGoalPointsUp(graphForAnalysis, snapshot.goal_node_id),
+      // ⛔ RT-10 B′ (Codex r1 #2600): the direction-assumed line names the "at most" goal target only where that door
+      // opens. `goal_target_edit` refuses a CHANGE target (`goal_is_a_change`, the same `isChangeFrame`), so there the
+      // assumption is stated with no correction promised.
+      goal_direction_correctable: goalDirectionCorrectableByTarget(graphForAnalysis, snapshot.goal_node_id),
       // T1: withhold the confident "{X} currently leads" claim while any
       // ratified condition is unchecked. A recommendation must not exist
       // unless every user-ratified hard constraint is decision-grade.
@@ -3663,3 +3668,17 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */
 const OUTCOME_SAFE_PRECONDITIONS: ReadonlySet<string> = new Set(['P2', 'P3', 'P4']);
+
+/**
+ * RT-10 B′: whether the goal's direction can be corrected through the Model panel goal target ("at most") — the
+ * `goal_target_edit` door accepts the goal, i.e. its target is not a CHANGE from today (the door's `goal_is_a_change`
+ * refusal, `isChangeFrame`). Exported so the door and this reader are pinned together in one row.
+ */
+export function goalDirectionCorrectableByTarget(graph: unknown, goalNodeId: unknown): boolean {
+  if (typeof goalNodeId !== 'string' || graph === null || typeof graph !== 'object') return false;
+  const nodes = (graph as { nodes?: unknown }).nodes;
+  if (!Array.isArray(nodes)) return false;
+  const goal = nodes.find((n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === goalNodeId) as
+    { kind?: unknown; goal_threshold_frame?: unknown } | undefined;
+  return goal?.kind === 'goal' && !isChangeFrame(goal.goal_threshold_frame);
+}

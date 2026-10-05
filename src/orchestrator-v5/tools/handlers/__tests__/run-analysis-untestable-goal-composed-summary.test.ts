@@ -47,6 +47,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { goalDirectionCorrectableByTarget } from '../run-analysis.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -140,7 +141,9 @@ function headlineInput(recs: Json[], codes: readonly string[]): AnalysisResultHe
  * and the headline builder's goal-frame verdict for the same input.
  */
 function composeAsHandler(recs: Json[], codes: readonly string[], rawGraph: Json): { summary: string; tail: string } {
-  const input = headlineInput(recs, codes);
+  // RT-10 B′: the handler's own flag, from the same graph (`goalDirectionCorrectableByTarget`).
+  const goalId = ((rawGraph['nodes'] as Json[]).find((n) => n['kind'] === 'goal') ?? {})['id'];
+  const input = { ...headlineInput(recs, codes), goal_direction_correctable: goalDirectionCorrectableByTarget(rawGraph, goalId) };
   const headline = buildAnalysisResultHeadline(input);
   const goalFrame = describeGoalFrame(input);
   const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(

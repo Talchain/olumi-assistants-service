@@ -88,7 +88,8 @@ const FIXED_HEADLINE =
   ' and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
 
 function input(enrichment: Json): AnalysisResultHeadlineInput {
-  return { enrichment, leading_option_id: BLOCK['leading_option_id'] as string, status_kind: 'ok' };
+  // RT-10 B′: the handler passes true for a goal whose target is not a change; this envelope's goal is taken as one.
+  return { enrichment, leading_option_id: BLOCK['leading_option_id'] as string, status_kind: 'ok', goal_direction_correctable: true };
 }
 
 /** The envelope with the warning channel reduced to the entries whose codes are in `keep`. */

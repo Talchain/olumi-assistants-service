@@ -89,11 +89,11 @@ const factor = (id: string, label: string) => ({
   observed_state: { value: 0.5, cap: 1 },
 });
 
-function graph(goalLabel: string, holdAtToday = false): Json {
+function graph(goalLabel: string, holdAtToday = false, goalFields: Json = {}): Json {
   return {
     version: '1',
     nodes: [
-      { id: 'goal', kind: 'goal', label: goalLabel },
+      { id: 'goal', kind: 'goal', label: goalLabel, ...goalFields },
       { id: 'decision', kind: 'decision', label: 'Pricing plan' },
       factor('fac_price', 'Seat Price Level'),
       factor('fac_seats', 'Active paid seats'),
@@ -195,9 +195,10 @@ async function runHandler(
   codes: readonly string[],
   data: DataShape,
   holdAtToday = false,
+  goalFields: Json = {},
 ): Promise<{ summary: string; assistantText: string; leadingOptionId: string | null; plotCalls: number; holdEarned: unknown }> {
   const { client, run } = plotClient(codes, data);
-  const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: scenarioReader(graph(goalLabel, holdAtToday)) });
+  const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: scenarioReader(graph(goalLabel, holdAtToday, goalFields)) });
   const outcome = await handler(invocation());
   const fact = outcome.handler_facts[0];
   if (fact === undefined || fact.fact_type !== 'run_analysis') {
@@ -339,5 +340,24 @@ describe('R3-3 CONTRAST (R3 #75 5916385251; AIQ 5916386753): where the compared 
     expect(r.holdEarned).toBe(true);
     expect(r.summary).toBe(`${FRAMED_LEAD}${ARM_B_FRAMED}`);
     expect(isAllowedRunAnalysisAssistantText(r.summary), `egress rejected: ${r.summary}`).toBe(true);
+  });
+});
+
+// ⛔ RT-10 B′ (Codex r1 #2600, its negative/control pair): the direction-assumed line names the "at most" goal target only
+// where that door opens. `goal_target_edit` refuses a goal whose target is a CHANGE (`goal_is_a_change`), so there the
+// assumption is said ALONE; on a goal with no target (the matrix above) it carries the correction.
+describe('RT-10 B′ — the "at most" correction is promised only where the goal target door opens (EXECUTED handler)', () => {
+  const CORRECTION = ' If lower is better, set the goal’s target to ‘at most’ and re-run.';
+  const ASSUMPTION = 'In this model I’ve assumed a higher value is better for your goal';
+  it.each([
+    ['NEGATIVE: a CHANGE target held as a floor ("at least a 20% cut", change_rel −0.2) → the assumption alone',
+      { goal_direction: '>=', goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.2, goal_threshold: -0.2,
+        observed_state: { value: 0.5, baseline: 0.5, source: 'brief_extraction' } }, false],
+    ['CONTROL: no target figure (the door opens) → the assumption and the correction', {}, true],
+  ] as const)('%s', async (_name, goalFields, promisesCorrection) => {
+    const { summary, plotCalls } = await runHandler(METRIC_GOAL, CODE_SETS.D, 'contradicted', false, goalFields);
+    expect(plotCalls).toBe(1);
+    expect(summary).toContain(ASSUMPTION);
+    expect(summary.includes(CORRECTION)).toBe(promisesCorrection);
   });
 });
