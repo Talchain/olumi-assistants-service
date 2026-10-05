@@ -1066,8 +1066,11 @@ function buildInterventionsFromV4Data(
 
     const binding = v4InterventionBindings?.[factorId];
     const carriedRaw = v4RawInterventions?.[factorId];
+    // The records projector writes two stated bindings: a direct causal value ("… bound by edge …") and an option's
+    // own setting ("Stated option value bound to stated_items[i]: <quote>"). Both carry their quote and both are
+    // checked against the brief below; reading only the first stamped a user's "raise prices by 10%" cee_hypothesis.
     const boundQuote = binding?.reasoning.match(
-      /^Direct causal value bound by edge \S+ to stated_items\[\d+\]: (.+)$/s,
+      /^(?:Direct causal value bound by edge \S+|Stated option value bound) to stated_items\[\d+\]: (.+)$/s,
     )?.[1];
     const bindingIsVerified =
       binding !== undefined &&

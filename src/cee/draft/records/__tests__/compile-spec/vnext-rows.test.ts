@@ -703,3 +703,24 @@ describe('Science ruling 2026-10-05 P2-FRAME: an undeclared quantity takes the l
     }
   });
 });
+
+// ── Pre-3×3 (5 Oct): the ideal sealed v-next records scored ADMITTED_AS_ESTIMATE on price_rise through the served
+// transport harness. The option-setting binding the projector writes ("Stated option value bound to stated_items[i]:
+// <quote>") was never read by the V3 intervention extractor, whose quote route matched only the direct-causal binding,
+// so the user's own "raise prices by 10%" was stamped cee_hypothesis / low. ──
+describe('a stated option setting keeps its brief authority through the V3 intervention extractor', () => {
+  const interventionsOf = (node: any) => (node.interventions ?? node.data?.interventions ?? {}) as Record<string, any>;
+  it('the sealed "raise prices by 10%" setting is stored brief_extraction / high', async () => {
+    const body = await registered();
+    const raise = body.graph.nodes.find((n: any) => n.kind === 'option' && /raise/i.test(String(n.label)));
+    const setting = Object.values(interventionsOf(raise)).find((iv: any) => /raise prices by 10%/.test(String(iv.reasoning)));
+    expect(setting, 'the stated setting is bound by its own quote').toMatchObject({ raw_value: 10, unit: '%' });
+    expect(setting).toMatchObject({ source: 'brief_extraction', value_confidence: 'high' });
+  });
+  it('CONTROL the direct-causal binding (150 starter subscribers) was already brief_extraction / high', async () => {
+    const body = await registered();
+    const starter = body.graph.nodes.find((n: any) => n.kind === 'option' && /starter/i.test(String(n.label)));
+    const won = Object.values(interventionsOf(starter)).find((iv: any) => iv.raw_value === 150);
+    expect(won).toMatchObject({ source: 'brief_extraction', value_confidence: 'high' });
+  });
+});
