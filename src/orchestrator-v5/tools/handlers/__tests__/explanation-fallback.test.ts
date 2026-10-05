@@ -89,7 +89,7 @@ describe('composeExplainResultsFallback', () => {
     // carries is its OWN win share, so the reader gets 62% and 27% rather than
     // their subtraction.
     expect(text).toContain('Hire Two Mid-Level');
-    expect(text).toContain("'Hire Two Mid-Level' sits in second place, with a probability of 27%");
+    expect(text).toContain("'Hire Two Mid-Level' scored highest in 27% of runs");
     expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivity values rendered as bucketed
     // lead-framing prose (formatSensitivityDirection composes adverb
@@ -311,6 +311,9 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     const flip = composeWhatWouldFlipFallback(nullMargin, OVERRIDE_TIE);
     expect(explain).toContain('effectively tied');
     expect(explain).not.toContain('sits in second place');
+    // Union, never replace: the runner-up standing in its model-relative words (principle audit, 5 Oct).
+    expect(explain).not.toContain("'Hire Two Mid-Level' scored highest");
+    expect(explain).not.toContain("'Hire Two Mid-Level' came next");
     expect(flip).toContain('effectively tied');
   });
 

@@ -371,6 +371,11 @@ export function composeRobustnessVerdict(
       typeof runnerP === 'number' && Number.isFinite(runnerP)
         ? `, with a probability of ${formatProbability(runnerP)}`
         : '';
+    // Principle audit (5 Oct): the runner-up's own share in the headline's verb, never "second place".
+    const runnerStanding =
+      typeof runnerP === 'number' && Number.isFinite(runnerP)
+        ? ` scored highest in ${formatProbability(runnerP)} of runs`
+        : ' came next';
     if (marginCat === 'near_tie') {
       margin_clause =
         mode === 'explain'
@@ -379,13 +384,13 @@ export function composeRobustnessVerdict(
     } else if (marginCat === 'clear' && finiteMargin !== null) {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)} sits in second place${runnerPFragment}, so the lead is meaningful rather than marginal.`
+          ? `${quoteLabel(runner.label)}${runnerStanding}, so the lead is meaningful rather than marginal.`
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it${runnerPFragment}.`;
     } else {
       // indeterminate: no finite margin and not a near-tie.
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)} sits in second place${runnerPFragment}.`
+          ? `${quoteLabel(runner.label)}${runnerStanding}.`
           : `${quoteLabel(runner.label)} is the most likely contender to overtake it.`;
     }
   }
@@ -558,7 +563,8 @@ export function composeExplainResultsFallback(
   // ran, and keeps prose ordering decisions in one place.
 
   sentences.push(
-    `${leading.label} performs best, with a probability of ${formatProbability(leading.probability)}.`,
+    // Principle audit (5 Oct): a finding about this model in the Run headline's verb, never "performs best".
+    `In this model, ${leading.label} scored highest in ${formatProbability(leading.probability)} of runs.`,
   );
 
   if (verdict.margin_clause !== null) {
@@ -667,7 +673,7 @@ export function composeWhatWouldFlipFallback(
   // is set on the projection.
 
   sentences.push(
-    `${quoteLabel(leading.label)} currently leads, with a probability of ${formatProbability(leading.probability)}.`,
+    `In this model, ${quoteLabel(leading.label)} scored highest in ${formatProbability(leading.probability)} of runs.`,
   );
 
   // Margin sentence (near-tie "effectively tied" / clear "would need to close"

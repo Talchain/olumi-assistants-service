@@ -14,6 +14,8 @@ import { textNamesLeadingOption } from '../../compose/leading-option-egress-guar
 import { FORBIDDEN_HEADLINE_VOCABULARY_REGEX } from '../../coaching/assistant-text-defences.js';
 import { buildAnalysisResultHeadline, isAllowedRunAnalysisAssistantText } from '../../coaching/analysis-result-headline.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
+import type { AnalysisProjectionSummary } from '../../context/projection-summaries.js';
+import { composeExplainResultsFallback, composeWhatWouldFlipFallback } from '../../tools/handlers/explanation-fallback.js';
 
 type Copy = string | Readonly<Record<string, string>>;
 const row = (id: string) => POLICY.rows.find(r => r.policy_id === id)! as unknown as {
@@ -123,5 +125,30 @@ describe('W-HEAD: the Run headline names the option only in this model, and is n
   it('CONTROL: the retired words are no longer in the grammar, so they fall back', () => {
     expect(forward('Hire A currently leads.')).toBe(FALLBACK);
     expect(forward('Hire A currently leads, but treat this as provisional: the link between Price and Revenue is fragile.')).toBe(FALLBACK);
+  });
+});
+
+describe('explain and flip fallbacks: the leader and runner-up are said in this model, never "performs best" / "currently leads" / "second place"', () => {
+  const ANALYSIS: AnalysisProjectionSummary = {
+    status: 'complete',
+    leading_option: { label: 'Hire Senior Engineer', probability: 0.62 },
+    runner_up: { label: 'Hire Two Mid-Level', probability: 0.27 },
+    margin_pp: 35,
+    robustness_band: 'stable',
+    top_drivers: [{ factor_label: 'Engineering Capacity', sensitivity_value: 0.65 }],
+    staleness_reason: null,
+  };
+
+  it('explain fallback: exact leader sentence and the runner-up in its own share', () => {
+    const text = composeExplainResultsFallback(ANALYSIS, null, null);
+    expect(text).toContain('In this model, Hire Senior Engineer scored highest in 62% of runs.');
+    expect(text).toContain("'Hire Two Mid-Level' scored highest in 27% of runs");
+    expect(text).not.toMatch(/performs best|currently leads|second place/);
+  });
+
+  it('flip fallback: exact leader sentence', () => {
+    const text = composeWhatWouldFlipFallback(ANALYSIS, null, null, null);
+    expect(text).toContain("In this model, 'Hire Senior Engineer' scored highest in 62% of runs.");
+    expect(text).not.toMatch(/performs best|currently leads/);
   });
 });

@@ -377,7 +377,7 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     // opens with "Based on this model, the analysis currently favours
     // <leading>" regardless of which branch fires.
     expect(result.response.assistant_text).toContain('A');
-    expect(result.response.assistant_text).toContain('currently favours');
+    expect(result.response.assistant_text).toContain('scored highest');
     expect(result.response.assistant_text.toLowerCase()).not.toContain('recommendation');
     expect(result.response.assistant_text).not.toMatch(/\d+\.\d+/);
     // No canonical edit_graph no-op denial.
@@ -646,7 +646,7 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
 
     // The deterministic flip composer output — leading option A at 62% — must
     // be present, and the generic apology must NOT be the answer.
-    expect(result.response.assistant_text).toContain('currently leads');
+    expect(result.response.assistant_text).toContain('scored highest');
     expect(result.response.assistant_text).toContain('62%');
     expect(result.response.assistant_text).not.toContain("couldn't complete that turn");
 
