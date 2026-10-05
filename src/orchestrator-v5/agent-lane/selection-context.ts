@@ -24,6 +24,8 @@ export type SelectionUnresolved = 'none' | 'not_in_model' | 'could_not_check';
 export interface AgentSelectionContext {
   /** The developer note the Agent is given for THIS turn only (never handed on into the history). */
   readonly note: string;
+  /** Exact directed links resolved from the REQUEST selection; kept out of the public node-id sidecar. */
+  readonly links?: readonly { readonly from: string; readonly to: string }[];
   /** The `_grounded_selection` sidecar, route-v2's shape: the resolved node ids, in the order selected. */
   readonly grounded: { readonly element_ids: readonly string[]; readonly unresolved: SelectionUnresolved };
 }
@@ -76,6 +78,7 @@ export function agentSelectionContext(
 
   const selected: Rec[] = [];
   const elementIds: string[] = [];
+  const selectedLinks: { from: string; to: string }[] = [];
   let missing = 0;
   let unreadable = 0;
   for (const id of nodeIds.slice(0, SELECTION_MAX_ELEMENTS)) {
@@ -94,10 +97,12 @@ export function agentSelectionContext(
     if (link === undefined) { missing += 1; continue; }
     const end = (id: string): Json => ({ id, ...(typeof byId.get(id)?.label === 'string' ? { label: byId.get(id)!.label } : {}) });
     selected.push({ kind: 'link', ...link, from: end(ends.from), to: end(ends.to) });
+    selectedLinks.push(ends);
   }
 
   const unresolved: SelectionUnresolved = unreadable > 0 ? 'could_not_check' : missing > 0 ? 'not_in_model' : 'none';
   const note = `${SELECTION_NOTE_PREFIX}${selected.length > 0 ? JSON.stringify(selected) : 'nothing this model contains.'}`
     + (missing > 0 ? NOT_IN_MODEL : '') + (unreadable > 0 ? COULD_NOT_CHECK : '');
-  return { note, grounded: { element_ids: elementIds, unresolved } };
+  return { note, grounded: { element_ids: elementIds, unresolved },
+    ...(selectedLinks.length > 0 ? { links: selectedLinks } : {}) };
 }

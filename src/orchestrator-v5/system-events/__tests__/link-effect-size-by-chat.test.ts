@@ -206,9 +206,9 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(Object.keys(nodeOf(cold, SOURCE).unit_reading).sort()).toEqual(['source', 'source_quote', 'unit']);
     expect(linkOf(cold).provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated', natural_effect: {
       amount: -2, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: 'percentage points' } });
-    expect(w.commits[0]!.link_effect?.quote).toBe(SAID_POINTS.slice(0, -1));
+    expect(w.commits[0]!.link_effect?.quote).toBe(SAID_POINTS);
     expect(w.rows[0]!.write.handler_facts[0]).toMatchObject({ fact_type: 'adjust_edge_strength',
-      result: { after: { stated_quote: SAID_POINTS.slice(0, -1) } } });
+      result: { after: { stated_quote: SAID_POINTS } } });
     expect(w.attempts[0]!.graph).toEqual(written);
     expect(nodeOf(cold, OTHER)).toEqual(nodeOf(before, OTHER));
     expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);

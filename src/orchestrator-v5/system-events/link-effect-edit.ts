@@ -5,9 +5,10 @@
  * This writer sizes that one link with the construction path's own converter (`sizeLink`, `user_stated: true`, the
  * magnitude contract D2–D8), and stores exactly what it did:
  *   · `strength {mean, std}` from the sizing, `effect_direction` from the stated sign;
- *   · `provenance = {source: 'user_specified', magnitude: 'user_stated', natural_effect}` — the size said back in the
+ *   · `provenance = {...existing, source: 'user_specified', magnitude: 'user_stated', natural_effect, source_quote,
+ *     reading: 'agent_proposed_user_confirmed'}` — the size said back in the
  *     units the user used, bound to the β it was written for (`strength_mean`);
- *   · Olumi's `reasoning` and the whole-edge `defaulted` flag go (a user statement is not Olumi's); the per-field
+ *   · Every other provenance key is retained; the whole-edge `defaulted` flag goes, and the per-field
  *     `exists_defaulted` / `std_defaulted` keep what the statement did not state (A6e / A6f).
  * Since schemas 0.62.0 (projection v3) who sized a link and its natural unit are analysis inputs, so the write moves
  * the analysis revision and the prior Run reads stale — the placeholder-parts predicate reads exactly this.
@@ -25,7 +26,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
-import { resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitOf, type LinkSizeProblem, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
+import { isPercentageLevelUnit, resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitOf, type LinkSizeProblem, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import { createHash } from 'node:crypto';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -51,6 +52,12 @@ export interface LinkEffectStatement {
   readonly per_source_change_unit: string;
 }
 
+/** A displayed direction correction, approved as part of the exact link-effect reading. */
+export interface LinkEffectReversal {
+  readonly from: 'positive' | 'negative';
+  readonly to: 'positive' | 'negative';
+}
+
 export interface ApplyLinkEffectEditParams {
   /** The STORED graph (strict server-side read) — never a client copy. */
   readonly persistedGraph: unknown;
@@ -59,6 +66,10 @@ export interface ApplyLinkEffectEditParams {
   readonly effect: LinkEffectStatement;
   /** End units inferred from the displayed, literal user statement; approval binds each exact reading. */
   readonly unit_readings?: readonly LinkEffectUnitReading[];
+  /** A reversal is written only when the card explicitly disclosed both the old and proposed directions. */
+  readonly reversal?: LinkEffectReversal;
+  /** Grounded canvas selection, supplied by the request and bound into this approval reading. */
+  readonly link_selected?: true;
   /**
    * What the ask was prepared against (DL 5882808387). Either one moved ⇒ `superseded`, nothing written.
    *  · `graph_hash` — the wire `graph_hash` (`computeAnalysisAffectingGraphHash`), which every Agent proposal carries as
@@ -71,7 +82,7 @@ export interface ApplyLinkEffectEditParams {
   /** The user's verbatim words (1..400), carried on the receipt for the approval card and audit. */
   readonly quote: string;
   /**
-   * `linkEffectReadingToken` of the reading the user APPROVED — the card's {from, to, effect, quote, unit_readings}. The writer
+   * `linkEffectReadingToken` of the reading the user APPROVED — including units, reversal and grounded selection. The writer
    * recomputes it over what it is asked to write; absent or different ⇒ `reading_not_confirmed`, nothing written.
    */
   readonly reading_token: string;
@@ -158,28 +169,30 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   // pre-existing node units unchanged: the aliases apply only while this end's governing reading is user-stated %.
   const sourceOwn = present(unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
     targetUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
-    ...(hasAdoptedPercentUnit(sourceEnd, sourceNode) ? ['pp', 'points'] : []));
+    ...(hasAdoptedPercentUnit(sourceEnd, sourceNode) || isPercentageLevelUnit(unitOf(sourceNode), resolveMagnitudeFrame(sourceNode))
+      || sourceNode.percent_level === true ? ['percentage points', 'pp', 'points'] : []));
   // ⛔ The points-only rule applies to a % LEVEL target the graph marks `percent_level` from `goal_constraints`
   // (Science, #87 5993238492): "gross margin falls 2%" may mean 2 points or 2% of today's level, so a bare "%" for that
   // target is refused and the user is asked for points. A % goal not so marked keeps the pre-existing comparison
   // (follow-up for Science).
   // A % LEVEL target's unit is fixed (points), so it is never adopted from the link: a stored "%" must not let a
   // relative % size it (Codex buddy #2586 @b278c84d, P2: a marked level with no `goal_threshold_unit`).
-  const levelPoints = targetNode.percent_level === true ? present(targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode))) : [];
-  const targetOwn = [...(targetNode.percent_level === true
+  const targetIsLevel = targetNode.percent_level === true || isPercentageLevelUnit(unitOf(targetNode), resolveMagnitudeFrame(targetNode));
+  const levelPoints = targetIsLevel ? present(targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode))) : [];
+  const targetOwn = [...(targetIsLevel
     ? (levelPoints.length > 0 ? levelPoints : ['percentage points'])
     : present(unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))),
-    ...(hasAdoptedPercentUnit(targetEnd, targetNode) ? ['pp', 'points'] : [])];
+    ...(hasAdoptedPercentUnit(targetEnd, targetNode) || targetIsLevel ? ['pp', 'points'] : [])];
   const provenance = isRec(found.edge.provenance) ? found.edge.provenance : {};
   const stored = isRec(provenance.natural_effect) ? provenance.natural_effect : undefined;
   const storedUnit = (key: 'amount_unit' | 'per_source_change_unit'): string | undefined =>
     typeof stored?.[key] === 'string' && (stored[key] as string).trim() !== '' ? stored[key] as string : undefined;
   const sourceAdopted = sourceOwn.length === 0 ? storedUnit('per_source_change_unit') : undefined;
-  const targetAdopted = targetOwn.length === 0 && targetNode.percent_level !== true ? storedUnit('amount_unit') : undefined;
+  const targetAdopted = targetOwn.length === 0 && !targetIsLevel ? storedUnit('amount_unit') : undefined;
   return {
     source: { own: sourceOwn, ...(sourceAdopted !== undefined ? { adopted: sourceAdopted } : {}) },
     target: { own: targetOwn, ...(targetAdopted !== undefined ? { adopted: targetAdopted } : {}),
-      ...(targetNode.percent_level === true && levelPoints.length === 0 ? { storeAsStated: true } : {}) },
+      ...(targetIsLevel && levelPoints.length === 0 ? { storeAsStated: true } : {}) },
   };
 }
 
@@ -229,10 +242,14 @@ export function linkEffectReadingToken(reading: {
   readonly effect: LinkEffectStatement;
   readonly quote: string;
   readonly unit_readings?: readonly LinkEffectUnitReading[];
+  readonly reversal?: LinkEffectReversal;
+  readonly link_selected?: true;
 }): string {
   const { amount, amount_unit, per_source_change, per_source_change_unit } = reading.effect;
   const bound = { from: reading.from, to: reading.to, effect: { amount, amount_unit, per_source_change, per_source_change_unit }, quote: reading.quote,
-    ...(reading.unit_readings?.length ? { unit_readings: reading.unit_readings } : {}) };
+    ...(reading.unit_readings?.length ? { unit_readings: reading.unit_readings } : {}),
+    ...(reading.reversal !== undefined ? { reversal: reading.reversal } : {}),
+    ...(reading.link_selected === true ? { link_selected: true } : {}) };
   return `reading:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
 }
 const refuse = (reason: LinkEffectRefusal): LinkEffectEditResult => ({ kind: 'refused', reason });
@@ -242,7 +259,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const { from, to, effect, expected } = params;
   if (typeof params.quote !== 'string' || params.quote.trim() === '' || params.quote.length > QUOTE_MAX) return refuse('quote_invalid');
   if (typeof params.reading_token !== 'string'
-    || params.reading_token !== linkEffectReadingToken({ from, to, effect, quote: params.quote, unit_readings: params.unit_readings })) {
+    || params.reading_token !== linkEffectReadingToken({ from, to, effect, quote: params.quote, unit_readings: params.unit_readings,
+      reversal: params.reversal, link_selected: params.link_selected })) {
     return refuse('reading_not_confirmed');
   }
   if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
@@ -266,11 +284,12 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // Unit readings are identity content, outside the analysis hash: independently re-check eligibility against the
   // persisted node and its other sized links. A level or governing unit added since approval makes adoption stale.
   const unitReadings = params.unit_readings ?? [];
+  const prepared = prepareLinkEffectUnitReadings(params.persistedGraph, from, to, effect, params.quote,
+    { link_selected: params.link_selected === true });
+  if (prepared.ask !== undefined || stableStringify(prepared.unit_readings) !== stableStringify(unitReadings)) {
+    return refuse('unit_mismatch');
+  }
   if (unitReadings.length > 0) {
-    const prepared = prepareLinkEffectUnitReadings(params.persistedGraph, from, to, effect, params.quote);
-    if (prepared.ask !== undefined || stableStringify(prepared.unit_readings) !== stableStringify(unitReadings)) {
-      return refuse('unit_mismatch');
-    }
     for (const reading of unitReadings) {
       const node = nodes.find(n => n.id === reading.node_id);
       if (node === undefined || (reading.node_id !== from && reading.node_id !== to)) return refuse('unit_mismatch');
@@ -304,17 +323,18 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   }
 
   // ── NEVER A SILENT REVERSAL (Runtime 5883054365, reproduced on served journey C) ─────────────────────────────────
-  // The stated sign must agree with the STORED link's: its `effect_direction`, else the sign of its mean. A user who says
-  // the link runs the other way is correcting Olumi's direction — that is the reversal door (`propose_link_strength`
-  // with the user's direction words), never a side effect of sizing. `sizeLink`'s own check compares the figure with
-  // itself, so this one is the guard.
+  // The stated sign must agree with the STORED link, or carry the exact reversal the approval card disclosed. A token
+  // for an ordinary sizing cannot approve a reversal: both old and proposed direction are bound into its reading.
   // The link's direction is the SIGNED SLOPE (amount ÷ per_source_change; PR Review 5883720887): "lowering price by £1
   // gains 50" (+50 per −1) runs the same way as "raising it by £1 loses 50" (−50 per +1).
   const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? 'negative' : 'positive';
   const storedMean = isRec(edge.strength) && finite(edge.strength.mean) ? edge.strength.mean : 0;
   const storedDirection = edge.effect_direction === 'positive' || edge.effect_direction === 'negative' ? edge.effect_direction
     : storedMean < 0 ? 'negative' : storedMean > 0 ? 'positive' : null;
-  if (storedDirection !== null && storedDirection !== direction) return refuse('sign_conflict');
+  if (params.reversal !== undefined && (!isRec(params.reversal) || Object.keys(params.reversal).length !== 2
+    || params.reversal.from !== storedDirection || params.reversal.to !== direction
+    || params.reversal.from === params.reversal.to)) return refuse('sign_conflict');
+  if (storedDirection !== null && storedDirection !== direction && params.reversal === undefined) return refuse('sign_conflict');
 
   // ── THE CONSTRUCTION PATH'S OWN SIZING ────────────────────────────────────────────────────────────────────────────
   const sizing = sizeLink(
@@ -326,7 +346,6 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (sizing.outcome !== 'user_stated' || sizing.natural_effect === undefined) return refuse('unconvertible');
 
   const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance } };
-  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
   // RT-6: an end taking this link's stored unit, or a newly disclosed sentence unit, keeps its change in the words
@@ -338,7 +357,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     ...(endUnits.target.adopted !== undefined || endUnits.target.storeAsStated === true || unitReadings.some(r => r.node_id === to)
       ? { amount_unit: effect.amount_unit } : {}),
   };
-  edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect };
+  // The confirmed reading is identity content, outside the analysis hash; every other existing provenance key survives.
+  edge.provenance = { ...provenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect,
+    source_quote: params.quote, reading: 'agent_proposed_user_confirmed' };
   edge.provenance_display = 'user_set';
   // A6e: `defaulted` is whole-edge; the statement sizes the strength only, so existence stays Olumi's per field.
   if (edge.defaulted === true) edge.exists_defaulted = true;

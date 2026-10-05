@@ -33,7 +33,7 @@ import type { EdgeProvenanceV3T } from '../../schemas/cee-v3.js';
 import { classifyUnitScaleClass, unitPinnedScaleFrame } from '../draft/records/unit-scale-class.js';
 import { readCurrencyUnitWithQualifiers } from '../provenance/stated-amounts.js';
 import { recoverScaleFrame } from '../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
-import { isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
+import { isPercentOfPopulation, isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
 import { sayFigure } from '../../orchestrator-v5/agent-lane/say-figure.js';
 
 /** Who sized a link (D9). Declared once, on `EdgeProvenanceV3.magnitude`. */
@@ -128,7 +128,8 @@ export function levelDomain(unit: string | undefined, frame: number, percentLeve
   const cls = classifyUnitScaleClass(unit);
   if (cls === 'percentage_points' || cls === 'basis_points') return null;
   if (cls === 'percent') {
-    return unit !== undefined && (isPercentWithPeriod(unit) || percentLevel) && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
+    return unit !== undefined && (isPercentWithPeriod(unit) || isPercentOfPopulation(unit) || percentLevel)
+      && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
   }
   if (unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency') return { lo: 0, hi: Infinity };
   return frame === 1 ? UNIT_INTERVAL : null;
@@ -322,9 +323,14 @@ export function switchStateWords(level: number): 'on' | 'off' | undefined {
   return level === 1 ? 'on' : level === 0 ? 'off' : undefined;
 }
 
-const isPercentLevel = (node: MagnitudeNode, frame: number | undefined): boolean => {
+/** A pinned percentage level moves in points: 1 point is 1 raw unit, including "% of output". */
+export function isPercentageLevelUnit(unit: string | undefined, frame: number | undefined): boolean {
+  return frame === 100 && unit !== undefined && (isPercentWithPeriod(unit) || isPercentOfPopulation(unit));
+}
+
+export const isPercentLevel = (node: MagnitudeNode, frame: number | undefined): boolean => {
   const unit = unitOf(node);
-  return frame === 100 && unit !== undefined && isPercentWithPeriod(unit);
+  return isPercentageLevelUnit(unit, frame);
 };
 
 /**

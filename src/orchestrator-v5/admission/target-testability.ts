@@ -67,7 +67,7 @@ function sizedInGoalUnit(e: Rec, goalUnit: string | undefined, graph?: unknown):
   // WRITER's own comparator over the goal end's own units. A % goal not so marked keeps the pre-existing comparison
   // (follow-up for Science). A count goal's units hold no "points": unchanged.
   const ends = graph !== undefined && typeof e.from === 'string' && typeof e.to === 'string' ? linkEffectEndUnits(graph, e.from, e.to) : null;
-  return ends !== null && ends.target.own.every((u) => /point/i.test(u)) && statedInOneOf(ne.amount_unit, ends.target.own);
+  return ends !== null && ends.target.own.every(u => statedInOneOf(u, ['percentage points', 'pp', 'points'])) && statedInOneOf(ne.amount_unit, ends.target.own);
 }
 
 type Rec = Record<string, unknown>;

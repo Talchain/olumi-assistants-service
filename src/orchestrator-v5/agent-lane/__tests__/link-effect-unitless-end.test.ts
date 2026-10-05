@@ -1,8 +1,8 @@
 /**
  * RT-6 — the unitless end's stored link unit, through the REAL proposer, approval and writer.
  * Served bytes: "Footfall lost from price rise" has no unit; its link to "Gross margin" was sized by Olumi
- * as −1 percentage point per +5 '%'. A sentence the served word rule reads must be recordable in that same unit.
- * P is RED on origin/staging (unit_mismatch). The word rule and proposer remain staging's; the card path is follow-up.
+ * as −1 percentage point per +5 '%'. The statement remains recordable in that same established unit.
+ * RT-6 step 3: the conservative sentence filter binds numbers and link; the displayed reading carries consent.
  * No LLM calls: approval writes through applyLinkEffectEdit, then authoriseChange reads the stored link back.
  */
 import { readFileSync } from 'node:fs';
@@ -24,8 +24,8 @@ const FOOTFALL = 'Footfall lost from price rise';
 const MARGIN = 'Gross margin';
 const LINK = { from_label: FOOTFALL, to_label: MARGIN, amount: -2, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: '%' };
 const SAID_READ = 'Each 5% rise in footfall lost from price rise costs us about 2 percentage points of gross margin.';
-const STATED_READ = SAID_READ.slice(0, -1); // staging stores the ONE sentence read, without its terminating period.
-/** The red team's words, verbatim, stay refused by the served rule; interpreting them on a card is follow-up. */
+const STATED_READ = SAID_READ; // B3 retains the verbatim sentence, including its terminating period.
+/** The red team's natural words are now disclosed on a typed reading card before any write. */
 const SAID_UP = 'When footfall lost from price rise goes up by 5%, gross margin falls by about 2 percentage points.';
 const SAID_FALL = 'A 5% fall in footfall would cost us about 2 percentage points of gross margin.';
 
@@ -44,7 +44,8 @@ function world(graph: Json = structuredClone(SERVED)) {
     commits.push(input);
     for (const le of [...(input.link_effects ?? []), ...(input.link_effect !== undefined ? [input.link_effect] : [])]) {
       const r = applyLinkEffectEdit({ persistedGraph: graph, from: le.from, to: le.to, effect: le.effect,
-        expected: { graph_hash: input.base_graph_hash, edge_token: le.edge_token }, quote: le.quote, reading_token: le.reading_token });
+        expected: { graph_hash: input.base_graph_hash, edge_token: le.edge_token }, quote: le.quote, reading_token: le.reading_token,
+        unit_readings: le.unit_readings, reversal: le.reversal, link_selected: le.link_selected });
       if (r.kind === 'refused') throw new Error(`writer refused at approval: ${r.reason}`);
       const next = r.mutatedGraph as Json;
       graph.edges = next.edges;
@@ -58,6 +59,15 @@ function world(graph: Json = structuredClone(SERVED)) {
 const cardFor = (store: ProposalStore, r: Json) => approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
   (id) => ({ proposal: store.get(id), result: r as never }))[0]!;
 const linkOf = (g: Json, from = SOURCE, to = TARGET) => (g.edges as Json[]).find((e) => e.from === from && e.to === to)!;
+const RISING_READING = `Record: +5% on "${FOOTFALL}" → −2 percentage points in "${MARGIN}": `
+  + `raising "${FOOTFALL}" by 5% lowers "${MARGIN}" by 2 percentage points.`;
+const CONFIRM_DISCLOSURE = ' On approval: from your words, as you confirmed. Approve, or correct.';
+const expectedRisingCard = (quote: string): string => `${RISING_READING} — from your words: "${quote}".${CONFIRM_DISCLOSURE}`;
+const expectedMarginPercentQuestion = 'Nothing was prepared. Tell the user exactly this: "'
+  + `Is that a 2-point fall in “${MARGIN}” (say 12% → 10%), or 2% of today’s level? Nothing is recorded until you answer. `
+  + `If you’d rather not answer, you can set how strong this link is on the canvas: click the link from “${FOOTFALL}” `
+  + `to “${MARGIN}”, and under “How strong is this effect?” choose Slight, Moderate, Strong or Very strong. `
+  + 'That records how strong you judge the link, not your figure."';
 
 /** A refusal binds the exact typed reason, no offer, and the identified stored link's unchanged provenance. */
 function expectRefused(r: Json, refusal: string, why: string | undefined, store: ProposalStore, graph: Json,
@@ -94,11 +104,7 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     expect(commits).toEqual([]);
     const card = cardFor(store, r);
     expect(card.id).toBe(approvalChipIdFor(proposalId));
-    expect(card.detail).toContain(`"${FOOTFALL}"`);
-    expect(card.detail).toContain(`"${MARGIN}"`);
-    expect(card.detail).toMatch(/\+5\s?%/);
-    expect(card.detail).toContain('−2 percentage points');
-    expect(card.detail).toContain(STATED_READ);
+    expect(card.detail).toBe(expectedRisingCard(STATED_READ));
 
     const out = await caps.authoriseChange(ctxPressing(proposalId, card.message), { proposal_id: proposalId }) as Json;
     expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true, proposal_id: proposalId,
@@ -108,7 +114,8 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     expect(commits[0]!.link_effect).toMatchObject({ from: SOURCE, to: TARGET, quote: STATED_READ,
       effect: { amount: -2, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: '%' } });
     expect(linkOf(graph)).toMatchObject({ from: SOURCE, to: TARGET, effect_direction: 'negative' });
-    expect(linkOf(graph).provenance).toEqual({ source: 'user_specified', magnitude: 'user_stated',
+    expect(linkOf(graph).provenance).toEqual({ ...before, source: 'user_specified', magnitude: 'user_stated',
+      reading: 'agent_proposed_user_confirmed', source_quote: STATED_READ,
       natural_effect: { amount: -2, amount_unit: 'percentage points', per_source_change: 5,
         per_source_change_unit: '%', strength_mean: linkOf(graph).strength.mean, strength_mean_frame: 'edge_strength' } });
     expect(store.outstanding(SCENARIO, null)).toEqual([]);
@@ -119,8 +126,8 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     const r2 = await caps.proposeLinkEffect!(ctxSaying(again), { ...LINK, amount: -3, quote: again }) as Json;
     expect(r2, JSON.stringify(r2)).toEqual(expect.objectContaining({ ok: true, mutated: false,
       link: { from: FOOTFALL, to: MARGIN, effect: { amount: -3, amount_unit: 'percentage points',
-        per_source_change: 5, per_source_change_unit: '%' }, your_words: again.slice(0, -1) } }));
-    expect(store.get(String(r2.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: again.slice(0, -1) });
+        per_source_change: 5, per_source_change_unit: '%' }, your_words: again } }));
+    expect(store.get(String(r2.proposal_id))!.provenance).toEqual({ authored_by: 'user_stated', basis: again });
     expect(store.outstanding(SCENARIO, null).map((p) => p.proposal_id)).toEqual([String(r2.proposal_id)]);
     expect(linkOf(graph).provenance).toEqual(after);
   });
@@ -162,38 +169,62 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     expectRefused(r, 'unit_mismatch', undefined, store, graph, before, 'bread_price_increase');
   });
 
-  it('S a sign-inverted reading passes the served word rule but is refused by the writer sign guard', async () => {
-    const { caps, store, graph } = world();
+  it('S a sign-inverted reading explicitly reverses the link on the card and only approval records it', async () => {
+    const { caps, store, graph, commits } = world();
     const before = structuredClone(linkOf(graph).provenance);
     const said = 'Each 5% fall in footfall costs us about 2 percentage points of gross margin.';
     const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, per_source_change: -5, quote: said }) as Json;
-    expectRefused(r, 'sign_conflict', undefined, store, graph, before);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false });
+    const proposalId = String(r.proposal_id);
+    const proposal = store.get(proposalId)!;
+    expect(proposal.operations[0]!.value).toMatchObject({ reversal: { from: 'negative', to: 'positive' }, quote: said });
+    const card = cardFor(store, r);
+    expect(card.detail).toBe('REVERSAL: this changes the link from negative to positive. '
+      + `Record: −5% on "${FOOTFALL}" → −2 percentage points in "${MARGIN}": `
+      + `lowering "${FOOTFALL}" by 5% lowers "${MARGIN}" by 2 percentage points. — from your words: "${said}".`
+      + CONFIRM_DISCLOSURE);
+    expect(commits).toEqual([]);
+    expect(linkOf(graph).provenance).toEqual(before);
+    expect(linkOf(graph).effect_direction).toBe('negative');
+    const out = await caps.authoriseChange(ctxPressing(proposalId, card.message), { proposal_id: proposalId }) as Json;
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(commits).toHaveLength(1);
+    expect(commits[0]!.link_effect).toMatchObject({ reversal: { from: 'negative', to: 'positive' } });
+    expect(linkOf(graph)).toMatchObject({ effect_direction: 'positive', provenance: {
+      magnitude: 'user_stated', reading: 'agent_proposed_user_confirmed', source_quote: said } });
+    expect(store.outstanding(SCENARIO, null)).toEqual([]);
   });
 
-  // PINNED FOLLOW-UP: the served word rule refuses these today. Card-based interpretation is outside this unit fix.
-  // It already accepts "Our budget for footfall rises by 5% and costs…"; that pre-existing binding loophole is follow-up.
+  // B2: vocabulary, direction and level-vs-change grammar cannot refuse a reading. The card states the Agent's args,
+  // including an incorrect reading when the user needs to correct it, and the stored model stays unchanged.
   it.each([
-    ['SAID_FALL', SAID_FALL, 'direction_contradicts'],
-    ['SAID_UP', SAID_UP, 'direction_not_stated'],
-    ['a budget', 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.', 'direction_not_stated'],
-    ["today's level", 'Footfall lost from price rise is 5% today and gross margin falls by about 2 percentage points.', 'figure_not_bound'],
-    ['a budget that goes up', 'Our budget for footfall goes up by 5%, gross margin falls by about 2 percentage points.', 'direction_not_stated'],
-    ['a target level', 'When footfall goes up by 5%, gross margin of 2 percentage points is our target.', 'direction_not_stated'],
-    ["a target's current level", "When footfall goes up by 5%, gross margin of 2 percentage points is today's level.", 'direction_not_stated'],
-    ['a budget that falls', 'Our budget for footfall falls by 5% and costs us about 2 percentage points of gross margin.', 'direction_contradicts'],
-    ['net margin while gross margin stays steady', 'A 5% fall in footfall would cost us about 2 percentage points of net margin while gross margin stays steady.', 'direction_contradicts'],
-    ['"rises by 5%"', 'When footfall lost from price rise rises by 5%, gross margin falls by about 2 percentage points.', 'direction_not_stated'],
-  ] as const)('PINNED FOLLOW-UP %s → served refusal, nothing outstanding', async (_name, said, why) => {
-    const { caps, store, graph } = world();
+    ['SAID_FALL', SAID_FALL],
+    ['SAID_UP', SAID_UP],
+    ['a budget', 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.'],
+    ["today's level", 'Footfall lost from price rise is 5% today and gross margin falls by about 2 percentage points.'],
+    ['a budget that goes up', 'Our budget for footfall goes up by 5%, gross margin falls by about 2 percentage points.'],
+    ['a target level', 'When footfall goes up by 5%, gross margin of 2 percentage points is our target.'],
+    ["a target's current level", "When footfall goes up by 5%, gross margin of 2 percentage points is today's level."],
+    ['a budget that falls', 'Our budget for footfall falls by 5% and costs us about 2 percentage points of gross margin.'],
+    ['net margin while gross margin stays steady', 'A 5% fall in footfall would cost us about 2 percentage points of net margin while gross margin stays steady.'],
+    ['"rises by 5%"', 'When footfall lost from price rise rises by 5%, gross margin falls by about 2 percentage points.'],
+  ] as const)('B2 %s → the exact Agent reading is offered for approval, nothing stored', async (_name, said) => {
+    const { caps, store, graph, commits } = world();
     const before = structuredClone(linkOf(graph).provenance);
     const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
-    expectRefused(r, 'not_the_users_statement', why, store, graph, before);
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false });
+    expect(r).not.toHaveProperty('refusal');
+    expect(r).not.toHaveProperty('why');
+    expect(cardFor(store, r).detail).toBe(expectedRisingCard(said));
+    expect(store.outstanding(SCENARIO, null).map(p => p.proposal_id)).toEqual([String(r.proposal_id)]);
+    expect(commits).toEqual([]);
+    expect(linkOf(graph).provenance).toEqual(before);
   });
 
   it.each([
     ['a question', 'Does a 5% rise in footfall lost cost about 2 percentage points of gross margin?', 'not_the_users_statement', 'question'],
     ['a negation', "A 5% rise in footfall lost wouldn't cost 2 percentage points of gross margin.", 'not_the_users_statement', 'denied'],
-    ['a third figure', 'A 5% fall in footfall would cost us about 2, maybe 3 percentage points of gross margin.', 'not_the_users_statement', 'direction_contradicts'],
+    ['a third figure', 'A 5% fall in footfall would cost us about 2, maybe 3 percentage points of gross margin.', 'not_the_users_statement', 'unclear_figure'],
     ['a corrected figure', 'An 8%, no, a 5% fall in footfall costs about 2 percentage points of gross margin.', 'not_the_users_statement', 'denied'],
     ['no figures', 'Footfall lost from price rise matters a lot for gross margin.', 'not_the_users_figure', undefined],
   ] as const)('N %s → served refusal, nothing stored', async (_name, said, refusal, why) => {
@@ -201,6 +232,10 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     const before = structuredClone(linkOf(graph).provenance);
     const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
     expectRefused(r, refusal, why, store, graph, before);
+    if (why === 'unclear_figure') {
+      expect(r.question).toBe(`What single change in “${MARGIN}” do you mean, rather than a range?`);
+      expect(String(r.detail).replace("How strong is this effect?", "How strong is this effect").match(/\?/g)).toHaveLength(1);
+    }
   });
 
   it('N figures the words do not write (another unit, another number) → refused, never filled in', async () => {
@@ -248,7 +283,7 @@ describe('RT-6 row 2 (Science): points size a % LEVEL goal, through the writer\'
     const said = 'Each 5% rise in footfall lost from price rise costs us about 2% of gross margin.';
     const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, amount_unit: '%', quote: said }) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
-    expect(String(r.detail)).toContain('recorded in percentage points');
+    expect(String(r.detail)).toBe(expectedMarginPercentQuestion);
     expectRefused(r, 'unit_mismatch', undefined, store, graph, before);
   });
   it('(c2) Codex P2: a % level goal with NO goal_threshold_unit never adopts a stored "%"; points still record (control)', async () => {
@@ -265,7 +300,7 @@ describe('RT-6 row 2 (Science): points size a % LEVEL goal, through the writer\'
     const before = structuredClone(linkOf(refusedWorld.graph).provenance);
     const r = await refusedWorld.caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, amount_unit: '%', quote: said }) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
-    expect(String(r.detail)).toContain('recorded in percentage points');
+    expect(String(r.detail)).toBe(expectedMarginPercentQuestion);
     expectRefused(r, 'unit_mismatch', undefined, refusedWorld.store, refusedWorld.graph, before);
     // Control, through the REAL writer (Codex buddy @97ff622f: the proposal alone passed while the write stored ''):
     const control = world(marked());

@@ -1,7 +1,10 @@
+import { percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 /** Literal, per-end unit readings for an unsized link (RT-6 U1–U4). No graph writes. */
-import { findStatedAmounts, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
+import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
 import { sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
+import { isPercentageLevelUnit } from '../../cee/magnitude/link-effect.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectStatement } from './link-effect-edit.js';
 
@@ -45,7 +48,8 @@ function eligible(node: Rec, edges: readonly Rec[], from: string, to: string, un
 
 /** Only words explicitly stated inside THIS end's clause may qualify its currency period. */
 function periodOf(clause: string): string | null | undefined {
-  const periods = [...clause.matchAll(/(?:\bper\s+|\/\s*)([\p{L}]+)\b/giu)].map(m => m[1]!.toLowerCase());
+  const periods = [...clause.matchAll(/(?:\bper\s+|\/\s*)([\p{L}]+)\b|\ba\s+(month|week|year)\b/giu)]
+    .map(m => (m[1] ?? m[2])!.toLowerCase());
   if (periods.some(p => !['day', 'week', 'month', 'quarter', 'year'].includes(p))) return null;
   return new Set(periods).size > 1 ? null : periods[0];
 }
@@ -95,7 +99,7 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
     const clause = quote.slice(from, to).trimEnd();
     return clause.length >= 1 && clause.length <= 500 ? clause : undefined;
   };
-  const PERIOD = /^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)*/iu;
+  const PERIOD = /^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b|\s+a\s+(?:month|week|year)\b)*/iu;
   // Forward.
   const rest = quote.slice(figureEnd, next);
   // Whitespace is consumed only WITH a unit word, so "£3 per month" keeps its period (buddy r2 P2).
@@ -142,6 +146,18 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   return bounded(previousEnd + boundary + words[first]!.index!, figureEnd + suffix.length + period.length);
 }
 
+/** A selected link binds an unnamed currency end, while its literal amount and period remain the only unit warrant. */
+function selectedCurrencyClause(quote: string, amount: StatedAmount): string | undefined {
+  if (amount.kind !== 'currency') return undefined;
+  const start = amount.index + amount.matchedText.length - amount.matchedText.trimStart().length;
+  const end = amount.index + amount.matchedText.length;
+  const tail = /^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b|\s+a\s+(?:month|week|year)\b)*/iu.exec(quote.slice(end))![0];
+  // A numbered denominator cannot be quietly omitted from the selected reading either.
+  if (/^\s*(?:per\s+|\/\s*)\d/i.test(quote.slice(end + tail.length))) return undefined;
+  const clause = quote.slice(start, end + tail.length).trimEnd();
+  return clause.length >= 1 && clause.length <= 500 ? clause : undefined;
+}
+
 function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: string; barePercent?: true } {
   if (a.kind === 'percent') return { barePercent: true };
   if (a.kind === 'currency' && a.currencyCode !== undefined) {
@@ -171,6 +187,7 @@ function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: strin
 
 export function prepareLinkEffectUnitReadings(
   graph: unknown, from: string, to: string, effect: LinkEffectStatement, quote: string,
+  options?: { readonly link_selected?: boolean },
 ): PreparedLinkEffectUnitReadings {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return { unit_readings: [] };
   const nodes = graph.nodes.filter(isRec);
@@ -178,22 +195,43 @@ export function prepareLinkEffectUnitReadings(
   if (source === undefined || target === undefined) return { unit_readings: [] };
   const edges = graph.edges.filter(isRec);
   const current = edges.find(e => e.from === from && e.to === to);
-  const amounts = findStatedAmounts(quote, { isoCurrencyCodes: true });
+  const amounts = findLinkEffectAmounts(quote);
+  const percentLevels = percentLevelIds(graph);
   const unit_readings: LinkEffectUnitReading[] = [];
   const asks: string[] = [];
   for (const [node, other, value, statedUnit] of [[source, target, effect.per_source_change, effect.per_source_change_unit],
     [target, source, effect.amount, effect.amount_unit]] as const) {
+    const label = String(node.label ?? node.id);
+    const establishedUnit = unitOf(node) ?? (current === undefined ? undefined : endpointUnit(current, String(node.id)));
+    const literalPercent = amounts.find(a => a.magnitude === Math.abs(value) && a.kind === 'percent');
+    const sourceLevels = node === source ? linkEffectSourceLevels(quote) : undefined;
+    const explicitSourceLevels = sourceLevels !== undefined && Math.abs(sourceLevels.change) === Math.abs(value);
+    const frame = typeof node.scale_frame === 'number' ? node.scale_frame
+      : isRec(node.observed_state) && typeof node.observed_state.cap === 'number' ? node.observed_state.cap
+        : typeof node.goal_threshold_cap === 'number' ? node.goal_threshold_cap : undefined;
+    if (establishedUnit !== undefined && literalPercent !== undefined && !explicitSourceLevels) {
+      if ((unitOf(node) !== undefined || percentLevels.has(String(node.id)))
+        && (percentLevels.has(String(node.id)) || isPercentageLevelUnit(establishedUnit, frame))) {
+        const example = value < 0 ? `${10 + Math.abs(value)}% → 10%` : `10% → ${10 + value}%`;
+        asks.push(`Is that a ${Math.abs(value)}-point ${value < 0 ? 'fall' : 'rise'} in \u201c${label}\u201d (say ${example}), or ${Math.abs(value)}% of today\u2019s level?`);
+        continue;
+      }
+      if (readCurrencyUnitWithQualifiers(establishedUnit).kind === 'currency') {
+        asks.push(`What ${establishedUnit} change in \u201c${label}\u201d do you mean by ${Math.abs(value)}%?`);
+        continue;
+      }
+    }
     // Step 1's established size continues to govern; this door adopts units for UNSIZED ends only.
-    if (unitOf(node) !== undefined || (current !== undefined && endpointUnit(current, String(node.id)) !== undefined)) continue;
+    if (establishedUnit !== undefined) continue;
     const candidates = amounts.flatMap((a, i) => {
       if (a.magnitude !== Math.abs(value)) return [];
-      const clause = clauseOf(quote, amounts, i, node, other);
+      const clause = clauseOf(quote, amounts, i, node, other)
+        ?? (options?.link_selected === true ? selectedCurrencyClause(quote, a) : undefined);
       return clause === undefined ? [] : [{ clause, ...literalUnit(a, clause, node) }];
     });
     const one = candidates.length === 1 ? candidates[0] : undefined;
     const unit = one?.unit;
     if (!eligible(node, edges, from, to, unit ?? statedUnit)) continue;
-    const label = String(node.label ?? node.id);
     if (one?.barePercent === true) {
       const example = value < 0 ? `${10 + Math.abs(value)}% → 10%` : `10% → ${10 + value}%`;
       asks.push(`Is that a ${Math.abs(value)}-point ${value < 0 ? 'fall' : 'rise'} in \u201c${label}\u201d (say ${example}), or ${Math.abs(value)}% of today\u2019s level?`);
