@@ -229,7 +229,10 @@ describe('ceilingTheUserWroteFor: a ceiling is the USER\'S only where the brief 
   it('⭐ ROUND 4 (Codex on a351e007): a figure written TWICE is a ceiling only when both writings are ("tax" is not in the model)', () => {
     expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend target £36k; tax below £36k.')).toBe(false);
     expect(ceilingTheUserWroteFor(2, '%', 'Keep churn below 2%; tax is 2%.'), 'the second writing is not a ceiling: under-claim, by design').toBe(false);
-    expect(ceilingTheUserWroteFor(2, '%', 'Keep churn below 2%, and I mean below 2%.'), 'CONTROL: both writings are ceilings').toBe(true);
+    const churn = { target: ['Monthly churn'], others: ['Tax rate'] };
+    expect(ceilingTheUserWroteFor(2, '%', 'Keep churn below 2%; keep it below 2%.', churn), 'CONTROL: both writings are the goal\'s ceilings').toBe(true);
+    // Round 5 (Codex on 101ab77a): the goal AT its target today, and an unmodelled quantity's ceiling on the same figure.
+    expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend is at its £36k target; tax below £36k.', { target: ['Monthly spend'], others: [] }, true)).toBe(false);
     // Today's level is the same figure, written plainly once: that writing is today's, the other is the ceiling.
     expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend is £36k; keep it to at most £36k.', undefined, true)).toBe(true);
     expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend is £36k; keep it to at most £36k.'), 'not today\'s: unaccounted').toBe(false);

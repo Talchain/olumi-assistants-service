@@ -93,6 +93,15 @@ const CHANGE_OR_DENIAL_BEFORE = /\bby\b|\bnot\b|\bnever\b|\bcannot\b|n['\u2019]t
  * clause's next subject, not the ceiling's ("cut it to at most £36k a month without … migration downtime risk"), and an
  * anaphor ("it") names nothing. Words shared by the goal's and another label name neither (`figureTheUserWroteFor`'s rule).
  */
+/** A word of the goal's own label on the ceiling's left, or an anaphor pointing back to it ("keep it to at most …"). */
+const ANAPHOR = /\b(?:it|this|that|them|these|those)\b/i;
+function tiedToTheGoal(clauseBefore: string, scope: EntityScope | undefined): boolean {
+  if (ANAPHOR.test(clauseBefore)) return true;
+  if (scope === undefined) return false;
+  const said = wordsOf(clauseBefore);
+  return scope.target.flatMap(wordsOf).some((t) => said.some((w) => sameWord(w, t)));
+}
+
 function leftNamesAnotherQuantity(clauseBefore: string, scope: EntityScope): boolean {
   const target = [...new Set(scope.target.flatMap(wordsOf))];
   const others = [...new Set(scope.others.flatMap(wordsOf))];
@@ -125,7 +134,11 @@ export function ceilingTheUserWroteFor(
     if (CHANGE_OR_DENIAL_BEFORE.test(clauseBefore)) return false;
     const end = a.index + a.matchedText.length;
     const ceiling = CEILING_BEFORE_FIGURE.test(clauseBefore) || CEILING_AFTER_FIGURE.test(userText.slice(end, end + 24));
-    return ceiling && (scope === undefined || !leftNamesAnotherQuantity(clauseBefore, scope));
+    if (!ceiling || (scope !== undefined && leftNamesAnotherQuantity(clauseBefore, scope))) return false;
+    // ⛔ Round 5 (Codex buddy on 101ab77a): with the figure written MORE than once, a ceiling writing counts only when its
+    // clause ties it to the goal — a word of the goal's label, or an anaphor ("keep IT to at most £36k"). "Monthly spend
+    // is at its £36k target; tax below £36k": the tax writing names neither, so it is not the goal's ceiling.
+    return writings.length === 1 || tiedToTheGoal(clauseBefore, scope);
   });
   return ceilings.length > 0 && writings.length - ceilings.length <= (todayIsTheSameFigure ? 1 : 0);
 }

@@ -275,6 +275,14 @@ describe('RT-10 (Codex buddy on #2585): a ceiling on a level is held — and min
     expect('goal_direction' in await plotRequestFor(graph)).toBe(false);
   });
 
+  it('⭐ RED (round 5): "Monthly spend is at its £36k target; tax below £36k" (today = target = 36) — the tax writing names neither the goal nor "it" → not held, nothing sent', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? Monthly spend is at its £36k target; tax below £36k, and no more than 2 weeks of migration downtime risk.';
+    const { graph, goal } = await build(brief, withGoal('cloud-2', { baseline_value: 36 }));
+    expect(goal.goal_threshold_raw).toBe(36);
+    expect(Object.hasOwn(goal, 'goal_direction')).toBe(false);
+    expect('goal_direction' in await plotRequestFor(graph)).toBe(false);
+  });
+
   it('CONTROL: "4% or less" (the ceiling written AFTER the figure) → held, minimised', async () => {
     const brief = 'Should we switch our cloud provider from AWS to GCP? We want downtime at 4% or less, with no more than 2 weeks of migration risk.';
     const { graph, goal } = await build(brief, downtime('<='));
