@@ -1,3 +1,4 @@
+import { goalQuantityCanonicaliser } from './goal-quantity-identity.js';
 /**
  * THE DETERMINISTIC PROJECTOR — record set → GraphV3.
  *
@@ -527,6 +528,7 @@ export interface DroppedRecordRef {
      * withdrawal happens after both node passes and a stated item has no claim
      * index to point at.
      */
+    | "goal_quantity_projection_set_aside"
     | "unconnected_to_goal"
     /**
      * The projected option set exceeded `MAX_OPTIONS` (6, `graph-validator.types.ts:287`)
@@ -3598,7 +3600,9 @@ function projectOnce(
   };
   const carrier = (q: number): { node?: ProjectedNode; reason?: DroppedRecordRef["reason"] } => {
     const claimIds=new Set(claimIdByIndex.values());
-    const own=nodes.filter(n=>n.kind !== "goal" && n.kind !== "option" && claimIds.has(n.id) && n.quantity_ref===q);
+    // Science Q1: claims on a goal quantity never carry stated causes.
+    const goalQuantity = statedItems.some(s => s.kind === "goal" && s.quantity === q);
+    const own=goalQuantity ? [] : nodes.filter(n=>n.kind !== "goal" && n.kind !== "option" && claimIds.has(n.id) && n.quantity_ref===q);
     if(own.length>1)return {reason:"relationship_endpoint_ambiguous"};
     if(own.length===1)return {node:own[0]};
     const lever=leverByQuantity.get(q);
@@ -3642,11 +3646,27 @@ function projectOnce(
     let changeBy:number|undefined;
     let rawValue=settingValue;
     if(item.setting==="change_by"){
-      const level=zeroQuantities.has(q) ? 0 : declaration.kind==="change_quantity" || q===index ? undefined : declaration.value;
+      // Q2: only the option's own quantity can define a change from today.
+      // A stated stock/baseline, identity operand or rate-less cause prevents it.
+      const declaredLevels = statedItems.filter((s, i) => i !== index && s.quantity === q
+        && (s.kind === "figure" || s.is_baseline === true || s.role === "baseline"));
+      const ownZero = q === index && declaredLevels.length === 0 && !identityOperands.has(lever.id)
+        && statedItems.every(s => s.kind !== "cause" || s.relationship?.from_quantity !== q
+          || typeof s.relationship.per_source_change === "number");
+      if (ownZero) {
+        zeroQuantities.add(q);
+        lever.body = "a change from today, so today = 0";
+        lever.data = { ...lever.data, value: 0, raw_value: 0, baseline: 0, extractionType: "inferred" };
+        delete lever.data.rangeMin; delete lever.data.rangeMax;
+        lever.observed_state = { value: 0, raw_value: 0, baseline: 0, source: "cee_inference" };
+      }
+      const levelDeclaration = q === index && declaredLevels.length === 1
+        && (declaredLevels[0]!.role === undefined || declaredLevels[0]!.role === "baseline") ? declaredLevels[0]! : declaration;
+      const level=zeroQuantities.has(q) ? 0 : declaration.kind==="change_quantity" || q===index && levelDeclaration === declaration ? undefined : levelDeclaration.value;
       if(typeof level!=="number" || !Number.isFinite(level)){refuse("option_change_by_baseline_unknown");return;}
       // The level a delta resolves against is evidence like any stated value: unbound to its own quote ("We have 8
       // vans" typed 9), it is refused, never written as a brief-derived absolute.
-      if(!zeroQuantities.has(q) && !statedValueIsBound(declaration,brief)){refuse("option_change_by_baseline_unbound");return;}
+      if(!zeroQuantities.has(q) && !statedValueIsBound(levelDeclaration,brief)){refuse("option_change_by_baseline_unbound");return;}
       changeBy=settingValue;
       rawValue=literalConventionValue(level,declaration.unit,declaration.value_scale)+settingValue;
     }
@@ -4077,6 +4097,8 @@ function projectOnce(
       value_literal: r.amount_literal ?? "", ...(r.range === undefined ? {} : { range: r.range }) });
   });
 
+  // Accepted stated cause edges license the conditional Q1 set-aside below.
+  const statedCauseEdgeIds = new Set<string>();
   // Relationship endpoints are resolved solely by quantity identity, before connectivity pruning.
   statedItems.forEach((item,stated_index)=>{
     const r=item.relationship;
@@ -4141,11 +4163,12 @@ function projectOnce(
       const d=claim?.effect_detail;
       if(d!==undefined && (d.amount!==r.amount || d.per_source_change!==r.per_source_change || !sameUnit(d.amount_unit,r.amount_unit) || !sameUnit(d.per_source_change_unit,r.per_source_change_unit))){refuse("effect_detail_conflicts_with_relationship");return;}
     }
-    if(matches.length>0){for(const e of matches)e.to=target.id;return;}
+    if(matches.length>0){for(const e of matches){e.to=target.id;statedCauseEdgeIds.add(e.id);}return;}
     const id=mintUnique(sha8("edge", "stated-relationship",source.id,target.id),usedIds);
     const prov:RecordProvenance={provenance_class:"ai_inferred",...EDGE_ATTRIBUTION.ai_inferred,basis:[statedIdByIndex.get(stated_index)!],unbased:false};
     provenance[id]=prov;
     edges.push({id,from:source.id,to:target.id,effect_direction:direction,origin:"ai",provenance_source:"inferred",provenance:prov});
+    statedCauseEdgeIds.add(id);
   });
   // A goal-quantity outcome no stated cause reached (every one refused) is withdrawn with its identity edge: the goal
   // carries the quantity exactly as before, and nothing the user said is lost (each refusal is already disclosed).
@@ -4155,6 +4178,46 @@ function projectOnce(
     nodes.splice(nodes.indexOf(outcome),1);delete provenance[outcome.id];
     goalQuantityOutcome.delete(q);goalOfQuantityOutcome.delete(outcome.id);
   }
+
+  // Science e1: set aside a model projection only after the stated chain has
+  // reproduced its goal quantity. Never withdraw claims before resolving causes.
+  const reproducedGoalQuantities = new Set([...goalQuantityOutcome].filter(([, outcome]) =>
+    edges.some(e => e.to === outcome.id && statedCauseEdgeIds.has(e.id))).map(([q]) => q));
+  const claimIndexById = new Map([...claimIdByIndex].map(([index, id]) => [id, index]));
+  const setAside = nodes.filter(n => n.kind !== "goal" && n.kind !== "option"
+    && claimIndexById.has(n.id) && n.quantity_ref !== undefined && reproducedGoalQuantities.has(n.quantity_ref));
+  const setAsideIds = new Set(setAside.map(n => n.id));
+  // Science 5 Oct: a stated no-effect clause remains honoured when its only
+  // model path is removed by e1. Bind the clause by its stated index and the
+  // baseline option's zero-setting path, never by a model node's label.
+  statedItems.forEach((item, stated_index) => {
+    if (item.kind !== "cause" || item.relationship !== undefined || item.value !== undefined
+      || typeof brief !== "string" || !brief.includes(item.source_quote)
+      || !/\b(?:adds?\s+nothing|(?:has?|makes?)\s+no\s+(?:effect|difference)|(?:does?|will)\s+not\s+(?:change|affect|add))\b/iu.test(item.source_quote)) return;
+    const zeroSettings = claims.filter(c => c.claim_kind === "causal_link" && c.from_stated !== undefined
+      && statedItems[c.from_stated]?.kind === "option" && statedItems[c.from_stated]?.is_baseline === true
+      && c.sets_to === 0 && c.to_claim !== undefined && c.basis?.includes(stated_index));
+    const reachesAside = zeroSettings.some(c => {
+      const start = claimIdByIndex.get(c.to_claim!);
+      if (start === undefined) return false;
+      const reached = new Set([start]);
+      for (let size = -1; size !== reached.size;) {
+        size = reached.size;
+        for (const e of edges) if (reached.has(e.from)) reached.add(e.to);
+      }
+      return [...setAsideIds].some(id => reached.has(id));
+    });
+    if (reachesAside) dropped.push({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, stated_index,
+      label: item.source_quote, reason: "user_stated_no_effect" });
+  });
+  for (const node of setAside) {
+    dropped.push({ claim_index: claimIndexById.get(node.id)!, claim_kind: "claim", node_id: node.id,
+      label: node.label, reason: "goal_quantity_projection_set_aside" });
+    delete provenance[node.id];
+  }
+  for (const edge of edges.filter(e => setAsideIds.has(e.from) || setAsideIds.has(e.to))) delete provenance[edge.id];
+  edges.splice(0, edges.length, ...edges.filter(e => !setAsideIds.has(e.from) && !setAsideIds.has(e.to)));
+  nodes.splice(0, nodes.length, ...nodes.filter(n => !setAsideIds.has(n.id)));
 
   statedItems.forEach((item, index) => {
     const causeEffect = causeOptionEffects.get(index);
@@ -4289,6 +4352,7 @@ function projectOnce(
       (n) => (n.kind === "factor" || n.kind === "constraint" || n.kind === "outcome" || n.kind === "risk")
         && !reachesGoal.has(n.id) && !limitSink.has(n.id) && !inertRisk.has(n.id),
     );
+    const inertCauses = new Map([...inertRisk].map(id => [id, edges.filter(e => e.to === id).map(e => e.from)]));
     if (unmodelled.length > 0) {
       const unmodelledIds = new Set(unmodelled.map((n) => n.id));
       // The early role notice describes a retained figure. If its exact node
@@ -4360,6 +4424,29 @@ function projectOnce(
       const keptNodes = nodes.filter((n) => !unmodelledIds.has(n.id));
       nodes.length = 0;
       nodes.push(...keptNodes);
+      // R3: propagate only losses caused by the prune through its inert-risk
+      // exemption. Each round withdraws at least one authored node, so it ends.
+      const disclosedOrphans = new Set<string>();
+      for (;;) {
+        const present = new Set(nodes.map(n => n.id));
+        const orphaned = nodes.filter(n => inertRisk.has(n.id) && !reachesGoal.has(n.id) && !limitSink.has(n.id)
+          && (inertCauses.get(n.id) ?? []).some(id => !present.has(id))
+          && !edges.some(e => e.to === n.id));
+        for (const node of orphaned) {
+          if (disclosedOrphans.has(node.id)) continue;
+          dropped.push({ claim_index: -1, claim_kind: node.provenance?.provenance_class === "stated" ? "stated_item" : "claim",
+            label: node.label, node_id: node.id, reason: reachesGoalOnModelsOwnLinks.has(node.id)
+              ? "disconnected_by_shape_gate" : "unconnected_to_goal", ...statedMagnitudeOf(node) });
+          disclosedOrphans.add(node.id);
+        }
+        // Science: a user-stated node remains, even after its cause disappears.
+        const gone = new Set(orphaned.filter(n => n.provenance?.provenance_class !== "stated").map(n => n.id));
+        if (gone.size === 0) break;
+        for (const id of gone) delete provenance[id];
+        for (const edge of edges.filter(e => gone.has(e.from) || gone.has(e.to))) delete provenance[edge.id];
+        edges.splice(0, edges.length, ...edges.filter(e => !gone.has(e.from) && !gone.has(e.to)));
+        nodes.splice(0, nodes.length, ...nodes.filter(n => !gone.has(n.id)));
+      }
     }
   }
 
@@ -5722,32 +5809,7 @@ function repairStatedOptionTargets(projection: OneProjection): void {
  */
 /** Canonical quantity identities declared by a goal's baseline_ref. No wording participates. */
 function unifyGoalQuantityReferences(records: DraftRecordSet): DraftRecordSet {
-  const targets = new Map<number, Set<number>>();
-  const addAlias = (from: number, to: number): void => {
-    const set = targets.get(from) ?? new Set<number>();
-    set.add(to);
-    targets.set(from, set);
-  };
-  for (const [index, item] of records.stated_items.entries()) {
-    if (item.kind !== "goal" || item.baseline_ref === undefined) continue;
-    const baseline = records.stated_items[item.baseline_ref];
-    if (baseline?.role !== "baseline") continue;
-    const identity = baseline.quantity ?? item.baseline_ref;
-    addAlias(index, identity);
-    if (item.quantity !== undefined) addAlias(item.quantity, identity);
-  }
-  // Conflicting typed aliases are unresolved, never chosen by emission order.
-  const aliases = new Map([...targets].flatMap(([from, to]) => to.size === 1 ? [[from, [...to][0]!] as const] : []));
-  const canonical = (index: number): number => {
-    const seen = new Set<number>();
-    let next = index;
-    while (aliases.has(next) && aliases.get(next) !== next) {
-      if (seen.has(next)) return index; // Conflicting cycles supply no identity.
-      seen.add(next);
-      next = aliases.get(next)!;
-    }
-    return next;
-  };
+  const canonical = goalQuantityCanonicaliser(new Map(records.stated_items.entries()));
   const statedItems = records.stated_items.map(item => ({
       ...item,
       ...(item.quantity === undefined ? {} : { quantity: canonical(item.quantity) }),

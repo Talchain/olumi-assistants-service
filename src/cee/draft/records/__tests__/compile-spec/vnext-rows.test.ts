@@ -39,12 +39,20 @@ function materialise(value: any, node: any): any {
   if (!s.properties || value === null || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(s.properties).map(([k,v]) => [k,k in value && value[k] !== undefined ? materialise(value[k],v) : null]));
 }
-async function registered(records = sealedRecordsVNext()) {
+async function registered(records = sealedRecordsVNext(), onResult?: (result: any) => void) {
   let body: any;
   const result = await buildModelFromRecords('11111111-1111-4111-8111-111111111111', BRIEF,
     async (path, b) => { if (path.endsWith('/register')) { body=b; return {status:200,json:{model_version:1}}; } return {status:200,json:{graph:{nodes:[],edges:[]}}}; },
     async () => ({text:JSON.stringify(records),status:'completed'}));
-  expect(result.ok).toBe(true); return body;
+  expect(result.ok).toBe(true); onResult?.(result); return body;
+}
+
+function rateRisk() {
+  const r=sealedRecordsVNext();
+  r.claims[4]={claim_kind:'risk',label:'Rate of revenue loss',unit:'£/month/month',change_of:0};
+  r.claims.push({claim_kind:'causal_link',label:'loss into goal',from_claim:4,to_stated:6,effect:'negative'},
+    {claim_kind:'causal_link',label:'price reaches rate risk',from_claim:0,to_claim:4,effect:'positive'});
+  return r;
 }
 // EXTRACTION-UNPROVEN: authored delivery-vans evidence proves compilation only.
 const VANS = 'We have 8 vans. We make 640 deliveries every month. Lease 5 vans. Adding 5 vans changes deliveries by 18 to 36 every month. Repainting 5 vans will not change deliveries. Goal: at least 900 deliveries every month within 7 months.';
@@ -109,7 +117,18 @@ describe('v-next inert flip ladder', () => {
   it('B3 negative restated unit conflicts without overwriting declaration',()=>{const r=sealedRecordsVNext();r.stated_items[6]!.unit='£';const p=project(r);expect(p.graph.nodes.find(n=>n.kind==='goal')?.goal_threshold_unit).toBe('£/month');expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:6,reason:'unit_restated_conflict'}));});
   it('B3 EXTRACTION-UNPROVEN count-with-period differs from a count',()=>{expect(sameUnit('deliveries/month','deliveries')).toBe(false);expect(sameUnit('deliveries per month','delivery/month')).toBe(true);const p=project(vans(),VANS);expect(p.graph.nodes.find(n=>n.kind==='goal')?.goal_baseline_raw).toBe(640);});
   it('B4 relationship alone builds the exact endpoint pair and bundle',()=>{const r=sealedRecordsVNext();expect(edgeFor(project(r),10,r)?.provenance).toMatchObject({natural_effect:{amount:-300,amount_unit:'£/month',per_source_change:1,per_source_change_unit:'customers'}});});
-  it('B4 negative duplicate quantity carriers refuse, never select',()=>{const r=sealedRecordsVNext();r.claims.push({claim_kind:'outcome',label:'Other revenue carrier',quantity:0});expect(project(r).dropped).toContainEqual(expect.objectContaining({stated_index:10,reason:'relationship_endpoint_ambiguous'}));});
+  // Science Q1 (5 Oct): goal-quantity claims are never carriers
+  it('B4 negative duplicate quantity carriers refuse, never select',()=>{const r=sealedRecordsVNext();r.claims.push({claim_kind:'factor',label:'Other customer carrier',quantity:9});expect(project(r).dropped).toContainEqual(expect.objectContaining({stated_index:10,reason:'relationship_endpoint_ambiguous'}));});
+  it('B4 goal duplicates use the stated outcome by ID and disclose both claims', () => {
+    const r=sealedRecordsVNext(); r.claims.push({claim_kind:'outcome',label:'Other revenue carrier',quantity:0});
+    const p=project(r), outcome=p.graph.nodes.find(n=>n.id==='8a21277c')!;
+    expect(outcome).toMatchObject({kind:'outcome',quantity_ref:0,provenance:{provenance_class:'stated'}});
+    expect(edgeFor(p,10,r)).toMatchObject({to:outcome.id,provenance:{natural_effect:{amount:-300}}});
+    for(const id of ['f171bf57','e93bf32e']) {
+      expect(p.graph.nodes.some(n=>n.id===id)).toBe(false);
+      expect(p.dropped).toContainEqual(expect.objectContaining({node_id:id,reason:'goal_quantity_projection_set_aside'}));
+    }
+  });
   it('B2 option value is bound to its own lever',()=>{const r=sealedRecordsVNext();r.stated_items[3]!.value=10;delete r.stated_items[3]!.value_scale;/* Isolate B2 from B7: undeclared percent convention is literal points. */for(const i of r.stated_items)if(i.relationship?.from_quantity===3)i.relationship.per_source_change=1;const p=project(r);const o=p.graph.nodes.find(n=>n.provenance?.source_quote===r.stated_items[3]!.source_quote)!;const lever=p.graph.nodes.find(n=>n.kind==='factor'&&n.quantity_ref===3)!;expect(details(o)![lever.id]).toMatchObject({raw_value:10,unit:'%',source:'brief_extraction',stated_index:3});expect(details(o)![lever.id]!.reasoning).toContain('stated_items[3]');});
   it('B7 option unit_interval keeps the literal convention',()=>{const r=sealedRecordsVNext();const p=project(r);const o=p.graph.nodes.find(n=>n.provenance?.source_quote===r.stated_items[3]!.source_quote)!;const lever=p.graph.nodes.find(n=>n.kind==='factor'&&n.quantity_ref===3)!;expect((o.data!.raw_interventions as Record<string, unknown>)[lever.id]).toBe(10);expect(details(o)![lever.id]).toMatchObject({raw_value:10,unit:'%',source:'brief_extraction',stated_index:3});expect(details(o)![lever.id]!.reasoning).toContain('stated_items[3]');});
   it('B1a stated point and asymmetric 90% spread size the stored edge',()=>{const r=sealedRecordsVNext();const e=edgeFor(project(r),9,r)!;const ne=e.provenance!.natural_effect!;expect(ne?.amount).toBe(2);expect(e.strength_std).toBeCloseTo(Math.abs(e.strength_mean!)* (2/2)/1.645,5);expect(ne).not.toHaveProperty('stated_range');});
@@ -133,7 +152,39 @@ describe('v-next inert flip ladder', () => {
     expect(legacy.range_words).toBe('2 deliveries per van on "Vans" → "Delivery goal" is the low end of your "2 to 5" range, so any figure that runs through this link is a floor: at least that much.');
   });
   it('B6(1) change_of writes the Science definitional carrier',async()=>{const r=sealedRecordsVNext();/* The option reaches q9→q10→goal: this proves P5, not the unreached contrast. */r.stated_items[10]!.quantity=10;r.stated_items[10]!.unit='£/month';r.stated_items[10]!.unit_literals=['a month'];r.stated_items[10]!.horizon_ref=7;r.stated_items[10]!.relationship!.to_quantity=10;r.stated_items[10]!.relationship!.amount=300;r.claims[4]={claim_kind:'risk',label:'Revenue lost over the goal horizon',quantity:10,value:0,change_of:0};r.claims.push({claim_kind:'causal_link',label:'loss into goal',from_claim:4,to_stated:6,effect:'negative'});const b=await registered(r);const n=b.graph.nodes.find((n:any)=>n.label==='Revenue lost over the goal horizon');const e=b.graph.edges.find((e:any)=>e.from===n?.id);expect(e?.provenance?.definitional).toBe(true);expect(e?.provenance?.natural_effect).toMatchObject({amount:-1,amount_unit:'£/month',per_source_change:1,per_source_change_unit:'£/month'});expect(holdsByDefinition(e,nodeUnitOf(b.graph.nodes))).toBe(true);expect(targetTestabilityOf(b.graph).kind).toBe('testable');const goal=b.graph.nodes.find((n:any)=>n.kind==='goal');expect(goal.goal_threshold_unit).toBe(goal.observed_state.unit);});
-  it('B6(1) negative rate cannot become an own-horizon identity',async()=>{const r=sealedRecordsVNext();r.claims[4]={claim_kind:'risk',label:'Rate of revenue loss',unit:'£/month/month',change_of:0};r.claims.push({claim_kind:'causal_link',label:'loss into goal',from_claim:4,to_stated:6,effect:'negative'},{claim_kind:'causal_link',label:'price reaches rate risk',from_claim:0,to_claim:4,effect:'positive'});expect(project(r).dropped).toContainEqual(expect.objectContaining({reason:'change_of_unit_mismatch'}));const b=await registered(r);expect(targetTestabilityOf(b.graph)).toMatchObject({kind:'not_testable',failures:[expect.objectContaining({code:'goal_path_unsized'})]});});
+  // Science 5 Oct: rule (e1) supersedes the unsized invented risk
+  it('B6(1) negative rate cannot become an own-horizon identity',async()=>{
+    const r=rateRisk();
+    expect(project(r).dropped).toContainEqual(expect.objectContaining({reason:'change_of_unit_mismatch'}));
+    let disclosures:any[]=[]; const b=await registered(r,result=>{disclosures=result.not_represented;});
+    expect(targetTestabilityOf(b.graph)).toMatchObject({kind:'testable'});
+    expect(disclosures).toContainEqual(expect.objectContaining({node_id:'d8bdb99a',reason:'superseded_by_stated_path'}));
+    expect(b.graph.nodes.some((n:any)=>n.id==='d8bdb99a')).toBe(false);
+    const goal=b.graph.nodes.find((n:any)=>n.kind==='goal');
+    const intoGoal=b.graph.edges.filter((e:any)=>e.to===goal.id);
+    expect(intoGoal.length).toBeGreaterThan(0);
+    for(const edge of intoGoal) {
+      if(edge.provenance?.magnitude==='user_stated') {
+        expect(b.stated_dispositions).toContainEqual(expect.objectContaining({disposition:'carried',location:expect.objectContaining({kind:'edge',from:edge.from,to:edge.to})}));
+      } else {
+        // A definitional link is licensed by the receipt on its stated quantity, not an invented user magnitude.
+        expect(edge.provenance).toMatchObject({definitional:true,natural_effect:{amount:1,per_source_change:1}});
+        expect(project(r).graph.nodes.find(n=>n.id===edge.from)).toMatchObject({kind:'outcome',quantity_ref:0,provenance:{provenance_class:'stated'}});
+        const receipts=b.stated_dispositions.filter((row:any)=>row.disposition==='carried'&&row.location.kind==='edge'&&row.location.to===edge.from);
+        expect(receipts.length).toBeGreaterThan(0);
+        for(const row of receipts) expect(b.graph.edges.find((e:any)=>e.from===row.location.from&&e.to===row.location.to)?.provenance).toMatchObject({source:'brief_extraction',magnitude:'user_stated'});
+      }
+    }
+  });
+  it('B6(1) CONTRAST no stated sized path retains the invented risk and stays unsized',async()=>{
+    const r=rateRisk();
+    for(const item of r.stated_items) if(item.relationship) { delete item.relationship.amount; delete item.relationship.amount_span; delete item.relationship.amount_literal; delete item.relationship.range; }
+    expect(project(r).dropped).toContainEqual(expect.objectContaining({reason:'change_of_unit_mismatch'}));
+    let disclosures:any[]=[]; const b=await registered(r,result=>{disclosures=result.not_represented;});
+    expect(b.graph.nodes.some((n:any)=>n.id==='d8bdb99a')).toBe(true);
+    expect(disclosures.some(d=>d.node_id==='d8bdb99a'&&d.reason==='superseded_by_stated_path')).toBe(false);
+    expect(targetTestabilityOf(b.graph)).toMatchObject({kind:'not_testable',failures:[expect.objectContaining({code:'goal_path_unsized'})]});
+  });
   it('B6(2) EXTRACTION-UNPROVEN stated no-effect is withheld with an A1 receipt',()=>{const r=vansWithRoutes();r.stated_items[5]={kind:'cause',source_quote:'Repainting 5 vans will not change deliveries.',relationship:{from_quantity:0,to_quantity:1,no_effect_literal:'will not change'}};r.claims.push({claim_kind:'causal_link',label:'repainting effect',from_claim:0,to_stated:3,effect:'positive'});const p=project(r,VANS_WITH_ROUTES);expect(p.stated_dispositions).toContainEqual(expect.objectContaining({stated_index:5,disposition:'rejected',reason:'user_stated_no_effect'}));expect(p.graph.edges.filter(e=>e.from===p.graph.nodes.find(n=>n.label==='Vans')?.id&&e.to===p.graph.nodes.find(n=>n.kind==='goal')!.id)).toHaveLength(0);expect(p.graph.edges.some(e=>e.provenance?.natural_effect?.amount===0)).toBe(false);/* Science ruling 2026-10-05 P2-FRAME accepted change, then RESTORED (Lead rebind 5 Oct, vans-outcome builder): P2-FRAME frames the 17-route control at defaultFrameFor(17)=100 (ladder: 20), so 55 deliveries/route sizes to β=55×100/1125≈4.89>1 (was 0.978), and #2573 pinned that as 'testable' → not_testable P5 goal_path_unsized on Routes — accepted by Science ON CONDITION that port 3 restores it. Port 3 part 1 (keep a user_stated sizing whatever its sizer `problem`, legacy D7) restores it at COMPILE level on this combined head: rebound not_testable → 'testable' (old → new). The served-path witness is records-ports3-served-readers' Science (3) rows, since the sweep acts only on the served path. The withheld no-effect assertions above and the frame/receipt assertions below are unchanged. */expect(targetTestabilityOf(p.graph)).toEqual({kind:'testable',goal_id:p.graph.nodes.find(n=>n.kind==='goal')!.id});expect(p.graph.nodes.find(n=>n.label==='Routes')?.scale_frame).toBe(100);expect(p.stated_dispositions?.find(d=>d.stated_index===5)?.stated_item.source_quote).toBe('Repainting 5 vans will not change deliveries.');});
   it('B6(2) Science ruling 2026-10-05 P2-FRAME: with a route effect representable on the ruled frame (10/route, β≈0.89), the withheld no-effect still leaves P5 testable',()=>{const r=vansWithRoutes();const route=r.stated_items[8]!;route.source_quote='Each extra route increases deliveries by 10 every month.';route.relationship!.amount=10;route.relationship!.amount_literal='10';const brief=VANS_WITH_ROUTES.replace('by 55 every month','by 10 every month');expect(brief).toContain(route.source_quote);r.stated_items[5]={kind:'cause',source_quote:'Repainting 5 vans will not change deliveries.',relationship:{from_quantity:0,to_quantity:1,no_effect_literal:'will not change'}};r.claims.push({claim_kind:'causal_link',label:'repainting effect',from_claim:0,to_stated:3,effect:'positive'});const p=project(r,brief);expect(p.stated_dispositions).toContainEqual(expect.objectContaining({stated_index:5,disposition:'rejected',reason:'user_stated_no_effect'}));expect(p.graph.nodes.find(n=>n.label==='Routes')?.scale_frame).toBe(100);expect(edgeFor(p,8,r)?.provenance).toMatchObject({magnitude:'user_stated',natural_effect:{amount:10,per_source_change:1}});expect(targetTestabilityOf(p.graph).kind,JSON.stringify(targetTestabilityOf(p.graph))).toBe('testable');});
   it('B1a EXTRACTION-UNPROVEN silence never means zero and blocks P5 (B6 contrast)',()=>{const r=vansWithRoutes();r.stated_items[5]={kind:'cause',source_quote:'Repainting 5 vans will not change deliveries.',relationship:{from_quantity:0,to_quantity:1}};r.claims.push({claim_kind:'causal_link',label:'unmeasured effect',from_claim:0,to_stated:3,effect:'positive'});const p=project(r,VANS_WITH_ROUTES);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'relationship_unsized'}));expect(targetTestabilityOf(p.graph)).toMatchObject({kind:'not_testable',failures:[expect.objectContaining({code:'goal_path_unsized'})]});});
@@ -275,8 +326,11 @@ describe('pass 2 P2-A6: each factor carries its driver role from the compile', (
     expect(node(labelOf(3))).toMatchObject({ kind: 'factor', category: 'controllable' });
     expect(node(labelOf(9))).toMatchObject({ kind: 'factor' });
     expect(['observable', 'external']).toContain(node(labelOf(9)).category);
-    expect(node(labelOf(0)).kind).toBe('outcome');
-    expect(node(labelOf(0)).category).not.toBe('controllable');
+    // Science 5 Oct P2-A6: bind the stated goal quantity by ID, never its claim label.
+    const mrr=graph.nodes.find((n:any)=>n.id==='8a21277c');
+    expect(project(r).graph.nodes.find(n=>n.id==='8a21277c')).toMatchObject({kind:'outcome',quantity_ref:0,provenance:{provenance_class:'stated'}});
+    expect(mrr.kind).toBe('outcome');
+    expect(mrr.category).not.toBe('controllable');
     // Every stored factor is typed: none is left for a reader to guess.
     expect(graph.nodes.filter((n: any) => n.kind === 'factor' && n.category === undefined)).toEqual([]);
   });

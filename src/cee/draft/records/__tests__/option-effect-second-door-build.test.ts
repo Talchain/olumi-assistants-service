@@ -152,7 +152,7 @@ describe('BUILD second door to the same option effect compile', () => {
       value: 100000, value_literal: '£100,000', unit: '£/month', unit_literals: ['£100,000', 'a month'],
       direction: 'floor', direction_literal: 'at least', role: 'target' };
     input.records.stated_items[1] = { kind: 'option', source_quote: optionQuote, quantity: 1, value: 10, value_literal: '10%',
-      unit: '%', unit_literals: ['10%'], value_scale: 'percent_0_100' };
+      unit: '%', unit_literals: ['10%'], value_scale: 'percent_0_100' as unknown as DraftStatedItem['value_scale'] };
     input.records.stated_items[2] = { kind: 'figure', source_quote: baseline, quantity: 2, value: 50000, value_literal: '£50,000',
       unit: '£/month', unit_literals: ['£50,000', 'a month'], role: 'baseline' };
     input.records.stated_items[3] = { kind: 'cause', source_quote: quote, relationship: { from_quantity: 1, to_quantity: 2,

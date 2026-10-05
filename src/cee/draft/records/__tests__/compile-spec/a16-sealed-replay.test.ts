@@ -73,18 +73,37 @@ describe('A16 banked sealed compile → registered → stored carriers (zero pro
       // A2 preserves this measurement instead of merging it into stated_items[8].
       expect(replay.projection.graph.nodes.find(n => n.id === '56015172')).toMatchObject({ kind: 'factor', quantity_ref: 3, data: { unit: '%' } });
     } else if (draw === 2) {
-      // B4 refuses both relationships targeting the ambiguous q0 claim carriers, never choosing an alias.
+      // Science Q1 (5 Oct): goal-quantity claims are never carriers
+      // Round 5: the original goal alias resolves to the same stored q0 edge identity.
       for (const index of [10, 12]) {
-        expect(row(index)).toMatchObject({ stated_index: index, disposition: 'rejected', reason: 'relationship_endpoint_ambiguous' });
-        expect(stored.edges.filter(e=>e.provenance?.source_quote===records.stated_items[index]!.source_quote && e.provenance?.natural_effect)).toHaveLength(0);
+        expect(row(index)).toMatchObject({ stated_index: index, disposition: 'carried',
+          location: { kind: 'edge', from: index === 10 ? 'dd58e25f' : '3b5eec5e', to: '8a21277c' },
+          stored_value: { amount: index === 10 ? -300 : 49 } });
+        expect(replay.projection.graph.edges.find(e=>e.provenance?.source_quote===records.stated_items[index]!.source_quote))
+          .toMatchObject({to:'8a21277c',provenance:{natural_effect:{amount:index===10 ? -300 : 49}}});
+        expect(replay.projection.graph.nodes.find(n=>n.id==='8a21277c'))
+          .toMatchObject({kind:'outcome',quantity_ref:0,provenance:{provenance_class:'stated'}});
+        expect(stored.edges.filter(e=>e.from===(index===10 ? 'dd58e25f' : '3b5eec5e') && e.to==='8a21277c' && e.provenance?.natural_effect)).toHaveLength(1);
       }
+      // Science 5 Oct Round 5: the same no-effect clause is honoured on draw 2.
+      expect(row(14)).toMatchObject({ stated_index: 14, disposition: 'rejected', reason: 'user_stated_no_effect' });
       expect(replay.projection.graph.nodes.find(n => n.id === goalId)?.quantity_ref).toBe(0);
     } else {
       expect(row(0)).toMatchObject({ stated_index: 0, disposition: 'rejected', reason: 'unconnected_to_goal' });
       expect(row(13)).toMatchObject({ stated_index: 13, disposition: 'carried', location: { kind: 'node', node_id: '22ae8802', path: ['interventions', '19b1afd6', 'raw_value'] }, stored_value: 150 });
-      // B4 refuses the two q0 claim carriers instead of choosing the old endpoint by emission order.
-      expect(row(15)).toMatchObject({ stated_index: 15, disposition: 'rejected', reason: 'relationship_endpoint_ambiguous' });
-      expect(stored.edges.filter(e=>e.provenance?.source_quote===records.stated_items[15]!.source_quote && e.provenance?.natural_effect)).toHaveLength(0);
+      // Science Q1 (5 Oct): goal-quantity claims are never carriers
+      expect(row(15)).toMatchObject({ stated_index: 15, disposition: 'carried',
+        location:{kind:'edge',from:'19b1afd6',to:'8a21277c'},stored_value:{amount:49} });
+      expect(replay.projection.graph.nodes.find(n=>n.id==='8a21277c')).toMatchObject({kind:'outcome',quantity_ref:0,provenance:{provenance_class:'stated'}});
+      expect(stored.nodes.find(n=>n.id==='8a21277c')?.kind).toBe('outcome');
+      expect(stored.edges.filter(e=>e.provenance?.source_quote===records.stated_items[15]!.source_quote && e.provenance?.natural_effect)).toHaveLength(1);
+      // Science 5 Oct: the stated no-effect is honoured after e1 removes its model-only path.
+      expect(row(18)).toMatchObject({stated_index:18,disposition:'rejected',reason:'user_stated_no_effect'});
+      const keep=stored.nodes.find(n=>n.kind==='option' && n.id==='4dc8a24c');
+      expect(keep).toBeDefined();
+      // Keep moves nothing (= the baseline, whatever it is). This raw draft fixture registers no goal baseline, so the
+      // 120,000 figure is asserted where a baseline exists: W6 and the sealed ceiling draws (oracle.py), not here.
+      expect(keep?.interventions ?? {}).toEqual({});
     }
   });
 });

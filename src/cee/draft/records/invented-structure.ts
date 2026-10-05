@@ -42,10 +42,19 @@ export function setAsideInventedStructure<G extends { readonly nodes: readonly u
   let nodes = [...graph.nodes] as Node[];
   let edges = [...graph.edges] as Edge[];
   const disclosures: DroppedRecordRef[] = [];
-  const invented = (node: Node | undefined): boolean => rec(node?.provenance) && node!.provenance.provenance_class === "ai_inferred";
   const sized = (edge: Edge): boolean => rec(edge.provenance) && rec(edge.provenance.natural_effect);
   const settings = (option: Node, field: (typeof INTERVENTION_FIELDS)[number]): Rec | undefined =>
     rec(option.data) && rec(option.data[field]) ? option.data[field] as Rec : undefined;
+  // Science 5 Oct R5: carrying the user's relationship or setting is stated
+  // structure, even when the endpoint node itself was minted by Olumi.
+  // Both e1 and e2 use this predicate; estimates and placeholders earn no exemption.
+  const statedCarrier = (id: string): boolean => edges.some(e => (e.from === id || e.to === id)
+    && rec(e.provenance) && e.provenance.source === "brief_extraction"
+    && e.provenance.magnitude === "user_stated" && rec(e.provenance.stated_relationship) && sized(e))
+    || nodes.some(n => n.kind === "option" && rec(settings(n, "intervention_details")?.[id])
+      && (settings(n, "intervention_details")![id] as Rec).source === "brief_extraction");
+  const invented = (node: Node | undefined): boolean => rec(node?.provenance)
+    && node!.provenance.provenance_class === "ai_inferred" && !statedCarrier(node!.id);
   const remove = (ids: ReadonlySet<string>, reason: "superseded_by_stated_path" | "invented_root_level_unknown"): void => {
     for (const id of ids) {
       const node = nodes.find((n) => n.id === id)!;
@@ -87,9 +96,7 @@ export function setAsideInventedStructure<G extends { readonly nodes: readonly u
         if (["option", "goal", "decision"].includes(String(node.kind))) continue;
         const level = (rec(node.observed_state) && finite(node.observed_state.value)) || (rec(node.data) && finite(node.data.value));
         const evidenced = edges.some((e) => (e.from === node.id || e.to === node.id) && sized(e));
-        const statedSetting = nodes.some((n) => n.kind === "option" && rec(settings(n, "intervention_details")?.[node.id])
-          && (settings(n, "intervention_details")![node.id] as Rec).source === "brief_extraction");
-        if (!level && !evidenced && !statedSetting) aside.add(node.id);
+        if (!level && !evidenced) aside.add(node.id);
       }
     }
     if (aside.size > 0) remove(aside, "superseded_by_stated_path");

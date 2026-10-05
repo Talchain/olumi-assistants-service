@@ -148,6 +148,7 @@ export const NOTICE_KIND_BY_REASON: Record<
   // ── A DETAIL FROM THE BRIEF IS NOT CONNECTED TO THE DECISION ──────────────
   // "The record was projected as a node and then withdrawn because nothing the
   // model emitted connects it to the goal."
+  goal_quantity_projection_set_aside: "detail_not_connected",
   unconnected_to_goal: "detail_not_connected",
   // "THE PROJECTOR'S OWN GATE DISCONNECTED THIS RECORD — not the model." The
   // producer separates the two so it never blames the model for our refusal;

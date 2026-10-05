@@ -1030,6 +1030,7 @@ export function enumerateCompletionAsk(
       // can only fire when a refused link exists on the node's path to the goal.
       // If that ever stops being true, the record becomes silent in BOTH places.
       case "disconnected_by_shape_gate":
+      case "goal_quantity_projection_set_aside":
       case "unconnected_to_goal":
       case "undeveloped_duplicate_of_stated":
       case "undeveloped_duplicate_of_model":
