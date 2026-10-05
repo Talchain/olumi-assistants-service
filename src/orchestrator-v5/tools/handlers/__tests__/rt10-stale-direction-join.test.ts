@@ -173,4 +173,20 @@ describe('RT-10 — a saved Run the model now reads upside down is not served as
     const read = await cold();
     expect(read.analysis_state?.run_state.kind).toBe('complete_current');
   });
+
+  it('J5 B′: after an approved card ceiling (held <= + its goal row, no target figure) the Run sends minimise and reads current', async () => {
+    const graph = churn();
+    const goal = graph.nodes.find((n: Rec) => n.id === 'monthly_churn')!;
+    for (const k of ['goal_threshold', 'goal_threshold_raw', 'goal_threshold_frame', 'goal_threshold_unit', 'goal_threshold_cap',
+      'goal_threshold_cap_provenance']) delete goal[k];
+    goal.goal_direction = '<=';
+    graph.goal_constraints = [{ constraint_id: 'gc-card-1', node_id: 'monthly_churn', operator: '<=', value: 2, unit: '%',
+      label: 'Monthly churn', provenance: 'explicit' }];
+    const { run, cold, sent } = harness(graph);
+    const saved = await run('turn-a', false);
+    expect(sent[0]).toMatchObject({ goal_direction: 'minimise' });
+    expect(saved.result.input_snapshot.goal).toMatchObject({ direction: 'minimise' });
+    const read = await cold();
+    expect(read.analysis_state?.run_state.kind).toBe('complete_current');
+  });
 });

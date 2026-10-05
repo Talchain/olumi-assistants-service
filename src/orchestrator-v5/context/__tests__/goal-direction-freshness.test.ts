@@ -18,7 +18,7 @@ import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 import { compareRunGoalUnitSnapshot, deriveAnalysisFreshness, goalSnapshotStaleMessage } from '../freshness.js';
 import { resolveGoalDirection } from '../../goal-target/goal-direction.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
-import { NodeV3 } from '../../../schemas/cee-v3.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { composeToolCallResponse } from '../../compose.js';
 import { composeAnalysisStateV1, projectAnalysisBlocksForRunBinding } from '../../compose/analysis-state-v1.js';
 import { attachComputedAt } from '../../compose/analysis-ready-emit.js';
@@ -184,11 +184,33 @@ describe('RT-10 — the direction a Run sent is part of its currentness', () => 
     expect(derive(valid, changeSnapshot())).toMatchObject({ freshness: 'stale', reason: 'goal_direction_changed' });
   });
 
-  it('R15: a goal node the Run loader would REFUSE (NodeV3) cannot be run, so no direction verdict is drawn', () => {
+  it('R15: a graph the Run loader would REFUSE (GraphV3) cannot be run, so no direction verdict is drawn', () => {
     const graph = churnGraph();
     goalOf(graph).label = 42;
-    expect(NodeV3.safeParse(goalOf(graph)).success, 'precondition: NodeV3 refuses this goal').toBe(false);
+    expect(GraphV3.safeParse(graph).success, 'precondition: GraphV3 refuses this graph').toBe(false);
     expect(derive(graph, fact({ goal: snapshotGoal() }))).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+  });
+
+  // RT-10 B′ × #2596: the approved goal ceiling card holds `<=` and keeps its own limit row on the goal; the run reads
+  // the ROW (GraphV3 keeps `goal_constraints`), so the read must too, or every rerun after an approved card reads stale.
+  const cardCeiling = (): Rec => {
+    const graph = churnGraph();
+    const goal = goalOf(graph);
+    for (const k of ['goal_threshold', 'goal_threshold_raw', 'goal_threshold_frame', 'goal_threshold_unit', 'goal_threshold_cap',
+      'goal_threshold_cap_provenance']) delete goal[k];
+    goal.goal_direction = '<=';
+    graph.goal_constraints = [{ constraint_id: 'gc-card-1', node_id: GOAL, operator: '<=', value: 2, unit: '%',
+      label: 'Monthly churn', provenance: 'explicit' }];
+    return graph;
+  };
+  it('R16 B′: a Run that SENT minimise through an approved card ceiling (no target figure) stays current', () => {
+    expect(resolveGoalDirection(cardCeiling(), GOAL)).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
+    const sent = fact({ goal: { node_id: GOAL, label: 'monthly churn', operator: '<=', direction: 'minimise' } });
+    expect(derive(cardCeiling(), sent)).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+  });
+  it('R16 B′ CONTRAST: the same graph with a Run that sent nothing reads stale', () => {
+    const none = fact({ goal: { node_id: GOAL, label: 'monthly churn', operator: '<=' } });
+    expect(derive(cardCeiling(), none)).toMatchObject({ freshness: 'stale', reason: 'goal_direction_changed' });
   });
 
   it('R11: model-restore chronology still outranks the direction reason', () => {
