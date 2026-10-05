@@ -106,6 +106,10 @@ import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
+import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
+import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
+import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
+import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
@@ -152,7 +156,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure } from '../orchestrator-v5/routing/answer-shape.js';
+import { ANSWER_SHAPE_MAX_BULLETS, AnswerShapeSchema, deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure, withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /**
@@ -793,12 +797,14 @@ export function leavesProposalAwaitingApproval(
  * AFTER the narrator's words: K3's "left out of this analysis", A7, D1's target ask, a withheld figure's sentence. The UI
  * renders `_answer_shape` INSTEAD of the text (headline + ≤3 bullets, the rest behind "Show more"), so a shape built over
  * the whole reply folds exactly those lines away whenever the narrator writes bullets. There is no face slot for them in
- * the shape, so a reply that is not EXACTLY the narrator's own words (`turn.hostLinesInText`: any host line added or
- * edited — disclosures, asks, status, break-even arithmetic, a rerun's code line) ships whole, as a leader-gate edit does.
+ * the shape except for ONE typed exception: the Explain robustness caveat goes on the face as bullet 1. All other
+ * host lines keep the reply whole. `turn.hostLinesInText` compares against the narrator plus exactly that caveat;
+ * other host additions or edits — disclosures, asks, status, break-even arithmetic, a rerun's code line — ship whole,
+ * as a leader-gate edit does.
  */
 export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
   body: T,
-  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean; hostLinesInText?: boolean } = {},
+  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean; hostLinesInText?: boolean; faceCaveat?: string; narratorWords?: string } = {},
 ): T {
   if ('_answer_shape' in body) return body;
   if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
@@ -813,11 +819,55 @@ export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; bl
   if (!carriesResult) return body;
   const text = body.assistant_text;
   if (typeof text !== 'string' || text.trim().length === 0) return body;
-  const shape = synthesiseAnswerShapeFromText(text);
+  // The caveat must not manufacture eligibility: remove narrator copies before synthesis and the floor.
+  const narratorWords = turn.narratorWords ?? text;
+  const caveat = turn.faceCaveat;
+  const wordsWithoutCaveat = caveat === undefined ? narratorWords : withoutSentenceCopies(narratorWords, caveat);
+  let shape = synthesiseAnswerShapeFromText(wordsWithoutCaveat);
   if (shape === null) return body;
   const derived = deriveAnswerTextFromShape(shape);
   if (!warrantsProgressiveDisclosure(derived) && shape.bullets.length === 0) return body;
-  return { ...body, assistant_text: derived, _answer_shape: shape };
+  if (turn.faceCaveat !== undefined) {
+    const sentence = turn.faceCaveat;
+    // Exact narrator copies were removed before synthesis; insert the sole copy on the face.
+    const bullets = [sentence, ...shape.bullets];
+    const overflow = bullets.length > ANSWER_SHAPE_MAX_BULLETS ? bullets.pop()! : '';
+    const parsed = AnswerShapeSchema.safeParse({
+      headline: shape.headline, bullets,
+      detail: [overflow, shape.detail].filter(Boolean).join('\n\n'),
+    });
+    if (!parsed.success) return body;
+    shape = parsed.data;
+  }
+  return { ...body, assistant_text: deriveAnswerTextFromShape(shape), _answer_shape: shape };
+}
+
+/** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
+function placeExplainCaveat(text: string, caveat: string): string {
+  return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
+}
+
+/** Prefer the identity-bound Run's own deterministic copy; only older summaries need a structural fallback. */
+function explainRobustnessSentence(analysisResult: unknown, graph: unknown): string {
+  const block = analysisResult as { summary?: unknown; enrichment?: Record<string, unknown> };
+  if (typeof block.summary === 'string') {
+    for (const sentence of [NOT_ROBUST_NO_FLIP_SENTENCE.trim(), NOT_ROBUST_SENTENCE.trim()]) {
+      if (block.summary.includes(sentence)) return sentence;
+    }
+  }
+  const ids = new Set(analysedOptionIds(analysisResult));
+  const raw = graph as { nodes?: unknown; options?: unknown } | null | undefined;
+  const nodes = Array.isArray(raw?.nodes) ? raw.nodes : [];
+  const options = Array.isArray(raw?.options) ? raw.options : [];
+  const analysedNodes = nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object'
+    && n.kind === 'option' && ids.has(n.id));
+  const analysedOptions = options.filter((o): o is Record<string, unknown> => o !== null && typeof o === 'object'
+    && ids.has(o.id ?? o.option_id));
+  const found = new Set([...analysedNodes.map(n => n.id), ...analysedOptions.map(o => o.id ?? o.option_id)]);
+  // No complete analysed roster: omit the vacuity set; only attested_no_flip can select the no-flip sentence.
+  const everyOption = ids.size > 0 && [...ids].every(id => found.has(id))
+    ? collectFactorIdsSetByEveryOption({ nodes: analysedNodes, options: analysedOptions }) : undefined;
+  return robustnessHonestySentence(block.enrichment ?? {}, everyOption);
 }
 
 /**
@@ -2250,9 +2300,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /**
      * The NARRATOR's own words on this turn, exactly as the model wrote them (the explanation's raw answer, or the Agent
      * loop's reply), or null when the reply is Olumi's own text. The answer shape is built ONLY when the final text is
-     * still exactly these words: any line the host added or edited ships whole (see `withAnalysisAnswerShape`).
+     * still exactly these words, plus the typed robustness caveat if owed: other host additions ship whole.
      */
     let narratorWords: string | null = null;
+    let explainRobustnessCaveat: string | null = null;
+    let explainFallbackText: string | undefined;
     /**
      * The host COMPOSED this reply (CODEX r2 on #2517): it can strip a narrator sentence and restore an identical host line
      * (the save receipt, a rerun's code line), so equal final text does not prove the narrator's words stand alone. Set where
@@ -2459,6 +2511,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // M2: with no interpretation, a rerun still says Olumi's code line rather than nothing about what changed.
       const text = interpreted?.answer ?? (matches
         ? (rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true })) : RUN_EXPLANATION_UNAVAILABLE_TEXT);
+      explainFallbackText = rerunPlan?.fallback;
       result = {
         assistant_text: text,
         items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
@@ -3319,7 +3372,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Keep the pending authority verbatim. Normalise exact narrator copies before
     // the whole-reply scrub, so other IDs cannot give this display question a
     // different replacement name and defeat final deduplication.
-    const scopedNarration = rawScopeQuestion === null || freshScopeQuestion === null ? narration.text : narration.text.split(rawScopeQuestion).join(freshScopeQuestion);
+    const scopedNarrationRaw = rawScopeQuestion === null || freshScopeQuestion === null ? narration.text : narration.text.split(rawScopeQuestion).join(freshScopeQuestion);
+    // Decide only at assembly, against the final scope-composed, identity-bound authority used by egress.
+    const explainEnrichment = (analysisResult as { enrichment?: Record<string, unknown> } | null | undefined)?.enrichment;
+    if (fastPath === 'explain' && narrationStatus === 'ready' && narratorWords !== null
+      && text !== RUN_EXPLANATION_UNAVAILABLE_TEXT && text !== RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT
+      && text !== interpretationUnavailableText({ ok: true, ran: true }) && text !== explainFallbackText
+      && runExplanationMatches(explanationId, scenarioId, { graphHash, analysisState, analysisResult })
+      && leaderLicenceFromState(analysisState, composedRead.analysisReady) !== 'withheld'
+      && explainEnrichment != null && isRawFragile(readRawRobustnessSignals(explainEnrichment.robustness))) {
+      explainRobustnessCaveat = explainRobustnessSentence(analysisResult, composedRead.graph);
+    }
+    // Whole-text exits keep the caveat after the narrator's at-rest prose, before any folded questions.
+    // Display first, while the raw ask is intact. With no IDs the replacement is identical;
+    // otherwise the id-free form cannot recreate the raw ask. The caveat cannot contain it,
+    // so the scanner-pinned second display call is a no-op after dedupe and placement.
+    const scopedNarration = explainRobustnessCaveat === null ? scopedNarrationRaw
+      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat);
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
@@ -3504,13 +3573,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
     }
     const finalText = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
+    const narratorWithCaveat = narratorWords === null ? null
+      : explainRobustnessCaveat === null ? narratorWords
+        : placeExplainCaveat(narratorWords, explainRobustnessCaveat);
     if (fastPath !== 'method') wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
-      // Shaped only while the reply is EXACTLY the narrator's words AND the host composed nothing into it (CODEX r1/r2 on
-      // #2517): a status line, an owed disclosure, a decision line or a rerun composition ships the reply whole, even when
-      // the host restored text identical to the narrator's.
-      hostLinesInText: narratorWords === null || finalText.trim() !== narratorWords.trim() || hostComposed
+      // Only the typed robustness caveat is allowed beside narrator words; every other host obligation stays whole.
+      ...(explainRobustnessCaveat !== null ? { faceCaveat: explainRobustnessCaveat, narratorWords: narratorWords! } : {}),
+      hostLinesInText: narratorWithCaveat === null || finalText.trim() !== narratorWithCaveat.trim() || hostComposed
         || (statusText ?? '').trim() !== '' || owed.length > 0 || basis !== null || decisionLines.length > 0,
     });
     let pendingPreview: ProposalPreview | undefined;

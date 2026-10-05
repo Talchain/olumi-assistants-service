@@ -6,6 +6,7 @@ import {
   isAllowedRunAnalysisAssistantText,
   RUN_ANALYSIS_LOCKED_TEMPLATES,
   MAX_HEADLINE_CHARS,
+  robustnessHonestySentence,
 } from '../analysis-result-headline.js';
 import { RUN_ANALYSIS_ASSISTANT_TEMPLATES } from '../../tools/handlers/run-analysis.js';
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
@@ -37,6 +38,34 @@ const UUID_PATTERN =
 const RAW_DECIMAL_PATTERN = /\d+\.\d+/;
 
 describe('buildAnalysisResultHeadline', () => {
+  it('shares trimmed honesty copy and retains the optional vacuity rule', () => {
+    const enrichment = { flip_thresholds: [
+      { factor_id: 'fac_a', current_value: 0.5, flip_value: null, flip_reason: 'structurally_invariant' },
+    ] };
+    expect(robustnessHonestySentence({})).toBe('The result is not yet robust — small changes could flip it.');
+    expect(robustnessHonestySentence(enrichment)).toBe(
+      'The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.',
+    );
+    expect(robustnessHonestySentence(enrichment, new Set(['fac_a']))).toBe('The result is not yet robust — small changes could flip it.');
+  });
+
+  /** Pin the private buildNarrationTail through its public reader: leading spaces and both variants are byte contracts. */
+  it('keeps the fragile and attested-no-flip narration tails byte-identical', () => {
+    const enrichment = {
+      results: [{ option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 }],
+      robustness: { level: 'low', is_robust: false },
+    };
+    const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
+    expect(buildAnalysisResultHeadline(input)).toBe(
+      'Option A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final. The result is not yet robust — small changes could flip it.',
+    );
+    expect(buildAnalysisResultHeadline({ ...input, enrichment: { ...enrichment,
+      flip_thresholds: [{ factor_id: 'fac_a', current_value: 0.5, flip_value: null, flip_reason: 'structurally_invariant' }],
+    } })).toBe(
+      'Option A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.',
+    );
+  });
+
   it('full data — Case A: winner + margin + provisional caution naming the fragile reason (no driver)', () => {
     const out = buildAnalysisResultHeadline({
       enrichment: HIRING_FULL,
