@@ -68,7 +68,8 @@ describe('same-text typography does not lose a genuine refinement or admit a que
     expect(question).toBeDefined();
     expect(question.provenance?.merged_refinements).toEqual([label]);
     expect(question.data?.raw_interventions).toEqual({ '5f3b2b5d': 1 });
-    expect(question.data?.interventions).toEqual({ '5f3b2b5d': 0.5 });
+    // Science ruling 2026-10-05 P2-FRAME accepted change: raw 1 on a factor whose largest magnitude is above 1 frames at defaultFrameFor = 10, not the ladder's 2; 0.5 → 0.1.
+    expect(question.data?.interventions).toEqual({ '5f3b2b5d': 0.1 });
 
     const seamBytes = JSON.stringify(seam.records);
     const result = reconcileDraftOptionFraming(freeze(seam.records), original);
@@ -85,7 +86,7 @@ describe('same-text typography does not lose a genuine refinement or admit a que
     expect(option.label).toBe(label);
     expect(option.is_baseline).toBe(true);
     expect(option.raw_interventions).toEqual({ '5f3b2b5d': 1 });
-    expect(option.interventions['5f3b2b5d'].value).toBe(0.5);
+    expect(option.interventions['5f3b2b5d'].value).toBe(0.1); // Science ruling 2026-10-05 P2-FRAME accepted change: 0.5 → 0.1
     expect(v3.graph.nodes.find((node) => node.id === question.id)?.source_quote).toBe(sourceQuote);
     const ready = buildAnalysisReadyPayload(v3.options, v3.goal_node_id, v3.graph);
     expect(ready.options.find((entry) => entry.id === question.id)?.label).toBe(label);

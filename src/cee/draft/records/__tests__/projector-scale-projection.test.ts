@@ -146,8 +146,9 @@ describe("the golden-brief class computes: one wire scale, ratios preserved, raw
     // from the implementation.
     expect(interventionsOf(graph, replace)[annual]).toBe(0.5);
     expect(interventionsOf(graph, keep)[annual]).toBe(0.35);
-    // Migration: {20000 baseline, 20000, 0} → frame 50000.
-    expect(interventionsOf(graph, replace)[migration]).toBe(0.4);
+    // Migration: {20000 baseline, 20000, 0} → frame 100000 (defaultFrameFor; Science ruling 2026-10-05 P2-FRAME accepted change:
+    // the ladder's 50000 made this 0.4 → now 0.2).
+    expect(interventionsOf(graph, replace)[migration]).toBe(0.2);
     expect(interventionsOf(graph, keep)[migration]).toBe(0);
     // Adoption was ALREADY unit-interval: untouched, verbatim.
     expect(interventionsOf(graph, replace)[adoption]).toBe(0.75);
@@ -170,8 +171,9 @@ describe("the golden-brief class computes: one wire scale, ratios preserved, raw
     const migration = idOf(graph, "One-Off Migration Cost");
     expect(observedOf(graph, annual)).toMatchObject({ value: 0.5, raw_value: 50000 });
     expect(dataOf(graph, annual)).toMatchObject({ value: 0.5, raw_value: 50000 });
-    expect(observedOf(graph, migration)).toMatchObject({ value: 0.4, raw_value: 20000 });
-    expect(dataOf(graph, migration)).toMatchObject({ value: 0.4, raw_value: 20000 });
+    // Science ruling 2026-10-05 P2-FRAME accepted change: migration frame 50000 → 100000; value 0.4 → 0.2 (raw 20000 unchanged).
+    expect(observedOf(graph, migration)).toMatchObject({ value: 0.2, raw_value: 20000 });
+    expect(dataOf(graph, migration)).toMatchObject({ value: 0.2, raw_value: 20000 });
   });
 
   it("stores NO cap anywhere — a cap would flip the edit handler to normalised writes and break INV-7", () => {
@@ -376,10 +378,12 @@ describe("percent-scaled stated figures use the scale a percentage declares (÷1
       ],
     });
     const growth = idOf(graph, "growth is 150% YoY");
-    // max 180 → derived frame 200 ({1,2,5}×10^k strictly above 180).
-    expect(observedOf(graph, growth)).toMatchObject({ value: 0.75, raw_value: 150 });
+    // max 180 → derived frame 1000 (defaultFrameFor: the smallest power of ten strictly above 180).
+    // Science ruling 2026-10-05 P2-FRAME accepted change: the ladder's frame 200 → 1000; 0.75 → 0.15 and 0.9 → 0.18.
+    // `unitPinnedScaleFrame` abstains above 100, so this is a ladder frame, not a unit-pinned one.
+    expect(observedOf(graph, growth)).toMatchObject({ value: 0.15, raw_value: 150 });
     const raise = idOf(graph, "raise now");
-    expect(interventionsOf(graph, raise)[growth]).toBe(0.9);
+    expect(interventionsOf(graph, raise)[growth]).toBe(0.18);
   });
 });
 
@@ -401,9 +405,9 @@ describe("frame edge cases", () => {
     const spend = idOf(graph, "Migration Spend");
     const migrate = idOf(graph, "migrate");
     const stay = idOf(graph, "stay");
-    // {0, 20000, 0} → frame 50000.
+    // {0, 20000, 0} → frame 100000 (Science ruling 2026-10-05 P2-FRAME accepted change: ladder 50000 → defaultFrameFor 100000; 0.4 → 0.2).
     expect(observedOf(graph, spend)).toMatchObject({ value: 0, raw_value: 0 });
-    expect(interventionsOf(graph, migrate)[spend]).toBe(0.4);
+    expect(interventionsOf(graph, migrate)[spend]).toBe(0.2);
     expect(interventionsOf(graph, stay)[spend]).toBe(0);
     const verdict = analysisSeamVerdict(graph);
     expect(verdict.mixedUnresolved).toBe(false);
@@ -455,8 +459,8 @@ describe("frame edge cases", () => {
       ],
     });
     const team = idOf(graph, "We are a 34-person B2B sales team");
-    // {34} → frame 50 → 0.68, raw kept.
-    expect(observedOf(graph, team)).toMatchObject({ value: 0.68, raw_value: 34 });
+    // {34} → frame 100 → 0.34, raw kept. (Science ruling 2026-10-05 P2-FRAME accepted change: ladder frame 50 → 100; 0.68 → 0.34.)
+    expect(observedOf(graph, team)).toMatchObject({ value: 0.34, raw_value: 34 });
   });
 
   it("provenance, labels and extractionType are untouched by the scale pass", () => {

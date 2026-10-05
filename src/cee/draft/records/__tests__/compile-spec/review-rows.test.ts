@@ -5,6 +5,7 @@ import type { DraftRecordSet } from '../../grammar.js';
 import { statedEffectQuoteMatches } from '../../../../provenance/stated-effect.js';
 import { completionRegressesProtectedContent, shouldKeepCompletion } from '../../completion.js';
 import { deriveNotModelledManifest } from '../../../../context-integrity/not-modelled-manifest.js';
+import { deriveNotModelledManifest as stagingManifest } from '../../../records-v25/not-modelled-manifest.js';
 import { transformEdgeToV3 } from '../../../../transforms/schema-v3.js';
 import { transformNodeToV2, type V1Edge, type V1Node } from '../../../../transforms/schema-v2.js';
 
@@ -250,14 +251,51 @@ describe('P2b Manifest truth', () => {
     const graph = { nodes: p.graph.nodes, edges: [edge] };
     expect(deriveNotModelledManifest(full, graph).quantities!.items.find(i => i.literal === '£1,200')!.verdict).toBe('in_model');
   });
-  it('does not count £1,200 after the current coefficient became zero', () => {
-    const graph = { nodes: [
+  // Codex R2 F3: the zero-coefficient check is the records evidence's (a carrier WITH stated_relationship). A carrier
+  // without one is read by staging's check, which never compared the coefficient (rows below).
+  const staleGraph = (records: boolean) => ({ nodes: [
       { id: 'source', kind: 'factor', label: 'Price rise', scale_frame: 100, observed_state: { value: 0, unit: '%' } },
       { id: 'target', kind: 'outcome', label: 'Monthly recurring revenue', scale_frame: 187500, observed_state: { value: 0.64, unit: '£/month' } },
     ], edges: [{ id: 'stale-effect', from: 'source', to: 'target', strength: { mean: 0, std: 0.32 }, effect_direction: 'positive', provenance: {
       source: 'brief_extraction', magnitude: 'user_stated', quote, natural_effect: { ...detail, strength_mean: 0.64, strength_mean_frame: 'edge_strength' },
-    } }] };
-    const manifest = deriveNotModelledManifest(quote, graph);
+      ...(records ? { stated_relationship: { ...records_authority(), from_node: 'source', to_node: 'target' } } : {}),
+    } }] });
+  it('does not count £1,200 after the current coefficient of a records carrier became zero', () => {
+    const manifest = deriveNotModelledManifest(quote, staleGraph(true));
     expect(manifest.quantities!.items.find(i => i.literal === '£1,200')!.verdict).not.toBe('in_model');
+  });
+});
+
+/** The signed relationship the records compiler writes for `quote` (amount and source spans located in it). */
+function records_authority() {
+  return { from_quantity: 3, to_quantity: 4, ...detail,
+    amount_span: { start: quote.indexOf('£1,200'), end: quote.indexOf('£1,200') + 6 },
+    source_span: { start: quote.indexOf('1%'), end: quote.indexOf('1%') + 2 } };
+}
+describe('Codex R2 F3: carriers without stated_relationship read back exactly as staging read them', () => {
+  const verdict = (m: ReturnType<typeof deriveNotModelledManifest>) => m.quantities!.items.find(i => i.literal === '£1,200')!.verdict;
+  // A native-agent-style user_stated edge: brief quote + natural effect, no records-only stated_relationship.
+  const nativeGraph = () => ({ nodes: [
+      { id: 'source', kind: 'factor', label: 'Price rise', scale_frame: 100, observed_state: { value: 0, unit: '%' } },
+      { id: 'target', kind: 'outcome', label: 'Monthly recurring revenue', scale_frame: 187500, observed_state: { value: 0.64, unit: '£/month' } },
+    ], edges: [{ id: 'native-effect', from: 'source', to: 'target', strength: { mean: 0.64, std: 0.32 }, effect_direction: 'positive', provenance: {
+      source: 'brief_extraction', magnitude: 'user_stated', quote, natural_effect: { ...detail, strength_mean: 0.64, strength_mean_frame: 'edge_strength' },
+    } }] });
+  it('R3-3 a native-agent-style user_stated edge is in_model, as at staging', () => {
+    expect(verdict(stagingManifest(quote, nativeGraph()))).toBe('in_model');
+    expect(verdict(deriveNotModelledManifest(quote, nativeGraph()))).toBe('in_model');
+  });
+  it('R3-3 a records edge whose stated_relationship fails its literal check is still not in_model', () => {
+    const p = project();
+    const graph = { nodes: p.graph.nodes.map(node => ({ ...node, observed_state: {
+      ...node.observed_state, unit: node.data?.unit ?? node.goal_threshold_unit,
+    } })), edges: p.graph.edges.map(edge => ({ ...edge, strength: { mean: edge.strength_mean, std: edge.strength_std } })) };
+    const edge = graph.edges.find(e => e.id === sized(p).id)!;
+    expect(edge.provenance?.stated_relationship).toBeDefined();
+    expect(verdict(deriveNotModelledManifest(quote, graph)), 'control: the intact records evidence counts').toBe('in_model');
+    // The amount span now covers "monthly", not the stated £1,200.
+    const at = quote.indexOf('monthly');
+    (edge.provenance as any).stated_relationship = { ...edge.provenance!.stated_relationship, amount_span: { start: at, end: at + 7 } };
+    expect(verdict(deriveNotModelledManifest(quote, graph))).not.toBe('in_model');
   });
 });

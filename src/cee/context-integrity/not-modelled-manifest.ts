@@ -52,7 +52,7 @@ import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../pr
 import { magnitudeNodes, percentLevelIds } from "../magnitude/frame-defaulted-links.js";
 import { sizeLink, unitOf } from "../magnitude/link-effect.js";
 import { sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
-import { statedEffectQuoteMatches, readStatedRelationship } from "../provenance/stated-effect.js";
+import { statedEffectQuoteMatches, statedEffectFiguresMatch, readStatedRelationship } from "../provenance/stated-effect.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -1524,40 +1524,59 @@ function collectBriefNaturalEffectCandidates(
     const sourceLabel = labels.get(from);
     const targetLabel = labels.get(to);
     if (sourceLabel === undefined || targetLabel === undefined) continue;
-    const quote = p.source_quote ?? p.quote;
+    // Codex R2 F3: only the records compiler writes `stated_relationship`. A carrier without it (the frozen Anthropic
+    // compile, native agent admission) is read back by staging's check: its `quote`, its four typed fields located in
+    // that quote, and the direction rule below. The literal-backed, re-sized check is for the records evidence alone.
+    const recordsEvidence = p.stated_relationship !== undefined && p.stated_relationship !== null;
+    const quote = recordsEvidence ? p.source_quote ?? p.quote : p.quote;
     if (typeof quote !== "string" || quote.length === 0 || !briefText.includes(quote)) continue;
 
     const amount = natural.amount;
     const amountUnit = natural.amount_unit;
     const perSourceChange = natural.per_source_change;
     const perSourceChangeUnit = natural.per_source_change_unit;
-    const authority = readStatedRelationship(p.stated_relationship);
-    const evidence = p.stated_relationship as { from_node?: unknown; to_node?: unknown } | undefined;
-    const source = view.get(from), target = view.get(to);
-    const strength = edge.strength as { mean?: unknown } | undefined;
-    const mean = strength?.mean ?? edge.strength_mean;
-    if (authority === undefined || evidence?.from_node !== from || evidence.to_node !== to
-      || source === undefined || target === undefined || typeof mean !== "number" || !Number.isFinite(mean)
-      || typeof amount !== "number" || typeof perSourceChange !== "number"
-      || typeof amountUnit !== "string" || typeof perSourceChangeUnit !== "string"
-      || !sameUnit(amountUnit, unitOf(target) ?? "") || !sameUnit(perSourceChangeUnit, unitOf(source) ?? "")) continue;
-    const sized = sizeLink({ direction: amount * perSourceChange < 0 ? "negative" : "positive",
-      effect_amount: amount, effect_per_source_change: perSourceChange, user_stated: true }, source, target);
-    const std = (edge.strength as { std?: unknown } | undefined)?.std ?? edge.strength_std;
-    if (sized.problem !== undefined || sized.outcome !== "user_stated" || mean !== sized.mean
-      || std !== sized.std || natural.strength_mean !== mean) continue;
-    if (
-      typeof amount !== "number" ||
-      typeof amountUnit !== "string" ||
-      typeof perSourceChange !== "number" ||
-      typeof perSourceChangeUnit !== "string" ||
-      !statedEffectQuoteMatches(quote, {
-        amount,
-        amount_unit: amountUnit,
-        per_source_change: perSourceChange,
-        per_source_change_unit: perSourceChangeUnit,
-      }, authority)
-    ) continue;
+    if (!recordsEvidence) {
+      if (typeof amount !== "number" || typeof amountUnit !== "string" || typeof perSourceChange !== "number"
+        || typeof perSourceChangeUnit !== "string" || !statedEffectFiguresMatch(quote, {
+          amount, amount_unit: amountUnit, per_source_change: perSourceChange, per_source_change_unit: perSourceChangeUnit,
+        })) continue;
+    } else {
+      const authority = readStatedRelationship(p.stated_relationship);
+      const evidence = p.stated_relationship as { from_node?: unknown; to_node?: unknown } | undefined;
+      const source = view.get(from), target = view.get(to);
+      const strength = edge.strength as { mean?: unknown } | undefined;
+      const mean = strength?.mean ?? edge.strength_mean;
+      if (authority === undefined || evidence?.from_node !== from || evidence.to_node !== to
+        || source === undefined || target === undefined || typeof mean !== "number" || !Number.isFinite(mean)
+        || typeof amount !== "number" || typeof perSourceChange !== "number"
+        || typeof amountUnit !== "string" || typeof perSourceChangeUnit !== "string"
+        || !sameUnit(amountUnit, unitOf(target) ?? "") || !sameUnit(perSourceChangeUnit, unitOf(source) ?? "")) continue;
+      // Codex R2 F4: a stated range is re-sized by the compiler's own contract (sizeLink's `amount_range`, the B1 rule),
+      // never by the default spread. A range that is present but unreadable earns nothing.
+      const storedRange = (p.stated_relationship as { range?: unknown }).range;
+      const range = storedRange as { low?: unknown; high?: unknown } | null | undefined;
+      const amountRange = range !== null && typeof range === "object" && typeof range.low === "number" && Number.isFinite(range.low)
+        && typeof range.high === "number" && Number.isFinite(range.high) ? { low: range.low, high: range.high } : undefined;
+      if (storedRange !== undefined && amountRange === undefined) continue;
+      const sized = sizeLink({ direction: amount * perSourceChange < 0 ? "negative" : "positive",
+        effect_amount: amount, effect_per_source_change: perSourceChange, user_stated: true,
+        ...(amountRange !== undefined ? { amount_range: amountRange } : {}) }, source, target);
+      const std = (edge.strength as { std?: unknown } | undefined)?.std ?? edge.strength_std;
+      if (sized.problem !== undefined || sized.outcome !== "user_stated" || mean !== sized.mean
+        || std !== sized.std || natural.strength_mean !== mean) continue;
+      if (
+        typeof amount !== "number" ||
+        typeof amountUnit !== "string" ||
+        typeof perSourceChange !== "number" ||
+        typeof perSourceChangeUnit !== "string" ||
+        !statedEffectQuoteMatches(quote, {
+          amount,
+          amount_unit: amountUnit,
+          per_source_change: perSourceChange,
+          per_source_change_unit: perSourceChangeUnit,
+        }, authority)
+      ) continue;
+    }
     const effectDirection = edge.effect_direction;
     const signedEffect = Math.sign(amount) * Math.sign(perSourceChange);
     if (

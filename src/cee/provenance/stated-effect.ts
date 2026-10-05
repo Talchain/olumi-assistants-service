@@ -1,7 +1,7 @@
 import type { DraftQuoteSpan, DraftStatedRelationship } from "../draft/records/grammar.js";
 import { findStatedAmounts, readUnit, type StatedAmount } from "./stated-amounts.js";
 import { boundLiteral } from "../draft/records/quantity-evidence.js";
-import { sameUnit, readCountRate, readMoney } from "../../orchestrator-v5/agent-lane/same-unit.js";
+import { sameUnit, readCountRate, readMoney, periodIn } from "../../orchestrator-v5/agent-lane/same-unit.js";
 
 export interface StatedEffectDetail {
   readonly amount: number;
@@ -85,34 +85,63 @@ function oneMatchingAmount(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-// Unit words written directly at a plain numeral. Calendar words outside the shared month/year vocabulary are kept as
-// their own periods so "per week" can never read as a monthly rate.
-const LOCAL_PERIOD: Readonly<Record<string, string>> = {
+/**
+ * One written figure is never both endpoints, so the source is located among the figures the target did not take.
+ * Codex R3 P2(i): in "Each recruiter adds 1 hire." the before-numeral window also puts "recruiter" on the numeral 1,
+ * so the source (1 recruiter) matched both "Each" and "1" and the one-match rule refused a stated effect staging read.
+ */
+function statedEndpoints(amounts: readonly LocatedAmount[], detail: StatedEffectDetail): { readonly target: LocatedAmount | undefined; readonly source: LocatedAmount | undefined } {
+  const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false);
+  const candidates = target === undefined ? amounts : amounts.filter(amount => amount !== target);
+  return { target, source: oneMatchingAmount(candidates, detail.per_source_change, detail.per_source_change_unit, true) };
+}
+
+// Unit words written directly at a plain numeral. Month and year are read by the SHARED unit reader (`periodIn`, the
+// vocabulary `sameUnit` uses: "annum", "pa", "pcm" included). Only calendar words it does not read stay local, as their
+// own periods, so "per week" can never read as a monthly rate (Codex R2 F1).
+const OTHER_PERIOD: Readonly<Record<string, string>> = {
   day: "day", days: "day", daily: "day", week: "week", weeks: "week", weekly: "week",
-  month: "month", months: "month", mo: "month", monthly: "month", quarter: "quarter", quarters: "quarter", quarterly: "quarter",
-  year: "year", years: "year", yr: "year", yearly: "year", annual: "year", annually: "year",
+  quarter: "quarter", quarters: "quarter", quarterly: "quarter", yearly: "year",
 };
+const localPeriod = (word: string | undefined): string | undefined =>
+  word === undefined || word === "/" ? undefined : periodIn(word) ?? OTHER_PERIOD[word];
 const PERIOD_ADJECTIVE = /^(?:daily|weekly|monthly|quarterly|yearly|annual|annually)$/u;
-const PERIOD_CONNECTOR = new Set(["a", "an", "per", "every", "each"]);
+const PERIOD_CONNECTOR = new Set(["a", "an", "per", "every", "each", "/"]);
 const LOCAL_QUALIFIER = new Set(["more", "extra", "additional", "new", "newly", "fewer", "less", "further", "net", "lost", "added", "existing"]);
 const LOCAL_FUNCTION_WORD = new Set(["a", "an", "the", "and", "or", "to", "of", "in", "on", "at", "by", "for", "from", "with", "than",
   "per", "each", "every", "into", "over", "under", "across", "between", "about", "around", "roughly", "approximately", "up", "down",
   "is", "are", "was", "were", "be", "would", "will", "could", "should", "if", "when", "while", "but"]);
 
-/** The noun phrase (at most two words) and the period written at a plain numeral. Nothing here supplies a unit. */
-function localCountUnit(quote: string, amount: LocatedAmount): { readonly nouns: readonly string[]; readonly period: string | null } {
-  const words = quote.slice(amount.index + amount.matchedText.length).match(/^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,6})/u)?.[1]
-    .trim().split(/\s+/u).map(word => word.toLowerCase()) ?? [];
+/**
+ * The noun phrase and the period written at a plain numeral. Nothing here supplies a unit. `closed` says the phrase
+ * visibly ends inside the scan (a period, a non-coordinating function word, or the sentence end): only then is a noun
+ * that is not the declared one a contradiction. A phrase that runs on ("highly experienced, senior hires") or past the
+ * scan is a noun the scanner did not place, which is no evidence either way (Codex R2 F2).
+ */
+function localCountUnit(quote: string, amount: LocatedAmount): { readonly nouns: readonly string[]; readonly period: string | null; readonly closed: boolean } {
+  // "/" is its own word, so "deliveries/year" reads its period like "deliveries per year".
+  const tail = quote.slice(amount.index + amount.matchedText.length);
+  const scanned = tail.match(/^\s+((?:(?:[A-Za-z][A-Za-z-]*|\/)\s*){1,6})/u);
+  const words = scanned?.[1]?.replace(/\//gu, " / ").trim().split(/\s+/u).map(word => word.toLowerCase()) ?? [];
+  const after = scanned === null ? undefined : tail.charAt(scanned[0].length);
   let i = 0, period: string | null = null;
   while (i < words.length && (LOCAL_QUALIFIER.has(words[i]!) || PERIOD_ADJECTIVE.test(words[i]!))) {
-    if (PERIOD_ADJECTIVE.test(words[i]!)) period = LOCAL_PERIOD[words[i]!]!;
+    if (PERIOD_ADJECTIVE.test(words[i]!)) period = localPeriod(words[i])!;
     i++;
   }
   const nouns: string[] = [];
-  while (i < words.length && nouns.length < 2 && !LOCAL_FUNCTION_WORD.has(words[i]!) && LOCAL_PERIOD[words[i]!] === undefined) nouns.push(words[i++]!);
-  if (PERIOD_ADJECTIVE.test(words[i] ?? "")) period = LOCAL_PERIOD[words[i]!]!;
-  else if (PERIOD_CONNECTOR.has(words[i] ?? "") && LOCAL_PERIOD[words[i + 1] ?? ""] !== undefined) period = LOCAL_PERIOD[words[i + 1]!]!;
-  return { nouns, period };
+  while (i < words.length && !LOCAL_FUNCTION_WORD.has(words[i]!) && words[i] !== "/" && localPeriod(words[i]) === undefined) nouns.push(words[i++]!);
+  const closed = i < words.length ? words[i] !== "and" && words[i] !== "or" : after !== undefined && (after === "" || /[.!?;]/u.test(after));
+  if (PERIOD_ADJECTIVE.test(words[i] ?? "")) period = localPeriod(words[i])!;
+  else if (PERIOD_CONNECTOR.has(words[i] ?? "") && localPeriod(words[i + 1]) !== undefined) period = localPeriod(words[i + 1])!;
+  return { nouns, period, closed };
+}
+
+/** The words after a numeral up to its clause end: the sentence end or the next figure, whichever comes first. */
+function clauseWordsAfter(quote: string, amount: LocatedAmount): readonly string[] {
+  const tail = quote.slice(amount.index + amount.matchedText.length);
+  const end = tail.search(/[.!?;]|\d/u);
+  return (end === -1 ? tail : tail.slice(0, end)).replace(/\//gu, " / ").match(/[A-Za-z][A-Za-z-]*|\//gu)?.map(word => word.toLowerCase()) ?? [];
 }
 
 /**
@@ -131,8 +160,19 @@ function unitAgrees(amount: LocatedAmount, expected: string, other: string, quot
   if(amount.implicitSource!==true){
     const local=localCountUnit(quote,amount);
     const runs=local.nouns.flatMap((_,start)=>local.nouns.slice(start).map((__,end)=>local.nouns.slice(start,start+end+1).join(' ')));
-    if(local.nouns.length>0 && !runs.some(run=>sameNoun(run,count.noun)))return false;
+    if(local.nouns.length>0 && local.closed && !runs.some(run=>sameNoun(run,count.noun)))return false;
     if(local.period!==null && local.period!==count.period)return false;
+    // ⛔ A phrase that runs on past a comma or "and" hides its period and noun from the scan above, so it is read to the
+    // clause end (the sentence end or the next figure): a written period that is not the declared one refuses, and so
+    // does a clause that never writes the declared noun (Codex R3 P1: "3 highly experienced, carefully vetted hires a
+    // year" earned hires/month). A clause that writes no content word ("1 and 4", a range's bounds) stays no evidence.
+    if(!local.closed){
+      const rest=clauseWordsAfter(quote,amount);
+      const restRuns=rest.flatMap((_,start)=>rest.slice(start,start+6).map((__,end)=>rest.slice(start,start+end+1).join(' ')));
+      const content=rest.filter(word=>!LOCAL_FUNCTION_WORD.has(word) && word!=='/' && localPeriod(word)===undefined && !PERIOD_ADJECTIVE.test(word));
+      if(rest.some(word=>{const period=localPeriod(word);return period!==undefined && period!==count.period;}))return false;
+      if(content.length>0 && !restRuns.some(run=>sameNoun(run,count.noun)))return false;
+    }
   }
   if(amount.units.some(u=>sameNoun(u,count.noun)))return true;
   return otherCount===null || !amount.units.some(u=>sameNoun(u,otherCount.noun));
@@ -195,9 +235,7 @@ export function statedEffectFiguresMatch(
   if (quote.trim().length === 0) return false;
   if (![detail.amount, detail.per_source_change].every((value) => Number.isFinite(value) && value !== 0)) return false;
   if (![detail.amount_unit, detail.per_source_change_unit].every((unit) => typeof unit === "string" && unit.trim().length > 0)) return false;
-  const amounts = locatedAmounts(quote);
-  const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false);
-  const source = oneMatchingAmount(amounts, detail.per_source_change, detail.per_source_change_unit, true);
+  const { target, source } = statedEndpoints(locatedAmounts(quote), detail);
   return target !== undefined && source !== undefined && target.index !== source.index;
 }
 
@@ -242,9 +280,7 @@ export function statedEffectQuoteMatches(
   if (authority.amount !== detail.amount || authority.per_source_change !== detail.per_source_change
     || !sameUnit(authority.amount_unit, detail.amount_unit)
     || !sameUnit(authority.per_source_change_unit, detail.per_source_change_unit)) return false;
-  const amounts = locatedAmounts(quote);
-  const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false);
-  const source = oneMatchingAmount(amounts, detail.per_source_change, detail.per_source_change_unit, true);
+  const { target, source } = statedEndpoints(locatedAmounts(quote), detail);
   if (target === undefined || source === undefined
     || !atSpan(target, authority.amount_span, quote) || !atSpan(source, authority.source_span, quote)) return false;
   // The two typed amount spans must be in one relationship clause. Punctuation

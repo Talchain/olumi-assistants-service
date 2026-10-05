@@ -173,7 +173,9 @@ describe("draft stated figures at the records seam", () => {
       else expect(BRIEF).toContain(edge.provenance!.quote);
     }
     const starter = graph.nodes.find((node) => node.label.includes("starter tier would win"));
-    expect(starter?.observed_state).toMatchObject({ value: 0.75, raw_value: 150, baseline: 150, range: { min: 80, max: 250 } });
+    // Science ruling 2026-10-05 P2-FRAME accepted change: no plausible_max here, so the starter frame is defaultFrameFor(150) = 1000, not the
+    // ladder's 200; value 0.75 → 0.15 (raw 150, baseline and stated range unchanged).
+    expect(starter?.observed_state).toMatchObject({ value: 0.15, raw_value: 150, baseline: 150, range: { min: 80, max: 250 } });
     const manifest = deriveNotModelledManifest(BRIEF, graph);
     const manifestItems = manifest.quantities?.items ?? [];
     expect(manifestItems.filter((item) => ["£1,200", "£49"].includes(item.literal)).every((item) => item.verdict === "in_model")).toBe(true);
