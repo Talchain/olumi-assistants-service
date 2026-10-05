@@ -20,6 +20,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { parse } from "yaml";
 
 import {
@@ -46,6 +47,12 @@ import {
   halfDetectionRate,
   assertSampleFloor,
   samplingReport,
+  assertServedBuild,
+  agentLedgerIdentity,
+  servedBuildFromHeaders,
+  AGENT_CONSTRUCT_ALIAS,
+  BUILD_HEADER,
+  BUILD_PROBE_PATH,
 } from "../../../scripts/ci/staging-journey-smoke.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -420,6 +427,16 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
       "the smoke step no longer tees its output — the upload-artifact step has nothing to attach",
     ).toContain("| tee");
     expect(smokeStep.shell, "step pipes output but does not set `shell: bash` (no pipefail)").toBe("bash");
+  });
+
+  it("spends the shared LLM budget at k=1 per deploy; k=5 only by an explicit dispatch, never a schedule", () => {
+    // DL ruling, 5 Oct 2026: one sample = 3 provider calls (measured on served 5e79d2d).
+    expect(String(requireSmokeStep().env.SMOKE_DRAFT_SAMPLES)).toBe("${{ github.event.inputs.samples || '1' }}");
+    const samples = wf.on.workflow_dispatch.inputs.samples;
+    expect(samples.type).toBe("choice");
+    expect(samples.options).toEqual(["1", "5"]);
+    expect(samples.default).toBe("1");
+    expect(wf.on.schedule).toBeUndefined();
   });
 
   it("asserts deploy freshness by passing the expected commit", () => {
@@ -1865,5 +1882,181 @@ describe("the .d.mts type mirror cannot silently fall behind the .mjs", () => {
     const exported = mjsExports();
     const phantom = dtsDeclares().filter((n) => !exported.includes(n));
     expect(phantom, `declared in ${DTS} but NOT exported from ${MJS}: ${phantom.join(", ")}`).toEqual([]);
+  });
+});
+
+/**
+ * THE AGENT ROUTE'S IDENTITY (CI OPTIMISER, 5 Oct 2026). With `PROXY_V5_TARGET=agent`
+ * every browser turn exits `agent_lane_v1`, whose `_diagnostic_trace` carries no
+ * `prompt_identity`, so this alarm went red on every healthy journey and was
+ * disabled. The identity the Agent DOES serve is on `_provider_calls`. These
+ * fixtures are a REAL frame→draft journey against served 5e79d2d (cee_build on
+ * every row), captured unedited; each failing row below is the same capture with
+ * ONE field changed, so each pair discriminates on that field alone.
+ */
+describe("staging journey smoke — the Agent route's served prompt/provider identity", () => {
+  const T1 = readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-agent-turn1-5e79d2d.json"));
+  const T2 = readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-agent-turn2-5e79d2d.json"));
+  const BUILD = "5e79d2dccce581023f5e5f79b56a873979499eda";
+  const clone = (b: any): any => structuredClone(b);
+  const constructRow = (b: any): any => b._provider_calls.find((r: any) => r.prompt_alias === AGENT_CONSTRUCT_ALIAS);
+  const provenance = (b1: any, b2: any): string[] =>
+    assertPromptProvenance([extractDiagnostics(b1), extractDiagnostics(b2)], [b1, b2]);
+
+  it("the captures really are the shape this fix is about (agent exit, no trace identity, ledger identity)", () => {
+    for (const b of [T1, T2]) {
+      expect(b._diagnostic_trace.exit_path).toBe("agent_lane_v1");
+      expect(b._diagnostic_trace.prompt_identity).toBeUndefined();
+      expect(carriedDraftGraph(b)).toBe(true);
+      expect(b._provider_calls.every((r: any) => r.cee_build === BUILD)).toBe(true);
+    }
+    expect(T1._diagnostic_trace.construction).toEqual({ retried: false });
+    expect(T2._diagnostic_trace.construction).toBeUndefined();
+    expect(T1._provider_calls.map((r: any) => r.prompt_alias)).toEqual(["agent.converse", AGENT_CONSTRUCT_ALIAS]);
+    expect(T2._provider_calls.map((r: any) => r.prompt_alias)).toEqual(["agent.converse"]);
+  });
+
+  it("PASSES the real healthy journey, naming each call's alias, provider, model and prompt hash", () => {
+    expect(provenance(T1, T2)).toEqual([]);
+    const d1 = extractDiagnostics(T1);
+    expect(d1).toMatchObject({ exit_path: "agent_lane_v1", build_sha: BUILD, prompt_identity_count: 2, constructed: true, construct_identified: true });
+    const sha = constructRow(T1).prompt_sha256.slice(0, 8);
+    expect(d1.prompt_identity).toContain(`${AGENT_CONSTRUCT_ALIAS}=openai/${constructRow(T1).model}#${sha}`);
+    expect(extractDiagnostics(T2)).toMatchObject({ prompt_identity_count: 1, constructed: false, construct_identified: false });
+  });
+
+  it("FAILS the same journey with the ledger removed — the pre-fix red, still a red", () => {
+    const b1 = clone(T1);
+    const b2 = clone(T2);
+    delete b1._provider_calls;
+    delete b2._provider_calls;
+    const f = provenance(b1, b2);
+    expect(f).toHaveLength(2);
+    expect(f[0]).toContain("turn 1");
+    expect(f[0]).toContain(AGENT_CONSTRUCT_ALIAS);
+    expect(f[1]).toContain("turn 2");
+    expect(f[1]).toContain("prompt_identity was empty");
+  });
+
+  it("FAILS a construction turn whose only identity is the conversation call (construct row removed)", () => {
+    const b1 = clone(T1);
+    b1._provider_calls = b1._provider_calls.filter((r: any) => r.prompt_alias !== AGENT_CONSTRUCT_ALIAS);
+    expect(extractDiagnostics(b1).prompt_identity_count).toBe(1);
+    const f = provenance(b1, T2);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toContain("turn 1: this turn ran a construction");
+  });
+
+  it.each([
+    ["prompt_sha256 removed", (r: any) => { delete r.prompt_sha256; }],
+    ["prompt_sha256 = sha256('') (no instructions)", (r: any) => { r.prompt_sha256 = createHash("sha256").update("", "utf8").digest("hex"); }],
+    ["prompt_sha256 truncated", (r: any) => { r.prompt_sha256 = r.prompt_sha256.slice(0, 12); }],
+    ["prompt_alias removed", (r: any) => { delete r.prompt_alias; }],
+    ["prompt_alias not an agent alias", (r: any) => { r.prompt_alias = "legacy.draft"; }],
+    ["outcome refused_before_network", (r: any) => { r.outcome = "refused_before_network"; }],
+    ["model unknown", (r: any) => { r.model = "unknown"; }],
+    ["provider empty", (r: any) => { r.provider = ""; }],
+  ])("FAILS the construction turn when its construct row has %s", (_label, mutate) => {
+    const b1 = clone(T1);
+    mutate(constructRow(b1) ?? b1._provider_calls[1]);
+    const f = provenance(b1, T2);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toContain("turn 1: this turn ran a construction");
+  });
+
+  it("FAILS a later turn that carries the graph when its only row loses its alias (the general arm)", () => {
+    const b2 = clone(T2);
+    delete b2._provider_calls[0].prompt_alias;
+    const f = provenance(T1, b2);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toContain("turn 2: this turn produced a graph");
+  });
+
+  it("agentLedgerIdentity keeps exactly the fully identified rows", () => {
+    expect(agentLedgerIdentity(T1)).toHaveLength(2);
+    expect(agentLedgerIdentity({})).toEqual([]);
+    expect(agentLedgerIdentity({ _provider_calls: "x" })).toEqual([]);
+    expect(agentLedgerIdentity({ _provider_calls: [null, 3] })).toEqual([]);
+  });
+
+  it("the construction alias and its producer agree (derived from the producer's source)", () => {
+    const src = readFileSync(resolve(REPO_ROOT, "src/orchestrator-v5/agent-lane/runtime/prompt-identity.ts"), "utf8");
+    const line = src.split("\n").find((l) => l.includes("export const AGENT_PROMPT_ALIASES"));
+    expect(line, "AGENT_PROMPT_ALIASES is gone from prompt-identity.ts").toBeDefined();
+    expect(line).toContain(`'${AGENT_CONSTRUCT_ALIAS}'`);
+    // Contrast: the parse sees the other aliases too, so a match is not an accident.
+    expect(line).toContain("'agent.converse'");
+  });
+});
+
+describe("staging journey smoke — every turn is served by the commit under test", () => {
+  const T1 = readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-agent-turn1-5e79d2d.json"));
+  const T2 = readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-agent-turn2-5e79d2d.json"));
+  const FULL = "5e79d2dccce581023f5e5f79b56a873979499eda";
+  const OTHER = "af1f094edb83200dc6998b51f16fb6ad82aa3418";
+  const ds = (b1: any = T1, b2: any = T2) => [extractDiagnostics(b1), extractDiagnostics(b2)];
+
+  it("PASSES when every Agent call's stamped build is the expected commit (full or short)", () => {
+    expect(extractDiagnostics(T1).agent_builds).toEqual([FULL, FULL]);
+    expect(extractDiagnostics(T2).agent_builds).toEqual([FULL]);
+    expect(assertServedBuild(ds(), FULL)).toEqual([]);
+    expect(assertServedBuild(ds(), "5e79d2d")).toEqual([]);
+  });
+
+  it("FAILS each turn served by a different build", () => {
+    const f = assertServedBuild(ds(), OTHER);
+    expect(f).toHaveLength(2);
+    expect(f[0]).toContain("turn 1: served by build 5e79d2dc");
+  });
+
+  it.each([
+    ["removed", (r: any) => { delete r.cee_build; }],
+    ["malformed", (r: any) => { r.cee_build = "unknown"; }],
+  ])("FAILS a real call whose cee_build is %s (cannot confirm), not skips it", (_label, mutate) => {
+    const b2 = structuredClone(T2);
+    mutate(b2._provider_calls[0]);
+    const f = assertServedBuild(ds(T1, b2), FULL);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toContain("turn 2: 1 of 1 Agent model call(s) carried no valid cee_build");
+  });
+
+  it("FAILS one conflicting call even when another call on the same turn matches", () => {
+    const b1 = structuredClone(T1);
+    b1._provider_calls.find((r: any) => r.prompt_alias === AGENT_CONSTRUCT_ALIAS).cee_build = OTHER;
+    const f = assertServedBuild(ds(b1, T2), FULL);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toContain("turn 1: served by build af1f094e");
+  });
+
+  it("checks nothing when no commit is expected; a turn with no Agent call falls back to the trace build", () => {
+    expect(assertServedBuild(ds(), "")).toEqual([]);
+    expect(assertServedBuild([{ build_sha: null, agent_builds: [] }], "5e79d2d")).toEqual([]);
+    expect(assertServedBuild([{ build_sha: OTHER, agent_builds: [] }], "5e79d2d")[0]).toContain("turn 1: served by build af1f094e");
+  });
+});
+
+describe("staging journey smoke — Phase 1 reads the build header, never /healthz", () => {
+  const SRC = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+
+  it("no fetch in the gate targets /healthz (each call fans out into Supabase reads)", () => {
+    const fetches = SRC.match(/fetch\([^\n]*/g) ?? [];
+    // Contrast: the parse sees the gate's real fetches, so zero /healthz is not zero-of-nothing.
+    expect(fetches.some((l) => l.includes("BUILD_PROBE_PATH"))).toBe(true);
+    expect(fetches.some((l) => l.includes("TURN_PATH"))).toBe(true);
+    expect(fetches.filter((l) => l.includes("healthz"))).toEqual([]);
+  });
+
+  it("the header name is the one the producer stamps", () => {
+    const src = readFileSync(resolve(REPO_ROOT, "src/plugins/boundary-logging.ts"), "utf8");
+    expect(src).toContain(`SERVICE_BUILD_HEADER = "${BUILD_HEADER}"`);
+    expect(src).toContain("reply.header(SERVICE_BUILD_HEADER, GIT_COMMIT_SHORT)");
+    expect(BUILD_PROBE_PATH).not.toContain("healthz");
+  });
+
+  it("servedBuildFromHeaders reads the stamped build and nothing else", () => {
+    expect(servedBuildFromHeaders(new Headers({ [BUILD_HEADER]: "5e79d2d" }))).toBe("5e79d2d");
+    expect(servedBuildFromHeaders(new Headers({ "x-other": "5e79d2d" }))).toBeNull();
+    expect(servedBuildFromHeaders(new Headers({ [BUILD_HEADER]: "unknown" }))).toBeNull();
+    expect(servedBuildFromHeaders(undefined)).toBeNull();
   });
 });
