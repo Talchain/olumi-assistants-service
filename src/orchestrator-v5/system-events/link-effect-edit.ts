@@ -134,9 +134,10 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   const present = (...u: (string | undefined)[]): string[] => u.filter((x): x is string => typeof x === 'string' && x.trim() !== '');
   const sourceOwn = present(unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
     targetUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)));
-  // ⛔ A % LEVEL's change is said in POINTS only (Science, #87 5993238492: "a relative % never sizes a % goal"): "gross
-  // margin falls 2%" may mean 2 points or 2% of today's level, so a bare "%" for it is refused and the user is asked
-  // for points, never sized as points by guess.
+  // ⛔ The points-only rule applies to a % LEVEL target the graph marks `percent_level` from `goal_constraints`
+  // (Science, #87 5993238492): "gross margin falls 2%" may mean 2 points or 2% of today's level, so a bare "%" for that
+  // target is refused and the user is asked for points. A % goal not so marked keeps the pre-existing comparison
+  // (follow-up for Science).
   const targetOwn = targetNode.percent_level === true
     ? present(targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))
     : present(unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)));

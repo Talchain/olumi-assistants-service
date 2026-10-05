@@ -62,9 +62,10 @@ function sizedInGoalUnit(e: Rec, goalUnit: string | undefined, graph?: unknown):
   const ne = isRec(p?.natural_effect) ? p!.natural_effect as Rec : undefined;
   if (goalUnit === undefined || typeof ne?.amount_unit !== 'string' || !finite(ne.amount)) return false;
   if (sameUnit(ne.amount_unit, goalUnit)) return true;
-  // ⭐ RT-6 row 2 (Science RULED YES, #87 5993238492): a % LEVEL goal's change is said in POINTS (1 point = 1 raw unit of
-  // the level, `sizeLink`'s own conversion). Read by the WRITER's own comparator over the goal end's own units, never a
-  // %-only case here, so the writer and this gate cannot drift. A count goal's units hold no "points": unchanged.
+  // ⭐ RT-6 row 2 (Science RULED YES, #87 5993238492): the points-only rule applies to a % LEVEL target the graph marks
+  // `percent_level` from `goal_constraints` (1 point = 1 raw unit of the level, `sizeLink`'s own conversion). Read by the
+  // WRITER's own comparator over the goal end's own units. A % goal not so marked keeps the pre-existing comparison
+  // (follow-up for Science). A count goal's units hold no "points": unchanged.
   const ends = graph !== undefined && typeof e.from === 'string' && typeof e.to === 'string' ? linkEffectEndUnits(graph, e.from, e.to) : null;
   return ends !== null && ends.target.own.every((u) => /point/i.test(u)) && statedInOneOf(ne.amount_unit, ends.target.own);
 }

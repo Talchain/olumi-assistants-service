@@ -14,6 +14,7 @@
  *   · `statedEffectQuoteMatches`: both typed figures, each with its unit, written exactly once in the quote;
  *   · `figuresWrittenIn`: no more than those two (a second or corrected figure, "8%, no, 6%", is never picked from);
  *   · `linkEffectTheUserStated`'s `question` / `denied` stay refusals: a question or a negation states nothing.
+ *   · its binding and source-change checks still run when direction goes to the card: both figures must size THIS effect.
  * ⛔ ONLY THE DIRECTION goes to the card: `direction_not_stated` / `direction_contradicts` (RT-6's two misses). Which way
  * a link runs is what the signed card shows and the writer's sign guard checks against the stored link. Every other miss
  * stays a refusal exactly as before (#2275's five review rounds): an unnamed end, a figure that sizes something else (a
@@ -39,7 +40,7 @@ export type LinkEffectPrefilter =
   | { readonly kind: 'prepared'; readonly said: string; readonly read_by_rule: boolean };
 
 export function linkEffectPrefilter(quote: string, effect: Effect, ends: Ends, scope: Scope): LinkEffectPrefilter {
-  const miss = linkEffectTheUserStated(quote, effect, ends, scope);
+  let miss = linkEffectTheUserStated(quote, effect, ends, scope);
   const said = (): string => statingSentenceOf(quote, effect, ends, scope) ?? quote;
   // The word rule read it: prepared exactly as before (nothing served changes).
   if (miss === null) return { kind: 'prepared', said: said(), read_by_rule: true };
@@ -58,10 +59,14 @@ export function linkEffectPrefilter(quote: string, effect: Effect, ends: Ends, s
       detail: 'Nothing was prepared: the words quoted deny or correct the effect rather than state it. Ask the user what the '
         + 'effect is, in numbers.' };
   }
-  // ⭐ ONLY a DIRECTION miss can go to the card, and only when the shared validator finds both typed figures, each with
-  // its unit, written exactly once, and no third figure. Otherwise it stays refused exactly as before.
-  if (CARD_MISSES.has(miss) && statedEffectQuoteMatches(quote, effect) && figuresWrittenIn(quote) <= 2) {
-    return { kind: 'prepared', said: quote, read_by_rule: false };
+  // ⭐ ONLY a DIRECTION miss can go to the card: binding and source-change checks still run, and the shared validator
+  // must find both typed figures, each with its unit, written exactly once, and no third figure.
+  if (CARD_MISSES.has(miss)) {
+    const cardMiss = linkEffectTheUserStated(quote, effect, ends, scope, { directionOnCard: true });
+    if (cardMiss === null && statedEffectQuoteMatches(quote, effect) && figuresWrittenIn(quote) <= 2) {
+      return { kind: 'prepared', said: quote, read_by_rule: false };
+    }
+    miss = cardMiss ?? miss;
   }
   return { kind: 'refused', refusal: 'not_the_users_statement', why: miss as RefusedMiss,
     detail: 'Nothing was prepared: the words quoted do not state, as one statement of the user\u2019s, how much the one moves '

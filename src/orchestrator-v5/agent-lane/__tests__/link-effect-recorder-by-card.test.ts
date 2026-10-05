@@ -15,6 +15,8 @@ import { applyLinkEffectEdit } from '../../system-events/link-effect-edit.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
+import { linkEffectPrefilter } from '../link-effect-prefilter.js';
+import { linkEffectTheUserStated } from '../stated-by-user.js';
 
 type Json = Record<string, any>;
 const SERVED = (JSON.parse(readFileSync(new URL('./fixtures/served-rt6-bakery-footfall-margin-c6dcb3dd.json', import.meta.url), 'utf8')) as { graph: Json }).graph;
@@ -91,6 +93,45 @@ describe('RT-6 recorder by card: the user\'s plain answer reaches an approval ca
     const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r).not.toHaveProperty('reading_check');
+  });
+
+  it.each([
+    ['a budget', 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.', 'source_figure_not_a_change'],
+    ["today's level", 'Footfall lost from price rise is 5% today and gross margin falls by about 2 percentage points.', 'figure_not_bound'],
+  ])('N %s → refused with its true typed reason, nothing prepared or proposed', async (_why, said, why) => {
+    const ends = { source: FOOTFALL, target: MARGIN };
+    const scope = { quantities: (SERVED.nodes as Json[]).filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => String(n.label)) };
+    expect(linkEffectPrefilter(said, LINK, ends, scope)).toEqual(expect.objectContaining({ kind: 'refused',
+      refusal: 'not_the_users_statement', why }));
+    const { caps, store } = world();
+    const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
+    expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false,
+      refusal: 'not_the_users_statement', why }));
+    expect(r).not.toHaveProperty('proposal_id');
+    expect(store.outstanding('0c6dcb3d-de66-4b46-8860-4b7dce0bb107', null)).toEqual([]);
+  });
+
+  it.each([
+    ['SAID_UP', SAID_UP],
+    ['"rises by 5%"', 'When footfall lost from price rise rises by 5%, gross margin falls by about 2 percentage points.'],
+  ])('P control: %s is prepared for the card with read_by_rule false', async (_why, said) => {
+    const ends = { source: FOOTFALL, target: MARGIN };
+    const scope = { quantities: (SERVED.nodes as Json[]).filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => String(n.label)) };
+    expect(linkEffectPrefilter(said, LINK, ends, scope)).toEqual({ kind: 'prepared', said, read_by_rule: false });
+    const { caps, store } = world();
+    const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
+    expect(r).toEqual(expect.objectContaining({ ok: true, reading_check: 'read_by_olumi' }));
+    expect(cardFor(store, r).detail).toContain(said);
+    expect(store.outstanding('0c6dcb3d-de66-4b46-8860-4b7dce0bb107', null)).toHaveLength(1);
+  });
+
+  it('N direct rule: default keeps its direction miss; card mode checks the source change', () => {
+    const ends = { source: FOOTFALL, target: MARGIN };
+    const scope = { quantities: (SERVED.nodes as Json[]).filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => String(n.label)) };
+    const said = 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.';
+    expect(linkEffectTheUserStated(said, LINK, ends, scope)).toBe('direction_not_stated');
+    expect(linkEffectTheUserStated(said, LINK, ends, scope, { directionOnCard: true })).toBe('source_figure_not_a_change');
+    expect(linkEffectTheUserStated(SAID_UP, LINK, ends, scope, { directionOnCard: true })).toBeNull();
   });
 
   it.each([
