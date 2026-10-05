@@ -1386,7 +1386,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       rawGap <= MARGINAL_RAW_ODDS_GAP_PP / 100 + RAW_ODDS_GAP_FLOAT_EPSILON
     ) {
       const disambig =
-        `${winnerLabel} leads overall, though ${winner.runnerUpLabel} has marginally better raw probability.${suffix}`;
+        `${winnerLabel} was supported by the most runs of this model, though ${winner.runnerUpLabel} has marginally better raw probability.${suffix}`;
       if (disambig.length <= lengthCap) {
         return {
           text: disambig,
@@ -1850,7 +1850,7 @@ function tieHeadlineText(
   suffix: string,
 ): string {
   return tieReason === 'margin'
-    ? `${winnerLabel} is currently only fractionally ahead, so the options are effectively tied.${suffix}`
+    ? `${winnerLabel} was supported by only fractionally more runs of this model, so the options are effectively tied.${suffix}`
     : `${winnerLabel} ${leadClause}, but the analysis treats this as a close call.${suffix}`;
 }
 
@@ -2993,7 +2993,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   ),
   // Case NT (tied): effectively tied, no margin number.
   new RegExp(
-    `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${TAIL_PATTERN}$`,
+    `^.+? was supported by only fractionally more runs of this model, so the options are effectively tied\\.${TAIL_PATTERN}$`,
   ),
   // Case NT (override tie): a WIDER gap the raw near_tie.is_tie override still
   // flagged as a tie — the winner is nominally ahead but the analysis treats it
@@ -3028,7 +3028,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // banned vocabulary, so the ordinary forbidden-vocab / ID / decimal defences
   // (applied after the grammar match) still bite on a leaky slot.
   new RegExp(
-    `^.+? leads overall, though .+? has marginally better raw probability\\.${TAIL_PATTERN}$`,
+    `^.+? was supported by the most runs of this model, though .+? has marginally better raw probability\\.${TAIL_PATTERN}$`,
   ),
   // Case E (link-safe floor): minimal "{label} currently leads.{suffix}".
   // MUST stay last — the trailing `\\.${TAIL_PATTERN}$` anchor is

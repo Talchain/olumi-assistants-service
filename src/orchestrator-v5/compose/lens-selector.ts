@@ -1396,7 +1396,7 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   TOP_FACTOR_LOW_CONFIDENCE:
     'The factor that moves this result the most is also the one you are least sure about. A pre-mortem helps you name what could go wrong before you commit.',
   WIN_PROB_MODERATE:
-    'The leading option is ahead, but not by a wide margin. A pre-mortem — assuming it went wrong and asking why — helps you see what would have to break for that to happen.',
+    'Most runs supported one option, but not by a wide margin. A pre-mortem — assuming it went wrong and asking why — helps you see what would have to break for that to happen.',
   RESOLVED_EVPPI_PRIORITY:
     'This run ranked one assessed factor first for further evidence. Investigate that priority before widening the search.',
   // ── ROADMAP 2.989 — the resolvable fragile relationship ────────────────────

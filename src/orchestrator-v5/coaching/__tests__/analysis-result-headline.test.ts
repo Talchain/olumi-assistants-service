@@ -913,7 +913,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
     // Near-tie effectively-tied output (1pp). Crucially the 80% from the
     // later legacy results source must NOT leak — the same-source invariant
     // still holds.
-    expect(out).toBe('Hire X is currently only fractionally ahead, so the options are effectively tied.');
+    expect(out).toBe('Hire X was supported by only fractionally more runs of this model, so the options are effectively tied.');
     expect(out).not.toContain('80%');
     expect(out).not.toMatch(/\d+%/);
   });
@@ -994,7 +994,7 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
       // Case NT — small but real lead, flagged close
       'Hire A scored highest against your goal in 2% of runs of this model, but the options are close.',
       // Case NT — effectively tied
-      'Hire A is currently only fractionally ahead, so the options are effectively tied.',
+      'Hire A was supported by only fractionally more runs of this model, so the options are effectively tied.',
       // Case E — link-safe floor
       'Hire A scored highest in this model.',
     ];
@@ -1640,7 +1640,7 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
     // provisional_doctrine_v0 (Mission B): level 'low' appends the
     // robustness-honesty sentence; the near-tie line itself is unchanged.
     expect(out).toBe(
-      'Option A is currently only fractionally ahead, so the options are effectively tied. The result is not yet robust — small changes could flip it.',
+      'Option A was supported by only fractionally more runs of this model, so the options are effectively tied. The result is not yet robust — small changes could flip it.',
     );
     // No driver / fragility / probability / margin number at a near-tie.
     expect(out!).not.toContain('because');
@@ -1699,7 +1699,7 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Option A leads overall, though Option B has marginally better raw probability.',
+      'Option A was supported by the most runs of this model, though Option B has marginally better raw probability.',
     );
     expect(out).not.toContain('scored highest against your goal in');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
@@ -2380,7 +2380,7 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.',
+      'Defer Hiring was supported by the most runs of this model, though Hire One Senior Technical Lead has marginally better raw probability.',
     );
     // SIGN GUARD (anti sign-inversion, ref 77a4d577f): the runner-up — the
     // higher raw-probability option — is the one credited with "better raw
@@ -2403,6 +2403,7 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
     });
     expect(out).toContain('scored highest against your goal in');
     expect(out).not.toContain('leads overall');
+    expect(out).not.toContain('was supported by the most runs');
   });
 
   it('leader trails by a NON-marginal gap → no false "marginally"/"leads" claim (neutral floor)', () => {
@@ -2478,18 +2479,18 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.',
+      'Defer Hiring was supported by the most runs of this model, though Hire One Senior Technical Lead has marginally better raw probability.',
     );
   });
 
   it('the disambiguation sentence is accepted by the registry allowlist', () => {
     const sanctioned =
-      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.';
+      'Defer Hiring was supported by the most runs of this model, though Hire One Senior Technical Lead has marginally better raw probability.';
     expect(isAllowedRunAnalysisAssistantText(sanctioned)).toBe(true);
     // Defence-in-depth still bites: an internal id in a slot is rejected.
     expect(
       isAllowedRunAnalysisAssistantText(
-        'opt_b leads overall, though opt_a has marginally better raw probability.',
+        'opt_b was supported by the most runs of this model, though opt_a has marginally better raw probability.',
       ),
     ).toBe(false);
   });
@@ -2501,7 +2502,7 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
     // NO banned phrase — a regression to "recommended overall" would be swapped
     // out at egress and never reach the user.
     const sanctioned =
-      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.';
+      'Defer Hiring was supported by the most runs of this model, though Hire One Senior Technical Lead has marginally better raw probability.';
     expect(findForbiddenPhraseHit(sanctioned)).toBeNull();
     // The banned literal Paul ruled would be swapped at egress — pin the reason
     // the surface-adapted wording is used instead.

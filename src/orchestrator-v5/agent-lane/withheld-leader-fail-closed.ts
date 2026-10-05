@@ -274,7 +274,7 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
   },
   { code: 'ahead', re: /\bahead\b/i },
   // DL 0df0e1 6002469285 (Part B): the direction-neutral leader form, "N% of runs supported X" / "more runs would support X".
-  { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?)?support(?:s|ed|ing)?\b/i },
+  { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?|could\s+|still\s+)?support(?:s|ed|ing)?\b|\bsupported\s+by\s+[^.;!?]{0,48}?\b(?:runs?|simulations?|draws?)\b/i },
   /**
    * Served on bc09bb1 (Canonical 5845848896, AI Quality 5845776236): "Release to All Now is provisionally separated in
    * this model". ONE option as the subject — singular verbs only, since "the two options are separated by less than a

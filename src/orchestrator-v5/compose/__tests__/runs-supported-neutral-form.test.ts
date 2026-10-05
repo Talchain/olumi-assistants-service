@@ -23,10 +23,18 @@ const STILL = 'Most runs would still support ‘Keep Pro at £49’ even if pric
 const CARD = 'On Olumi’s estimates, the option most runs supported is more likely than not to break your churn limit.';
 const SHARE = 'In this model, 62% of runs supported ‘Raise Pro to £59 at release’ for MRR.';
 const PLAIN = 'Monthly churn is currently assumed at 3%, against your limit of 4%.';
+/** The passive forms the headline, close-call and lens composers emit (label first, so nothing that reads the leader moves). */
+const PASSIVE = [
+  '‘Keep Pro at £49’ was supported by the most runs of this model, though ‘Raise Pro to £59 at release’ has marginally better raw probability.',
+  '‘Keep Pro at £49’ was supported by only fractionally more runs of this model, so the options are effectively tied.',
+  'This is a close call: in this model, ‘Keep Pro at £49’ was supported by about 3 percentage points more of the runs than ‘Raise Pro to £59 at release’.',
+  'Most runs supported one option, but not by a wide margin.',
+];
 
 describe('the shared vocabulary (textNamesLeadingOption) reads the neutral form', () => {
   it.each([WOULD, STILL, CARD, SHARE])('RED: names a leading option: %s', (s) => { expect(textNamesLeadingOption(s)).toBe(true); });
   it('CONTROL: a sentence about a figure names none', () => { expect(textNamesLeadingOption(PLAIN)).toBe(false); });
+  it.each(PASSIVE)('RED: the passive forms name a leading option too: %s', (s) => { expect(textNamesLeadingOption(s)).toBe(true); });
 });
 
 describe('the Agent lane fail-closed classifier reads it', () => {
@@ -34,6 +42,10 @@ describe('the Agent lane fail-closed classifier reads it', () => {
     expect(sentenceRanksOptions(s, labels)).toBe(true);
   });
   it('CONTROL: the figure sentence ranks nothing', () => { expect(sentenceRanksOptions(PLAIN, labels)).toBe(false); });
+  it('RED: the passive "supported by … runs" form ranks on its own (no other ranking word)', () => {
+    const s = '‘Keep Pro at £49’ was supported by only fractionally more runs of this model.';
+    expect(sentenceRanksOptions(s, labels)).toBe(true);
+  });
 
   const wire = (permitted: boolean, text: string) => enforceAgentLaneLeaderClaimsAtWire(
     { assistant_text: text, blocks: [], suggested_actions: [],

@@ -306,7 +306,7 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * runs supported". Added WITH those composers, for the same reason as `scored_highest` above: a new leader verb the
    * alarm cannot read would switch redaction off for it.
    */
-  { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?)?support(?:s|ed|ing)?\b/i },
+  { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?|could\s+|still\s+)?support(?:s|ed|ing)?\b|\bsupported\s+by\s+[^.;!?]{0,48}?\b(?:runs?|simulations?|draws?)\b/i },
   { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
 ];
 
