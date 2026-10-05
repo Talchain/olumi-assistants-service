@@ -117,6 +117,12 @@ describe('gate 1 v2 — identical arms are detected on the Run\'s own result', (
     expect(detectIdenticalArms(threeArm(), OPTIONS)).toHaveLength(1); // control
   });
 
+  it('an UNUSABLE third arm (skipped) never hides the identical pair (each arm read on its own)', () => {
+    const b = threeArm();
+    (b.option_comparison as Rec[])[2]!.status = 'skipped';
+    expect(detectIdenticalArms(b, OPTIONS).map((g) => g.option_ids)).toEqual([['carry_on', 'hire_two']]);
+  });
+
   it('(f) a percentile present on one side only is never identical', () => {
     const b = threeArm();
     delete ((b.option_comparison as Rec[])[1]!.outcome as Rec).p90;
