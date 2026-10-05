@@ -108,6 +108,9 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
 import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/placeholder-parts.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
+// The readiness validator's own exemptions from NO_PATH_TO_GOAL, read here so the prune and readiness share one rule.
+import { limitSinkBranch } from "../../../graph/limit-sink-branch.js";
+import { inertRiskBranch } from "../../../graph/inert-risk.js";
 import { admitGoalBaseline } from "../../factor-extraction/goal-baseline-admissibility.js";
 import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits, literalConventionValue, locateLiteral } from "./quantity-evidence.js";
 import { statedEffectQuoteMatches, statedEffectUnitsMatch } from "../../provenance/stated-effect.js";
@@ -3969,8 +3972,18 @@ function projectOnce(
         ? reachesGoal
         : reachingGoal([...edges, ...refusedByShapeGate]);
 
+    // ⭐ PASS 2 P2-0 (sealed v-next, 5 Oct): readiness (`graph-structure-validator.ts` loop 2) refuses EVERY edged
+    // node except the goal, decision and options that cannot reach the goal — so an `outcome` the user sized outside
+    // the goal ("Monthly support cost", the £6 clause) left the whole sealed model at admission `none` with
+    // NO_PATH_TO_GOAL. The prune therefore withdraws every kind readiness would refuse (factor, constraint, outcome,
+    // risk), and keeps readiness's two exemptions through the SAME helpers, never a second rule: a limit-sink branch
+    // (`limitSinkBranch`) and a K3 inert risk with the causes drawn only into it (`inertRiskBranch`).
+    const limitIds = goalConstraints.map((row) => row.node_id);
+    const limitSink = limitSinkBranch(nodes, edges, limitIds);
+    const inertRisk = inertRiskBranch(nodes, edges, limitIds);
     const unmodelled = nodes.filter(
-      (n) => (n.kind === "factor" || n.kind === "constraint") && !reachesGoal.has(n.id),
+      (n) => (n.kind === "factor" || n.kind === "constraint" || n.kind === "outcome" || n.kind === "risk")
+        && !reachesGoal.has(n.id) && !limitSink.has(n.id) && !inertRisk.has(n.id),
     );
     if (unmodelled.length > 0) {
       const unmodelledIds = new Set(unmodelled.map((n) => n.id));
@@ -4008,6 +4021,20 @@ function projectOnce(
       // Edges among pruned nodes go with them. An edge whose endpoint is not on
       // the graph is not a partial truth, it is a dangling reference.
       for (const edge of edges.filter((e) => unmodelledIds.has(e.from) || unmodelledIds.has(e.to))) {
+        // ⭐ P2-0: a withdrawn edge that carries the user's own stated effect (its cause's validated relationship,
+        // bound by quantity identity at both ends) keeps that number on the cause's disclosure — the £6 a month of
+        // the support-cost clause — under the same contract as `value` above. Sizing runs after this pass, so the
+        // number is the stated relationship's located amount, never a sized coefficient.
+        const causeId = edge.provenance?.basis?.[0];
+        const causeIndex = causeId === undefined ? undefined : [...statedIdByIndex].find(([, id]) => id === causeId)?.[0];
+        const stated = causeIndex === undefined ? undefined : statedItems[causeIndex]?.relationship;
+        const at = causeId === undefined ? -1 : dropped.findIndex((d) => d.node_id === causeId && d.value === undefined
+          && (d.reason === "unconnected_to_goal" || d.reason === "disconnected_by_shape_gate"));
+        if (stated !== undefined && at >= 0 && stated.amount_span !== undefined && typeof stated.amount === "number" && Number.isFinite(stated.amount)
+          && nodes.find((n) => n.id === edge.from)?.quantity_ref === stated.from_quantity
+          && nodes.find((n) => n.id === edge.to)?.quantity_ref === stated.to_quantity) {
+          dropped[at] = { ...dropped[at], value: stated.amount, ...(stated.amount_unit ? { unit: stated.amount_unit } : {}) };
+        }
         delete provenance[edge.id];
       }
       const keptEdges = edges.filter((e) => !unmodelledIds.has(e.from) && !unmodelledIds.has(e.to));

@@ -5,8 +5,8 @@
  *
  * Runs the REAL `buildModelFromBrief` with the provider cut at the transport, then takes the registered graph through
  * the register route's own pure steps (node-kind normalisation → ingress parse → persistence projection → entity refs)
- * and the GET route's own on-read derivations (not-modelled manifest, target testability). The output is shaped like a
- * GET /graph body, so the independent scorer reads it exactly as it reads a served wire capture.
+ * and the GET route's own on-read derivations (not-modelled manifest, target testability, analysis admission). The
+ * output is shaped like a GET /graph body, so the independent scorer reads it exactly as it reads a served wire capture.
  *
  *   live:   one real agent.construct call per construction call; each raw response is banked.
  *   replay: the banked raw responses are replayed in order: zero provider calls, admission re-run on real model output.
@@ -23,6 +23,7 @@ import { projectGraphForPersistence } from '../../src/orchestrator-v5/persisted-
 import { assignEntityRefs } from '../../src/orchestrator-v5/graph/entity-refs.js';
 import { deriveNotModelledManifest } from '../../src/cee/context-integrity/not-modelled-manifest.js';
 import { targetTestabilityOf } from '../../src/orchestrator-v5/admission/target-testability.js';
+import { resolveAnalysisAdmission } from '../../src/orchestrator-v5/admission/analysis-admission.js';
 
 const argv = process.argv.slice(2);
 const arg = (name: string): string | undefined => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; };
@@ -94,6 +95,16 @@ const callStructured: CallStructuredModel = async (req) => {
 };
 const replayDrift: { call: number; fields: string[] }[] = [];
 
+/** The verdict and its codes only; the full admission object restates the graph hash and signals. */
+function analysisAdmissionSummary(graph: unknown) {
+  const admission = resolveAnalysisAdmission(graph);
+  return {
+    permitted_analysis_mode: admission.permitted_analysis_mode,
+    codes: admission.missing_important_inputs.map((input) => input.code),
+    reason_codes: admission.reasons.map((reason) => `${reason.field}:${reason.code}`),
+  };
+}
+
 let registered: { graph: unknown; brief_text: unknown; stated_dispositions?: unknown } | undefined;
 const SCENARIO = '00000000-0000-4000-8000-000000000001';
 const dispatch = async (path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> => {
@@ -130,5 +141,7 @@ writeFileSync(out, JSON.stringify({
   brief_text: brief,
   not_modelled: stored === null ? null : deriveNotModelledManifest(brief, stored),
   target_testability: stored === null ? null : targetTestabilityOf(stored),
+  // M1 (pass 2) is "testable AND admission != none": the stored graph's analysis admission, beside testability.
+  analysis_admission: stored === null ? null : analysisAdmissionSummary(stored),
 }, null, 2));
 console.log(JSON.stringify({ out, ok: (result as { ok?: unknown }).ok, calls: callIndex, drift: replayDrift.length, stored: stored !== null }));

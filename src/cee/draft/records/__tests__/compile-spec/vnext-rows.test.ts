@@ -13,6 +13,9 @@ import { sameUnit } from '../../../../../orchestrator-v5/agent-lane/same-unit.js
 import { sizeLink } from '../../../../magnitude/link-effect.js';
 import { targetTestabilityOf } from '../../../../../orchestrator-v5/admission/target-testability.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../../../orchestrator/context/placeholder-parts.js';
+import { resolveAnalysisAdmission } from '../../../../../orchestrator-v5/admission/analysis-admission.js';
+import { projectGraphForPersistence } from '../../../../../orchestrator-v5/persisted-graph-projection.js';
+import { assignEntityRefs } from '../../../../../orchestrator-v5/graph/entity-refs.js';
 
 function project(records: DraftRecordSet, brief = BRIEF) {
   const r = projectDraftRecords(records, brief); expect(r.ok).toBe(true);
@@ -116,4 +119,62 @@ describe('v-next inert flip ladder', () => {
   it('B4 EXTRACTION-UNPROVEN a calendar determiner cannot stand for a van',()=>{const r=vans();const item=r.stated_items[5]!;delete item.relationship!.range;Object.assign(item.relationship!,{amount:18,amount_literal:'18',per_source_change:1,per_source_literal:'every month'});const p=project(r,VANS);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'unit_literal_contradicts_unit'}));expect(edgeFor(p,5,r)?.provenance?.natural_effect).toBeUndefined();});
   it('instruction new generic v-next hash is pinned without moving v25',()=>{expect(createHash('sha256').update(V_NEXT_DRAFT_RECORDS_INSTRUCTION).digest('hex')).toBe('fe150807d06c4c25fe41cb2e88eaf8cf87026fd67d5bbbf808e8148b01b4ab3e');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('effect_detail');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('value_span');});
   it('determinism is byte identical',async()=>{expect(JSON.stringify(await registered())).toBe(JSON.stringify(await registered()));expect(projectionFingerprint(project(sealedRecordsVNext()))).toBe(projectionFingerprint(project(sealedRecordsVNext())));});
+});
+
+/** The graph as the store holds it: the same persistence projection the bridge row reads. */
+function stored(graph: any) {
+  return assignEntityRefs(projectGraphForPersistence(graph, { scenarioId: '11111111-1111-4111-8111-111111111111', turnClass: 'direct_answer', source: 'graph_registration' }), null).graph;
+}
+// EXTRACTION-UNPROVEN: generic vans limit/risk shapes; they prove the projector's prune rule only.
+const VANS_LIMIT = VANS + ' Keep fuel spend under £5,000 a month.';
+function vansWithFuelLimit(): DraftRecordSet {
+  const r = vans();
+  r.stated_items.push({ kind: 'constraint', source_quote: 'Keep fuel spend under £5,000 a month.', value: 5000, value_literal: '£5,000', unit: '£/month', unit_literals: ['a month'], direction: 'ceiling', direction_literal: 'under', role: 'constraint', applies_to_claim: 2 });
+  r.claims.push({ claim_kind: 'outcome', label: 'Fuel spend', unit: '£/month', value: 3000 }, { claim_kind: 'causal_link', label: 'more vans burn more fuel', from_claim: 0, to_claim: 2, effect: 'positive' });
+  return r;
+}
+function vansWithRisk(actedOnByOption: boolean): DraftRecordSet {
+  const r = vans();
+  r.claims.push({ claim_kind: 'risk', label: 'Van breakdowns' }, actedOnByOption
+    ? { claim_kind: 'causal_link', label: 'leasing adds breakdown exposure', from_stated: 2, to_claim: 2, effect: 'positive' }
+    : { claim_kind: 'causal_link', label: 'more vans more breakdowns', from_claim: 0, to_claim: 2, effect: 'positive' });
+  return r;
+}
+
+describe('pass 2 P2-0: the connectivity prune withdraws every kind readiness would refuse', () => {
+  it('P2-0 the sealed v-next stored graph is admitted for analysis with no NO_PATH_TO_GOAL', async () => {
+    const graph = stored((await registered()).graph);
+    const admission = resolveAnalysisAdmission(graph);
+    expect(targetTestabilityOf(graph)).toMatchObject({ kind: 'testable' });
+    expect(admission.permitted_analysis_mode).not.toBe('none');
+    expect(JSON.stringify(admission)).not.toContain('NO_PATH_TO_GOAL');
+  });
+  it('P2-0 the support-cost clause is withdrawn with its stated magnitude and an A1 rejected receipt', () => {
+    const r = sealedRecordsVNext(); const p = project(r);
+    const supportQuantity = r.stated_items[13]!.relationship!.to_quantity;
+    expect(p.graph.nodes.some(n => n.quantity_ref === supportQuantity)).toBe(false);
+    expect(p.graph.edges.some(e => e.provenance?.source_quote === r.stated_items[13]!.source_quote)).toBe(false);
+    expect(p.dropped).toContainEqual(expect.objectContaining({ stated_index: 13, label: r.stated_items[13]!.source_quote, reason: 'unconnected_to_goal', value: 6, unit: '£/month' }));
+    expect(p.dropped).toContainEqual(expect.objectContaining({ label: r.claims.find(c => c.quantity === supportQuantity)!.label, reason: 'unconnected_to_goal', claim_kind: 'claim' }));
+    expect(p.stated_dispositions?.find(d => d.stated_index === 13)).toMatchObject({ disposition: 'rejected', reason: 'unconnected_to_goal' });
+  });
+  it('P2-0 a risk an option moves that cannot reach the goal is withdrawn and disclosed', () => {
+    const p = project(vansWithRisk(true), VANS);
+    expect(p.graph.nodes.some(n => n.label === 'Van breakdowns')).toBe(false);
+    expect(p.dropped).toContainEqual(expect.objectContaining({ label: 'Van breakdowns', reason: 'unconnected_to_goal' }));
+  });
+  it('P2-0 CONTRAST a K3 inert risk keeps its node and its cause', () => {
+    const p = project(vansWithRisk(false), VANS);
+    const risk = p.graph.nodes.find(n => n.label === 'Van breakdowns');
+    expect(risk?.kind).toBe('risk');
+    expect(p.graph.edges.some(e => e.to === risk!.id)).toBe(true);
+    expect(p.dropped.some(d => d.node_id === risk!.id)).toBe(false);
+  });
+  it('P2-0 CONTRAST a limit-sink branch outcome is not withdrawn', () => {
+    const p = project(vansWithFuelLimit(), VANS_LIMIT);
+    const fuel = p.graph.nodes.find(n => n.label === 'Fuel spend');
+    expect(fuel?.kind).toBe('outcome');
+    expect(p.goalConstraints.map(c => c.node_id)).toContain(fuel!.id);
+    expect(p.dropped.some(d => d.node_id === fuel!.id)).toBe(false);
+  });
 });

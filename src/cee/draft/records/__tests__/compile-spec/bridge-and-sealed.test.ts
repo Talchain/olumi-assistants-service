@@ -129,7 +129,11 @@ describe('Sealed M1/M2 compile', () => {
     expect(testability).toMatchObject({ kind: 'testable' });
     expect(JSON.stringify(admission)).not.toContain('TARGET_NOT_TESTABLE');
     expect(figures).toEqual({ 'raise prices by 10%': 126000, 'launch a starter tier at £49 a month': 127350, 'keep pricing as it is': 120000 });
-    for (const index of [8, 9, 10, 12, 13]) {
+    // P2-0 (pass 2): the support-cost clause (13) sizes an outcome outside the gross-MRR goal, so the connectivity
+    // prune now withdraws it with its £6 disclosed (vnext-rows P2-0); readiness no longer refuses the whole model.
+    expect(admission.permitted_analysis_mode).not.toBe('none');
+    expect(graph.edges.some(edge => edge.provenance?.source_quote === sealedRecords().stated_items[13]!.source_quote)).toBe(false);
+    for (const index of [8, 9, 10, 12]) {
       const stated = sealedRecords().stated_items[index]!;
       const authority = stated.relationship!;
       const edge = graph.edges.find(edge => edge.provenance?.source_quote === stated.source_quote);
