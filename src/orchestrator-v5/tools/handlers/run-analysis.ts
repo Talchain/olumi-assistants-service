@@ -115,6 +115,7 @@ import {
   HandlerResultInvalidError,
 } from '../handler-errors.js';
 import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
+import { leaderLicenceShadow } from '../../compose/leader-licence-shadow.js';
 import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/turn-timings.js';
 import { config } from '../../../config/index.js';
 import { hasReducedSamplesDisclosure, withoutDirectionUnattestedOnHeldFloor } from '../../compose/claim-safety-cage.js';
@@ -2899,6 +2900,38 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'Constructed RunAnalysisHandlerFact failed schema validation',
         parsed.error,
       );
+    }
+
+    // --- 7b. A2 L1 SHADOW (Science 0df0e1) --------------------------------
+    // The ONE leader-licence verdict for this Run, compared with the live predicates L2 will replace. LOG-ONLY: it is
+    // not stored (the result schema is strict) and nothing reads it, so the Run, its fact and its reply are unchanged.
+    // Ids and codes only, never labels or prose.
+    try {
+      const shadow = leaderLicenceShadow({
+        fact: parsed.data,
+        graph: snapshot.rawPersistedGraph,
+        scenarioId: args.scenario_id,
+        summaryNamesLeader: headlineDescriptor.has_leading_option,
+      });
+      log.info(
+        {
+          event: 'cee.leader_licence.shadow',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          run_id: shadow.verdict.basis.run_id,
+          verdict: shadow.verdict.verdict,
+          leader_option_id: shadow.verdict.leader_option_id,
+          reason: shadow.verdict.reason,
+          caveats: shadow.verdict.caveats,
+          admission_mode: shadow.verdict.basis.admission_mode,
+          claim_reason: shadow.verdict.basis.claim_reason,
+          failed_closed: shadow.failed_closed,
+          disagreements: shadow.disagreements,
+        },
+        'A2 L1 leader-licence shadow verdict (no behaviour change)',
+      );
+    } catch {
+      // Shadow only: a failure here must never reach the Run.
     }
 
     // --- 8. Emit HandlerOutcome ------------------------------------------
