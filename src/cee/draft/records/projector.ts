@@ -108,6 +108,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
 import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/placeholder-parts.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
+import { LLM_STRENGTH_STD_FLOOR } from "../../constants.js";
 import { defaultFrameFor, framedFields, statedRangeFrame } from "../../../orchestrator-v5/agent-lane/frame-rule.js";
 // The readiness validator's own exemptions from NO_PATH_TO_GOAL, read here so the prune and readiness share one rule.
 import { limitSinkBranch } from "../../../graph/limit-sink-branch.js";
@@ -1020,6 +1021,8 @@ export interface ProjectedEdge {
   effect_direction?: "positive" | "negative";
   strength_mean?: number;
   strength_std?: number;
+  /** Existence probability; written only for a definitional identity (certain, 1). Absent → the V3 class default. */
+  belief_exists?: number;
   origin: "ai" | "default";
   provenance_source: "inferred" | "structural";
   provenance?: RecordProvenance;
@@ -4811,13 +4814,20 @@ function projectOnce(
     }
     const view = magnitudeNodes(nodes.map(node => ({ ...node, interventions: node.data?.interventions })), percentLevelIds({ goal_constraints: goalConstraints }));
     // Both existing same-quantity identities and explicit own-horizon flows use one checked writer.
+    // ⭐ IDENTITY NOISE (i) (Science ruling 2026-10-05): a definitional (linear pass-through) identity is NOISE-FREE —
+    // certain (exists 1) and without spread. A spread of exactly 0 is not representable on CEE's own path: V1
+    // `strength_std` and V3 `EdgeStrengthV3.std` are `.positive()`, and `normaliseDraftResponse` drops a 0 (V3 then
+    // re-derives 0.1). So it is written at the estate's existing floor for a definition, `LLM_STRENGTH_STD_FLOOR`, exactly
+    // as the legacy constructor writes a minted sum's definitional parts (`admit-model.ts`, DL ruling (ii) 5929790081).
+    // Only these written edges change; a stored graph is never rewritten. Nonlinear identities are not written here.
+    const IDENTITY_STD=LLM_STRENGTH_STD_FLOOR, IDENTITY_EXISTS=1;
     const writeDefinition=(edge:ProjectedEdge,unit:string,amount:number,source:NonNullable<ReturnType<typeof view.get>>,target:NonNullable<ReturnType<typeof view.get>>):boolean=>{
       const sized=sizeLink({direction:amount<0 ? "negative" : "positive",effect_amount:amount,effect_per_source_change:1,user_stated:true},source,target);
       if(sized.problem!==undefined || sized.natural_effect===undefined)return false;
       const prov:RecordProvenance={...edge.provenance!,source:"domain_knowledge",definitional:true,natural_effect:{...sized.natural_effect,amount,amount_unit:unit,per_source_change:1,per_source_change_unit:unit}};
       const v3nodes=nodes.map(n=>({id:n.id,kind:n.kind,unit:n.data?.unit,observed_state:n.observed_state,goal_threshold_unit:n.goal_threshold_unit}));
       if(!holdsByDefinition({from:edge.from,to:edge.to,strength:{mean:sized.mean,std:sized.std},provenance:prov},nodeUnitOf(v3nodes)))return false;
-      edge.strength_mean=sized.mean;edge.strength_std=sized.std;edge.provenance=prov;provenance[edge.id]=prov;return true;
+      edge.strength_mean=sized.mean;edge.strength_std=IDENTITY_STD;edge.belief_exists=IDENTITY_EXISTS;edge.provenance=prov;provenance[edge.id]=prov;return true;
     };
     for(const edge of edges){
       const sourceNode=nodes.find(n=>n.id===edge.from),targetNode=nodes.find(n=>n.id===edge.to);
