@@ -50,6 +50,7 @@ import {
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { MUTATION_RECEIPT_FACT_TYPES } from '../../../src/orchestrator-v5/mutation-receipt-fact-types.js';
 import { formatProbability } from '../../../src/orchestrator-v5/format/format-analysis-value.js';
+import { relationshipPhrase } from '../../../src/orchestrator-v5/format/format-graph-for-context.js';
 import {
   buildUserMessage,
   routeWithToolUse,
@@ -1037,10 +1038,14 @@ export function scoreReturnSessionContinuity(
   ) {
     failures.push('causal edge or its persisted strength/existence was not retained');
   }
+  // DERIVED from the fixture's edge mean through the production band table
+  // (relationshipPhrase), never a literal: the 'moderate positive link' literal
+  // pinned here on 28 Aug went stale when #2021 re-banded edge strengths, and
+  // mean 0.64 now reads 'strong positive link' (5 Oct 2026).
   requireText(
     failures,
     prompt,
-    'moderate positive link',
+    relationshipPhrase(expectedEdge.strength.mean),
     'display-safe causal relationship missing from routed prompt',
   );
   if (expectedSummaryMode === 'healthy') {
