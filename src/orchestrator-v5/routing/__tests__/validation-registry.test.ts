@@ -243,7 +243,7 @@ describe('run_analysis confirmation_template forwarder', () => {
       // Case NT — small but real lead, flagged close
       'Hire A scored highest against your goal in 2% of runs of this model, but the options are close.',
       // Case NT — effectively tied
-      'Hire A is currently only fractionally ahead, so the options are effectively tied.',
+      'Hire A was supported by only fractionally more runs of this model, so the options are effectively tied.',
       // Case E — floor
       'Hire A scored highest in this model.',
     ];

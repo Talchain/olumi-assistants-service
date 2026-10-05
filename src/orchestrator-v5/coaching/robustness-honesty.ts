@@ -177,7 +177,8 @@ export function closenessLead(args: {
   // override: prefer the real margin when finite (honest "narrowly ahead by N"),
   // otherwise a number-free near-tie line so we never anchor on a phantom gap.
   if (typeof marginPp === 'number' && Number.isFinite(marginPp)) {
-    return `This is a close call: ${lead} is narrowly ahead of ${runner} by about ${formatPercentagePoints(Math.abs(marginPp))}.`;
+    // DL 0df0e1 6002469285: never "ahead"; the direction-neutral form.
+    return `This is a close call: in this model, ${lead} was supported by about ${formatPercentagePoints(Math.abs(marginPp))} more of the runs than ${runner}.`;
   }
   return `This is a close call: the analysis treats ${lead} and ${runner} as a near-tie.`;
 }

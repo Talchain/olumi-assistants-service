@@ -911,7 +911,7 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
         ],
       },
       'NT',
-      'Option A is currently only fractionally ahead, so the options are effectively tied.',
+      'Option A was supported by only fractionally more runs of this model, so the options are effectively tied.',
     ],
     [
       'D-W leader trails marginally',
@@ -922,7 +922,7 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
         ],
       },
       'LT',
-      'Option A leads overall, though Option B has marginally better raw probability.',
+      'In this model, Option B was supported by marginally more runs than Option A (50% against 45%), so the two are close. Change a figure you’re unsure about to see what separates them.',
     ],
   ];
 

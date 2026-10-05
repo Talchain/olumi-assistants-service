@@ -322,7 +322,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead is currently only fractionally ahead, so the options are effectively tied.',
+      'Hire One Senior Technical Lead was supported by only fractionally more runs of this model, so the options are effectively tied.',
     );
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });

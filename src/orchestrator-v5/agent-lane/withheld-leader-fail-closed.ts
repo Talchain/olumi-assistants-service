@@ -273,6 +273,8 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     re: /\bbetter\s+than\b|\bbetter\s+(?:option|choice|bet|path|route|outcome|result|performer|pick|alternative|fit|candidate|position|odds|chances?|prospects?)s?\b|\b(?:perform(?:s|ed|ing)?|do|does|did|doing|fare[sd]?|faring|scor(?:e|es|ed|ing)|comes?\s+out|came\s+out|fits?|fitted|works?|worked)\s+better\b/i,
   },
   { code: 'ahead', re: /\bahead\b/i },
+  // DL 0df0e1 6002469285 (Part B): the direction-neutral leader form, "N% of runs supported X" / "X would be supported by the most runs".
+  { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?|could\s+|still\s+)?support(?:s|ed|ing)?\b|\bsupported\s+by\s+[^.;!?]{0,48}?\b(?:runs?|simulations?|draws?)\b/i },
   /**
    * Served on bc09bb1 (Canonical 5845848896, AI Quality 5845776236): "Release to All Now is provisionally separated in
    * this model". ONE option as the subject — singular verbs only, since "the two options are separated by less than a

@@ -71,10 +71,10 @@ const RUN_NOT_CURRENT = 'I can’t explain that result as current. Check the cur
 // Each of RC's three measured sentence kinds, from ISL's real D3 links.
 const [savings, overspend] = ISL_D3_BLOCK.links;
 const STATUSES: Record<string, { block: Rec; said: RegExp }> = {
-  quoted: { block: { ...ISL_D3_BLOCK, links: [savings] }, said: /would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter/ },
+  quoted: { block: { ...ISL_D3_BLOCK, links: [savings] }, said: /‘[^’]+’ would be the first to be supported by the most runs if monthly cloud savings's effect on monthly spend fell below about a quarter/ },
   below_a_tenth: { block: { ...ISL_D3_BLOCK, links: [{ ...savings, threshold: -0.02, replicate_thresholds: [-0.02, -0.02, -0.02, -0.02], replicate_range: 0 }] },
-    said: /would come out ahead only if monthly cloud savings's effect on monthly spend all but disappeared/ },
-  no_change: { block: { ...ISL_D3_BLOCK, links: [overspend] }, said: /would still lead even if monthly cloud overspend during migration's average effect/ },
+    said: /‘[^’]+’ would be the first to be supported by the most runs only if monthly cloud savings's effect on monthly spend all but disappeared/ },
+  no_change: { block: { ...ISL_D3_BLOCK, links: [overspend] }, said: /‘[^’]+’ would still be supported by the most runs even if monthly cloud overspend during migration's average effect/ },
 };
 const canonical = buildCanonicalAnalysisReadyFromGraph(D3.body.draft_graph) as Rec;
 // The SAME Run (scenario, computed_against_hash, computed_at untouched): only the permission or the admission moves.
@@ -142,8 +142,8 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(modelCalls).toBe(0);
     expect(dispatch.calls).toHaveLength(1);
     expect(dispatch.calls[0].payload.scenario_id).toBe(SCENARIO);
-    const answer = "In this model, ‘Stay on AWS’ would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
-      + "‘Switch to GCP’ would still lead even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
+    const answer = "In this model, ‘Stay on AWS’ would be the first to be supported by the most runs if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
+      + "‘Switch to GCP’ would still be supported by the most runs even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
     // The turn's answer is the reply's last paragraph, intact. This served Run is quantified-provisional (the user's
     // own estimates are off the deciding path), so the leader wire gate puts its caveat first: the governing egress
     // rule (leading-option-wire-enforcement.ts), not this turn's words.
@@ -175,7 +175,7 @@ describe('the real route: "What would change the result?" → measured tipping p
     // D3's Run quotes no factor threshold (#2536 `no_flip_in_range`); the wire gate's caveat leads, as in W1.
     const coached = 'This analysis has no factor threshold to quote within the ranges it checked.';
     expect(text === coached || text.endsWith(`\n\n${coached}`), text).toBe(true);
-    expect(text).not.toMatch(/would come out ahead|would still lead|Your model has changed since/);
+    expect(text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|Your model has changed since/);
   });
 
   it('W4: a measurement that is not an answer (unavailable) falls back to the same coaching, never RC\'s honest limit', async () => {
@@ -184,7 +184,7 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(dispatch.calls).toHaveLength(1);
     expect(modelCalls).toBe(0);
     expect(body.assistant_text).toBe(await coaching());
-    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|can't yet measure what would change/);
+    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|can't yet measure what would change/);
     expect(body.suggested_actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
   });
 
@@ -194,7 +194,7 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(dispatch.calls).toHaveLength(1);
     expect(modelCalls).toBe(0);
     expect(body.assistant_text).toBe(await coaching());
-    expect(body.assistant_text).not.toMatch(/Your model has changed since|would come out ahead|would still lead/);
+    expect(body.assistant_text).not.toMatch(/Your model has changed since|would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs/);
   });
 
   it('W5: an edit while ISL measures (the bound Run is no longer current at the final read) is never answered', async () => {
@@ -203,7 +203,7 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(dispatch.calls).toHaveLength(1);
     expect(modelCalls).toBe(0);
     expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
-    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs/);
   });
 
   it('W6: a Run the Explain control cannot bind (no computed_against_hash) is never measured', async () => {
@@ -220,7 +220,7 @@ describe('the real route: "What would change the result?" → measured tipping p
     const body = await post(PRESS.id, PRESS.message);
     expect(dispatch.calls).toHaveLength(1);
     expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
-    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs/);
   });
 
   it('W7b: a block measured for another Run than the one shown is refused: the shown Run\'s coaching answers', async () => {
@@ -241,7 +241,7 @@ describe('the real route: "What would change the result?" → measured tipping p
   });
 
   describe('ONE owner on replay (Codex P1 #2542: the replay always chose SCI-HERO)', () => {
-    const MEASURED = "‘Switch to GCP’ would still lead even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
+    const MEASURED = "‘Switch to GCP’ would still be supported by the most runs even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
     it('R1: a retry of a measured turn, its Run still current, is the SAME measured answer and never measures again', async () => {
       const turn = randomUUID();
       const first = await post(PRESS.id, PRESS.message, turn);
@@ -256,7 +256,7 @@ describe('the real route: "What would change the result?" → measured tipping p
       await post(PRESS.id, PRESS.message, turn);
       served.state = runB();
       const again = await post(PRESS.id, PRESS.message, turn);
-      expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+      expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs/);
       expect(again.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\.$/);
       expect(dispatch.calls).toHaveLength(1);
     });
@@ -264,7 +264,7 @@ describe('the real route: "What would change the result?" → measured tipping p
       const turn = randomUUID();
       await post(PRESS.id, PRESS.message, turn);
       const again = await killSwitchOff(() => post(PRESS.id, PRESS.message, turn));
-      expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+      expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs/);
       expect(dispatch.calls).toHaveLength(1);
     });
   });
@@ -282,7 +282,7 @@ describe('the real route: "What would change the result?" → measured tipping p
           expect(first.assistant_text, first.assistant_text).toMatch(said);
           withhold();
           const again = await post(PRESS.id, PRESS.message, turn);
-          expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+          expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
           expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
           expect(dispatch.calls).toHaveLength(1);
           expect(modelCalls).toBe(0);
@@ -308,7 +308,7 @@ describe('the real route: "What would change the result?" → measured tipping p
             expect((await post(PRESS.id, PRESS.message, turn)).assistant_text).toMatch(said);
             withhold();
             const again = await retryChipless(app, turn, chip);
-            expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+            expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
             expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
             expect(dispatch.calls).toHaveLength(1);
           });
@@ -321,11 +321,11 @@ describe('the real route: "What would change the result?" → measured tipping p
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: PRESS.message, source: 'chip', chip: { id: PRESS.id, action_type: 'what_would_flip' } } });
     expect(r.statusCode, r.body).toBe(200);
     expect(dispatch.calls).toHaveLength(0);
-    expect((r.json() as { assistant_text: string }).assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+    expect((r.json() as { assistant_text: string }).assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
   });
 
   describe('every replay CALLER reaches the one owner (Codex delta follow-up on #2542: claim wait, append repair)', () => {
-    const MEASURED_TAIL = "would still lead even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
+    const MEASURED_TAIL = "even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
     /** Holds the first press inside its measurement, so a second request meets the first one's claim. */
     const holdMeasurement = () => {
       let release!: () => void;
@@ -359,7 +359,7 @@ describe('the real route: "What would change the result?" → measured tipping p
       const [first, second] = await Promise.all([firstP, secondP]);
       expect(first.assistant_text.endsWith(RUN_NOT_CURRENT), first.assistant_text).toBe(true);
       expect(second.assistant_text, second.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\.$/);
-      expect(second.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+      expect(second.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
       expect(dispatch.calls).toHaveLength(1);
     }, 30_000);
 
@@ -385,7 +385,7 @@ describe('the real route: "What would change the result?" → measured tipping p
       expect((await post(PRESS.id, PRESS.message, turn)).assistant_text.endsWith(MEASURED_TAIL)).toBe(true);
       WITHHELD['admission exploratory']();
       const again = await appendRepairRetry(turn);
-      expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+      expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
       expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
     });
 
@@ -406,7 +406,7 @@ describe('the real route: "What would change the result?" → measured tipping p
       const body = await post(PRESS.id, PRESS.message);
       expect(served.reads).toBeGreaterThan(1);
       expect(dispatch.calls).toHaveLength(1); // the press read licensed it, so it was measured
-      expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+      expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
       expect(body.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\.$/);
     });
 
@@ -441,7 +441,7 @@ describe('the real route: "What would change the result?" → measured tipping p
             const again = form === 'chip'
               ? (await restarted.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: PRESS.message, source: 'chip', chip: { id: PRESS.id }, turn_id: turn } })).json() as { assistant_text: string }
               : await retryChipless(restarted, turn, form);
-            expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+            expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|runs would (?:still )?support|(?:still )?be supported by the most runs|all but disappeared/);
             expect(again.assistant_text).toMatch(/There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet\./); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
             expect(dispatch.calls).toHaveLength(1);
           });
