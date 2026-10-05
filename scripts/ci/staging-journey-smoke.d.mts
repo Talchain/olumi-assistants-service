@@ -29,6 +29,43 @@ export declare const BUILD_PROBE_PATH: string;
 /** The build a response's {@link BUILD_HEADER} names; null when absent or malformed. */
 export declare function servedBuildFromHeaders(headers: { get(name: string): string | null } | null | undefined): string | null;
 
+/**
+ * Which commit a run measures: an explicit sha wins; else the CURRENT branch head
+ * (`stale` = the triggering event named a different commit); else, only when the
+ * head is not required, the event's sha. Required-but-unreadable = `head_unreadable`.
+ */
+export declare function resolveTarget(input: {
+  explicitSha?: string;
+  eventSha?: string;
+  headSha?: string | null;
+  headRequired?: boolean;
+}): { sha: string | null; source: "explicit" | "head" | "event" | "head_unreadable" | "none"; stale: boolean };
+
+/** Consecutive Phase-1 header matches needed before the journey (Render rollover settle). */
+export declare const SETTLE_MATCHES_DEFAULT: number;
+
+/** One Phase-1 probe folded into the consecutive-match count; any non-match restarts it. */
+export declare function settleStep(streak: number, served: string | null, want: string, needed: number): { streak: number; done: boolean };
+
+/** Phase 3 tick spacing (ms) and the consecutive mismatches that make a revert. */
+export declare const WATCH_INTERVAL_MS: number;
+export declare const WATCH_REVERT_TICKS: number;
+
+/**
+ * One live-vs-head watch tick: a moved head = `superseded`; a tick missing either
+ * reading decides nothing; the served build differing from an unchanged head on
+ * `revertTicks` consecutive ticks = `revert`.
+ */
+export declare function watchStep(
+  state: { mismatches: number },
+  tick: { served: string | null; head: string | null },
+  target: string,
+  revertTicks?: number,
+): { state: { mismatches: number }; verdict: "continue" | "superseded" | "revert"; decided: boolean; served?: string; head?: string };
+
+/** The revert red: what went live over the head, and the exact redeploy command. */
+export declare function revertMessage(input: { target: string; served: string; renderServiceId?: string }): string;
+
 /** The Agent construction call's prompt alias (`agent-lane/runtime/prompt-identity.ts`). */
 export declare const AGENT_CONSTRUCT_ALIAS: string;
 

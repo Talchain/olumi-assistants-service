@@ -53,6 +53,13 @@ import {
   AGENT_CONSTRUCT_ALIAS,
   BUILD_HEADER,
   BUILD_PROBE_PATH,
+  resolveTarget,
+  settleStep,
+  watchStep,
+  revertMessage,
+  SETTLE_MATCHES_DEFAULT,
+  WATCH_INTERVAL_MS,
+  WATCH_REVERT_TICKS,
 } from "../../../scripts/ci/staging-journey-smoke.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -439,10 +446,22 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
     expect(wf.on.schedule).toBeUndefined();
   });
 
-  it("asserts deploy freshness by passing the expected commit", () => {
-    // The "deploy did not ship" half. Without SMOKE_EXPECT_SHA the gate would
-    // happily test whatever stale build is deployed and call it green.
-    expect(String(requireSmokeStep().env.SMOKE_EXPECT_SHA)).toContain("github.sha");
+  it("asserts deploy freshness against the CURRENT head of staging, not the event's sha", () => {
+    // The "deploy did not ship" half. Without a target the gate would happily
+    // test whatever stale build is deployed and call it green. Since 5 Oct the
+    // target is the branch HEAD (resolved by the script), because a late
+    // duplicate push event named an OLDER commit and its run measured that.
+    const env = requireSmokeStep().env;
+    expect(env.SMOKE_HEAD_REPO).toBe("${{ github.repository }}");
+    expect(env.SMOKE_HEAD_BRANCH).toBe("staging");
+    expect(env.GITHUB_TOKEN).toBe("${{ github.token }}");
+    expect(env.SMOKE_EVENT_SHA).toBe("${{ github.sha }}");
+    // An explicit dispatch sha still wins; it must NOT fall back to github.sha.
+    expect(env.SMOKE_EXPECT_SHA).toBe("${{ github.event.inputs.expect_sha }}");
+    // Phase 3 stays on: the workflow never sets the watch window (0 = off).
+    expect(env.SMOKE_WATCH_MS).toBeUndefined();
+    // Reading the branch needs nothing beyond the job's read-only token.
+    expect(wf.permissions).toEqual({ contents: "read" });
   });
 });
 
@@ -1778,11 +1797,13 @@ describe("11 Sep — the gate samples, and REDS on a RATE", () => {
       expect(() => defaultOf("SMOKE_NO_SUCH_KNOB")).toThrow();
     });
 
-    it("timeout-minutes exceeds the freshness poll plus the journey budget", () => {
+    it("timeout-minutes exceeds the freshness poll plus the journey budget plus the live-vs-head watch", () => {
       const wf = parse(readFileSync(WORKFLOW_PATH, "utf8"));
       const timeoutMinutes = wf.jobs.journey["timeout-minutes"];
       expect(typeof timeoutMinutes).toBe("number");
-      const neededMinutes = (freshnessDefaultMs() + defaultOf("SMOKE_JOURNEY_BUDGET_MS")) / 60000;
+      expect(defaultOf("SMOKE_WATCH_MS")).toBeGreaterThan(0);
+      const neededMinutes =
+        (freshnessDefaultMs() + defaultOf("SMOKE_JOURNEY_BUDGET_MS") + defaultOf("SMOKE_WATCH_MS")) / 60000;
       expect(
         timeoutMinutes,
         `the job would be KILLED mid-report: timeout-minutes=${timeoutMinutes} but the script's own ` +
@@ -2058,5 +2079,167 @@ describe("staging journey smoke — Phase 1 reads the build header, never /healt
     expect(servedBuildFromHeaders(new Headers({ "x-other": "5e79d2d" }))).toBeNull();
     expect(servedBuildFromHeaders(new Headers({ [BUILD_HEADER]: "unknown" }))).toBeNull();
     expect(servedBuildFromHeaders(undefined)).toBeNull();
+  });
+});
+
+/**
+ * THE LATE DUPLICATE PUSH EVENT (CI OPTIMISER E21, 5 Oct 2026; DL github-e8).
+ * GitHub delivered the 147c6630 push twice; the second copy (17:31:24Z) made
+ * Render deploy 147c6630 over b02a3cc1 (live 17:35:25Z) and started a smoke run
+ * for 147c6630 that cancelled the head's run. The fixture is the REAL Render
+ * deploy timeline and staging ref activity for 15:30–18:00Z, unedited. The
+ * replay drives the SAME pure decisions the loops use (resolveTarget,
+ * settleStep, watchStep) at their real cadence: served(t) = the commit of the
+ * latest Render deploy whose finishedAt ≤ t; head(t) = the latest ref update ≤ t.
+ */
+describe("staging journey smoke — a late duplicate push event cannot pass unseen", () => {
+  const FX = readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/staging-revert-20261005.json"));
+  const ms = (iso: string): number => Date.parse(iso);
+  const servedAt = (t: number): string | null => {
+    let best: any = null;
+    for (const d of FX.render_deploys) {
+      if (d.finishedAt && ms(d.finishedAt) <= t && (!best || ms(d.finishedAt) > ms(best.finishedAt))) best = d;
+    }
+    return best ? best.commit.slice(0, 7) : null; // the header carries the SHORT build
+  };
+  const headAt = (t: number): string | null => {
+    let best: any = null;
+    for (const a of FX.ref_activity) if (ms(a.timestamp) <= t && (!best || ms(a.timestamp) >= ms(best.timestamp))) best = a;
+    return best ? best.after : null;
+  };
+  const full = (prefix: string): string => {
+    const hit = FX.render_deploys.find((d: any) => d.commit.startsWith(prefix));
+    if (!hit) throw new Error(`no commit ${prefix} in the fixture`);
+    return hit.commit;
+  };
+
+  /** One run, replayed: resolve → Phase 1 settle (15 s) → journey (journeyMs) → Phase 3 watch (30 s, 12 min). */
+  const replayRun = (startIso: string, eventSha: string, journeyMs: number, measure: "head" | "event" = "head") => {
+    const start = ms(startIso);
+    const target = measure === "head"
+      ? resolveTarget({ eventSha, headSha: headAt(start), headRequired: true })
+      : { sha: eventSha, source: "event", stale: false };
+    let t = start;
+    let streak = 0;
+    let settled = false;
+    for (let i = 0; i < 60 && !settled; i += 1) {
+      const step = settleStep(streak, servedAt(t), target.sha as string, SETTLE_MATCHES_DEFAULT);
+      streak = step.streak;
+      settled = step.done;
+      if (!settled) t += 15000;
+    }
+    const settledAt = t;
+    t += journeyMs;
+    let state = { mismatches: 0 };
+    const end = t + 720000;
+    let verdict: string = "held";
+    let at = 0;
+    let served: string | undefined;
+    while (t + WATCH_INTERVAL_MS <= end) {
+      t += WATCH_INTERVAL_MS;
+      const step = watchStep(state, { served: servedAt(t), head: headAt(t) }, target.sha as string);
+      state = step.state;
+      if (step.verdict !== "continue") { verdict = step.verdict; at = t; served = step.served; break; }
+    }
+    return { target, settled, settledAt: new Date(settledAt).toISOString(), verdict, at: at ? new Date(at).toISOString() : null, served };
+  };
+
+  it("the fixture really is the incident: the push is listed twice and 147c6630 is deployed twice", () => {
+    const dup = FX.ref_activity.filter((a: any) => a.after.startsWith("147c6630"));
+    expect(dup).toHaveLength(2);
+    expect(dup[0].timestamp).toBe(dup[1].timestamp);
+    const stale = FX.render_deploys.filter((d: any) => d.commit.startsWith("147c6630") && d.trigger === "new_commit");
+    expect(stale.map((d: any) => d.createdAt.slice(11, 19))).toEqual(["17:21:18", "17:31:24"]);
+    expect(servedAt(ms("2026-10-05T17:36:00Z"))).toBe("147c663");
+    expect(headAt(ms("2026-10-05T17:36:00Z"))).toBe(full("b02a3cc1"));
+  });
+
+  it.each([0, 90000, 180000])(
+    "REPLAY 17:31:24Z (the stale event's own run, journey %i ms): it measures the head b02a3cc1 and the watch goes RED",
+    (journeyMs) => {
+      const r = replayRun("2026-10-05T17:31:24Z", full("147c6630"), journeyMs);
+      expect(r.target).toEqual({ sha: full("b02a3cc1"), source: "head", stale: true });
+      expect(r.settled).toBe(true);
+      expect(r.settledAt).toBe("2026-10-05T17:33:54.000Z"); // b02a3cc1 live 17:33:19 → 3 matches at :24/:39/:54
+      expect(r.verdict).toBe("revert");
+      expect(r.served).toBe("147c663");
+      expect(Date.parse(r.at as string)).toBeLessThan(Date.parse("2026-10-05T17:39:58Z")); // before the manual redeploy
+    },
+  );
+
+  it("PRE-FIX CONTROL: measuring the event's sha (the old rule) never reds — the revert went unseen", () => {
+    const r = replayRun("2026-10-05T17:31:24Z", full("147c6630"), 90000, "event");
+    expect(r.verdict).toBe("superseded");
+  });
+
+  it("CONTROL: the head's own on-time run before it (147c6630 at 17:21:19Z) ends superseded by the newer push, not red", () => {
+    const r = replayRun("2026-10-05T17:21:19Z", full("147c6630"), 90000);
+    expect(r.target).toEqual({ sha: full("147c6630"), source: "head", stale: false });
+    expect(r.verdict).toBe("superseded");
+  });
+
+  it("CONTROL: a quiet deploy (9d556065 at 16:03:20Z) holds for the window or ends superseded — never a revert", () => {
+    const r = replayRun("2026-10-05T16:03:20Z", full("9d556065"), 90000);
+    expect(r.target.stale).toBe(false);
+    expect(["held", "superseded"]).toContain(r.verdict);
+  });
+
+  it("the revert red names the head, the stale build and the exact redeploy", () => {
+    const m = revertMessage({ target: full("b02a3cc1"), served: "147c663", renderServiceId: "srv-d4slpaili9vc73eiq4og" });
+    expect(m).toContain("LIVE ≠ HEAD");
+    expect(m).toContain("b02a3cc1");
+    expect(m).toContain("147c663");
+    expect(m).toContain(`https://api.render.com/v1/services/srv-d4slpaili9vc73eiq4og/deploys -d '{"commitId":"${full("b02a3cc1")}"}'`);
+  });
+});
+
+describe("staging journey smoke — target, settle and watch decisions", () => {
+  const A = "b02a3cc12940a3e3842504288947eac9f52130f6";
+  const B = "147c6630028fb323049e24415bf9b74b730fef36";
+
+  it("resolveTarget: explicit wins; else the head; the head required but unreadable is UNMEASURED, never the event", () => {
+    expect(resolveTarget({ explicitSha: "abc1234", eventSha: B, headSha: A, headRequired: true })).toEqual({ sha: "abc1234", source: "explicit", stale: false });
+    expect(resolveTarget({ eventSha: A, headSha: A, headRequired: true })).toEqual({ sha: A, source: "head", stale: false });
+    expect(resolveTarget({ eventSha: B, headSha: A, headRequired: true })).toEqual({ sha: A, source: "head", stale: true });
+    expect(resolveTarget({ eventSha: B, headSha: null, headRequired: true })).toEqual({ sha: null, source: "head_unreadable", stale: false });
+    expect(resolveTarget({ eventSha: B, headSha: "not-a-sha", headRequired: true }).source).toBe("head_unreadable");
+    // Local runs (no head repo): the old behaviour.
+    expect(resolveTarget({ eventSha: B, headSha: null })).toEqual({ sha: B, source: "event", stale: false });
+    expect(resolveTarget({})).toEqual({ sha: null, source: "none", stale: false });
+  });
+
+  it("settleStep: a non-match (old instance, or no header) restarts the count", () => {
+    let streak = 0;
+    const seen: boolean[] = [];
+    for (const served of ["b02a3cc", "147c663", "b02a3cc", null, "b02a3cc", "b02a3cc", "b02a3cc"]) {
+      const step = settleStep(streak, served, A, SETTLE_MATCHES_DEFAULT);
+      streak = step.streak;
+      seen.push(step.done);
+    }
+    expect(seen).toEqual([false, false, false, false, false, false, true]);
+    expect(SETTLE_MATCHES_DEFAULT).toBe(3);
+  });
+
+  it("watchStep: superseded on a moved head; no decision without both readings; revert needs consecutive mismatches", () => {
+    expect(watchStep({ mismatches: 0 }, { served: "147c663", head: B }, A).verdict).toBe("superseded");
+    expect(watchStep({ mismatches: 1 }, { served: "147c663", head: null }, A)).toEqual({ state: { mismatches: 1 }, verdict: "continue", decided: false });
+    expect(watchStep({ mismatches: 1 }, { served: null, head: A }, A)).toEqual({ state: { mismatches: 1 }, verdict: "continue", decided: false });
+    const one = watchStep({ mismatches: 0 }, { served: "147c663", head: A }, A);
+    expect(one).toMatchObject({ verdict: "continue", decided: true, state: { mismatches: 1 } });
+    expect(watchStep(one.state, { served: "147c663", head: A }, A)).toMatchObject({ verdict: "revert", served: "147c663" });
+    // A match between two mismatches resets: one stray answer is not a revert.
+    const reset = watchStep(one.state, { served: "b02a3cc", head: A }, A);
+    expect(reset.state.mismatches).toBe(0);
+    expect(watchStep(reset.state, { served: "147c663", head: A }, A).verdict).toBe("continue");
+    expect(WATCH_REVERT_TICKS).toBe(2);
+    expect(WATCH_INTERVAL_MS).toBe(30000);
+  });
+
+  it("the loops use these decisions (wiring pin)", () => {
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain("resolveTarget({ explicitSha, eventSha, headSha, headRequired })");
+    expect(src).toContain("settleStep(streak, served, expectSha, settleMatches)");
+    expect(src).toContain("watchStep(state, { served: probe?.served ?? null, head }, target)");
+    expect(src).toContain("await watchLiveVsHead(base, expectSha, watchMs)");
   });
 });

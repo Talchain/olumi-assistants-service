@@ -96,8 +96,18 @@
  *                    https://staging--olumi.netlify.app. Required, not
  *                    defaulted: a gate that invents its own origin would pass
  *                    while every real browser was being refused.
- *   SMOKE_EXPECT_SHA (optional) commit expected to be serving; enables Phase 1
- *                    and the per-turn served-build check
+ *   SMOKE_EXPECT_SHA (optional) an EXPLICIT commit to measure (dispatch input);
+ *                    wins over the branch head. Enables Phase 1, the per-turn
+ *                    served-build check and Phase 3.
+ *   SMOKE_HEAD_REPO / SMOKE_HEAD_BRANCH (CI) owner/repo and branch whose CURRENT
+ *                    head is measured (see resolveTarget); with GITHUB_TOKEN.
+ *                    Set = the head is required: unreadable is a red.
+ *   SMOKE_EVENT_SHA  (CI) the commit the triggering event named; only compared,
+ *                    to say when a run was triggered by a stale event
+ *   SMOKE_SETTLE_MATCHES (default 3) consecutive Phase-1 header matches
+ *   SMOKE_WATCH_MS   (default 720000 = 12 min) Phase 3, the live-vs-head watch;
+ *                    0 = off (local runs only)
+ *   SMOKE_RENDER_SERVICE_ID (optional) named in the revert red's redeploy command
  *   SMOKE_FRESHNESS_TIMEOUT_MS (default 900000 = 15 min)
  *   SMOKE_TURN_TIMEOUT_MS      (default 180000 = 3 min)
  */
@@ -117,6 +127,105 @@ export const BUILD_HEADER = "x-olumi-service-build";
  * Never /healthz — see the header.
  */
 export const BUILD_PROBE_PATH = "/__journey-smoke/build";
+
+/**
+ * ⭐ WHICH COMMIT A RUN MEASURES: THE BRANCH HEAD, NOT THE EVENT'S SHA.
+ *
+ * MEASURED, 5 Oct 2026 (CI OPTIMISER E21): GitHub delivered the 147c6630 push
+ * event TWICE — the staging ref activity lists `ed245a15→147c6630` twice, and
+ * the second copy arrived at 17:31:24Z, 16 s after b02a3cc1 was pushed. Render
+ * deployed the event's SHA (new_commit, live 17:35:25Z over b02a3cc1), and THIS
+ * workflow ran for it too: that stale run cancelled the head's run under
+ * `cancel-in-progress` and measured 147c6630. 30 Sep had the same shape
+ * (d6d3896b's event reached Render 9 min late, after d3d28031).
+ *
+ * So in CI the run resolves the CURRENT head of the deployed branch and measures
+ * that; a run triggered by a stale event says so and still measures the head. An
+ * explicit `expect_sha` (dispatch) wins. When the head is required (CI) and
+ * cannot be read, the run is UNMEASURED — a red, never a fallback to the event.
+ */
+const SHA40_RE = /^[0-9a-f]{40}$/i;
+
+/** Two build identifiers name the same commit: a 7+ char prefix of one is a prefix of the other. */
+function sameBuild(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x.length < 7 || y.length < 7) return false;
+  const n = Math.min(x.length, y.length);
+  return x.slice(0, n) === y.slice(0, n);
+}
+
+/**
+ * @param {{explicitSha?: string, eventSha?: string, headSha?: string|null, headRequired?: boolean}} input
+ * @returns {{sha: string|null, source: "explicit"|"head"|"event"|"head_unreadable"|"none", stale: boolean}}
+ */
+export function resolveTarget({ explicitSha, eventSha, headSha, headRequired = false }) {
+  const explicit = String(explicitSha ?? "").trim();
+  if (explicit) return { sha: explicit, source: "explicit", stale: false };
+  const head = typeof headSha === "string" && SHA40_RE.test(headSha.trim()) ? headSha.trim().toLowerCase() : null;
+  const event = String(eventSha ?? "").trim().toLowerCase();
+  if (head) return { sha: head, source: "head", stale: event.length > 0 && !sameBuild(event, head) };
+  if (headRequired) return { sha: null, source: "head_unreadable", stale: false };
+  return event ? { sha: event, source: "event", stale: false } : { sha: null, source: "none", stale: false };
+}
+
+/**
+ * ⭐ PHASE 1 SETTLES BEFORE THE JOURNEY. Measured: 2 of the first 7 automatic runs
+ * (16c5397b, ed245a15) saw the new build on the FIRST header hit, then had turn 1
+ * served by the OLD build and turn 2 answered HTTP 502 while it drained — Render
+ * routes to both during a rollover. So the target must be seen on N CONSECUTIVE
+ * probes (15 s apart) before Phase 2; any other answer restarts the count.
+ */
+export const SETTLE_MATCHES_DEFAULT = 3;
+
+/** One Phase-1 probe folded into the consecutive-match count. Pure. */
+export function settleStep(streak, served, want, needed) {
+  const next = sameBuild(served, want) ? streak + 1 : 0;
+  return { streak: next, done: next >= needed };
+}
+
+/**
+ * ⭐ PHASE 3 — LIVE-VS-HEAD WATCH. The stale deploy went live 2 min after the
+ * head did (5 Oct) — after every per-run check had finished — so nothing told
+ * anyone staging was serving the wrong build. For WATCH_WINDOW after the
+ * journey, every WATCH_INTERVAL the run reads the served build and the branch
+ * head. A newer push ends the watch (its own run takes over); the served build
+ * differing from an UNCHANGED head on WATCH_REVERT_TICKS consecutive ticks is a
+ * REVERT, and a red. A tick missing either reading decides nothing.
+ */
+export const WATCH_INTERVAL_MS = 30000;
+export const WATCH_REVERT_TICKS = 2;
+
+/**
+ * One watch tick. Pure.
+ * @param {{mismatches: number}} state
+ * @param {{served: string|null, head: string|null}} tick
+ * @param {string} target the commit the run measured
+ * @returns {{state: {mismatches: number}, verdict: "continue"|"superseded"|"revert", decided: boolean, served?: string, head?: string}}
+ */
+export function watchStep(state, tick, target, revertTicks = WATCH_REVERT_TICKS) {
+  const mismatches = state?.mismatches ?? 0;
+  const head = typeof tick?.head === "string" && SHA40_RE.test(tick.head) ? tick.head.toLowerCase() : null;
+  const served = typeof tick?.served === "string" && /^[0-9a-f]{7,40}$/i.test(tick.served) ? tick.served : null;
+  if (head && !sameBuild(head, target)) return { state: { mismatches: 0 }, verdict: "superseded", decided: true, head };
+  if (!head || !served) return { state: { mismatches }, verdict: "continue", decided: false };
+  if (sameBuild(served, target)) return { state: { mismatches: 0 }, verdict: "continue", decided: true };
+  const n = mismatches + 1;
+  return { state: { mismatches: n }, verdict: n >= revertTicks ? "revert" : "continue", decided: true, served };
+}
+
+/** The red a revert produces: what happened, and the exact redeploy. */
+export function revertMessage({ target, served, renderServiceId }) {
+  const svc = renderServiceId || "<render-service-id>";
+  return (
+    `LIVE ≠ HEAD: staging's head is ${target.slice(0, 8)} but build ${served} went live over it with no newer push — ` +
+    `a late duplicate push event redeployed an older commit (seen 30 Sep 19:21Z, 5 Oct 17:35Z). Redeploy the head now: ` +
+    `Render → cee-staging → Manual Deploy → "Deploy latest commit", or ` +
+    `curl -X POST -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" ` +
+    `https://api.render.com/v1/services/${svc}/deploys -d '{"commitId":"${target}"}'`
+  );
+}
 
 export const MIN_NODES = 4;
 export const MIN_OPTIONS = 2;
@@ -1394,29 +1503,71 @@ export function servedBuildFromHeaders(headers) {
   return typeof v === "string" && /^[0-9a-f]{7,40}$/i.test(v.trim()) ? v.trim() : null;
 }
 
+/** One header probe: `{status, served}`, or null when unreachable. Never a body, never /healthz. */
+async function probeServedBuild(base) {
+  try {
+    const res = await fetch(`${base}${BUILD_PROBE_PATH}`, { signal: AbortSignal.timeout(20000) });
+    await res.body?.cancel();
+    return { status: res.status, served: servedBuildFromHeaders(res.headers) };
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * The current head of the deployed branch, from the GitHub REST API (the job's
+ * own read-only token). Null when unconfigured or unreadable.
+ */
+async function readBranchHead() {
+  const repo = process.env.SMOKE_HEAD_REPO ?? "";
+  if (!repo) return null;
+  const branch = process.env.SMOKE_HEAD_BRANCH || "staging";
+  const api = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
+  const token = process.env.GITHUB_TOKEN ?? "";
+  try {
+    const res = await fetch(`${api}/repos/${repo}/branches/${encodeURIComponent(branch)}`, {
+      headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null;
+    const sha = (await res.json())?.commit?.sha;
+    return typeof sha === "string" && SHA40_RE.test(sha) ? sha.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * PHASE 1. Poll {@link BUILD_PROBE_PATH}'s build header until the served build
- * matches `expectSha`. Reads headers only — never a body, never /healthz.
+ * matches `expectSha` on `settleMatches` CONSECUTIVE probes (see settleStep).
+ * Reads headers only — never a body, never /healthz.
  * Returns {ok, served, waitedMs}. Never throws on a bad build — the caller
  * decides, so the failure message stays in one place.
  */
-async function waitForBuild(base, expectSha, timeoutMs) {
+async function waitForBuild(base, expectSha, timeoutMs, settleMatches = SETTLE_MATCHES_DEFAULT) {
   const deadline = Date.now() + timeoutMs;
   const want = expectSha.slice(0, 7);
   let served = null;
   let attempt = 0;
+  let streak = 0;
   while (Date.now() < deadline) {
     attempt += 1;
-    try {
-      const res = await fetch(`${base}${BUILD_PROBE_PATH}`, { signal: AbortSignal.timeout(20000) });
-      await res.body?.cancel();
-      served = servedBuildFromHeaders(res.headers);
-      if (served && served.slice(0, 7) === want) {
+    const probe = await probeServedBuild(base);
+    if (probe) {
+      served = probe.served;
+      const step = settleStep(streak, served, expectSha, settleMatches);
+      streak = step.streak;
+      if (step.done) {
         return { ok: true, served, waitedMs: timeoutMs - (deadline - Date.now()), attempt };
       }
-      log(`  [freshness] attempt ${attempt}: HTTP ${res.status}, serving ${served ?? "?"}, want ${want} — waiting…`);
-    } catch (e) {
-      log(`  [freshness] attempt ${attempt}: ${BUILD_PROBE_PATH} unreachable (${e.name}) — waiting…`);
+      log(
+        streak > 0
+          ? `  [freshness] attempt ${attempt}: HTTP ${probe.status}, serving ${served} — match ${streak}/${settleMatches}, settling…`
+          : `  [freshness] attempt ${attempt}: HTTP ${probe.status}, serving ${served ?? "?"}, want ${want} — waiting…`,
+      );
+    } else {
+      streak = 0;
+      log(`  [freshness] attempt ${attempt}: ${BUILD_PROBE_PATH} unreachable — waiting…`);
     }
     // Never sleep PAST the deadline. A fixed 15s wait on the final iteration
     // burns up to 15s of job time after the poll has already given up. The
@@ -1427,6 +1578,36 @@ async function waitForBuild(base, expectSha, timeoutMs) {
     await new Promise((r) => setTimeout(r, Math.min(15000, remaining)));
   }
   return { ok: false, served, waitedMs: timeoutMs, attempt };
+}
+
+/**
+ * PHASE 3. Watch the served build against the branch head for `windowMs` (see
+ * watchStep). Returns the verdict: `held` (the head stayed live), `superseded`
+ * (a newer push — its own run watches), `revert`, or `unmeasured` (no tick had
+ * both readings: could-not-measure, a red).
+ */
+async function watchLiveVsHead(base, target, windowMs) {
+  const deadline = Date.now() + windowMs;
+  let state = { mismatches: 0 };
+  let ticks = 0;
+  let decided = 0;
+  log(`\n## Phase 3 — live-vs-head watch (${Math.round(windowMs / 60000)} min, every ${WATCH_INTERVAL_MS / 1000}s, head ${target.slice(0, 8)})`);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, Math.min(WATCH_INTERVAL_MS, Math.max(0, deadline - Date.now()))));
+    ticks += 1;
+    const [probe, head] = await Promise.all([probeServedBuild(base), readBranchHead()]);
+    const step = watchStep(state, { served: probe?.served ?? null, head }, target);
+    state = step.state;
+    if (step.decided) decided += 1;
+    if (step.verdict === "superseded") {
+      log(`  tick ${ticks}: staging moved to ${step.head.slice(0, 8)} — its own run watches it. Watch ends.`);
+      return { verdict: "superseded", ticks, decided };
+    }
+    if (step.served) log(`  tick ${ticks}: ⚠ serving ${step.served}, head still ${target.slice(0, 8)} (${state.mismatches}/${WATCH_REVERT_TICKS})`);
+    if (step.verdict === "revert") return { verdict: "revert", served: step.served, ticks, decided };
+  }
+  log(`  ${ticks} ticks, ${decided} decided — ${decided > 0 ? "the head stayed live" : "NO tick could read both the served build and the head"}.`);
+  return { verdict: decided > 0 ? "held" : "unmeasured", ticks, decided };
 }
 
 /**
@@ -1568,7 +1749,9 @@ async function runJourneySample({ base, origin, turnTimeout, index, total, expec
 async function main() {
   const base = (process.env.SMOKE_BASE_URL ?? "").replace(/\/$/, "");
   const origin = (process.env.SMOKE_ORIGIN ?? "").trim().replace(/\/$/, "");
-  const expectSha = process.env.SMOKE_EXPECT_SHA ?? "";
+  const explicitSha = process.env.SMOKE_EXPECT_SHA ?? "";
+  const eventSha = process.env.SMOKE_EVENT_SHA ?? "";
+  const headRequired = Boolean(process.env.SMOKE_HEAD_REPO);
   const freshnessTimeout = Number(process.env.SMOKE_FRESHNESS_TIMEOUT_MS ?? 900000);
   const turnTimeout = Number(process.env.SMOKE_TURN_TIMEOUT_MS ?? 180000);
 
@@ -1604,6 +1787,9 @@ async function main() {
   // and that path returns before Phase 2 — so the two maxima are effectively
   // exclusive. The job's timeout-minutes is set above their sum regardless.
   const budgetMs = intFromEnv("SMOKE_JOURNEY_BUDGET_MS", 720000, 30000, 3600000);
+  const settleMatches = intFromEnv("SMOKE_SETTLE_MATCHES", 3, 1, 10);
+  // Phase 3 window. 0 turns the watch off (local runs only; the workflow never sets it).
+  const watchMs = intFromEnv("SMOKE_WATCH_MS", 720000, 0, 1800000);
 
   if (!base || !origin) {
     log("FATAL: SMOKE_BASE_URL and SMOKE_ORIGIN are required.");
@@ -1622,10 +1808,31 @@ async function main() {
   const failures = [];
   const samplingOptions = { floor, requested, minSamples };
 
+  // ---- WHICH COMMIT: the branch head, not the event's SHA (see resolveTarget) ----
+  const headSha = headRequired && !explicitSha.trim() ? await readBranchHead() : null;
+  const target = resolveTarget({ explicitSha, eventSha, headSha, headRequired });
+  if (target.source === "head_unreadable") {
+    failures.push(
+      `COULD NOT READ the head of ${process.env.SMOKE_HEAD_BRANCH || "staging"} — this run cannot tell which commit ` +
+        "it is measuring. Could-not-measure, never a pass.",
+    );
+    report(failures, null, samplingOptions, "the branch head could not be read");
+    return;
+  }
+  if (target.stale) {
+    log(
+      `\n⚠ STALE PUSH EVENT: this run was triggered for ${eventSha.slice(0, 8)} but the branch head is ` +
+        `${target.sha.slice(0, 8)}. A late duplicate push event can make Render deploy ${eventSha.slice(0, 8)} over ` +
+        "the head; this run measures the head, and Phase 3 watches for exactly that.",
+    );
+  }
+  const expectSha = target.sha ?? "";
+  log(`measuring: ${expectSha ? expectSha.slice(0, 8) : "(nothing)"} (${target.source})`);
+
   // ---- PHASE 1: did the build ship? ----
   if (expectSha) {
-    log(`\n## Phase 1 — deploy freshness (want ${expectSha.slice(0, 7)})`);
-    const fresh = await waitForBuild(base, expectSha, freshnessTimeout);
+    log(`\n## Phase 1 — deploy freshness (want ${expectSha.slice(0, 7)}, ${settleMatches} consecutive)`);
+    const fresh = await waitForBuild(base, expectSha, freshnessTimeout, settleMatches);
     if (!fresh.ok) {
       failures.push(
         `DEPLOY DID NOT SHIP: after ${Math.round(fresh.waitedMs / 1000)}s, ${base} is still serving ` +
@@ -1671,15 +1878,31 @@ async function main() {
     slowestSampleMs = Math.max(slowestSampleMs, Date.now() - started);
   }
 
+  // ---- PHASE 3: does the head STAY live? ----
+  if (expectSha && watchMs > 0) {
+    const watch = await watchLiveVsHead(base, expectSha, watchMs);
+    if (watch.verdict === "revert") {
+      const msg = revertMessage({ target: expectSha, served: watch.served, renderServiceId: process.env.SMOKE_RENDER_SERVICE_ID });
+      failures.push(msg);
+      // A GitHub error annotation: shown on the run's summary page, so the red names its fix where it is read.
+      log(`::error title=STAGING LIVE ≠ HEAD::${msg}`);
+    } else if (watch.verdict === "unmeasured") {
+      failures.push(
+        `LIVE-VS-HEAD WATCH UNMEASURED: none of ${watch.ticks} ticks could read both the served build and the ` +
+          "branch head. Could-not-measure, never a pass.",
+      );
+    }
+  }
+
   report(failures, samples, samplingOptions);
 }
 
-function report(failures, samples, samplingOptions) {
+function report(failures, samples, samplingOptions, notAttemptedReason = "the deploy did not ship") {
   // PHASE 2 NEVER RAN. Reported as its own state rather than as an empty
   // sample set: "the deploy did not ship" and "five samples all passed" must
   // never share an output shape.
   if (samples === null) {
-    log(`\n## Draft sampling — NOT ATTEMPTED (the deploy did not ship; sampling the wrong build proves nothing)`);
+    log(`\n## Draft sampling — NOT ATTEMPTED (${notAttemptedReason}; sampling the wrong build proves nothing)`);
   } else {
     const summary = summariseSamples(samples);
     log("");
