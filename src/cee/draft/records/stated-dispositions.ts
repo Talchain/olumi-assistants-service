@@ -1,6 +1,7 @@
 import { literalConventionValue } from './quantity-evidence.js';
 import type { DraftRecordSet, DraftStatedItem } from './grammar.js';
 import type { DroppedRecordRef, RecordProjection } from './projector.js';
+import { sameStatedNaturalEffect } from './stated-edge-carrier.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 
 /** Edge endpoints are its persisted identity; V3 deliberately strips legacy edge ids. */
@@ -144,7 +145,30 @@ export function reconcileStatedDispositions(rows: readonly StatedDisposition[], 
     const held = path.length === 0 && object(carrier) ? { id: carrier.id } : field(carrier, path);
     // Structural equality, independent of object KEY ORDER: a GraphV3 parse rebuilds objects in schema order (a
     // `natural_effect` came back reordered), and the same carrier must not read as removed (R2, Codex P2).
-    if (held !== undefined && stableStringify(held) === stableStringify(row.stored_value)) return { ...row, location: { ...location, path } };
+    const sameWrite = location.kind === 'edge' && path.join('.') === 'provenance.natural_effect'
+      ? sameStatedNaturalEffect(held, row.stored_value)
+      : held !== undefined && stableStringify(held) === stableStringify(row.stored_value);
+    let sameRange = true;
+    if (location.kind === 'edge' && row.stated_item.relationship !== undefined && object(carrier)) {
+      const p = carrier.provenance;
+      const actual = object(p) && object(p.stated_relationship) ? p.stated_relationship : undefined;
+      const expected = row.stated_item.relationship;
+      if (actual !== undefined) {
+        sameRange = actual.from_quantity === expected.from_quantity && actual.to_quantity === expected.to_quantity
+          && actual.from_node === location.from && actual.to_node === location.to;
+        const actualRange = actual.range;
+        if (expected.range !== undefined && object(held) && typeof held.amount === 'number'
+          && typeof expected.amount === 'number' && expected.amount !== 0) {
+          // Input evidence retains its original convention. The executable write
+          // may express a loss on a quantity level with the opposite sign.
+          const factor = held.amount / expected.amount;
+          const ends = [expected.range.low * factor, expected.range.high * factor].sort((a, b) => a - b);
+          sameRange &&= object(actualRange) && actualRange.low === ends[0] && actualRange.high === ends[1]
+            && actualRange.meaning === expected.range.meaning;
+        } else sameRange &&= actualRange === undefined && expected.range === undefined;
+      } else if (expected.range !== undefined) sameRange = false;
+    }
+    if (sameWrite && sameRange) return { ...row, location: { ...location, path }, stored_value: held };
     return { stated_index: row.stated_index, stated_item: row.stated_item, disposition: 'rejected', reason: 'carrier_removed' };
   });
 }

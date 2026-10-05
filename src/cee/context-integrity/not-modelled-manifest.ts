@@ -49,10 +49,12 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
+
 import { magnitudeNodes, percentLevelIds } from "../magnitude/frame-defaulted-links.js";
 import { sizeLink, unitOf } from "../magnitude/link-effect.js";
+import { readRecordsEdgeEffect } from "../draft/records/stated-edge-carrier.js";
 import { sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
-import { statedEffectQuoteMatches, statedEffectFiguresMatch, readStatedRelationship } from "../provenance/stated-effect.js";
+import { statedEffectFiguresMatch } from "../provenance/stated-effect.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -1307,6 +1309,9 @@ function readDeclaredExclusions(
  */
 interface Candidate {
   readonly nodeId: string;
+  /** Records rates match only their own located literal occurrence. */
+  readonly briefSpan?: { readonly start: number; readonly end: number };
+  readonly signedMagnitude?: true;
   readonly label: string;
   /** Real-world value, already scaled by its declared unit (1.5 "£m" -> 1.5e6). */
   readonly value: number;
@@ -1498,7 +1503,7 @@ function collectBriefNaturalEffectCandidates(
 ): Candidate[] {
   if (!Array.isArray(graph.edges)) return [];
   const nodes = Array.isArray(graph.nodes) ? graph.nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === "object" && !Array.isArray(n)) : [];
-  const view = magnitudeNodes(nodes, percentLevelIds(graph));
+
   const labels = new Map<string, string>();
   if (Array.isArray(graph.nodes)) {
     for (const raw of graph.nodes) {
@@ -1541,52 +1546,46 @@ function collectBriefNaturalEffectCandidates(
           amount, amount_unit: amountUnit, per_source_change: perSourceChange, per_source_change_unit: perSourceChangeUnit,
         })) continue;
     } else {
-      const authority = readStatedRelationship(p.stated_relationship);
-      const evidence = p.stated_relationship as { from_node?: unknown; to_node?: unknown } | undefined;
+      // R4b: quantity identity and recorded endpoint ids survive persistence;
+      // units on nodes and refitted coefficients are not stated-rate evidence.
+      const held = readRecordsEdgeEffect(edge, nodes, quote);
+      if (held === undefined) continue;
+      // Preserve the existing range-integrity check where endpoint frames and
+      // units are available. Persistence may omit them; it does not erase the
+      // literal-backed, quantity-bound stated effect checked above.
+      const view = magnitudeNodes(nodes, percentLevelIds(graph));
       const source = view.get(from), target = view.get(to);
-      const strength = edge.strength as { mean?: unknown } | undefined;
-      const mean = strength?.mean ?? edge.strength_mean;
-      if (authority === undefined || evidence?.from_node !== from || evidence.to_node !== to
-        || source === undefined || target === undefined || typeof mean !== "number" || !Number.isFinite(mean)
-        || typeof amount !== "number" || typeof perSourceChange !== "number"
-        || typeof amountUnit !== "string" || typeof perSourceChangeUnit !== "string"
-        || !sameUnit(amountUnit, unitOf(target) ?? "") || !sameUnit(perSourceChangeUnit, unitOf(source) ?? "")) continue;
-      // Codex R2 F4: a stated range is re-sized by the compiler's own contract (sizeLink's `amount_range`, the B1 rule),
-      // never by the default spread. A range that is present but unreadable earns nothing.
-      const storedRange = (p.stated_relationship as { range?: unknown }).range;
-      const range = storedRange as { low?: unknown; high?: unknown } | null | undefined;
-      const amountRange = range !== null && typeof range === "object" && typeof range.low === "number" && Number.isFinite(range.low)
-        && typeof range.high === "number" && Number.isFinite(range.high) ? { low: range.low, high: range.high } : undefined;
-      if (storedRange !== undefined && amountRange === undefined) continue;
-      const sized = sizeLink({ direction: amount * perSourceChange < 0 ? "negative" : "positive",
-        effect_amount: amount, effect_per_source_change: perSourceChange, user_stated: true,
-        ...(amountRange !== undefined ? { amount_range: amountRange } : {}) }, source, target);
-      const std = (edge.strength as { std?: unknown } | undefined)?.std ?? edge.strength_std;
-      if (sized.problem !== undefined || sized.outcome !== "user_stated" || mean !== sized.mean
-        || std !== sized.std || natural.strength_mean !== mean) continue;
-      if (
-        typeof amount !== "number" ||
-        typeof amountUnit !== "string" ||
-        typeof perSourceChange !== "number" ||
-        typeof perSourceChangeUnit !== "string" ||
-        !statedEffectQuoteMatches(quote, {
-          amount,
-          amount_unit: amountUnit,
-          per_source_change: perSourceChange,
-          per_source_change_unit: perSourceChangeUnit,
-        }, authority)
-      ) continue;
+      if (source !== undefined && target !== undefined && unitOf(source) !== undefined && unitOf(target) !== undefined) {
+        const range = held.authority.range;
+        const sized = sizeLink({ direction: held.detail.amount * held.detail.per_source_change < 0 ? "negative" : "positive",
+          effect_amount: held.detail.amount, effect_per_source_change: held.detail.per_source_change, user_stated: true,
+          ...(range === undefined ? {} : { amount_range: { low: range.low, high: range.high } }) }, source, target);
+        const mean = (edge.strength as { mean?: unknown } | undefined)?.mean ?? edge.strength_mean;
+        const std = (edge.strength as { std?: unknown } | undefined)?.std ?? edge.strength_std;
+        if (sized.problem !== undefined || sized.outcome !== "user_stated" || mean !== sized.mean || std !== sized.std
+          || natural.strength_mean !== mean) continue;
+      }
     }
+    if (typeof amount !== "number" || typeof perSourceChange !== "number") continue;
     const effectDirection = edge.effect_direction;
     const signedEffect = Math.sign(amount) * Math.sign(perSourceChange);
     if (
       (effectDirection === "positive" && signedEffect < 0) ||
       (effectDirection === "negative" && signedEffect >= 0)
     ) continue;
+    const recorded = recordsEvidence ? readRecordsEdgeEffect(edge, nodes, quote) : undefined;
+    const quoteStart = briefText.indexOf(quote);
+    // An ambiguous repeated quote supplies no occurrence identity.
+    if (recordsEvidence && quoteStart !== briefText.lastIndexOf(quote)) continue;
+    const spanFor = (key: "amount_span" | "source_span") => {
+      const span = recorded?.authority[key];
+      return span === undefined ? {} : { briefSpan: { start: quoteStart + span.start, end: quoteStart + span.end }, signedMagnitude: true as const };
+    };
     if (typeof amount === "number" && Number.isFinite(amount) && typeof amountUnit === "string" && amountUnit.trim().length > 0) {
       const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(amountUnit);
       out.push({
         nodeId: to,
+        ...spanFor("amount_span"),
         label: targetLabel,
         value: amount * multiplier,
         unitKind: kind,
@@ -1602,6 +1601,7 @@ function collectBriefNaturalEffectCandidates(
       const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(perSourceChangeUnit);
       out.push({
         nodeId: from,
+        ...spanFor("source_span"),
         label: sourceLabel,
         value: perSourceChange * multiplier,
         unitKind: kind,
@@ -1816,8 +1816,9 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
 function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidate | null {
   if (q.value === null) return null;
   for (const c of candidates) {
+    if (c.briefSpan !== undefined && (q.at < c.briefSpan.start || q.at >= c.briefSpan.end)) continue;
     if (!unitCompatible(q, c)) continue;
-    if (numbersEqual(c.value, q.value)) return c;
+    if (numbersEqual(c.value, q.value) || c.signedMagnitude && numbersEqual(Math.abs(c.value), Math.abs(q.value))) return c;
   }
   return null;
 }
@@ -1964,6 +1965,7 @@ const SCOPE = {
   // generated from the constant that decides it and cannot drift again.
   model_surface: [
     `${CANDIDATE_COLLECTIONS.map((c) => c.replace(/s$/, "")).join(" and ")} values, caps, units, labels and encoding maps`,
+    "literal-backed edge natural effects bound to their recorded endpoint quantities",
   ],
   prose_surface: ["coaching cards", "draft warnings", "validation warnings"],
   excluded_from_search: [

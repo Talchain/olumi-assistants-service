@@ -3642,11 +3642,27 @@ function projectOnce(
     let changeBy:number|undefined;
     let rawValue=settingValue;
     if(item.setting==="change_by"){
-      const level=zeroQuantities.has(q) ? 0 : declaration.kind==="change_quantity" || q===index ? undefined : declaration.value;
+      // Q2: only the option's own quantity can define a change from today.
+      // A stated stock/baseline, identity operand or rate-less cause prevents it.
+      const declaredLevels = statedItems.filter((s, i) => i !== index && s.quantity === q
+        && (s.kind === "figure" || s.is_baseline === true || s.role === "baseline"));
+      const ownZero = q === index && declaredLevels.length === 0 && !identityOperands.has(lever.id)
+        && statedItems.every(s => s.kind !== "cause" || s.relationship?.from_quantity !== q
+          || typeof s.relationship.per_source_change === "number");
+      if (ownZero) {
+        zeroQuantities.add(q);
+        lever.body = "a change from today, so today = 0";
+        lever.data = { ...lever.data, value: 0, raw_value: 0, baseline: 0, extractionType: "inferred" };
+        delete lever.data.rangeMin; delete lever.data.rangeMax;
+        lever.observed_state = { value: 0, raw_value: 0, baseline: 0, source: "cee_inference" };
+      }
+      const levelDeclaration = q === index && declaredLevels.length === 1
+        && (declaredLevels[0]!.role === undefined || declaredLevels[0]!.role === "baseline") ? declaredLevels[0]! : declaration;
+      const level=zeroQuantities.has(q) ? 0 : declaration.kind==="change_quantity" || q===index && levelDeclaration === declaration ? undefined : levelDeclaration.value;
       if(typeof level!=="number" || !Number.isFinite(level)){refuse("option_change_by_baseline_unknown");return;}
       // The level a delta resolves against is evidence like any stated value: unbound to its own quote ("We have 8
       // vans" typed 9), it is refused, never written as a brief-derived absolute.
-      if(!zeroQuantities.has(q) && !statedValueIsBound(declaration,brief)){refuse("option_change_by_baseline_unbound");return;}
+      if(!zeroQuantities.has(q) && !statedValueIsBound(levelDeclaration,brief)){refuse("option_change_by_baseline_unbound");return;}
       changeBy=settingValue;
       rawValue=literalConventionValue(level,declaration.unit,declaration.value_scale)+settingValue;
     }
@@ -4289,6 +4305,7 @@ function projectOnce(
       (n) => (n.kind === "factor" || n.kind === "constraint" || n.kind === "outcome" || n.kind === "risk")
         && !reachesGoal.has(n.id) && !limitSink.has(n.id) && !inertRisk.has(n.id),
     );
+    const inertCauses = new Map([...inertRisk].map(id => [id, edges.filter(e => e.to === id).map(e => e.from)]));
     if (unmodelled.length > 0) {
       const unmodelledIds = new Set(unmodelled.map((n) => n.id));
       // The early role notice describes a retained figure. If its exact node
@@ -4360,6 +4377,29 @@ function projectOnce(
       const keptNodes = nodes.filter((n) => !unmodelledIds.has(n.id));
       nodes.length = 0;
       nodes.push(...keptNodes);
+      // R3: propagate only losses caused by the prune through its inert-risk
+      // exemption. Each round withdraws at least one authored node, so it ends.
+      const disclosedOrphans = new Set<string>();
+      for (;;) {
+        const present = new Set(nodes.map(n => n.id));
+        const orphaned = nodes.filter(n => inertRisk.has(n.id) && !reachesGoal.has(n.id) && !limitSink.has(n.id)
+          && (inertCauses.get(n.id) ?? []).some(id => !present.has(id))
+          && !edges.some(e => e.to === n.id));
+        for (const node of orphaned) {
+          if (disclosedOrphans.has(node.id)) continue;
+          dropped.push({ claim_index: -1, claim_kind: node.provenance?.provenance_class === "stated" ? "stated_item" : "claim",
+            label: node.label, node_id: node.id, reason: reachesGoalOnModelsOwnLinks.has(node.id)
+              ? "disconnected_by_shape_gate" : "unconnected_to_goal", ...statedMagnitudeOf(node) });
+          disclosedOrphans.add(node.id);
+        }
+        // Science: a user-stated node remains, even after its cause disappears.
+        const gone = new Set(orphaned.filter(n => n.provenance?.provenance_class !== "stated").map(n => n.id));
+        if (gone.size === 0) break;
+        for (const id of gone) delete provenance[id];
+        for (const edge of edges.filter(e => gone.has(e.from) || gone.has(e.to))) delete provenance[edge.id];
+        edges.splice(0, edges.length, ...edges.filter(e => !gone.has(e.from) && !gone.has(e.to)));
+        nodes.splice(0, nodes.length, ...nodes.filter(n => !gone.has(n.id)));
+      }
     }
   }
 
