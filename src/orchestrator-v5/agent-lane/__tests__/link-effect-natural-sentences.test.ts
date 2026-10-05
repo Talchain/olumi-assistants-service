@@ -615,3 +615,25 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
     expect(cardsFor(w, result)[0]?.detail).toContain(`From your words: "${row.quote}"`);
   });
 });
+
+// ⛔ DL 0df0e1 ruling (5 Oct ~20:2xZ) on Acceptance 6001583510: Olumi suggested an exact wording and the recorder refused it
+// 3/3. The chat never improvises a wording: a statement whose figures the recorder cannot read gets ONE fixed question, said
+// exactly, WITH the canvas route that always works. Acceptance's own untyped rows 7 and 8, on their served f0eb03ac graph.
+describe('RT-6: figures the recorder cannot read → ONE fixed question + the canvas route, never an improvised wording', () => {
+  it.each([
+    ['Acceptance row 7 ("a shop" / "half a margin point")', { id: 'A7', fixture: 'f0eb03ac', from: 'shops_operating', to: 'gross_margin',
+      quote: 'Shutting a shop is worth maybe half a margin point, give or take.', effect: effect(0.5, 'percentage points', -1, 'shops') },
+      'How much does “Shops operating” move “gross margin”, in figures?', ['Shops operating', 'gross margin']],
+    ['Acceptance row 8 ("every extra percent")', { id: 'A8', fixture: 'f0eb03ac', from: 'bread_price_change_from_current', to: 'footfall_lost_from_price_rise',
+      quote: 'Up to about a 5% price rise we barely lose anyone, but past that every extra percent costs us about 1% of footfall.', effect: effect(1, '%', 1, '%') },
+      'How much does “Bread price change from current” move “Footfall lost from price rise”, in figures?', ['Bread price change from current', 'Footfall lost from price rise']],
+  ] as const)('%s', async (_n, row, question, [from, to]) => {
+    const w = world(row as CorpusRow); const before = w.graph(); const result = await propose(w, row as CorpusRow);
+    oneQuestion(result, question);
+    expect(result).toMatchObject({ refusal: 'not_the_users_figure' });
+    expect(String(result.detail)).toMatch(/^Nothing was prepared\. Tell the user exactly this: "/);
+    expect(String(result.detail)).toContain(`click the link from “${from}” to “${to}”, and under “How strong is this effect?”`);
+    expect(String(result.detail)).not.toMatch(/Ask the user|in numbers/);
+    expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
+  });
+});
