@@ -12,8 +12,8 @@ import {
 } from '../sentence-pass.js';
 import { buildStrictSentencePassSchema } from '../../../../orchestrator-v5/agent-lane/runtime/build-model-from-records.js';
 import { strictForTheDrafter } from '../../../../orchestrator-v5/agent-lane/runtime/build-model.js';
-import linksSource from '../sentence-links.ts?raw';
 
+const linksSource = readFileSync(new URL('../sentence-links.ts', import.meta.url), 'utf8');
 const HELDOUT = '/Users/paulslee/Documents/GitHub/output/olumi-aie-eval-executor-20261003/drafting-extraction-20261004/heldout-20261004';
 const heldout = (name: string): string | undefined => {
   const file = `${HELDOUT}/${name}`;
@@ -124,8 +124,8 @@ describe('the strict wire and the instruction', () => {
 describe('(e) import graph: the merge module reads no label and calls no unit or amount parser', () => {
   it('imports only sameUnit and locateLiteral as values (plus grammar constants and types)', () => {
     const imports = [...linksSource.matchAll(/^import\s+(type\s+)?\{([^}]*)\}\s+from\s+'([^']+)'/gm)].map((m) => ({
-      typeOnly: m[1] !== undefined, names: m[2]!.split(',').map((n) => n.trim()).filter(Boolean), from: m[3]! }));
-    const values = imports.filter((i) => !i.typeOnly).flatMap((i) => i.names.filter((n) => !n.startsWith('type ')).map((n) => `${i.from}#${n}`));
+      typeOnly: m[1] !== undefined, names: m[2]!.split(',').map((n: string) => n.trim()).filter(Boolean), from: m[3]! }));
+    const values = imports.filter((i) => !i.typeOnly).flatMap((i) => i.names.filter((n: string) => !n.startsWith('type ')).map((n: string) => `${i.from}#${n}`));
     expect(values.sort()).toEqual([
       '../../../orchestrator-v5/agent-lane/same-unit.js#sameUnit',
       './grammar.js#DRAFT_RECORD_UNRESOLVED',
