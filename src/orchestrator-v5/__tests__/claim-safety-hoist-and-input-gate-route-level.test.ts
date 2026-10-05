@@ -1099,6 +1099,7 @@ describe('G-CEE-1 — the PERSISTED analysis summary in the MODEL INPUT (P6 deci
     // The live leaking substring, and the whole sentence it came from.
     expect(bytes).not.toContain('17 percentage points');
     expect(bytes).not.toContain('currently leads');
+    expect(bytes).not.toContain('scored highest');
     expect(bytes).not.toContain(HISTORIC_LEADER_SUMMARY);
 
     // And the DESIGNATION beside it. `Chose "<leader label>"` is the analysis's

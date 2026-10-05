@@ -70,9 +70,10 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
       checked.identity.graph_hash_at_run, projection, result?.input_snapshot)) continue;
     // A confirmed immutable snapshot is historical identity, not current
     // freshness. Reuse only the Run-attested goal-unit check, including
-    // goal-free work; never bypass the legacy guard on a live current graph.
+    // goal-free work; never bypass the legacy guard on a live current graph. RT-10: the same check refuses a Run
+    // whose SENT direction is not the one this version's graph sends now (its order would read upside down).
     const goalBinding = compareRunGoalUnitSnapshot(fact, version.graph);
-    if (goalBinding === 'unit_changed' || goalBinding === 'unverified') { refusal = 'incompatible_results'; continue; }
+    if (goalBinding !== 'legacy' && goalBinding !== 'match') { refusal = 'incompatible_results'; continue; }
     candidates.push({ identity: { ...checked.identity, run_id: runId }, fact, snapshot: snapshot.data });
   }
   const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;

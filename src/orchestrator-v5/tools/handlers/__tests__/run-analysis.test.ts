@@ -1551,6 +1551,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
 
     // (a) No recommendation may exist while a stated condition is unchecked.
     expect(outcome.assistant_text).not.toContain('currently leads');
+    expect(outcome.assistant_text).not.toContain('scored highest');
     expect(outcome.assistant_text).not.toContain('percentage points');
 
     // (b) Exactly which user condition was not evaluated.
@@ -1579,6 +1580,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).not.toContain('currently leads');
+    expect(outcome.assistant_text).not.toContain('scored highest');
     expect(outcome.assistant_text).toContain('Total three-year cost');
   });
 
@@ -1596,6 +1598,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).not.toContain('currently leads');
+    expect(outcome.assistant_text).not.toContain('scored highest');
     expect(outcome.assistant_text).toContain('Total three-year cost');
   });
 

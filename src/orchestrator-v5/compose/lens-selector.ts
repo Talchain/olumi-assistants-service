@@ -1386,9 +1386,9 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
 
 export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   FLIP_RISK_ISOLATED:
-    'The result leans on a single factor that could tip which option leads on its own — a small change to it alone could flip the outcome. Asking what would flip the decision shows how much room for error you have.',
+    'The result leans on a single factor that could tip which option leads on its own — a small change to it alone could flip the outcome. Asking what would flip the result shows how much room for error you have.',
   FLIP_RISK_CORRELATED:
-    'No single factor is decisive here, but the right combination of factors could tip which option leads — the outcome is more finely balanced than it first looks. Asking what would flip the decision shows which factors move together.',
+    'No single factor is decisive here, but the right combination of factors could tip which option leads — the outcome is more finely balanced than it first looks. Asking what would flip the result shows which factors move together.',
   DOMINANT_DRIVER:
     'One factor is doing most of the work in this result. A sensitivity check shows how far it can move before the leading option changes.',
   CONFIDENCE_NEEDS_WORK:
@@ -1430,7 +1430,7 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'Change it and which option is most likely to hit your goal could change, so firming it up is the highest-value thing to resolve next.',
   // ── DSK slice 1 — disconfirmation + devil's advocacy ───────────────────────
   CLEAR_WINNER_DISCONFIRMATION:
-    'One option is clearly ahead here. Before you commit, spend a few minutes making the strongest honest case against it — if that case falls apart, the choice has earned more trust; if it holds up, you have found something worth checking first.',
+    'In this model, one option scored highest by a wide margin. Before you commit, spend a few minutes making the strongest honest case against it — if that case falls apart, the choice has earned more trust; if it holds up, you have found something worth checking first.',
   DOMINANT_FACTOR_DISSENT:
     'Most of this result rests on a single factor. Arguing the case against that factor — that it is overstated, less certain than it looks, or outweighed by something outside the model — shows quickly whether the result would survive honest dissent.',
   WHATIF_EXPLORE_DRIVER:

@@ -48,6 +48,8 @@ import {
 } from './option-identity.js';
 import { isAnalysisRefusalFact } from './analysis-refusal-continuity.js';
 import { normalizeRunGoalUnit } from './run-goal-unit.js';
+import { resolveGoalDirection } from '../goal-target/goal-direction.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 import { runAnalysisProjectionNeedsStamp } from './analysis-projection-policy.js';
 import { ANALYSIS_PROJECTION_VERSION, RUN_ANALYSIS_PROJECTION_KEY } from './graph-identity.js';
 
@@ -71,6 +73,9 @@ export type FreshnessReason =
   /** The hash does not include the goal's display unit. A Run-input snapshot
    * must agree with that unit before old figures may be called current. */
   | 'goal_unit_changed'
+  /** RT-10: the direction the Run SENT (its snapshot) is not the one the model sends now. The analysis hash cannot
+   * see it: `run_semantics` keys on a top-level `goal_node_id` the persisted graph does not carry. */
+  | 'goal_direction_changed'
   /** A snapshotted Run was read without one verifiable selected goal. */
   | 'goal_snapshot_unverified'
   /** A legacy Run's projection cannot attest unchanged option admission. */
@@ -612,8 +617,7 @@ function checkHardInvariants(
     derivation.graph_hash_at_run === derivation.current_graph_hash &&
     derivation.reason !== 'model_restored_after_analysis' &&
     derivation.reason !== 'model_edited_after_analysis' &&
-    derivation.reason !== 'goal_unit_changed' &&
-    derivation.reason !== 'goal_snapshot_unverified' &&
+    !isGoalSnapshotStaleReason(derivation.reason) &&
     derivation.reason !== 'legacy_admission_unverified' &&
     derivation.freshness !== 'fresh'
   ) {
@@ -830,9 +834,9 @@ export function deriveAnalysisFreshness(
   // narrower hash-bound-unit projection (AIQ #75 5912905493).
   if (base.freshness === 'fresh') {
     const goalBinding = compareRunGoalUnitSnapshot(selected.fact, opts?.currentGraph);
-    if (goalBinding === 'unit_changed' || goalBinding === 'unverified') {
-      base = { ...base, freshness: 'stale', reason: goalBinding === 'unit_changed'
-        ? 'goal_unit_changed' : 'goal_snapshot_unverified' };
+    if (goalBinding !== 'legacy' && goalBinding !== 'match') {
+      base = { ...base, freshness: 'stale', reason: goalBinding === 'unit_changed' ? 'goal_unit_changed'
+        : goalBinding === 'direction_changed' ? 'goal_direction_changed' : 'goal_snapshot_unverified' };
     }
   }
 
@@ -866,8 +870,16 @@ export function goalSnapshotStaleMessage(reason: FreshnessReason): string | unde
   if (reason === 'legacy_admission_unverified') return 'the saved Run’s option admission could not be confirmed';
   if (reason === 'model_edited_after_analysis') return 'the model was edited after this analysis';
   if (reason === 'goal_unit_changed') return 'your goal’s unit changed';
+  if (reason === 'goal_direction_changed') return 'which way counts as better for your goal changed';
   if (reason === 'goal_snapshot_unverified') return 'the saved goal’s unit could not be confirmed';
   return undefined;
+}
+
+/** The reasons a hash-matched Run is stale because its own goal snapshot disagrees with the model. Every reader that
+ * withholds a hash-matched Run's figures, delta or Phase 3 cards branches on this one set. */
+export type GoalSnapshotStaleReason = 'goal_unit_changed' | 'goal_direction_changed' | 'goal_snapshot_unverified';
+export function isGoalSnapshotStaleReason(reason: FreshnessReason | null | undefined): reason is GoalSnapshotStaleReason {
+  return reason === 'goal_unit_changed' || reason === 'goal_direction_changed' || reason === 'goal_snapshot_unverified';
 }
 
 /** Read only SC-24's existing input_snapshot.goal carrier. No second snapshot,
@@ -875,7 +887,7 @@ export function goalSnapshotStaleMessage(reason: FreshnessReason): string | unde
 export function compareRunGoalUnitSnapshot(
   fact: HandlerFact,
   currentGraph: unknown,
-): 'legacy' | 'match' | 'unit_changed' | 'unverified' {
+): 'legacy' | 'match' | 'unit_changed' | 'direction_changed' | 'unverified' {
   const record = (value: unknown): Record<string, unknown> | null =>
     value !== null && typeof value === 'object' && !Array.isArray(value)
       ? value as Record<string, unknown> : null;
@@ -904,7 +916,27 @@ export function compareRunGoalUnitSnapshot(
   // Both absent means no unit was asserted by either input. A removal/addition
   // is a change; an invalid supplied unit is never repaired to GBP here.
   if (goalAtRun.unit !== undefined && normalizeRunGoalUnit(goalAtRun.unit) === undefined) return 'unverified';
-  return goalAtRun.unit === currentUnit ? 'match' : 'unit_changed';
+  if (goalAtRun.unit !== currentUnit) return 'unit_changed';
+  // RT-10 (#87 5996221302): the direction the Run SENT. The writer records `direction` only when one was sent
+  // (`run-input-snapshot.ts`), so absent = PLoT ran its maximiser. `maximise` is byte-identical to absent on the wire and
+  // `resolveGoalDirection` never returns it, so the comparison is "sent minimise" against "would send minimise now".
+  // Any other recorded value is not the writer's and fails closed. The analysis hash cannot catch this: `run_semantics`
+  // keys on a top-level `goal_node_id` the persisted graph does not carry (`graph-hash.ts`), so the derived direction
+  // hashes as null on both sides and a semantics change (#2585) or a direction-flipping rename left old Runs current.
+  if (goalAtRun.direction !== undefined && goalAtRun.direction !== 'minimise' && goalAtRun.direction !== 'maximise') {
+    return 'unverified';
+  }
+  // ⛔ RESOLVED ON THE GOAL AS THE RUN'S LOADER VALIDATES IT (Codex r1 #2596): the Run reads the GraphV3-parsed graph
+  // (`loadScenarioSnapshotForRunAnalysis`), whose NodeV3 drops a malformed carrier field by field (`.catch(undefined)`,
+  // e.g. a `goal_sense_reading` without `words`). The stored graph keeps it, so resolving the RAW node read a sense the
+  // Run never sent: an unchanged, correctly-run Run went falsely stale. GraphV3 has no graph-level transform, and the
+  // resolver reads only the goal node, so parsing that node alone is the Run's view of it. A goal node NodeV3 refuses
+  // cannot be run at all: there is no "would send now", so no direction verdict is drawn (the unit verdict stands).
+  const validatedGoal = NodeV3.safeParse(selected[0]);
+  if (!validatedGoal.success) return 'match';
+  const sentMinimise = goalAtRun.direction === 'minimise';
+  const sendsMinimiseNow = resolveGoalDirection({ nodes: [validatedGoal.data] }, goalAtRun.node_id)?.direction === 'minimise';
+  return sentMinimise === sendsMinimiseNow ? 'match' : 'direction_changed';
 }
 
 /**

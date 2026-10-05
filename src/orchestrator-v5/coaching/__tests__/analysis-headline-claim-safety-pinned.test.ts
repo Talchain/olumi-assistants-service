@@ -100,7 +100,7 @@ describe('Mission A — pinned-factor claim safety (Paul bundle, provisional_doc
     // claim is about the LINK's fragility (switch_probability 0.61), which
     // is truthfully grounded, unlike factor sensitivity (which is 0).
     expect(out!).toContain(
-      'the link between Tech Lead in Place and Delivery Confidence is fragile',
+      'it rests heavily on how much Tech Lead in Place changes Delivery Confidence',
     );
     expect(out!).toContain('treat this as provisional');
   });

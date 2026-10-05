@@ -16,7 +16,12 @@
  * It checks two independent failure modes, in order:
  *
  *   PHASE 1 — DID THE BUILD EVEN SHIP?
- *     Polls /healthz until the served `build` matches the commit we expect.
+ *     Polls the `x-olumi-service-build` response header until it matches the
+ *     commit we expect. NOT /healthz: every /healthz call fans out into full
+ *     prompt-history Supabase reads (the 30 Sep 2026 egress runaway), and the
+ *     estate bans polling it. The header is stamped on EVERY response by
+ *     `plugins/boundary-logging.ts`, so an unauthenticated GET of a path no
+ *     route serves answers 401/404 from memory, with the build, and no I/O.
  *     A service still serving an older build than the tip is itself an outage:
  *     it means the deploy failed, and every downstream "verified on staging"
  *     claim is measuring the wrong code. This half is arguably more valuable
@@ -92,6 +97,7 @@
  *                    defaulted: a gate that invents its own origin would pass
  *                    while every real browser was being refused.
  *   SMOKE_EXPECT_SHA (optional) commit expected to be serving; enables Phase 1
+ *                    and the per-turn served-build check
  *   SMOKE_FRESHNESS_TIMEOUT_MS (default 900000 = 15 min)
  *   SMOKE_TURN_TIMEOUT_MS      (default 180000 = 3 min)
  */
@@ -101,6 +107,16 @@
  * two different opinions about which path is under test. See the header.
  */
 export const TURN_PATH = "/proxy/v5/turn";
+
+/** Stamped on every CEE response by `src/plugins/boundary-logging.ts` (SERVICE_BUILD_HEADER). */
+export const BUILD_HEADER = "x-olumi-service-build";
+
+/**
+ * Phase 1's probe target: a path NO route serves, so the auth hook answers 401
+ * (or the router 404) from memory and the onSend hook still stamps the build.
+ * Never /healthz — see the header.
+ */
+export const BUILD_PROBE_PATH = "/__journey-smoke/build";
 
 export const MIN_NODES = 4;
 export const MIN_OPTIONS = 2;
@@ -733,6 +749,17 @@ export function assertPromptProvenance(diagnostics, bodies = []) {
   const f = [];
   diagnostics.forEach((d, i) => {
     if (!d) return;
+    // A turn that RAN a construction must name the construction call's prompt,
+    // not merely some prompt: the Agent's conversation call also carries an
+    // identity, and on its own it says nothing about which prompt built the graph.
+    if (d.constructed && !d.construct_identified) {
+      f.push(
+        `turn ${i + 1}: this turn ran a construction (_diagnostic_trace.construction is set) but no ` +
+          `allowed _provider_calls row carries prompt_alias=${AGENT_CONSTRUCT_ALIAS} with a provider, ` +
+          "model and prompt_sha256 — we cannot prove WHICH prompt built this graph.",
+      );
+      return;
+    }
     const delivered = carriedDraftGraph(bodies[i]);
     const declared = d.exit_path === DRAFT_EXIT_PATH;
     if (!delivered && !declared) return;
@@ -742,22 +769,128 @@ export function assertPromptProvenance(diagnostics, bodies = []) {
       : `exit_path=${DRAFT_EXIT_PATH}`;
     f.push(
       `turn ${i + 1}: this turn produced a graph — it ${how} — but prompt_identity was empty: ` +
-        "the served prompt version/hash did not reach the trace, so we cannot prove WHICH " +
-        "prompt produced this graph.",
+        "the served prompt version/hash reached neither the trace nor the provider-call ledger, " +
+        "so we cannot prove WHICH prompt produced this graph.",
     );
   });
   return f;
+}
+
+/**
+ * Every turn must be served by the commit under test. Phase 1 confirms the
+ * build ONCE; this confirms it PER TURN, and per MODEL CALL: every Agent call
+ * stamps `cee_build` on its own `_provider_calls` row (`agentRequestIdentity`),
+ * so EVERY such row must carry a valid build equal to the expected commit — a
+ * missing or malformed stamp on a real call is "cannot confirm", a red, and one
+ * conflicting row is not masked by a matching one. A turn with no Agent call
+ * has nothing to stamp: it falls back to the trace's `environment.build_sha`
+ * (the orchestrator path), and is reported, not failed, when that is absent.
+ *
+ * @param {Array<{build_sha: string|null, agent_builds?: Array<string|null>}|null>} diagnostics
+ * @param {string} expectSha the commit Phase 1 waited for; blank = not checked
+ * @returns {string[]} failure messages; empty means healthy.
+ */
+export function assertServedBuild(diagnostics, expectSha) {
+  const want = String(expectSha ?? "").trim().toLowerCase();
+  if (want.length < 7) return [];
+  const matches = (b) => {
+    const got = typeof b === "string" && BUILD_RE.test(b) ? b.toLowerCase() : "";
+    if (got.length === 0) return null;
+    const n = Math.min(got.length, want.length);
+    return got.slice(0, n) === want.slice(0, n);
+  };
+  const f = [];
+  diagnostics.forEach((d, i) => {
+    if (!d) return;
+    const builds = Array.isArray(d.agent_builds) ? d.agent_builds : [];
+    if (builds.length > 0) {
+      const unstamped = builds.filter((b) => matches(b) === null).length;
+      const other = [...new Set(builds.filter((b) => matches(b) === false))];
+      if (unstamped > 0) {
+        f.push(
+          `turn ${i + 1}: ${unstamped} of ${builds.length} Agent model call(s) carried no valid cee_build — ` +
+            `cannot confirm this turn was served by the commit under test ${want.slice(0, 8)}.`,
+        );
+      }
+      if (other.length > 0) {
+        f.push(
+          `turn ${i + 1}: served by build ${other.map((b) => b.slice(0, 8)).join(", ")}, not the commit under test ` +
+            `${want.slice(0, 8)} — this sample measured a different build from the one Phase 1 confirmed.`,
+        );
+      }
+      return;
+    }
+    if (matches(d.build_sha) === false) {
+      f.push(
+        `turn ${i + 1}: served by build ${String(d.build_sha).slice(0, 8)}, not the commit under test ${want.slice(0, 8)} — ` +
+          "this sample measured a different build from the one Phase 1 confirmed.",
+      );
+    }
+  });
+  return f;
+}
+
+/**
+ * The Agent route's identity carrier. With `PROXY_V5_TARGET=agent` every browser
+ * turn is served by `src/routes/agent-v1-turn.ts`, whose `_diagnostic_trace`
+ * (exit_path `agent_lane_v1`) has NO `prompt_identity`: its prompts are in no
+ * registry. Each model call instead records its identity on its own
+ * `_provider_calls` row (`adapters/llm/provider-policy.ts` GenerativeCall):
+ * `prompt_alias` (`agent-lane/runtime/prompt-identity.ts` AGENT_PROMPT_ALIASES),
+ * `prompt_sha256` of the instructions it actually sent, `provider`, `model`
+ * and `cee_build`. Measured on served 5e79d2d (fixtures
+ * `live-journey-agent-turn{1,2}-5e79d2d.json`): turn 1 carried agent.converse +
+ * agent.construct rows, turn 2 one agent.converse row; both `openai`.
+ */
+export const AGENT_CONSTRUCT_ALIAS = "agent.construct";
+const AGENT_ALIAS_RE = /^agent\.[a-z_]+$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
+const BUILD_RE = /^[0-9a-f]{7,40}$/i;
+/** sha256 of '' — what `promptSha256` records for absent instructions: "no prompt", never an identity. */
+const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+/** The allowed ledger rows that fully identify the call: alias, prompt hash, provider and model. */
+export function agentLedgerIdentity(body) {
+  const rows = Array.isArray(body?._provider_calls) ? body._provider_calls : [];
+  return rows.filter(
+    (r) =>
+      r !== null &&
+      typeof r === "object" &&
+      r.outcome === "allowed" &&
+      typeof r.prompt_alias === "string" &&
+      AGENT_ALIAS_RE.test(r.prompt_alias) &&
+      typeof r.prompt_sha256 === "string" &&
+      SHA256_RE.test(r.prompt_sha256) &&
+      r.prompt_sha256 !== EMPTY_SHA256 &&
+      typeof r.provider === "string" &&
+      r.provider.length > 0 &&
+      typeof r.model === "string" &&
+      r.model.length > 0 &&
+      r.model !== "unknown",
+  );
 }
 
 /** Extract the diagnostics we report on every run, healthy or not. */
 export function extractDiagnostics(body) {
   const t = body?._diagnostic_trace ?? {};
   const identity = Array.isArray(t.prompt_identity) ? t.prompt_identity : [];
+  const ledger = agentLedgerIdentity(body);
+  // EVERY allowed Agent-aliased call, identified or not: each one stamps its build.
+  const rows = Array.isArray(body?._provider_calls) ? body._provider_calls : [];
+  const agentBuilds = rows
+    .filter((r) => r !== null && typeof r === "object" && r.outcome === "allowed" && typeof r.prompt_alias === "string" && AGENT_ALIAS_RE.test(r.prompt_alias))
+    .map((r) => (typeof r.cee_build === "string" ? r.cee_build : null));
   return {
-    build_sha: t?.environment?.build_sha ?? null,
+    build_sha: t?.environment?.build_sha ?? agentBuilds.find((b) => b !== null && BUILD_RE.test(b)) ?? null,
+    agent_builds: agentBuilds,
     exit_path: t?.exit_path ?? null,
-    prompt_identity_count: identity.length,
-    prompt_identity: identity.map((p) => `${p?.task_id}=${p?.version}#${String(p?.hash ?? "").slice(0, 8)}`),
+    prompt_identity_count: identity.length + ledger.length,
+    prompt_identity: [
+      ...identity.map((p) => `${p?.task_id}=${p?.version}#${String(p?.hash ?? "").slice(0, 8)}`),
+      ...ledger.map((r) => `${r.prompt_alias}=${r.provider}/${r.model}#${r.prompt_sha256.slice(0, 8)}`),
+    ],
+    constructed: t?.construction !== null && typeof t?.construction === "object",
+    construct_identified: ledger.some((r) => r.prompt_alias === AGENT_CONSTRUCT_ALIAS),
   };
 }
 
@@ -1251,7 +1384,19 @@ async function postTurn(base, origin, payload, timeoutMs) {
 }
 
 /**
- * PHASE 1. Poll /healthz until the served build matches `expectSha`.
+ * The build a CEE response says served it, from {@link BUILD_HEADER}; null when
+ * absent (a Render edge page during a deploy carries no CEE header).
+ *
+ * @param {{ get(name: string): string|null }} headers a fetch `Headers`
+ */
+export function servedBuildFromHeaders(headers) {
+  const v = headers?.get?.(BUILD_HEADER);
+  return typeof v === "string" && /^[0-9a-f]{7,40}$/i.test(v.trim()) ? v.trim() : null;
+}
+
+/**
+ * PHASE 1. Poll {@link BUILD_PROBE_PATH}'s build header until the served build
+ * matches `expectSha`. Reads headers only — never a body, never /healthz.
  * Returns {ok, served, waitedMs}. Never throws on a bad build — the caller
  * decides, so the failure message stays in one place.
  */
@@ -1263,20 +1408,20 @@ async function waitForBuild(base, expectSha, timeoutMs) {
   while (Date.now() < deadline) {
     attempt += 1;
     try {
-      const res = await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(20000) });
-      const body = await res.json();
-      served = body?.build ?? null;
+      const res = await fetch(`${base}${BUILD_PROBE_PATH}`, { signal: AbortSignal.timeout(20000) });
+      await res.body?.cancel();
+      served = servedBuildFromHeaders(res.headers);
       if (served && served.slice(0, 7) === want) {
         return { ok: true, served, waitedMs: timeoutMs - (deadline - Date.now()), attempt };
       }
-      log(`  [freshness] attempt ${attempt}: serving ${served ?? "?"}, want ${want} — waiting…`);
+      log(`  [freshness] attempt ${attempt}: HTTP ${res.status}, serving ${served ?? "?"}, want ${want} — waiting…`);
     } catch (e) {
-      log(`  [freshness] attempt ${attempt}: /healthz unreachable (${e.name}) — waiting…`);
+      log(`  [freshness] attempt ${attempt}: ${BUILD_PROBE_PATH} unreachable (${e.name}) — waiting…`);
     }
     // Never sleep PAST the deadline. A fixed 15s wait on the final iteration
     // burns up to 15s of job time after the poll has already given up. The
-    // 15s interval itself is deliberately kept — ~60 healthz GETs over 15
-    // minutes is negligible load and needs no backoff.
+    // 15s interval itself is deliberately kept: the probe is answered from
+    // memory by the auth hook, so ~60 GETs over 15 minutes cost no I/O.
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
     await new Promise((r) => setTimeout(r, Math.min(15000, remaining)));
@@ -1315,7 +1460,7 @@ function intFromEnv(name, fallback, min, max) {
  * run and produced no rate at all, which is the same "no measurement reads as a
  * verdict" defect one level up. A thrown sample still counts against the floor.
  */
-async function runJourneySample({ base, origin, turnTimeout, index, total }) {
+async function runJourneySample({ base, origin, turnTimeout, index, total, expectSha = "" }) {
   const scenarioId = uuid();
   log(`\n### Sample ${index}/${total} (scenario_id ${scenarioId})`);
   const failures = [];
@@ -1403,6 +1548,7 @@ async function runJourneySample({ base, origin, turnTimeout, index, total }) {
     const turnDiagnostics = turns.map((t) => t.d);
     const turnBodies = turns.map((t) => t.body);
     failures.push(...assertPromptProvenance(turnDiagnostics, turnBodies));
+    failures.push(...assertServedBuild(turnDiagnostics, expectSha));
   } catch (e) {
     const name = typeof e?.name === "string" && e.name.length > 0 ? e.name : "Error";
     log(`  turn threw: ${e?.stack ?? e}`);
@@ -1521,7 +1667,7 @@ async function main() {
       break;
     }
     const started = Date.now();
-    samples.push(await runJourneySample({ base, origin, turnTimeout, index: i, total: requested }));
+    samples.push(await runJourneySample({ base, origin, turnTimeout, index: i, total: requested, expectSha }));
     slowestSampleMs = Math.max(slowestSampleMs, Date.now() - started);
   }
 

@@ -1883,10 +1883,14 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
  * keeps every enriched composer aligned on the same degrade-gracefully
  * contract: if the upstream projection does not carry probability, the
  * fragment is silently omitted rather than rendering "Not available".
+ *
+ * Principle audit (5 Oct; DL ruling on W-HEAD: CEE's own verb, never "best"): the leader is named only as a finding
+ * about this model, "In this model, '{X}' scored highest in N% of runs", never "the analysis currently favours" or
+ * "currently leads". No period: callers close or extend the clause. The share is omitted, never invented, when absent.
  */
-function probabilityFragment(p: number | undefined): string {
-  if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 1) return '';
-  return `, with a probability of ${formatProbability(p)}`;
+function modelLeaderClause(renderedLeaderLabel: string, p: number | undefined): string {
+  const share = typeof p === 'number' && Number.isFinite(p) && p >= 0 && p <= 1 ? ` in ${formatProbability(p)} of runs` : '';
+  return `In this model, ${renderedLeaderLabel} scored highest${share}`;
 }
 
 /**
@@ -1932,7 +1936,10 @@ function runnerUpStandingSentence(
   renderedRunnerLabel: string,
   runnerProbability: number | undefined,
 ): string {
-  return `${renderedRunnerLabel} sits in second place${probabilityFragment(runnerProbability)}.`;
+  // Principle audit (5 Oct): the runner-up's own share in the same model-relative verb, never a placing.
+  return typeof runnerProbability === 'number' && Number.isFinite(runnerProbability) && runnerProbability >= 0 && runnerProbability <= 1
+    ? `${renderedRunnerLabel} scored highest in ${formatProbability(runnerProbability)} of runs.`
+    : `${renderedRunnerLabel} came next.`;
 }
 
 /**
@@ -2027,7 +2034,6 @@ function composeAdvice(
   // bullet so the scannable next-step lands on its own line. The phrase
   // wording inside the bullet is unchanged so existing `.toContain`
   // pinning continues to match.
-  const probability = probabilityFragment(analysis.leading_option?.probability);
   // Labels are QUOTED here, as they already are in `composeMeaning`,
   // `composeExplainResults` and `composeWhatWouldFlip`. This composer was the
   // odd one out: on the 2026-09-05 founder journey turn 3 (quoted) and turn 10
@@ -2035,7 +2041,7 @@ function composeAdvice(
   // a grammatical sentence, because a node label can be a raw span of the
   // user's brief ("The biggest thing to examine next is we believe is partly
   // driven by product quality and…"). `quoteLabel` exists for exactly this.
-  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
+  const opener = `${modelLeaderClause(quoteLabel(leadingLabel), analysis.leading_option?.probability)}.`;
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
   // ROUND 4: `advice` makes no stability claim, but it DOES compose a margin
@@ -2075,9 +2081,8 @@ function composeImprovement(
   // into a `What to check next` bullet. Phrase wording is unchanged so
   // existing `.toContain('To improve confidence')` style pinning keeps
   // matching.
-  const probability = probabilityFragment(analysis.leading_option?.probability);
   // Quoted, matching every sibling composer — see `composeAdvice`.
-  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
+  const opener = `${modelLeaderClause(quoteLabel(leadingLabel), analysis.leading_option?.probability)}.`;
   // ROUND 4: routed through the shared composer. `improvement` is the one
   // surface with NO closeness sentence of its own — its opener states the
   // leader flatly — so on a near-tie this slot is the ONLY place honesty can
@@ -2150,7 +2155,6 @@ function composeMeaning(
   // simultaneously calling a tie.
   const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
   const tieReason = nearTieWording(verdict, analysis, rawRobustness);
-  const probability = probabilityFragment(analysis.leading_option?.probability);
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
   const topEdge = selectRenderableFragileEdge(analysis);
@@ -2177,11 +2181,11 @@ function composeMeaning(
         : '';
     if (topDriverLabel) {
       sentences.push(
-        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, and the result appears to be driven by ${quoteLabel(topDriverLabel)}.${marginSentence}`,
+        `${modelLeaderClause(quoteLabel(leadingLabel), analysis.leading_option?.probability)}, and the result appears to be driven by ${quoteLabel(topDriverLabel)}.${marginSentence}`,
       );
     } else {
       sentences.push(
-        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, given the model you've built so far.${marginSentence}`,
+        `${modelLeaderClause(quoteLabel(leadingLabel), analysis.leading_option?.probability)}.${marginSentence}`,
       );
     }
   }
@@ -2370,7 +2374,7 @@ function composeExplainResults(
     sentences.push(closeness);
   } else {
     sentences.push(
-      `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probabilityFragment(analysis.leading_option?.probability)}.`,
+      `${modelLeaderClause(quoteLabel(leadingLabel), analysis.leading_option?.probability)}.`,
     );
     // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE. These two arms were
     // copy-identical twins of `composeRobustnessVerdict`'s `explain` clear and
@@ -2627,7 +2631,7 @@ function composeWhatWouldFlip(
     sentences.push(closeness);
   } else {
     sentences.push(
-      `Based on this model, ${quoteLabel(leadingLabel)} currently leads${probabilityFragment(analysis.leading_option?.probability)}.`,
+      `${modelLeaderClause(quoteLabel(leadingLabel), analysis.leading_option?.probability)}.`,
     );
     // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE, the `flip` voice of
     // `composeRobustnessVerdict`. These two arms were copy-identical twins of

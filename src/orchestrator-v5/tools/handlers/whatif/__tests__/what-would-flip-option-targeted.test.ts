@@ -130,8 +130,9 @@ describe('what_would_flip — the answer addresses the option the user named', (
     // The pre-fix answer named the OTHER option as the one that would lead.
     expect(out.assistant_text).not.toContain('would lead instead');
     expect(out.assistant_text).not.toContain('Hire Two Senior Engineers Locally');
-    // And it is not the generic prose either.
+    // And it is not the generic prose either (old and current openers).
     expect(out.assistant_text).not.toContain('currently leads');
+    expect(out.assistant_text).not.toMatch(/In this model, .+ scored highest/);
   });
 
   it('the named option IS the one that flips ⇒ an addressed answer', async () => {
@@ -235,7 +236,7 @@ describe('NO named option ⇒ existing behaviour, untouched', () => {
 
   it('the deterministic composer keeps the generic prose', async () => {
     const out = await handler(makeInvocation({ flipTargetOption: null, sonnetValid: false }));
-    expect(out.assistant_text).toContain('currently leads');
+    expect(out.assistant_text).toMatch(/In this model, .+ scored highest/);
     expect(out.assistant_text).toContain('would lead instead');
   });
 });

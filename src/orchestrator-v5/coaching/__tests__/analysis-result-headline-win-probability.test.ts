@@ -305,7 +305,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Hire One Senior Technical Lead currently leads.');
+    expect(out).toBe('Hire One Senior Technical Lead scored highest in this model.');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 

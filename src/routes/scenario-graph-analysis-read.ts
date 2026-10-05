@@ -133,7 +133,7 @@ import {
   type LeaderLimitRisk,
   type StoredLimitVerdicts,
 } from '../orchestrator/context/constraint-feasibility.js';
-import { deriveAnalysisFreshness, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
+import { deriveAnalysisFreshness, isGoalSnapshotStaleReason, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional-links.js';
 import { isScenarioAnalysisReasoningAuthority, readScenarioAnalysisClaimSafetyFact, type ScenarioAnalysisClaimSafetyRead } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -541,8 +541,7 @@ export async function readScenarioAnalysis(
         ? projectCurrentRead({ analysisState: null })
         : projectCurrentRead({
             analysisState, derivation, analysisResult: boundResult,
-            ...(analysisReady !== undefined && (derivation.reason === 'goal_unit_changed'
-              || derivation.reason === 'goal_snapshot_unverified')
+            ...(analysisReady !== undefined && isGoalSnapshotStaleReason(derivation.reason)
               ? { analysisReady: attachComputedAt(analysisReady, derivation) } : {}),
             figures: projectSelectedRunFigures({
               scenarioId: params.scenarioId,

@@ -290,7 +290,7 @@ describe('conversational recitation — defaulted values', () => {
       // drifted the first time the wording moved.
       expect(after).toContain(DEFAULTED_DISCLOSURE_TAIL);
       // The recitation itself SURVIVES — qualified, not withheld.
-      expect(after).toContain('currently leads, with a probability of');
+      expect(after).toContain('scored highest in');
     });
 
     it('the explain fallback carries the same disclosure, from the same source', () => {

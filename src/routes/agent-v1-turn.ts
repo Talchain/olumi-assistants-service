@@ -77,7 +77,7 @@ import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestr
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
-import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
+import { agentProposals as proposals, executableWaitingProposal, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
@@ -287,7 +287,6 @@ function isConstructionTimeout(err: unknown): boolean {
 
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
-const proposals = new ProposalStore();
 /** The approval carrier each scenario and subject's latest answer row persisted — see `carrierForAnswerRow`. */
 const carriedProposals = new CarriedProposals();
 
@@ -422,22 +421,6 @@ function rememberApprove(key: string, offered: readonly OfferedAction[]): void {
 }
 
 /**
- * THE ONE PREDICATE for "may an approve chip be shown now": the ONE proposal still awaiting a yes for this
- * subject, when the store would EXECUTE it on the revision read back this turn — else nothing (a missing
- * readback fails closed). Used by the fresh Run carry AND by every replay (Codex #1807 5810816841: a
- * replay checked only id membership, so after the model moved a retried Run showed a chip that could not
- * commit).
- */
-function executableWaitingProposal(scenarioId: string, userId: string | null, graphHash: string | undefined): string | undefined {
-  if (graphHash === undefined) return undefined;
-  const waiting = proposals.outstanding(scenarioId, userId);
-  if (waiting.length !== 1) return undefined;
-  const id = waiting[0]!.proposal_id;
-  const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
-  return decision.status === 'execute' ? id : undefined;
-}
-
-/**
  * EVERY proposal still waiting for its yes that would execute on this graph, however many (`executableWaitingProposal`
  * wants exactly one, for the chip it re-offers). Any of them makes the turn a decision point for guidance (T2).
  */
@@ -459,10 +442,7 @@ export function stillValidOffers(
   offered: readonly OfferedAction[],
   now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown; modelExists: boolean },
 ): OfferedAction[] {
-  const approvals = offered.filter((a) => {
-    const id = typedApprovalOf({ chip: { id: a.id } });
-    return id !== undefined && now.outstandingProposalIds.has(id);
-  });
+  const approvals = stillValidApprovalOffers(offered, now.outstandingProposalIds);
   const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
     && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
@@ -478,7 +458,7 @@ export function stillValidOffers(
   // next step after a blocked Run: after a restart the replay carries the words only).
   const nextSteps = offersNextSteps(now.analysisState) && now.outstandingProposalIds.size === 0
     ? offered.filter((a) => METHOD_PRESS_IDS.has(a.id)) : [];  // Widen sits in a next step's place (DL P2 on #2512)
-  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
+  return [...approvals, ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
 }
 const sessions = new SessionBindingRegistry();
 
@@ -551,8 +531,27 @@ export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.j
 export const REPLY_LENGTH_INSTRUCTION =
   'Length: your words are only part of what the user reads, because Olumi adds its own status, disclosure and receipt lines after them. Stay under 110 words on the turn that builds the model from a brief, under 100 when you explain an analysis result, and under 90 otherwise: these are limits, not targets. Ask at most one question, as your last sentence. On a turn that builds the model or runs the analysis, never ask for the goal\'s target or name it as the next step: Olumi asks for it after your words. To fit, cut restated model contents, process narration and extra questions first; never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure.';
 
+/**
+ * ⭐ AN OPTION IS NAMED ONLY IN THIS MODEL, AND NEVER "FRAGILE" (WORDING BATCH; DL 0df0e1 lease, 5 Oct ~15:0xZ; Acceptance
+ * #87 5996853005 on CEE 0b37e2d). #2588 made Olumi's own Run lines model-relative, but the words the user reads after a Run
+ * are this lane's narration, and it said "…scoring highest in about 73% of simulations" and "The finding is fragile…".
+ * Host rule #34 itself says "When the result is fragile or a near tie, say that this uncertainty is itself the finding".
+ * APPENDED after the reply-length sentence, like it: the v0.2 template and every host rule reach the model unchanged
+ * (a swap drops every rule it does not restate, #2379). It reaches both served aliases: `agent.converse` and the Run's
+ * `agent.interpret`, whose instructions begin with AGENT_INSTRUCTIONS. It grants nothing: whether a leader may be named
+ * is still #34's `claim_permissions.leader_may_be_named`, and the wire gates still drop a ranking on a withheld turn.
+ * N is the option's share of runs in which it scored highest, never `probability_of_goal` (#35's "reaches the target").
+ */
+export const MODEL_RELATIVE_NAMING_INSTRUCTION =
+  'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, \u2018X\u2019 scored highest in N% of runs\u201d, '
+  + 'with X its display label and N the share of model runs in which it scored highest, taken from the result; N is never its chance of reaching the goal. '
+  + 'If the result gives no such share, say \u201cIn this model, \u2018X\u2019 scored highest\u201d. Keep any provisional or limit condition the rules above require in that same sentence. '
+  + 'Never name an option as leading, ahead, favoured, on top or winning in other words, and never without \u201cin this model\u201d. '
+  + 'Never call a result, finding, option or link \u201cfragile\u201d: say what the result rests on instead, in the result\u2019s own terms, '
+  + 'such as the assumption its decision_sensitivity names when measured, and whose figure it is.';
+
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
-  '{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION].join(' '),
+  '{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION].join(' '),
 );
 
 /**

@@ -227,6 +227,8 @@ import { log } from "../utils/telemetry.js";
 // helper; this route contributes the security ladder and the graph it read.
 import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
 import { projectAnalysisAdmission } from './analysis-admission-projection.js';
+import { readExecutableHeldProposalOffers, type HeldProposalOfferRead } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
+import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { isAgentAnswerRow } from "../orchestrator-v5/session/conversation-as-seen.js";
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
@@ -328,14 +330,16 @@ export { AGENT_ANSWER_REQUEST_HASH_PREFIX } from "../orchestrator-v5/session/con
  * `null` and the graph read stands.
  */
 async function readConversationTurns(
-  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; request_hash?: string; user_message?: string | null; assistant_message?: string | null }[]> },
+  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; request_hash?: string; user_message?: string | null; assistant_message?: string | null }[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null> },
   scenarioId: string,
   requestId: string,
-): Promise<ConversationTurnRead[] | null> {
+  authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[] },
+): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[] } | null> {
   try {
     const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
-    return [...rows].reverse()
-      .filter(isAgentAnswerRow)
+    const answers = rows.filter(isAgentAnswerRow)
+      .filter(r => typeof r.user_message === "string" || typeof r.assistant_message === "string").slice(0, CONVERSATION_TURNS_CAP);
+    const turns = [...answers].reverse()
       .map((r) => ({
         turn_id: r.turn_id,
         created_at: r.created_at,
@@ -344,6 +348,7 @@ async function readConversationTurns(
       }))
       .filter((t) => t.user_message !== null || t.assistant_message !== null)
       .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
+    return { turns, heldOffers: await readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers, store }) };
   } catch (err) {
     log.warn(
       {
@@ -617,8 +622,10 @@ export default async function route(app: FastifyInstance) {
 
       if (typeof store.readMostRecentPendingActions !== 'function') return unavailable();
       let scopeInput: ReturnType<typeof goalScopeClaimInput>;
+      let latestPending: readonly PendingAction[];
       try {
-        scopeInput = goalScopeClaimInput(await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }), graph);
+        latestPending = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
+        scopeInput = goalScopeClaimInput(latestPending, graph);
       } catch { return unavailable(); }
       const scopeIssues = scopeInput.issues;
 
@@ -679,12 +686,20 @@ export default async function route(app: FastifyInstance) {
       // entitled to read the graph is exactly the caller entitled to read its conversation") holds for the owner and
       // a guest row. A colleague the owner shared the decision with was given the decision, not the owner's chat
       // with Olumi. So a member read leaves the field out, exactly as if it had not been asked for.
-      const conversationTurns = wantsConversationTurns(req.body) && !memberRead
-        ? await readConversationTurns(store, scenarioId, requestId)
-        : undefined;
+      const conversationRequested = wantsConversationTurns(req.body) && !memberRead;
+      const conversationRead = conversationRequested
+        ? await readConversationTurns(store, scenarioId, requestId, {
+          userId: resolved.identity.mode === 'verified' ? resolved.identity.userId : null,
+          // EXACTLY the graph_hash the Agent turn reads from this route, not identity.v1's different projection.
+          graphHash: (graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null) ?? undefined,
+          latest: latestPending,
+        }) : undefined;
+      const conversationTurns = conversationRead === undefined ? undefined : conversationRead?.turns ?? null;
+      const heldOffers = conversationRead?.heldOffers;
 
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
+        ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
         scenario_id: scenarioId,
         graph: graphPresent ? graph : null,
         graph_present: graphPresent,

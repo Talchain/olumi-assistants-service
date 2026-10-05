@@ -23,8 +23,12 @@ const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f6
 // Derived from the request the real route SENT (harness raw body), never computed by hand.
 // + the link-set sentence above (MG, 2 Oct): 27,833 → 28,043 bytes.
 // + none_measurable makes no claim (AI HARNESS, RC 5950124321): 28,043 → 28,026 bytes.
-const RENDERED_SHA = 'b2653d0e2f2eda3c2387366ec33e3c6412508dc1bec9c7fbe35af6877037c739';
-const RENDERED_BYTES = 28_026;
+// + MODEL_RELATIVE_NAMING_INSTRUCTION appended after the reply-length sentence (WORDING BATCH, DL 0df0e1 lease, 5 Oct):
+//   28,026 → 28,835 bytes (+1 space +808). Rebuilt from the source literals, it reproduced the old pin b2653d0e… exactly first.
+const RENDERED_SHA = '2bc25cbaeafcca10580afc201b5c7e82cd223a877fe4a440aa5dfe4000ac629a';
+const RENDERED_BYTES = 28_835;
+/** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
+const NAMING_RULE_FORM = 'name it only as \u201cIn this model, \u2018X\u2019 scored highest in N% of runs\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';
@@ -166,6 +170,8 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(sent[0]!.instructions).toContain('authorise_change');
     // The exported host contract is the one-space join of all 31 approved old entries.
     expect(sent[0]!.instructions).toContain(HOST_TOOL_CONTRACT);
+    // WORDING BATCH: the served conversation prompt carries the model-relative naming rule (agent.converse).
+    expect(sent[0]!.instructions).toContain(NAMING_RULE_FORM);
   });
 
   it('keeps the same selected prompt and budget on a tool-followup conversation', async () => {
@@ -200,6 +206,8 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(sha256(prefix)).toBe(RENDERED_SHA);
     expect(body.instructions).toContain(interpretOnlyConstraint);
     expect(body.instructions).toContain(interpreterV02);
+    // WORDING BATCH: the Run's narration call (agent.interpret) carries the rule too, inside the selected-coach prefix.
+    expect(prefix.toString('utf8')).toContain(NAMING_RULE_FORM);
   });
 
   it('keeps Terra-low for every hop of a known-empty construction, then uses Sol-high on the next turn', async () => {

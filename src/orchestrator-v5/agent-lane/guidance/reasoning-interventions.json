@@ -449,10 +449,10 @@
       "priority": "P2",
       "reasoning_question": {
         "range_olumi_assumed": "Do you know {factor_label} more precisely? Within Olumi's assumed range it could change which option leads.",
-        "range_yours_or_unknown": "Would {leader_label} still be the best choice if {factor_label} turned out different?"
+        "range_yours_or_unknown": "Would {leader_label} still score highest in this model if {factor_label} changed?"
       },
       "short_copy": "{factor_label} could change which option leads.",
-      "why_now": "The analysis found that the answer is sensitive to {factor_label}.",
+      "why_now": "In this model, which option scores highest is sensitive to {factor_label}.",
       "primary_action": {
         "when_range_olumi_assumed": {
           "label": "Give your estimate",
@@ -589,7 +589,7 @@
       },
       "short_copy": {
         "S1": "The comparison rests on a link nobody has sized yet.",
-        "S2": "The answer is sensitive to {factor_label}, Olumi's estimate.",
+        "S2": "This model's result turns on {factor_label}, Olumi's estimate.",
         "S3L": "The effect of {from_label} is Olumi's guess.",
         "S3V": "{factor_label} is Olumi's estimate, not yours."
       },

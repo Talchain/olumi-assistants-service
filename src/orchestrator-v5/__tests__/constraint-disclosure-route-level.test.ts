@@ -781,6 +781,7 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     // The withheld headline is why the confirmation opens with the locked
     // template rather than "Hire Marketing Manager currently leads".
     expect(turn.assistantText).not.toContain('currently leads');
+    expect(turn.assistantText).not.toContain('scored highest');
   });
 });
 
@@ -1413,6 +1414,7 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
         // …and the strings themselves are off the SERIALISED bytes, not merely
         // off one parsed path.
         expect(turn.raw).not.toContain('currently leads');
+        expect(turn.raw).not.toContain('scored highest');
         expect(turn.raw).not.toContain('is slightly ahead');
         expect(turn.raw).not.toContain('could change which option leads');
         expect(turn.raw).not.toContain('slightly_ahead');

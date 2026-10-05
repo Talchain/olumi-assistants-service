@@ -669,6 +669,7 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     expect(result.response.blocks.some((block) => block.type === 'error')).toBe(false);
     expect(result.response.assistant_text).toBe(NOT_IN_MODEL_TEXT);
     expect(result.response.assistant_text).not.toContain('currently leads');
+    expect(result.response.assistant_text).not.toContain('scored highest');
     expect(result.response.assistant_text).not.toContain('62%');
     expect(result.response.blocks).toEqual([]);
     expect(result.response.suggested_actions).toEqual([]);
@@ -680,6 +681,7 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     const persisted = harness.appendedRows.at(-1);
     expect(persisted?.assistantMessage).toBe(NOT_IN_MODEL_TEXT);
     expect(persisted?.assistantMessage).not.toContain('currently leads');
+    expect(persisted?.assistantMessage).not.toContain('scored highest');
     expect(persisted?.assistantMessage).not.toContain('62%');
     expect(persisted?.pending_actions).toEqual([]);
     expect(persisted?.graph).toBeUndefined();
@@ -694,6 +696,7 @@ describe('TurnExecutor final guard — every requested selection resolved to not
     );
     expect(modelInput).toContain(NOT_IN_MODEL_TEXT);
     expect(modelInput).not.toContain('currently leads');
+    expect(modelInput).not.toContain('scored highest');
   });
 
   it('the next routed turn sees the refusal in history, never the discarded leader answer', async () => {
