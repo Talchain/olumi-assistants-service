@@ -122,7 +122,7 @@ vi.mock('../../session/index.js', async original => ({
 afterEach(() => { session.store = undefined; });
 
 function fixture(row: CorpusRow): Json {
-  const raw = JSON.parse(readFileSync(new URL(`../../../../probe/graph-${row.fixture}.json`, import.meta.url), 'utf8'));
+  const raw = JSON.parse(readFileSync(new URL(`./fixtures/rt6-graph-${row.fixture}.json`, import.meta.url), 'utf8'));
   return projectGraphForPersistence(GraphV3.parse(raw)) as Json;
 }
 
