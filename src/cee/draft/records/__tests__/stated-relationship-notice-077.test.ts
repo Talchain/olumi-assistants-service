@@ -8,13 +8,17 @@
  * credits the user's own words to Olumi. 0.77.0 adds the closed member `stated_relationship_not_used` for exactly this.
  *
  * ── THE CARRIER, HOP BY HOP (each one strips an undeclared field) ──────────
- *   projector `DroppedRecordRef.stated` → adapter (passes drops whole) → V3 transform (copies declared fields only)
+ *   projector `DroppedRecordRef.stated_relationship` → adapter (passes drops whole) → V3 transform (copies declared fields only)
  *   → `CEEGraphResponseV3` (`record_disclosures` items are a plain, STRIPPING `z.object`) → `buildModelBuildingNotices`.
  * A flag the transform does not copy, or the schema does not declare, vanishes silently — so the rows below go through
  * the REAL transform and the REAL schema parse, never a hand-built disclosure handed straight to the builder.
  *
+ * ⚠ The flag is `stated_relationship`, not a generic `stated`: the reference-failure reasons fire identically for a
+ * causal link and for a stated LIMIT (`completion.ts:811-830`), and the transform does not carry `claim_kind`, so only
+ * the producer can assert "this refused record is a relationship the user stated" (codex r1, #2595).
+ *
  * ⚠ The producer side is NOT in this file's scope: no staging reason disposes of a user-stated relationship yet
- * (records-v25 lands with #2576, which sets `stated: true` on its drops of `provenance_class: 'stated'` records). Until
+ * (records-v25 lands with #2576, which sets `stated_relationship: true` on its drops of `provenance_class: 'stated'` records). Until
  * then this path is byte-identical on every current input — pinned in row (e).
  */
 import { describe, expect, it } from "vitest";
@@ -54,13 +58,13 @@ describe("0.77.0 — a stated relationship's refusal is the user's (SPINE X8)", 
     expect(ModelBuildingNoticeKindSchema.options).toContain(STATED);
   });
 
-  it("(a) a relationship refusal flagged `stated: true` survives the transform AND the stripping schema", () => {
-    const wire = throughTheWire([drop({ stated: true })]);
-    expect((wire.record_disclosures?.[0] as { stated?: unknown } | undefined)?.stated).toBe(true);
+  it("(a) a relationship refusal flagged `stated_relationship: true` survives the transform AND the stripping schema", () => {
+    const wire = throughTheWire([drop({ stated_relationship: true })]);
+    expect((wire.record_disclosures?.[0] as { stated_relationship?: unknown } | undefined)?.stated_relationship).toBe(true);
   });
 
   it("(b) ...and is counted as the user's kind; its unflagged twin stays Olumi's `relationship_not_used`", () => {
-    const wire = throughTheWire([drop({ stated: true }), drop({ label: "Another link" })]);
+    const wire = throughTheWire([drop({ stated_relationship: true }), drop({ label: "Another link" })]);
     const notices = buildModelBuildingNotices(wire.record_disclosures, wire.record_disclosures_omitted);
     expect(notices).toEqual({
       total_count: 2,
@@ -74,22 +78,22 @@ describe("0.77.0 — a stated relationship's refusal is the user's (SPINE X8)", 
     expect(ModelBuildingNoticesSchema.parse(notices)).toEqual(notices);
   });
 
-  it("(c) CONTRAST: `stated` relabels ONLY a relationship refusal — a stated detail stays `detail_not_connected`", () => {
-    const wire = throughTheWire([drop({ reason: "unconnected_to_goal", claim_kind: "factor", stated: true })]);
+  it("(c) CONTRAST: `stated_relationship` relabels ONLY a relationship refusal — a stated detail stays `detail_not_connected`", () => {
+    const wire = throughTheWire([drop({ reason: "unconnected_to_goal", claim_kind: "factor", stated_relationship: true })]);
     const notices = buildModelBuildingNotices(wire.record_disclosures, wire.record_disclosures_omitted);
     expect(notices?.groups).toEqual([{ kind: "detail_not_connected", count: 1 }]);
   });
 
   it("(d) CONTRAST: only the literal `true` counts — a malformed flag is never read as the user's", () => {
     for (const bad of [false, "true", 1, null]) {
-      const notices = buildModelBuildingNotices([{ ...drop({}), withdrawn: true, stated: bad }], undefined);
-      expect(notices?.groups, `stated: ${JSON.stringify(bad)}`).toEqual([{ kind: "relationship_not_used", count: 1 }]);
+      const notices = buildModelBuildingNotices([{ ...drop({}), withdrawn: true, stated_relationship: bad }], undefined);
+      expect(notices?.groups, `stated_relationship: ${JSON.stringify(bad)}`).toEqual([{ kind: "relationship_not_used", count: 1 }]);
     }
   });
 
-  it("(e) BYTE-IDENTICAL on every current input: an unflagged disclosure carries no `stated` key", () => {
+  it("(e) BYTE-IDENTICAL on every current input: an unflagged disclosure carries no `stated_relationship` key", () => {
     const wire = throughTheWire([drop({})]);
-    expect(Object.hasOwn(wire.record_disclosures![0]!, "stated")).toBe(false);
+    expect(Object.hasOwn(wire.record_disclosures![0]!, "stated_relationship")).toBe(false);
   });
 
   it("(f) the conversation receipt says it in the user's terms, with no Olumi attribution", () => {
@@ -102,5 +106,29 @@ describe("0.77.0 — a stated relationship's refusal is the user's (SPINE X8)", 
       "Draft notice: 2 relationships you described not used. This notice records category counts, not the individual items.",
     );
     expect(receipt).not.toMatch(/Olumi/);
+  });
+
+  it("(g) PAIR, SAME reason: a stated LIMIT's refusal is not a relationship — only the producer's relationship flag moves it", () => {
+    // Identical `ref_out_of_range` on both: the reason cannot discriminate a stated limit from a causal link.
+    const wire = throughTheWire([
+      drop({ reason: "ref_out_of_range", claim_kind: "stated_item", label: "Keep churn below 2%", stated: true }),
+      drop({ reason: "ref_out_of_range", claim_kind: "causal_link", stated_relationship: true }),
+    ]);
+    const notices = buildModelBuildingNotices(wire.record_disclosures, wire.record_disclosures_omitted);
+    expect(notices?.groups).toEqual([
+      { kind: "relationship_not_used", count: 1 },
+      { kind: STATED, count: 1 },
+    ]);
+    // A generic statedness key never reaches the wire at all: the stripping schema does not declare it.
+    expect(Object.hasOwn(wire.record_disclosures![0]!, "stated")).toBe(false);
+  });
+
+  it("(h) WIRE-level malformed flag: a non-`true` value is not carried, and the refusal stays Olumi's", () => {
+    for (const bad of ["true", 1, false]) {
+      const wire = throughTheWire([drop({ stated_relationship: bad })]);
+      expect(Object.hasOwn(wire.record_disclosures![0]!, "stated_relationship"), JSON.stringify(bad)).toBe(false);
+      const notices = buildModelBuildingNotices(wire.record_disclosures, wire.record_disclosures_omitted);
+      expect(notices?.groups, JSON.stringify(bad)).toEqual([{ kind: "relationship_not_used", count: 1 }]);
+    }
   });
 });

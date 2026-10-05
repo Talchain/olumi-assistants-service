@@ -855,13 +855,18 @@ export interface DroppedRecordRef {
    */
   readonly strength_signature?: string;
   /**
-   * ⭐ SPINE X8 (schemas 0.77.0): `true` ONLY when the refused record was STATED by the user (its
-   * `provenance_class` is `stated`). A RELATIONSHIP refusal carrying it is counted as
+   * ⭐ SPINE X8 (schemas 0.77.0): `true` ONLY when the refused record IS A RELATIONSHIP (a causal link, or a
+   * stated `cause`) AND the user stated it (`provenance_class: 'stated'`). Counted as
    * `stated_relationship_not_used` — the user's own words, never "Connections Olumi proposed".
-   * Absent on every current producer path (records-v25, #2576, sets it), so every disclosure that had
-   * none before stays byte-identical. A literal `true`, never a boolean: absence is the only "no".
+   *
+   * ⚠ NOT a generic "the user stated this" flag, and that is load-bearing: the reference-failure reasons
+   * (`unparseable_ref` … `ambiguous_ref`) fire identically for a causal link AND for a stated LIMIT's
+   * `applies_to_*` (`completion.ts:811-830`: "THE REASON CANNOT DISCRIMINATE"), and the V3 transform does not
+   * carry `claim_kind`. Only the producer knows which it refused, so it asserts the relationship itself; a
+   * stated limit or constraint NEVER carries this (codex r1, #2595). Absent on every current producer path
+   * (records-v25, #2576, sets it), so every disclosure that had none before stays byte-identical.
    */
-  readonly stated?: true;
+  readonly stated_relationship?: true;
 }
 
 /** A bound declaration, not yet an executable constraint. Minted at reference resolution. */

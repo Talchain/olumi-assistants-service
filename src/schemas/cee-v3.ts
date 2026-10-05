@@ -1188,11 +1188,12 @@ export const CEEGraphResponseV3 = z.object({
         /** The unit the user stated, alongside `value` (e.g. `"£"`, `"%"`). */
         unit: z.string().optional(),
         /**
-         * SPINE X8 (schemas 0.77.0): the refused record was STATED by the user. Declared here because this
-         * object STRIPS undeclared keys — left to ride, the flag would vanish between the transform and
-         * `buildModelBuildingNotices`, and the user's relationship would be counted as Olumi's.
+         * SPINE X8 (schemas 0.77.0): the refused record is a RELATIONSHIP the user stated (see
+         * `DroppedRecordRef.stated_relationship`). Declared here because this object STRIPS undeclared keys —
+         * left to ride, the flag would vanish before `buildModelBuildingNotices` and the user's relationship
+         * would be counted as Olumi's.
          */
-        stated: z.literal(true).optional(),
+        stated_relationship: z.literal(true).optional(),
       }),
     )
     .optional(),

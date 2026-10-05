@@ -269,11 +269,11 @@ export function buildModelBuildingNotices(
       const kind = NOTICE_KIND_BY_REASON[reason as DroppedRecordRef["reason"]] ?? "other";
       // ⭐ SPINE X8 (schemas 0.77.0): a relationship the USER stated is theirs. Every consumer words
       // `relationship_not_used` as Olumi's ("Connections Olumi proposed…"), so counting the user's own stated
-      // relationship there credits their words to Olumi. The producer's literal `stated: true` (never a guess
-      // from the reason name, never a truthy value) moves ONLY a relationship refusal; every other kind keeps
-      // its reason's kind, because statedness does not change what happened to a detail or an alternative.
+      // relationship there credits their words to Olumi. The producer's literal `stated_relationship: true`
+      // (never a guess from the reason name — a stated LIMIT shares these reasons — and never a truthy value)
+      // moves ONLY a relationship refusal; every other kind keeps its reason's kind.
       bump(
-        kind === "relationship_not_used" && (raw as { stated?: unknown }).stated === true
+        kind === "relationship_not_used" && (raw as { stated_relationship?: unknown }).stated_relationship === true
           ? "stated_relationship_not_used"
           : kind,
       );
