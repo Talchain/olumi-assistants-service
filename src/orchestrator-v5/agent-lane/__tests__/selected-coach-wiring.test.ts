@@ -1,3 +1,4 @@
+import { constructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /** Selected coaching reaches the real Agent route on every conversation path. No provider is called. */
 import { createHash } from 'node:crypto';
@@ -45,15 +46,6 @@ let readMode: 'populated' | 'empty' | 'failed' = 'populated';
 let registered = false;
 let ran = false;
 const BRIEF = 'Should we raise the Pro price or grow the Pro subscriber base to lift MRR?';
-const candidate = {
-  goal: { metric: 'MRR', operator: '>=', value: 100, unit: 'k', horizon_months: 6, provenance: 'explicit' },
-  constraints: [],
-  options: [{ label: 'Raise the Pro price', provenance: 'explicit', interventions: [] }],
-  factors: [{ label: 'Pro subscriber base', role: 'controllable', baseline_known: true, baseline_value: 5, unit: 'k', provenance: 'explicit' }],
-  risks: [], outcomes: [{ label: 'MRR', provenance: 'inferred' }],
-  links: [{ from: 'Pro subscriber base', to: 'MRR', direction: 'positive', provenance: 'inferred' }],
-  unknowns: [],
-};
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string; assistant_message: string | null }>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -90,7 +82,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
       sent.push(body);
       registeredAtCall.push(registered);
       if (body.text?.format?.name === 'whole_candidate') {
-        return new Response(JSON.stringify({ status: 'completed', output: say(JSON.stringify(candidate)) }), { status: 200 });
+        return new Response(JSON.stringify({ status: 'completed', output: say(JSON.stringify(strictRecordsWire(constructionRecords('Raise the Pro price', 'MRR', 'Pro subscriber base')))) }), { status: 200 });
       }
       return new Response(JSON.stringify({ status: 'completed', output: scripted.shift() ?? say('Done.') }), { status: 200 });
     }));

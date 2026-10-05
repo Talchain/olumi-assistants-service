@@ -1,3 +1,5 @@
+import { strictRecordsWire } from './records-wire-fixture.js';
+import type { DraftRecordSet } from '../../../cee/draft/records/grammar.js';
 /**
  * ⛔ A FACTOR'S RANGE MUST LIVE WHERE EVERY LATER WRITER READS IT.
  *
@@ -29,27 +31,23 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 const SCENARIO = '22222222-2222-4222-8222-222222222222';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-range' };
 
-/** Paul's decision, shaped the way the builder returns it. No baseline is known for either factor. */
-const HIRING = {
-  goal: { metric: 'Delivery velocity', operator: '>=', value: 30, unit: 'points per sprint', horizon_months: 6, provenance: 'inferred' },
-  constraints: [],
-  options: [
-    { label: 'Hire Two Developers', provenance: 'explicit', changes: [],
-      interventions: [{ factor_label: 'Developer headcount', value: 7, unit: 'FTE', provenance: 'inferred' }] },
-    { label: 'Hire a Tech Lead', provenance: 'explicit', changes: [],
-      interventions: [{ factor_label: 'Tech leads hired', value: 1, unit: 'FTE', provenance: 'explicit' }] },
+/** Hand-authored records with the same hiring levels; the grammar has no plausible_max field. */
+const HIRING: DraftRecordSet = {
+  stated_items: [
+    { kind: 'goal', source_quote: 'increase velocity' },
+    { kind: 'option', source_quote: 'Hire Two Developers' },
+    { kind: 'option', source_quote: 'Hire a Tech Lead' },
   ],
-  factors: [
-    { label: 'Developer headcount', role: 'controllable', baseline_known: false, baseline_value: null, unit: 'FTE', provenance: 'inferred', plausible_max: 100 },
-    { label: 'Tech leads hired', role: 'controllable', baseline_known: false, baseline_value: null, unit: 'FTE', provenance: 'inferred', plausible_max: 10 },
+  claims: [
+    { claim_kind: 'factor', label: 'Developer headcount', unit: 'FTE', value_scale: 'raw_count' },
+    { claim_kind: 'factor', label: 'Tech leads hired', unit: 'FTE', value_scale: 'raw_count' },
+    { claim_kind: 'outcome', label: 'Delivery velocity' },
+    { claim_kind: 'causal_link', label: 'Developer level', from_stated: 1, to_claim: 0, sets_to: 7, unit: 'FTE', value_scale: 'raw_count', effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Lead level', from_stated: 2, to_claim: 1, sets_to: 1, unit: 'FTE', value_scale: 'raw_count', effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Developer effect', from_claim: 0, to_claim: 2, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Lead effect', from_claim: 1, to_claim: 2, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Velocity reaches goal', from_claim: 2, to_stated: 0, effect: 'positive' },
   ],
-  risks: [],
-  outcomes: [],
-  links: [
-    { from: 'Developer headcount', to: 'Delivery velocity', direction: 'positive', provenance: 'inferred' },
-    { from: 'Tech leads hired', to: 'Delivery velocity', direction: 'positive', provenance: 'inferred' },
-  ],
-  unknowns: [],
 };
 
 type StoredNode = {
@@ -104,7 +102,7 @@ function product() {
   return { d, edits, node, level, graph: () => graph };
 }
 
-const structured = (payload: unknown): CallStructuredModel => async () => ({ text: JSON.stringify(payload) });
+const structured = (payload: DraftRecordSet): CallStructuredModel => async () => ({ text: JSON.stringify(strictRecordsWire(payload)) });
 
 async function built() {
   const p = product();

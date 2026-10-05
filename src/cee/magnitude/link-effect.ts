@@ -222,8 +222,13 @@ export function frameAwarePlaceholder(sign: 1 | -1, baseline: number, domain: Le
   return sign * size;
 }
 
+/** Stated ranges are read as a 90% interval for the inert records compiler. */
+export const RANGE_SIGMAS = 1.645;
+
 export interface LinkStatement {
   readonly direction: 'positive' | 'negative';
+  /** Relationship interval (B1a sizing only). Distinct from the served A4 one-end contract. */
+  readonly amount_range?: { readonly low: number; readonly high: number };
   readonly effect_amount?: number | null;
   readonly effect_per_source_change?: number | null;
   /** True when the USER stated the size (never overridden, D7). */
@@ -477,7 +482,11 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   else if (beta !== null && (beta === 0 || Math.sign(beta) !== sign)) problem = 'sign_conflict';
 
   if (beta !== null && problem === undefined) {
-    const sigma = Math.abs(beta) / 2;
+    const interval=link.amount_range;
+    const lowBeta=interval===undefined ? null : convertLinkEffect(interval.low,per as number,targetFrame,sourceFrame);
+    const highBeta=interval===undefined ? null : convertLinkEffect(interval.high,per as number,targetFrame,sourceFrame);
+    const sigma = lowBeta===null || highBeta===null ? Math.abs(beta) / 2
+      : Math.max(Math.abs(highBeta-beta),Math.abs(beta-lowBeta))/RANGE_SIGMAS;
     const outOfDomain = judge !== null && !withinDomain(domainBand(judge.baseline, beta, sigma, judge.swing), judge.domain);
     const issue: LinkSizeProblem | undefined = outOfDomain ? 'out_of_domain' : Math.abs(beta) > 1 ? 'not_representable' : undefined;
     if (link.user_stated) {

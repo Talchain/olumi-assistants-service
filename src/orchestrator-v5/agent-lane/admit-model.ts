@@ -37,6 +37,7 @@ import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
+import { defaultFrameFor, framedFields, statedRangeFrame } from './frame-rule.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, definitionalLink, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
@@ -753,10 +754,9 @@ export function framedObservedState(f: {
   // only genuinely unusable cases are a missing/non-finite cap, a cap that is not
   // strictly above 1, a NEGATIVE baseline (which a 0..cap frame cannot express),
   // and a baseline above the cap.
-  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 1 || raw < 0 || raw > cap) {
-    return { value: raw, ...base };
-  }
-  return { value: raw / cap, raw_value: raw, cap, declared_scale: 'unit_interval', ...base };
+  // The frame fields come from the ONE shared rule the records compile also writes through (`frame-rule.ts`).
+  const framed = framedFields(raw, cap);
+  return framed === undefined ? { value: raw, ...base } : { ...framed, ...base };
 }
 
 /**
@@ -822,19 +822,8 @@ function estimatedObservedState(
  * user's own number untouched; and it is recorded in the ledger as defaulted,
  * so the Agent says it out loud. It is a unit of measurement, not a claim.
  */
-export function defaultFrameFor(largestMagnitude: number): number {
-  const magnitude = Math.abs(largestMagnitude);
-  if (!Number.isFinite(magnitude) || magnitude <= 1) return 1;
-  // ⭐ HEADROOM (AIQ #72 5868446435): the frame sits STRICTLY above the figure, so an exact
-  // power of ten takes the next step up — £100,000 → 0–1,000,000 (0.1), never 1.0 of its frame
-  // (ISL clips a value at the edge one-sided; PLoT refuses a limit outside the frame). The old
-  // `ceil(log10 + EPSILON)` only managed that for 10: above it the EPSILON was lost.
-  let frame = 10 ** (Math.floor(Math.log10(magnitude)) + 1);
-  // `Math.log10` can round across a power of ten; correct by one step either way.
-  if (frame <= magnitude) frame *= 10;
-  else if (frame / 10 > magnitude) frame /= 10;
-  return frame;
-}
+// Moved verbatim to `frame-rule.ts` (P2-FRAME: one rule, also read by the records compile); re-exported unchanged.
+export { defaultFrameFor, statedRangeFrame };
 
 /**
  * ⛔ A LEVER NO OPTION PULLS IS CONTEXT, NOT A LEVER (served 23 Sep, `c4a6cce`,
@@ -3030,8 +3019,10 @@ function admitOnce(
   for (const o of model.options) {
     for (const iv of o.interventions ?? []) {
       const stated = capByLabel.get(iv.factor_label);
-      if (stated === undefined || !Number.isFinite(iv.value) || iv.value <= stated) continue;
-      const frame = defaultFrameFor(iv.value);
+      if (stated === undefined) continue;
+      // P2-FRAME: the one widening rule (`frame-rule.ts`); a non-finite or in-range level leaves the range as stated.
+      const frame = statedRangeFrame(stated, [iv.value]);
+      if (frame === stated) continue;
       const prior = widenedFrames.find((w) => w.label === iv.factor_label);
       if (prior !== undefined && prior.frame >= frame) continue;
       if (prior !== undefined) widenedFrames.splice(widenedFrames.indexOf(prior), 1);

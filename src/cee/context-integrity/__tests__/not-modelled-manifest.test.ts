@@ -171,8 +171,8 @@ describe("B1 growth brief — oracle: loss-map B1 per-atom table", () => {
     expect(eightMillion?.matched_node_id).toBe("fac_headcount_budget");
   });
 
-  it("reports the goal figure as in_model (atom A07)", () => {
-    expect(statedItem(B1, "£20m").verdict).toBe("in_model");
+  it("reports the goal label as prose_only without a numeric carrier (atom A07)", () => {
+    expect(statedItem(B1, "£20m").verdict).toBe("prose_only");
   });
 
   it("separates a coaching quote from a modelled value (atom A06)", () => {
@@ -210,7 +210,7 @@ describe("B2 restructuring brief — oracle: loss-map B2 per-atom table", () => 
   it("matches an abbreviated month in a model label (atom A23)", () => {
     // The brief writes "January 2027"; the model labels a risk "(Jan 2027)".
     // Without month canonicalisation this reads as a loss that did not happen.
-    expect(statedItem(B2, "January 2027").verdict).toBe("in_model");
+    expect(statedItem(B2, "January 2027").verdict).toBe("prose_only");
   });
 });
 
@@ -235,13 +235,13 @@ describe("B3 product-bet brief — oracle: loss-map B3 per-atom table", () => {
     expect(statedItem(B3, "22%").verdict).toBe("absent");
   });
 
-  it("reports the goal figure as the ONE quantity that survived (atom A02)", () => {
+  it("reports the goal label as prose_only (atom A02)", () => {
     // The trace's tally for B3: "Quantitative atoms with unit+magnitude intact:
     // 1 of ~14 (the 15% inside the goal label)". This asserts the survivor AND
     // that the derivation is not generously inventing others.
     const m = deriveNotModelledManifest(B3.brief_text, B3.graph);
-    expect(statedItem(B3, "15%").verdict).toBe("in_model");
-    expect(m.quantities?.in_model).toBe(1);
+    expect(statedItem(B3, "15%").verdict).toBe("prose_only");
+    expect(m.quantities?.in_model).toBe(0);
   });
 });
 

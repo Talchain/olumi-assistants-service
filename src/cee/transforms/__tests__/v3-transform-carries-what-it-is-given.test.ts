@@ -266,6 +266,9 @@ function fullV1Node(kind: string, data: V1FactorData | V1OptionData): Required<V
     goal_baseline: 0.5,
     goal_baseline_raw: 50,
     scale_frame: 100,
+    threshold_source: 'brief_extraction',
+    goal_direction: '>=',
+    goal_horizon_months: 9,
   };
 }
 
@@ -404,6 +407,8 @@ const NODE_CASES: readonly NodeCase[] = [
         arrived: (out) => {
           expect((out.observed_state as Out | undefined)?.value).toBe(0.3);
           expect((out.observed_state as Out | undefined)?.raw_value).toBe(30);
+          expect((out.observed_state as Out | undefined)?.baseline).toBe(0.2);
+          expect((out.observed_state as Out | undefined)?.range).toEqual({ min: 0, max: 1 });
           expect(out.encoding_map).toEqual({ '0': 'Developers' });
           expect(out.display_value).toBe('£30');
         },
@@ -412,7 +417,7 @@ const NODE_CASES: readonly NodeCase[] = [
     // Goal-only fields. `transformNodeToV3` builds the baseline limb under
     // `kind === "goal"` (schema-v3.ts:395), so on a factor they have no carrier
     // — which is correct, not a defect, and pinned here so it stays visible.
-    knownDropped: new Set(['goal_baseline', 'goal_baseline_raw']),
+    knownDropped: new Set(['goal_baseline', 'goal_baseline_raw', 'threshold_source', 'goal_direction', 'goal_horizon_months']),
   },
   {
     kind: 'option',
@@ -423,7 +428,7 @@ const NODE_CASES: readonly NodeCase[] = [
     // `transformGraphToV3` (schema-v3.ts:1532-1533, read back onto the node at
     // :1591) instead. Pinned as absent FROM THIS FUNCTION, with the graph-level
     // carrier named — scoped, not excused.
-    knownDropped: new Set(['data', 'goal_baseline', 'goal_baseline_raw']),
+    knownDropped: new Set(['data', 'goal_baseline', 'goal_baseline_raw', 'threshold_source', 'goal_direction', 'goal_horizon_months']),
   },
 ];
 
@@ -580,6 +585,11 @@ describe('V3 transform — it carries what it is given, or the loss is pinned', 
       );
       // Positive control per limb: the transform produced a real record, so an
       // empty or throwing transform cannot read as "nothing was lost".
+      if (nodeCase.kind === 'goal') {
+        expect(out.threshold_source).toBe('brief_extraction');
+        expect(out.goal_direction).toBe('>=');
+        expect(out.goal_horizon_months).toBe(9);
+      }
       expect(out.id).toBe('n_1');
       expect(out.label).toBe('Label');
     });

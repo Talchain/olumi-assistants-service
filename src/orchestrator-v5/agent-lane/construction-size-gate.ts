@@ -167,8 +167,20 @@ const EMPTY_PROVENANCE: Readonly<Record<InferenceClass, number>> = {
  * cap read off the raw candidate would be measuring a different object from the
  * one that gets registered, and would disagree with the canvas the user sees.
  */
+/**
+ * What the gate READS, structurally: node ids (kinds and labels are read through `unknown`), edges as stored, the
+ * inference classes, and the stated limits. Type-only (P2-P3): the records build counts the GraphV3 graph it would
+ * register through this SAME function; `AdmittedModel` satisfies it unchanged.
+ */
+export interface SizedModel {
+  readonly nodes: ReadonlyArray<{ readonly id: string }>;
+  readonly edges: ReadonlyArray<unknown>;
+  readonly inference_classes: Readonly<Record<string, InferenceClass>>;
+  readonly goal_constraints?: AdmittedModel['goal_constraints'];
+}
+
 export function assessConstructionSize(
-  admitted: Pick<AdmittedModel, 'nodes' | 'edges' | 'inference_classes'> & Partial<Pick<AdmittedModel, 'goal_constraints'>>,
+  admitted: SizedModel,
   limits: ConstructionSizeLimits = COMPACT_LIMITS,
 ): ConstructionSizeVerdict {
   const nodes = admitted.nodes.length;

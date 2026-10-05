@@ -64,6 +64,7 @@ import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedRange } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
+import type { HorizonAttestation } from '../horizon-attestation.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 
@@ -1821,31 +1822,10 @@ export async function buildModelFromBrief(
     ...withheldOptions.map((w) => w.sentence),
     ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
   );
-  /**
-   * ⛔ A DEADLINE NO RESULT ANSWERS IS ASKED WHERE THE USER ALWAYS SEES IT. Unattested, the goal holds no deadline and
-   * admission records the loss in `not_represented`; attested, the goal holds it (G1) but the analysis compares levels,
-   * not a path over time, so the question stays, worded truthfully either way. Only the Agent's model reads
-   * that, and on served CEE `85ce874` (MG fidelity scorecard, 26 Sep) Paul's "£20k MRR within 12 months"
-   * reply never mentioned the deadline. `open_questions` is appended to the reply by the server every time
-   * (`write-outcome.ts` `openQuestionsLine`), so the deadline goes FIRST there, ahead of the five-question cap.
-   */
-  const horizon = candidate.goal?.horizon_months;
-  // ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
-  // ("by Q3" needs a year and a fiscal calendar) is asked in the brief's OWN words, in this same first slot. Before, the
-  // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
-  // 8th of 10, two shown), and a month count the drafter typed for it was asked as the deadline. Olumi's count is never
-  // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
-  if (statedGoal.horizon.status === 'unresolved') {
-    const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
-    openQuestions.unshift(deadlineHeld
-      ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
-      : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`);
-  } else if (typeof horizon === 'number' && Number.isFinite(horizon) && horizon > 0) {
-    // Held (G1): the model keeps the deadline, but the analysis compares levels, so still no result answers it.
-    openQuestions.unshift(statedGoal.held.horizon
-      ? `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds the deadline; no result answers that yet.`
-      : `Does "${candidate.goal.metric}" get there within ${horizon} months? The model holds no deadline yet, so no result answers that.`);
-  }
+  // ⛔ THE DEADLINE QUESTION, FIRST, ahead of the five-question cap: one producer (`deadlineOpenQuestion`), which the
+  // records constructor (`build-model-from-records.ts`) calls too (DL WIRING PORTS 3: port by calling, never a 2nd writer).
+  const deadlineQuestion = deadlineOpenQuestion(statedGoal, candidate.goal?.metric, candidate.goal?.horizon_months, deadlineHeld);
+  if (deadlineQuestion !== undefined) openQuestions.unshift(deadlineQuestion);
   // ⛔ C46: the goal's unstated scope (`admit-model.ts` records the question as the reason of
   // its `goal_scope` entry). First, because the ruling requires it clarified or named before
   // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
@@ -2143,6 +2123,47 @@ function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAside
   if (amounts.length === 0) return questions;
   const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, a, b);
   return questions.filter((q) => !findStatedAmounts(q).some((w) => amounts.some((a) => same(Math.abs(w.magnitude), a))));
+}
+
+/**
+ * ⛔ A DEADLINE NO RESULT ANSWERS IS ASKED WHERE THE USER ALWAYS SEES IT. Unattested, the goal holds no deadline and
+ * admission records the loss in `not_represented`; attested, the goal holds it (G1) but the analysis compares levels,
+ * not a path over time, so the question stays, worded truthfully either way. Only the Agent's model reads
+ * that, and on served CEE `85ce874` (MG fidelity scorecard, 26 Sep) Paul's "£20k MRR within 12 months"
+ * reply never mentioned the deadline. `open_questions` is appended to the reply by the server every time
+ * (`write-outcome.ts` `openQuestionsLine`), so the deadline goes FIRST there, ahead of the five-question cap.
+ *
+ * ⛔ T2 (journey E, PJ-E-A2; served pj-20260928T074951Z E01): a deadline the brief writes but no month count can hold
+ * ("by Q3" needs a year and a fiscal calendar) is asked in the brief's OWN words, in this same first slot. Before, the
+ * wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
+ * 8th of 10, two shown), and a month count the drafter typed for it was asked as the deadline. Olumi's count is never
+ * asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
+ *
+ * The ONE producer of the deadline question (DL WIRING PORTS 3): the legacy constructor and the records constructor both
+ * call it. `statedGoal` is `holdStatedGoalAttributes`' verdict on the brief; `metric` and `horizonMonths` are the goal's;
+ * `wordsHeld` is whether the goal node the caller registers holds the deadline's own words (`goal_deadline_as_stated`),
+ * so "the model keeps your words" is said only where it does. Undefined: no deadline to ask about.
+ */
+export function deadlineOpenQuestion(
+  statedGoal: { readonly horizon: HorizonAttestation; readonly held: { readonly horizon: boolean } },
+  metric: unknown,
+  horizonMonths: unknown,
+  wordsHeld: boolean,
+): string | undefined {
+  if (statedGoal.horizon.status === 'unresolved') {
+    const deadlineWords = statedGoal.horizon.wording.trim();
+    const goalName = typeof metric === 'string' && metric.trim() !== '' ? ` for "${metric}"` : '';
+    return wordsHeld
+      ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`
+      : `Which date does "${statedGoal.horizon.wording}" mean? It is the deadline your brief sets${goalName}, but the model does not hold it yet, so no result answers whether it is met by then.`;
+  }
+  if (typeof horizonMonths === 'number' && Number.isFinite(horizonMonths) && horizonMonths > 0) {
+    // Held (G1): the model keeps the deadline, but the analysis compares levels, so still no result answers it.
+    return statedGoal.held.horizon
+      ? `Does "${String(metric)}" get there within ${horizonMonths} months? The model holds the deadline; no result answers that yet.`
+      : `Does "${String(metric)}" get there within ${horizonMonths} months? The model holds no deadline yet, so no result answers that.`;
+  }
+  return undefined;
 }
 
 export function userFacingDrafterQuestions(parked: unknown): string[] {

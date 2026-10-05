@@ -1,3 +1,4 @@
+import { constructionRecords, oversizedConstructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 /**
  * ⭐ C6-1: THE CANVAS DRAWS THE FIRST MODEL WHEN IT IS REGISTERED, NOT AT THE END OF THE TURN.
  *
@@ -77,34 +78,6 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 const BRIEF = 'Should we hire a tech lead or two developers to lift delivery reliability?';
-const candidate = {
-  goal: { metric: 'Delivery reliability', operator: '>=', value: 90, unit: '%', horizon_months: 6, provenance: 'explicit' },
-  constraints: [],
-  options: [{ label: 'Hire a tech lead', provenance: 'explicit', interventions: [] }],
-  factors: [{ label: 'Team capacity', role: 'controllable', baseline_known: true, baseline_value: 5, unit: 'people', provenance: 'explicit' }],
-  risks: [], outcomes: [{ label: 'Delivery reliability', provenance: 'inferred' }],
-  links: [{ from: 'Team capacity', to: 'Delivery reliability', direction: 'positive', provenance: 'inferred' }],
-  unknowns: [],
-};
-/** A first model far over the first-model limit, made of widened factors only — refused `model_too_large` (see rebuild-after-too-large.test.ts). */
-function oversized() {
-  const names = Array.from({ length: 35 }, (_, i) => `Secondary factor ${i}`);
-  const factor = (label: string, provenance = 'ai_proposed') => ({ label, role: 'observable', baseline_known: false, baseline_value: null, unit: null, provenance, plausible_max: 100 });
-  const link = (from: string, to: string) => ({ from, to, direction: 'positive', provenance: 'inferred' });
-  return {
-    goal: { metric: 'Velocity', operator: '>=', value: 20, unit: 'points', horizon_months: 6, provenance: 'explicit' },
-    constraints: [],
-    options: [
-      { label: 'Hire a tech lead', provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] },
-      { label: 'Hire two developers', provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] },
-    ],
-    factors: [factor('Delivery capacity', 'inferred'), ...names.map((n) => factor(n))],
-    risks: [],
-    outcomes: [{ label: 'Velocity', provenance: 'inferred' }],
-    links: [link('Delivery capacity', 'Velocity'), ...names.map((n) => link(n, 'Velocity'))],
-    unknowns: [],
-  };
-}
 let constructionReturns: 'ready' | 'oversized' = 'ready';
 
 let script: Array<Record<string, unknown>> = [];
@@ -117,7 +90,7 @@ function installFetch() {
     const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { type?: string } } };
     if (body.text?.format?.type === 'json_schema') {
       steps.push({ at: 'construction' });
-      const out = constructionReturns === 'oversized' ? oversized() : candidate;
+      const out = strictRecordsWire(constructionReturns === 'oversized' ? oversizedConstructionRecords() : constructionRecords());
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(out) }] }] }), { status: 200 });
     }
     steps.push({ at: 'model' });

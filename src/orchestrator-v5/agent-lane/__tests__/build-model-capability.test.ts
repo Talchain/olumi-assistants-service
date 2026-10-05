@@ -1,3 +1,5 @@
+import { strictRecordsWire } from './records-wire-fixture.js';
+import type { DraftRecordSet } from '../../../cee/draft/records/grammar.js';
 /**
  * `build_model_from_brief` — the construction capability, as the ROUTE reaches it.
  *
@@ -21,25 +23,27 @@ import { AGENT_TOOLS, dispatchTool } from '../runtime/agent-tools.js';
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-1' };
 
-/** A minimal candidate the admitter accepts. */
-const CANDIDATE = {
-  goal: { metric: 'MRR', operator: '>=', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit' },
-  constraints: [{ metric: 'Monthly churn', operator: '<', value: 4, unit: '%', provenance: 'explicit' }],
-  options: [{ label: 'Raise Pro to £59', provenance: 'explicit', interventions: [] }],
-  factors: [
-    { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit' },
-    // The constraint's metric must NAME an entity, or it cannot attach to one.
-    // Olumi's level (DL ruling #72 5863840239): a limited quantity with none is a gap that spends the one retry.
-    { label: 'Monthly churn', role: 'observable', baseline_known: false, baseline_value: 3, unit: '%', provenance: 'ai_proposed' },
+/** An explicit records topology, including a located user limit on claim 1. */
+const RECORDS: DraftRecordSet = {
+  stated_items: [
+    { kind: 'goal', source_quote: 'MRR' },
+    { kind: 'option', source_quote: 'Raise Pro to £59' },
+    { kind: 'constraint', source_quote: 'Monthly churn under 4%', value: 4, unit: '%', direction: 'ceiling',
+      direction_span: { start: 14, end: 19 }, value_span: { start: 20, end: 21 }, applies_to_claim: 1 },
   ],
-  risks: [{ label: 'Churn rises', provenance: 'inferred' }],
-  outcomes: [{ label: 'Monthly recurring revenue', provenance: 'inferred' }],
-  links: [{ from: 'Pro plan price', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' }],
-  unknowns: [],
+  claims: [
+    { claim_kind: 'factor', label: 'Pro plan price', value: 49, unit: 'GBP', value_scale: 'raw_count' },
+    { claim_kind: 'factor', label: 'Monthly churn', value: 3, unit: '%', value_scale: 'raw_count' },
+    { claim_kind: 'outcome', label: 'Monthly recurring revenue' },
+    { claim_kind: 'causal_link', label: 'Price effect', from_claim: 0, to_claim: 2, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Churn effect', from_claim: 1, to_claim: 2, effect: 'negative' },
+    { claim_kind: 'causal_link', label: 'Revenue reaches goal', from_claim: 2, to_stated: 0, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Price level', from_stated: 1, to_claim: 0, sets_to: 59, unit: 'GBP', value_scale: 'raw_count', effect: 'positive' },
+  ],
 };
 
-const structured = (payload: unknown = CANDIDATE): CallStructuredModel =>
-  async () => ({ text: JSON.stringify(payload) });
+const structured = (payload: DraftRecordSet = RECORDS): CallStructuredModel =>
+  async () => ({ text: JSON.stringify(strictRecordsWire(payload)) });
 
 /** `nodes` drives both the pre-check and the post-write confirmation. */
 function dispatcher(opts: { before: unknown[]; after: unknown[]; registerStatus?: number }) {
@@ -92,7 +96,7 @@ describe('build_model_from_brief', () => {
   it('is reachable through dispatchTool by its declared name', async () => {
     const { d } = dispatcher({ before: [], after: [{ id: 'a' }] });
     const caps = createAgentCapabilities(d, new ProposalStore(), structured());
-    const r = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'a brief' }), ctx, caps);
+    const r = await dispatchTool('build_model_from_brief', JSON.stringify({ brief: 'MRR. Raise Pro to £59. Monthly churn under 4%.' }), ctx, caps);
     expect(r.ok).toBe(true);
     expect(r.mutated).toBe(true);
   });
@@ -100,7 +104,7 @@ describe('build_model_from_brief', () => {
   it('REFUSES over a model that already has entities, rather than replacing it', async () => {
     const { d, calls } = dispatcher({ before: NON_EMPTY, after: NON_EMPTY });
     const caps = createAgentCapabilities(d, new ProposalStore(), structured());
-    const r = await caps.buildModelFromBrief(ctx, { brief: 'a brief' });
+    const r = await caps.buildModelFromBrief(ctx, { brief: 'MRR. Raise Pro to £59. Monthly churn under 4%.' });
     expect(r.ok).toBe(false);
     expect(r.refusal).toBe('model_already_exists');
     expect(r.mutated).toBe(false);
@@ -111,14 +115,14 @@ describe('build_model_from_brief', () => {
   it('refuses honestly when no construction caller is available', async () => {
     const { d } = dispatcher({ before: [], after: [] });
     const caps = createAgentCapabilities(d, new ProposalStore());
-    const r = await caps.buildModelFromBrief(ctx, { brief: 'a brief' });
+    const r = await caps.buildModelFromBrief(ctx, { brief: 'MRR. Raise Pro to £59. Monthly churn under 4%.' });
     expect(r.refusal).toBe('construction_unavailable');
   });
 
   it('reports NOT APPLIED when registration refuses', async () => {
     const { d } = dispatcher({ before: [], after: [], registerStatus: 403 });
     const caps = createAgentCapabilities(d, new ProposalStore(), structured());
-    const r = await caps.buildModelFromBrief(ctx, { brief: 'a brief' });
+    const r = await caps.buildModelFromBrief(ctx, { brief: 'MRR. Raise Pro to £59. Monthly churn under 4%.' });
     expect(r.ok).toBe(false);
     expect(r.mutated).toBe(false);
     expect(r.refusal).toBe('registration_refused');
@@ -129,7 +133,7 @@ describe('build_model_from_brief', () => {
     // shape that once let the Agent announce "Added: …" over a refusal.
     const { d } = dispatcher({ before: [], after: [] });
     const caps = createAgentCapabilities(d, new ProposalStore(), structured());
-    const r = await caps.buildModelFromBrief(ctx, { brief: 'a brief' });
+    const r = await caps.buildModelFromBrief(ctx, { brief: 'MRR. Raise Pro to £59. Monthly churn under 4%.' });
     expect(r.ok).toBe(false);
     expect(r.refusal).toBe('model_not_readable_after_write');
   });
@@ -138,12 +142,13 @@ describe('build_model_from_brief', () => {
     // Same run, same shape, one difference: the metric matches no entity. If
     // this ALSO reported 1, the count above would be measuring nothing.
     const unresolvable = {
-      ...CANDIDATE,
-      constraints: [{ metric: 'Something nobody modelled', operator: '<', value: 4, unit: '%', provenance: 'explicit' }],
+      ...RECORDS,
+      stated_items: RECORDS.stated_items.map((item, index) => index === 2
+        ? { ...item, source_quote: 'Something nobody modelled under 4%', applies_to_claim: 999 } : item),
     };
     const { d, bodies } = dispatcher({ before: [], after: [{ id: 'a' }] });
     const caps = createAgentCapabilities(d, new ProposalStore(), structured(unresolvable));
-    const r = await caps.buildModelFromBrief(ctx, { brief: 'a brief' });
+    const r = await caps.buildModelFromBrief(ctx, { brief: 'MRR. Raise Pro to £59. Monthly churn under 4%.' });
     expect(r.goal_constraints_carried).toBe(0);
     const sent = (bodies.register as { graph?: Record<string, unknown> } | undefined)?.graph;
     expect(sent && 'goal_constraints' in sent, 'no constraints => the key must be absent').toBe(false);
@@ -152,8 +157,8 @@ describe('build_model_from_brief', () => {
   it('carries the stated constraint with the graph it registers', async () => {
     const { d, bodies } = dispatcher({ before: [], after: [{ id: 'a' }] });
     const caps = createAgentCapabilities(d, new ProposalStore(), structured());
-    const r = await caps.buildModelFromBrief(ctx, { brief: 'a brief' });
-    // The candidate states one constraint; `/graph/register` takes graph +
+    const r = await caps.buildModelFromBrief(ctx, { brief: 'MRR. Raise Pro to £59. Monthly churn under 4%.' });
+    // The records state one constraint; `/graph/register` takes graph +
     // brief_text only, so it is NOT enforced by what was just persisted.
     expect(r.goal_constraints_carried).toBe(1);
     // And the graph SENT to registration must actually carry them — the point
@@ -169,7 +174,7 @@ describe('build_model_from_brief', () => {
   it('refuses an empty structured answer instead of writing nothing', async () => {
     const { d } = dispatcher({ before: [], after: [] });
     const caps = createAgentCapabilities(d, new ProposalStore(), async () => ({ text: '' }));
-    const r = await caps.buildModelFromBrief(ctx, { brief: 'a brief' });
+    const r = await caps.buildModelFromBrief(ctx, { brief: 'MRR. Raise Pro to £59. Monthly churn under 4%.' });
     expect(r.refusal).toBe('no_structured_output');
   });
 });
@@ -182,10 +187,10 @@ describe('the construction budget is the measured one', () => {
     const seen: { max?: number; model?: string; effort?: string }[] = [];
     const capture: CallStructuredModel = async (r) => {
       seen.push({ max: r.max_output_tokens, model: r.model, effort: r.reasoning_effort });
-      return { text: JSON.stringify(CANDIDATE) };
+      return { text: JSON.stringify(strictRecordsWire(RECORDS)) };
     };
     const { d } = dispatcher({ before: [], after: [{ id: 'a' }] });
-    await createAgentCapabilities(d, new ProposalStore(), capture).buildModelFromBrief(ctx, { brief: 'a brief' });
+    await createAgentCapabilities(d, new ProposalStore(), capture).buildModelFromBrief(ctx, { brief: 'MRR. Raise Pro to £59. Monthly churn under 4%.' });
 
     expect(seen).toHaveLength(1);
     const whole = budgetFor(seen[0].model!, 'whole');
@@ -228,4 +233,3 @@ describe('build_model_from_brief names its construction operation', () => {
     expect(constructionOperationId(SCENARIO, 'brief A')).not.toBe(constructionOperationId('22222222-2222-2222-2222-222222222222', 'brief A'));
   });
 });
-

@@ -1,6 +1,11 @@
 /**
  * THE DRAFT RECORDS GRAMMAR — what the draft model emits, INSTEAD of a graph.
  *
+ * S1 offline compile spike (4 Oct 2026): typed evidence extensions below exceed
+ * the legacy Anthropic budget proxies. They are verified with the new OpenAI
+ * strict bridge only. Do not promote this candidate until those budget failures
+ * and the published effect-range carrier gap are resolved.
+ *
  * ── THE THREE SHAPES, NAMED APART (trap 21) ────────────────────────────────
  * There are three distinct shapes in this mechanism and they must never share a
  * name:
@@ -200,6 +205,9 @@ export type DraftRecordRole = (typeof DRAFT_RECORD_ROLES)[number];
 
 /** The GATE's language. Never the wire operator — see design note 4. */
 export const DRAFT_RECORD_DIRECTIONS = ["floor", "ceiling"] as const;
+/** P2-A1: how an option sets its lever: an absolute level, or a change to the lever's current level. */
+export const DRAFT_RECORD_OPTION_SETTINGS = ["sets_to", "change_by"] as const;
+export type DraftRecordOptionSetting = (typeof DRAFT_RECORD_OPTION_SETTINGS)[number];
 export type DraftRecordDirection = (typeof DRAFT_RECORD_DIRECTIONS)[number];
 
 /**
@@ -454,16 +462,81 @@ export type DraftRecordCategory = (typeof DRAFT_RECORD_CATEGORIES)[number];
 export const DRAFT_RECORD_EFFECTS = ["positive", "negative"] as const;
 export type DraftRecordEffect = (typeof DRAFT_RECORD_EFFECTS)[number];
 
-// ── The wire shapes (TS mirrors of the JSON Schema below) ───────────────────
+// ── Compiler shapes: v-next fields plus checked legacy inputs decoded by seam.ts ──
 
 /** What the user said. `id` is absent BY DESIGN — see design note 1. */
+/** UTF-16 offsets within the owning verbatim source_quote. */
+export interface DraftQuoteSpan { start: number; end: number }
+/** A range belongs to this exact value, never to another number in its quote. */
+export interface DraftValueRange {
+  low: number;
+  high: number;
+  unit?: string;
+  low_literal?: string;
+  high_literal?: string;
+  meaning?: "min_max" | "likely_range";
+  low_span?: DraftQuoteSpan;
+  high_span?: DraftQuoteSpan;
+}
+/** Signed relationship transcription, owned by a stated cause, independent of a proposed link. */
+export interface DraftStatedRelationship {
+  from_quantity: number;
+  to_quantity: number;
+  amount?: number;
+  amount_literal?: string;
+  range?: DraftValueRange;
+  per_source_change?: number;
+  per_source_literal?: string;
+  no_effect_literal?: string;
+  /** Legacy evidence, decoded and checked at the seam; never emitted by v-next. */
+  amount_unit?: string;
+  per_source_change_unit?: string;
+  amount_span?: DraftQuoteSpan;
+  source_span?: DraftQuoteSpan;
+}
+
+const VALUE_RANGE_SCHEMA = {
+  type: "object", properties: {
+    low: { type: "number" }, high: { type: "number" }, low_literal: { type: "string" }, high_literal: { type: "string" },
+    meaning: { type: "string", enum: ["min_max", "likely_range"] },
+  }, required: ["low", "high", "low_literal", "high_literal"], additionalProperties: false,
+};
+const STATED_RELATIONSHIP_SCHEMA = {
+  type: "object", properties: {
+    from_quantity: { type: "integer" }, to_quantity: { type: "integer" },
+    amount: { type: "number" }, amount_literal: { type: "string" }, range: VALUE_RANGE_SCHEMA,
+    per_source_change: { type: "number" }, per_source_literal: { type: "string" }, no_effect_literal: { type: "string" },
+  }, required: ["from_quantity", "to_quantity"], additionalProperties: false,
+};
+
 export interface DraftStatedItem {
   kind: DraftRecordStatedKind;
   /** REQUIRED, verbatim. Verified by substring location against the brief. */
   source_quote: string;
   value?: number;
+  value_literal?: string;
+  unit_literals?: string[];
+  direction_literal?: string;
+  /** v-next only, option only: absent or `sets_to` is an absolute level; `change_by` is the signed change to the lever. */
+  setting?: DraftRecordOptionSetting;
+  /** v-next only, on a quantity's declaring item: the top of its plausible range, i.e. its frame (P2-FRAME). */
+  plausible_max?: number;
+  /** Seam-only compatibility and typed conflict diagnostics. */
+  legacy_evidence?: true;
+  evidence_conflicts?: string[];
+  value_span?: DraftQuoteSpan;
+  unit_span?: DraftQuoteSpan;
   /** Explicit current level when the same quoted span also names a baseline. */
   baseline?: number;
+  /** Identity is a stated_items index; absence supplies no metric identity. */
+  quantity?: number;
+  /** Goal only: quoted baseline item for the SAME quantity. */
+  baseline_ref?: number;
+  range?: DraftValueRange;
+  relationship?: DraftStatedRelationship;
+  horizon_months?: number;
+  horizon_ref?: number;
+  direction_span?: DraftQuoteSpan;
   unit?: string;
   role?: DraftRecordRole;
   /**
@@ -545,14 +618,13 @@ export interface DraftInferenceClaim {
   from_claim?: number;
   to_stated?: number;
   to_claim?: number;
+  quantity?: number;
+  /** Range on an option link belongs to sets_to. */
+  range?: DraftValueRange;
+  change_of?: number;
   effect?: DraftRecordEffect;
-  /** A user-quoted natural effect. All four fields are required when present. */
-  effect_detail?: {
-    amount: number;
-    amount_unit: string;
-    per_source_change: number;
-    per_source_change_unit: string;
-  };
+  /** Seam-only legacy checked input; absent from both v-next wire builders. */
+  effect_detail?: import('./seam.js').LegacyEffectDetail;
   strength?: number;
   category?: DraftRecordCategory;
   value?: number;
@@ -927,4 +999,123 @@ export function draftRecordsGrammarHash(): string {
   return createHash("sha256")
     .update(JSON.stringify(buildDraftRecordsSchema()), "utf8")
     .digest("hex");
+}
+
+/** INERT OpenAI-strict records grammar; never attached by Anthropic. */
+export function buildVNextDraftRecordsSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      stated_items: {
+        type: "array",
+        // See design note 2. `minItems` ∈ {0,1} only.
+        minItems: 1,
+        items: {
+          type: "object",
+          properties: {
+            kind: { type: "string", enum: [...DRAFT_RECORD_STATED_KINDS] },
+            source_quote: { type: "string" },
+            value: { type: "number" },
+            value_literal: { type: "string" }, unit_literals: { type: "array", items: { type: "string" } },
+            baseline: { type: "number" },
+            quantity: { type: "integer" }, baseline_ref: { type: "integer" },
+            range: VALUE_RANGE_SCHEMA, relationship: STATED_RELATIONSHIP_SCHEMA,
+            horizon_months: { type: "number" }, horizon_ref: { type: "integer" }, direction_literal: { type: "string" },
+            setting: { type: "string", enum: [...DRAFT_RECORD_OPTION_SETTINGS] },
+            plausible_max: { type: "number" },
+            unit: { type: "string" },
+            role: { type: "string", enum: [...DRAFT_RECORD_ROLES] },
+            // What convention `value` is written in. See the interface note:
+            // `unit` says what it is MEASURED IN, this says what it MEANS.
+            // Built from the SAME constant as the claims side, so the two
+            // shapes cannot answer the question differently (trap 12).
+            value_scale: { type: "string", enum: [...DRAFT_RECORD_VALUE_SCALES] },
+            direction: { type: "string", enum: [...DRAFT_RECORD_DIRECTIONS] },
+            // Design note 5. `option` only; the projector ignores it elsewhere.
+            is_baseline: { type: "boolean" },
+            // ⭐ WHAT A `constraint` APPLIES TO.
+            //
+            // ⚠⚠ THE CLAIM THAT USED TO BE HERE WAS FALSE, AND IT CITED TRAP 12
+            // WHILE COMMITTING IT. It said the wire schema, the seam's
+            // carried-key set and the projector's binder were all keyed from
+            // `DRAFT_RECORD_APPLIES_TO_FIELDS` so none was a hand-maintained
+            // mirror. Derived at the bytes: ONLY THE TWO LINES BELOW are. The
+            // seam's Zod (`seam.ts`), the seam's carried-key spread and the
+            // projector's binder all read the names as literals — necessarily,
+            // for the property ACCESSES — and the companion export
+            // `DRAFT_RECORD_APPLIES_TO_FIELD_NAMES` had ZERO consumers anywhere
+            // in the repo (contrast control in the same sweep:
+            // `DRAFT_RECORD_REF_FIELD_NAMES`, 2). A derivation claim over a
+            // symbol nobody reads is the mirror wearing the anti-mirror's
+            // clothes, so the claim and the dead export are both gone rather
+            // than restated.
+            //
+            // ⭐ WHAT ACTUALLY CATCHES A RENAME, stated so the next reader does
+            // not have to re-derive it: the PRE-REGISTERED GRAMMAR HASH. Change
+            // either name and the pin REDs. That is a real guard; it is simply
+            // not the one the deleted sentence described.
+            //
+            // DELIBERATELY ABSENT FROM `required`: a model that does not know
+            // what a limit applies to must be able to say so by omission, and
+            // omission has to mean exactly today's behaviour.
+            [DRAFT_RECORD_APPLIES_TO_FIELDS.appliesToStated]: { type: "integer" },
+            [DRAFT_RECORD_APPLIES_TO_FIELDS.appliesToClaim]: { type: "integer" },
+          },
+          required: ["kind", "source_quote"],
+          additionalProperties: false,
+        },
+      },
+      claims: {
+        type: "array",
+        // NO minItems — see design note 2. This absence is load-bearing.
+        items: buildVNextDraftClaimItemSchema(),
+      },
+    },
+    required: ["stated_items", "claims"],
+    additionalProperties: false,
+  };
+}
+
+export function buildVNextDraftClaimItemSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      // Built from DRAFT_RECORD_CLAIM_DISCRIMINATOR so the streaming progress
+      // probe and this schema cannot drift apart.
+      [DRAFT_RECORD_CLAIM_DISCRIMINATOR]: { type: "string", enum: [...DRAFT_RECORD_CLAIM_KINDS] },
+      label: { type: "string" },
+      basis: { type: "array", items: { type: "integer" } },
+      // Typed reference fields — the namespace IS the field (design note 1b).
+      // Keyed from DRAFT_RECORD_REF_FIELDS so the projector's resolver, the
+      // seam's carried-key set and the streaming edge probe all move together.
+      [DRAFT_RECORD_REF_FIELDS.fromStated]: { type: "integer" },
+      [DRAFT_RECORD_REF_FIELDS.fromClaim]: { type: "integer" },
+      [DRAFT_RECORD_REF_FIELDS.toStated]: { type: "integer" },
+      [DRAFT_RECORD_REF_FIELDS.toClaim]: { type: "integer" },
+      quantity: { type: "integer" },
+      range: VALUE_RANGE_SCHEMA,
+      effect: { type: "string", enum: [...DRAFT_RECORD_EFFECTS] },
+      change_of: { type: "integer" },
+      strength: { type: "number" },
+      category: { type: "string", enum: [...DRAFT_RECORD_CATEGORIES] },
+      value: { type: "number" },
+      // See the interface note: without this a model-authored quantity is
+      // unitless BY CONTRACT, and SAFETY 2's target side is always `unknown`.
+      unit: { type: "string" },
+      // What convention `value`/`sets_to` are written in. See the interface
+      // note: `unit` says what it is measured in, this says what it means.
+      value_scale: { type: "string", enum: [...DRAFT_RECORD_VALUE_SCALES] },
+      // `risk` claims only — HOW LIKELY the thing is, never how big it is.
+      // See the interface note: this exists so a likelihood has a DESTINATION
+      // rather than being asked for as silence.
+      likelihood: { type: "number" },
+      // Option→factor intervention level. See the interface note: named apart
+      // from `strength` on purpose.
+      sets_to: { type: "number" },
+      // Design note 5. `option_refinement` only; ignored on other claim kinds.
+      is_baseline: { type: "boolean" },
+    },
+    required: [DRAFT_RECORD_CLAIM_DISCRIMINATOR, "label"],
+    additionalProperties: false,
+  };
 }

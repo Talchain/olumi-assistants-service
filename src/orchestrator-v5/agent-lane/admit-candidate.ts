@@ -121,7 +121,7 @@ export interface AdmittedEdge {
 export interface WithheldLink {
   readonly from: string;
   readonly to: string;
-  readonly reason: 'no_authored_direction';
+  readonly reason: 'no_authored_direction' | 'user_stated_no_effect';
   readonly detail: string;
 }
 

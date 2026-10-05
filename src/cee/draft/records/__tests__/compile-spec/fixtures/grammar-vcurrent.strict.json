@@ -1,0 +1,813 @@
+{
+  "type": "object",
+  "properties": {
+    "stated_items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "goal",
+              "option",
+              "constraint",
+              "figure",
+              "cause"
+            ]
+          },
+          "source_quote": {
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value_span": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "start": {
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit_span": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "start": {
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "baseline": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "baseline_ref": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "range": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "low": {
+                    "type": "number"
+                  },
+                  "high": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "meaning": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "min_max",
+                          "likely_range"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "low_span": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "high_span": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "low",
+                  "high",
+                  "unit",
+                  "meaning",
+                  "low_span",
+                  "high_span"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relationship": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "from_quantity": {
+                    "type": "integer"
+                  },
+                  "to_quantity": {
+                    "type": "integer"
+                  },
+                  "amount": {
+                    "type": "number"
+                  },
+                  "amount_unit": {
+                    "type": "string"
+                  },
+                  "per_source_change": {
+                    "type": "number"
+                  },
+                  "per_source_change_unit": {
+                    "type": "string"
+                  },
+                  "amount_span": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "source_span": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "from_quantity",
+                  "to_quantity",
+                  "amount",
+                  "amount_unit",
+                  "per_source_change",
+                  "per_source_change_unit",
+                  "amount_span",
+                  "source_span"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "horizon_months": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "horizon_ref": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "direction_span": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "start": {
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "target",
+                  "baseline",
+                  "constraint",
+                  "context"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value_scale": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unit_interval",
+                  "ratio",
+                  "raw_count"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "floor",
+                  "ceiling"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_baseline": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "applies_to_stated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "applies_to_claim": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "source_quote",
+          "value",
+          "value_span",
+          "unit_span",
+          "baseline",
+          "quantity",
+          "baseline_ref",
+          "range",
+          "relationship",
+          "horizon_months",
+          "horizon_ref",
+          "direction_span",
+          "unit",
+          "role",
+          "value_scale",
+          "direction",
+          "is_baseline",
+          "applies_to_stated",
+          "applies_to_claim"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim_kind": {
+            "type": "string",
+            "enum": [
+              "factor",
+              "causal_link",
+              "option_refinement",
+              "prior",
+              "risk",
+              "outcome"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "basis": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "from_stated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "from_claim": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_stated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_claim": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "range": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "low": {
+                    "type": "number"
+                  },
+                  "high": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "meaning": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "min_max",
+                          "likely_range"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "low_span": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "high_span": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "low",
+                  "high",
+                  "unit",
+                  "meaning",
+                  "low_span",
+                  "high_span"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effect": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "positive",
+                  "negative"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effect_detail": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "number"
+                  },
+                  "amount_unit": {
+                    "type": "string"
+                  },
+                  "per_source_change": {
+                    "type": "number"
+                  },
+                  "per_source_change_unit": {
+                    "type": "string"
+                  },
+                  "range": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "number"
+                          },
+                          "high": {
+                            "type": "number"
+                          },
+                          "unit": {
+                            "type": "string"
+                          },
+                          "meaning": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "min_max",
+                                  "likely_range"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "low_span": {
+                            "type": "object",
+                            "properties": {
+                              "start": {
+                                "type": "integer"
+                              },
+                              "end": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "start",
+                              "end"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "high_span": {
+                            "type": "object",
+                            "properties": {
+                              "start": {
+                                "type": "integer"
+                              },
+                              "end": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "start",
+                              "end"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "low",
+                          "high",
+                          "unit",
+                          "meaning",
+                          "low_span",
+                          "high_span"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "amount",
+                  "amount_unit",
+                  "per_source_change",
+                  "per_source_change_unit",
+                  "range"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strength": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "controllable",
+                  "observable",
+                  "external"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value_scale": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unit_interval",
+                  "ratio",
+                  "raw_count"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "likelihood": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sets_to": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_baseline": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "claim_kind",
+          "label",
+          "basis",
+          "from_stated",
+          "from_claim",
+          "to_stated",
+          "to_claim",
+          "quantity",
+          "range",
+          "effect",
+          "effect_detail",
+          "strength",
+          "category",
+          "value",
+          "unit",
+          "value_scale",
+          "likelihood",
+          "sets_to",
+          "is_baseline"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "stated_items",
+    "claims"
+  ],
+  "additionalProperties": false
+}

@@ -1,3 +1,4 @@
+import { constructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 /**
  * A construction whose response was lost is RECOVERED, not refused and not rebuilt.
  *
@@ -24,16 +25,6 @@ import { registrationRequestHash, registrationTurnId } from '../../graph-registr
 const SCENARIO = '11111111-1111-1111-1111-111111111111';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-1' };
 const BRIEF = 'Should we raise the Pro plan from £49 to £59?';
-
-const candidate = (optionLabel: string) => ({
-  goal: { metric: 'MRR', operator: '>=', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit' },
-  constraints: [],
-  options: [{ label: optionLabel, provenance: 'explicit', interventions: [] }],
-  factors: [{ label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit' }],
-  risks: [], outcomes: [{ label: 'Monthly recurring revenue', provenance: 'inferred' }],
-  links: [{ from: 'Pro plan price', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' }],
-  unknowns: [],
-});
 
 /** One stateful product: graph, versions and the durable (scenario, turn_id) key. */
 function statefulStore(opts: { preloadNodes?: unknown[] } = {}) {
@@ -75,7 +66,7 @@ describe('a lost construction response is recovered', () => {
   it('RED: the retry recovers the SAME version, writes no second one, and does NOT regenerate', async () => {
     const store = statefulStore();
     let generations = 0;
-    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(candidate('Raise to £59')) }; };
+    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(strictRecordsWire(constructionRecords('Raise to £59', 'MRR', 'Pro plan price'))) }; };
 
     const first = await build(store.d, call);          // commits…
     expect(first.ok, JSON.stringify(first).slice(0, 200)).toBe(true);
@@ -98,7 +89,7 @@ describe('a lost construction response is recovered', () => {
   it('CONTRAST: a populated graph with NO matching construction is still refused, and nothing is generated', async () => {
     const store = statefulStore({ preloadNodes: [{ id: 'x', kind: 'goal', label: 'An existing model' }] });
     let generations = 0;
-    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(candidate('Raise to £59')) }; };
+    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(strictRecordsWire(constructionRecords('Raise to £59', 'MRR', 'Pro plan price'))) }; };
     const r = await build(store.d, call);
     expect(r.ok).toBe(false);
     expect(r.refusal).toBe('model_already_exists');
@@ -150,7 +141,7 @@ describe('a concurrent build of the same construction', () => {
       arrived += 1;
       if (arrived === 2) release();
       await bothIn;
-      return { text: JSON.stringify(candidate(mine)) };
+      return { text: JSON.stringify(strictRecordsWire(constructionRecords(mine))) };
     };
     const [a, b] = await Promise.all([build(store.d, call), build(store.d, call)]);
     expect(store.versions).toHaveLength(1);

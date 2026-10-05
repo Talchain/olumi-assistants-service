@@ -255,7 +255,8 @@ describe('buildFactorScaleMap', () => {
       { id: 'fac_spend', kind: 'factor', observed_state: { value: 0.25, raw_value: 5000, cap: 20000, unit: '£' } },
       { id: 'goal_1', kind: 'goal' },
     ]);
-    expect(map.get('fac_spend')).toEqual({ cap: 20000, unit: '£', normalisedConvention: true });
+    // Pass 2 P2-A1: the map also carries the factor's CURRENT raw baseline, read only to resolve a `change_by`.
+    expect(map.get('fac_spend')).toEqual({ cap: 20000, unit: '£', normalisedConvention: true, baselineRaw: 5000 });
     expect(map.get('goal_1')).toEqual({});
   });
 

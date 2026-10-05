@@ -102,6 +102,7 @@ import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-refer
 import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
+import type { CompileStageEvent } from '../cee/unified-pipeline/types.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
@@ -1538,9 +1539,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         },
       },
     };
+    const identity = agentRequestIdentity('agent.construct', sentBody);
     const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
-      model: reqBody.model, purpose: 'construction', ...agentRequestIdentity('agent.construct', sentBody),
+      model: reqBody.model, purpose: 'construction', ...identity,
     });
+    /**
+     * ⭐ A8b (PAUL-TEST 5 Oct gap A8: "the agent-lane model id is never logged"). ONE server log line per structured call,
+     * whatever its end: the provider, the model id actually sent, the purpose, the prompt and schema identities (the same
+     * values the ledger row carries) and the measured latency. Built from the sent body's identity only — never the key,
+     * the headers, the instructions or the user's text.
+     */
+    const callStartedAt = Date.now();
+    const logStructuredCall = (outcome: string, extra: Record<string, unknown> = {}): void => {
+      log.info({
+        event: 'agent_lane.structured_call', provider: 'openai', model: reqBody.model, purpose: 'construction',
+        prompt_alias: identity['prompt_alias'], prompt_sha256: identity['prompt_sha256'], schema_sha256: identity['schema_sha256'],
+        latency_ms: Date.now() - callStartedAt, outcome, ...extra,
+      }, 'agent-lane: structured call');
+    };
     let j: {
       output?: { type?: string; content?: { type?: string; text?: string }[] }[];
       usage?: Record<string, unknown>;
@@ -1564,7 +1580,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       j = (await r.json()) as typeof j;
     } catch (err) {
-      if (isConstructionTimeout(err)) return timedOut(budgetMs, err);
+      if (isConstructionTimeout(err)) { logStructuredCall('timeout'); return timedOut(budgetMs, err); }
+      logStructuredCall('error');
       throw err;
     }
     let text = '';
@@ -1581,6 +1598,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (j.status === 'incomplete') {
       log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
     }
+    logStructuredCall(typeof j.status === 'string' ? j.status : 'answered', { output_chars: text.length });
     return {
       text,
       usage: j.usage,
@@ -2172,6 +2190,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let lastRun: CapturedAnalysis | undefined;
     /** X5: set only when this turn ran a construction — see `ConstructionTrace`. */
     let constructionTrace: ConstructionTrace | undefined;
+    /** A8a: the records build's typed compile stages, each stamped with this request's elapsed time. Trace only. */
+    const compileStages: Array<CompileStageEvent & { readonly elapsed_ms: number }> = [];
     const capabilities = createAgentCapabilities(
       countingDispatch, proposals, (reqBody) => callStructured(reqBody, constructionDeadlineAt), mode,
       (payload) => { lastRun = { ...payload, trigger: payload.trigger ?? 'explicit_run' }; },
@@ -2192,6 +2212,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          */
         // X5 (DESIGN Q3): the construction retry's reason and outcome, for the trace only.
         onConstructionTrace: (t) => { constructionTrace = t; },
+        /**
+         * ⭐ A8a (PAUL-TEST 5 Oct gap A8: ~13.7 s of a 20.7 s draft was opaque, 0 progress frames). Each records compile
+         * stage goes to the construction trace and, on a streamed turn, out as the EXISTING `PROGRESS` frame class
+         * (`phase: 'compile'`) — the UI keeps PROGRESS inert and would abandon the stream on an unknown stage. Counts and
+         * typed codes only. Buffered turns read no emitter and their body is untouched (the trace is `_diagnostic_trace`).
+         */
+        onCompileStage: (event) => {
+          const stamped = { ...event, elapsed_ms: Date.now() - startedAt };
+          compileStages.push(stamped);
+          currentStageEmitter()?.({ kind: 'PROGRESS', labels: [], phase: 'compile', compile: event, elapsed_ms: stamped.elapsed_ms });
+        },
         onModelRegistered: (raw) => {
           const emitStage = currentStageEmitter();
           if (emitStage === undefined || !Array.isArray(raw.nodes) || raw.nodes.length === 0) return;
@@ -3808,7 +3839,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           dispatch_ms: dispatchLedger.reduce((a, d) => a + d.ms, 0),
         },
         /** X5 (DESIGN Q3): why the one construction retry ran (issue classes) and what became of it. Diagnostic only. */
-        ...(constructionTrace !== undefined ? { construction: constructionTrace } : {}),
+        ...(constructionTrace !== undefined
+          ? { construction: { ...constructionTrace, ...(compileStages.length > 0 ? { compile_stages: compileStages } : {}) } }
+          : {}),
         write_claims_removed: narration.stripped.length,
         ...(leaderClaimEnforced ? { leader_claim_enforced: true } : {}),
         /** The run-turn coaching card: shown, or the typed reason it is not (for staging witnesses). */

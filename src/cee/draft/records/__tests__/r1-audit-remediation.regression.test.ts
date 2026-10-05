@@ -450,7 +450,7 @@ describe("ROOT 2(b) — a stated target is not silently an observed value", () =
    * Strictly worse than the figure case: there the number is present but modelled
    * as a value that already holds; here it is nowhere at all.
    */
-  it("a stated NUMERIC goal target is disclosed, not silently dropped", () => {
+  it("a stated NUMERIC goal target is stored with its target-derived cap", () => {
     const brief = "We want to cut customer churn to 8% this year. Today churn is 12%. We can buy a new CRM or keep the current system.";
     const projection = project(
       {
@@ -468,13 +468,14 @@ describe("ROOT 2(b) — a stated target is not silently an observed value", () =
     const goal = projection.graph.nodes.find(
       (n) => n.provenance?.source_quote === "cut customer churn to 8%",
     )!;
-    // The precondition that makes this a real finding: the number reached NOTHING.
-    expect(goal.observed_state, "the projector has no value branch for a goal").toBeUndefined();
+    // A1 retains the number as a target, never as an observed current level.
+    expect(goal.observed_state).toBeUndefined();
     expect((goal.data as { value?: number } | undefined)?.value).toBeUndefined();
-    // …so it must be named. Bound to the distinct reason for total loss.
-    expect(
-      projection.dropped.find((d) => d.reason === "stated_target_value_dropped")?.label,
-    ).toBe("cut customer churn to 8%");
+    // The A1 target carrier replaces the old loss disclosure; percent uses the fixed 100 frame.
+    expect(goal.goal_threshold_raw).toBe(8);
+    expect(goal.goal_threshold_cap).toBe(100);
+    expect(goal.goal_threshold).toBe(0.08);
+    expect(projection.dropped.some(d => d.reason === "stated_target_value_dropped")).toBe(false);
   });
 
   /**
