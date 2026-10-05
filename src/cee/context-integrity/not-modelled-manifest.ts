@@ -59,6 +59,7 @@ import {
 } from "../graph-readiness/obligation-provenance.js";
 import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
 import type { ObservedStateStatedRole } from "./stated-role-vocabulary.js";
+import { STATED_DISPOSITIONS_KEY, StatedDispositionsV3 } from "../../schemas/graph-stated-dispositions.js";
 
 /** Wire schema discriminator. The UI lane builds against this. */
 export const NOT_MODELLED_SCHEMA = "not_modelled.v1" as const;
@@ -286,6 +287,37 @@ export interface NotModelledManifest {
   };
   /** Loss classes this derivation CANNOT observe. The anti-reassurance field. */
   readonly not_tracked: readonly string[];
+  /**
+   * WHAT THE RECORDS COMPILER ITSELF DECIDED, read from the graph's persisted receipt (`graph.stated_dispositions`,
+   * written only by the register route). PRESENT ONLY when the stored graph carries one, so every other manifest is
+   * byte-identical to before. See `readStatedDispositions`.
+   */
+  readonly stated_dispositions?: StatedDispositionsBlock;
+}
+
+/**
+ * One stated item the compiler REJECTED (with its typed reason) or ASKED about — a disposition the compiler TYPED,
+ * as opposed to the read-time `no_executable_quantity_carrier` label this module stamps on every unmodelled figure.
+ * `char_offset` addresses the user's own bytes in `brief_text`: the stated figure when its span is recorded (the same
+ * identity as the matching `quantities.items[]` row), else the start of the stated sentence.
+ */
+export interface StatedDispositionRow {
+  readonly stated_index: number;
+  readonly stated_item_kind: string;
+  readonly literal: string;
+  readonly char_offset: number;
+  readonly disposition: "rejected" | "clarification_asked";
+  readonly reason: string;
+  readonly typed: true;
+}
+
+export interface StatedDispositionsBlock {
+  readonly status: "recorded";
+  /** Receipts whose item the compiler CARRIED onto the model — counted, never rows: they are not losses. */
+  readonly carried: number;
+  /** Receipts whose sentence is not in this brief — counted, never placed at a guessed offset. */
+  readonly unlocated: number;
+  readonly items: readonly StatedDispositionRow[];
 }
 
 /**
@@ -517,6 +549,9 @@ const TOP_KEY_CLASS: ReadonlyMap<string, TopKeyClass> = new Map<string, TopKeyCl
   ["quality", "skip"],
   ["analysis_ready", "skip"],
   ["schema_version", "skip"],
+  // The records compiler's receipt QUOTES the user's sentences. It is our bookkeeping about the model, not the model:
+  // searched, it would turn a figure the model does not hold from `absent` into `prose_only`.
+  [STATED_DISPOSITIONS_KEY, "skip"],
   ["coaching", "prose"],
   ["draft_warnings", "prose"],
   ["validation_warnings", "prose"],
@@ -1946,6 +1981,57 @@ const UNAVAILABLE = (
   not_tracked: NOT_TRACKED_CLASSES,
 });
 
+/** A recorded span inside its own quote, or null — never a guessed position. */
+function spanIn(quote: string, span: unknown): { start: number; end: number } | null {
+  if (span === null || typeof span !== "object") return null;
+  const { start, end } = span as { start?: unknown; end?: unknown };
+  return Number.isInteger(start) && Number.isInteger(end) && (start as number) >= 0
+    && (start as number) < (end as number) && (end as number) <= quote.length
+    ? { start: start as number, end: end as number }
+    : null;
+}
+
+/**
+ * The compiler's TYPED dispositions, from the graph's persisted receipt. `undefined` when the graph carries none (or a
+ * malformed one — absence, never a guess), so the manifest gains no key. Re-derived on every read like everything
+ * else here; the receipt is reconciled against the stored bytes by its only writer (the register route) and dropped
+ * by every other writer, so it always describes the graph it is stored on.
+ */
+function readStatedDispositions(briefText: string, graph: Record<string, unknown>): StatedDispositionsBlock | undefined {
+  if (!Object.prototype.hasOwnProperty.call(graph, STATED_DISPOSITIONS_KEY)) return undefined;
+  const parsed = StatedDispositionsV3.safeParse(graph[STATED_DISPOSITIONS_KEY]);
+  if (!parsed.success) return undefined;
+  let carried = 0;
+  let unlocated = 0;
+  const items: StatedDispositionRow[] = [];
+  for (const row of parsed.data) {
+    if (row.disposition === "carried") {
+      carried += 1;
+      continue;
+    }
+    const item = row.stated_item;
+    const quote = item.source_quote;
+    const at = quote.length === 0 ? -1 : briefText.indexOf(quote);
+    if (at < 0) {
+      unlocated += 1;
+      continue;
+    }
+    const relationship = item.relationship as { amount_span?: unknown } | undefined;
+    const figure = spanIn(quote, item.value_span) ?? spanIn(quote, relationship?.amount_span);
+    items.push({
+      stated_index: row.stated_index,
+      stated_item_kind: item.kind,
+      literal: figure === null ? quote : quote.slice(figure.start, figure.end),
+      char_offset: at + (figure?.start ?? 0),
+      ...(row.disposition === "rejected"
+        ? { disposition: "rejected" as const, reason: row.reason }
+        : { disposition: "clarification_asked" as const, reason: "clarification_asked" }),
+      typed: true,
+    });
+  }
+  return { status: "recorded", carried, unlocated, items };
+}
+
 /**
  * Derive the manifest for one scenario.
  *
@@ -1965,6 +2051,7 @@ export function deriveNotModelledManifest(
   }
 
   const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
+  const typedDispositions = readStatedDispositions(briefText, graph as Record<string, unknown>);
   const quantities = extractStatedQuantities(briefText);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 
@@ -2039,6 +2126,7 @@ export function deriveNotModelledManifest(
       numericTokensIn(briefText),
     ),
     not_tracked: NOT_TRACKED_CLASSES,
+    ...(typedDispositions === undefined ? {} : { stated_dispositions: typedDispositions }),
   };
 }
 
