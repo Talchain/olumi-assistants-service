@@ -150,9 +150,15 @@ describe("draft stated figures at the records seam", () => {
     if (!result.ok) return;
     const graph = normaliseDraftResponse(structuredClone(result.projection.graph));
     const verdict = targetTestabilityOf(graph);
+    // RE-PINNED, RT-10 B′ (Science d5 #2606): the (c) failure carries the FAILING link's two ends, bound by identity here
+    // (the projection hashes node ids): Price rise → the goal, a link INTO the goal.
+    const goal = result.projection.graph.nodes.find((node) => node.kind === "goal")!;
+    const priceRise = graph.nodes.filter((node) => node.label === "Price rise");
+    expect(priceRise).toHaveLength(1);
     expect(verdict).toEqual({
-      kind: "not_testable", goal_id: result.projection.graph.nodes.find((node) => node.kind === "goal")!.id,
-      failures: [{ precondition: "P5", case: "c", code: "goal_path_unsized", lever: "Price rise" }],
+      kind: "not_testable", goal_id: goal.id,
+      failures: [{ precondition: "P5", case: "c", code: "goal_path_unsized", lever: "Price rise", link_to: goal.label,
+        link: { from: priceRise[0]!.id, to: goal.id } }],
     });
   });
 

@@ -38,6 +38,8 @@ export interface TargetTestabilityFailure {
    * (Science d5, #2606: d3's `Starter monthly price → Starter-tier monthly recurring revenue`), so (c) names this end.
    */
   readonly link_to?: string;
+  /** For P5: the FAILING link's two node ids, so its question sizes that same link in its own ends' units. */
+  readonly link?: { readonly from: string; readonly to: string };
 }
 
 export type TargetTestability =
@@ -187,7 +189,8 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
       const placeholderLink = failing !== undefined && isPlaceholderLink(failing);
       failures.push({ precondition: 'P5', case: 'c',
         code: identity !== undefined && !identityForwarded ? 'identity_unconfirmed' : placeholderLink ? 'goal_path_placeholder' : 'goal_path_unsized',
-        ...(failing !== undefined ? { lever: labelOf.get(failing.from) ?? String(failing.from), link_to: labelOf.get(failing.to) ?? String(failing.to) } : {}) });
+        ...(failing !== undefined ? { lever: labelOf.get(failing.from) ?? String(failing.from), link_to: labelOf.get(failing.to) ?? String(failing.to),
+          link: { from: String(failing.from), to: String(failing.to) } } : {}) });
     }
   }
   // P4 — the target's unit is the goal level's own (currency AND period).
@@ -249,12 +252,25 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const lever = failingLink?.lever;
   const identityCase = verdict.failures.some((f) => f.code === 'identity_unconfirmed');
   const link = `a size for the link from ${lever ?? 'what the options change'} to ${lever === undefined ? name : failingLink?.link_to ?? name}`;
+  // The (c) question sizes the SAME link the clause names (Science d5, #2606): a link into the goal keeps AIQ's words, in
+  // the goal's unit; an upstream link is asked in its own ends' units (the RT-6 sizing route's reader), never as the
+  // lever's whole effect on the goal, which recorded on that link double-counts any non-definitional link after it.
+  const upstream = failingLink?.link !== undefined && failingLink.link.to !== verdict.goal_id ? failingLink.link : undefined;
+  const linkQuestion = (): string => {
+    if (upstream === undefined) return `Roughly how much ${name} in ${unit || 'the goal unit'} does a change in ${lever} bring?`;
+    const ends = linkEffectEndUnits(graph, upstream.from, upstream.to);
+    const [fromUnit, toUnit] = [ends?.source.own[0], ends?.target.own[0]];
+    const to = failingLink?.link_to ?? upstream.to;
+    return fromUnit !== undefined && toUnit !== undefined
+      ? `Roughly how much does ${to} change, in ${toUnit}, when ${lever} rises by ${sayFigure(1, fromUnit)}?`
+      : `Roughly how much does ${to} change when ${lever} changes?`;
+  };
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
     ? [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
     : c === 'c' ? [`it needs ${link}`, link,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
-      identityCase || lever === undefined ? null : `Roughly how much ${name} in ${unit || 'the goal unit'} does a change in ${lever} bring?`]
+      identityCase || lever === undefined ? null : linkQuestion()]
     : c === 'b' ? [`it can't yet test a '${typeof comparator === 'string' ? comparator : ''} ${figure}' target on ${name}`, null, null]
     : [`your target is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
       `${name} measured in ${unit || 'its own units'}`, `What's today's level of ${name}${unit !== '' ? `, in ${unit}` : ''}?`];

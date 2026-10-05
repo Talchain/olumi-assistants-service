@@ -55,7 +55,10 @@ describe('the verdict (0 LLM)', () => {
   it('Paul: no today\'s level (a) AND his goal is reached only through links nobody sized (c)', () => {
     expect(targetTestabilityOf(FIX.paul)).toEqual({ kind: 'not_testable', goal_id: 'securing_funding', failures: [
       { precondition: 'P1', case: 'a', code: 'missing_goal_baseline' },
-      { precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Investment firm meetings' },
+      // RE-PINNED, RT-10 B′ (Science d5 #2606): the (c) failure names the FAILING link by its own two ends. Here it is
+      // into the goal, so the goal is its far end and the words do not change.
+      { precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Investment firm meetings', link_to: 'securing funding',
+        link: { from: 'investment_firm_meetings', to: 'securing_funding' } },
     ] });
   });
 
@@ -164,7 +167,10 @@ describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn gue
   });
   it('RED: m1 as served → not testable, (c), naming the price', () => {
     const v = targetTestabilityOf(M1);
-    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: expect.stringMatching(/price/i) }]);
+    // RE-PINNED, RT-10 B′ (Science d5 #2606): Olumi's guess is the price → churn link, UPSTREAM of mrr, so (c) names
+    // that link by its own ends (it used to say "the link from Pro plan price to mrr", a link the canvas does not have).
+    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: expect.stringMatching(/price/i),
+      link_to: 'Monthly churn rate', link: { from: 'pro_plan_price', to: 'monthly_churn_rate' } }]);
     // RE-PINNED, RT-10 B′ R2: the verdict no longer caps the mode — m1 is admitted as it is without its target.
     expect(resolveAnalysisAdmission(M1).permitted_analysis_mode).toBe(resolveAnalysisAdmission(withoutTarget(M1)).permitted_analysis_mode);
     expect(reasonOf(resolveAnalysisAdmission(M1)).code).not.toBe('TARGET_NOT_TESTABLE');
