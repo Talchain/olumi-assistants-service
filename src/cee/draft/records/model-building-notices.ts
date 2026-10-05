@@ -118,6 +118,12 @@ export const NOTICE_KIND_BY_REASON: Record<
   option_change_by_baseline_unbound: "relationship_not_used",
   // P2-B6x: the ask for a deadline goal's measurable quantity; nothing was guessed.
   goal_quantity_missing: "conflict_resolved_conservatively",
+  // FIX (b): the linking pass's typed asks (`link-by-unit.ts`); nothing was guessed or sized.
+  goal_baseline_unlinked: "conflict_resolved_conservatively",
+  goal_baseline_candidate_ambiguous: "conflict_resolved_conservatively",
+  figure_quantity_unlinked: "conflict_resolved_conservatively",
+  goal_direction_unstated: "conflict_resolved_conservatively",
+  cause_relationship_unstated: "conflict_resolved_conservatively",
   // ── A RELATIONSHIP THE MODEL ASSERTED WAS NOT USED ────────────────────────
   // Each of these is a LINK that did not make it onto the graph. The reference
   // was malformed, unresolvable, ambiguous, self-referential, an illegal kind

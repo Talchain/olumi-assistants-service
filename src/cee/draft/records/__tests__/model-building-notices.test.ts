@@ -53,6 +53,12 @@ const PRODUCER_REASONS = [
   "option_change_by_baseline_unbound",
   // Pass 2 P2-B6x: the typed ask for a deadline goal's measurable quantity.
   "goal_quantity_missing",
+  // FIX (b): the linking pass's typed asks.
+  "goal_baseline_unlinked",
+  "goal_baseline_candidate_ambiguous",
+  "figure_quantity_unlinked",
+  "goal_direction_unstated",
+  "cause_relationship_unstated",
   "range_bounds_inverted",
   "range_excludes_point",
   "range_straddles_zero",

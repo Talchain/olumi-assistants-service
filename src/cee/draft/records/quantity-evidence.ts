@@ -1,6 +1,7 @@
 import { periodIn, sameUnit, readCountRate, readMoney, evidencePeriod, words } from '../../../orchestrator-v5/agent-lane/same-unit.js';
 import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../provenance/stated-amounts.js';
 import type { DraftQuoteSpan, DraftValueRange, DraftStatedItem } from './grammar.js';
+import { isVNextRecordSet } from './link-by-unit.js';
 
 function boundMatches(quote: string, span: DraftQuoteSpan, value: number, unit?: string): boolean {
   if (!Number.isInteger(span.start) || !Number.isInteger(span.end)
@@ -82,7 +83,7 @@ export function unitEvidenceReason(item: DraftStatedItem, unit: string): UnitRef
 
 export function canonicalQuantityUnits(records: import('./grammar.js').DraftRecordSet): { records: import('./grammar.js').DraftRecordSet; refusals: {stated_index:number;reason:UnitRefusal}[] } {
   const copy=structuredClone(records);
-  const vnext=records.stated_items.some(i=>!i.legacy_evidence && (i.value_literal!==undefined || i.unit_literals!==undefined || i.relationship?.no_effect_literal!==undefined));
+  const vnext=isVNextRecordSet(records);
   const refusals: {stated_index:number;reason:UnitRefusal}[]=[];
   const unitOf=(q:number): string | undefined => {
     const item=records.stated_items[q];

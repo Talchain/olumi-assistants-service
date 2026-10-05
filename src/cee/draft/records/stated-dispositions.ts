@@ -1,6 +1,7 @@
 import { literalConventionValue } from './quantity-evidence.js';
 import type { DraftRecordSet, DraftStatedItem } from './grammar.js';
 import type { DroppedRecordRef, RecordProjection } from './projector.js';
+import { isUnitLinkAskReason, type UnitLinkAskReason } from './link-by-unit.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 
 /** Edge endpoints are its persisted identity; V3 deliberately strips legacy edge ids. */
@@ -11,7 +12,7 @@ export type StatedCarrier = (
 export type StatedDisposition = { readonly stated_index: number; readonly stated_item: DraftStatedItem } & (
   | { readonly disposition: 'carried'; readonly location: StatedCarrier; readonly stored_value: unknown }
   | { readonly disposition: 'rejected'; readonly reason: DroppedRecordRef['reason'] | 'stated_value_not_carried' | 'stated_relationship_not_carried' | 'carrier_removed' }
-  | { readonly disposition: 'asked'; readonly reason?: 'goal_quantity_missing' }
+  | { readonly disposition: 'asked'; readonly reason?: 'goal_quantity_missing' | UnitLinkAskReason }
 );
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -87,6 +88,10 @@ export function deriveStatedDispositions(
         }
       }
     } else if (node !== undefined) return carry({ kind: 'node', node_id: node.id, path: [] }, { id: node.id });
+    // FIX (b): a NULL link the unit pass could not resolve is an ASK on an item nothing carried (a carried item keeps
+    // its carrier; its ask is the open question). Never a rejection, never a guess.
+    const asked = projection.dropped.find(row => row.stated_index === stated_index && isUnitLinkAskReason(row.reason));
+    if (asked !== undefined && isUnitLinkAskReason(asked.reason)) return { ...origin, disposition: 'asked', reason: asked.reason };
     const dropped = projection.dropped.find(row => row.stated_index === stated_index);
     return { ...origin, disposition: 'rejected', reason: dropped?.reason
       ?? (item.relationship !== undefined ? 'stated_relationship_not_carried' : 'stated_value_not_carried') };

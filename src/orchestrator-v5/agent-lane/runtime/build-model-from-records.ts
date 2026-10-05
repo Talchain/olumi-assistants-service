@@ -3,6 +3,7 @@ import { buildVNextDraftRecordsSchema, type DraftRecordSet } from '../../../cee/
 import { V_NEXT_DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction-vnext.js';
 import { reconcileStatedDispositions } from '../../../cee/draft/records/stated-dispositions.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
+import { unitLinkOpenQuestions } from '../../../cee/draft/records/link-by-unit.js';
 import type { RecordConstraintCandidate } from '../../../cee/draft/records/projector.js';
 import { runCompoundGoals } from '../../../cee/unified-pipeline/stages/repair/compound-goals.js';
 import { sameRecordConstraintEvidence, type RecordConstraintDisposition } from '../../../cee/compound-goal/record-constraint-carrier.js';
@@ -420,7 +421,9 @@ export async function buildModelFromRecords(
     goal_constraints_carried: graph.goal_constraints?.length ?? 0,
     ...(limits.notCarried.length > 0 ? { goal_constraints_not_carried: limits.notCarried } : {}),
     open_questions: [...(goalScope.question !== undefined ? [goalScope.question] : []), ...(deadline !== undefined ? [deadline] : []),
-      ...compiled.ask.items.map(item => item.detail)],
+      ...compiled.ask.items.map(item => item.detail),
+      // FIX (b): each typed ask of the linking pass by unit, by its stated item (never a guessed link or size).
+      ...unitLinkOpenQuestions(compiled.projection.dropped)],
     // Preserve the projector's typed identities and reasons; do not reconstruct them from labels.
     not_represented: compiled.projection.dropped,
   };

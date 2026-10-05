@@ -114,6 +114,7 @@ import { limitSinkBranch } from "../../../graph/limit-sink-branch.js";
 import { inertRiskBranch } from "../../../graph/inert-risk.js";
 import { admitGoalBaseline } from "../../factor-extraction/goal-baseline-admissibility.js";
 import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits, literalConventionValue, locateLiteral } from "./quantity-evidence.js";
+import { linkByUnit, isVNextRecordSet, type UnitLinkAskReason } from "./link-by-unit.js";
 import { statedEffectQuoteMatches, statedEffectUnitsMatch } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
 import { sizeLink, resolveMagnitudeFrame, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
@@ -499,6 +500,9 @@ export interface DroppedRecordRef {
     // P2-B6x (a994c38a): a deadline goal that names no measurable quantity. An ASK for the quantity, never a guess
     // and never a default "higher is better" direction.
     | "goal_quantity_missing"
+    // FIX (b): the linking pass by unit (`link-by-unit.ts`): a NULL link that no single dimensioned same-unit
+    // candidate resolves is a typed ASK, never a guess.
+    | UnitLinkAskReason
     | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
     | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
     | import("./quantity-evidence.js").UnitRefusal
@@ -5523,6 +5527,10 @@ export function projectRecordsToGraph(
   /** Authored input before seam compatibility enrichment, for diagnostic receipts only. */
   originalRecords: DraftRecordSet = records,
 ): RecordProjection {
+  // ⭐ FIX (b): NULL links resolved by TYPED UNIT only, before any evidence or projection (`link-by-unit.ts`).
+  // v-next record sets only; the legacy span-shaped wire keeps its own semantics.
+  const linked = isVNextRecordSet(records) ? linkByUnit(records) : undefined;
+  if (linked !== undefined) records = linked.records;
   const located = locateRecordEvidence(records);
   const units = canonicalQuantityUnits(located.records);
   records = unifyGoalQuantityReferences(units.records);
@@ -5540,6 +5548,10 @@ export function projectRecordsToGraph(
   projection = { ...projection, dropped: [
     ...[...located.refusals, ...units.refusals].filter(r => records.stated_items[r.stated_index] !== undefined).map(r => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: records.stated_items[r.stated_index]!.source_quote,
       stated_index: r.stated_index, reason: r.reason, source_quote: records.stated_items[r.stated_index]!.source_quote })), ...projection.dropped,
+    // FIX (b): each typed ask lands on its own stated index, after every existing row (an existing reason keeps precedence).
+    ...(linked?.asks ?? []).filter(a => records.stated_items[a.stated_index] !== undefined).map(a => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND,
+      label: records.stated_items[a.stated_index]!.source_quote, stated_index: a.stated_index, reason: a.reason,
+      source_quote: records.stated_items[a.stated_index]!.source_quote })),
   ] };
   // The internal binding is not part of the contract: consumers get the same
   // graph/provenance/disclosures and the explicitly declared constraint carriers.
