@@ -153,15 +153,28 @@ export function stillNeededLine(view: ReadinessView): string | null {
     lines.push(n === 1 ? `One level is not set yet: ${asks}?`
       : n === 2 ? `Two levels are not set yet: ${asks}?` : `${n} levels are not set yet, including: ${asks}?`);
   }
-  // DL gate 2 (5 Oct): a non-factor root with no figure runs at zero (as ISL does) and is SAID, never a block.
+  const roots = treatedAsZeroLine(view);
+  if (roots !== null) lines.push(roots);
+  return lines.length > 0 ? lines.join(' ') : null;
+}
+
+/**
+ * DL gate 2 (5 Oct): a non-factor root with no figure runs at zero (as ISL does) and is SAID, never a block — with the
+ * ask for its figure. One sentence for both readers: the post-write ask above, and the Run turn and its replay
+ * (`agent-v1-turn.ts`), which said neither (Acceptance #87 5987804248, scenario 9b9a4b81). Science (5 Oct): `treated_as`
+ * is only `'zero'`, and the ask does not branch on `kind` ("risk" here is not a probability).
+ */
+export function treatedAsZeroLine(view: ReadinessView): string | null {
+  if (!view.checked || view.may_run !== true) return null;
   const roots = view.treated_as_zero ?? [];
   if (roots.length === 1) {
-    lines.push(`No figure is set for "${roots[0]}" yet, so the analysis treats it as zero. How likely or how large is it today?`);
-  } else if (roots.length > 1) {
-    const labels = `"${roots[0]}" and "${roots[1]}"${roots.length > 2 ? ` and ${roots.length - 2} more` : ''}`;
-    lines.push(`No figures are set for ${labels} yet, so the analysis treats them as zero. How likely or how large is each today?`);
+    return `No figure is set for "${roots[0]}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
   }
-  return lines.length > 0 ? lines.join(' ') : null;
+  if (roots.length > 1) {
+    const labels = `"${roots[0]}" and "${roots[1]}"${roots.length > 2 ? ` and ${roots.length - 2} more` : ''}`;
+    return `No figures are set for ${labels} yet, so the analysis treats them as zero. How likely or how large is each today?`;
+  }
+  return null;
 }
 
 /**
