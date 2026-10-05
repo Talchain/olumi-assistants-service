@@ -63,6 +63,7 @@
  *   |----------------------|-------------------------------|-------------------------|
  *   | `'<='` or `'<'`, PROVEN (below) | `'minimise'`       | `stated_comparator`     |
  *   | `'<='` or `'<'` beside a target TYPED as a LEVEL (RT-10, below), in any unit, with or without today's level | `'minimise'` | `stated_comparator` |
+ *   | `'<='` or `'<'` beside its own limit row on the goal (the approved card's pair, RT-10 B′) | `'minimise'` | `stated_comparator` |
  *   | no proven ceiling; Olumi's `goal_sense_reading` of a NEGATIVE typed change ("cut by 20%") | `'minimise'` | `typed_change_sign` |
  *   | anything else (a held floor, an unproven ceiling, none) | the label classifier, exactly as base | `derived_from_goal_label` |
  *
@@ -201,6 +202,28 @@ function heldTargetIsATypedLevel(graph: unknown, goalNodeId: unknown): boolean {
   return typeof raw === 'number' && Number.isFinite(raw) && !(typeof unit === 'string' && CHANGE_UNIT.test(unit));
 }
 
+/**
+ * ⭐ RT-10 B′ (Science 5 Oct Q1; DL ruling): the goal holds a ceiling BESIDE ITS OWN LIMIT ROW on the goal — a
+ * `goal_constraints` row on the goal node that states the same comparator (`<=`, or `<` as `operator_as_stated`), on a
+ * level (`value_frame` `level` or absent, never a change). The approved goal target card writes exactly that pair
+ * (`add-constraint.ts`: an approved "at most" holds the ceiling and keeps the row), so "If lower is better, tell me and
+ * I'll re-order" re-orders even where the goal holds no target figure of its own.
+ */
+function heldCeilingBesideItsLimitRow(graph: unknown, goalNodeId: unknown): boolean {
+  if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
+  const held = readHeldGoalComparator(graph, goalNodeId);
+  if (held !== '<' && held !== '<=') return false;
+  const rows = graph !== null && typeof graph === 'object' ? (graph as Record<string, unknown>).goal_constraints : undefined;
+  if (!Array.isArray(rows)) return false;
+  return rows.some((r) => {
+    if (r === null || typeof r !== 'object') return false;
+    const row = r as Record<string, unknown>;
+    if (row.node_id !== goalNodeId || row.operator !== '<=') return false;
+    if (row.value_frame !== undefined && row.value_frame !== 'level') return false;
+    return (row.operator_as_stated === '<' ? '<' : '<=') === held;
+  });
+}
+
 /** R1 S4-core: the goal's target is typed as a change from today (`goal_threshold_frame` `change_abs` | `change_rel`). */
 function goalTargetIsATypedChange(graph: unknown, goalNodeId: unknown): boolean {
   if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
@@ -279,6 +302,8 @@ export function resolveGoalDirection(
   if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && heldTargetIsATypedLevel(graph, goalNodeId)) {
     return { direction: 'minimise', provenance: 'stated_comparator' };
   }
+  // ⭐ RT-10 B′: a held ceiling beside its own limit row on the goal (the approved card's pair) — no target figure needed.
+  if (heldCeilingBesideItsLimitRow(graph, goalNodeId)) return { direction: 'minimise', provenance: 'stated_comparator' };
   // ⭐ R1 S4-core: a target TYPED as a change from today ("cut by 15%" → `change_rel` −0.15, held `<=`) needs no level
   // proof — the frame is the proof S1 waited for. Its held ceiling is its direction; a held floor stays today's maximiser.
   if (heldComparatorSense(readHeldGoalComparator(graph, goalNodeId)) === 'minimise' && goalTargetIsATypedChange(graph, goalNodeId)) {

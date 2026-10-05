@@ -294,13 +294,24 @@ export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
  * drift from either half.
  */
 const UNTESTED_GOAL_LEAD_CLAUSE_OPENING = 'scored highest in';
-const GOAL_DIRECTION_ASSUMED_CLAUSE =
-  'The analysis was not told which way your goal points, so it assumed a higher value is better';
+// ⭐ RT-10 B′ (DL ruling; words APPROVED 5 Oct): the assumption is OLUMI'S and model-relative, and the sentence after it
+// names the ONE correction that works. An "at most" target set on the goal in the Model panel (`goal_target_edit`) now
+// holds the user's ceiling (`add-constraint.ts`), so the rerun minimises (`resolveGoalDirection`, the goal-row branch);
+// chat has no door that holds a direction, so the words never say "tell me". It works on a goal with no target yet (the
+// goal editor opens with its at least / at most select). No goal label: the headline input carries none (see above).
+const GOAL_DIRECTION_ASSUMED_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
+const GOAL_DIRECTION_CORRECTION = ' If lower is better, set the goal’s target to ‘at most’ and re-run.';
 const GOAL_UNTESTED_CLAUSE = 'could not test whether any option reaches your goal';
 const GOAL_UNTESTED_DISCLOSURE = ` The model ${GOAL_UNTESTED_CLAUSE}.`;
-const GOAL_DIRECTION_ASSUMED_DISCLOSURE = ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}.`;
+const GOAL_DIRECTION_ASSUMED_DISCLOSURE = ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}.${GOAL_DIRECTION_CORRECTION}`;
 const GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE =
-  ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}, and it ${GOAL_UNTESTED_CLAUSE}.`;
+  ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}, and the model ${GOAL_UNTESTED_CLAUSE}.${GOAL_DIRECTION_CORRECTION}`;
+// ⛔ Codex r1 (#2600): the correction is said ONLY where its door opens. `goal_target_edit` refuses a goal whose target
+// is a CHANGE from today (`goal_is_a_change`), so there the assumption is stated and no correction is promised
+// (`goal_direction_correctable`, set by the caller from the same predicate the door refuses on).
+const GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE = ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}.`;
+const GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE =
+  ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}, and the model ${GOAL_UNTESTED_CLAUSE}.`;
 /**
  * The sentence each goal frame carries. A total map over {@link GoalFrame}, so a
  * new frame cannot compile without choosing its sentence.
@@ -311,11 +322,19 @@ const GOAL_FRAME_SENTENCE: Readonly<Record<GoalFrame, string>> = Object.freeze({
   attainment_untested: GOAL_UNTESTED_DISCLOSURE,
   direction_assumed_and_attainment_untested: GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE,
 });
+/** The same map where the goal's direction cannot be corrected through the goal target (a change target): no promise. */
+const GOAL_FRAME_SENTENCE_UNCORRECTABLE: Readonly<Record<GoalFrame, string>> = Object.freeze({
+  ...GOAL_FRAME_SENTENCE,
+  direction_assumed: GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE,
+  direction_assumed_and_attainment_untested: GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE,
+});
 /** The goal-frame sentence's budget: the LONGEST of the three, since exactly one rides. */
 const GOAL_FRAME_DISCLOSURE_MAX_CHARS = Math.max(
   GOAL_UNTESTED_DISCLOSURE.length,
   GOAL_DIRECTION_ASSUMED_DISCLOSURE.length,
   GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE.length,
+  GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE.length,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE.length,
 );
 /**
  * How much SHORTER the withdrawn opening is than the goal-framed one (18). The
@@ -719,6 +738,13 @@ export interface AnalysisResultHeadlineInput {
    * sends `maximise`), so the headline must not say the direction was assumed. Omitted / false ⇒ today's frame.
    */
   readonly goal_points_up_as_held?: boolean;
+  /**
+   * ⛔ RT-10 B′ (Codex r1 #2600): true only when the goal's direction CAN be corrected through the Model panel goal
+   * target ("at most"), i.e. `goal_target_edit` accepts this goal: its target is not a CHANGE from today
+   * (`isChangeFrame`, the door's own `goal_is_a_change` refusal). Absent or false ⇒ the direction-assumed sentence
+   * states the assumption WITHOUT the correction, so no door is promised that would refuse.
+   */
+  readonly goal_direction_correctable?: boolean;
   /**
    * T1. True for the constraint verdict's `identity_unresolved` state: the
    * producer plainly evaluated constraints, but not one of the ids it returned
@@ -1142,7 +1168,8 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // never decides a case: see `leadCap`.
   const goalFrame = resolveGoalFrame(enrichment, input.goal_points_up_as_held === true);
   const goalUntestable = goalFrame !== 'goal_framed';
-  const goalUntestedSuffix = GOAL_FRAME_SENTENCE[goalFrame];
+  const goalUntestedSuffix = (input.goal_direction_correctable === true
+    ? GOAL_FRAME_SENTENCE : GOAL_FRAME_SENTENCE_UNCORRECTABLE)[goalFrame];
   const suffix = `${goalUntestedSuffix}${narrationTail}${reducedSamplesSuffix}${statusSuffix(status_kind)}`;
   const lengthCap =
     MAX_HEADLINE_CHARS + goalUntestedSuffix.length + narrationTail.length + reducedSamplesSuffix.length;
@@ -2550,6 +2577,8 @@ const GOAL_FRAME_WITHDRAWN_RE_SRC = `(?:${[
   GOAL_UNTESTED_DISCLOSURE,
   GOAL_DIRECTION_ASSUMED_DISCLOSURE,
   GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE,
 ]
   .map(escapeForRegex)
   .join('|')})`;

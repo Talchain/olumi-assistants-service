@@ -47,6 +47,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { goalDirectionCorrectableByTarget } from '../run-analysis.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -91,11 +92,11 @@ const SERVED_GOAL_WARNINGS = (((T2.blocks[0] as Json)['enrichment'] as Json)['in
 // The two headline sentences, spelled here and never imported.
 const COULD_NOT_TEST = ' The model could not test whether any option reaches your goal.';
 const DIRECTION_ASSUMED =
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better.';
+  ' In this model I’ve assumed a higher value is better for your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
 const COMBINED =
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better,' +
-  ' and it could not test whether any option reaches your goal.';
-const DIRECTION_CLAUSE = 'The analysis was not told which way your goal points, so it assumed a higher value is better';
+  ' In this model I’ve assumed a higher value is better for your goal,' +
+  ' and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
+const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
 const GLOSS = 'Scoring highest counts how often an option scored highest on your goal';
 
 const HOLD = 'Hold at £49 Per Seat (Status Quo)';
@@ -140,7 +141,9 @@ function headlineInput(recs: Json[], codes: readonly string[]): AnalysisResultHe
  * and the headline builder's goal-frame verdict for the same input.
  */
 function composeAsHandler(recs: Json[], codes: readonly string[], rawGraph: Json): { summary: string; tail: string } {
-  const input = headlineInput(recs, codes);
+  // RT-10 B′: the handler's own flag, from the same graph (`goalDirectionCorrectableByTarget`).
+  const goalId = ((rawGraph['nodes'] as Json[]).find((n) => n['kind'] === 'goal') ?? {})['id'];
+  const input = { ...headlineInput(recs, codes), goal_direction_correctable: goalDirectionCorrectableByTarget(rawGraph, goalId) };
   const headline = buildAnalysisResultHeadline(input);
   const goalFrame = describeGoalFrame(input);
   const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
