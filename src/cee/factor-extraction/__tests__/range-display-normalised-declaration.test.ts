@@ -738,7 +738,12 @@ describe("the writer census is derived, and REDs on a fourth writer", () => {
     expect(Object.fromEntries([...byFile].sort())).toEqual({
       // ⚠ 3 -> 5 at the #1653 rebase: `stated_items[].value_scale` writes both
       // carriers (`:2918`, `:2919`). Re-derive, never edit to match a run.
-      "cee/draft/records/projector.ts": 5,
+      // ⚠ 5 -> 6 (#2573 F9): a DECLARED frame writes the legacy framing's
+      // `declared_scale` on the node, the carrier V3 rebuilds observed_state from.
+      "cee/draft/records/projector.ts": 6,
+      // #2573 F1 (DL FREEZE): the Anthropic route's records compile, frozen at
+      // staging 890923c9 — the same five writers staging's projector had.
+      "cee/draft/records-v25/projector.ts": 5,
       "cee/unified-pipeline/stages/repair/unreachable-factors.ts": 1,
     });
   });

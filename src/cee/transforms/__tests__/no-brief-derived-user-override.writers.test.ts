@@ -165,6 +165,9 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // label the system wrote about itself.
   "cee/context-integrity/not-modelled-manifest.ts":
     "reader only — treats the stamp as a user-write receipt so the brief-audit ledger REFUSES to claim the user's value as its own invention; the literal is a lookup key, no write path, and a wrong read can only withhold our own claim, never invent one about the user",
+  // #2573 F1 (DL FREEZE): the byte-identical staging copy (890923c9) the Anthropic route compiles through. Same reader.
+  "cee/draft/records-v25/not-modelled-manifest.ts":
+    "frozen staging copy of cee/context-integrity/not-modelled-manifest.ts — reader only, the literal is a lookup key with no write path (same review as the live file)",
   // ── The authorship-display projection. Reviewed 31 Aug 2026 against this
   // ── guard's one truth condition.
   //
