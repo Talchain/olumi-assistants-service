@@ -1278,6 +1278,11 @@ interface Candidate {
   readonly carrier?: "edge_effect";
   /** The one place in the brief this figure may match. Absent means anywhere. */
   readonly boundSpan?: { readonly start: number; readonly end: number };
+  /** An option's level on this factor (`collectSourceBoundInterventionCandidates`).
+   *  Admitted only under Science's W2/W3, see {@link admissibleCandidates}. */
+  readonly optionLevel?: true;
+  /** The `char_offset` of the ONE brief quantity an option level states (`bindOptionLevels`). */
+  readonly boundAt?: number;
 }
 
 /**
@@ -1343,6 +1348,18 @@ const CANDIDATE_COLLECTIONS = ["nodes", "options"] as const;
  * The provenance tuple below is the fail-closed source-binding contract emitted
  * by the draft projector. A hypothesis — even one that happens to repeat the
  * same number — is not evidence that the amount was carried from the brief.
+ *
+ * ⚠ `value_confidence` IS NOT THE AUTHORITY; `source` IS (RT-4 class A, #87
+ * 5998705341). The served agent-lane producer (`admit-model` `ConstructedLevel`)
+ * writes `{ value, source, target_match, raw_value, unit }` and has no
+ * `value_confidence` field at all, so requiring "high" made every stated option
+ * figure read "absent". Seven served drafts replayed: 37/37 levels carried none,
+ * and £250k, £120k, 15%, 8% and 6% were all reported as missing from a model
+ * that held them. An ABSENT confidence is therefore no evidence either way. A
+ * producer that does write one and says less than "high" still withholds the
+ * credit (the extractor co-writes "low" with `cee_hypothesis`). `cee_hypothesis`
+ * is never credited, whatever it claims: £300, £8k and a 15% the brief states
+ * stay absent where the producer marked the level as Olumi's own.
  */
 function collectSourceBoundInterventionCandidates(
   option: Record<string, unknown>,
@@ -1364,7 +1381,9 @@ function collectSourceBoundInterventionCandidates(
     const target = targetMatch as Record<string, unknown>;
     if (
       intervention.source !== "brief_extraction" ||
-      intervention.value_confidence !== "high" ||
+      (intervention.value_confidence !== undefined &&
+        intervention.value_confidence !== null &&
+        intervention.value_confidence !== "high") ||
       target.node_id !== factorId ||
       target.confidence !== "high" ||
       target.match_type !== "exact_id"
@@ -1393,6 +1412,7 @@ function collectSourceBoundInterventionCandidates(
       unitKind: kind,
       currencyCode: currencyCode ?? null,
       declaredUnit,
+      optionLevel: true,
     });
   }
   return out;
@@ -1622,6 +1642,8 @@ const canonicaliseMonths = (s: string): string =>
 
 interface Surfaces {
   readonly candidates: readonly Candidate[];
+  /** Where the brief states each limit (`constraintSpans`), so `classify` can keep a stated limit off an option's level. */
+  readonly limitSpans: readonly ConstraintSpan[];
   /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
   readonly modelStrings: readonly string[];
   /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
@@ -1682,7 +1704,12 @@ function splitSurfaces(graph: Record<string, unknown>, briefText: string): Surfa
     else if (cls === "prose") walkText(v, true);
   }
 
-  return { candidates: collectCandidates(graph, briefText), modelStrings, proseStrings };
+  return {
+    candidates: bindOptionLevels(collectCandidates(graph, briefText), extractStatedQuantities(briefText)),
+    limitSpans: constraintSpans(graph, briefText),
+    modelStrings,
+    proseStrings,
+  };
 }
 
 // ── matching ────────────────────────────────────────────────────────────────
@@ -1776,11 +1803,62 @@ function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidat
   return null;
 }
 
+/**
+ * The candidates a quantity may be matched against. Option levels are admitted
+ * only under Science's ruling on RT-4 class A (#87 5999083694):
+ *
+ *  · W2 — A LIMIT THE USER STATED IS NEVER AN OPTION'S LEVEL. Option candidates
+ *    are collected before limit candidates and `matchCandidate` takes the first
+ *    match, so "a £120k budget" beside a £120k option level would otherwise be
+ *    anchored to the option's factor instead of the limit.
+ *  · W3 — A FIGURE MATCHING LEVELS ON TWO DIFFERENT FACTORS NAMES NEITHER. Value
+ *    and unit cannot say which factor the user meant, so no option level is
+ *    credited. The same factor set by several options is one claim, not two.
+ *
+ * Every other candidate is untouched, so no previously anchored match moves.
+ */
+function admissibleCandidates(q: Quantity, s: Surfaces): readonly Candidate[] {
+  if (!s.candidates.some((c) => c.optionLevel === true)) return s.candidates;
+  const withoutOptionLevels = (): readonly Candidate[] => s.candidates.filter((c) => c.optionLevel !== true);
+  // ⛔ FALLBACK ONLY (Codex r2 (b) on #2603): an option level may turn an unmatched figure into a credit, never move
+  // one the model already accounts for. A served limit row carries no `source_quote`, so W2 alone could not see it:
+  // the £120k limit's anchor moved from the limit's node to the tool's cost. Any other carrier, or the model text,
+  // keeps the figure, exactly as before this route existed.
+  if (matchCandidate(q, withoutOptionLevels()) !== null || appearsInStrings(q, s.modelStrings)) {
+    return withoutOptionLevels();
+  }
+  if (classifyStatedKind(q, s.limitSpans) === "constraint") return withoutOptionLevels();
+  // Own span: an option level is offered only to the one literal it was bound to (`bindOptionLevels`).
+  const offered = s.candidates.filter((c) => c.optionLevel !== true || c.boundAt === q.at);
+  const factors = new Set(offered.filter((c) => c.optionLevel === true).map((c) => c.nodeId));
+  return factors.size > 1 ? withoutOptionLevels() : offered;
+}
+
+/**
+ * ⛔ AN OPTION LEVEL IS THE USER'S FIGURE ONLY WHERE THE BRIEF STATES IT ONCE (DL ruling on #2603, the Review Desk's
+ * lease ask; the same own-span rule #2601 applies to an unquoted edge effect). Value and unit alone cannot say which
+ * written figure a level holds: "raise prices by 8%" and "churn is 8% today" both read as 8%. So a level binds to the
+ * ONE brief quantity with its value and unit. Two such places, or none, and it is not offered at all — the figure stays
+ * visibly unmatched, never guessed. The cost is deliberate: a figure the user wrote twice is not credited by this route.
+ */
+function bindOptionLevels(candidates: readonly Candidate[], quantities: readonly Quantity[]): Candidate[] {
+  const out: Candidate[] = [];
+  for (const c of candidates) {
+    if (c.optionLevel !== true) {
+      out.push(c);
+      continue;
+    }
+    const places = quantities.filter((q) => q.value !== null && unitCompatible(q, c) && numbersEqual(c.value, q.value));
+    if (places.length === 1) out.push({ ...c, boundAt: places[0]!.at });
+  }
+  return out;
+}
+
 function classify(
   q: Quantity,
   s: Surfaces,
 ): { verdict: QuantityVerdict; matched: Candidate | null } {
-  const matched = matchCandidate(q, s.candidates);
+  const matched = matchCandidate(q, admissibleCandidates(q, s));
   if (matched !== null) return { verdict: "in_model", matched };
   // Text is the second route: a figure written into a label, a unit string or
   // an encoding-map caption ("45 roles offshored (~40% saving)", "(Jan 2027)")
@@ -2000,7 +2078,10 @@ export function deriveNotModelledManifest(
     const { verdict, matched } = classify(q, surfaces);
     // An edge's figure is the user's EFFECT size, not the node's own value: crediting it must never hide Olumi's own
     // estimate on that node from `inferred_factors` (Codex r1 on #2601).
-    if (matched !== null && matched.carrier !== "edge_effect") matchedNodeIds.add(matched.nodeId);
+    // An option's level, like an edge's effect, is a figure ON the factor, not the factor's own: crediting it never
+    // certifies the factor's baseline or cap as the user's (RT-4 class A, #2603: the £250k fit-out level would have
+    // hidden that Olumi set that factor's £0 today and £500k cap).
+    if (matched !== null && matched.carrier !== "edge_effect" && matched.optionLevel !== true) matchedNodeIds.add(matched.nodeId);
     if (verdict === "in_model") {
       inModel += 1;
       if (matched !== null) inModelAnchored += 1;
