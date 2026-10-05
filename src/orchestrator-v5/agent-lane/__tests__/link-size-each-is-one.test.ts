@@ -24,7 +24,8 @@ describe('R3 5925568501: a distributive word + the source names a change of one'
   });
   it('the approval card quotes that sentence (what Paul approves is the reading of his own words)', () => {
     const quote = 'We have £180k in the bank. Each extra conversation brings in about £20,000 towards funding.';
-    expect(statingSentenceOf(quote, effect, ends, { quantities: Q })).toBe('Each extra conversation brings in about £20,000 towards funding');
+    // RT-6 step 3: the stored sentence keeps its own full stop (one clean quote on the card); was without it.
+    expect(statingSentenceOf(quote, effect, ends, { quantities: Q })).toBe('Each extra conversation brings in about £20,000 towards funding.');
   });
   for (const s of ['One more conversation adds about £20,000 to funding', 'Each extra investment-firm conversation adds about £20,000 to funding', 'Each extra conversation, we think, adds about £20,000 to funding',
     'We bring in about £20,000 of funding per extra conversation']) {
@@ -38,10 +39,14 @@ describe('R3 5925568501: a distributive word + the source names a change of one'
     ['Each extra new conversation adds about £20,000 to funding', 'two modifiers: the word no longer governs the noun'],
     ['Each phone conversation adds about £20,000 to funding', 'an unknown modifier names a KIND of conversation, not the source: under-claim'],
     ['Every week a conversation adds about £20,000 to funding', '"every week" counts weeks, not conversations: only extra/more/new or the source\'s own words may stand between'],
-    ['Each extra conversation brings down funding by about £20,000', 'a bare "brings" is no direction (never read as money in)'],
   ] as const) {
     it(`refused (${why}): "${s}"`, () => expect(door(s)).not.toBeNull());
   }
+  // RT-6 step 3, option B (Science B2): direction words no longer refuse at the binder; the card's WORDS state the Agent's
+  // reading ("raises … by £20,000" against the user's "brings down"), the M-sign class the user corrects. Was refused.
+  it('B2: "Each extra conversation brings down funding by about £20,000" passes the binder; the card carries the reading', () => {
+    expect(door('Each extra conversation brings down funding by about £20,000')).toBeNull();
+  });
   // AIQ 5925663053: the governed word must be what the source COUNTS (its unit noun, else its label's last word).
   for (const [source, sentence] of [
     ['Warm conversations with investment firms', 'Each investment firm brings in about £1m of funding'],

@@ -24,6 +24,8 @@ import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
 import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
+import { linkEffectSourceLevels } from './link-effect-figures.js';
+import { namesSourceOf } from './stated-by-user.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -337,17 +339,33 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
 export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
     { from?: unknown; to?: unknown; effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown };
-      quote?: unknown; unit_readings?: unknown } : undefined;
+      quote?: unknown; unit_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
   const e = op?.effect;
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
-    || typeof e.amount !== 'number' || typeof e.per_source_change !== 'number' || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') return undefined;
-  const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`}`;
-  const head = `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}"`;
-  if (op.unit_readings === undefined) return `${head} \u2014 from your words: "${op.quote}"`;
-  if (!Array.isArray(op.unit_readings) || op.unit_readings.length > 2) return undefined;
+    || typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0
+    || typeof e.per_source_change !== 'number' || !Number.isFinite(e.per_source_change) || e.per_source_change === 0
+    || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string'
+    || (op.link_selected !== undefined && op.link_selected !== true)) return undefined;
+  const unsigned = (v: number, unit: string): string => figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`;
+  const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${unsigned(v, unit)}`;
+  let reversal = '';
+  if (op.reversal !== undefined) {
+    const r = op.reversal as { from?: unknown; to?: unknown } | null;
+    const direction = Math.sign(e.amount) * Math.sign(e.per_source_change) < 0 ? 'negative' : 'positive';
+    if (r === null || typeof r !== 'object' || Object.keys(r).length !== 2
+      || (r.from !== 'positive' && r.from !== 'negative') || r.to !== direction || r.from === r.to) return undefined;
+    reversal = `REVERSAL: this changes the link from ${r.from} to ${r.to}. `;
+  }
+  const words = `${e.per_source_change < 0 ? 'lowering' : 'raising'} "${labels.from}" by ${unsigned(e.per_source_change, e.per_source_change_unit)} `
+    + `${e.amount < 0 ? 'lowers' : 'raises'} "${labels.to}" by ${unsigned(e.amount, e.amount_unit)}`;
+  const levels = linkEffectSourceLevels(op.quote, namesSourceOf({ source: labels.from, target: labels.to }));
+  const transition = levels !== undefined && levels.change === e.per_source_change
+    ? ` Source change: ${levels.from}% \u2192 ${levels.to}% = ${signed(levels.change, levels.unit)}.` : '';
+  const head = `${reversal}Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}": ${words}.${transition}`;
+  if (op.unit_readings !== undefined && (!Array.isArray(op.unit_readings) || op.unit_readings.length > 2)) return undefined;
   const disclosures: string[] = [];
   const seen = new Set<string>();
-  for (const raw of op.unit_readings) {
+  for (const raw of (op.unit_readings ?? []) as unknown[]) {
     const item = raw as { node_id?: unknown; unit_reading?: { unit?: unknown; source?: unknown; source_quote?: unknown } } | null;
     const reading = item?.unit_reading;
     if (item === null || typeof item !== 'object' || Object.keys(item).length !== 2 || typeof item.node_id !== 'string'
@@ -359,8 +377,10 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
     seen.add(item.node_id);
     disclosures.push(`I've taken "${item.node_id === op.from ? labels.from : labels.to}" to be in ${reading.unit}, from your words.`);
   }
-  return disclosures.length === 0 ? `${head} \u2014 from your words: "${op.quote}"`
-    : `${head}, from your words: "${op.quote}". ${disclosures.join(' ')}`;
+  // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.
+  return `${head} From your words: "${op.quote}"${/[.!?]$/.test(op.quote) ? '' : '.'}`
+    + (disclosures.length > 0 ? ` ${disclosures.join(' ')}` : '')
+    + ' Approve, or correct.';
 }
 
 /** The same card reading for one stored operation; kept separate so the single-link wording remains byte-for-byte. */
@@ -392,7 +412,8 @@ const LINK_EFFECT_APPROVE_PREFIX = 'Yes \u2014 ';
 export const linkEffectApproveMessage = (reading: string): string => `${LINK_EFFECT_APPROVE_PREFIX}${reading}`;
 /** The reading a link-effect card's words carry, or `undefined` for any other words. */
 export function readingOfLinkEffectApproval(message: unknown): string | undefined {
-  return typeof message === 'string' && message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+  return typeof message === 'string' && (message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+    || /^Yes \u2014 REVERSAL: this changes the link from (positive|negative) to (positive|negative)\. Record: /.test(message))
     ? message.slice(LINK_EFFECT_APPROVE_PREFIX.length) : undefined;
 }
 

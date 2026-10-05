@@ -1,7 +1,12 @@
+import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 /** Literal, per-end unit readings for an unsized link (RT-6 U1–U4). No graph writes. */
-import { findStatedAmounts, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
+import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
+import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
+import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
-import { sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
+import { isPercentageLevelUnit, resolveMagnitudeFrame } from '../../cee/magnitude/link-effect.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectStatement } from './link-effect-edit.js';
 
@@ -15,8 +20,42 @@ export interface LinkEffectUnitReading {
 }
 export interface PreparedLinkEffectUnitReadings {
   readonly unit_readings: readonly LinkEffectUnitReading[];
+  /** % level ends at a TYPED 0, where a bare % can only be points (Science F1): the stored reading says points. */
+  readonly points_at_zero?: readonly string[];
   /** One question, including every unresolved eligible end. Nothing is written until it is answered. */
   readonly ask?: string;
+}
+
+/**
+ * The end's level only when the USER stated it (Science F1, #87 5999199710; typed fields 17:3xZ): `raw_value ?? value`
+ * (an unframed level has no raw_value) under a source that earns authorship. An Olumi estimate, a default or a missing
+ * level is no level here: never a "today's level" in an example, never a zero that settles a reading.
+ */
+function usersLevelOf(node: Rec): number | undefined {
+  const os = isRec(node.observed_state) ? node.observed_state : undefined;
+  const level = os === undefined ? undefined : os.raw_value ?? os.value;
+  return os !== undefined && typeof level === 'number' && Number.isFinite(level)
+    && earnsAuthorshipCredit(classifyValueSource(os.source)) ? level : undefined;
+}
+
+const tidy = (n: number): number => Number(n.toFixed(2));
+/** U3: points or a share of today's level. The example uses the user's own level when it is theirs, else a generic one. */
+function pointsOrShareAsk(label: string, value: number, level: number | undefined, frame: number | undefined): string {
+  const by = Math.abs(value);
+  const move = `${by}-point ${value < 0 ? 'fall' : 'rise'} in \u201c${label}\u201d`;
+  const to = level === undefined ? undefined : tidy(level + value);
+  if (level !== undefined && to !== undefined && to >= 0 && to <= (frame !== undefined && frame > 1 ? frame : 100)) {
+    return `Is that a ${move} (${level}% → ${to}%), or ${by}% of today\u2019s ${level}%, i.e. ${tidy(level * (1 + value / 100))}%?`;
+  }
+  const example = value < 0 ? `${10 + by}% → 10%` : `10% → ${10 + value}%`;
+  return `Is that a ${move} (say ${example}), or ${by}% of today\u2019s level?`;
+}
+
+/** The reading the card shows and the writer stores: a typed-zero end's change is said in points (B3). */
+export function withPointsAtZero<E extends LinkEffectStatement>(effect: E, zero: readonly string[] | undefined, from: string, to: string): E {
+  if (zero === undefined || zero.length === 0) return effect;
+  return { ...effect, ...(zero.includes(from) ? { per_source_change_unit: POINTS_UNIT } : {}),
+    ...(zero.includes(to) ? { amount_unit: POINTS_UNIT } : {}) };
 }
 
 const unitOf = (n: Rec): string | undefined => text(n.unit)
@@ -31,7 +70,8 @@ const endpointUnit = (edge: Rec, id: string): string | undefined => {
   return natural === undefined ? undefined : text(natural[edge.from === id ? 'per_source_change_unit' : 'amount_unit']);
 };
 // A points change and a % level use the same raw unit; this comparator does not reinterpret a literal bare %.
-const levelUnitKey = (u: string): string | undefined => /^(?:percentage\s+points?|pp|points?)$/i.test(u.trim()) ? unitComparisonKey('%') : unitComparisonKey(u);
+// Bare "point(s)" is points of a % only on a quantity whose unit is % (Science F1); on a unitless end it is a count noun.
+const levelUnitKey = (u: string): string | undefined => /^(?:percentage\s+points?|pp)$/i.test(u.trim()) ? unitComparisonKey('%') : unitComparisonKey(u);
 
 /** The model can adopt only where no established unit or level would be reinterpreted (U1). */
 function eligible(node: Rec, edges: readonly Rec[], from: string, to: string, unit: string): boolean {
@@ -45,7 +85,8 @@ function eligible(node: Rec, edges: readonly Rec[], from: string, to: string, un
 
 /** Only words explicitly stated inside THIS end's clause may qualify its currency period. */
 function periodOf(clause: string): string | null | undefined {
-  const periods = [...clause.matchAll(/(?:\bper\s+|\/\s*)([\p{L}]+)\b/giu)].map(m => m[1]!.toLowerCase());
+  const periods = [...clause.matchAll(/(?:\bper\s+|\/\s*)([\p{L}]+)\b|\ba\s+(month|week|year)\b/giu)]
+    .map(m => (m[1] ?? m[2])!.toLowerCase());
   if (periods.some(p => !['day', 'week', 'month', 'quarter', 'year'].includes(p))) return null;
   return new Set(periods).size > 1 ? null : periods[0];
 }
@@ -107,7 +148,7 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
     const clause = quote.slice(from, to).trimEnd();
     return clause.length >= 1 && clause.length <= 500 ? clause : undefined;
   };
-  const PERIOD = /^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)*/iu;
+  const PERIOD = /^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b|\s+a\s+(?:month|week|year)\b)*/iu;
   // Forward.
   const rest = quote.slice(figureEnd, next);
   // Whitespace is consumed only WITH a unit word, so "£3 per month" keeps its period (buddy r2 P2).
@@ -159,6 +200,18 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   return bounded(previousEnd + boundary + words[first]!.index!, figureEnd + suffix.length + period.length);
 }
 
+/** A selected link binds an unnamed currency end, while its literal amount and period remain the only unit warrant. */
+function selectedCurrencyClause(quote: string, amount: StatedAmount): string | undefined {
+  if (amount.kind !== 'currency') return undefined;
+  const start = amount.index + amount.matchedText.length - amount.matchedText.trimStart().length;
+  const end = amount.index + amount.matchedText.length;
+  const tail = /^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b|\s+a\s+(?:month|week|year)\b)*/iu.exec(quote.slice(end))![0];
+  // A numbered denominator cannot be quietly omitted from the selected reading either.
+  if (/^\s*(?:per\s+|\/\s*)\d/i.test(quote.slice(end + tail.length))) return undefined;
+  const clause = quote.slice(start, end + tail.length).trimEnd();
+  return clause.length >= 1 && clause.length <= 500 ? clause : undefined;
+}
+
 function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: string; barePercent?: true } {
   if (a.kind === 'percent') return { barePercent: true };
   if (a.kind === 'currency' && a.currencyCode !== undefined) {
@@ -174,7 +227,8 @@ function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: strin
   const at = clause.indexOf(literal);
   if (at < 0) return {};
   const tail = clause.slice(at + literal.length);
-  if (/^\s*(?:percentage\s+points?\b|pp\b|points?\s+of\b)/i.test(tail)) return { unit: '%' };
+  // "5 points of X" never makes an end of unknown unit a % (Science F1: loyalty points); it is asked, not adopted.
+  if (/^\s*(?:percentage\s+points?\b|pp\b)/i.test(tail)) return { unit: '%' };
   const nounWords = tail.replace(/^\s*(?:(?:more|extra|additional)\s+)?/, '').match(/[\p{L}]+/gu) ?? [];
   const noun = nounWords[0];
   const statedCountNoun = typeof node.count_noun === 'string' ? wordsOf(node.count_noun) : undefined;
@@ -188,6 +242,7 @@ function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: strin
 
 export function prepareLinkEffectUnitReadings(
   graph: unknown, from: string, to: string, effect: LinkEffectStatement, quote: string,
+  options?: { readonly link_selected?: boolean },
 ): PreparedLinkEffectUnitReadings {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return { unit_readings: [] };
   const nodes = graph.nodes.filter(isRec);
@@ -195,25 +250,54 @@ export function prepareLinkEffectUnitReadings(
   if (source === undefined || target === undefined) return { unit_readings: [] };
   const edges = graph.edges.filter(isRec);
   const current = edges.find(e => e.from === from && e.to === to);
-  const amounts = findStatedAmounts(quote, { isoCurrencyCodes: true });
+  const amounts = findLinkEffectAmounts(quote);
+  const percentLevels = percentLevelIds(graph);
+  // The writer's ONE frame authority (D2), so a % with no stored cap is read on the same pinned frame it is sized on
+  // (Codex buddy r1 HIGH: an explicit-only read skipped U3 where the writer still sized the bare %).
+  const view = magnitudeNodes(nodes, percentLevels);
   const unit_readings: LinkEffectUnitReading[] = [];
+  const points_at_zero: string[] = [];
   const asks: string[] = [];
   for (const [node, other, value, statedUnit] of [[source, target, effect.per_source_change, effect.per_source_change_unit],
     [target, source, effect.amount, effect.amount_unit]] as const) {
+    const label = String(node.label ?? node.id);
+    const establishedUnit = unitOf(node) ?? (current === undefined ? undefined : endpointUnit(current, String(node.id)));
+    const literalPercent = amounts.find(a => a.magnitude === Math.abs(value) && a.kind === 'percent');
+    const sourceLevels = node === source
+      ? linkEffectSourceLevels(quote, namesSourceOf({ source: String(source.label ?? source.id), target: String(target.label ?? target.id) })) : undefined;
+    const explicitSourceLevels = sourceLevels !== undefined && Math.abs(sourceLevels.change) === Math.abs(value);
+    const magnitude = view.get(String(node.id));
+    const frame = magnitude === undefined ? undefined : resolveMagnitudeFrame(magnitude);
+    if (establishedUnit !== undefined && literalPercent !== undefined && !explicitSourceLevels) {
+      if ((unitOf(node) !== undefined || percentLevels.has(String(node.id)))
+        // A bare % on a percent LEVEL is two readings whatever frame it is stored on (Codex r1 HIGH: a capless 0 resolves to
+        // frame 1, and an explicit-100-only test skipped the question); the writer's own dry run decides what it can size.
+        && (percentLevels.has(String(node.id)) || isPercentageLevelUnit(establishedUnit, 100))) {
+        const level = usersLevelOf(node);
+        // Science F1: 10% of 0 is 0, so at the user's own 0 the % can only be points: no question, and the card says
+        // points for approval. Only a TYPED 0 settles it; Olumi's estimated 0 is read through the question like any level.
+        if (level === 0) { points_at_zero.push(String(node.id)); continue; }
+        asks.push(pointsOrShareAsk(label, value, level, frame));
+        continue;
+      }
+      if (readCurrencyUnitWithQualifiers(establishedUnit).kind === 'currency') {
+        asks.push(`What ${establishedUnit} change in \u201c${label}\u201d do you mean by ${Math.abs(value)}%?`);
+        continue;
+      }
+    }
     // Step 1's established size continues to govern; this door adopts units for UNSIZED ends only.
-    if (unitOf(node) !== undefined || (current !== undefined && endpointUnit(current, String(node.id)) !== undefined)) continue;
+    if (establishedUnit !== undefined) continue;
     const candidates = amounts.flatMap((a, i) => {
       if (a.magnitude !== Math.abs(value)) return [];
-      const clause = clauseOf(quote, amounts, i, node, other);
+      const clause = clauseOf(quote, amounts, i, node, other)
+        ?? (options?.link_selected === true ? selectedCurrencyClause(quote, a) : undefined);
       return clause === undefined ? [] : [{ clause, ...literalUnit(a, clause, node) }];
     });
     const one = candidates.length === 1 ? candidates[0] : undefined;
     const unit = one?.unit;
     if (!eligible(node, edges, from, to, unit ?? statedUnit)) continue;
-    const label = String(node.label ?? node.id);
     if (one?.barePercent === true) {
-      const example = value < 0 ? `${10 + Math.abs(value)}% → 10%` : `10% → ${10 + value}%`;
-      asks.push(`Is that a ${Math.abs(value)}-point ${value < 0 ? 'fall' : 'rise'} in \u201c${label}\u201d (say ${example}), or ${Math.abs(value)}% of today\u2019s level?`);
+      asks.push(pointsOrShareAsk(label, value, undefined, undefined));
     } else if (unit === undefined || unit.length > 40) {
       asks.push(`What unit is the ${Math.abs(value)} change in \u201c${label}\u201d stated in?`);
     } else {
@@ -221,5 +305,5 @@ export function prepareLinkEffectUnitReadings(
     }
   }
   // One question even when both ends need clarification.
-  return { unit_readings, ...(asks.length > 0 ? { ask: asks.map((ask, i) => { const lead = i === 0 ? ask : ask[0]!.toLowerCase() + ask.slice(1); return i < asks.length - 1 ? lead.replace(/\?$/, ';') : lead; }).join(' ') } : {}) };
+  return { unit_readings, ...(points_at_zero.length > 0 ? { points_at_zero } : {}), ...(asks.length > 0 ? { ask: asks.map((ask, i) => { const lead = i === 0 ? ask : ask[0]!.toLowerCase() + ask.slice(1); return i < asks.length - 1 ? lead.replace(/\?$/, ';') : lead; }).join(' ') } : {}) };
 }

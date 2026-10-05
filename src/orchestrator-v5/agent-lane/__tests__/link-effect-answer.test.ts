@@ -17,7 +17,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { dispatchTool } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { linkEffectEdgeToken, linkEffectReadingToken } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken } from '../../system-events/link-effect-edit.js';
 import { approvalChipsFor, approvalChipIdFor, readingOfLinkEffectApproval } from '../approval-chips.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 
@@ -127,18 +127,13 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     ['Our budget is £1 per month and we currently have 50 subscribers. Does a Pro price rise affect paying subscribers?',
       'Does a Pro price rise affect paying subscribers?', -50, 1, 'not_the_users_statement', 'question'],
     ['Our budget is £1 per month and we currently have 50 paying subscribers. Does a Pro price rise affect them?',
-      'Our budget is £1 per month and we currently have 50 paying subscribers', -50, 1, 'not_the_users_statement', 'end_not_named'],
+      'Our budget is £1 per month and we currently have 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     ['Does every £1 on the Pro price lose us 50 paying subscribers?', 'Does every £1 on the Pro price lose us 50 paying subscribers', -50, 1,
       'not_the_users_statement', 'question'],
     ['Every £1 on the Pro price does not lose us 50 paying subscribers.', 'Every £1 on the Pro price does not lose us 50 paying subscribers',
       -50, 1, 'not_the_users_statement', 'denied'],
-    // The opposite way, with the STORED sign supplied: the user said "wins", the tool says −50.
-    ['Every £1 on the Pro price wins us about 50 paying subscribers.', 'Every £1 on the Pro price wins us about 50 paying subscribers',
-      -50, 1, 'not_the_users_statement', 'direction_contradicts'],
     ['£1 on the Pro price and 50 paying subscribers.', '£1 on the Pro price and 50 paying subscribers', -50, 1,
-      'not_the_users_statement', 'direction_not_stated'],
-    ['Every £1 on the Pro price loses us about 50 paying subscribers.', 'Every £1 on the Pro price loses us about 50 paying subscribers',
-      50, -1, 'not_the_users_statement', 'direction_contradicts'],
+      'not_the_users_statement', 'no_change_stated'],
     // The figures only ELSEWHERE in the turn; the quoted statement names both ends and the way, but no size.
     ['Our budget is £1 a month; we have 50 paying subscribers. Raising the Pro price loses us paying subscribers.',
       'Raising the Pro price loses us paying subscribers', -50, 1, 'not_the_users_figure', undefined],
@@ -152,44 +147,43 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     // ONE sentence, every element in it, but neither figure sizes the movement.
     ['Our budget is £1 per month and we currently have 50 paying subscribers, and a Pro price rise loses us paying subscribers.',
       'Our budget is £1 per month and we currently have 50 paying subscribers, and a Pro price rise loses us paying subscribers',
-      -50, 1, 'not_the_users_statement', 'figure_not_bound'],
+      -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     // PR Review's third CR (@ 157b42ae), its two exact strings: a sentence-ending period after a digit; and a budget
     // beside the source's NAME that describes no change of it ("£1 and Pro price rises").
     ['Our budget is £1. Pro price rises, losing 50 paying subscribers.',
       'Our budget is £1. Pro price rises, losing 50 paying subscribers', -50, 1, 'not_the_users_statement', 'not_one_statement'],
     ['Our budget is £1 and Pro price rises, losing 50 paying subscribers.',
-      'Our budget is £1 and Pro price rises, losing 50 paying subscribers', -50, 1, 'not_the_users_statement', 'figure_not_bound'],
+      'Our budget is £1 and Pro price rises, losing 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     // The source's figure sizes the price move, but 50 is today's level — it does not size the loss.
     ['Every £1 on the Pro price loses us paying subscribers, and we have 50 paying subscribers today.',
       'Every £1 on the Pro price loses us paying subscribers, and we have 50 paying subscribers today', -50, 1,
-      'not_the_users_statement', 'figure_not_bound'],
+      'not_the_users_statement', 'target_figure_a_level'],
     // PR Review's fourth CR (@ ce3cd9d0): £1 is today's LEVEL of the price, not a £1 rise — no change is sized.
     ['With Pro price £1 today, raising it loses 50 paying subscribers.',
-      'With Pro price £1 today, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+      'With Pro price £1 today, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     // PR Review's fifth CR (@ db47673d), its exact string: the comma ends "£1" as today's price; the rise has no size.
     ['With Pro price £1, raising it loses 50 paying subscribers.',
-      'With Pro price £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+      'With Pro price £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     ['At a Pro price of £1, raising it loses 50 paying subscribers.',
-      'At a Pro price of £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+      'At a Pro price of £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     // PR Review @ fe509477, its exact string: no punctuation, and the move straight after £1 is a VERB on the price.
     ['With Pro price £1 raising it loses 50 paying subscribers.',
-      'With Pro price £1 raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+      'With Pro price £1 raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     ['At a Pro price of £1 raising it loses 50 paying subscribers.',
-      'At a Pro price of £1 raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+      'At a Pro price of £1 raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
+    // Codex buddy r2 HIGH: "equals" states today's level as plainly as "is".
+    ['Pro price equals £1, raising it loses 50 paying subscribers.',
+      'Pro price equals £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     ['With Pro price £1 increasing it loses 50 paying subscribers.',
-      'With Pro price £1 increasing it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_not_a_change'],
+      'With Pro price £1 increasing it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     // Today's level, then a comma, then a change of NO stated size: the comma ends the figure's phrase (each passes if
     // punctuation is ignored).
     ['With the Pro price at £1, price increase loses us about 50 paying subscribers.',
-      'With the Pro price at £1, price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'figure_not_bound'],
+      'With the Pro price at £1, price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     ['Pro price is £1, price increase loses us about 50 paying subscribers.',
-      'Pro price is £1, price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'figure_not_bound'],
+      'Pro price is £1, price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     ['At £1, Pro price increase loses us about 50 paying subscribers.',
-      'At £1, Pro price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'figure_not_bound'],
-    // A NAMED under-claim (unchanged by the fifth CR): the move four words from the source's name reads as the target's —
-    // the Agent asks them to say it again, never records it.
-    ['If we raise the Pro price by £1 we lose about 50 paying subscribers.',
-      'If we raise the Pro price by £1 we lose about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'direction_not_stated'],
+      'At £1, Pro price increase loses us about 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     // A NAMED under-claim: the source only implied ("a £10 rise") — the Agent asks, never infers the price.
     ['A £10 rise loses us about 500 paying subscribers.', 'A £10 rise loses us about 500 paying subscribers', -500, 10,
       'not_the_users_statement', 'end_not_named'],
@@ -198,6 +192,28 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(r).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal }));
     if (why !== undefined) expect(r.why).toBe(why);
     expect(r.stored).toBe(0);
+  });
+
+  // RT-6 step 3, option B (DL; Science B2): the direction and verb vocabulary no longer refuses. These three were refused
+  // ONLY by that vocabulary; each now offers a card whose WORDS state the Agent's reading, so the user approves or corrects
+  // THAT reading (the first two read correctly; "wins" with a −50 reading is exposed in the card's own words, the M-sign
+  // class). Level and binding figures stay refused above (DL e8, 5 Oct ~18:5xZ).
+  const TAIL = ' Approve, or correct.';
+  it.each([
+    ['If we raise the Pro price by £1 we lose about 50 paying subscribers.', 'If we raise the Pro price by £1 we lose about 50 paying subscribers', -50, 1,
+      'Record: +£1/month on "Pro plan price" \u2192 \u221250 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month lowers "Pro plan paying subscribers" by 50 subscribers. From your words: "If we raise the Pro price by £1 we lose about 50 paying subscribers".' + TAIL],
+    ['Every £1 on the Pro price loses us about 50 paying subscribers.', 'Every £1 on the Pro price loses us about 50 paying subscribers', 50, -1,
+      'Record: \u2212£1/month on "Pro plan price" \u2192 +50 subscribers in "Pro plan paying subscribers": lowering "Pro plan price" by £1/month raises "Pro plan paying subscribers" by 50 subscribers. From your words: "Every £1 on the Pro price loses us about 50 paying subscribers".' + TAIL],
+    // Codex buddy r2 P2: "is" after a CHANGE noun states the change's size, not a level.
+    ['The Pro price rise is £1, and we lose 50 paying subscribers for that rise.', 'The Pro price rise is £1, and we lose 50 paying subscribers for that rise', -50, 1,
+      'Record: +£1/month on "Pro plan price" \u2192 \u221250 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month lowers "Pro plan paying subscribers" by 50 subscribers. From your words: "The Pro price rise is £1, and we lose 50 paying subscribers for that rise".' + TAIL],
+    ['Every £1 on the Pro price wins us about 50 paying subscribers.', 'Every £1 on the Pro price wins us about 50 paying subscribers', -50, 1,
+      'Record: +£1/month on "Pro plan price" \u2192 \u221250 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month lowers "Pro plan paying subscribers" by 50 subscribers. From your words: "Every £1 on the Pro price wins us about 50 paying subscribers".' + TAIL],
+  ] as const)('B2 (option B), now a card stating the Agent\'s reading: %s', async (turn, quote, amount, per, card) => {
+    const { caps, store } = world(C);
+    const r = await caps.proposeLinkEffect!(ctxSaying(turn), { ...SUBS_ARGS, amount, per_source_change: per, quote }) as Json;
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(cardFor(store, r).detail).toBe(card);
   });
 
   /**
@@ -224,7 +240,8 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
       () => ({ proposal: store.get(id), result: r as never }));
     const approve = chips.find((c) => c.id === approvalChipIdFor(id))!;
     expect(approve.label).toBe('Record this reading'); // AIQ 5885199635: a reading the user confirms
-    expect(approve.detail).toMatch(/^Record: \+.*1.* on "Pro plan price" \u2192 \u221250 .*subscribers.* in "Pro plan paying subscribers" \u2014 from your words: "every £1 on the Pro price loses us about 50 paying subscribers"$/);
+    // B3 (RT-6 step 3): symbols AND words, then the user's sentence; was `… — from your words: "…"`.
+    expect(approve.detail).toBe('Record: +£1/month on "Pro plan price" \u2192 \u221250 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month lowers "Pro plan paying subscribers" by 50 subscribers. From your words: "every £1 on the Pro price loses us about 50 paying subscribers". Approve, or correct.');
   });
 
   it('NO CARD, NO BUTTON (PR Review\'s fifth CR): the proposer\'s result and the stored proposal disagree → nothing to approve', async () => {
@@ -247,6 +264,26 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(readingOfLinkEffectApproval('Yes, record that.')).toBeUndefined(); // any other card's words carry no reading
   });
 
+  /**
+   * The door a stub stands in for stores the REAL writer's postimage (RT-6 step 3, B4: the read-back checks the reloaded
+   * link IS that postimage, `reading` and `source_quote` included). Was a hand-made `{ ...provenance, ...THEIRS }`.
+   */
+  const writerPostimage = (graph: Json, input: CommitOptionLevelsInput): Json => {
+    const le = input.link_effect!;
+    const out = applyLinkEffectEdit({ persistedGraph: structuredClone(graph), from: le.from, to: le.to, effect: le.effect, quote: le.quote,
+      expected: { graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, edge_token: le.edge_token }, reading_token: le.reading_token,
+      ...(le.unit_readings !== undefined ? { unit_readings: le.unit_readings } : {}), ...(le.reversal !== undefined ? { reversal: le.reversal } : {}),
+      ...(le.link_selected === true ? { link_selected: true } : {}) });
+    if (out.kind !== 'mutated') throw new Error(`writer refused in the stub door: ${JSON.stringify(out)}`);
+    return (out.mutatedGraph as Json).edges.find((x: Json) => x.from === le.from && x.to === le.to);
+  };
+  const storePostimage = (graph: Json, input: CommitOptionLevelsInput, change: (edge: Json) => void = () => {}): void => {
+    const edge = structuredClone(writerPostimage(graph, input));
+    change(edge);
+    const i = (graph.edges as Json[]).findIndex((x) => x.from === edge.from && x.to === edge.to);
+    graph.edges[i] = edge;
+  };
+
   it('ONLY FROM THE CARD (PR Review\'s fifth CR): the Agent approving from the user\'s "yes" records nothing; the card then does', async () => {
     const graph = structuredClone(C);
     const d: InternalDispatch = async (path) => {
@@ -258,8 +295,7 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
       doorCalls += 1;
       sent = input;
-      const e = (graph.edges as Json[]).find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
-      e.provenance = { ...(e.provenance ?? {}), ...THEIRS };
+      storePostimage(graph, input);
       return { status: 'committed', graph_hash: 'h-after', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
     };
     const store = new ProposalStore();
@@ -293,14 +329,17 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(r.ok, JSON.stringify(r)).toBe(true);
   });
 
-  it('REFUSED (sign_conflict, AIQ 5882847470): the user\'s figure runs the OTHER way — said plainly, with the reversal door offered', async () => {
-    const { caps } = world(C);
+  // B2 (RT-6 step 3): a reading against the stored direction is an explicit REVERSAL card, said in words; was a sign_conflict
+  // refusal pointing at propose_link_strength. Nothing is written until the user approves that reversal.
+  it('REVERSAL CARD (was sign_conflict, AIQ 5882847470): the user\'s figure runs the OTHER way — said plainly on the card', async () => {
+    const { caps, store } = world(C);
     const said = 'Every £1 on the Pro price wins us about 50 paying subscribers.';
     const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...SUBS_ARGS, amount: 50, quote: 'Every £1 on the Pro price wins us about 50 paying subscribers' }) as Json;
     const edge = (C.edges as Json[]).find((e) => e.from === 'pro_plan_price' && e.to === 'pro_plan_paying_subscribers')!;
     expect(edge.effect_direction ?? Math.sign(edge.strength?.mean)).not.toBe('positive'); // precondition: served link runs negative
-    expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'sign_conflict' }));
-    expect(String(r.detail)).toMatch(/propose_link_strength/);
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(cardFor(store, r).detail).toBe('REVERSAL: this changes the link from negative to positive. Record: +£1/month on "Pro plan price" \u2192 +50 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month raises "Pro plan paying subscribers" by 50 subscribers. From your words: "Every £1 on the Pro price wins us about 50 paying subscribers". Approve, or correct.');
+    expect(store.size()).toBe(1);
   });
 
   it('RED (live replay on served C + 0929 D2, 29 Sep: 6/6 prepared, 0 chips): the prepared change is OFFERED — one approve chip for it', async () => {
@@ -340,15 +379,14 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
    * PR Review on #2275: the read-back proves THIS figure — the user's source, both numbers AND both units. A door that
    * reports "committed" while the stored link holds another source or unit is never said as "recorded".
    */
-  const readBackAfter = async (stored: Json): Promise<Json> => {
+  const readBackAfter = async (change: (edge: Json) => void): Promise<Json> => {
     const graph = structuredClone(C);
     const d: InternalDispatch = async (path) => {
       if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: computeAnalysisAffectingGraphHash(graph as never) } };
       throw new Error(`unexpected dispatch ${path}`);
     };
-    const commitOptionLevels = async (): Promise<CommitOptionLevelsResult> => {
-      const e = (graph.edges as Json[]).find((x) => x.from === 'pro_plan_price' && x.to === 'pro_plan_paying_subscribers')!;
-      e.provenance = { ...(e.provenance ?? {}), ...stored };
+    const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
+      storePostimage(graph, input, change);
       return { status: 'committed', graph_hash: 'h-after', receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
     };
     const store = new ProposalStore();
@@ -356,17 +394,16 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     const r = await caps.proposeLinkEffect!(ctxSaying(SUBS_SAID), SUBS_ARGS) as Json;
     return await caps.authoriseChange(ctxPressing(String(r.proposal_id), cardFor(store, r).message), { proposal_id: String(r.proposal_id) }) as Json;
   };
-  const THEIRS = { source: 'user_specified', magnitude: 'user_stated',
-    natural_effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'GBP per month' } };
   it('READ-BACK: the user\'s source, numbers and units → recorded', async () => {
-    expect(await readBackAfter(THEIRS)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    expect(await readBackAfter(() => {})).toEqual(expect.objectContaining({ ok: true, applied: true }));
   });
   it.each([
-    ['another source', { ...THEIRS, source: 'cee_hypothesis' }],
-    ['another target unit', { ...THEIRS, natural_effect: { ...THEIRS.natural_effect, amount_unit: 'customers' } }],
-    ['another source unit', { ...THEIRS, natural_effect: { ...THEIRS.natural_effect, per_source_change_unit: 'percent' } }],
-  ])('READ-BACK: %s → never said as recorded', async (_why, stored) => {
-    expect(await readBackAfter(stored as Json)).toEqual(expect.objectContaining({ ok: false, applied: false, refusal: 'not_verified' }));
+    ['another source', (e: Json) => { e.provenance.source = 'cee_hypothesis'; }],
+    ['another target unit', (e: Json) => { e.provenance.natural_effect.amount_unit = 'customers'; }],
+    ['another source unit', (e: Json) => { e.provenance.natural_effect.per_source_change_unit = 'percent'; }],
+    ['no confirmed reading', (e: Json) => { delete e.provenance.reading; }],
+  ] as const)('READ-BACK: %s → never said as recorded', async (_why, change) => {
+    expect(await readBackAfter(change)).toEqual(expect.objectContaining({ ok: false, applied: false, refusal: 'not_verified' }));
   });
 
   it('FAIL CLOSED without the level door: approving writes nothing and says so (never a strength-only or register fallback)', async () => {

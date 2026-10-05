@@ -3246,6 +3246,8 @@ export type CommitOptionLevelsInput = {
      */
     readonly reading_token: string;
     readonly unit_readings?: ApprovedLinkEffect['unit_readings'];
+    readonly reversal?: ApprovedLinkEffect['reversal'];
+    readonly link_selected?: true;
   };
   /** Several approved natural-effect edits, held together by one approval and one commit. */
   readonly link_effects?: readonly {
@@ -3256,6 +3258,8 @@ export type CommitOptionLevelsInput = {
     readonly quote: string;
     readonly reading_token: string;
     readonly unit_readings?: ApprovedLinkEffect['unit_readings'];
+    readonly reversal?: ApprovedLinkEffect['reversal'];
+    readonly link_selected?: true;
   }[];
   /**
    * ⭐ ONE PRODUCT CONFIRMATION (DL #72 5887510885; Canonical 5887564539): "MRR = price × subscribers" recorded as the
@@ -3347,9 +3351,13 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) } : {}),
     ...(input.link_effect !== undefined ? { linkEffect: { from: input.link_effect.from, to: input.link_effect.to, effect: input.link_effect.effect,
       edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token,
+      ...(input.link_effect.reversal !== undefined ? { reversal: input.link_effect.reversal } : {}),
+      ...(input.link_effect.link_selected === true ? { link_selected: true as const } : {}),
       ...(input.link_effect.unit_readings !== undefined ? { unit_readings: input.link_effect.unit_readings } : {}) } } : {}),
     ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { linkEffects: input.link_effects.map((effect) => ({ from: effect.from, to: effect.to, effect: effect.effect,
       edge_token: effect.edge_token, quote: effect.quote, reading_token: effect.reading_token,
+      ...(effect.reversal !== undefined ? { reversal: effect.reversal } : {}),
+      ...(effect.link_selected === true ? { link_selected: true as const } : {}),
       ...(effect.unit_readings !== undefined ? { unit_readings: effect.unit_readings } : {}) })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
