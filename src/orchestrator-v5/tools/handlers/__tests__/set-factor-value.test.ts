@@ -375,7 +375,8 @@ describe('set_factor_value handler', () => {
     // new scale honestly. The one-sided "to 5%" (no fabricated "from 0")
     // behaviour under test is unchanged.
     expect(outcome.assistant_text).toBe(
-      'Updated Legacy churn to 5%. The scale for this factor now allows values up to 100%.',
+      // #2576 item 5 re-pin: the scale is named as Olumi's assumption (old: 'The scale for this factor now allows …').
+      'Updated Legacy churn to 5%. The scale Olumi assumed for this factor now allows values up to 100%.',
     );
     expect(outcome.assistant_text).not.toMatch(/from 0\b/);
   });

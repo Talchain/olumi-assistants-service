@@ -1123,7 +1123,7 @@ function evaluateFactorValueProposalImpl(
         return {
           ok: false,
           reason: 'bare_number_outside_cap',
-          specific_issue: `Value ${effectiveRaw} is outside the factor's expected range [0, ${cap}] and no unit was given.`,
+          specific_issue: `Value ${effectiveRaw} is outside the range Olumi assumed (0 to ${cap}) and no unit was given.`,
         };
       }
       // ⚠ THE SENTENCE THIS REPLACES WAS FALSE. A unit-bearing negative took
@@ -1162,7 +1162,7 @@ function evaluateFactorValueProposalImpl(
         return {
           ok: false,
           reason: 'bare_number_outside_cap',
-          specific_issue: `Value ${effectiveRaw} is outside the factor's expected range [0, ${cap}] and no unit was given.`,
+          specific_issue: `Value ${effectiveRaw} is outside the range Olumi assumed (0 to ${cap}) and no unit was given.`,
         };
       }
       // Format via the shared helper so currency prefixes render correctly
@@ -1208,8 +1208,8 @@ function evaluateFactorValueProposalImpl(
           // worst realistic case (£1,000,000,000 twice) composes to 95. Pinned on
           // the COMPOSED assistant_text, not on this string, so a copy change that
           // re-crosses the budget REDs instead of truncating silently.
-          `${formattedInput} is above an unconfirmed limit of ${formattedCap}. ` +
-          `The limit may be what is wrong.`,
+          `${formattedInput} is above the scale Olumi assumed (${formattedCap}). ` +
+          `The scale may be what is wrong.`,
         unconfirmed_bound: { cap, rescale_cap_to: suggestExtendedCap(effectiveRaw) },
       };
     }

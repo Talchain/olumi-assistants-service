@@ -122,7 +122,9 @@ describe('an inherited ceiling is not a rule the user is refused against', () =>
     // that nothing confirms the bound.
     expect(r.specific_issue).toContain('£100,000');
     expect(r.specific_issue).toContain('£100');
-    expect(r.specific_issue).toMatch(/confirm/i);
+    // #2576 item 5 re-pin (old: toMatch(/confirm/i), the 'unconfirmed limit' wording): the bound is named as Olumi's
+    // assumption, which is the owner the old word only hinted at.
+    expect(r.specific_issue).toMatch(/the scale Olumi assumed/);
   });
 
   it('TWIN — the proposal-stated ceiling keeps its historic sentence byte-for-byte', () => {

@@ -324,7 +324,8 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     const r = await caps.proposeLinkEffect!(ctxSaying(BEYOND_SAID), BEYOND_ARGS) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'not_representable' }));
     const detail = String(r.detail);
-    expect(detail).toMatch(/the range the model uses for "Pro plan price" \(up to 200 GBP\/month\) and "Pro paying subscribers"/);
+    // #2576 item 5 re-pin (old: /… "Pro plan price" \(up to 200 GBP\/month\) and …/): the cap is named as Olumi's assumption.
+    expect(detail).toMatch(/the range the model uses for "Pro plan price" \(the scale Olumi assumed: up to 200 GBP\/month\) and "Pro paying subscribers"/);
     expect(detail).toMatch(/it is that range, not their figure, that stops it being used/);
     expect(detail).toMatch(/Never ask them to change their figure first/);
     expect(detail).toMatch(/Repeat their figure in their own words/);

@@ -1081,7 +1081,7 @@ export function createSetFactorValueHandler(): HandlerFn {
     }
     const scaleNote =
       capChanged && after.cap !== undefined
-        ? ` The scale for this factor now allows values up to ${formatValueWithUnit(after.cap, after.unit)}.`
+        ? ` The scale Olumi assumed for this factor now allows values up to ${formatValueWithUnit(after.cap, after.unit)}.`
         : '';
     const baseText = `${changeText}${scaleNote}`;
 

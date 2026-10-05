@@ -182,7 +182,7 @@ describe('the value is read against the factor’s declared range', () => {
       interventions: [{ option_label: 'Phase Pro price increase', factor_label: 'Pro plan price', value: 5000, basis: 'typo' }],
     });
     expect(r.refusal).toBe('nothing_to_set');
-    expect((r.no_stated_range as { detail: string }[])[0].detail).toMatch(/outside the model's range for this factor \(0 to 200\)/);
+    expect((r.no_stated_range as { detail: string }[])[0].detail).toMatch(/outside the range Olumi assumed for this factor \(0 to 200\)/); // #2576 item 5 re-pin (old: /outside the model's range for this factor \(0 to 200\)/)
   });
 
   it('refuses a restatement of what the option already does — the contrast control', async () => {

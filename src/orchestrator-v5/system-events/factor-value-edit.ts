@@ -274,7 +274,7 @@ function resolveUserUnitInput(args: {
         ok: false,
         issue:
           `The edit is internally inconsistent: value ${value} does not match ` +
-          `raw_value ${rawValue}${cap !== undefined ? ` over cap ${cap}` : ''} ` +
+          `raw_value ${rawValue}${cap !== undefined ? ` over the scale Olumi assumed (${cap})` : ''} ` +
           `(expected ${expected}). Refusing rather than guessing which one you meant.`,
       };
     }

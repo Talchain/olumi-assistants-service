@@ -1441,12 +1441,13 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
     // The sizer's own terms and questions (`link-effect.ts` D7). At the answer door the writer refuses and asks (Canonical
     // 5883568580): nothing is stored, the user's figure stays in the reply, and never shrunk to fit.
     // AIQ 5883669977: the user's stated figure never yields first. No typed field says whose a cap is (Canonical
-    // 5883707376), so the words claim neither owner, and offer no range change until a reframe door exists.
+    // 5883707376); DL ruling (#2576 item 5, STOP2-SCALE-EXPOSURE.md) names it as Olumi's assumption until the per-factor
+    // `frame_source` carrier exists. No range change is offered until a reframe door exists.
     case 'not_representable': {
       const rangeOf = (id: string): string => {
         const os = (((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as
           { observed_state?: { cap?: unknown; unit?: unknown } } | undefined)?.observed_state;
-        return typeof os?.cap === 'number' && Number.isFinite(os.cap) ? ` (up to ${os.cap}${typeof os.unit === 'string' ? ` ${os.unit}` : ''})` : '';
+        return typeof os?.cap === 'number' && Number.isFinite(os.cap) ? ` (the scale Olumi assumed: up to ${os.cap}${typeof os.unit === 'string' ? ` ${os.unit}` : ''})` : '';
       };
       return `Nothing was prepared: the user's figure is more than the analysis can represent on the range the model uses for "${from.label}"`
         + `${rangeOf(from.id)} and "${to.label}"${rangeOf(to.id)}, so it would be cut short. Repeat their figure in their own words, and say `
@@ -4624,10 +4625,10 @@ export function createAgentCapabilities(
         if (cap !== null) {
           normalised = raw / cap;
           if (normalised < 0 || normalised > 1) {
-            unframed.push({ factor: factor.label, detail: `${raw} is outside the model's range for this factor (0 to ${cap})` });
+            unframed.push({ factor: factor.label, detail: `${raw} is outside the range Olumi assumed for this factor (0 to ${cap})` });
             notAccepted.push({
               option: option.label, factor: factor.label, value: raw,
-              reason: `${raw} is outside the model's range for this factor (0 to ${cap}). Propose a level within that range, in the same units, as an assumption for the user to correct.`,
+              reason: `${raw} is outside the range Olumi assumed for this factor (0 to ${cap}). Propose a level within that range, in the same units, as an assumption for the user to correct.`,
             });
             continue;
           }
@@ -7111,7 +7112,7 @@ export function createAgentCapabilities(
           const cap = (today.observed_state as { cap?: unknown }).cap;
           const framed = typeof cap === 'number' ? asked / cap : asked;
           if (!(framed >= 0 && framed <= 1)) {
-            notSet(`${shown} is outside the range "${a.label}" is read on in this change (0 to ${typeof cap === 'number' ? cap : 1}), so this option's level for it is not set. Ask the user for a figure within it.`);
+            notSet(`${shown} is outside the range Olumi assumed for "${a.label}" in this change (0 to ${typeof cap === 'number' ? cap : 1}), so this option's level for it is not set. Ask the user for a figure within it.`);
             continue;
           }
           newGradedLevels.set(a.key, {

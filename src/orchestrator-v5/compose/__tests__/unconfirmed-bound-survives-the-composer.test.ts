@@ -123,7 +123,8 @@ describe('the unconfirmed-bound refusal survives the composer intact', () => {
     // the clause the 146-char version always lost.
     const issue = predicateIssue();
     const { response } = composeValidationFailure(errorFor(issue), ctx(), 'frame');
-    expect(response.assistant_text).toMatch(/limit may be what is wrong/i);
+    // #2576 item 5 re-pin (old: /limit may be what is wrong/i): the doubted bound is now named as Olumi's scale.
+    expect(response.assistant_text).toMatch(/scale may be what is wrong/i);
   });
 
   it('TWIN — the proposal-stated arm also survives whole', () => {
