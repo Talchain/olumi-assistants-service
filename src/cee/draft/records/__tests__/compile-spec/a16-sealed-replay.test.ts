@@ -51,7 +51,9 @@ describe('A16 banked sealed compile → registered → stored carriers (zero pro
     // from the sealed draws must survive a strict GraphV3 read verbatim — a stripped or rewritten row would be lost
     // on the first read after registration.
     expect(stored).not.toHaveProperty('stated_dispositions');
-    expect(GraphV3.parse({ ...stored, stated_dispositions: rows }).stated_dispositions).toEqual(rows);
+    // P1: the stored receipt is bound to the identity of the graph it was reconciled against.
+    const bound = { reconciled_against: 'a'.repeat(64), rows };
+    expect(GraphV3.parse({ ...stored, stated_dispositions: bound }).stated_dispositions).toEqual(bound);
 
     const row = (index: number) => rows[index];
     const goalId = draw === 3 ? '6144a59c' : '876e0d81';

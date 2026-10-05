@@ -59,7 +59,8 @@ import {
 } from "../graph-readiness/obligation-provenance.js";
 import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
 import type { ObservedStateStatedRole } from "./stated-role-vocabulary.js";
-import { STATED_DISPOSITIONS_KEY, StatedDispositionsV3 } from "../../schemas/graph-stated-dispositions.js";
+import { STATED_DISPOSITIONS_KEY } from "../../schemas/graph-stated-dispositions.js";
+import type { StatedDispositionV3T } from "../../schemas/graph-stated-dispositions.js";
 
 /** Wire schema discriminator. The UI lane builds against this. */
 export const NOT_MODELLED_SCHEMA = "not_modelled.v1" as const;
@@ -1992,19 +1993,23 @@ function spanIn(quote: string, span: unknown): { start: number; end: number } | 
 }
 
 /**
- * The compiler's TYPED dispositions, from the graph's persisted receipt. `undefined` when the graph carries none (or a
- * malformed one — absence, never a guess), so the manifest gains no key. Re-derived on every read like everything
- * else here; the receipt is reconciled against the stored bytes by its only writer (the register route) and dropped
- * by every other writer, so it always describes the graph it is stored on.
+ * The compiler's TYPED dispositions. The rows arrive ALREADY BOUND by the caller: the cold read passes
+ * `currentStatedDispositionRows(graph)` (`orchestrator-v5/graph/stated-dispositions-binding.ts`), which yields them only
+ * while the graph's identity, receipt omitted, equals the receipt's `reconciled_against` (P1). The binding is not
+ * computed here: this pure module is shared with the draft pipeline (boundary stage, enricher, narrative), none of
+ * which reads a stored graph, and keeping the identity hash's module graph out of it leaves this module's imports as
+ * they were. `undefined` — no bound rows passed, or a stale/unbound/malformed receipt — is absence, never a guess:
+ * the manifest gains no key and every clause keeps its untyped read-time row.
  */
-function readStatedDispositions(briefText: string, graph: Record<string, unknown>): StatedDispositionsBlock | undefined {
-  if (!Object.prototype.hasOwnProperty.call(graph, STATED_DISPOSITIONS_KEY)) return undefined;
-  const parsed = StatedDispositionsV3.safeParse(graph[STATED_DISPOSITIONS_KEY]);
-  if (!parsed.success) return undefined;
+function readStatedDispositions(
+  briefText: string,
+  rows: readonly StatedDispositionV3T[] | undefined,
+): StatedDispositionsBlock | undefined {
+  if (rows === undefined) return undefined;
   let carried = 0;
   let unlocated = 0;
   const items: StatedDispositionRow[] = [];
-  for (const row of parsed.data) {
+  for (const row of rows) {
     if (row.disposition === "carried") {
       carried += 1;
       continue;
@@ -2042,6 +2047,8 @@ function readStatedDispositions(briefText: string, graph: Record<string, unknown
 export function deriveNotModelledManifest(
   briefText: string | null | undefined,
   graph: unknown,
+  /** The graph's receipt rows, ONLY if bound to this graph (`currentStatedDispositionRows`). Omitted = no typed rows. */
+  options: { readonly statedDispositionRows?: readonly StatedDispositionV3T[] } = {},
 ): NotModelledManifest {
   if (typeof briefText !== "string" || briefText.trim().length === 0) {
     return UNAVAILABLE("no_brief_text");
@@ -2051,7 +2058,7 @@ export function deriveNotModelledManifest(
   }
 
   const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
-  const typedDispositions = readStatedDispositions(briefText, graph as Record<string, unknown>);
+  const typedDispositions = readStatedDispositions(briefText, options.statedDispositionRows);
   const quantities = extractStatedQuantities(briefText);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 

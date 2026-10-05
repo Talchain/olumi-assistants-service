@@ -153,7 +153,12 @@ describe("graph.stated_dispositions — register write → stored row → cold r
   it("⭐ RED: the register writes the sidecar onto the stored graph, reconciled against the bytes it stores", async () => {
     const res = await register({ graph: structuredClone(GRAPH), brief_text: BRIEF, stated_dispositions: structuredClone(SIDECAR) });
     expect(res.statusCode, res.body).toBe(200);
-    const stored = storedRow().graph.stated_dispositions as Rec[];
+    const row = storedRow();
+    const receipt = row.graph.stated_dispositions as Rec;
+    // P1: the receipt names the graph it was reconciled against — the stored bytes' identity WITHOUT the receipt.
+    const { stated_dispositions: _receipt, ...bare } = row.graph;
+    expect(receipt.reconciled_against).toBe(computeGraphIdentityHash(bare as never)!.value);
+    const stored = receipt.rows as Rec[];
     expect(stored.map((r) => [r.stated_index, r.disposition, r.reason])).toEqual([
       [0, "carried", undefined],
       [1, "rejected", "stated_relationship_not_carried"],
@@ -229,6 +234,95 @@ describe("graph.stated_dispositions — register write → stored row → cold r
     expect(res.statusCode).toBe(422);
     expect((res.json() as { details?: { code?: string } }).details?.code).toBe("STATED_DISPOSITIONS_INVALID");
     expect(append).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * P1 (DL, 5 Oct): production CEE `abed3b51` edit lanes copy the stored graph's top-level keys forward
+ * (`apply-graph-mutation.ts:228-236`, `edit-graph-dispatch.ts:2170-2174` @abed3b51) and its commit does not drop the
+ * receipt. So the receipt binds to the identity of the graph it was reconciled against, and the reader emits typed
+ * rows ONLY while the current graph (receipt omitted) still has that identity. A stale receipt is ignored: the
+ * clause falls back to the untyped read-time path, exactly as if no receipt were stored.
+ */
+describe("P1 — the receipt binds to the graph it was reconciled against", () => {
+  /** abed3b51 `applyGraphMutation`: `{ ...persistedBase, nodes, edges }` — every other root key rides forward. */
+  const productionEdit = (stored: Rec, edit: (nodes: Rec[]) => Rec[]): Rec => ({
+    ...stored,
+    nodes: edit(structuredClone(stored.nodes as Rec[])),
+    edges: structuredClone(stored.edges),
+  });
+  const registerAndStore = async () => {
+    const ack = await register({ graph: structuredClone(GRAPH), brief_text: BRIEF, stated_dispositions: structuredClone(SIDECAR) });
+    expect(ack.statusCode, ack.body).toBe(200);
+    return storedRow();
+  };
+  const readOf = async (graph: Rec) => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: JSON.parse(JSON.stringify(graph)), briefText: BRIEF });
+    const res = await read();
+    expect(res.statusCode, res.body).toBe(200);
+    return res.json() as Rec;
+  };
+  const withoutReceipt = (graph: Rec): Rec => { const { stated_dispositions: _r, ...bare } = graph; return bare; };
+
+  it("⭐ RED (a): a production-style RENAME that carries the receipt forward leaves NO typed rows", async () => {
+    const row = await registerAndStore();
+    const edited = productionEdit(row.graph, (nodes) => nodes.map((n) => (n.id === "fac_price" ? { ...n, label: "Pro list price" } : n)));
+    expect(edited.stated_dispositions).toEqual(row.graph.stated_dispositions); // the copy really carried it
+    const body = await readOf(edited);
+    expect(typedItems(body)).toEqual([]);
+    // …and the manifest is exactly the untyped one for the same edited graph with no receipt at all
+    const control = await readOf(withoutReceipt(edited));
+    expect(body.not_modelled).toEqual(control.not_modelled);
+  });
+
+  it("⭐ RED (a): a production-style VALUE edit that now models the asked figure leaves no stale row for it", async () => {
+    const row = await registerAndStore();
+    const edited = productionEdit(row.graph, (nodes) => [...nodes,
+      { id: "fac_churn", kind: "factor", label: "Monthly churn", observed_state: { value: 0.03, raw_value: 3, unit: "%" } }]);
+    const body = await readOf(edited);
+    expect(typedItems(body)).toEqual([]);
+    expect(body.not_modelled).toEqual((await readOf(withoutReceipt(edited))).not_modelled);
+  });
+
+  // A "still emits" row cannot be RED on a base that emits unconditionally; it is discriminated by mutant MP2 (the
+  // reader hashing the graph WITH the receipt), which turns it RED.
+  it("CONTROL (b): the unchanged stored graph still emits its rows — and so does a change OUTSIDE the identity (ref_high_water)", async () => {
+    const row = await registerAndStore();
+    expect(typedItems(await readOf(row.graph)).map((r) => r.stated_index)).toEqual([1, 2, 3]);
+    // a restore raises only the counter, which the identity excludes: the receipt still describes this model
+    const raised = { ...row.graph, ref_high_water: { ...(row.graph.ref_high_water as Rec), O: 99 } };
+    expect(typedItems(await readOf(raised)).map((r) => r.stated_index)).toEqual([1, 2, 3]);
+  });
+
+  it("⭐ RED (c): a receipt with a WRONG or MISSING reconciled_against is ignored", async () => {
+    const row = await registerAndStore();
+    const stored = row.graph.stated_dispositions;
+    const rows = Array.isArray(stored) ? stored : (stored as Rec).rows;
+    const variants: Record<string, unknown> = {
+      wrong: { reconciled_against: "0".repeat(64), rows },
+      missing: { rows },
+      // the pre-P1 shape: a bare array names no graph at all
+      bare_array: rows,
+    };
+    for (const [name, value] of Object.entries(variants)) {
+      const body = await readOf({ ...row.graph, stated_dispositions: value });
+      expect(typedItems(body), name).toEqual([]);
+      expect(body.not_modelled, name).toEqual((await readOf(withoutReceipt(row.graph))).not_modelled);
+    }
+    // contrast: the receipt exactly as stored is read
+    expect(typedItems(await readOf(row.graph)).length).toBe(3);
+  });
+
+  // Discriminated by mutants M11 (serve the receipt) and M13 (identity from the stripped graph).
+  it("CONTROL (d): the egress strip and the stored-bytes identity tokens hold for the bound receipt", async () => {
+    const ack = (await register({ graph: structuredClone(GRAPH), brief_text: BRIEF, stated_dispositions: structuredClone(SIDECAR) })).json() as Rec;
+    const row = storedRow();
+    const body = await readOf(row.graph);
+    expect(body.graph as Rec).not.toHaveProperty("stated_dispositions");
+    expect(body.graph).toEqual(withoutReceipt(row.graph));
+    expect(body.graph_identity_hash).toEqual(computeGraphIdentityHash(row.graph as never));
+    expect(body.graph_identity_hash).toEqual(ack.graph_identity_hash);
+    expect(body.graph_hash).toBe(ack.graph_hash);
   });
 });
 

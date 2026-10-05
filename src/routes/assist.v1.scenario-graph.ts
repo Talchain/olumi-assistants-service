@@ -211,6 +211,7 @@ import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-exte
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import { deriveNotModelledManifest } from "../cee/context-integrity/not-modelled-manifest.js";
 import { omitStatedDispositions } from "../schemas/graph-stated-dispositions.js";
+import { currentStatedDispositionRows } from "../orchestrator-v5/graph/stated-dispositions-binding.js";
 import {
   authorizeScenarioOwnership,
   CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
@@ -762,6 +763,8 @@ export default async function route(app: FastifyInstance) {
         not_modelled: deriveNotModelledManifest(
           briefText,
           graphPresent ? graph : null,
+          // P1: the compiler's receipt counts ONLY while it is bound to THIS graph (identity, receipt omitted).
+          { statedDispositionRows: graphPresent ? currentStatedDispositionRows(graph) : undefined },
         ),
         // ROADMAP 2.1271 — see §5 above. `null` on either means "this leg did
         // not answer", never a state: a consumer must leave what it already

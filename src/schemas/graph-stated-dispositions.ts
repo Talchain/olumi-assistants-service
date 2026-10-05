@@ -51,8 +51,24 @@ export const StatedDispositionV3 = z.discriminatedUnion("disposition", [
 ]);
 export type StatedDispositionV3T = z.infer<typeof StatedDispositionV3>;
 
-/** One receipt per stated item; bounded like every other read-path array. */
+/** One receipt per stated item; bounded like every other read-path array. The register request's sidecar shape. */
 export const StatedDispositionsV3 = z.array(StatedDispositionV3).max(500);
+
+/**
+ * ⛔ THE STORED SHAPE BINDS THE ROWS TO THE GRAPH THEY DESCRIBE (P1, DL 5 Oct 2026).
+ *
+ * Production CEE `abed3b51` edit lanes copy the stored graph's top-level keys forward
+ * (`apply-graph-mutation.ts:228-236`, `edit-graph-dispatch.ts:2170-2174` @abed3b51) and its commit does not drop
+ * this key, so a receipt CAN outlive the model it was reconciled against. `reconciled_against` is that model's
+ * `graph_identity_hash` value computed with the receipt itself OMITTED; a reader uses the rows ONLY while the current
+ * graph (receipt omitted) still has that identity (`orchestrator-v5/graph/stated-dispositions-binding.ts`). A bare
+ * array — the shape before this binding — names no graph and reads as absent.
+ */
+export const StatedDispositionsReceiptV3 = z.object({
+  reconciled_against: z.string().regex(/^[0-9a-f]{64}$/),
+  rows: StatedDispositionsV3,
+});
+export type StatedDispositionsReceiptV3T = z.infer<typeof StatedDispositionsReceiptV3>;
 
 /**
  * The graph WITHOUT the receipt. Returns the ORIGINAL reference when the key is absent, so a

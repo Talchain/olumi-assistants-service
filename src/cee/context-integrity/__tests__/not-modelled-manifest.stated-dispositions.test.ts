@@ -11,8 +11,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { deriveNotModelledManifest } from "../not-modelled-manifest.js";
+import { deriveNotModelledManifest as deriveUnbound } from "../not-modelled-manifest.js";
+import { currentStatedDispositionRows } from "../../../orchestrator-v5/graph/stated-dispositions-binding.js";
+
+/** Exactly what the cold read does (`assist.v1.scenario-graph.ts`): the receipt's rows only while bound to this graph. */
+const deriveNotModelledManifest = (brief: string, graph: unknown) =>
+  deriveUnbound(brief, graph, { statedDispositionRows: currentStatedDispositionRows(graph) });
 import { GraphV3 } from "../../../schemas/cee-v3.js";
+import { computeGraphIdentityHash } from "../../../orchestrator-v5/context/graph-identity.js";
 
 type Rec = Record<string, unknown>;
 
@@ -37,13 +43,23 @@ const RECEIPT = [
   { stated_index: 2, stated_item: { kind: "figure", source_quote: Q_CHURN, value: 3, value_span: span(Q_CHURN, "3%") },
     disposition: "asked" },
 ];
-const withReceipt = (receipt: unknown = RECEIPT): Rec => ({ ...structuredClone(GRAPH), stated_dispositions: structuredClone(receipt) });
+/** P1: the receipt names the graph it was reconciled against — that graph's identity with the receipt omitted. */
+const BOUND_TO = computeGraphIdentityHash(structuredClone(GRAPH) as never)!.value;
+const withReceipt = (rows: unknown = RECEIPT, reconciledAgainst: unknown = BOUND_TO): Rec => ({
+  ...structuredClone(GRAPH), stated_dispositions: { reconciled_against: reconciledAgainst, rows: structuredClone(rows) },
+});
 
 describe("GraphV3 declares graph.stated_dispositions (additive, optional)", () => {
   it("RED: a strict GraphV3 reader KEEPS a well-formed receipt", () => {
     const parsed = GraphV3.safeParse(withReceipt());
     expect(parsed.success).toBe(true);
-    expect((parsed as { data: Rec }).data.stated_dispositions).toEqual(RECEIPT);
+    expect((parsed as { data: Rec }).data.stated_dispositions).toEqual({ reconciled_against: BOUND_TO, rows: RECEIPT });
+  });
+
+  it("RED (P1): the pre-P1 bare-array shape names no graph, so a strict reader reads it as ABSENT", () => {
+    const parsed = GraphV3.safeParse({ ...structuredClone(GRAPH), stated_dispositions: structuredClone(RECEIPT) });
+    expect(parsed.success).toBe(true);
+    expect((parsed as { data: Rec }).data.stated_dispositions).toBeUndefined();
   });
 
   it("CONTROL: a malformed receipt reads as ABSENT — it never fails the graph", () => {
@@ -95,6 +111,34 @@ describe("deriveNotModelledManifest — typed rows from the persisted receipt", 
     expect(verdictOf(withIt, "3%")).toBe("absent");
     expect(withIt.quantities).toEqual(without.quantities);
     expect(withIt.inferred_factors).toEqual(without.inferred_factors);
+  });
+
+  it("⭐ RED (P1 a): once the graph is edited (receipt carried forward), the receipt is stale — no typed rows, the untyped manifest", () => {
+    const edited = withReceipt();
+    (edited.nodes as Rec[]).push({ id: "fac_churn", kind: "factor", label: "Monthly churn", observed_state: { value: 0.03, raw_value: 3, unit: "%" } });
+    const { stated_dispositions: _r, ...editedBare } = edited;
+    expect(deriveNotModelledManifest(BRIEF, edited)).toEqual(deriveNotModelledManifest(BRIEF, editedBare));
+    expect(deriveNotModelledManifest(BRIEF, edited) as unknown as Rec).not.toHaveProperty("stated_dispositions");
+  });
+
+  it("⭐ RED (P1 c): a wrong or missing reconciled_against is ignored", () => {
+    for (const reconciledAgainst of ["f".repeat(64), "not-a-hash", null]) {
+      const manifest = deriveNotModelledManifest(BRIEF, withReceipt(RECEIPT, reconciledAgainst)) as unknown as Rec;
+      expect(manifest, String(reconciledAgainst)).not.toHaveProperty("stated_dispositions");
+    }
+    // missing entirely (a default parameter would hide `undefined`, so the envelope is built by hand)
+    const missing = deriveNotModelledManifest(BRIEF, { ...structuredClone(GRAPH), stated_dispositions: { rows: structuredClone(RECEIPT) } }) as unknown as Rec;
+    expect(missing).not.toHaveProperty("stated_dispositions");
+    // the pre-P1 bare array is ignored too
+    const bare = deriveNotModelledManifest(BRIEF, { ...structuredClone(GRAPH), stated_dispositions: structuredClone(RECEIPT) }) as unknown as Rec;
+    expect(bare).not.toHaveProperty("stated_dispositions");
+    // contrast: the bound receipt is read
+    expect(deriveNotModelledManifest(BRIEF, withReceipt()) as unknown as Rec).toHaveProperty("stated_dispositions");
+  });
+
+  it("CONTROL: a caller that passes no bound rows gets no typed rows, even for a bound receipt (the safe default)", () => {
+    expect(deriveUnbound(BRIEF, withReceipt()) as unknown as Rec).not.toHaveProperty("stated_dispositions");
+    expect(deriveUnbound(BRIEF, withReceipt())).toEqual(deriveUnbound(BRIEF, structuredClone(GRAPH)));
   });
 
   it("CONTROL: a graph without the key yields a manifest with no new key, byte-identical to before", () => {
