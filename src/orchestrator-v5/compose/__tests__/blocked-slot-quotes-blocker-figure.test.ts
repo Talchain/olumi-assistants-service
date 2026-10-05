@@ -1,20 +1,30 @@
 /**
- * ⭐ A REPLY QUOTING THE BLOCKER'S OWN "is currently …" FIGURE IS TRUE, AND THE GUARD LEAVES IT (CEE-ECHO-F1; DL 0df0e1).
+ * THE BLOCKED-SLOT GUARD AFTER CEE-ECHO-F1: what it does with the blocker's own "is currently …" figure, at head and base.
+ * (DL 0df0e1: settle it, don't watch it.)
  *
- * The guard's own spec (`GROUNDED_VALUE_EXEMPTION`, carrier 2): the FACTOR's persisted value is a legitimate ground,
- * because "the blocker's own message states it … so a reply quoting it is telling the truth about the model". P3.
+ * WHAT THE GUARD READS: reply text, the blockers' ids + labels (`deriveMissingEffectPairs`), the persisted graph. Never
+ * `display_value`, never the blocker's message. So for any one reply, head and base give the same result. Pinned below
+ * by running one reply against both messages.
  *
- * MEASURED (b09849d5): on an Olumi-estimate count factor (`{ value: 4/30, raw_value: 4, unit: 'developers' }`) the
- * blocker said "is currently 0.13", and the guard REFUSED a reply quoting that 0.13: it grounded the exact level
- * 0.1333…, never a figure a user is shown. CEE-ECHO-F1 makes the blocker say "is currently 4 developers"; the guard
- * grounded only the level, so the truthful quote was refused there too. The guard now also grounds the factor's own
- * raw figure — attributed to THAT factor, never to a number found elsewhere in the graph.
+ * WHAT CHANGED UPSTREAM: the blocker's message reaches composers verbatim (`analysis-ready-helper.ts`, the pair-scoped
+ * producer message). On an Olumi-estimate count factor whose label sits inside its own unit, base said "is currently
+ * 0.13" and head says "is currently 4 senior developers".
  *
- * WHAT THE GUARD READS (the head-vs-base question): reply text, the blockers' ids + labels, the persisted graph. Never
- * `display_value`, never the blocker's message — pinned below by running one reply against both messages.
+ * MEASURED: a possession sentence quoting either figure is REFUSED, at base and at head alike. The guard grounds the
+ * factor's exact level (0.1333…), which neither quote matches. This is a pre-existing over-refusal: the replacement
+ * names the pair and asks for the option's value, a true sentence in place of a true sentence. #2578 does not widen
+ * it.
  *
- * FIXTURES are the writer's shapes (admit-model), and the blocker is the real one from `buildAnalysisReadyPayload`.
- * The quoted figure is lifted from that blocker's own message, so the row follows whatever the producer says.
+ * ⛔ WHY THE GUARD IS NOT WIDENED HERE: grounding the factor's raw figure was built and withdrawn (e17613ed; Codex
+ * CHANGES_REQUIRED, two P1s):
+ *   · ownership — an option-named claim borrows the baseline ("The Hire option is modelled using 4 senior developers"
+ *     survives although the option holds no value);
+ *   · units — `readClaimedNumbers` is unit-, sign- and suffix-blind, so raw 4 would ground "£4", "400%", "4k".
+ * A correct ground needs typed baseline-vs-option evidence that keeps unit, sign and scale. That is a separate design,
+ * not a scalar. The twins below fail on that withdrawn widening, so any future one must answer both classes.
+ *
+ * FIXTURES are the writer's shapes (admit-model), and the blocker is the real one from `buildAnalysisReadyPayload`. The
+ * quoted figure is lifted from that blocker's own message.
  */
 import { describe, expect, it } from 'vitest';
 import { applyBlockedSlotClaimGuard } from '../blocked-slot-claim-guard.js';
@@ -28,8 +38,8 @@ const FRAME = 30;
 
 /**
  * The label sits inside its own unit, so the reading CONTAINS the label: the echo case. Two label tokens, because the
- * guard binds a unit to a label only on ≥2 matched tokens (`MIN_MATCHED_TOKENS`) — a one-word "Developers" never
- * anchors at all, which is that suite's own pinned gap, not this row's.
+ * guard binds a unit to a label only on ≥2 matched tokens (`MIN_MATCHED_TOKENS`). A one-word "Developers" never
+ * anchors at all; that is the guard suite's own pinned gap, not this row's.
  */
 const developers = {
   id: FACTOR,
@@ -38,7 +48,7 @@ const developers = {
   observed_state: { value: 4 / FRAME, raw_value: 4, unit: 'senior developers', source: 'cee_inference' },
   scale_frame: FRAME,
 };
-/** A second count factor whose raw figure is 9 — a number the graph holds, but not for the blocked slot. */
+/** A second count factor whose raw figure is 9: a number the graph holds, but not for the blocked slot. */
 const contractors = {
   id: 'fac_con',
   kind: 'factor',
@@ -69,50 +79,75 @@ function statedFigure(message: string): string {
   return m[1];
 }
 
+const BASE_MESSAGE = `Factor "Senior developers" is currently 0.13 (Olumi's estimate). What should option "Hire" set it to?`;
+
 const guard = (assistantText: string, blockers: unknown, persistedGraph: unknown) =>
   applyBlockedSlotClaimGuard({ assistantText, blockers, persistedGraph });
 
-describe("⭐ the blocker's own current figure, quoted back, survives the guard (P3)", () => {
-  it("⭐ 'Your model already has Senior developers at <the blocker\'s figure>' is left exactly as written", () => {
+/** Refused, and bound to opt_hire × fac_dev by id. */
+function expectRefusedOnTheSlot(out: ReturnType<typeof guard>, ungrounded: string[]) {
+  expect(out.changed).toBe(true);
+  expect(out.slot?.optionId).toBe(OPTION);
+  expect(out.slot?.factorId).toBe(FACTOR);
+  expect(out.ungroundedValues).toEqual(ungrounded);
+}
+
+describe("the blocker's own figure quoted back: same verdict at head and base", () => {
+  it("the head blocker states '4 senior developers' (CEE-ECHO-F1), the figure behind level 4/30", () => {
+    const { mine } = blockersFor(graphWith(developers));
+    expect(statedFigure(mine.message)).toBe('4 senior developers');
+  });
+
+  it('KNOWN GAP, pre-existing (pinned so that a change is deliberate): either quote is refused — base "0.13", head "4 senior developers"', () => {
     const graph = graphWith(developers);
     const { blockers, mine } = blockersFor(graph);
-    const figure = statedFigure(mine.message);
-    expect(figure).toBe('4 senior developers');
-    const reply = `Your model already has Senior developers at ${figure}.`;
-    const out = guard(reply, blockers, graph);
-    expect(out.changed).toBe(false);
-    expect(out.text).toBe(reply);
+    expectRefusedOnTheSlot(guard(`Your model already has Senior developers at ${statedFigure(BASE_MESSAGE)}.`, blockers, graph), ['0.13']);
+    expectRefusedOnTheSlot(guard(`Your model already has Senior developers at ${statedFigure(mine.message)}.`, blockers, graph), ['4']);
   });
 
   it("the guard does not read the blocker's message: one reply, either message, the same result", () => {
     const graph = graphWith(developers);
     const { blockers, mine } = blockersFor(graph);
-    const baseWorded = blockers.map((b) =>
-      b === mine ? { ...b, message: `Factor "Senior developers" is currently 0.13 (Olumi's estimate). What should option "Hire" set it to?` } : b,
-    );
-    for (const reply of ['Your model already has Senior developers at 4 senior developers.', 'Your model already has Senior developers at 9 senior developers.']) {
+    const baseWorded = blockers.map((b) => (b === mine ? { ...b, message: BASE_MESSAGE } : b));
+    for (const reply of [
+      'Your model already has Senior developers at 4 senior developers.',
+      'Your model already has Senior developers at 0.13.',
+      'Your model already has Senior developers at 9 senior developers.',
+    ]) {
       expect(guard(reply, baseWorded, graph)).toEqual(guard(reply, blockers, graph));
     }
   });
-});
 
-describe('the catch direction is unchanged: a figure the slot does not hold is still refused', () => {
-  it('twin: "9 senior developers" on the blocked factor is refused, bound to opt_hire × fac_dev', () => {
+  it("control: the factor's exact level is still grounded (the guard's carrier 2), so the probe can say yes", () => {
     const graph = graphWith(developers);
     const { blockers } = blockersFor(graph);
-    const out = guard('Your model already has Senior developers at 9 senior developers.', blockers, graph);
-    expect(out.changed).toBe(true);
-    expect(out.slot?.optionId).toBe(OPTION);
-    expect(out.slot?.factorId).toBe(FACTOR);
-    expect(out.ungroundedValues).toEqual(['9']);
+    const reply = `Your model already has Senior developers at ${String(4 / FRAME)}.`;
+    const out = guard(reply, blockers, graph);
+    expect(out.changed).toBe(false);
+    expect(out.text).toBe(reply);
+  });
+});
+
+describe('refusal twins any future raw grounding must keep (Codex r2 on the withdrawn e17613ed)', () => {
+  it('a figure the slot does not hold: "9 senior developers" is refused', () => {
+    const graph = graphWith(developers);
+    expectRefusedOnTheSlot(guard('Your model already has Senior developers at 9 senior developers.', blockersFor(graph).blockers, graph), ['9']);
   });
 
-  it("attribution twin: another factor's raw 9 never grounds a 9 claimed for Senior developers", () => {
+  it("attribution: another factor's raw 9 never grounds a 9 claimed for Senior developers", () => {
     const graph = graphWith(developers, contractors);
-    const { blockers } = blockersFor(graph);
-    const out = guard('Your model already has Senior developers at 9 senior developers.', blockers, graph);
+    expectRefusedOnTheSlot(guard('Your model already has Senior developers at 9 senior developers.', blockersFor(graph).blockers, graph), ['9']);
+  });
+
+  it("ownership: the option claimed to hold the baseline's 4 is refused (the option holds no value)", () => {
+    const graph = graphWith(developers);
+    expectRefusedOnTheSlot(guard('The Hire option is modelled using 4 senior developers.', blockersFor(graph).blockers, graph), ['4']);
+  });
+
+  it.each([['£4'], ['400%'], ['4k senior developers']])('units: %s is not the factor\'s 4 senior developers and is refused', (claim) => {
+    const graph = graphWith(developers);
+    const out = guard(`Your model already has Senior developers at ${claim}.`, blockersFor(graph).blockers, graph);
     expect(out.changed).toBe(true);
     expect(out.slot?.factorId).toBe(FACTOR);
-    expect(out.ungroundedValues).toEqual(['9']);
   });
 });
