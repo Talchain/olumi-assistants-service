@@ -11,7 +11,7 @@
 #   - tests/perf/_reports/baseline-v1.0.1-YYYYMMDD-HHMMSS.md (summary)
 #
 # Requirements:
-#   - artillery installed (pnpm install)
+#   - network access for `npx --yes artillery@2` (no longer a devDependency, 5 Oct 2026)
 #   - ASSISTANTS_URL env var set
 #   - Assistants service must be deployed and healthy
 
@@ -68,11 +68,11 @@ echo ""
 # Run artillery with the target URL
 # Note: Adjust the artillery config path if needed
 if [ -f "tests/perf/draft-graph-baseline.yml" ]; then
-  PERF_TARGET_URL="$ASSISTANTS_URL" pnpm exec artillery run \
+  PERF_TARGET_URL="$ASSISTANTS_URL" npx --yes artillery@2 run \
     --output "$REPORT_JSON" \
     tests/perf/draft-graph-baseline.yml
 elif [ -f "artillery.yml" ]; then
-  PERF_TARGET_URL="$ASSISTANTS_URL" pnpm exec artillery run \
+  PERF_TARGET_URL="$ASSISTANTS_URL" npx --yes artillery@2 run \
     --output "$REPORT_JSON" \
     artillery.yml
 else
@@ -106,7 +106,7 @@ scenarios:
               as: "cost"
 EOF
 
-  PERF_TARGET_URL="$ASSISTANTS_URL" pnpm exec artillery run \
+  PERF_TARGET_URL="$ASSISTANTS_URL" npx --yes artillery@2 run \
     --output "$REPORT_JSON" \
     /tmp/baseline-$TIMESTAMP.yml
 fi

@@ -54,7 +54,7 @@ try {
     env.ARTILLERY_API_KEY = apiKey;
   }
   execSync(
-    `artillery run "${BASELINE_YML}" --output "${jsonFile}" --target "${target}"`,
+    `npx --yes artillery@2 run "${BASELINE_YML}" --output "${jsonFile}" --target "${target}"`,
     { stdio: 'inherit', env }
   );
 
@@ -63,7 +63,7 @@ try {
   // Generate HTML report
   console.log('📈 Generating HTML report...\n');
   execSync(
-    `artillery report "${jsonFile}" --output "${htmlFile}"`,
+    `npx --yes artillery@2 report "${jsonFile}" --output "${htmlFile}"`,
     { stdio: 'inherit' }
   );
 

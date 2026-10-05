@@ -223,7 +223,7 @@ git push origin feat/fastify-5-upgrade
 
 **After deployment:**
 1. Check service health: `https://olumi-assistants-service-staging.onrender.com/healthz`
-2. Run Artillery baseline: `artillery run tests/perf/baseline.yml`
+2. Run Artillery baseline: `npx --yes artillery@2 run tests/perf/baseline.yml` (artillery is not a devDependency since 5 Oct 2026)
 3. Validate p95 ≤ 8s
 
 See [render-setup.md](./render-setup.md) for complete deployment guide.
