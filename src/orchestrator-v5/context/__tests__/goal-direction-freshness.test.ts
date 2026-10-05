@@ -18,6 +18,7 @@ import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 import { compareRunGoalUnitSnapshot, deriveAnalysisFreshness, goalSnapshotStaleMessage } from '../freshness.js';
 import { resolveGoalDirection } from '../../goal-target/goal-direction.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
+import { NodeV3 } from '../../../schemas/cee-v3.js';
 import { composeToolCallResponse } from '../../compose.js';
 import { composeAnalysisStateV1, projectAnalysisBlocksForRunBinding } from '../../compose/analysis-state-v1.js';
 import { attachComputedAt } from '../../compose/analysis-ready-emit.js';
@@ -157,6 +158,38 @@ describe('RT-10 — the direction a Run sent is part of its currentness', () => 
       expect(derive(raw, fact({ goal: { ...snapshotGoal(sentByTheRun), operator: held } })))
         .toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
     });
+
+  // Codex r1 (#2596): the Run resolves on the goal node AS ITS LOADER VALIDATES IT (GraphV3 → NodeV3, field-level
+  // `.catch(undefined)`). A malformed Olumi reading the stored graph still holds is absence to the Run, so it must be
+  // absence to the read — or an unchanged, correctly-run Run reads falsely stale.
+  const cloudCosts = (words?: string): Rec => {
+    const graph = churnGraph();
+    const goal = goalOf(graph);
+    delete goal.goal_direction;
+    Object.assign(goal, { label: 'Cloud costs', goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.2,
+      goal_threshold: -0.2, goal_sense_reading: { sense: 'minimise', basis: 'typed_change_sign', threshold: -0.2,
+        threshold_frame: 'change_rel', ...(words === undefined ? {} : { words }) } });
+    delete goal.goal_threshold_unit;
+    return graph;
+  };
+  const changeSnapshot = (direction?: 'minimise') => fact({ goal: { node_id: GOAL, label: 'Cloud costs',
+    target_raw: -0.2, frame: 'change_rel', ...(direction === undefined ? {} : { direction }) } });
+  it('R14 NEGATIVE: a MALFORMED Olumi reading (no words) is absence to the Run, so a Run that sent nothing stays current', () => {
+    expect(derive(cloudCosts(), changeSnapshot())).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+  });
+  it('R14 CONTROL: a VALID reading sends minimise — that Run is current, and a Run that sent nothing is stale', () => {
+    const valid = cloudCosts('Olumi reads “cut by 20%” as lower is better.');
+    expect(resolveGoalDirection(valid, GOAL)).toEqual({ direction: 'minimise', provenance: 'typed_change_sign' });
+    expect(derive(valid, changeSnapshot('minimise'))).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+    expect(derive(valid, changeSnapshot())).toMatchObject({ freshness: 'stale', reason: 'goal_direction_changed' });
+  });
+
+  it('R15: a goal node the Run loader would REFUSE (NodeV3) cannot be run, so no direction verdict is drawn', () => {
+    const graph = churnGraph();
+    goalOf(graph).label = 42;
+    expect(NodeV3.safeParse(goalOf(graph)).success, 'precondition: NodeV3 refuses this goal').toBe(false);
+    expect(derive(graph, fact({ goal: snapshotGoal() }))).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+  });
 
   it('R11: model-restore chronology still outranks the direction reason', () => {
     expect(deriveAnalysisFreshness([fact({ goal: snapshotGoal() })], HASH, undefined, {

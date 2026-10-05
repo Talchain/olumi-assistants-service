@@ -147,4 +147,30 @@ describe('RT-10 — a saved Run the model now reads upside down is not served as
     const read = await cold();
     expect(read.analysis_state?.run_state.kind).toBe('complete_current');
   });
+
+  // Codex r1 (#2596) negative/control pair, through the REAL loader (GraphV3 parse) and snapshot writer: the read must
+  // resolve the goal as the Run's loader validated it, so a malformed reading the stored graph keeps is never "changed".
+  it.each([
+    ['NEGATIVE: a malformed Olumi reading (no words) — the Run sends nothing', undefined, false],
+    ['CONTROL: a valid Olumi reading — the Run sends minimise', 'Olumi reads “cut by 20%” as lower is better.', true],
+  ] as const)('J4 %s, and the cold read stays current', async (_name, words, sendsMinimise) => {
+    const graph = churn();
+    const goal = graph.nodes.find((n: Rec) => n.id === 'monthly_churn')!;
+    delete goal.goal_direction;
+    delete goal.goal_threshold_unit;
+    Object.assign(goal, { label: 'Cloud costs', goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.2,
+      goal_threshold: -0.2, goal_sense_reading: { sense: 'minimise', basis: 'typed_change_sign', threshold: -0.2,
+        threshold_frame: 'change_rel', ...(words === undefined ? {} : { words }) } });
+    const { run, cold, sent } = harness(graph);
+    const saved = await run('turn-a', false);
+    if (sendsMinimise) {
+      expect(sent[0]).toMatchObject({ goal_direction: 'minimise' });
+      expect(saved.result.input_snapshot.goal).toMatchObject({ direction: 'minimise' });
+    } else {
+      expect(sent[0]).not.toHaveProperty('goal_direction');
+      expect(saved.result.input_snapshot.goal).not.toHaveProperty('direction');
+    }
+    const read = await cold();
+    expect(read.analysis_state?.run_state.kind).toBe('complete_current');
+  });
 });

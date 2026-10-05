@@ -49,6 +49,7 @@ import {
 import { isAnalysisRefusalFact } from './analysis-refusal-continuity.js';
 import { normalizeRunGoalUnit } from './run-goal-unit.js';
 import { resolveGoalDirection } from '../goal-target/goal-direction.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 import { runAnalysisProjectionNeedsStamp } from './analysis-projection-policy.js';
 import { ANALYSIS_PROJECTION_VERSION, RUN_ANALYSIS_PROJECTION_KEY } from './graph-identity.js';
 
@@ -925,8 +926,16 @@ export function compareRunGoalUnitSnapshot(
   if (goalAtRun.direction !== undefined && goalAtRun.direction !== 'minimise' && goalAtRun.direction !== 'maximise') {
     return 'unverified';
   }
+  // ⛔ RESOLVED ON THE GOAL AS THE RUN'S LOADER VALIDATES IT (Codex r1 #2596): the Run reads the GraphV3-parsed graph
+  // (`loadScenarioSnapshotForRunAnalysis`), whose NodeV3 drops a malformed carrier field by field (`.catch(undefined)`,
+  // e.g. a `goal_sense_reading` without `words`). The stored graph keeps it, so resolving the RAW node read a sense the
+  // Run never sent: an unchanged, correctly-run Run went falsely stale. GraphV3 has no graph-level transform, and the
+  // resolver reads only the goal node, so parsing that node alone is the Run's view of it. A goal node NodeV3 refuses
+  // cannot be run at all: there is no "would send now", so no direction verdict is drawn (the unit verdict stands).
+  const validatedGoal = NodeV3.safeParse(selected[0]);
+  if (!validatedGoal.success) return 'match';
   const sentMinimise = goalAtRun.direction === 'minimise';
-  const sendsMinimiseNow = resolveGoalDirection(graph, goalAtRun.node_id)?.direction === 'minimise';
+  const sendsMinimiseNow = resolveGoalDirection({ nodes: [validatedGoal.data] }, goalAtRun.node_id)?.direction === 'minimise';
   return sentMinimise === sendsMinimiseNow ? 'match' : 'direction_changed';
 }
 
