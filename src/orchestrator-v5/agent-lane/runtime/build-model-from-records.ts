@@ -1,4 +1,4 @@
-/** Offline construction spike. Deliberately has no live-route consumer or flag. */
+/** Agent construction: one records extraction, deterministic compile, canonical registration. */
 import { buildDraftRecordsSchema, type DraftRecordSet } from '../../../cee/draft/records/grammar.js';
 import { DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction.js';
 import { reconcileStatedDispositions } from '../../../cee/draft/records/stated-dispositions.js';
@@ -8,7 +8,7 @@ import type { V1Graph } from '../../../cee/transforms/schema-v2.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { constructionOperationId, strictForTheDrafter, findConstructionVersion, type CallStructuredModel } from './build-model.js';
+import { constructionOperationId, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import type { ToolResult } from './agent-tools.js';
 
@@ -54,7 +54,10 @@ export async function buildModelFromRecords(
   brief: string,
   dispatch: InternalDispatch,
   callStructured: CallStructuredModel,
+  observeConstruction?: (trace: ConstructionTrace) => void,
 ): Promise<ToolResult> {
+  // Records construction never makes a generative repair call. Observers cannot cost the build.
+  try { observeConstruction?.({ retried: false }); } catch { /* diagnostic only */ }
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   let raw: unknown;
   try {
@@ -81,7 +84,11 @@ export async function buildModelFromRecords(
   const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
   const held = stillEmpty.json.graph;
   if (stillEmpty.status === 200 && object(held) && Array.isArray(held.nodes) && held.nodes.length > 0) {
-    return { ok: false, mutated: false, refusal: 'model_already_exists' };
+    return {
+      ok: false, mutated: false, refusal: 'model_already_exists',
+      detail: 'While that model was being built, something was added to this one — so nothing was written, and '
+        + 'your own change is untouched. Ask me to propose a change to the model you now have.',
+    };
   }
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
     // Registration diagnostic only: GraphV3 has no declared persisted receipt carrier.
@@ -92,12 +99,21 @@ export async function buildModelFromRecords(
   if (reg.status === 409 && (code === 'GRAPH_STALE' || code === 'OPERATION_ID_REUSED')) {
     const prior = await findConstructionVersion(dispatch, scenarioId, brief);
     if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
-    if (code === 'GRAPH_STALE') return { ok: false, mutated: false, refusal: 'model_already_exists' };
+    if (code === 'GRAPH_STALE') return {
+      ok: false, mutated: false, refusal: 'model_already_exists',
+      detail: 'While that model was being built, something was added to this one — so nothing was written, and '
+        + 'your own change is untouched. Ask me to propose a change to the model you now have.',
+    };
   }
-  if (reg.status !== 200) return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status };
+  if (reg.status !== 200) return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) };
   return {
     ok: true, mutated: reg.json.replayed !== true, ...(reg.json.replayed === true ? { replayed: true } : {}),
     ...(reg.json.model_version === undefined ? {} : { model_version: reg.json.model_version }),
     nodes: graph.nodes.length, edges: graph.edges.length, readiness: compiled.readiness,
+    options: graph.nodes.filter(node => node.kind === 'option').length,
+    goal_constraints_carried: graph.goal_constraints?.length ?? 0,
+    open_questions: compiled.ask.items.map(item => item.detail),
+    // Preserve the projector's typed identities and reasons; do not reconstruct them from labels.
+    not_represented: compiled.projection.dropped,
   };
 }
