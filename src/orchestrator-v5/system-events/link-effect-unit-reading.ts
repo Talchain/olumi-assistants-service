@@ -208,11 +208,11 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   if (first < 0 || !namesThisEnd(back) || (k >= 0 && gapOk(k) && !startsPhrase(words[k]![0]))) return undefined;
   // A movement verb opens the phrase only as THE verb (Codex step-4 r1/r2): an inflected form is a finite verb ("a price
   // increase RAISES revenue"); a bare form after a determiner ("increase our LIFT revenue") or after another movement word
-  // ("increase LIFT revenue") names a different quantity, unless that word is a relative clause's own ("customers we add").
+  // ("increase LIFT revenue") names a different quantity. ("customers we ADD increase revenue" passes: "add" opens no phrase.)
   if (k >= 1 && MOVEMENT_STARTER.test(words[k]![0]) && !/(?:s|ed|ing)$/i.test(words[k]![0]) && gapOk(k - 1)) {
-    const prev = words[k - 1]![0]; const relative = k >= 2 && /^(?:i|we|you|they|he|she|it)$/i.test(words[k - 2]![0]);
+    const prev = words[k - 1]![0];
     if (/^(?:our|the|their|its|your|my|a|an|this|that|these|those)$/i.test(prev)
-      || ((MOVEMENT_STARTER.test(prev) || LINKING.test(prev)) && !relative)) return undefined;
+      || MOVEMENT_STARTER.test(prev) || LINKING.test(prev)) return undefined;
   }
   const suffix = UNIT_WORDS.exec(rest)![0];
   const period = PERIOD.exec(rest.slice(suffix.length))![0];
