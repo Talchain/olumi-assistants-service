@@ -40,6 +40,8 @@ export interface ReadinessView {
   readonly will_run_without: readonly string[];
   /** Per-option true reasons when a run leaves out a no-change option. */
   readonly exclusion_notices?: readonly string[];
+  /** Non-factor roots the admitted analysis treats as zero, by label. */
+  readonly treated_as_zero?: readonly string[];
   /**
    * Option levels no one has set (`MISSING_OPTION_VALUE`, not waived by leaving the option out), by label — whether
    * the verdict demands them or only offers help: either way the figure is the user's to give. A run can still be
@@ -83,6 +85,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
   const needs: ReadinessItem[] = [];
   const offers: ReadinessItem[] = [];
   const levelsNotSet: { option: string; factor: string }[] = [];
+  const treatedAsZero = (verdict.unvalued_roots ?? []).map((root) => root.label);
   for (const issue of verdict.readiness_issues) {
     const item = itemOf(issue);
     if (item === undefined) continue;
@@ -123,6 +126,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
       ? { exclusion_notices: verdict.scaffold_plan.excluded_options.map(buildExcludedOptionNotice) }
       : {}),
     levels_not_set: levelsNotSet,
+    ...(treatedAsZero.length > 0 ? { treated_as_zero: treatedAsZero } : {}),
     ...(reason !== undefined ? { reason } : {}),
     ...(target !== null ? { target_not_testable: target } : {}),
   };
@@ -147,11 +151,22 @@ const listOf = (xs: readonly string[]): string =>
  * from the verdict's own labels — never a code. Only while a run is admitted: a refusal already names what it needs.
  */
 export function stillNeededLine(view: ReadinessView): string | null {
-  if (!view.checked || view.may_run !== true || view.levels_not_set.length === 0) return null;
+  if (!view.checked || view.may_run !== true) return null;
+  const lines: string[] = [];
   const n = view.levels_not_set.length;
-  const asks = view.levels_not_set.slice(0, 2).map((l) => `what does "${l.option}" set ${l.factor} to`).join(', and ');
-  if (n === 1) return `One level is not set yet: ${asks}?`;
-  return n === 2 ? `Two levels are not set yet: ${asks}?` : `${n} levels are not set yet, including: ${asks}?`;
+  if (n > 0) {
+    const asks = view.levels_not_set.slice(0, 2).map((l) => `what does "${l.option}" set ${l.factor} to`).join(', and ');
+    lines.push(n === 1 ? `One level is not set yet: ${asks}?`
+      : n === 2 ? `Two levels are not set yet: ${asks}?` : `${n} levels are not set yet, including: ${asks}?`);
+  }
+  const roots = view.treated_as_zero ?? [];
+  if (roots.length === 1) {
+    lines.push(`No figure is set for "${roots[0]}" yet, so the analysis treats it as zero. How likely or how large is it today?`);
+  } else if (roots.length > 1) {
+    const labels = `"${roots[0]}" and "${roots[1]}"${roots.length > 2 ? ` and ${roots.length - 2} more` : ''}`;
+    lines.push(`No figures are set for ${labels} yet, so the analysis treats them as zero. How likely or how large is each today?`);
+  }
+  return lines.length > 0 ? lines.join(' ') : null;
 }
 
 /**

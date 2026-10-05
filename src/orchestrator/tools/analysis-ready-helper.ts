@@ -182,6 +182,13 @@ export interface CanonicalReadinessRepairProposal {
 }
 
 export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']> & {
+  /** Non-factor sampled roots disclosed as zero; never Run blockers. */
+  readonly unvalued_roots?: Array<{
+    node_id: string;
+    label: string;
+    kind: string;
+    treated_as: 'zero';
+  }>;
   /** Exhaustive structural + semantic issues from the canonical assessment. */
   readonly readiness_issues?: CanonicalReadinessIssue[];
   /** Present only for two-or-more blocking issues. */
@@ -1310,11 +1317,6 @@ function hasSampledPrior(prior: unknown): boolean {
 const statusQuoLevelAsk = (label: string): string =>
   `What is "${label}" today, before any option changes it? Without a current level the analysis would treat it as zero.`;
 
-const rootLevelAsk = (gap: { label: string; kind: string }): string =>
-  gap.kind === 'risk'
-    ? `How likely or how large is "${gap.label}" today? Without a figure it would be treated as zero.`
-    : statusQuoLevelAsk(gap.label);
-
 function appendSemanticIssues(
   payload: AnalysisReadyPayload | undefined,
   out: CanonicalReadinessIssue[],
@@ -1561,12 +1563,14 @@ export function assessCanonicalAnalysisReadiness(
     // option id) can answer it — excluding options does not give the remaining
     // arms a status-quo level.
     const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic, graph) : [];
-    levelGaps.forEach((gap, index) => {
+    const factorLevelGaps = levelGaps.filter((gap) => gap.kind === 'factor');
+    const nonFactorLevelGaps = levelGaps.filter((gap) => gap.kind !== 'factor');
+    factorLevelGaps.forEach((gap, index) => {
       blockingIssues.push({
         issue_id: `level_${index + 1}`,
         code: 'MISSING_FACTOR_LEVEL',
         category: 'option_values',
-        message: rootLevelAsk(gap),
+        message: statusQuoLevelAsk(gap.label),
         repairability: 'human_input_required',
         factor_id: gap.id,
         factor_label: gap.label,
@@ -1640,16 +1644,21 @@ export function assessCanonicalAnalysisReadiness(
     const analysisReady = semantic
       ? {
           ...semantic,
-          ...(levelGaps.length > 0
+          ...(nonFactorLevelGaps.length > 0
+            ? { unvalued_roots: nonFactorLevelGaps.map((gap) => ({
+                node_id: gap.id, label: gap.label, kind: gap.kind, treated_as: 'zero' as const,
+              })) }
+            : {}),
+          ...(factorLevelGaps.length > 0
             ? {
                 status: 'needs_user_input',
                 blockers: [
                   ...(semantic.blockers ?? []),
-                  ...levelGaps.map((gap) => ({
+                  ...factorLevelGaps.map((gap) => ({
                     factor_id: gap.id,
                     factor_label: gap.label,
                     blocker_type: 'missing_value' as const,
-                    message: rootLevelAsk(gap),
+                    message: statusQuoLevelAsk(gap.label),
                     suggested_action: 'add_value' as const,
                   })),
                 ],
@@ -1789,7 +1798,7 @@ export function canonicalAnalysisReadyFrom(
  * CARRY the CANONICAL-ONLY fields onto a payload that was built by some OTHER
  * projection of the same graph. A carry, never a second derivation.
  *
- * The canonical-only set is `may_run`, `readiness_issues`, `repair_proposal` and
+ * The canonical-only set includes `may_run`, `readiness_issues`, `unvalued_roots`, `repair_proposal` and
  * `analysis_admission` — the fields the canonical authority computes that no
  * other producer does. It was named `carryCanonicalRunAdmission` when `may_run` was the only
  * member; the name is now the general one, because a function that carries an
@@ -1898,6 +1907,11 @@ export function carryCanonicalOnlyFields(
   const issues = canonical.readiness_issues;
   if (issues !== undefined && payload.readiness_issues !== issues) {
     patch.readiness_issues = issues;
+  }
+
+  const roots = canonical.unvalued_roots;
+  if (roots !== undefined && (payload as AnalysisReadyPayload).unvalued_roots !== roots) {
+    patch.unvalued_roots = roots;
   }
 
   const proposal = canonical.repair_proposal;
