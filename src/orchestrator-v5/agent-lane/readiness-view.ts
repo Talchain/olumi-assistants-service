@@ -166,7 +166,8 @@ export function stillNeededLine(view: ReadinessView): string | null {
  */
 export function treatedAsZeroLine(view: ReadinessView): string | null {
   if (!view.checked || view.may_run !== true) return null;
-  const roots = view.treated_as_zero ?? [];
+  // One line, whatever the label holds: a line break inside a quoted label would split the sentence in two.
+  const roots = (view.treated_as_zero ?? []).map((label) => label.replace(/\s+/g, ' ').trim());
   if (roots.length === 1) {
     return `No figure is set for "${roots[0]}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
   }

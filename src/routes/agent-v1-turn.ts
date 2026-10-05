@@ -3405,7 +3405,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ GATE 2 CONSUMER (DL 0df0e1; Science #2571; Acceptance #87 5987804248): a Run that RAN on a model with an unvalued
     // non-factor root says it was treated as zero and asks for its figure — the post-write ask's own sentence. The replay
     // above says the same, from the same readback, in the same place.
+    // ⛔ Only about the result on screen (Codex #2577 P1): when the readback no longer binds to this Run (an edit landed
+    // before the readback, a stale or missing result), the readback's roots are not the ones this Run treated as zero.
     const rootLine = fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true
+      && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       ? treatedAsZeroLine(readinessViewOf(readbackGraph)) : null;
     if (rootLine !== null && !narrationText.includes(rootLine)) owed.push(rootLine);
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
@@ -3512,6 +3515,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisReady,
         // Only the Run tool's typed sentence matching this final readback may survive ranking redaction.
         protectedGoalChanceSay: goalChanceSayFromThisTurn(result.tool_results),
+        // The host's own typed line from this readback (gate 2): a node label can hold ". " and a ranking word, and a
+        // fragment of the sentence must never be dropped or left behind (Codex #2577 P2).
+        protectedHostLines: rootLine !== null ? [rootLine] : [],
         // AX2: the build turn's automatic first pass was not asked to rank anything — drop a ranking, add no "why".
         // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
         // user's model followed a reply about public evidence).

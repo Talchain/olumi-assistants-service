@@ -34,7 +34,7 @@ const edge = (from: string, to: string, negative = false): Rec => ({
   exists_probability: 1, effect_direction: negative ? 'negative' : 'positive',
 });
 /** Two options and a baseline over two people factors, plus a risk root on the goal path — valued or not. */
-function graphWith(riskValued: boolean): Rec {
+function graphWith(riskValued: boolean, riskLabel = 'Demand shortfall'): Rec {
   const options = [
     option('hire_lead', 'Hire a Tech Lead', { tech_leads: { value: 2 / 10, source: 'brief_extraction' } }),
     option('hire_two', 'Hire Two Developers', { developers: { value: 6 / 30, source: 'brief_extraction' } }),
@@ -49,7 +49,7 @@ function graphWith(riskValued: boolean): Rec {
       observed_state: { value: 4 / 30, raw_value: 4, unit: 'people', source: 'brief_extraction' } },
     { id: 'productivity', kind: 'factor', label: 'Delivery productivity', category: 'observable',
       observed_state: { value: 20 / 100, raw_value: 20, unit: 'feature points/week', source: 'brief_extraction' } },
-    { id: 'demand_shortfall', kind: 'risk', label: 'Demand shortfall', category: 'observable',
+    { id: 'demand_shortfall', kind: 'risk', label: riskLabel, category: 'observable',
       ...(riskValued ? { observed_state: { value: 0.35, source: 'brief_extraction' } } : {}) },
     ...options,
   ];
@@ -63,6 +63,9 @@ function graphWith(riskValued: boolean): Rec {
 }
 
 let riskValued = false;
+let riskLabel = 'Demand shortfall';
+/** What the readback says about the Run: current (bound), stale after an edit, or no result at all. */
+let readback: 'current' | 'stale' | 'no_result' = 'current';
 type Row = Record<string, unknown>;
 const rows: Row[] = [];
 const store = {
@@ -83,6 +86,8 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 }));
 
 const state = () => ({ ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: '2026-10-05T03:48:55.163Z' } });
+/** Run A completed; an edit then gave graph B (with the unvalued root) before the readback: the readback is stale. */
+const staleState = () => ({ ...SERVED.analysis_state, run_state: { kind: 'complete_stale', computed_at: '2026-10-05T03:48:55.163Z', cause: 'graph_changed' } });
 
 async function freshApp(): Promise<FastifyInstance> {
   vi.resetModules();
@@ -92,8 +97,9 @@ async function freshApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
     graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY }));
-  app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: graphWith(riskValued), graph_hash: HASH, analysis_ready: READY,
-    analysis_state: state(), analysis_result: SERVED.block }));
+  app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: graphWith(riskValued, riskLabel), graph_hash: HASH, analysis_ready: READY,
+    analysis_state: readback === 'stale' ? staleState() : state(),
+    ...(readback === 'no_result' ? {} : { analysis_result: SERVED.block }) }));
   await app.register(agentV1TurnRoute);
   await app.ready();
   return app;
@@ -111,7 +117,7 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; riskValued = false; });
+  beforeEach(() => { rows.length = 0; riskValued = false; riskLabel = 'Demand shortfall'; readback = 'current'; });
 
   const runTurn = (turnId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
     payload: { scenario_id: SCENARIO, turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
@@ -144,5 +150,54 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
   it('the sentence survives the withheld-leader rails: no leader claim, no ranking sentence', () => {
     expect(findLeaderClaims({ assistant_text: SENTENCE, blocks: [], suggested_actions: [] } as never)).toEqual([]);
     expect(dropRankingSentences(SENTENCE)).toEqual({ text: SENTENCE, droppedSentences: 0 });
+  });
+
+  // ⛔ Codex #2577 P1: the sentence speaks of the result on screen. When the readback no longer binds to this Run, the
+  // readback's roots are not the ones the Run treated as zero, so nothing is said — live, on a replay, or after a restart.
+  it.each([
+    ['stale: an edit landed before the readback', 'stale'],
+    ['no result in the readback', 'no_result'],
+  ] as const)('RED: Run ran, readback %s → no treated-as-zero sentence, live or replayed', async (_n, kind) => {
+    readback = kind;
+    const turnId = randomUUID();
+    const first = (await runTurn(turnId)).json() as Body;
+    expect(first.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(false); // the unbound headline, not "ready"
+    expect(first.assistant_text).not.toContain('treats it as zero');
+    for (const restart of [false, true]) {
+      if (restart) { await app.close(); app = await freshApp(); }
+      const replay = (await runTurn(turnId)).json() as Body;
+      expect(replay.assistant_text, `restart=${restart}`).not.toContain('treats it as zero');
+    }
+  });
+
+  // ⛔ Codex #2577 P2: a node label can hold a sentence break and a ranking word. The leader is withheld here, so the wire's
+  // ranking drop runs over the reply; the typed line must reach the user whole, once, and the replay must say the same.
+  it.each([
+    ['". " + ranking word', 'Competitor wins. Demand falls', 'Competitor wins. Demand falls'],
+    ['"? " + ranking word', 'Who wins? Demand falls', 'Who wins? Demand falls'],
+    ['"! " + ranking word', 'Rival leads! Demand falls', 'Rival leads! Demand falls'],
+    ['a line break + ranking word', 'Competitor wins\nDemand falls', 'Competitor wins Demand falls'],
+  ])('RED: a risk labelled with %s → the whole sentence, once, live and on replay', async (_n, label, shown) => {
+    riskLabel = label;
+    const sentence = `No figure is set for "${shown}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+    const turnId = randomUUID();
+    const first = (await runTurn(turnId)).json() as Body;
+    expect(first.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    expect(first.assistant_text.split(sentence)).toHaveLength(2);
+    // No fragment left behind beside the whole sentence.
+    expect(first.assistant_text.split('treats it as zero')).toHaveLength(2);
+    expect(first.assistant_text.split('Demand falls')).toHaveLength(2);
+    const replay = (await runTurn(turnId)).json() as Body;
+    expect(replay.assistant_text).toBe(first.assistant_text);
+  });
+
+  it('the protected line is kept only where it stands whole; a neighbouring ranking sentence still goes', () => {
+    const line = 'No figure is set for "Competitor wins. Demand falls" yet, so the analysis treats it as zero. How likely or how large is it today?';
+    const text = `Hire a Tech Lead is the best option here.\n\n${line}`;
+    const out = dropRankingSentences(text, undefined, [line]);
+    expect(out.text).toBe(line);
+    expect(out.droppedSentences).toBe(1);
+    // CONTROL: unprotected, the same line is cut into fragments.
+    expect(dropRankingSentences(line).text).not.toBe(line);
   });
 });
