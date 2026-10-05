@@ -31,3 +31,15 @@ export function statedRangeFrame(plausibleMax: number, levels: readonly number[]
   const over = levels.filter((level) => Number.isFinite(level) && level > plausibleMax);
   return over.length === 0 ? plausibleMax : defaultFrameFor(Math.max(...over));
 }
+
+/**
+ * The frame FIELDS the legacy construct writes on a framed factor (`framedObservedState`, `admit-model.ts`), shared so
+ * the records compile writes exactly the same ones (F9: the run path's `buildFactorScaleMap` reads `cap`, never
+ * `scale_frame`). `undefined` where no 0..cap frame can express the level: a missing/non-finite cap, a cap not
+ * strictly above 1, a negative level or a level above the cap.
+ */
+export function framedFields(raw: number, cap: number | null | undefined):
+  { value: number; raw_value: number; cap: number; declared_scale: 'unit_interval' } | undefined {
+  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 1 || raw < 0 || raw > cap) return undefined;
+  return { value: raw / cap, raw_value: raw, cap, declared_scale: 'unit_interval' };
+}

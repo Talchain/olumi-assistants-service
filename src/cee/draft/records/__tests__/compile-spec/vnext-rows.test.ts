@@ -449,3 +449,49 @@ describe('Codex R1 F6: the prune disclosure keeps the figure from the validated 
     });
   }
 });
+describe('F9 P2-FRAME: a declared plausible_max writes the legacy frame fields, so /v2/run sees the legacy cap and level', () => {
+  // The run path's REAL loader and wire-scale step over the STORED graph; only storage is a double (mc-wire
+  // REPORT-RESTACK item 3: records cap undefined / level 150 vs legacy 300 / 0.5 and 1000 / 0.15).
+  async function wireFor(plausibleMax: number) {
+    const records = sealedRecordsVNext(); records.stated_items[11]!.plausible_max = plausibleMax;
+    const graph: any = stored((await registered(records)).graph);
+    const factorLabel = records.claims.find(c => c.quantity === 11 && c.claim_kind === 'factor')!.label!;
+    const factors = graph.nodes.filter((n: any) => n.kind === 'factor' && n.label === factorLabel);
+    const options = graph.nodes.filter((n: any) => n.kind === 'option' && n.source_quote === records.stated_items[4]!.source_quote);
+    expect(factors, 'identity: the starter-subscriber factor').toHaveLength(1);
+    expect(options, 'identity: the starter option').toHaveLength(1);
+    const { loadScenarioSnapshotForRunAnalysis } = await import('../../../../../orchestrator-v5/build-turn-context.js');
+    const snapshot = await loadScenarioSnapshotForRunAnalysis('11111111-1111-4111-8111-111111111111', 'f9-frame',
+      { loadGraphAndBriefText: async () => ({ graph, briefText: BRIEF }), readMostRecentPendingActions: async () => [] } as never);
+    const snapOption = (snapshot.options as any[]).filter(o => (o.option_id ?? o.id) === options[0].id);
+    expect(snapOption, 'identity: the starter option in the run snapshot').toHaveLength(1);
+    const scale = buildFactorScaleMap((snapshot.graph as any).nodes);
+    const wire = projectRequestInterventionsToWireScale([snapOption[0].interventions ?? {}], scale, [new Set()]);
+    const cap = scale.get(factors[0].id)?.cap;
+    const emitted = wire.perOption[0]![factors[0].id];
+    // The request carries a value above 1, so PLoT's gate normalises it by the factor's cap: the level PLoT computes on.
+    const level = emitted === undefined || cap === undefined ? undefined : emitted / cap;
+    return { factor: factors[0], option: options[0], cap, emitted, level, rule: wire.conversions.find(c => c.factor_id === factors[0].id) };
+  }
+  /** The legacy construct's cells for the same figures: its framed factor and its `{value, raw_value}` option level. */
+  function legacyWire(cap: number, factorUnit: string) {
+    const observed = framedObservedState({ baseline_value: 0, unit: factorUnit, provenance: 'explicit', plausible_max: cap });
+    const nodes = [{ id: 'f', kind: 'factor', observed_state: observed }];
+    const wire = projectRequestInterventionsToWireScale([{ f: { value: 150 / cap, raw_value: 150, unit: factorUnit, source: 'brief_extraction' } }], buildFactorScaleMap(nodes), [new Set()]);
+    return { observed, cap: buildFactorScaleMap(nodes).get('f')?.cap, emitted: wire.perOption[0]!.f };
+  }
+  it('F9 plausible_max 300: stored frame fields = legacy framedObservedState; cap 300 reaches the scale map, level 0.5', async () => {
+    const { factor, option, cap, emitted, level, rule } = await wireFor(300);
+    const legacy = legacyWire(300, factor.observed_state.unit);
+    expect(option.interventions[factor.id].raw_value).toBe(150);
+    const frameFields = (o: any) => ({ value: o.value, raw_value: o.raw_value, cap: o.cap, declared_scale: o.declared_scale });
+    expect(frameFields(factor.observed_state)).toEqual(frameFields(legacy.observed));
+    expect({ cap, emitted, level, rule: rule?.rule, inconsistent: rule?.inconsistent }).toEqual({ cap: legacy.cap, emitted: legacy.emitted, level: 0.5, rule: 'raw_value_used', inconsistent: false });
+  });
+  it('F9 plausible_max 100 with a level of 150: the widened legacy frame 1000 is the stored cap, level 0.15', async () => {
+    const { factor, cap, emitted, level } = await wireFor(100);
+    expect(factor.scale_frame).toBe(defaultFrameFor(150));
+    const legacy = legacyWire(defaultFrameFor(150), factor.observed_state.unit);
+    expect({ stored_cap: factor.observed_state.cap, cap, emitted, level }).toEqual({ stored_cap: 1000, cap: legacy.cap, emitted: legacy.emitted, level: 0.15 });
+  });
+});

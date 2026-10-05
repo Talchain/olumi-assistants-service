@@ -108,7 +108,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
 import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/placeholder-parts.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
-import { statedRangeFrame } from "../../../orchestrator-v5/agent-lane/frame-rule.js";
+import { framedFields, statedRangeFrame } from "../../../orchestrator-v5/agent-lane/frame-rule.js";
 // The readiness validator's own exemptions from NO_PATH_TO_GOAL, read here so the prune and readiness share one rule.
 import { limitSinkBranch } from "../../../graph/limit-sink-branch.js";
 import { inertRiskBranch } from "../../../graph/inert-risk.js";
@@ -4544,7 +4544,8 @@ function projectOnce(
       // rule (`statedRangeFrame`: the stated range, widened only when a level exceeds it). Without one, the records
       // ladder below still applies (the legacy fallback switch is measured and STOPPED in the pass-2 report).
       const declaredMax = factor.quantity_ref === undefined ? undefined : statedItems[factor.quantity_ref]?.plausible_max;
-      const frame = typeof declaredMax === "number" && Number.isFinite(declaredMax) && declaredMax > 1 && !magnitudes.some((m) => m < 0)
+      const declared = typeof declaredMax === "number" && Number.isFinite(declaredMax) && declaredMax > 1 && !magnitudes.some((m) => m < 0);
+      const frame = declared
         ? statedRangeFrame(declaredMax, magnitudes)
         : deriveFactorScaleFrame(magnitudes, typeof unit === "string" ? unit : undefined);
       if (frame === undefined) continue;
@@ -4587,6 +4588,18 @@ function projectOnce(
         if (factor.declared_scale !== undefined) {
           factor.declared_scale = "unit_interval";
           factor.observed_state.declared_scale = "unit_interval";
+        }
+        // ⭐ F9 (P2-FRAME): a DECLARED frame is the legacy construct's frame, so it is written with exactly the legacy
+        // framing's fields (`framedFields`, the rule `framedObservedState` writes through): the run path's
+        // `buildFactorScaleMap` reads `observed_state.cap`, never `scale_frame`, and without it the option level
+        // reached PLoT raw. On both carriers, because `schema-v3.ts` rebuilds observed_state from `data`. The derived
+        // records ladder (no declaration) is unchanged: its frame stays unpersisted as a cap, by design.
+        const framed = declared && typeof rawValue === "number" ? framedFields(rawValue, frame) : undefined;
+        if (framed !== undefined) {
+          factor.observed_state = { ...factor.observed_state, ...framed };
+          factor.data = { ...factor.data, ...framed };
+          // The node-level declaration is the carrier V3 rebuilds `observed_state.declared_scale` from.
+          factor.declared_scale = framed.declared_scale;
         }
       }
       for (const opt of optionNodes3d) {
