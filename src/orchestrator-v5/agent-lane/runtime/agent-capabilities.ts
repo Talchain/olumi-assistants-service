@@ -38,7 +38,7 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, linkEffectTargetOf, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
@@ -182,7 +182,8 @@ import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-ru
 import { selectedRunDeltaForModel } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, quoteOfFigure, sameWord, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { linkEffectPrefilter, READ_BY_OLUMI_NOTE } from '../link-effect-prefilter.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -1419,15 +1420,36 @@ function startingPointNoteFor(usersCount: number): string {
 }
 
 /** Canonical's link-effect refusal, said to the Agent in words it can relay truthfully (never a code). */
-function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string }): string {
+function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string },
+  /** RT-6: the stated effect, when known, so a unit refusal names the END that failed. */
+  effect?: { readonly amount_unit: string; readonly per_source_change_unit: string }): string {
   const unitOfNode = (id: string): string => {
     const n = ((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as { observed_state?: { unit?: unknown } } | undefined;
     return typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit : 'its own unit';
   };
   switch (reason) {
-    case 'unit_mismatch':
+    case 'unit_mismatch': {
+      // RT-6: an end with no unit (and no size already said for this link) has nothing to state a figure in. Say THAT,
+      // never "in its own unit": the user cannot answer in a unit the model does not have.
+      const ends = linkEffectEndUnits(raw, from.id, to.id);
+      const fails = (stated: string | undefined, u: { own: readonly string[]; adopted?: string }): boolean =>
+        stated === undefined || !statedInOneOf(stated, [...u.own, u.adopted]);
+      const sourceFails = ends !== null && fails(effect?.per_source_change_unit, ends.source);
+      const targetFails = ends !== null && fails(effect?.amount_unit, ends.target);
+      const unitless = ends === null ? [] : ([[from, ends.source, sourceFails], [to, ends.target, targetFails]] as const)
+        .filter(([, u, failed]) => failed && u.own.length === 0 && u.adopted === undefined).map(([end]) => end);
+      if (unitless.length > 0) {
+        return `Nothing was prepared: ${unitless.map((end) => `"${end.label}"`).join(' and ')} ${unitless.length > 1 ? 'have' : 'has'} no unit or `
+          + 'scale in this model yet, so a figure for this link cannot be recorded. The user\u2019s wording is not the problem: tell them so.';
+      }
+      // A % LEVEL target takes its change in points only: say THAT (Science 5993238492), never "measured in %".
+      if (ends !== null && effect !== undefined && targetFails && !sourceFails && ends.target.own.length > 0 && ends.target.own.every((u) => /point/i.test(u))) {
+        return `Nothing was prepared: a change in "${to.label}" is recorded in percentage points. Ask the user whether they mean `
+          + 'points (62% → 60% is 2 points) and for their figure in points; never convert a relative % yourself.';
+      }
       return `Nothing was prepared: "${to.label}" is measured in ${unitOfNode(to.id)} and "${from.label}" in ${unitOfNode(from.id)}. `
         + 'Ask the user for their figure in those units; never convert it yourself.';
+    }
     case 'sign_conflict':
       return `Nothing was prepared: the user's figure says "${from.label}" moves "${to.label}" the OTHER way from the link Olumi has. `
         + 'Tell them so plainly, and offer to reverse the link\u2019s direction with propose_link_strength (their words on one link).';
@@ -3225,6 +3247,8 @@ export function createAgentCapabilities(
         const prepared: { from: string; to: string; effect: { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string };
           quote: string; edge_token: string; said: string; from_label: string; to_label: string }[] = [];
         const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string }[] = [];
+        /** RT-6: any link whose reading Olumi, not the word rule, made; the user is then asked to check the card. */
+        let readByOlumi = false;
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
           const toLabel = String(entry.to_label ?? '');
@@ -3258,18 +3282,12 @@ export function createAgentCapabilities(
           const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
           const effect = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
-          const miss = linkEffectTheUserStated(entryQuote, effect, { source: from.label, target: to.label },
+          // ⭐ RT-6 (recorder by card): the words show the figures are the user's; the card shows the reading (`link-effect-prefilter.ts`).
+          const pre = linkEffectPrefilter(entryQuote, effect, { source: from.label, target: to.label },
             { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') });
-          if (miss === 'figures_not_in_statement') {
-            fail('not_the_users_figure', 'Nothing was prepared: this quoted statement does not write both figures. Ask the user how much the one moves the other, in numbers.');
-            continue;
-          }
-          if (miss !== null) {
-            fail('not_the_users_statement', `Nothing was prepared: the words quoted do not state, as one statement of the user, how much "${from.label}" moves "${to.label}" (${miss.replace(/_/g, ' ')}).`);
-            continue;
-          }
-          const said = statingSentenceOf(entryQuote, effect, { source: from.label, target: to.label },
-            { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') }) ?? entryQuote;
+          if (pre.kind === 'refused') { fail(pre.refusal, pre.detail); continue; }
+          if (!pre.read_by_rule) readByOlumi = true;
+          const said = pre.said;
           const endpoints = linkEffectTargetOf(working, from.id, to.id);
           if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
             fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
@@ -3291,7 +3309,7 @@ export function createAgentCapabilities(
           if (dry.kind === 'refused') {
             const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(working, from.id, to.id, g.identity_run_use ?? null) : null;
             fail(dry.reason, definition !== null ? `${definitionalLinkRefusalText(working, definition)} Tell the user exactly this.`
-              : linkEffectRefusalWords(dry.reason, working, from, to));
+              : linkEffectRefusalWords(dry.reason, working, from, to, effect));
             continue;
           }
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
@@ -3313,7 +3331,9 @@ export function createAgentCapabilities(
         return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
           links: prepared.map((item) => ({ from: item.from_label, to: item.to_label, effect: item.effect, your_words: item.said })),
           ...(notPrepared.length > 0 ? { not_prepared: notPrepared } : {}),
-          note: 'Nothing has changed yet. Tell the user these figures will be recorded as THEIR figures for the listed links, in their words, and call authorise_change with this proposal_id once they agree.' };
+          ...(readByOlumi ? { reading_check: 'read_by_olumi' } : {}),
+          note: (readByOlumi ? READ_BY_OLUMI_NOTE : '')
+            + 'Nothing has changed yet. Tell the user these figures will be recorded as THEIR figures for the listed links, in their words, and call authorise_change with this proposal_id once they agree.' };
       }
       const quote = typeof args?.quote === 'string' ? args.quote.trim() : '';
       if (quote === '' || !text.includes(quote)) {
@@ -3353,19 +3373,12 @@ export function createAgentCapabilities(
       const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const statedEnds = { source: from.label, target: to.label };
       const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') };
-      const miss = linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
-      if (miss === 'figures_not_in_statement') {
-        return { ok: false, mutated: false, refusal: 'not_the_users_figure',
-          detail: 'Nothing was prepared: the statement quoted does not write both figures. Ask the user how much the one moves the other, in numbers.' };
-      }
-      if (miss !== null) {
-        return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss,
-          detail: `Nothing was prepared: the words quoted do not state, as one statement of the user\u2019s, how much "${from.label}" moves `
-            + `"${to.label}" (${miss.replace(/_/g, ' ')}). A figure is recorded as theirs only when they say it: ask them to say it as one `
-            + 'statement naming both, which way, and both figures. Never fill in a figure or a direction for them.' };
-      }
-      // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
-      const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
+      // ⭐ RT-6 (recorder by card): the words show the figures are the user's and that they state, not ask or deny; the card
+      // shows the signed reading and the writer refuses any other (`link-effect-prefilter.ts`). AIQ 5884881500: the
+      // sentence stored and shown is the one the rule read when it read one, else the user's quote verbatim.
+      const pre = linkEffectPrefilter(quote, statedEffect, statedEnds, statedScope);
+      if (pre.kind === 'refused') return { ok: false, mutated: false, refusal: pre.refusal, why: pre.why, detail: pre.detail };
+      const said = pre.said;
       const endpoints = linkEffectTargetOf(g.raw, from.id, to.id);
       if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
         return { ok: false, mutated: false, refusal: 'target_ambiguous', detail: linkEffectRefusalWords('target_ambiguous', g.raw, from, to) };
@@ -3383,7 +3396,7 @@ export function createAgentCapabilities(
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,
-          detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to) };
+          detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to, effect) };
       }
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -3402,7 +3415,9 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: said },
-        note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
+        ...(pre.read_by_rule ? {} : { reading_check: 'read_by_olumi' }),
+        note: (pre.read_by_rule ? '' : READ_BY_OLUMI_NOTE)
+          + 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
       };
     },

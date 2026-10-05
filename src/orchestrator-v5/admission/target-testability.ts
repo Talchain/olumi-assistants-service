@@ -16,6 +16,7 @@
 import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
+import { linkEffectEndUnits, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 
@@ -56,10 +57,16 @@ export type TargetTestability =
  *   it). A structural link nobody sized carries no guess and is not a failure here.
  * A confirmed identity's ISL rules are checked by the Run, so that pass stays listed as unchecked.
  */
-function sizedInGoalUnit(e: Rec, goalUnit: string | undefined): boolean {
+function sizedInGoalUnit(e: Rec, goalUnit: string | undefined, graph?: unknown): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
   const ne = isRec(p?.natural_effect) ? p!.natural_effect as Rec : undefined;
-  return goalUnit !== undefined && typeof ne?.amount_unit === 'string' && finite(ne.amount) && sameUnit(ne.amount_unit, goalUnit);
+  if (goalUnit === undefined || typeof ne?.amount_unit !== 'string' || !finite(ne.amount)) return false;
+  if (sameUnit(ne.amount_unit, goalUnit)) return true;
+  // ⭐ RT-6 row 2 (Science RULED YES, #87 5993238492): a % LEVEL goal's change is said in POINTS (1 point = 1 raw unit of
+  // the level, `sizeLink`'s own conversion). Read by the WRITER's own comparator over the goal end's own units, never a
+  // %-only case here, so the writer and this gate cannot drift. A count goal's units hold no "points": unchanged.
+  const ends = graph !== undefined && typeof e.from === 'string' && typeof e.to === 'string' ? linkEffectEndUnits(graph, e.from, e.to) : null;
+  return ends !== null && ends.target.own.every((u) => /point/i.test(u)) && statedInOneOf(ne.amount_unit, ends.target.own);
 }
 
 type Rec = Record<string, unknown>;
@@ -153,7 +160,7 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
       && olumiGuessedGoalLink(e, unitOf));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
-    const unconverted = identityForwarded ? undefined : into.find((e) => !sizedInGoalUnit(e, goalUnit));
+    const unconverted = identityForwarded ? undefined : into.find((e) => !sizedInGoalUnit(e, goalUnit, graph));
     const failing = unconverted ?? guess;
     if ((!identityForwarded && into.length === 0) || failing !== undefined) {
       const placeholderLink = failing !== undefined && isPlaceholderLink(failing);
