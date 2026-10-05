@@ -107,6 +107,7 @@ export const NOTICE_KIND_BY_REASON: Record<
   relationship_endpoint_missing: "relationship_not_used",
   relationship_endpoint_ambiguous: "relationship_not_used",
   relationship_endpoint_illegal: "relationship_not_used",
+  goal_quantity_unit_mismatch: "relationship_not_used",
   relationship_sign_conflicts_with_link: "relationship_not_used",
   effect_detail_conflicts_with_relationship: "relationship_not_used",
   option_lever_undeclared: "relationship_not_used",

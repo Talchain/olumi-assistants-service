@@ -40,6 +40,8 @@ const PRODUCER_REASONS = [
   "relationship_endpoint_missing",
   "relationship_endpoint_ambiguous",
   "relationship_endpoint_illegal",
+  // S1 (Science 2026-10-05: S1 = vans (A)): the goal-quantity carrier's unit check declines with this typed reason.
+  "goal_quantity_unit_mismatch",
   "relationship_sign_conflicts_with_link",
   "effect_detail_conflicts_with_relationship",
   "option_lever_undeclared",
