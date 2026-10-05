@@ -239,8 +239,8 @@ export const OUTCOME_KEPT_CLAIMS: readonly WithheldGoalClaim[] = ['goal_probabil
  * Leader and flip facts computed from the same comparison as the withheld figures (PLoT #416's list, R3 5888737291):
  * which option does best when, how close it is, and what would flip it. Withheld with them.
  */
-const COMPARISON_DERIVED_KEYS = ['flip_thresholds', 'conditional_winners', 'p_win_sensitivity', 'factor_evppi', 'decision_evpi'] as const;
-const BRIEF_LEADER_KEYS = ['headline', 'headline_banded', 'robustness', 'robustness_caveat', 'what_would_change'] as const;
+export const COMPARISON_DERIVED_KEYS = ['flip_thresholds', 'conditional_winners', 'p_win_sensitivity', 'factor_evppi', 'decision_evpi'] as const;
+export const BRIEF_LEADER_KEYS = ['headline', 'headline_banded', 'robustness', 'robustness_caveat', 'what_would_change'] as const;
 const SUMMARY_LEADER_KEYS = ['goal_fit', 'win_probability', 'leading_option', 'robustness_band'] as const;
 
 /**

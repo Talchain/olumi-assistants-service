@@ -182,8 +182,10 @@ import {
 import { wireInterventionRangePlan } from '../../intervention-range.js';
 import { optionIdOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isRecommendableOption } from './recommendable-option.js';
+import { detectIdenticalToBaseline, mergeIdenticalToBaselineArms } from './identical-to-baseline.js';
 import {
   buildAnalysisSubmissionDisclosure,
+  buildIdenticalToBaselineDisclosure,
   partitionScaffoldedByAnalysisPresence,
 } from '../../coaching/scaffold-disclosure.js';
 import {
@@ -1891,6 +1893,25 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // DL gate 1 v2: inspect intact engine outcomes before any per-option withholder.
+    // ⛔ DL ruling: the goal-figure withhold reads the arms ANALYSED (captured here, before the merge). A merged arm's
+    // identity with the baseline was measured under any placeholder it crosses, so its withhold lands on that baseline.
+    const preMergeOptionIds = [...new Set(readOptionResultSources(response as Record<string, unknown>).flat()
+      .map((r) => (typeof r.option_id === 'string' ? r.option_id : r.id))
+      .filter((id): id is string => typeof id === 'string' && id !== ''))];
+    const identical = detectIdenticalToBaseline(response, finalWireOptions);
+    const mergedInto = new Map(identical.map((r) => [r.option_id, r.baseline_option_id] as const));
+    response = mergeIdenticalToBaselineArms(response, identical);
+    if (identical.length > 0) {
+      log.info({
+        event: 'run_analysis.options_identical_to_baseline',
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        baseline_option_id: identical[0]!.baseline_option_id,
+        option_ids: identical.map((r) => r.option_id),
+      }, 'run_analysis: identical arms merged into the submitted baseline');
+    }
+
     // --- 5. Check analysis status (V5 alpha hardening Phase 2.3) ---------
     // Permissive accept matrix per Docs/v5/v5-resilience-contract.md Part C.
     // Grounded against real staging capture at
@@ -1951,8 +1972,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // leader with them (`withholdOptionGoalFigures`). A run PLoT already withheld (#416 / #422) says its own reason.
     const envelope = response as Record<string, unknown>;
     if (!runWithheldGoalFigures(envelope)) {
-      const scoredIds = [...new Set(readOptionResultSources(envelope).flat().map((r) => (typeof r.option_id === 'string' ? r.option_id : r.id))
-        .filter((id): id is string => typeof id === 'string' && id !== ''))];
+      const scoredIds = preMergeOptionIds;
       const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
       const scored = new Map(finalWireOptions.flatMap((o) => {
         const rec = o as Record<string, unknown>;
@@ -1963,7 +1983,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }));
       const goalPaths = placeholderGoalPaths(graphForAnalysis, scoredIds, evaluations, scored);
       if (goalPaths.length > 0) {
-        response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
+        response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => mergedInto.get(p.option_id) ?? p.option_id)),
           placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH));
         log.info(
           {
@@ -2065,7 +2085,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // --- 6. Build RunAnalysisHandlerFact (Resolution 2) ------------------
     const winProbabilities = extractWinProbabilities(resultRecords);
-    const leadingOptionId = selectLeadingOptionId(resultRecords);
+    const leadingOptionId = leadingOptionAfterMerge(resultRecords, identical.length);
     // Template selection uses the status outcome. Correction 4 of the V5
     // alpha hardening plan: caveats for partial / unknown-status surface
     // through the existing `summary` / `assistant_text` fields only — do
@@ -2326,7 +2346,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
 
     const headlineInput = {
-      enrichment: response as Record<string, unknown>,
+      // After a merge leaves one arm, an empty declared id would let the headline builder crown it on its own.
+      enrichment: identical.length > 0 && resultRecords.filter(isRecommendableOption).length === 1
+        ? {} : response as Record<string, unknown>,
       leading_option_id: leadingOptionId ?? '',
       status_kind: headlineStatusKind,
       // A goal the user held as a floor points up by their own words: not "direction assumed" (AIQ #75 5901136155).
@@ -2748,7 +2770,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // predicates the Run acts on (`goal-reading-disclosure.ts`), on the graph this Run analysed. The forwarder admits
     // them only as its own rebuild from `__goal_reading_source` (AIQ 5895590866 (2), exact equality).
     const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id);
-    const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;
+    const identicalToBaselineDisclosure = buildIdenticalToBaselineDisclosure(identical);
+    const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalToBaselineDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -2907,6 +2930,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // The configure chip's source (see chip-generator): the options a
       // configure step actually repairs.
       ...(gate.excluded.length > 0 ? { __excluded_options: gate.excluded } : {}),
+      ...(identical.length > 0 ? { __identical_to_baseline: identical } : {}),
       // Internal channel — the exact graph THIS run analysed, for the
       // decision-review enricher. Same object the submission and
       // `graph_hash_at_run` were derived from, so a review grounded in it is
@@ -3453,7 +3477,20 @@ function extractWinProbabilities(
  * pre-existing, already-modelled "no leader" state (same value produced by an
  * empty result set or an unbroken tie), NOT a new wire shape.
  */
-function selectLeadingOptionId(
+/**
+ * ⛔ DL gate 1 v2: when arms were MERGED into the baseline and only one recommendable arm is left, nothing leads.
+ * The survivor is the baseline (or a single other arm) with no competitor left, so a crown would be a
+ * comparison that did not happen. Scoped to a merge: every other single-result Run keeps the R2 rule unchanged.
+ */
+export function leadingOptionAfterMerge(
+  allRecords: ReadonlyArray<Record<string, unknown>>,
+  mergedArmCount: number,
+): string | null {
+  if (mergedArmCount > 0 && allRecords.filter(isRecommendableOption).length === 1) return null;
+  return selectLeadingOptionId(allRecords);
+}
+
+export function selectLeadingOptionId(
   allRecords: ReadonlyArray<Record<string, unknown>>,
 ): string | null {
   if (allRecords.length === 0) return null;

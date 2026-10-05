@@ -644,6 +644,8 @@ export interface HandlerOutcome {
   readonly __excluded_options?: ReadonlyArray<
     import('../coaching/scaffold-disclosure.js').OmittedOptionRecord
   >;
+  /** Arms that ran and whose returned outcomes were merged into the explicit baseline. */
+  readonly __identical_to_baseline?: import('./handlers/identical-to-baseline.js').IdenticalToBaselineRecord[];
   /**
    * ROADMAP 2.918 — set ONLY by `add_constraint`, on the exact
    * mintable-and-baseline-less cell (the #868 `mintEligible` conjunction with

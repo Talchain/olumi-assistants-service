@@ -46,6 +46,8 @@ import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 // local regex mirrors are exactly the drift class that silently swallowed
 // the disclosure for ID-shaped labels ("Plan E_2").
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
+import type { IdenticalToBaselineRecord } from '../tools/handlers/identical-to-baseline.js';
+import { MAX_OPTIONS } from '../../validators/graph-validator.types.js';
 
 /**
  * The MINIMUM an option needs to be named in an omission sentence: an
@@ -543,6 +545,26 @@ export function buildAnalysisSubmissionDisclosure(
     buildScaffoldOmittedSuffix([...heldPartition.omitted, ...excluded], keptLabelFor)
   );
 }
+
+/** The arm ran: disclose result identity, without implying exclusion or diagnosing its cause. */
+export function buildIdenticalToBaselineDisclosure(records: readonly IdenticalToBaselineRecord[]): string {
+  return records.map((r) => {
+    const arm = sanitiseLabel(r.label, r.option_id) ?? 'This option';
+    const baseline = sanitiseLabel(r.baseline_label, r.baseline_option_id) ?? 'the baseline';
+    const sentence = ` ${arm} came out identical to ${baseline}: in this model it doesn't change the outcome.`;
+    return arm.length <= 200 && baseline.length <= 200
+      && passesAssistantTextContentDefences(sentence) && !/[\r\n]/.test(sentence)
+      ? sentence : " This option came out identical to the baseline: in this model it doesn't change the outcome.";
+  }).join('');
+}
+
+/** One sentence per returned arm; names are bounded by the existing assistant-text budget. */
+export const IDENTICAL_TO_BASELINE_DISCLOSURE_RE_SRC =
+  `(?: [^\\r\\n]{1,200}? came out identical to [^\\r\\n]{1,200}?: in this model it doesn't change the outcome\\.){1,${MAX_OPTIONS - 1}}`;
+
+// One sentence for each possible non-baseline arm under CEE's existing graph option bound.
+export const IDENTICAL_TO_BASELINE_DISCLOSURE_MAX_CHARS =
+  (MAX_OPTIONS - 1) * (` ${'x'.repeat(200)} came out identical to ${'x'.repeat(200)}: in this model it doesn't change the outcome.`).length;
 
 /**
  * The configure chip a scaffolded run_analysis success turn offers — same
