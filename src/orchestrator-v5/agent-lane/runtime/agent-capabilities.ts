@@ -16,6 +16,7 @@
 
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { POINTS_SPELLINGS } from '../../../utils/unit-alphabet.js';
+import { linkEffectQuestionCarrier } from '../link-effect-question.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
@@ -3496,7 +3497,11 @@ export function createAgentCapabilities(
       const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
         ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
       if (unitAsk !== undefined) {
-        return { ok: false, mutated: false, refusal: 'unit_mismatch', question: unitAsk, detail: linkEffectUnitAskWords(unitAsk, from, to) };
+        // RT-6 S4-A phase 2: ONE unit question about ONE end is held by the server, so a one-word answer completes it.
+        const carrier = linkEffectQuestionCarrier({ scenario_id: ctx.scenario_id, question: unitAsk, from, to, quote: said,
+          effect: stated, asked_unit: unitReading.asked_unit, graph_hash: g.graph_hash, emitted_at_iso: new Date().toISOString() });
+        return { ok: false, mutated: false, refusal: 'unit_mismatch', question: unitAsk, detail: linkEffectUnitAskWords(unitAsk, from, to),
+          ...(carrier !== undefined ? { pending_action: carrier } : {}) };
       }
       // Science F1: a % at the user's own 0 is points; the card shows, and the writer stores, that reading.
       const effect = withPointsAtZero(stated, unitReading.points_at_zero, from.id, to.id);

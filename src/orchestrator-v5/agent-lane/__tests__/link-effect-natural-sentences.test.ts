@@ -17,6 +17,8 @@ import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../../system-events/dispatch.js';
 import type { LinkEffectStatement } from '../../system-events/link-effect-edit.js';
 import { prepareLinkEffectUnitReadings } from '../../system-events/link-effect-unit-reading.js';
+import { linkEffectQuestionCarrier, LINK_EFFECT_QUESTION_WALL_TTL_MS } from '../link-effect-question.js';
+import { parsePendingAction } from '../../session/pending-action.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
@@ -726,5 +728,49 @@ describe('RT-6 S4-A phase 2: the unit reader says WHICH end it asked about, as t
       'Each 5% rise in team coordination overhead adds about 1% to feature-launch delay risk.');
     expect(r.ask).toMatch(/^Is that a 5-point rise in “Team coordination overhead”/);
     expect(r.asked_unit ?? []).not.toContainEqual(expect.objectContaining({ end: 'source' }));
+  });
+});
+
+describe('RT-6 S4-A phase 2 (B): the refused proposal carries the server-held question, validated by the session reader', () => {
+  const headcount = { fixture: 'd39c05ba', from: 'developer_headcount', to: 'onboarding_drag' } as const;
+  const C1 = 'Every 2 extra developers add about 1 point of onboarding drag.';
+  it('Acceptance C1 → ONE unit question AND a carrier that the strict reader parses, bound to this graph, 2 turns / 10 min', async () => {
+    const row = { ...headcount, id: 'Q-C1', quote: C1, effect: effect(1, 'points', 2, 'developers') } as CorpusRow;
+    const w = world(row); const before = w.graph(); const result = await propose(w, row);
+    oneQuestion(result, 'What unit is the 1 change in “Onboarding drag” stated in?');
+    const carrier = result.pending_action as Json;
+    expect(parsePendingAction(JSON.parse(JSON.stringify(carrier))), 'the strict reader parses it').not.toBeNull();
+    expect(carrier.chip_id).toBe(carrier.id); expect(carrier.id).toMatch(/^leq_[0-9a-f-]{36}$/);
+    expect(carrier.action).toEqual({ kind: 'agent_link_effect_question', question: 'What unit is the 1 change in “Onboarding drag” stated in?',
+      from_node_id: 'developer_headcount', to_node_id: 'onboarding_drag', from_label: 'Developer headcount', to_label: 'Onboarding drag',
+      quote: C1, effect: { amount: 1, amount_unit: 'points', per_source_change: 2, per_source_change_unit: 'developers' }, asked_ends: ['target'] });
+    const reloaded = projectGraphForPersistence(GraphV3.parse({ ...before, nodes: before.nodes.map((n: Json) => NodeV3.parse(n)) }));
+    expect(carrier.preconditions).toEqual({ graph_hash: hashOf(reloaded) });
+    expect(carrier.expires_at_turn_count).toBe(2);
+    expect(Date.parse(carrier.expires_at_iso) - Date.parse(carrier.emitted_at_iso)).toBe(LINK_EFFECT_QUESTION_WALL_TTL_MS);
+    noWrite(w, row, before);
+  });
+  it.each([
+    ['a card (the unit is written)', { ...headcount, id: 'Q-card', quote: 'Every 2 extra developers add about 1 percentage point of onboarding drag.',
+      effect: effect(1, 'percentage points', 2, 'developers') }],
+    ['a points-or-share question (its answer is not a unit)', { fixture: '96ea7439', from: 'team_coordination_overhead', to: 'feature_launch_delay_risk', id: 'Q-u3',
+      quote: 'Each 5% rise in team coordination overhead adds about 1% to feature-launch delay risk.', effect: effect(1, '%', 5, '%') }],
+  ] as const)('CONTROL: %s carries no question', async (_n, row) => {
+    const w = world(row as CorpusRow); const result = await propose(w, row as CorpusRow);
+    expect(result).not.toHaveProperty('pending_action');
+  });
+  const base = { scenario_id: SCENARIOS.d39c05ba, question: 'What unit is the 1 change in “Onboarding drag” stated in?',
+    from: { id: 'developer_headcount', label: 'Developer headcount' }, to: { id: 'onboarding_drag', label: 'Onboarding drag' }, quote: C1,
+    effect: effect(1, 'points', 2, 'developers'), asked_unit: [{ end: 'target' as const, node_id: 'onboarding_drag', value: 1 }],
+    graph_hash: '3fe4a430fb6b8cf7', emitted_at_iso: '2026-10-05T21:00:00.000Z' };
+  it('CONTROL: the base input carries', () => { expect(linkEffectQuestionCarrier(base)).toBeDefined(); });
+  it.each([
+    ['both ends asked at once', { asked_unit: [{ end: 'source' as const, node_id: 'developer_headcount', value: 2 }, { end: 'target' as const, node_id: 'onboarding_drag', value: 1 }] }],
+    ['the question is not the unit question for that end', { question: 'Is that a 1-point rise in “Onboarding drag” (say 10% → 11%), or 1% of today’s level?' }],
+    ['the asked end is not this link\'s', { asked_unit: [{ end: 'target' as const, node_id: 'someone_else', value: 1 }] }],
+    ['the session reader would refuse it (a 1001-character label)', { to: { id: 'onboarding_drag', label: 'D'.repeat(1001) },
+      question: `What unit is the 1 change in “${'D'.repeat(1001)}” stated in?` }],
+  ] as const)('NO carrier: %s', (_n, patch) => {
+    expect(linkEffectQuestionCarrier({ ...base, ...patch } as never)).toBeUndefined();
   });
 });
