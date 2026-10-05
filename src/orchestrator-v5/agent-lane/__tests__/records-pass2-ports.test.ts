@@ -205,3 +205,20 @@ describe('P2-ACCEPT: build-result keys a SERVED reader keys on are mapped to the
     expect(option[0]!.id).not.toBe(factor[0]!.id);
   });
 });
+
+/**
+ * P2-FRAME-CHECK (DL ruling 5 Oct): the wiring must not change compute. ONE 0-LLM row: for the same compiled graph, the
+ * per-quantity scales/frames in the CEE→PLoT `/v2/run` payload (the body `run-analysis.ts` builds for PLoT) equal what
+ * the legacy construction path would send for the same model — per factor id: `scale_frame` / plausible max, the option
+ * interventions' raw → normalised values, and each edge's frame. If they differ, the wiring changes compute: STOP and
+ * report, do not re-record either side.
+ *
+ * ⛔ BLOCKED ON A DEPENDENCY, NOT WRITTEN AGAINST A GUESS: the records grammar has no per-quantity `plausible_max`
+ * carrier yet (the v-next writer's pass-2 frame carrier in `cee/draft/records/{grammar,seam,projector,instruction}.ts`,
+ * which this lane must not edit — `construction-range-carrier.test.ts` is RED for the same reason). Until it lands the
+ * records side has no declared frame to compare, so any comparison would measure the fixture. Turn this into an `it`
+ * when that carrier merges.
+ */
+describe('P2-FRAME-CHECK: the /v2/run scales and frames equal the legacy path for the same compiled graph', () => {
+  it.todo('BLOCKED on the v-next pass-2 per-quantity plausible_max carrier (grammar/projector, other builder): compare the CEE→PLoT /v2/run frames records vs legacy, 0-LLM');
+});
