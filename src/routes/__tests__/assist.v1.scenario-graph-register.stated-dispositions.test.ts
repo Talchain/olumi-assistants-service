@@ -163,6 +163,8 @@ describe("graph.stated_dispositions — register write → stored row → cold r
     ]);
     expect(stored[0]!.location).toEqual({ kind: "node", node_id: "fac_price", path: [] });
     expect((stored[1]!.stated_item as Rec).source_quote).toBe(Q_LOSS);
+    // The receipt never costs the registration its version: the same versioned write as a graph without it.
+    expect((storedRow().write.modelVersion as Rec | undefined)?.creation_kind).toBe("committed_mutation");
   });
 
   it("⭐ RED: the cold read emits every persisted rejected/asked disposition as a typed not_modelled row at the stated item's offset", async () => {
