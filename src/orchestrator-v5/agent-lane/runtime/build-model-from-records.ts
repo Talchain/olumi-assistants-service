@@ -23,6 +23,8 @@ import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import { sizeLink } from '../../../cee/magnitude/link-effect.js';
 import { magnitudeNodes, percentLevelIds } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { userQuestionForAskItem } from '../../../cee/draft/records/user-asks.js';
+import { buildModelBuildingNotices } from '../../../cee/draft/records/model-building-notices.js';
+import { ModelBuildingNoticesSchema } from '@talchain/schemas/boundary';
 import { constructionOperationId, deadlineOpenQuestion, goalScopePendingAction, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import type { ToolResult } from './agent-tools.js';
@@ -485,6 +487,13 @@ export async function buildModelFromRecords(
     ...limitedLevelAsks({ nodes: graph.nodes, goal_constraints: graph.goal_constraints }),
     ...optionSetLimitAsks({ nodes: graph.nodes, goal_constraints: graph.goal_constraints }),
   ];
+  /**
+   * ⭐ #2576 item D: the projector's refusals as the published notices (route-v2's own producer, over this build's typed
+   * rows, user-stated relationships excluded from the Olumi-attributed count: item A). Validated HERE at the pinned
+   * contract; an invalid carrier is omitted, never sent for the UI parser to quarantine.
+   */
+  const notices = buildModelBuildingNotices(compiled.projection.dropped);
+  const validNotices = notices !== undefined && ModelBuildingNoticesSchema.safeParse(notices).success ? notices : undefined;
   // The magnitude contract's own question for a user's size the model cannot hold as stated (legacy slot: after the level asks).
   const magnitudeQuestions = recordsMagnitudeQuestions(fitted, limits.constraints.map((row) => ({ ...row, node_id: [...idOf].find(([, v3]) => v3 === row.node_id)?.[0] ?? row.node_id })));
   return {
@@ -504,5 +513,6 @@ export async function buildModelFromRecords(
       ...compiled.ask.items.map((item) => userQuestionForAskItem(item))],
     // Preserve the projector's typed identities and reasons; do not reconstruct them from labels.
     not_represented: compiled.projection.dropped,
+    ...(validNotices !== undefined ? { model_building_notices: validNotices } : {}),
   };
 }
