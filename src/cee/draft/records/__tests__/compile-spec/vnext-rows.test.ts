@@ -315,3 +315,21 @@ describe('pass 2 P2-FRAME: a declared plausible_max frames its quantity by the l
     expect(factor.scale_frame).toBe(defaultFrameFor(150));
   });
 });
+
+describe('pass 2 P2-A3: records-path readiness is read from the stored graph, so an edit moves it', () => {
+  // The records compile's own `readiness` is a build-time diagnostic and is not registered; the served readiness is
+  // re-derived from the stored graph on every read (resolveAnalysisAdmission / targetTestabilityOf). PIN, not a flip.
+  it('P2-A3 a value edit that breaks testability moves admission; restoring it moves it back', async () => {
+    const graph: any = stored((await registered()).graph);
+    const before = resolveAnalysisAdmission(graph).permitted_analysis_mode;
+    expect(targetTestabilityOf(graph)).toMatchObject({ kind: 'testable' });
+    expect(before).not.toBe('none');
+    const goal = graph.nodes.find((n: any) => n.kind === 'goal')!;
+    const held = goal.observed_state;
+    delete goal.observed_state;
+    expect(targetTestabilityOf(graph)).toMatchObject({ kind: 'not_testable' });
+    expect(resolveAnalysisAdmission(graph).permitted_analysis_mode).not.toBe(before);
+    goal.observed_state = held;
+    expect(resolveAnalysisAdmission(graph).permitted_analysis_mode).toBe(before);
+  });
+});
