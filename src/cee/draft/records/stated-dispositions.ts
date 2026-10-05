@@ -75,8 +75,13 @@ export function deriveStatedDispositions(
         const details = option.data?.intervention_details;
         if (!object(details)) continue;
         for (const [factorId, detail] of Object.entries(details)) {
-          if (object(detail) && detail.source === 'brief_extraction' && detail.stated_index === stated_index
-            && detail.raw_value === literalConventionValue(item.value, item.unit, item.value_scale)) {
+          if (!object(detail) || detail.source !== 'brief_extraction' || detail.stated_index !== stated_index) continue;
+          const stated = literalConventionValue(item.value, item.unit, item.value_scale);
+          // A delta option's own carrier is its `change_by` (P2-A1): its `raw_value` is the compile-time absolute
+          // (baseline + delta), never the figure the user stated, so it is never compared with it (Codex R1 F4).
+          if (detail.change_by !== undefined) {
+            if (detail.change_by === stated) return carry({ kind: 'node', node_id: option.id, path: ['data', 'intervention_details', factorId, 'change_by'] }, detail.change_by);
+          } else if (detail.raw_value === stated) {
             return carry({ kind: 'node', node_id: option.id, path: ['data', 'intervention_details', factorId, 'raw_value'] }, detail.raw_value);
           }
         }

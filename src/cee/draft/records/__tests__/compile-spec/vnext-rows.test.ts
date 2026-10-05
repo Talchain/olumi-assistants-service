@@ -9,6 +9,7 @@ import { projectDraftRecords, findGrammarFieldsDroppedBySeam } from '../../seam.
 import { buildStrictDraftRecordsSchema, omitOptionalRecordNulls, buildModelFromRecords } from '../../../../../orchestrator-v5/agent-lane/runtime/build-model-from-records.js';
 import { V_NEXT_DRAFT_RECORDS_INSTRUCTION } from '../../instruction-vnext.js';
 import { projectionFingerprint } from '../../projector.js';
+import { reconcileStatedDispositions } from '../../stated-dispositions.js';
 import { sameUnit } from '../../../../../orchestrator-v5/agent-lane/same-unit.js';
 import { sizeLink } from '../../../../magnitude/link-effect.js';
 import { targetTestabilityOf } from '../../../../../orchestrator-v5/admission/target-testability.js';
@@ -386,5 +387,32 @@ describe('Codex R1 F3: a change_by never resolves from an unbound or missing bas
     expect(projection).toMatchObject({ mixedUnresolved: true });
     expect(projection.unresolvedFactorIds).toContain(lever.id);
     expect(decideAnalysisScaleBlock(projection, [])).toMatchObject({ blocked: true, unresolvedFactorIds: [lever.id] });
+  });
+});
+describe('Codex R1 F4: a valid delta is carried by its own change_by, never rejected', () => {
+  async function registeredBody(records: DraftRecordSet, brief: string) {
+    let body: any;
+    const result = await buildModelFromRecords('11111111-1111-4111-8111-111111111111', brief,
+      async (path, b) => { if (path.endsWith('/register')) { body = b; return { status: 200, json: { model_version: 1 } }; } return { status: 200, json: { graph: { nodes: [], edges: [] } } }; },
+      async () => ({ text: JSON.stringify(records), status: 'completed' }));
+    expect(result.ok, JSON.stringify(result)).toBe(true); return body;
+  }
+  it('F4 baseline 8 + stated change 5: receipt carried at change_by, authorship kept through registration and persistence', async () => {
+    const r = vansDelta(); const p = project(r, VANS);
+    expect(p.stated_dispositions?.find(d => d.stated_index === 2)).toMatchObject({ disposition: 'carried', stored_value: 5 });
+    const body = await registeredBody(r, VANS);
+    const lever = body.graph.nodes.find((n: any) => n.kind === 'factor' && n.label === 'Vans')!;
+    const option = body.graph.nodes.find((n: any) => n.kind === 'option' && n.source_quote === r.stated_items[2]!.source_quote)!;
+    expect(option.interventions[lever.id]).toMatchObject({ change_by: 5, raw_value: 13, source: 'brief_extraction' });
+    const row = body.stated_dispositions.find((d: any) => d.stated_index === 2);
+    expect(row).toMatchObject({ disposition: 'carried', stored_value: 5, location: { kind: 'node', node_id: option.id, path: ['interventions', lever.id, 'change_by'] } });
+    const persisted: any = stored(body.graph);
+    const persistedRow = reconcileStatedDispositions(body.stated_dispositions, persisted).find(d => d.stated_index === 2);
+    expect(persistedRow).toMatchObject({ disposition: 'carried', stored_value: 5 });
+    expect(body.stated_dispositions.some((d: any) => d.reason === 'stated_value_not_carried')).toBe(false);
+  });
+  it('F4 CONTRAST an absolute option is still carried at raw_value', () => {
+    const r = vans(); const p = project(r, VANS);
+    expect(p.stated_dispositions?.find(d => d.stated_index === 2)).toMatchObject({ disposition: 'carried', stored_value: 5, location: { path: expect.arrayContaining(['raw_value']) } });
   });
 });
