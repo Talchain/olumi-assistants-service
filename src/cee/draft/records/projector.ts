@@ -504,6 +504,8 @@ export interface DroppedRecordRef {
     // and never a default "higher is better" direction.
     | "goal_quantity_missing"
     | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
+    // S1 (Science 2026-10-05): a stated cause on the goal's own quantity whose units disagree (goal / outcome / target).
+    | "goal_quantity_unit_mismatch"
     | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
     | import("./quantity-evidence.js").UnitRefusal
     | import("./quantity-evidence.js").LiteralRefusal
@@ -3916,21 +3918,30 @@ function projectOnce(
   // is not the goal; its unit IS the goal's unit and the goal holds a frame (so the identity is sizeable); and the
   // source→outcome shape is legal. A no-effect clause, an unsized cause and an inferred link (no stated cause) never mint.
   // The node is the user's quantity, minted as the option-lever pass mints one (`stated`, the declaring quote).
+  // ⭐ S1 (Science ruling 2026-10-05: S1 = vans (A)): the GOAL ITSELF may declare the quantity (the goal stated item is
+  // `statedItems[q]`, as live sealed draws do). Same carrier, same identity, same writer. The node then names the goal's
+  // own BASELINE figure when that states the same quantity in the same unit (the quantity's current level, in the user's
+  // words), else the goal's quote. UNITS (Science): goal unit = outcome unit = the stated cause's target unit, or the
+  // carrier is DECLINED with a typed reason (`goal_quantity_unit_mismatch`), never minted on a guess.
   if(typeof brief==="string" && brief.trim()!==""){
-    statedItems.forEach((item)=>{
+    statedItems.forEach((item,stated_index)=>{
       const r=item.relationship;
       if(item.kind!=="cause" || r===undefined || r.no_effect_literal!==undefined || !brief.includes(item.source_quote))return;
       if(r.amount===undefined && r.range===undefined || r.per_source_change===undefined)return;
       const q=r.to_quantity;
       if(goalQuantityOutcome.has(q))return;
       const goal=carrier(q).node, source=carrier(r.from_quantity).node, declaration=statedItems[q];
-      if(goal?.kind!=="goal" || source===undefined || source.kind==="goal" || declaration===undefined || declaration.kind==="goal")return;
+      if(goal?.kind!=="goal" || source===undefined || source.kind==="goal" || declaration===undefined)return;
       if(UNRESCUABLE_EDGE_SHAPES.has(`${PROJECTED_KIND_AFTER_NORMALISATION[source.kind] ?? source.kind}->outcome`))return;
-      if(goal.goal_threshold_cap===undefined || goal.goal_threshold_unit===undefined || declaration.unit===undefined
-        || !sameUnit(declaration.unit,goal.goal_threshold_unit))return;
+      if(goal.goal_threshold_cap===undefined || goal.goal_threshold_unit===undefined || declaration.unit===undefined || r.amount_unit===undefined)return;
+      if(!sameUnit(declaration.unit,goal.goal_threshold_unit) || !sameUnit(r.amount_unit,goal.goal_threshold_unit)){
+        dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index,label:item.source_quote,reason:"goal_quantity_unit_mismatch"});return;
+      }
+      const baseline=declaration.kind==="goal" && declaration.baseline_ref!==undefined ? statedItems[declaration.baseline_ref] : undefined;
+      const named=baseline!==undefined && baseline.quantity===q && baseline.unit!==undefined && sameUnit(baseline.unit,declaration.unit) ? baseline : declaration;
       const id=mintUnique(sha8("outcome","goal-quantity",String(q)),usedIds);
-      const prov:RecordProvenance={provenance_class:"stated",source_quote:declaration.source_quote};
-      const outcome:ProjectedNode={id,kind:"outcome",label:declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
+      const prov:RecordProvenance={provenance_class:"stated",source_quote:named.source_quote};
+      const outcome:ProjectedNode={id,kind:"outcome",label:boundNodeLabel(named.source_quote),quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
       nodes.push(outcome);provenance[id]=prov;goalQuantityOutcome.set(q,outcome);goalOfQuantityOutcome.set(id,goal.id);
       const edgeId=mintUnique(sha8("edge","goal-quantity-identity",id,goal.id),usedIds);
       const edgeProv=scaffoldingProvenance(GOAL_QUANTITY_IDENTITY_QUOTE);

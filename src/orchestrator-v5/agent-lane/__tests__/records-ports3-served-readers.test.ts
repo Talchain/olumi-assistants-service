@@ -38,6 +38,8 @@ import { EdgeStrengthV3, GraphV3 } from '../../../schemas/cee-v3.js';
 import { Graph as V1GraphSchema } from '../../../schemas/graph.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { sealedRecords as legacySealedRecords } from '../../../cee/draft/records/__tests__/compile-spec/sealed-fixture.js';
+import { boundNodeLabel } from '../../../cee/draft/records/label-bound.js';
 
 async function build(records: DraftRecordSet, brief: string): Promise<{ result: ToolResult; writes: Record<string, unknown>[] }> {
   const writes: Record<string, unknown>[] = [];
@@ -625,5 +627,111 @@ describe('IDENTITY NOISE (i): only the identity edges the projector writes chang
     ]);
     expect(fingerprint(registered)).toBe('91f58c6171bbf5bdfda2559e4bbab7ad5a8c49a9eca17f4ff5eac2bc42fd3ba4');
     expect(computeAnalysisAffectingGraphHashSha256(registered as never)).toBe('c5608621972f4d36c0ca0ca73d3bc35f45cae157542cf60293e3a4d4d27e1c0b');
+  });
+});
+
+// ── S1 GOAL-DECLARED (Science ruling 2026-10-05: S1 = vans (A)) ─────────────────────────────────────────────────────────
+// Live sealed draws (bank a37cb5365062-d1) put the quantity on the GOAL itself (the goal stated item is statedItems[q]),
+// with no claim carrying it; the carrier declined that (`declaration.kind === "goal"`), so the stated causes ran
+// factor→goal and the sweep split them (carrier_removed, P5 goal_path_unsized). Distilled here to the v-next shape this
+// tree accepts, from the sealed fixture and quoting only sealed text: the goal moves to index 0 and declares quantity 0 in
+// its own words (the bank draw's shape); the outcome claim on q0 and its link to the goal are removed.
+function goalDeclaredRecords(): DraftRecordSet {
+  const r = sealedRecords();
+  const goal = { ...r.stated_items[6]!, quantity: 0, baseline_ref: 6, unit: '£/month', unit_literals: ['monthly'] };
+  const figure = { ...r.stated_items[0]! };
+  r.stated_items[0] = goal; r.stated_items[6] = figure;
+  r.claims = r.claims.filter((_, i) => i !== 3 && i !== 5);
+  return JSON.parse(JSON.stringify(r)) as DraftRecordSet;
+}
+/** Independent path-product over the PERSISTED coefficients (the bridge row's oracle), in the goal's £. */
+function goalFigure(graph: Rec, optionId: string): number {
+  const goal = (graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+  const option = (graph.nodes as Rec[]).find((n) => n.id === optionId)!;
+  const paths = (from: string, seen: Set<string>): number => {
+    if (from === goal.id) return 1;
+    if (seen.has(from)) throw new Error('cycle');
+    const next = new Set(seen).add(from);
+    return (graph.edges as Rec[]).filter((e) => e.from === from && (graph.nodes as Rec[]).find((n) => n.id === e.to)?.kind !== 'option')
+      .reduce((sum, e) => sum + e.strength.mean * paths(e.to, next), 0);
+  };
+  let delta = 0;
+  for (const [factorId, intervention] of Object.entries(option.interventions ?? {})) {
+    const factor = (graph.nodes as Rec[]).find((n) => n.id === factorId)!;
+    delta += ((intervention as { value: number }).value - (factor.observed_state?.value ?? 0)) * paths(factorId, new Set());
+  }
+  return Math.round((goal.observed_state.baseline + delta) * goal.goal_threshold_cap * 100) / 100;
+}
+const S1_CAUSES = [8, 10, 12] as const;
+
+describe('S1 GOAL-DECLARED: a quantity the goal itself declares gets the same outcome carrier and identity (vans (A))', () => {
+  it('the stated causes land on the outcome, the goal is reached by the noise-free identity, testable, and the figures are the user\'s', async () => {
+    const records = goalDeclaredRecords();
+    // Precondition (identity): the goal declares quantity 0 and no claim carries it.
+    expect(records.stated_items[0]).toMatchObject({ kind: 'goal', quantity: 0, unit: '£/month' });
+    expect(records.claims.filter((c) => c.quantity === 0)).toEqual([]);
+    const replay = await replayRecordSet(structuredClone(records), { brief: BRIEF });
+    if (!replay.ok) throw new Error(replay.detail);
+    const goal = replay.projection.graph.nodes.find((n) => n.kind === 'goal')!;
+    const outcomes = replay.projection.graph.nodes.filter((n) => n.kind === 'outcome' && n.quantity_ref === goal.quantity_ref);
+    expect(outcomes).toHaveLength(1);
+    const outcome = outcomes[0]!;
+    // Named by the goal's own baseline figure (the quantity's current level, in the user's words), in the goal's unit.
+    expect(outcome).toMatchObject({ label: boundNodeLabel(records.stated_items[6]!.source_quote), data: { unit: goal.goal_threshold_unit },
+      provenance: { provenance_class: 'stated', source_quote: records.stated_items[6]!.source_quote } });
+    const { result, writes } = await build(records, BRIEF);
+    expect(result.ok).toBe(true);
+    const graph = writes[0]!.graph as Rec;
+    const stored = assignEntityRefs(projectGraphForPersistence(graph as never, { scenarioId: SCENARIO, turnClass: 'direct_answer', source: 'graph_registration' }), null).graph as Rec;
+    expect(targetTestabilityOf(stored as never)).toEqual({ kind: 'testable', goal_id: goal.id });
+    // Each stated cause on q0 is carried on its own source → the outcome, by quote, with the user's bundle.
+    for (const index of S1_CAUSES) {
+      const quote = records.stated_items[index]!.source_quote;
+      const edge = (stored.edges as Rec[]).find((e) => e.provenance?.source_quote === quote)!;
+      expect(edge, quote).toMatchObject({ to: outcome.id, provenance: { magnitude: 'user_stated', natural_effect: { amount_unit: goal.goal_threshold_unit } } });
+      const receipt = (writes[0]!.stated_dispositions as Rec[]).find((d) => d.stated_index === index)!;
+      expect(receipt).toMatchObject({ disposition: 'carried', location: { kind: 'edge', from: edge.from, to: outcome.id } });
+    }
+    // Units (Science): goal unit = outcome unit = every stated cause's target unit.
+    const into = (stored.edges as Rec[]).filter((e) => e.to === outcome.id);
+    expect(new Set(into.map((e) => e.provenance.natural_effect.amount_unit))).toEqual(new Set([goal.goal_threshold_unit]));
+    // The identity: the ONE writer, with identity noise (i).
+    const identity = (stored.edges as Rec[]).filter((e) => e.from === outcome.id && e.to === goal.id);
+    expect(identity).toHaveLength(1);
+    expect(identity[0]).toMatchObject({ strength: { mean: 1, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1,
+      provenance: { definitional: true, quote: GOAL_QUANTITY_IDENTITY_QUOTE } });
+    expect(holdsByDefinition(identity[0]!, nodeUnitOf(stored.nodes as unknown[]))).toBe(true);
+    // No split anywhere on the goal path: stored, or the request PLoT is sent.
+    expect(splitNodes(stored)).toEqual([]);
+    expect(splitLimbs(stored)).toEqual([]);
+    const { sent } = await plotRequest(graph);
+    expect(splitNodes(sent)).toEqual([]);
+    expect((sent.edges as Rec[]).filter((e) => e.to === goal.id).map((e) => e.from)).toEqual([outcome.id]);
+    // The user's arithmetic: the same figures as the sealed oracle (bridge-and-sealed), was £123,000 / £123,675 / £120,000.
+    const figures = Object.fromEntries((stored.nodes as Rec[]).filter((n) => n.kind === 'option').map((o) => [o.source_quote, goalFigure(stored, o.id)]));
+    expect(figures).toEqual({ 'raise prices by 10%': 126000, 'launch a starter tier at £49 a month': 127350, 'keep pricing as it is': 120000 });
+  });
+
+  it('CONTRAST: a unit mismatch DECLINES with the typed reason (a legacy-evidence goal binding its own unit), never mints', async () => {
+    // In v-next the units pass stamps the goal and every relationship from the ONE declaration (quantity-evidence.ts), so
+    // they cannot disagree; a legacy-evidence goal keeps a unit its own spans bind — the reachable mismatch.
+    const variant = (goalOwnUnit: boolean): DraftRecordSet => {
+      const r = legacySealedRecords();
+      const outcome = r.claims[3]!;
+      delete outcome.quantity; delete outcome.unit; delete outcome.value; // no claim carries q0: the carrier falls to the goal
+      if (goalOwnUnit) r.stated_items[6] = { ...r.stated_items[6]!, unit: '£', unit_span: { start: 21, end: 22 } };
+      return r;
+    };
+    const mismatch = await replayRecordSet(variant(true), { brief: BRIEF });
+    const control = await replayRecordSet(variant(false), { brief: BRIEF });
+    if (!mismatch.ok || !control.ok) throw new Error('replay refused');
+    const goal = mismatch.projection.graph.nodes.find((n) => n.kind === 'goal')!;
+    expect(goal.goal_threshold_unit).toBe('£');
+    const declined = (p: typeof mismatch) => p.projection.dropped.filter((d) => d.reason === 'goal_quantity_unit_mismatch').map((d) => d.stated_index);
+    expect(declined(mismatch)).toEqual([...S1_CAUSES]);
+    expect(mismatch.projection.graph.nodes.filter((n) => n.kind === 'outcome' && n.quantity_ref === goal.quantity_ref)).toEqual([]);
+    expect(mismatch.projection.graph.edges.filter((e) => e.provenance?.quote === GOAL_QUANTITY_IDENTITY_QUOTE)).toEqual([]);
+    // Same run, same records, the goal's unit left to its declaration: no decline (the probe discriminates on the unit).
+    expect(declined(control)).toEqual([]);
   });
 });
