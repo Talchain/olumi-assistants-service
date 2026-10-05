@@ -601,7 +601,7 @@ describe('the headline withholds an unsupportable winner, end to end', () => {
     expect(trailing).toBeDefined();
     const text = headlineFor(LYING_FIELD, trailing.id);
     expect(text).not.toBeNull();
-    expect(text as string).toContain('is the option this analysis names');
+    expect(text as string).toContain('was supported by marginally more runs than');
   });
 
   it('TWIN — lift ONE option and the same field keeps its winner', () => {

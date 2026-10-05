@@ -1699,7 +1699,7 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Option A is the option this analysis names, though Option B was supported by marginally more runs of this model.',
+      'In this model, Option B was supported by marginally more runs than Option A (45% against 40%), so the two are close. Change a figure you’re unsure about to see what separates them.',
     );
     expect(out).not.toContain('scored highest against your goal in');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
@@ -2380,12 +2380,13 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Defer Hiring is the option this analysis names, though Hire One Senior Technical Lead was supported by marginally more runs of this model.',
+      'In this model, Hire One Senior Technical Lead was supported by marginally more runs than Defer Hiring (55% against 45%), so the two are close. Change a figure you’re unsure about to see what separates them.',
     );
     // SIGN GUARD (anti sign-inversion, ref 77a4d577f): the runner-up — the
     // higher raw-probability option — is the one credited with "better raw
     // probability"; the trailing declared leader must NEVER be.
-    expect(out).toContain('Hire One Senior Technical Lead was supported by marginally more runs of this model');
+    expect(out).toContain('Hire One Senior Technical Lead was supported by marginally more runs than Defer Hiring (55% against 45%)');
+    expect(out).not.toContain('is the option this analysis names');
     expect(out).not.toContain('Defer Hiring has marginally better raw probability');
     expect(out).not.toContain('Defer Hiring was supported by marginally more runs');
     // Never a false "currently leads" for a leader that trails on raw odds.
@@ -2480,18 +2481,18 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Defer Hiring is the option this analysis names, though Hire One Senior Technical Lead was supported by marginally more runs of this model.',
+      'In this model, Hire One Senior Technical Lead was supported by marginally more runs than Defer Hiring (55% against 45%), so the two are close. Change a figure you’re unsure about to see what separates them.',
     );
   });
 
   it('the disambiguation sentence is accepted by the registry allowlist', () => {
     const sanctioned =
-      'Defer Hiring is the option this analysis names, though Hire One Senior Technical Lead was supported by marginally more runs of this model.';
+      'In this model, Hire One Senior Technical Lead was supported by marginally more runs than Defer Hiring (55% against 45%), so the two are close. Change a figure you’re unsure about to see what separates them.';
     expect(isAllowedRunAnalysisAssistantText(sanctioned)).toBe(true);
     // Defence-in-depth still bites: an internal id in a slot is rejected.
     expect(
       isAllowedRunAnalysisAssistantText(
-        'opt_b is the option this analysis names, though opt_a was supported by marginally more runs of this model.',
+        "In this model, opt_a was supported by marginally more runs than opt_b (55% against 45%), so the two are close. Change a figure you’re unsure about to see what separates them.",
       ),
     ).toBe(false);
   });
@@ -2503,7 +2504,7 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
     // NO banned phrase — a regression to "recommended overall" would be swapped
     // out at egress and never reach the user.
     const sanctioned =
-      'Defer Hiring is the option this analysis names, though Hire One Senior Technical Lead was supported by marginally more runs of this model.';
+      'In this model, Hire One Senior Technical Lead was supported by marginally more runs than Defer Hiring (55% against 45%), so the two are close. Change a figure you’re unsure about to see what separates them.';
     expect(findForbiddenPhraseHit(sanctioned)).toBeNull();
     // The banned literal Paul ruled would be swapped at egress — pin the reason
     // the surface-adapted wording is used instead.

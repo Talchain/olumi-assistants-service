@@ -922,7 +922,7 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
         ],
       },
       'LT',
-      'Option A is the option this analysis names, though Option B was supported by marginally more runs of this model.',
+      'In this model, Option B was supported by marginally more runs than Option A (50% against 45%), so the two are close. Change a figure you’re unsure about to see what separates them.',
     ],
   ];
 

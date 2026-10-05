@@ -29,7 +29,7 @@ const FORMS = {
   whatIfQuoted: '‘Raise Pro to £59 at release’ would be the first to be supported by the most runs if price’s effect on monthly churn fell below about a quarter of what it is now.',
   whatIfStill: '‘Keep Pro at £49’ would still be supported by the most runs even if price’s average effect on monthly churn fell to zero.',
   riskCard: 'On Olumi’s estimates, the option the most runs supported is more likely than not to break your churn limit.',
-  headlineDisambig: '‘Keep Pro at £49’ is the option this analysis names, though ‘Raise Pro to £59 at release’ was supported by marginally more runs of this model.',
+  headlineDisambig: "In this model, ‘Raise Pro to £59 at release’ was supported by marginally more runs than ‘Keep Pro at £49’ (52% against 48%), so the two are close. Change a figure you’re unsure about to see what separates them.",
   headlineTie: '‘Keep Pro at £49’ was supported by only fractionally more runs of this model, so the options are effectively tied.',
   closeCall: 'This is a close call: in this model, ‘Keep Pro at £49’ was supported by about 3 percentage points more of the runs than ‘Raise Pro to £59 at release’.',
   lens: 'One option was supported by the most runs, but by fewer than 70% of them.',
