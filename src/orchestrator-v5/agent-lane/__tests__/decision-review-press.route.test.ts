@@ -15,6 +15,7 @@ import { DECISION_REVIEW_OPENING, DECISION_REVIEW_PRESS_ID } from '../decision-r
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
 import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
 import { structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
+import { guidanceHistoryOf } from '../turn-context/guidance-history.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
   analysis_state: Record<string, unknown>;
@@ -92,6 +93,8 @@ const store = {
   readRecent: vi.fn(async () => []),
   readFactsFor: vi.fn(async () => []),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
+  /** Read as served, so the guidance selector runs on every turn (`t2-guidance-wire.test.ts`): no row offered yet. */
+  readGuidanceHistory: vi.fn(async () => guidanceHistoryOf([])),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
@@ -117,7 +120,8 @@ async function freshApp(): Promise<FastifyInstance> {
     return fixture === 'g2'
       ? { graph: graph(), graph_hash: HASH, analysis_ready: READY, analysis_state: state(moved ? 'complete_stale' : runKind), analysis_result: SERVED.block }
       : { graph: B5_STORED.graph, graph_hash: B5_STORED.graph_hash, analysis_ready: READY,
-        analysis_state: { run_state: { kind: 'complete_current', computed_at: fixture === 'b5' ? '2026-10-05T03:48:55.163Z' : '2026-10-05T09:12:00.000Z' },
+        // The served state's shape (0948Z: `usable_for_chips`/`usable_for_prose`), with a licensed leader.
+        analysis_state: { ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: fixture === 'b5' ? '2026-10-05T03:48:55.163Z' : '2026-10-05T09:12:00.000Z' },
           leader_claim: { permitted: true, separation: 'separated' } },
         analysis_result: fixture === 'b5' ? B5_BLOCK : B5_FLIP_BLOCK };
   });
