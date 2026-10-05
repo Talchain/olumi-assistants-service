@@ -438,3 +438,14 @@ describe('Codex R1 F5: the K3 inert-risk exemption reads the downstream kind', (
     expect(p.dropped.some(d => d.node_id === risk!.id)).toBe(false);
   });
 });
+describe('Codex R1 F6: the prune disclosure keeps the figure from the validated relationship identities', () => {
+  for (const withBasis of [false, true]) {
+    it(`F6 a typed £6/month relationship with an existing causal-link claim ${withBasis ? 'WITH' : 'WITHOUT'} basis keeps value 6 + unit`, () => {
+      const r = sealedRecordsVNext();
+      r.claims.push({ claim_kind: 'causal_link', label: 'Subscriber support effect', from_claim: 1, to_claim: 4, effect: 'positive', ...(withBasis ? { basis: [13] } : {}) });
+      const p = project(r);
+      expect(p.graph.edges.some(e => e.provenance?.source_quote === r.stated_items[13]!.source_quote)).toBe(false);
+      expect(p.dropped).toContainEqual(expect.objectContaining({ stated_index: 13, reason: 'unconnected_to_goal', value: 6, unit: '£/month' }));
+    });
+  }
+});

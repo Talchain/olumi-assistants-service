@@ -4062,8 +4062,21 @@ function projectOnce(
         // bound by quantity identity at both ends) keeps that number on the cause's disclosure — the £6 a month of
         // the support-cost clause — under the same contract as `value` above. Sizing runs after this pass, so the
         // number is the stated relationship's located amount, never a sized coefficient.
-        const causeId = edge.provenance?.basis?.[0];
-        const causeIndex = causeId === undefined ? undefined : [...statedIdByIndex].find(([, id]) => id === causeId)?.[0];
+        // The cause is found by the VALIDATED relationship identities (both endpoint quantities, a located amount),
+        // never only by `basis`: an existing causal-link claim may omit that optional field (Codex R1 F6). `basis`
+        // only chooses among several identity matches; it never names a cause the identities do not.
+        const fromQuantity = nodes.find((n) => n.id === edge.from)?.quantity_ref;
+        const toQuantity = nodes.find((n) => n.id === edge.to)?.quantity_ref;
+        const byIdentity = fromQuantity === undefined || toQuantity === undefined ? [] : statedItems.flatMap((item, index) => {
+          const rel = item.relationship;
+          return rel !== undefined && rel.from_quantity === fromQuantity && rel.to_quantity === toQuantity
+            && rel.amount_span !== undefined && typeof rel.amount === "number" && Number.isFinite(rel.amount) ? [index] : [];
+        });
+        const basisId = edge.provenance?.basis?.[0];
+        const basisIndex = basisId === undefined ? undefined : [...statedIdByIndex].find(([, id]) => id === basisId)?.[0];
+        const causeIndex = basisIndex !== undefined && byIdentity.includes(basisIndex) ? basisIndex
+          : byIdentity.length === 1 ? byIdentity[0] : undefined;
+        const causeId = causeIndex === undefined ? undefined : statedIdByIndex.get(causeIndex);
         const stated = causeIndex === undefined ? undefined : statedItems[causeIndex]?.relationship;
         const at = causeId === undefined ? -1 : dropped.findIndex((d) => d.node_id === causeId && d.value === undefined
           && (d.reason === "unconnected_to_goal" || d.reason === "disconnected_by_shape_gate"));
