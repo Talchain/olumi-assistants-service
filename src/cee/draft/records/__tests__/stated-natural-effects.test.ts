@@ -153,7 +153,7 @@ describe("draft stated figures at the records seam", () => {
     // RE-PINNED, RT-10 B′ (Science d5 #2606): the (c) failure carries the FAILING link's two ends, bound by identity here
     // (the projection hashes node ids): Price rise → the goal, a link INTO the goal.
     const goal = result.projection.graph.nodes.find((node) => node.kind === "goal")!;
-    const priceRise = graph.nodes.filter((node) => node.label === "Price rise");
+    const priceRise = result.projection.graph.nodes.filter((node) => node.label === "Price rise");
     expect(priceRise).toHaveLength(1);
     expect(verdict).toEqual({
       kind: "not_testable", goal_id: goal.id,
