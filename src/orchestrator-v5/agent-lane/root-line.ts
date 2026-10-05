@@ -21,11 +21,15 @@ import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
 import { optionRosterFromGraph, textNamesAnOption } from '../compose/leading-option-wire-enforcement.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
-/** The label-free form (Science words pending; said only when a label would not survive the reply's editors). */
+/**
+ * The label-free form, said only when a label would not survive the reply's editors. Science's words (5 Oct): the
+ * disclosure stays; the question does not, since an input the reply cannot name cannot be answered without guessing
+ * which. The count is the typed roots' (`unvalued_roots`), never counted from prose.
+ */
 export const TREATED_AS_ZERO_UNNAMED_ONE =
-  'One input on your goal’s path has no figure yet, so the analysis treats it as zero. How likely or how large is it today?';
+  'One input on your goal’s path has no figure yet, so the analysis treats it as zero. Give it a figure on the canvas to include it.';
 export const treatedAsZeroUnnamedMany = (n: number): string =>
-  `${n} inputs on your goal’s path have no figures yet, so the analysis treats them as zero. How likely or how large is each today?`;
+  `${n} inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.`;
 
 /** Does every editor after placement leave `line` byte-identical, with the leader withheld? */
 export function survivesReplyEditors(line: string, graph: unknown, analysisReady: unknown): boolean {

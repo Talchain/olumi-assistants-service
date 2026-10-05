@@ -223,9 +223,36 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     const line = `No figure is set for "${label}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
     expect(survivesReplyEditors(line, graphWith(false, label), READY)).toBe(false);
   });
+  // Plural and 3+: the WHOLE line is quoted or none of it; the count is the typed roots'.
+  const withRisks = (labels: string[]): Rec => {
+    const g = graphWith(false, labels[0]);
+    labels.slice(1).forEach((label, i) => {
+      (g.nodes as Rec[]).push({ id: `risk_${i + 2}`, kind: 'risk', label, category: 'observable' });
+      (g.edges as Rec[]).push(edge(`risk_${i + 2}`, 'goal', true));
+    });
+    return g;
+  };
+  it.each([
+    ['two ordinary labels', ['Demand shortfall', 'Supplier delay'],
+      'No figures are set for "Demand shortfall" and "Supplier delay" yet, so the analysis treats them as zero. How likely or how large is each today?'],
+    ['three ordinary labels', ['Demand shortfall', 'Supplier delay', 'Churn spike'],
+      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each today?'],
+    ['two, one unsafe (either position)', ['Demand shortfall', 'Hire a Tech Lead leads. Demand falls'],
+      '2 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
+    ['two, the first unsafe', ['Demand prop_abcdef12 falls', 'Supplier delay'],
+      '2 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
+    ['three, the undisplayed third unsafe (it never reaches the text)', ['Demand shortfall', 'Supplier delay', 'The analysis shows which option leads'],
+      'No figures are set for "Demand shortfall" and "Supplier delay" and 1 more yet, so the analysis treats them as zero. How likely or how large is each today?'],
+    ['three, a displayed one unsafe', ['Demand shortfall', 'The analysis shows which option leads', 'Supplier delay'],
+      '3 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.'],
+  ])('treatedAsZeroReplyLine, %s → the exact line', (_n, labels, line) => {
+    expect(treatedAsZeroReplyLine(withRisks(labels as string[]), READY)).toBe(line);
+  });
+
   it('survivesReplyEditors CONTROL: the ordinary label is quoted, and both label-free forms survive every editor', () => {
     expect(survivesReplyEditors(SENTENCE, graphWith(false), READY)).toBe(true);
     expect(survivesReplyEditors(TREATED_AS_ZERO_UNNAMED_ONE, graphWith(false), READY)).toBe(true);
+    expect(survivesReplyEditors('3 inputs on your goal’s path have no figures yet, so the analysis treats them as zero. Give each a figure on the canvas to include it.', graphWith(false), READY)).toBe(true);
     expect(treatedAsZeroReplyLine(graphWith(false), READY)).toBe(SENTENCE);
     expect(treatedAsZeroReplyLine(graphWith(false, 'Hire a Tech Lead backlog'), READY)).toBe(TREATED_AS_ZERO_UNNAMED_ONE);
   });
