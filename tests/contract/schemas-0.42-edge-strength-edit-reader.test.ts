@@ -274,7 +274,11 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // 0.75.0 → 0.76.0 (SCI-DEEP structural challenge), re-derived from the supplied published archives:
     // all four boundary files above are byte-identical; the fixture registry changes, but its edge_strength_edit
     // lines are identical. The existing reader assertions below still exercise the current package.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.76.0');
+    // 0.76.0 → 0.77.0 (schemas #88, `stated_relationship_not_used` notice kind; main `b0378e7f`), RE-DERIVED on 5 Oct
+    // against the PUBLISHED tarballs (sha1 `57f6764c…` for 0.77.0): the FILE SET naming `edge_strength_edit` is identical;
+    // four files are byte-unchanged and `dist/fixtures/index.js` differs; 0 changed dist lines name a strength or a band
+    // (contrast: the same diff finds 19 changed lines naming `stated_relationship`).
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.77.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
