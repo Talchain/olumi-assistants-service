@@ -19,6 +19,7 @@ import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
+import { goalOwnLimitRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -74,41 +75,34 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
-/** The goal's own limit row: the same statement as its target (DECISION-REPRESENTATION row 1). */
-/**
- * The goal's own limit row: the target when the node carries no raw threshold. A DEADLINE on the goal ("within 18
- * months") is DR row 3's time limit, not row 4's target: it is skipped, detected by `deadline_metadata` PRESENCE, the
- * signal `compound-goals.ts` uses for the same split.
- */
-function ownLimitRow(graph: Rec, goal: Rec): Rec | undefined {
-  const rows = Array.isArray(graph.goal_constraints) ? graph.goal_constraints.filter(isRec) : [];
-  return rows.find((c) => c.node_id === goal.id && finite(c.value) && !isRec(c.deadline_metadata));
-}
+/** The goal's own limit row (DECISION-REPRESENTATION row 1): the ONE reader's (`stated-goal-target.ts`). */
+const ownLimitRow = goalOwnLimitRow;
 
-/** The goal's stated target figure: the node's own raw threshold, else the goal's own limit row's value. */
+/** The goal's stated target figure, read by the ONE target reader every surface shares (RT-10 B′ R3). */
 function statedTarget(graph: Rec, goal: Rec): number | null {
-  if (finite(goal.goal_threshold_raw)) return goal.goal_threshold_raw;
-  const own = ownLimitRow(graph, goal);
-  return own !== undefined ? (own.value as number) : null;
+  return statedGoalTargetOf(graph, goal)?.value ?? null;
 }
 
 const PRECONDITION_ORDER: readonly TargetPrecondition[] = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
 
 /**
- * ⭐ WHICH FAILURES ALSO WITHHOLD THE LEADER AND THE SHARES, not only the goal chance: all of them.
- * - AIQ #75 5914209776: an unconfirmed product and a placeholder link into the goal (YES in meaning).
- * - PTL #77 5914383843 ("maturity rule = YES"): no today's level, or a consequential goal path resting only on
- *   defaulted/unsized links, is `exploratory` too: no leader, no win shares, no goal chance, and the one blocking question.
- * One set, so a later ruling is one line.
+ * The failures that withhold the claims made AGAINST the target: the goal chance, the joint chance and (unless the
+ * failures leave it in the goal's units) the outcome distribution. One set, so a later ruling is one line.
+ *
+ * ⛔ RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED) AMENDS PTL #77 5914383843 for a target the run cannot test:
+ * stating a target never removes a finding the Run shows without one. The ordering (shares, leader, brief) needs no level
+ * today and no unit — the shared offset cancels on each draw — so these failures no longer cap the analysis mode at
+ * `exploratory` nor withhold the shares or the leader. Placeholder paths and an unread product keep their own,
+ * target-independent withholds (`placeholderGoalPaths`, Gate 5), exactly as on a run with no target.
  */
-export const CAPS_THE_ORDERING: ReadonlySet<TargetTestabilityFailure['code']> = new Set([
+export const TARGET_CLAIM_FAILURES: ReadonlySet<TargetTestabilityFailure['code']> = new Set([
   'missing_goal_baseline', 'threshold_off_scale', 'comparator_unscorable', 'threshold_unit_mismatch',
   'goal_path_placeholder', 'goal_path_unsized', 'identity_unconfirmed',
 ]);
 
-/** True when a verdict caps the claim at `exploratory` (see {@link CAPS_THE_ORDERING}). */
-export function targetVerdictCapsOrdering(verdict: TargetTestability): boolean {
-  return verdict.kind === 'not_testable' && verdict.failures.some((f) => CAPS_THE_ORDERING.has(f.code));
+/** True when a verdict withholds the claims made against the target (see {@link TARGET_CLAIM_FAILURES}). */
+export function targetVerdictWithholdsTargetClaims(verdict: TargetTestability): boolean {
+  return verdict.kind === 'not_testable' && verdict.failures.some((f) => TARGET_CLAIM_FAILURES.has(f.code));
 }
 
 export function targetTestabilityOf(input: unknown): TargetTestability {
@@ -222,7 +216,7 @@ export function notTargetTestableSentence(graph: unknown, verdict: TargetTestabi
 export function targetNotTestableWarning(
   graph: unknown, verdict: TargetTestability, optionIds: readonly string[], code: string,
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[] } | null {
-  if (!targetVerdictCapsOrdering(verdict) || verdict.kind !== 'not_testable') return null;
+  if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable') return null;
   const said = notTargetTestableSentence(graph, verdict);
   const message = said !== null && said.length <= 388 ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
   return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds] };

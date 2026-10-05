@@ -2084,7 +2084,7 @@ export const RECENT_CHANGES_INSTRUCTION = [
 export const GOAL_TARGET_INSTRUCTION = [
   '## Success target (deterministic — authoritative)',
   'The `goal_target` block above is the system’s verified answer to "is a success target recorded on this model, and what is it?". It is read from the saved model itself. Treat it as the source of truth over anything said in conversation.',
-  '- If `status` is "set", you may state that value (with its unit) as the recorded success target.',
+  '- If `status` is "set", you may state that value (with its unit) as the recorded success target. When it carries `operator`, say the value WITH it — `<=` "at most", `<` "below", `>=` "at least", `>` "above" — never as a bare figure.',
   '- If `status` is "unset", NO success target is recorded — say so plainly, even if a number was mentioned earlier in this conversation. A value someone mentioned in conversation has NOT been recorded on the model, and must never be quoted back as though it had been.',
   '- Never say a target has been set, saved, updated, applied or confirmed unless this block says "set". Never attach a source or provenance to a target this block does not carry.',
   '- If this block is absent you do not know — say what you can see and offer to check, rather than asserting either way.',

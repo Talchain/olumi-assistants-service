@@ -3642,8 +3642,9 @@ function goalFigureOptions(envelope: unknown): { scored: string[]; shown: string
 
 /**
  * ⛔ DR ROW 4 IN THE RUN (AIQ #2371 5914730220 / 5915342964): when the goal's target can't be tested
- * (`targetVerdictCapsOrdering`), every option that STILL shows a goal figure after the earlier withholds has it withheld
- * under `GOAL_FIGURES_TARGET_NOT_TESTABLE` (the leader and shares go with it). Options an earlier withhold already took keep
+ * (`targetVerdictWithholdsTargetClaims`), every option that STILL shows a goal figure after the earlier withholds has its
+ * claims AGAINST THE TARGET withheld under `GOAL_FIGURES_TARGET_NOT_TESTABLE`. ⛔ RT-10 B′ R2 (Science #87 5999608477; DL
+ * e8 CONFIRMED): the shares, the leader and the brief STAY (`keepOrdering`), exactly as on a run with no target. Options an earlier withhold already took keep
  * that withhold's own reason. Returns `response` itself when nothing is left to withhold or the target is testable. Pure.
  */
 export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown): E {
@@ -3663,7 +3664,7 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   if (warning === null) return response;
   // DL [R1] condition: each kept figure carries its sizing label — the options resting on Olumi's accepted estimates.
   const accepted = keepOutcome ? optionsRestingOnAcceptedOlumiSizes(graph, ids) : [];
-  return withholdOptionGoalFigures(response, new Set(ids), accepted.length > 0 ? { ...warning, rests_on_accepted_olumi: accepted } : warning, { keepOutcome });
+  return withholdOptionGoalFigures(response, new Set(ids), accepted.length > 0 ? { ...warning, rests_on_accepted_olumi: accepted } : warning, { keepOutcome, keepOrdering: true });
 }
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */

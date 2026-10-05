@@ -234,6 +234,13 @@ const GOAL_OUTCOME_FIGURES = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
 export type WithheldGoalClaim = 'goal_probability' | 'joint_probability' | 'outcome' | 'downside' | 'win_share';
 /** Everything but the option's own outcome distribution. `downside` goes: its `expected_regret` compares options. */
 export const OUTCOME_KEPT_CLAIMS: readonly WithheldGoalClaim[] = ['goal_probability', 'joint_probability', 'downside', 'win_share'];
+/**
+ * ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): a target the run cannot TEST withholds only the claims made
+ * AGAINST the target. The ordering (shares, the leader, the brief, the flips and the comparison's robustness) needs no
+ * level today and no unit — the shared offset cancels on each draw — so it keeps exactly the gates a run with no target
+ * applies. The outcome distribution goes too unless the failures leave it in the goal's units (`keepOutcome`).
+ */
+export const TARGET_ONLY_CLAIMS: readonly WithheldGoalClaim[] = ['goal_probability', 'joint_probability'];
 
 /**
  * Leader and flip facts computed from the same comparison as the withheld figures (PLoT #416's list, R3 5888737291):
@@ -258,22 +265,24 @@ const SUMMARY_LEADER_KEYS = ['goal_fit', 'win_probability', 'leading_option', 'r
 export function withholdOptionGoalFigures<E>(
   envelope: E, withheld: ReadonlySet<string>, warning: Record<string, unknown>,
   /** Keep each withheld option's outcome distribution (F1b [R1]): only the claims AGAINST the target go. */
-  opts: { readonly keepOutcome?: boolean } = {},
+  opts: { readonly keepOutcome?: boolean; readonly keepOrdering?: boolean } = {},
 ): E {
   if (withheld.size === 0 || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const stripEntry = (entry: unknown): unknown => {
     const r = readRecord(entry);
     if (r === null) return entry;
     const out: Record<string, unknown> = { ...r };
-    delete out.win_probability;
-    delete out.rank;
-    // A per-row robustness reading is the same comparison claim as the top-level one emptied below.
-    delete out.robustness;
+    if (opts.keepOrdering !== true) {
+      delete out.win_probability;
+      delete out.rank;
+      // A per-row robustness reading is the same comparison claim as the top-level one emptied below.
+      delete out.robustness;
+    }
     const id = optionIdOf(r);
     if (id !== undefined && withheld.has(id)) {
       delete out.probability_of_goal;
       delete out.probability_of_joint_goal;
-      delete out.downside;
+      if (opts.keepOrdering !== true) delete out.downside;
       const outcome = readRecord(r.outcome);
       if (outcome !== null && opts.keepOutcome !== true) {
         const kept: Record<string, unknown> = { ...outcome };
@@ -300,24 +309,30 @@ export function withholdOptionGoalFigures<E>(
   if (brief !== null) {
     const b: Record<string, unknown> = { ...brief };
     if ('options' in brief) b.options = strip(brief.options);
-    for (const k of BRIEF_LEADER_KEYS) delete b[k];
+    if (opts.keepOrdering !== true) for (const k of BRIEF_LEADER_KEYS) delete b[k];
     const summary = readRecord(brief.analysis_summary);
     if (summary !== null) {
       const s: Record<string, unknown> = { ...summary };
-      for (const k of SUMMARY_LEADER_KEYS) delete s[k];
+      // `goal_fit` is the leader's fit to the TARGET: a target claim, withheld even when the ordering stays.
+      for (const k of SUMMARY_LEADER_KEYS) if (opts.keepOrdering !== true || k === 'goal_fit') delete s[k];
       b.analysis_summary = s;
     }
     out.decision_brief = b;
   }
-  for (const k of COMPARISON_DERIVED_KEYS) delete out[k];
-  if (readRecord(env.robustness) !== null) out.robustness = { fragile_edges: [], robust_edges: [] };
+  if (opts.keepOrdering !== true) {
+    for (const k of COMPARISON_DERIVED_KEYS) delete out[k];
+    if (readRecord(env.robustness) !== null) out.robustness = { fragile_edges: [], robust_edges: [] };
+  }
   // `win_shares_withheld`: this withhold REMOVED identity-bound usable shares (the run-delta producer's own rule, read
   // off the envelope BEFORE the strip). Every entry's share goes above, so a later reader sees none and cannot tell a
   // removed share from one PLoT never sent; only this record can (`runWithheldWinShares`, CODEX on CEE 864e915c P1).
-  const sharesRemoved = identityBoundWinProbabilities(env).size > 0;
+  const sharesRemoved = opts.keepOrdering !== true && identityBoundWinProbabilities(env).size > 0;
+  const withheldClaims: readonly WithheldGoalClaim[] | undefined = opts.keepOrdering === true
+    ? [...TARGET_ONLY_CLAIMS, ...(opts.keepOutcome === true ? [] : ['outcome' as const])]
+    : opts.keepOutcome === true ? OUTCOME_KEPT_CLAIMS : undefined;
   const recorded = {
     ...warning,
-    ...(opts.keepOutcome === true ? { withheld_claims: [...OUTCOME_KEPT_CLAIMS] } : {}),
+    ...(withheldClaims !== undefined ? { withheld_claims: [...withheldClaims] } : {}),
     ...(sharesRemoved ? { win_shares_withheld: true } : {}),
   };
   out.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), recorded];

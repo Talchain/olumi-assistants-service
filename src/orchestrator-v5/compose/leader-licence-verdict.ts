@@ -115,8 +115,11 @@ function admissionReason(analysisReady: unknown): LeaderLicenceWithheldReason {
 function goalFigureReason(result: Rec): LeaderLicenceWithheldReason | null {
   const envelope = rec(result.enrichment);
   if (envelope === null) return null;
-  const code = goalFiguresWithheldWarning(envelope)?.code;
+  const warning = goalFiguresWithheldWarning(envelope);
+  const code = warning?.code;
   if (typeof code !== 'string') return null;
+  // RT-10 B′ R2: a withhold that KEPT the shares (its `withheld_claims` lists no `win_share`) withholds no leader.
+  if (Array.isArray(warning?.withheld_claims) && !(warning.withheld_claims as unknown[]).includes('win_share')) return null;
   if (code === GOAL_FIGURES_OPTIONS_IDENTICAL) return 'options_do_not_separate';
   if (code === GOAL_FIGURES_TARGET_NOT_TESTABLE) return 'target_not_testable';
   return 'goal_figures_withheld';
