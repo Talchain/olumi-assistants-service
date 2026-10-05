@@ -108,6 +108,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
 import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/placeholder-parts.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
+import { statedRangeFrame } from "../../../orchestrator-v5/agent-lane/frame-rule.js";
 // The readiness validator's own exemptions from NO_PATH_TO_GOAL, read here so the prune and readiness share one rule.
 import { limitSinkBranch } from "../../../graph/limit-sink-branch.js";
 import { inertRiskBranch } from "../../../graph/inert-risk.js";
@@ -4519,7 +4520,13 @@ function projectOnce(
       }
       if (magnitudes.length === 0) continue;
       const unit = (factor.data as { unit?: unknown } | undefined)?.unit;
-      const frame = deriveFactorScaleFrame(magnitudes, typeof unit === "string" ? unit : undefined);
+      // ⭐ P2-FRAME (DL ruling): a quantity's declared `plausible_max` IS its frame, through the legacy construct's own
+      // rule (`statedRangeFrame`: the stated range, widened only when a level exceeds it). Without one, the records
+      // ladder below still applies (the legacy fallback switch is measured and STOPPED in the pass-2 report).
+      const declaredMax = factor.quantity_ref === undefined ? undefined : statedItems[factor.quantity_ref]?.plausible_max;
+      const frame = typeof declaredMax === "number" && Number.isFinite(declaredMax) && declaredMax > 1 && !magnitudes.some((m) => m < 0)
+        ? statedRangeFrame(declaredMax, magnitudes)
+        : deriveFactorScaleFrame(magnitudes, typeof unit === "string" ? unit : undefined);
       if (frame === undefined) continue;
       // ⭐⭐ PERSIST THE DIVISOR. Everything below divides by `frame` and, until
       // this line existed, then discarded it — so the ONLY surviving trace of

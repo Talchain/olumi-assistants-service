@@ -519,6 +519,8 @@ export interface DraftStatedItem {
   direction_literal?: string;
   /** v-next only, option only: absent or `sets_to` is an absolute level; `change_by` is the signed change to the lever. */
   setting?: DraftRecordOptionSetting;
+  /** v-next only, on a quantity's declaring item: the top of its plausible range, i.e. its frame (P2-FRAME). */
+  plausible_max?: number;
   /** Seam-only compatibility and typed conflict diagnostics. */
   legacy_evidence?: true;
   evidence_conflicts?: string[];
@@ -1020,6 +1022,7 @@ export function buildVNextDraftRecordsSchema(): Record<string, unknown> {
             range: VALUE_RANGE_SCHEMA, relationship: STATED_RELATIONSHIP_SCHEMA,
             horizon_months: { type: "number" }, horizon_ref: { type: "integer" }, direction_literal: { type: "string" },
             setting: { type: "string", enum: [...DRAFT_RECORD_OPTION_SETTINGS] },
+            plausible_max: { type: "number" },
             unit: { type: "string" },
             role: { type: "string", enum: [...DRAFT_RECORD_ROLES] },
             // What convention `value` is written in. See the interface note:

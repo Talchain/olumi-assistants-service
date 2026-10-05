@@ -16,6 +16,9 @@ It declares unit, including the period ("£/month", "vans", "deliveries/month"),
 unit_literals, and value_scale when it has a number. Every other record about
 that quantity sets quantity to this declaring index and does not restate unit
 or value_scale. A range and each end of a relationship use their quantity's unit.
+The declaring item may give plausible_max, the largest level the quantity could
+plausibly reach; every level is read against it. It is Olumi's estimate unless a
+stated figure bounds it. Omit it rather than guess when nothing bounds it.
 Never identify endpoints by their labels or by a matching unit.
 
 Copy, do not count. Every *_literal is copied character for character from that

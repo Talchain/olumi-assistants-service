@@ -1946,8 +1946,9 @@ describe("v20 — the current-level ask reaches risk and outcome claims", () => 
 
 // INERT compiler lease. New identity, extraction-unproven; all historic pins remain untouched.
 // Pass 2 P2-A1 re-pin (reason): the v-next rule for an option's typed `setting` (change_by vs sets_to) was added;
-// was fe150807d06c4c25fe41cb2e88eaf8cf87026fd67d5bbbf808e8148b01b4ab3e. The served v25 pins above are unchanged.
-const PREREGISTERED_VNEXT_INSTRUCTION_SHA256 = '2b2f88fa70bd3797955197380daea3d3f0701cc708f120e8a71255b99c12930c';
+// was fe150807d06c4c25fe41cb2e88eaf8cf87026fd67d5bbbf808e8148b01b4ab3e. P2-FRAME re-pin (reason): the declaring
+// item's `plausible_max` rule; was 2b2f88fa…930c. The served v25 pins above are unchanged.
+const PREREGISTERED_VNEXT_INSTRUCTION_SHA256 = '5535ce16fdea8896f4a9b0a6a18cd9c9a189f7bc36b45d8970a570fecfe83831';
 describe('inert v-next instruction identity', () => {
   it('pins new generic relationship/literal rules separately from served v25', () => {
     expect(vNextDraftRecordsInstructionHash()).toBe(PREREGISTERED_VNEXT_INSTRUCTION_SHA256);

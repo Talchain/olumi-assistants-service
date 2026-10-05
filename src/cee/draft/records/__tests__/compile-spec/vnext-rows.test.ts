@@ -17,6 +17,7 @@ import { resolveAnalysisAdmission } from '../../../../../orchestrator-v5/admissi
 import { projectGraphForPersistence } from '../../../../../orchestrator-v5/persisted-graph-projection.js';
 import { assignEntityRefs } from '../../../../../orchestrator-v5/graph/entity-refs.js';
 import { buildFactorScaleMap, projectRequestInterventionsToWireScale } from '../../../../../orchestrator-v5/tools/plot-intervention-scale.js';
+import { defaultFrameFor, framedObservedState } from '../../../../../orchestrator-v5/agent-lane/admit-model.js';
 
 function project(records: DraftRecordSet, brief = BRIEF) {
   const r = projectDraftRecords(records, brief); expect(r.ok).toBe(true);
@@ -73,8 +74,10 @@ describe('v-next inert flip ladder', () => {
     // Budget reason: nullable strict parameters are OpenAI inputs, not Anthropic optional parameters.
     // P2-A1 re-pin (reason): +1 optional `setting` enum on v-next stated items (4967→5064 strict bytes; 3180→3239 and
     // 44→45 optional on the unstrict builder). Anthropic bytes are unchanged and pinned by the G0 row above.
-    expect(measureDraftRecordsSchemaBudget(schema)).toMatchObject({serializedBytes:5064,optionalParams:0,objectSchemas:7});
-    expect(measureDraftRecordsSchemaBudget(buildVNextDraftRecordsSchema())).toMatchObject({serializedBytes:3239,optionalParams:45,objectSchemas:7});
+    // P2-FRAME re-pin (reason): +1 optional `plausible_max` number on v-next stated items (5064→5142 strict bytes;
+    // 3239→3273 and 45→46 optional on the unstrict builder). Anthropic bytes unchanged (G0 row above).
+    expect(measureDraftRecordsSchemaBudget(schema)).toMatchObject({serializedBytes:5142,optionalParams:0,objectSchemas:7});
+    expect(measureDraftRecordsSchemaBudget(buildVNextDraftRecordsSchema())).toMatchObject({serializedBytes:3273,optionalParams:46,objectSchemas:7});
   });
   it('B5 literal offsets are stored by relationship identity', () => {
     const r=sealedRecords();const i=r.stated_items[10]!;const a=i.relationship!;delete a.amount_span;delete a.source_span; a.amount_literal='£300';a.per_source_literal='Each';
@@ -120,8 +123,9 @@ describe('v-next inert flip ladder', () => {
   it('B1a EXTRACTION-UNPROVEN decimal bounds keep one relationship clause',()=>{const r=vans();const item=r.stated_items[5]!;item.source_quote='Adding 5 vans changes deliveries by 18.5 to 36.5 every month.';item.relationship!.per_source_literal='5 vans';item.relationship!.range={low:18.5,high:36.5,low_literal:'18.5',high_literal:'36.5'};expect(edgeFor(project(r,VANS+' '+item.source_quote),5,r)?.provenance?.natural_effect?.amount).toBe(27.5);});
   it('B1a EXTRACTION-UNPROVEN currency bounds contradict a count quantity',()=>{const r=vans();const item=r.stated_items[5]!;item.source_quote='Adding 5 vans changes deliveries by £18 to £36 every month.';item.relationship!.per_source_literal='5 vans';item.relationship!.range={low:18,high:36,low_literal:'£18',high_literal:'£36'};const p=project(r,VANS+' '+item.source_quote);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'unit_literal_contradicts_unit'}));expect(edgeFor(p,5,r)?.provenance?.natural_effect).toBeUndefined();});
   it('B4 EXTRACTION-UNPROVEN a calendar determiner cannot stand for a van',()=>{const r=vans();const item=r.stated_items[5]!;delete item.relationship!.range;Object.assign(item.relationship!,{amount:18,amount_literal:'18',per_source_change:1,per_source_literal:'every month'});const p=project(r,VANS);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'unit_literal_contradicts_unit'}));expect(edgeFor(p,5,r)?.provenance?.natural_effect).toBeUndefined();});
-  // P2-A1 re-pin (reason): the v-next option `setting` rule; was fe150807…ab3e. v25 is pinned in instruction-pin.
-  it('instruction new generic v-next hash is pinned without moving v25',()=>{expect(createHash('sha256').update(V_NEXT_DRAFT_RECORDS_INSTRUCTION).digest('hex')).toBe('2b2f88fa70bd3797955197380daea3d3f0701cc708f120e8a71255b99c12930c');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('effect_detail');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('value_span');});
+  // P2-A1 re-pin (reason): the v-next option `setting` rule; was fe150807…ab3e. P2-FRAME re-pin: the `plausible_max`
+  // rule; was 2b2f88fa…930c. v25 is pinned in instruction-pin.
+  it('instruction new generic v-next hash is pinned without moving v25',()=>{expect(createHash('sha256').update(V_NEXT_DRAFT_RECORDS_INSTRUCTION).digest('hex')).toBe('5535ce16fdea8896f4a9b0a6a18cd9c9a189f7bc36b45d8970a570fecfe83831');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('effect_detail');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('value_span');});
   it('determinism is byte identical',async()=>{expect(JSON.stringify(await registered())).toBe(JSON.stringify(await registered()));expect(projectionFingerprint(project(sealedRecordsVNext()))).toBe(projectionFingerprint(project(sealedRecordsVNext())));});
 });
 
@@ -285,5 +289,25 @@ describe('pass 2 P2-B6x: a missing value is an ask, never a zero or a default', 
     expect(goal.goal_direction).toBeUndefined();
     const graph: any = await registeredWith(r, VANS_DEADLINE);
     expect(graph.nodes.find((n: any) => n.kind === 'goal')?.goal_direction).toBeUndefined();
+  });
+});
+
+describe('pass 2 P2-FRAME: a declared plausible_max frames its quantity by the legacy construct rule', () => {
+  const starterFrame = async (plausibleMax: number) => {
+    const r = sealedRecordsVNext(); r.stated_items[11]!.plausible_max = plausibleMax;
+    const graph: any = stored((await registered(r)).graph);
+    const label = r.claims.find(c => c.quantity === 11 && c.claim_kind === 'factor')!.label!;
+    return { graph, factor: graph.nodes.find((n: any) => n.label === label)!, option: graph.nodes.find((n: any) => n.kind === 'option' && n.source_quote === r.stated_items[4]!.source_quote)! };
+  };
+  it('P2-FRAME the stored frame equals the legacy framing of the same plausible_max', async () => {
+    const { factor, option } = await starterFrame(300);
+    const legacy = framedObservedState({ baseline_value: factor.observed_state.raw_value, unit: factor.observed_state.unit, provenance: 'explicit', plausible_max: 300 }) as { cap?: number };
+    expect(legacy.cap).toBe(300);
+    expect(factor.scale_frame).toBe(legacy.cap);
+    expect(option.interventions[factor.id]).toMatchObject({ raw_value: 150, value: 0.5 });
+  });
+  it('P2-FRAME a level above the declared range widens it exactly as the legacy construct does', async () => {
+    const { factor } = await starterFrame(100);
+    expect(factor.scale_frame).toBe(defaultFrameFor(150));
   });
 });
