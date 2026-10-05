@@ -3689,6 +3689,6 @@ export function goalDirectionCorrectableByTarget(graph: unknown, goalNodeId: unk
   // `ceilingMatchesHeldFigure`). Where the shown figure is not the held figure, no correction is promised.
   const raw = goal.goal_threshold_raw;
   const shown = goal.threshold_source === 'user' ? goal.success_threshold : undefined;
-  const finiteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-  return !(finiteNumber(raw) && finiteNumber(shown) && shown !== raw);
+  const isFiniteFigure = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  return !(isFiniteFigure(raw) && isFiniteFigure(shown) && shown !== raw);
 }
