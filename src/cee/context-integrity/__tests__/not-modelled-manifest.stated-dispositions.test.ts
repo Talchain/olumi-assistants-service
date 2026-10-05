@@ -173,6 +173,19 @@ describe("deriveNotModelledManifest — typed rows from the persisted receipt", 
     expect(currentStatedDispositionRows(edited)).toBeUndefined();
   });
 
+  it("⭐ RED (R3, Codex counterexample): a typed row at the same offset but a DIFFERENT extent never hides the scanned quantity", () => {
+    const brief = "30% of customers churn each month";
+    const rows = [{ stated_index: 0, stated_item: { kind: "figure", source_quote: brief, value: 3, value_span: { start: 0, end: 1 } },
+      disposition: "rejected", reason: "stated_value_not_carried" }];
+    const graph = { ...structuredClone(GRAPH), stated_dispositions: { reconciled_against: BOUND_TO, rows } };
+    const manifest = deriveNotModelledManifest(brief, graph) as unknown as Rec & ReturnType<typeof deriveUnbound>;
+    const block = manifest.stated_dispositions as unknown as Rec;
+    expect((block.items as Rec[]).map((r) => [r.literal, r.char_offset])).toEqual([["3", 0]]); // contrast: the typed row is there
+    // the scanned `30%` is a different quantity: it is kept, and nothing is counted as superseded
+    expect(manifest.quantities!.items.map((i) => [i.literal, i.char_offset])).toEqual([["30%", 0]]);
+    expect(block.superseded).toBe(0);
+  });
+
   it("CONTROL: a graph without the key yields a manifest with no new key, byte-identical to before", () => {
     const manifest = deriveNotModelledManifest(BRIEF, structuredClone(GRAPH)) as unknown as Rec;
     expect(manifest).not.toHaveProperty("stated_dispositions");

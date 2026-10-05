@@ -318,7 +318,7 @@ export interface StatedDispositionsBlock {
   readonly carried: number;
   /** Receipts whose sentence is not in this brief — counted, never placed at a guessed offset. */
   readonly unlocated: number;
-  /** Read-time `quantities.items` rows NOT reported because a typed row here holds the same `char_offset`. */
+  /** Read-time `quantities.items` rows NOT reported because a typed row holds the same `char_offset` AND literal. */
   readonly superseded: number;
   readonly items: readonly StatedDispositionRow[];
 }
@@ -2061,7 +2061,9 @@ export function deriveNotModelledManifest(
 
   const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
   const typedDispositions = readStatedDispositions(briefText, options.statedDispositionRows);
-  const typedOffsets = new Set(typedDispositions?.items.map((row) => row.char_offset) ?? []);
+  // The SAME quantity = same offset AND same located literal (R3): a typed `3` at the start of a scanned `30%` is not it.
+  const typedSpan = (at: number, literal: string): string => `${at}\u0000${literal}`;
+  const typedSpans = new Set(typedDispositions?.items.map((row) => typedSpan(row.char_offset, row.literal)) ?? []);
   let superseded = 0;
   const quantities = extractStatedQuantities(briefText);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
@@ -2091,9 +2093,9 @@ export function deriveNotModelledManifest(
     } else if (verdict === "prose_only") proseOnly += 1;
     else absent += 1;
     // ONE AUTHORITATIVE DISPOSITION PER SPAN (R2, Codex P2): where the compiler TYPED this figure, its typed row
-    // (`stated_dispositions.items`, same `char_offset`) is the disposition, and the read-time row is not also
-    // reported. Tallies above still count every quantity found; `superseded` says how many rows were replaced.
-    if (typedOffsets.has(q.at)) {
+    // (`stated_dispositions.items`, same `char_offset` AND same literal) is the disposition, and the read-time row is not
+    // also reported. A quantity the typed row does not cover exactly is never hidden. Tallies above still count every quantity found; `superseded` says how many rows were replaced.
+    if (typedSpans.has(typedSpan(q.at, q.literal))) {
       superseded += 1;
     } else if (items.length < MAX_ITEMS) {
       const statedKind = classifyStatedKind(q, spans);
