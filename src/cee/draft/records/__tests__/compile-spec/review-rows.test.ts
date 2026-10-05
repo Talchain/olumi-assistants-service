@@ -167,13 +167,19 @@ describe('P1-7 Complete sizing bundle', () => {
     const e = sized(project());
     expect((e as V1Edge).strength_std).toBe(Math.abs(e.strength_mean!) / 2);
   });
-  it('refuses an unsupported coefficient instead of silently clamping 2 to 1', () => {
+  // PORTS 2+3 re-pin (DL port 3 part 1, legacy D7 "kept exactly as stated"): the projector no longer withdraws a user's
+  // size the frames cannot hold; it keeps the full β (never clamped here) and the records build stores it at ±1 with
+  // `clamped_from` (records-ports3-served-readers). Was: 'refuses an unsupported coefficient …' / magnitude not user_stated.
+  it('keeps an unsupported coefficient exactly as stated (full β > 1, natural size) instead of silently clamping 2 to 1', () => {
     const r = records(); r.claims[0]!.value = 100;
     r.claims[3]!.effect_detail!.amount = 3750;
     r.stated_items[1]!.source_quote = quote.replace('£1,200', '£3,750');
     Object.assign(r.stated_items[1]!, { relationship: { ...(r.stated_items[1] as unknown as { relationship: object }).relationship, amount: 3750 } });
     const e = sized(project(r, `${brief} ${r.stated_items[1]!.source_quote}`));
-    expect(e.provenance?.magnitude).not.toBe('user_stated');
+    expect(e.provenance?.magnitude).toBe('user_stated');
+    expect(e.strength_mean!).toBeGreaterThan(1);
+    expect(e.provenance?.natural_effect?.strength_mean).toBe(e.strength_mean);
+    expect(e.provenance?.source_quote).toBe(r.stated_items[1]!.source_quote);
   });
   it('withdraws authored size when the V3 boundary changes its mean or spread', () => {
     const original = sized(project());
