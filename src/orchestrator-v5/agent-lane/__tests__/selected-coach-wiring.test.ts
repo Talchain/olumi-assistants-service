@@ -26,11 +26,13 @@ const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f6
 // + MODEL_RELATIVE_NAMING_INSTRUCTION appended after the reply-length sentence (WORDING BATCH, DL 0df0e1 lease, 5 Oct):
 //   28,026 → 28,835 bytes (+1 space +808). Rebuilt from the source literals, it reproduced the old pin b2653d0e… exactly first.
 // + the naming rule glosses N in positive words and bans the recommend stem even negated (WORDING, DL 0df0e1 cut 3,
-//   Acceptance rehearsal 2): 28,835 → 29,072 bytes (+237). Same rebuild, which reproduced 2bc25cba… exactly first.
-const RENDERED_SHA = '3ef18fda91540f01c2229027cfe28f6bfd528f7b3949a35739199c4d66e1b54a';
-const RENDERED_BYTES = 29_072;
+//   Acceptance rehearsal 2), and names an option in Part B's neutral form "N% of runs supported X" (Codex r1 #2614: "scored
+//   highest" is false on a minimise Run and inexact under split tie credit): 28,835 → 29,197 bytes (+362). Same rebuild,
+//   which reproduced 2bc25cba… exactly first.
+const RENDERED_SHA = '9adadf8cd11696564c4e0f3bf222061b3735d1093d6f7784936d01331cc49936';
+const RENDERED_BYTES = 29_197;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
-const NAMING_RULE_FORM = 'name it only as \u201cIn this model, \u2018X\u2019 scored highest in N% of runs\u201d';
+const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';
