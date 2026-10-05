@@ -61,6 +61,17 @@ export function deriveStatedDispositions(
     if (evidenceFailure !== undefined) return { ...origin, disposition: 'rejected', reason: evidenceFailure.reason };
     const nodeId = statedNodeIds.get(stated_index);
     const node = nodes.find(n => n.id === nodeId);
+    if (item.kind === 'option_effect' && item.option_effect !== undefined) {
+      const e = item.option_effect;
+      const option = nodes.find(n => n.id === statedNodeIds.get(e.option));
+      const details = option?.data?.intervention_details;
+      if (option !== undefined && object(details)) for (const [factorId, detail] of Object.entries(details)) {
+        if (!object(detail) || detail.source !== 'brief_extraction' || detail.stated_index !== stated_index) continue;
+        const key = e.change_by === undefined ? 'raw_value' : 'change_by';
+        const value = literalConventionValue(e.sets_to ?? e.change_by!, records.stated_items[e.quantity]?.unit, records.stated_items[e.quantity]?.value_scale);
+        if (detail[key] === value) return carry({ kind: 'node', node_id: option.id, path: ['data', 'intervention_details', factorId, key] }, value);
+      }
+    }
     // A typed relationship needs its executable bundle, never just its cause label.
     if (item.relationship !== undefined) {
       const edge = edges.find(e => e.provenance?.magnitude === 'user_stated'

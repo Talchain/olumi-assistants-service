@@ -197,7 +197,9 @@ import { createHash } from "node:crypto";
  * way to say "this verbatim span is an explanation, not a choice". Now there is.
  */
 export const DRAFT_RECORD_STATED_KINDS = ["goal", "option", "constraint", "figure", "cause"] as const;
-export type DraftRecordStatedKind = (typeof DRAFT_RECORD_STATED_KINDS)[number];
+/** Additive compiler shapes; the frozen legacy wire keeps its original kinds. */
+export const DRAFT_RECORD_TYPED_STATED_KINDS = [...DRAFT_RECORD_STATED_KINDS, "change_quantity", "option_effect"] as const;
+export type DraftRecordStatedKind = (typeof DRAFT_RECORD_TYPED_STATED_KINDS)[number];
 
 /** ≈ `NumericAnchor.role` (`cee/signals/types.ts:22-27`). */
 export const DRAFT_RECORD_ROLES = ["target", "baseline", "constraint", "context"] as const;
@@ -540,8 +542,27 @@ export interface DraftGoalScope {
   stated_in_brief: boolean;
 }
 
+/** An option-bound intervention, never a quantity-to-quantity causal relationship. */
+export interface DraftStatedOptionEffect {
+  option: number;
+  quantity: number;
+  sets_to?: number;
+  change_by?: number;
+  value_literal: string;
+  range?: DraftValueRange;
+}
+/** Existing graph identity carrier, accepted as checked compiler input (not another drafter shape). */
+export interface DraftNonlinearIdentity {
+  operation: "product" | "ratio";
+  factor_ids: string[];
+  stated_in_brief?: boolean;
+}
+
 export interface DraftStatedItem {
   kind: DraftRecordStatedKind;
+  /** Explicit drafter name of the increment; never inferred from its quote. */
+  quantity_label?: string;
+  option_effect?: DraftStatedOptionEffect;
   /** REQUIRED, verbatim. Verified by substring location against the brief. */
   source_quote: string;
   value?: number;
@@ -638,6 +659,7 @@ export interface DraftStatedItem {
 
 /** What the model adds — the honesty half. `id` absent by design. */
 export interface DraftInferenceClaim {
+  nonlinear_identity?: DraftNonlinearIdentity;
   claim_kind: DraftRecordClaimKind;
   label: string;
   /**

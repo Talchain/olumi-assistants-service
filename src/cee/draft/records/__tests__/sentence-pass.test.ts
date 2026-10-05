@@ -82,7 +82,7 @@ describe('the strict wire and the instruction', () => {
     };
     walk(schema);
     const validate = new Ajv({ strict: false, allErrors: true }).compile(schema);
-    const nulls = { figure: null, value: null, value_literal: null, unit: null, unit_literals: null, value_scale: null, quantity_of: null,
+    const nulls = { kind: null, quantity_label: null, option_effect: null, figure: null, value: null, value_literal: null, unit: null, unit_literals: null, value_scale: null, quantity_of: null,
       direction: null, direction_literal: null, baseline_figure: null, setting: null, relationship: null };
     const answer = { records: [
       { ...nulls, sentence: 1, role: 'goal', figure: 2, direction: 'floor', direction_literal: 'at least', baseline_figure: 'unresolved' },
@@ -134,7 +134,9 @@ describe('(e) import graph: the merge module reads no label and calls no unit or
     // Code only: the module's own comments name the validators it defers to.
     const code = linksSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     expect(code).not.toMatch(/stated-amounts|findStatedAmounts|readUnit|readMoney|readCountRate|parseCardinal|unitEvidenceReason|boundLiteral/);
-    expect(code).not.toMatch(/\.label\b|claims\s*\[|\.claims\b/);
+    expect(code).not.toMatch(/\.label\b|claims\s*\[/);
+    // The typed increment declaration may rebind quantity aliases, never inspect a claim's content.
+    expect(new Set([...code.matchAll(/\bclaim\.([a-zA-Z_]\w*)/g)].map(m => m[1]))).toEqual(new Set(['quantity']));
     expect(code).toMatch(/sameUnit\(/); // contrast: the probe sees a call it allows
   });
 });

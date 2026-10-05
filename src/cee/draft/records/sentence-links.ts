@@ -30,7 +30,7 @@ import type { InventoryFigure, SentenceInventory, SentencePassRecord } from './s
 
 /** The refusals on a stated index that the pass may fill (design §4, verbatim list). */
 export const FILLABLE_REFUSALS: ReadonlySet<string> = new Set([
-  'relationship_endpoint_missing', 'quantity_unit_undeclared', 'unit_not_evidenced', 'literal_value_mismatch', 'option_value_unbound',
+  'relationship_endpoint_missing', 'quantity_unit_undeclared', 'unit_not_evidenced', 'literal_value_mismatch', 'option_value_unbound', 'option_change_by_baseline_unknown',
 ]);
 
 export interface MainCompileFacts {
@@ -52,7 +52,7 @@ export type SentenceLinkRefusalReason =
   | 'sentence_unknown' | 'figure_unknown' | 'figure_not_in_sentence' | 'figure_record_ambiguous'
   | 'alignment_none' | 'alignment_ambiguous' | 'unit_mismatch' | 'main_quote_not_unique'
   | 'main_link_compiled' | 'main_link_not_fillable' | 'endpoint_unresolved' | 'endpoint_undeclared' | 'endpoint_is_option_without_item'
-  | 'literal_not_in_sentence' | 'no_main_item';
+  | 'literal_not_in_sentence' | 'no_main_item' | 'option_binding_missing' | 'change_quantity_conflict';
 export interface SentenceLinkRefusal {
   readonly sentence: number;
   readonly role: string;
@@ -143,7 +143,7 @@ export function mergeSentenceLinks(input: {
   /** The pass's own record for each figure it typed (goal, figure, option setting or context). Two = ambiguous. */
   const recordByFigure = new Map<number, SentencePassRecord | null>();
   for (const r of pass) {
-    if (r.role === 'cause' || typeof r.figure !== 'number') continue;
+    if (r.role === 'cause' || r.role === 'option_effect' || typeof r.figure !== 'number') continue;
     recordByFigure.set(r.figure, recordByFigure.has(r.figure) ? null : r);
   }
   const refuse = (r: SentencePassRecord, reason: SentenceLinkRefusalReason, extra: Partial<SentenceLinkRefusal> = {}): void => {
@@ -211,7 +211,8 @@ export function mergeSentenceLinks(input: {
     const sentence = sentenceById.get(figure.sentence)!;
     const index = items.length;
     const item: DraftStatedItem = {
-      kind: 'figure', source_quote: sentence.text, quantity: index,
+      kind: own.kind === 'change_quantity' ? 'change_quantity' : 'figure', source_quote: sentence.text, quantity: index,
+      ...(own.quantity_label !== undefined ? { quantity_label: own.quantity_label } : {}),
       ...(own.value !== undefined ? { value: own.value } : {}),
       ...(own.value_literal !== undefined ? { value_literal: own.value_literal } : {}),
       ...(own.unit !== undefined ? { unit: own.unit } : {}),
@@ -228,6 +229,7 @@ export function mergeSentenceLinks(input: {
   /** The quantity identity of a declaring figure: D(F) = main[i].quantity ?? i, or an appended item. */
   const identity = (figureId: number | typeof DRAFT_RECORD_UNRESOLVED | undefined): number | SentenceLinkRefusalReason => {
     if (typeof figureId !== 'number') return 'endpoint_unresolved';
+    if (appended.has(figureId)) return appended.get(figureId)!;
     const figure = figureById.get(figureId);
     if (figure === undefined) return 'figure_unknown';
     const own = recordByFigure.get(figureId);
@@ -237,9 +239,83 @@ export function mergeSentenceLinks(input: {
     return appendFigure(figure);
   };
 
+  // Explicit increment declarations are processed first, so every later link resolves the SAME quantity.
+  // A refused option keeps its option node: its increment gets a separate declaring item and all typed aliases follow.
+  for (const r of pass) {
+    if (r.kind !== 'change_quantity' || typeof r.figure !== 'number') continue;
+    const figure = figureById.get(r.figure), sentence = sentenceById.get(r.sentence);
+    if (figure === undefined || sentence === undefined || figure.sentence !== r.sentence) { refuse(r, 'figure_not_in_sentence'); continue; }
+    if (!r.quantity_label?.trim()) { refuse(r, 'change_quantity_conflict'); continue; }
+    const at = align(figure, r.unit, r.role === 'option_setting' ? ['option'] : undefined);
+    if (!('index' in at)) {
+      if (at.reason === 'alignment_none') appendFigure(figure);
+      else refuse(r, at.reason);
+      continue;
+    }
+    const index = at.index, main = items[index]!;
+    if (main.kind === 'option') {
+      if (!open(index, 'quantity') && !input.facts.dropped.some(d => d.stated_index === index && d.reason === 'option_change_by_baseline_unknown')) {
+        refuse(r, 'main_link_compiled', { stated_index: index }); continue;
+      }
+      const old = declaringIndex(index), q = items.length;
+      items.push({ kind: 'change_quantity', source_quote: sentence.text, quantity: q, quantity_label: r.quantity_label,
+        unit: r.unit ?? declaredUnit(index), unit_literals: r.unit_literals, value_literal: r.value_literal,
+        value_scale: r.value_scale ?? items[old]?.value_scale } as DraftStatedItem & Record<string, unknown>);
+      appended.set(figure.id, q);
+      // This alias is changed only because its option setting did NOT compile.
+      for (let i = 0; i < mainCount; i++) {
+        const item = items[i]!;
+        if (i !== old && item.quantity === old) item.quantity = q;
+        if (typeof item.relationship === 'object' && item.relationship !== null) {
+          if (item.relationship.from_quantity === old) item.relationship.from_quantity = q;
+          if (item.relationship.to_quantity === old) item.relationship.to_quantity = q;
+        }
+      }
+      for (const claim of records.claims) if (claim.quantity === old) claim.quantity = q;
+      main.quantity = q;
+      fills.push({ stated_index: q, field: 'change_quantity', mode: 'appended', sentence: r.sentence, figure: figure.id });
+    } else if (main.kind === 'figure' && !carried.has(index)) {
+      main.kind = 'change_quantity'; main.quantity_label = r.quantity_label;
+      delete main.value; delete main.range; delete main.baseline;
+      if (r.unit !== undefined) main.unit = r.unit;
+      if (r.unit_literals !== undefined) main.unit_literals = [...r.unit_literals];
+      if (r.value_literal !== undefined) main.value_literal = r.value_literal;
+      // A context figure is evidence for the effect, never today's stock level.
+      main.quantity = index;
+      fills.push({ stated_index: index, field: 'change_quantity', mode: 'in_place', sentence: r.sentence, figure: figure.id });
+    } else if (main.kind !== 'change_quantity') refuse(r, 'change_quantity_conflict', { stated_index: index });
+  }
+
   for (const r of pass) {
     const sentence = sentenceById.get(r.sentence);
     if (sentence === undefined) { refuse(r, 'sentence_unknown'); continue; }
+
+    if (r.role === 'option_effect') {
+      const effect = r.option_effect;
+      if (effect === undefined) { refuse(r, 'option_binding_missing'); continue; }
+      const optionSentence = sentenceById.get(effect.option_sentence);
+      const literal = optionSentence === undefined ? undefined : locateLiteral(optionSentence.text, effect.option_literal);
+      if (optionSentence === undefined || literal?.reason !== undefined || literal?.span === undefined) { refuse(r, 'option_binding_missing'); continue; }
+      const optionSpan = { start: optionSentence.start + literal.span.start, end: optionSentence.start + literal.span.end };
+      const options = items.slice(0, mainCount).flatMap((item, i) => {
+        const q = quoteSpan(i);
+        return item.kind === 'option' && q !== undefined && within(q, optionSpan) ? [i] : [];
+      });
+      if (options.length !== 1) { refuse(r, 'option_binding_missing'); continue; }
+      const quantity = identity(effect.quantity_figure);
+      if (typeof quantity !== 'number') { refuse(r, quantity); continue; }
+      if (!allLocate(sentence.text, [effect.value_literal, effect.range?.low_literal, effect.range?.high_literal, ...(r.unit_literals ?? [])])) {
+        refuse(r, 'literal_not_in_sentence'); continue;
+      }
+      const existing = items.findIndex(item => item.kind === 'option_effect' && item.option_effect?.option === options[0] && item.option_effect?.quantity === quantity);
+      if (existing >= 0) { refuse(r, 'main_link_compiled', { stated_index: existing }); continue; }
+      const index = items.length;
+      items.push({ kind: 'option_effect', source_quote: sentence.text, unit: r.unit, unit_literals: r.unit_literals,
+        option_effect: { option: options[0]!, quantity, [effect.setting]: effect.value, value_literal: effect.value_literal,
+          ...(effect.range !== undefined ? { range: { ...effect.range } } : {}) } } as DraftStatedItem & Record<string, unknown>);
+      fills.push({ stated_index: index, field: 'option_effect', mode: 'appended', sentence: r.sentence });
+      continue;
+    }
 
     if (r.role === 'cause') {
       const rel = r.relationship;
@@ -280,6 +356,7 @@ export function mergeSentenceLinks(input: {
       continue;
     }
 
+    if (r.kind === 'change_quantity' && r.role !== 'option_setting') continue;
     if (typeof r.figure !== 'number') continue;
     const figure = figureById.get(r.figure);
     if (figure === undefined) { refuse(r, 'figure_unknown'); continue; }
@@ -338,7 +415,10 @@ export function mergeSentenceLinks(input: {
     const literals = [r.value_literal, ...(r.unit_literals ?? [])];
     const mode = placement(index, r.sentence, literals);
     if (mode === undefined) { refuse(r, 'literal_not_in_sentence', { stated_index: index, field: 'evidence' }); continue; }
-    if (r.value !== undefined) main.value = r.value;
+    if (r.value !== undefined) {
+      main.value = r.value;
+      if (r.value_scale !== undefined) main.value_scale = r.value_scale;
+    }
     if (r.value_literal !== undefined) main.value_literal = r.value_literal;
     if (r.unit_literals !== undefined) main.unit_literals = [...r.unit_literals];
     if (declaringIndex(index) === index) {

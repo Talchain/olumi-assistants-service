@@ -114,7 +114,7 @@ import { defaultFrameFor, framedFields, statedRangeFrame } from "../../../orches
 import { limitSinkBranch } from "../../../graph/limit-sink-branch.js";
 import { inertRiskBranch } from "../../../graph/inert-risk.js";
 import { admitGoalBaseline } from "../../factor-extraction/goal-baseline-admissibility.js";
-import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits, literalConventionValue, locateLiteral } from "./quantity-evidence.js";
+import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits, literalConventionValue, locateLiteral, unitEvidenceReason } from "./quantity-evidence.js";
 import { statedEffectQuoteMatches, statedEffectUnitsMatch } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
 import { sizeLink, resolveMagnitudeFrame, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
@@ -498,6 +498,7 @@ export interface DroppedRecordRef {
     | "user_stated_no_effect" | "no_effect_with_amount"
     | "change_of_index_invalid" | "change_of_self" | "change_of_unit_mismatch" | "change_of_horizon_mismatch" | "change_of_target_not_quantity" | "change_of_not_definitional"
     | "range_bounds_inverted" | "range_excludes_point" | "range_straddles_zero" | "relationship_unsized"
+    | "option_effect_invalid"
     | "option_lever_undeclared" | "option_lever_is_goal" | "option_value_unbound" | "option_lever_link_conflict" | "lever_endpoint_ambiguous"
     // P2-A1: a `change_by` option whose lever has no stated current level. Unknown is an ask, never a zero baseline.
     | "option_change_by_baseline_unknown"
@@ -940,6 +941,8 @@ export interface ProjectedNode {
   id: string;
   kind: "goal" | "decision" | "option" | "outcome" | "risk" | "action" | "factor" | "constraint";
   label: string;
+  body?: string;
+  nonlinear_identity?: import("./grammar.js").DraftNonlinearIdentity;
   category?: "controllable" | "observable" | "external";
   data?: Record<string, unknown>;
   observed_state?: Record<string, unknown>;
@@ -1140,6 +1143,7 @@ const STATED_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"]>> 
   constraint: "constraint",
   // A stated figure is a quantity the user asserted: a factor node carrying it.
   figure: "factor",
+  change_quantity: "factor",
   // ⭐ A stated cause is an EXPLANATION the user offered — an answer to "why",
   // which is true or false rather than something they carry out. It is a factor,
   // and it is emphatically NOT an option: projecting it as one is #1287, where
@@ -2677,8 +2681,9 @@ function projectOnce(
     // declared "appointments" keeps its brief-bound target. Only a restated
     // unit its quote does not evidence takes the referenced quantity's unit.
     const referencedUnit = originalItem.quantity === undefined ? undefined : statedItems[originalItem.quantity]?.unit;
-    const item = referencedUnit === undefined || statedValueIsBound(originalItem, brief) ? originalItem
-      : { ...originalItem, unit: referencedUnit };
+    const originalLevel = originalItem.kind === "change_quantity" ? { ...originalItem, value: undefined, baseline: undefined, range: undefined } : originalItem;
+    const item = referencedUnit === undefined || statedValueIsBound(originalLevel, brief) ? originalLevel
+      : { ...originalLevel, unit: referencedUnit };
     const quote = canonicalText(item.source_quote ?? "");
     const kind = STATED_KIND_TO_NODE_KIND[item.kind];
     // An unknown kind cannot occur through the grammar (enum-constrained), but
@@ -2939,7 +2944,7 @@ function projectOnce(
     const node: ProjectedNode = {
       id,
       kind,
-      label: authoredLabel.label,
+      label: item.kind === "change_quantity" && item.quantity_label?.trim() ? item.quantity_label : authoredLabel.label,
       provenance: prov,
     };
 
@@ -3438,6 +3443,7 @@ function projectOnce(
     // Same field name as the stated-item flag because it is the same question
     // asked of the other place an option can come from — see grammar note 5.
     if (claim.quantity !== undefined) node.quantity_ref = claim.quantity;
+    if (claim.nonlinear_identity !== undefined) node.nonlinear_identity = structuredClone(claim.nonlinear_identity);
     if (nodeKind === "option" && typeof claim.is_baseline === "boolean") {
       node.is_baseline = claim.is_baseline;
     }
@@ -3548,6 +3554,34 @@ function projectOnce(
   const goalQuantityOutcome = new Map<number,ProjectedNode>();
   const goalOfQuantityOutcome = new Map<string,string>();
   const goalQuantityIdentityEdgeIds = new Set<string>();
+  const ownOptionEffects: Array<{ optionId: string; lever: ProjectedNode; binding: ProjectedInterventionBinding }> = [];
+  const zeroQuantities = new Set<number>();
+  // Science 5 Oct: only the drafter's typed increment earns zero; the quote supplies no type or number.
+  // Read the existing graph identity carrier BEFORE any graph parse can discard an unsupported operation.
+  const identityOperands = new Set(nodes.flatMap(n => n.nonlinear_identity !== undefined
+    && ["product", "ratio"].includes(n.nonlinear_identity.operation) ? n.nonlinear_identity.factor_ids : []));
+  for (const [q, declaration] of statedItems.entries()) {
+    if (declaration.kind !== "change_quantity" || declaration.quantity !== q || !declaration.quantity_label?.trim()
+      || typeof brief !== "string" || !declaration.source_quote.trim() || !brief.includes(declaration.source_quote)
+      || declaration.unit === undefined || unitEvidenceReason(declaration, declaration.unit) !== undefined) continue;
+    const quantities = nodes.filter(n => n.kind !== "option" && n.kind !== "goal" && (n.quantity_ref === q || n.id === statedIdByIndex.get(q)));
+    const operand = quantities.some(n => identityOperands.has(n.id));
+    for (const node of quantities) {
+      node.label = declaration.quantity_label;
+      node.quantity_ref = q;
+      node.data = { ...node.data, unit: declaration.unit };
+      if (operand) {
+        for (const key of ["value", "raw_value", "baseline", "rangeMin", "rangeMax", "extractionType"]) delete node.data[key];
+        delete node.observed_state;
+        continue;
+      }
+      node.body = "a change from today, so today = 0";
+      node.data = { ...node.data, value: 0, raw_value: 0, baseline: 0, extractionType: "inferred" };
+      delete node.data.rangeMin; delete node.data.rangeMax;
+      node.observed_state = { value: 0, raw_value: 0, baseline: 0, source: "cee_inference" };
+    }
+    if (!operand && quantities.length > 0) zeroQuantities.add(q);
+  }
   const ownOptionSettings = new Map<string,{index:number;lever:ProjectedNode;binding:ProjectedInterventionBinding}>();
   // Fix (d): a stated cause's endpoint quantity carried by its DECLARING item's own stated node (pass below the options).
   const endpointByQuantity = new Map<number,ProjectedNode>();
@@ -3558,7 +3592,7 @@ function projectOnce(
   const mintDeclaredQuantity=(q:number,declaration:DraftStatedItem):ProjectedNode=>{
     const id=mintUnique(sha8("factor","quantity-lever",String(q)),usedIds);
     const prov:RecordProvenance={provenance_class:"stated",source_quote:declaration.source_quote};
-    const node:ProjectedNode={id,kind:"factor",label:declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
+    const node:ProjectedNode={id,kind:"factor",label:declaration.quantity_label ?? declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
     nodes.push(node);provenance[id]=prov;leverByQuantity.set(q,node);
     return node;
   };
@@ -3573,6 +3607,10 @@ function projectOnce(
     if(declared!==undefined)return {node:declared};
     const outcome=goalQuantityOutcome.get(q);
     if(outcome!==undefined)return {node:outcome};
+    if (statedItems[q]?.kind === "change_quantity") {
+      const own = nodes.find(n => n.id === statedIdByIndex.get(q));
+      if (own !== undefined) return { node: own };
+    }
     const goals=nodes.filter(n=>n.kind==="goal" && n.quantity_ref===q);
     return goals.length>1 ? {reason:"relationship_endpoint_ambiguous"} : goals.length===1 ? {node:goals[0]} : {reason:"relationship_endpoint_missing"};
   };
@@ -3604,11 +3642,11 @@ function projectOnce(
     let changeBy:number|undefined;
     let rawValue=settingValue;
     if(item.setting==="change_by"){
-      const level=q===index ? undefined : declaration.value;
+      const level=zeroQuantities.has(q) ? 0 : declaration.kind==="change_quantity" || q===index ? undefined : declaration.value;
       if(typeof level!=="number" || !Number.isFinite(level)){refuse("option_change_by_baseline_unknown");return;}
       // The level a delta resolves against is evidence like any stated value: unbound to its own quote ("We have 8
       // vans" typed 9), it is refused, never written as a brief-derived absolute.
-      if(!statedValueIsBound(declaration,brief)){refuse("option_change_by_baseline_unbound");return;}
+      if(!zeroQuantities.has(q) && !statedValueIsBound(declaration,brief)){refuse("option_change_by_baseline_unbound");return;}
       changeBy=settingValue;
       rawValue=literalConventionValue(level,declaration.unit,declaration.value_scale)+settingValue;
     }
@@ -4099,6 +4137,41 @@ function projectOnce(
     goalQuantityOutcome.delete(q);goalOfQuantityOutcome.delete(outcome.id);
   }
 
+  statedItems.forEach((item, index) => {
+    if (item.kind !== "option_effect") return;
+    const e = item.option_effect;
+    const refuse = (reason: DroppedRecordRef["reason"] = "option_effect_invalid") => dropped.push({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, stated_index: index, label: item.source_quote, reason });
+    if (e === undefined || (e.sets_to === undefined) === (e.change_by === undefined) || statedItems[e.option]?.kind !== "option") { refuse(); return; }
+    const declaration = statedItems[e.quantity];
+    if (declaration === undefined || declaration.kind === "goal" || declaration.kind === "constraint" || declaration.unit === undefined
+      || unitEvidenceReason(declaration, declaration.unit) !== undefined) { refuse("quantity_unit_undeclared"); return; }
+    const optionId = statedIdByIndex.get(e.option), resolved = carrier(e.quantity);
+    if (optionId === undefined || resolved.node?.kind !== "factor") { refuse(resolved.reason ?? "option_lever_is_goal"); return; }
+    const unit = declaration.unit, authoredValue = e.sets_to ?? e.change_by!;
+    const rawValue = literalConventionValue(authoredValue, unit, declaration.value_scale);
+    const range = e.range === undefined ? undefined : { ...e.range,
+      low: literalConventionValue(e.range.low, unit, declaration.value_scale), high: literalConventionValue(e.range.high, unit, declaration.value_scale) };
+    const checked = { ...e, sets_to: e.sets_to === undefined ? undefined : rawValue, change_by: e.change_by === undefined ? undefined : rawValue, range };
+    const evidenceItem = { ...item, value_literal: e.value_literal };
+    if (item.unit !== undefined && !sameUnit(item.unit, unit) || (item.unit_literals !== undefined || item.unit !== undefined) && unitEvidenceReason(evidenceItem, unit) !== undefined) { refuse("unit_not_evidenced"); return; }
+    if (typeof brief !== "string" || !statedEffectQuoteMatches(item.source_quote, { amount: rawValue, amount_unit: unit },
+      { kind: "option_effect", effect: checked, option_quote: statedItems[e.option]!.source_quote, brief })) { refuse(); return; }
+    const admittedRange = range === undefined ? undefined : admittedValueRange(range, item.source_quote, rawValue, unit);
+    if (range !== undefined && admittedRange === undefined) { refuse(); return; }
+    let baseline = 0;
+    if (e.change_by !== undefined) {
+      baseline = zeroQuantities.has(e.quantity) ? 0 : declaration.kind === "change_quantity" ? NaN : declaration.value!;
+      if (!Number.isFinite(baseline)) { refuse("option_change_by_baseline_unknown"); return; }
+      if (!zeroQuantities.has(e.quantity) && !statedValueIsBound(declaration, brief)) { refuse("option_change_by_baseline_unbound"); return; }
+      baseline = literalConventionValue(baseline, unit, declaration.value_scale);
+    }
+    ownOptionEffects.push({ optionId, lever: resolved.node, binding: { stated_index: index, raw_value: rawValue + baseline, unit,
+      source: "brief_extraction", ...(e.change_by !== undefined ? { change_by: rawValue } : {}),
+      ...(admittedRange === undefined ? {} : { range: { low: admittedRange.low + baseline, high: admittedRange.high + baseline,
+        meaning: admittedRange.meaning ?? "min_max", source: "brief_extraction", source_quote: item.source_quote } }),
+      reasoning: `Stated option ${e.change_by === undefined ? "value" : "change"} bound to stated_items[${index}]: ${item.source_quote}` } });
+  });
+
   // ── Pass 3b: DISCLOSE what the model never connected; never force it in. ───
   //
   // MEASURED, and this is the finding the whole slice turned on. A record set is
@@ -4474,6 +4547,14 @@ function projectOnce(
       const key = `${edge.from}\u0000${edge.to}`;
       const list = candidatesByPair.get(key) ?? [];
       list.push(candidate);
+      candidatesByPair.set(key, list);
+    }
+    for (const effect of ownOptionEffects) {
+      if (!kindById.has(effect.optionId) || kindById.get(effect.lever.id) !== "factor") continue;
+      const key = `${effect.optionId}\u0000${effect.lever.id}`;
+      const list = candidatesByPair.get(key) ?? [];
+      list.push({ edgeId: sha8("option-effect", effect.optionId, effect.lever.id, String(effect.binding.stated_index)),
+        setsTo: effect.binding.raw_value, authority: "direct_stated_option", binding: effect.binding });
       candidatesByPair.set(key, list);
     }
     for (const [key, candidates] of [...candidatesByPair.entries()].sort(([a], [b]) =>
@@ -5645,6 +5726,7 @@ function unifyGoalQuantityReferences(records: DraftRecordSet): DraftRecordSet {
       ...(item.quantity === undefined ? {} : { quantity: canonical(item.quantity) }),
       ...(item.kind === "goal" && item.baseline_ref !== undefined && records.stated_items[item.baseline_ref]?.role === "baseline"
         ? { quantity: canonical(records.stated_items[item.baseline_ref]!.quantity ?? item.baseline_ref) } : {}),
+      ...(item.option_effect === undefined ? {} : { option_effect: { ...item.option_effect, quantity: canonical(item.option_effect.quantity) } }),
       ...(item.relationship === undefined ? {} : { relationship: { ...item.relationship,
         from_quantity: canonical(item.relationship.from_quantity), to_quantity: canonical(item.relationship.to_quantity),
       } }),

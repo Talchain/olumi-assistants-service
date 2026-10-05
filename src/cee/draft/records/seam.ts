@@ -43,7 +43,7 @@ import {
   DRAFT_RECORD_UNRESOLVED,
   type DraftRecordLinkField,
   DRAFT_RECORD_ROLES,
-  DRAFT_RECORD_STATED_KINDS,
+  DRAFT_RECORD_TYPED_STATED_KINDS,
   DRAFT_RECORD_VALUE_SCALES,
   type DraftRecordSet,
   type DraftValueRange,
@@ -85,7 +85,13 @@ const StatedRelationshipWire = z.object({
   amount_span: QuoteSpanWire.optional(), source_span: QuoteSpanWire.optional(),
 });
 const StatedItemWire = z.object({
-  kind: z.enum(DRAFT_RECORD_STATED_KINDS),
+  kind: z.enum(DRAFT_RECORD_TYPED_STATED_KINDS),
+  quantity_label: z.string().optional(),
+  option_effect: z.object({
+    option: z.number().int().nonnegative(), quantity: z.number().int().nonnegative(),
+    sets_to: z.number().finite().optional(), change_by: z.number().finite().optional(),
+    value_literal: z.string(), range: ValueRangeWire.optional(),
+  }).optional(),
   source_quote: z.string(),
   value: z.number().optional(),
   value_literal: z.string().optional(), unit_literals: z.array(z.string()).optional(), direction_literal: z.string().optional(),
@@ -173,6 +179,7 @@ const StatedItemWire = z.object({
 }).passthrough();
 
 const InferenceClaimWire = z.object({
+  nonlinear_identity: z.object({ operation: z.enum(["product", "ratio"]), factor_ids: z.array(z.string()), stated_in_brief: z.boolean().optional() }).optional(),
   claim_kind: z.enum(DRAFT_RECORD_CLAIM_KINDS),
   label: z.string(),
   basis: z.array(z.number().int()).optional(),
@@ -362,6 +369,8 @@ export function projectDraftRecords(
     stated_items: parsed.data.stated_items.map((item) => ({
       kind: item.kind,
       source_quote: item.source_quote,
+      ...(item.quantity_label !== undefined ? { quantity_label: item.quantity_label } : {}),
+      ...(item.option_effect !== undefined ? { option_effect: item.option_effect } : {}),
       ...(item.value !== undefined ? { value: item.value } : {}),
       ...(item.value_literal !== undefined ? { value_literal: item.value_literal } : {}),
       ...(item.unit_literals !== undefined ? { unit_literals: item.unit_literals } : {}),
@@ -392,6 +401,7 @@ export function projectDraftRecords(
     })),
     claims: parsed.data.claims.map((claim) => ({
       claim_kind: claim.claim_kind,
+      ...(claim.nonlinear_identity !== undefined ? { nonlinear_identity: claim.nonlinear_identity } : {}),
       label: claim.label,
       ...(claim.basis !== undefined ? { basis: claim.basis } : {}),
       ...(claim.from_stated !== undefined ? { from_stated: claim.from_stated } : {}),

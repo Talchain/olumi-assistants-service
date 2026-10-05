@@ -1,4 +1,4 @@
-import type { DraftQuoteSpan, DraftStatedRelationship } from "../draft/records/grammar.js";
+import type { DraftQuoteSpan, DraftStatedRelationship, DraftStatedOptionEffect } from "../draft/records/grammar.js";
 import { findStatedAmounts, readUnit, type StatedAmount } from "./stated-amounts.js";
 import { boundLiteral } from "../draft/records/quantity-evidence.js";
 import { sameUnit, readCountRate, readMoney, periodIn } from "../../orchestrator-v5/agent-lane/same-unit.js";
@@ -246,11 +246,47 @@ function atSpan(amount: LocatedAmount, span: DraftQuoteSpan, quote: string): boo
 }
 
 /** Figures alone cannot attest a signed relationship. The stated cause owns it. */
+/** Explicit option authority has no numeric source operand; it is not a natural causal relationship. */
+export interface StatedOptionEffectAuthority {
+  kind: 'option_effect';
+  effect: DraftStatedOptionEffect;
+  option_quote: string;
+  brief: string;
+}
+
 export function statedEffectQuoteMatches(
   quote: string,
-  detail: StatedEffectDetail,
-  authority?: DraftStatedRelationship,
+  detail: StatedEffectDetail | { readonly amount: number; readonly amount_unit: string },
+  authority?: DraftStatedRelationship | StatedOptionEffectAuthority,
 ): boolean {
+  if (authority !== undefined && 'kind' in authority) {
+    const e = authority.effect;
+    if (!Number.isInteger(e.option) || e.option < 0 || !Number.isInteger(e.quantity) || e.quantity < 0
+      || !authority.option_quote.trim() || !authority.brief.includes(authority.option_quote) || !authority.brief.includes(quote)
+      || (e.sets_to === undefined) === (e.change_by === undefined)) return false;
+    const value = e.sets_to ?? e.change_by;
+    if (value !== detail.amount || !Number.isFinite(value) || !quote.trim()) return false;
+    const literal = boundLiteral(quote, e.value_literal, detail.amount);
+    if (literal.reason !== undefined) return false;
+    const amounts = locatedAmounts(quote);
+    const target = amounts.find(a => !a.implicitSource && atSpan(a, literal.span, quote));
+    if (target === undefined || !unitAgrees(target, detail.amount_unit, '', quote)) return false;
+    const spans = [literal.span];
+    if (e.range !== undefined) {
+      const r = e.range;
+      if (!Number.isFinite(r.low) || !Number.isFinite(r.high) || r.low >= r.high || r.low > detail.amount || detail.amount > r.high
+        || r.low_literal === undefined || r.high_literal === undefined) return false;
+      const low = boundLiteral(quote, r.low_literal, r.low), high = boundLiteral(quote, r.high_literal, r.high);
+      if (low.reason !== undefined || high.reason !== undefined || low.span.start >= high.span.start) return false;
+      for (const span of [low.span, high.span]) {
+        const amount = amounts.find(a => !a.implicitSource && atSpan(a, span, quote));
+        if (amount === undefined || !unitAgrees(amount, detail.amount_unit, '', quote)) return false;
+        spans.push(span);
+      }
+    }
+    return spansShareClause(quote, spans);
+  }
+  if (!('per_source_change' in detail)) return false;
   if(authority?.amount_literal!==undefined && authority.range===undefined && authority.amount_span!==undefined && authority.source_span!==undefined){
     if(authority.amount!==detail.amount || authority.per_source_change!==detail.per_source_change || detail.amount===0 || detail.per_source_change===0
       || !sameUnit(authority.amount_unit,detail.amount_unit) || !sameUnit(authority.per_source_change_unit,detail.per_source_change_unit)

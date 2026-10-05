@@ -1183,6 +1183,7 @@ function buildInterventionsFromV4Data(
         value,
         ...(rawIsFinite ? { raw_value: carriedRaw } : {}),
         ...(binding?.change_by !== undefined ? { change_by: binding.change_by } : {}),
+        ...(deltaEarnsBriefClaim && binding?.range !== undefined ? { range: binding.range } : {}),
         unit: binding?.unit ?? unit ?? statedDenomination?.unit,
         source: earnsBriefClaim ? "brief_extraction" : "cee_hypothesis",
         target_match: {

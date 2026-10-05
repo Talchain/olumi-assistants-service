@@ -15,7 +15,7 @@ import { segmentSentences } from '../../../orchestrator-v5/compose/defaulted-val
 import { findStatedAmounts } from '../../provenance/stated-amounts.js';
 import {
   DRAFT_RECORD_DIRECTIONS, DRAFT_RECORD_OPTION_SETTINGS, DRAFT_RECORD_UNRESOLVED, DRAFT_RECORD_VALUE_SCALES,
-  STATED_RELATIONSHIP_SCHEMA, type DraftValueRange,
+  STATED_RELATIONSHIP_SCHEMA, VALUE_RANGE_SCHEMA, type DraftValueRange,
 } from './grammar.js';
 
 /** The wire schema's name: the transport sends it as `text.format.name`, and the eval bank keys on it. */
@@ -72,7 +72,7 @@ export function renderSentencePassInput(brief: string, inventory: SentenceInvent
   return lines.join('\n');
 }
 
-export const SENTENCE_PASS_ROLES = ['goal', 'figure', 'cause', 'option_setting', 'context'] as const;
+export const SENTENCE_PASS_ROLES = ['goal', 'figure', 'cause', 'option_setting', 'context', 'option_effect'] as const;
 export type SentencePassRole = (typeof SENTENCE_PASS_ROLES)[number];
 type Fig = number | typeof DRAFT_RECORD_UNRESOLVED;
 
@@ -89,6 +89,17 @@ export interface SentencePassRelationship {
 export interface SentencePassRecord {
   sentence: number;
   role: SentencePassRole;
+  kind?: 'change_quantity';
+  quantity_label?: string;
+  option_effect?: {
+    option_sentence: number;
+    option_literal: string;
+    quantity_figure: Fig;
+    setting: (typeof DRAFT_RECORD_OPTION_SETTINGS)[number];
+    value: number;
+    value_literal: string;
+    range?: DraftValueRange;
+  };
   figure?: Fig;
   value?: number;
   value_literal?: string;
@@ -126,6 +137,15 @@ export function buildSentencePassBaseSchema(): Record<string, unknown> {
           properties: {
             sentence: { type: 'integer' },
             role: { type: 'string', enum: [...SENTENCE_PASS_ROLES] },
+            kind: { type: 'string', enum: ['change_quantity'] },
+            quantity_label: { type: 'string' },
+            option_effect: {
+              type: 'object', properties: {
+                option_sentence: { type: 'integer' }, option_literal: { type: 'string' }, quantity_figure: FIG_SCHEMA,
+                setting: { type: 'string', enum: [...DRAFT_RECORD_OPTION_SETTINGS] },
+                value: { type: 'number' }, value_literal: { type: 'string' }, range: VALUE_RANGE_SCHEMA,
+              }, required: ['option_sentence', 'option_literal', 'quantity_figure', 'setting', 'value', 'value_literal'], additionalProperties: false,
+            },
             figure: FIG_SCHEMA,
             value: { type: 'number' },
             value_literal: { type: 'string' },
@@ -181,6 +201,12 @@ const RangeZ = z.object({
 const RecordZ = z.object({
   sentence: z.number().int(),
   role: z.enum(SENTENCE_PASS_ROLES),
+  kind: z.literal('change_quantity').optional(),
+  quantity_label: z.string().optional(),
+  option_effect: z.object({
+    option_sentence: z.number().int(), option_literal: z.string(), quantity_figure: FigZ,
+    setting: z.enum(DRAFT_RECORD_OPTION_SETTINGS), value: z.number().finite(), value_literal: z.string(), range: RangeZ.optional(),
+  }).strict().optional(),
   figure: FigZ.optional(),
   value: z.number().optional(),
   value_literal: z.string().optional(),
@@ -221,15 +247,17 @@ export function parseSentencePassOutput(text: string): { ok: true; records: Sent
  * brief (a row asserts it). The only quoted token is the typed escape itself.
  */
 export const SENTENCE_PASS_INSTRUCTION = `SENTENCE LINKS
-You read a decision brief and type the links its sentences state. The input gives the whole brief, then an inventory: every sentence as S<j> and every stated figure as F<i> with the sentence it sits in. Use the whole brief to understand each sentence; a sentence may refer to a quantity stated in another sentence. Refer to sentences and figures only by their ids. Never write a character position.
+You read a strategic brief and type the links its sentences state. The input gives the whole brief, then an inventory: every sentence as S<j> and every stated figure as F<i> with the sentence it sits in. Use the whole brief to understand each sentence; a sentence may refer to a quantity stated in another sentence. Refer to sentences and figures only by their ids. Never write a character position.
 
 Write one record for each stated figure the brief uses, and one record for each sentence that states an effect of one quantity on another or states that something has no effect. Each field has one rule. Set a field to null when its rule does not apply to the record.
 
 sentence: the id of the sentence the record transcribes.
-role: goal for the target the user wants to reach; figure for a stated current level of a quantity; cause for a sentence that states how a change in one quantity changes another, or that it changes nothing; option_setting for the figure an option names as its own setting; context for any other stated figure.
+kind: change_quantity only when the quantity is explicitly typed as an increment from today; its level today is definitionally zero, except as a product or ratio identity operand, whose level stays unknown.
+quantity_label: on a change_quantity only, name the increment itself rather than the stock it changes.
+role: goal for the target the user wants to reach; figure for a stated current level of a quantity; cause for a sentence that states how a change in one quantity changes another, or that it changes nothing; option_setting for the figure an option names as its own setting; context for any other stated figure; option_effect for an effect explicitly tied to a particular option.
 figure: the id of the figure the record is about, or "unresolved" when the record has no figure of its own.
-value: the figure's number, signed as the brief states it, in the convention value_scale declares.
-value_literal: the figure's characters copied exactly from its own sentence, keeping any currency or percent sign, with a neighbouring word added when the bare characters occur more than once in that sentence.
+value: the record's figure or option effect's number, signed as the brief states it, in the convention value_scale declares.
+value_literal: the figure or option effect's characters copied exactly from its own sentence, keeping any currency or percent sign, with a neighbouring word added when the bare characters occur more than once in that sentence.
 unit: what the figure is measured in, including its period when the brief gives one.
 unit_literals: the words of the record's sentence that state that unit, each copied exactly.
 value_scale: the convention value is written in (unit_interval, ratio or raw_count); null when undeclared, never assumed.
@@ -237,7 +265,11 @@ quantity_of: the id of the figure that declares the quantity this figure measure
 direction: on the goal only: floor when the user wants the quantity at or above the figure, ceiling when at or below, "unresolved" when the brief states no comparator.
 direction_literal: on the goal only: the comparator words copied exactly from the goal's sentence, or "unresolved".
 baseline_figure: on the goal only: the id of the figure stating the current level of the same quantity, or "unresolved".
-setting: on an option_setting only: change_by when the option changes its quantity by the figure, sets_to when the figure is the level the option sets.
+setting: on an option_setting or option_effect, change_by for a signed shift from the quantity's level today, sets_to for its level under that option.
+option_effect: on an option_effect only, transcribe the particular option's intervention on a quantity without adding a causal relationship, using these fields.
+option_sentence: the id of the sentence that declares the particular option.
+option_literal: the characters in option_sentence that select that option, copied exactly; never omit the option binding.
+quantity_figure: the id of the figure declaring the affected quantity, or "unresolved" when the brief does not bind it.
 relationship: on a cause only, with these fields.
 from_figure: the id of the figure that declares the quantity whose change causes the effect, wherever in the brief it is stated, or "unresolved".
 to_figure: the id of the figure that declares the quantity that is changed, wherever in the brief it is stated, or "unresolved".
@@ -245,7 +277,7 @@ per_source_change: the signed size of the source change the sentence states; an 
 per_source_literal: the characters of the cause's sentence that state that source change, copied exactly.
 amount: the signed change in the changed quantity for that source change.
 amount_literal: the characters of the cause's sentence that state that amount, copied exactly.
-range: the low and high bounds of that amount when the sentence states bounds, low not above high, each bound's characters copied exactly; meaning min_max unless the brief says the bounds are likely values.
+range: the low and high bounds of the relationship amount or option effect value when the sentence states bounds, low not above high, each bound's characters copied exactly; meaning min_max unless the brief says the bounds are likely values.
 no_effect_literal: only when the sentence says the change has no effect: the words that say so, with no amount and no range.
 
 Never take a number, a unit or a word from a sentence other than the one a field names. Never add a link the brief does not state. Write "unresolved" for any link you cannot state from the brief.`;
