@@ -43,10 +43,14 @@ import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
 /** Whether `value`, in `unit`, is a figure written in `userText`. No text (or none bound) proves nothing: false. */
-export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+export function figureTheUserWroteSpan(value: number, unit: unknown, userText: string | null | undefined): { start: number; end: number } | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).some((a) => amountIs(a, value, unit, family, userText ?? undefined));
+  const a = findStatedAmounts(userText).find(a => amountIs(a, value, unit, family, userText ?? undefined));
+  return a === undefined ? null : { start: a.index, end: a.index + a.matchedText.length };
+}
+export function figureTheUserWrote(value: number, unit: unknown, userText: string | null | undefined): boolean {
+  return figureTheUserWroteSpan(value, unit, userText) !== null;
 }
 
 /**
@@ -453,10 +457,11 @@ export function goalLevelTheUserWrote(
     readonly risks?: readonly { readonly label: string }[];
   },
   brief: string | null | undefined,
-): (value: number, unit: unknown) => boolean {
+): ((value: number, unit: unknown) => boolean) & { span: (value: number, unit: unknown) => { start: number; end: number } | null } {
   const others = [...(model.factors ?? []), ...(model.outcomes ?? []), ...(model.risks ?? [])]
     .map((q) => q.label).filter((l) => l !== model.goal.metric);
-  return (value, unit) => figureTheUserWroteFor(value, unit, brief, { target: [model.goal.metric], others, strict: true });
+  const span = (value: number, unit: unknown) => figureTheUserWroteForSpan(value, unit, brief, { target: [model.goal.metric], others, strict: true });
+  return Object.assign((value: number, unit: unknown) => span(value, unit) !== null, { span });
 }
 
 /**
@@ -601,8 +606,31 @@ export function writtenRangeFor(
 /** Words that widen a label to the same whole rather than narrowing it (R3 #75 5924889786). */
 const GENERALISERS = ['total', 'overall', 'combined', 'all'];
 
-export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
-  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
+/** The existing size-written door's word matcher, shared with the C2 other-label refusal. */
+function quantityMentionOf(w: string, unitWords: readonly string[], decisiveTarget: readonly string[], decisiveOther: readonly string[]): 'target' | 'other' | null {
+  if (w.length < 3) return null;
+  if (unitWords.some((u) => sameWord(u, w))) return null;
+  const t = decisiveTarget.some((x) => sameWord(x, w));
+  const o = decisiveOther.some((x) => sameWord(x, w));
+  return t && !o ? 'target' : o && !t ? 'other' : null;
+}
+
+/** Fi R2: refuse a sentence naming another quantity; no target-label requirement. */
+/** Fi only: every content word of an OTHER label, or either parenthetical name. */
+export function sentenceNamesOtherQuantity(sentence: string, _unit: unknown, scope: EntityScope): boolean {
+  const said = wordsOf(sentence);
+  return scope.others.some(label => {
+    const parenthetical = /^(.+?)\s*\(([^()]+)\)\s*$/u.exec(label);
+    const alternatives = parenthetical === null ? [label] : [parenthetical[1]!, parenthetical[2]!];
+    return alternatives.some(name => {
+      const content = wordsOf(name).filter(w => !NOT_A_NAME.has(w));
+      return content.length > 0 && content.every(w => said.some(s => sameWord(s, w)));
+    });
+  });
+}
+
+export function figureTheUserWroteForSpan(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): { start: number; end: number } | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
   const family = unitPhraseFamily(unit);
   const targetWords = [...new Set(scope.target.flatMap(wordsOf))];
   const otherWords = [...new Set(scope.others.flatMap(wordsOf))];
@@ -615,17 +643,12 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
   const decisiveOther = otherWords.filter((o) => !targetWords.some((t) => sameWord(t, o)));
   // The figure's own unit names no entity (R&C #2013 B1): "£59 per month" in GBP/month is not about "Monthly churn".
   const unitWords = typeof unit === 'string' ? wordsOf(unit) : [];
-  const mentionOf = (w: string, decisiveTarget: readonly string[]): 'target' | 'other' | null => {
-    if (w.length < 3) return null;
-    if (unitWords.some((u) => sameWord(u, w))) return null;
-    const t = decisiveTarget.some((x) => sameWord(x, w));
-    const o = decisiveOther.some((x) => sameWord(x, w));
-    return t && !o ? 'target' : o && !t ? 'other' : null;
-  };
+  const mentionOf = (w: string, decisiveTarget: readonly string[]): 'target' | 'other' | null =>
+    quantityMentionOf(w, unitWords, decisiveTarget, decisiveOther);
   const strict = scope.strict === true;
   const written = [...findStatedAmounts(userText), ...countsInWords(userText)];
   const severalFigures = written.length >= 2;
-  return written.some((a) => {
+  const matched = written.find((a) => {
     if (scope.at !== undefined && a.index !== scope.at) return false;
     if (!amountIs(a, value, unit, family, userText)) return false;
     const decisiveTarget = ownKind(a.kind) ? decisiveOwnKind : decisiveAnyKind;
@@ -715,6 +738,11 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
     if (about === null) return scope.requireNamed !== true && !(strict && severalFigures);
     return about === 'target';
   });
+  return matched === undefined ? null : { start: matched.index, end: matched.index + matched.matchedText.length };
+}
+
+export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
+  return figureTheUserWroteForSpan(value, unit, userText, scope) !== null;
 }
 
 /** How many figures a message writes: digits (`findStatedAmounts`) and counts in words (`countsInWords`). */

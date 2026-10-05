@@ -1,3 +1,5 @@
+import { figureTheUserWroteSpan, figureTheUserWroteForSpan } from './stated-by-user.js';
+import { statedEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
 /**
  * Agent lane — whole-candidate admission.
  *
@@ -39,9 +41,11 @@ import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
+import { bindStatedLinkSizes } from './stated-size-binding.js';
+export { bindStatedLinkSizes } from './stated-size-binding.js';
 import { admitCandidateLinks, definitionalLink, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
-import { resolveMagnitudeFrame, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
@@ -2997,6 +3001,7 @@ function admitOnce(
   // ⛔ A goal read as a two-part product gets no third direct parent: a non-money factor's Olumi-sized link is re-pointed
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
   const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  const levelReading = { value: null as BriefGoalLevel | null };
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
@@ -3114,7 +3119,7 @@ function admitOnce(
         // ⭐ R1 S4-core: a target stated as a CHANGE from today is written as one (`admitStatedGoalChange`); a level
         // target takes the path below, unchanged.
         if (model.goal.frame === 'change_abs' || model.goal.frame === 'change_rel') {
-          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, goalLevelFromBrief(model));
+          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, (levelReading.value = goalLevelFromBrief(model)));
           if (change.reading !== undefined) {
             loss.push({
               field_path: `nodes[${slugId(model.goal.metric)}].goal_level_reading`,
@@ -3719,8 +3724,56 @@ function admitOnce(
    * `explicit` that no sentence carries is Olumi's estimate, never the user's. ONE predicate, read by the normalising
    * frame below AND by link sizing (CODEX CEE BUDDY 5922482284: an unwritten £100m tagged `explicit` once set the frame).
    */
+  // Fi is an ADDED door: the strict label-based sizeWritten check below is unchanged.
+  // The candidate effect fields are defined in each endpoint's own unit (D1).
+  // Read those same units for C1; no unit is inferred from the brief.
+  const magnitudeNodeFor = (n: AdmittedNode): MagnitudeNode => ({
+    label: n.label, kind: n.kind, scale_frame: n.scale_frame,
+    observed_state: n.observed_state as MagnitudeNode['observed_state'],
+    goal_threshold_cap: n.goal_threshold_cap, goal_threshold_unit: n.goal_threshold_unit,
+    unit: unitById.get(n.id) ?? null, option_levels: optionLevelsById.get(n.id) ?? [],
+    ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
+    ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
+  });
+  // Validate the converter's prospective STORED tuple, including percentage points.
+  const prospectiveEffects = resolvable.map(l => {
+    const source = nodeOf.get(l.from), target = nodeOf.get(l.to);
+    return source === undefined || target === undefined || l.direction === 'unknown' ? undefined
+      : sizeLink({ direction: l.direction, effect_amount: l.effect_amount,
+          effect_per_source_change: l.effect_per_source_change, user_stated: true },
+        magnitudeNodeFor(source), magnitudeNodeFor(target)).natural_effect;
+  });
+  const bindingNodes = nodes.map(n => {
+    const own = n.observed_state?.unit ?? (n.kind === 'goal' ? n.goal_threshold_unit : undefined) ?? unitById.get(n.id);
+    return { id: n.id, label: n.label, kind: n.kind, goal_threshold_raw: n.goal_threshold_raw, goal_threshold_unit: n.goal_threshold_unit, unit: own,
+      ...(typeof own === 'string' ? { effect_unit: naturalAmountUnitOf(magnitudeNodeFor(n)),
+        change_unit: sourceUnitWords(magnitudeNodeFor(n), resolveMagnitudeFrame(magnitudeNodeFor(n))) } : {}) };
+  });
+  // Readers expose the first span they already located, never a value-wide exclusion.
+  const claimedLevelSpans: { start: number; end: number }[] = [];
+  const claim = (span: { start: number; end: number } | null | undefined): void => { if (span != null) claimedLevelSpans.push(span); };
+  if (typeof model.goal.value === 'number') claim(figureTheUserWroteSpan(model.goal.value, model.goal.unit, brief));
+  if (typeof model.goal.baseline_value === 'number' && goalLevelStated(model.goal.baseline_value, model.goal.unit)) {
+    claim(figureTheUserWroteForSpan(model.goal.baseline_value, model.goal.unit, brief,
+      { target: [model.goal.metric], others: quantityLabels.filter(q => q !== model.goal.metric), strict: true }));
+  }
+  if (levelReading.value?.kind === 'adopt') claim(levelReading.value.span);
+  for (const factor of model.factors) if (typeof factor.baseline_value === 'number') {
+    claim(figureTheUserWroteForSpan(factor.baseline_value, factor.unit, brief,
+      { target: [factor.label], others: quantityLabels.filter(q => q !== factor.label), strict: true }));
+  }
+  for (const option of model.options) for (const level of option.interventions ?? []) {
+    if (level.provenance !== 'explicit') continue;
+    claim(figureTheUserWroteForSpan(level.value, level.unit, brief,
+      { target: [level.factor_label, option.label], others: quantityLabels.filter(q => q !== level.factor_label), strict: true }));
+  }
+  const boundSizeSentences = bindStatedLinkSizes(resolvable.map((l, i) => ({
+    from: l.from, to: l.to, effect_direction: l.direction, natural_effect: prospectiveEffects[i],
+  })), bindingNodes, brief, claimedLevelSpans);
+  const boundByLink = new Map([...boundSizeSentences].map(([index, sentence]) => [resolvable[index]!, sentence]));
   const userSizeEarned = (l: CandidateLink): boolean => {
     if (l.provenance_source === 'user_specified') return true;
+    if (boundByLink.has(l)) return true;
     const source = nodeOf.get(l.from);
     const target = nodeOf.get(l.to);
     if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
@@ -3772,18 +3825,7 @@ function admitOnce(
     goal.scale_frame = niceFrameAtLeast(top);
     return goal.id;
   })();
-  const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
-    label: n.label,
-    kind: n.kind,
-    scale_frame: n.scale_frame,
-    observed_state: n.observed_state as MagnitudeNode['observed_state'],
-    goal_threshold_cap: n.goal_threshold_cap,
-    goal_threshold_unit: n.goal_threshold_unit,
-    unit: unitById.get(n.id) ?? null,
-    option_levels: optionLevelsById.get(n.id) ?? [],
-    ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
-    ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
-  }]));
+  const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map(n => [n.id, magnitudeNodeFor(n)]));
   const sizing = new Map<string, LinkSizing>();
   for (const l of resolvable) {
     if (l.direction === 'unknown' || typeof l.strength_mean === 'number') continue;
@@ -3816,6 +3858,15 @@ function admitOnce(
   }
 
   const linkResult = admitCandidateLinks(resolvable, sizing);
+  // Reviewed Fi writer: carry the very sentence C2/W3/C1/SIGN-1 validated, through
+  // the existing stored statement field. User edits retain their own provenance.
+  for (const [link, sentence] of boundByLink) {
+    if (link.provenance_source === 'user_specified') continue;
+    const edge = linkResult.edges.find(e => e.from === link.from && e.to === link.to);
+    if (edge?.provenance?.magnitude === 'user_stated'
+      && edge.provenance.natural_effect !== undefined
+      && statedEffectQuoteMatches(sentence, edge.provenance.natural_effect)) edge.provenance.source_quote = sentence;
+  }
 
   // decision -> option edges are TOPOLOGY, not causal belief. They use the
   // canonical structural constant and are deliberately NOT marked `defaulted`
