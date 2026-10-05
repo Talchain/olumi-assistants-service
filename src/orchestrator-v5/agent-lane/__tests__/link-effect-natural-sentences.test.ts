@@ -27,7 +27,7 @@ type Json = Record<string, any>;
 type Selection = 'link' | 'nodes' | 'source_only' | 'wrong_link';
 interface CorpusRow {
   id: string;
-  fixture: 'f0eb03ac' | 'b8143909';
+  fixture: 'f0eb03ac' | 'b8143909' | '96ea7439' | 'd39c05ba';
   from: string;
   to: string;
   quote: string;
@@ -38,7 +38,9 @@ interface CorpusRow {
   /** An honest limit (the model's range, not the user's figure, stops it): said plainly, never a question about the figure. */
   limit?: string;
 }
-const SCENARIOS = { f0eb03ac: 'f0eb03ac-f6c6-4e68-9631-fa41d29d693f', b8143909: 'b8143909-9267-479e-ae3d-da8e19188427' } as const;
+const SCENARIOS = { f0eb03ac: 'f0eb03ac-f6c6-4e68-9631-fa41d29d693f', b8143909: 'b8143909-9267-479e-ae3d-da8e19188427',
+  // Acceptance's served reads on b644ddb (5 Oct): 96ea7439 (graph ba4fea4e) and d39c05ba (graph 3fe4a430).
+  '96ea7439': '96ea7439-40a4-40d5-a89a-0508e50ec998', d39c05ba: 'd39c05ba-0000-4000-8000-000000000000' } as const;
 const TAIL = ' Approve, or correct.';
 const wasteHead = 'Record: +1 percentage point on "Production waste rate" → −0.5 percentage points in "gross margin": raising "Production waste rate" by 1 percentage point lowers "gross margin" by 0.5 percentage points.';
 const effect = (amount: number, amount_unit: string, per_source_change: number, per_source_change_unit: string): LinkEffectStatement => ({ amount, amount_unit, per_source_change, per_source_change_unit });
@@ -480,5 +482,64 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     expect(edgeOf(reload, row).provenance).not.toHaveProperty('reasoning');
     expect(edgeOf(reload, row).provenance).not.toHaveProperty('clamped_from');
     expect(edgeOf(reload, row).provenance, 'Codex r1 P2: never a definition at the user\'s size').not.toHaveProperty('definitional');
+  });
+});
+
+// ⭐ RT-6 STEP 4 (DL e8 5 Oct ~19:4xZ): shapes Acceptance's served witnesses hit on b644ddb, on their own served graphs.
+describe('RT-6 step 4: a hyphenated end name and "raise <end> by N points" bind the unit the user wrote', () => {
+  const coordination = { fixture: '96ea7439', from: 'team_coordination_overhead', to: 'feature_launch_delay_risk' } as const;
+  const headcount = { fixture: 'd39c05ba', from: 'developer_headcount', to: 'onboarding_drag' } as const;
+  const onboardingHead = 'Record: +2 developers on "Developer headcount" → +1 percentage point in "Onboarding drag": raising "Developer headcount" by 2 developers raises "Onboarding drag" by 1 percentage point.';
+  const takenOnboarding = ' I\'ve taken "Onboarding drag" to be in %, from your words.';
+  it.each([
+    ['S4-H: "feature-launch delay risk" names "Feature-launch delay risk"', { ...coordination, id: 'S4-H',
+      quote: 'Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risk.',
+      effect: effect(1, 'percentage points', 5, 'percentage points'),
+      card: 'Record: +5 percentage points on "Team coordination overhead" → +1 percentage point in "Feature-launch delay risk": raising "Team coordination overhead" by 5 percentage points raises "Feature-launch delay risk" by 1 percentage point. From your words: "Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risk." I\'ve taken "Feature-launch delay risk" to be in %, from your words.' + TAIL }],
+    ['S4-B: "raise onboarding drag by about 1 percentage point"', { ...headcount, id: 'S4-B1',
+      quote: 'Each 2 more developers raise onboarding drag by about 1 percentage point.', effect: effect(1, 'percentage points', 2, 'developers'),
+      card: onboardingHead + ' From your words: "Each 2 more developers raise onboarding drag by about 1 percentage point."' + takenOnboarding + TAIL }],
+    ['S4-B: "increase onboarding drag by about 1 percentage point"', { ...headcount, id: 'S4-B2',
+      quote: 'Each 2 additional developers increase onboarding drag by about 1 percentage point.', effect: effect(1, 'percentage points', 2, 'developers'),
+      card: onboardingHead + ' From your words: "Each 2 additional developers increase onboarding drag by about 1 percentage point."' + takenOnboarding + TAIL }],
+    ['CONTROL (cards before step 4): "…1 percentage point of onboarding drag"', { ...headcount, id: 'S4-C',
+      quote: 'Every 2 extra developers add about 1 percentage point of onboarding drag.', effect: effect(1, 'percentage points', 2, 'developers'),
+      card: onboardingHead + ' From your words: "Every 2 extra developers add about 1 percentage point of onboarding drag."' + takenOnboarding + TAIL }],
+  ] as const)('%s → a card that takes the unit from the user\'s words', async (_n, row) => {
+    const w = world(row as CorpusRow); const result = await propose(w, row as CorpusRow);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)[0]?.detail).toBe(row.card);
+  });
+  it.each([
+    ['S4-H hyphenated name', { ...coordination, id: 'S4-H', quote: 'Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risk.',
+      effect: effect(1, 'percentage points', 5, 'percentage points') }, 'feature_launch_delay_risk', '1 percentage point of feature-launch delay risk'],
+    ['S4-B "raise <end> by"', { ...headcount, id: 'S4-B1', quote: 'Each 2 more developers raise onboarding drag by about 1 percentage point.',
+      effect: effect(1, 'percentage points', 2, 'developers') }, 'onboarding_drag', 'onboarding drag by about 1 percentage point'],
+  ] as const)('%s: Approve → ONE real commit → strict reload keeps the link sized AND the end\'s unit reading from the user\'s own clause', async (_n, row, endId, clause) => {
+    const w = world(row as CorpusRow); const result = await propose(w, row as CorpusRow);
+    const card = cardsFor(w, result)[0]!;
+    const approved = await w.caps.authoriseChange({ ...ctxFor(row as CorpusRow, card.message), typed_approval_of: String(result.proposal_id),
+      typed_approval_words: card.message }, { proposal_id: String(result.proposal_id) });
+    expect(approved, JSON.stringify(approved)).toMatchObject({ ok: true, mutated: true, applied: true });
+    expect(w.commits).toHaveLength(1);
+    const stored = w.graph();
+    const reload = projectGraphForPersistence(GraphV3.parse({ ...stored, nodes: stored.nodes.map((n: Json) => NodeV3.parse(n)) })) as Json;
+    expect(nodeOf(reload, endId).unit_reading).toEqual({ unit: '%', source: 'user_stated', source_quote: clause });
+    expect(edgeOf(reload, row).provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated', source_quote: row.quote,
+      reading: 'agent_proposed_user_confirmed', natural_effect: { amount: 1, per_source_change: row.effect.per_source_change } });
+  });
+  it.each([
+    ['a hyphen joins a name word to ANOTHER word ("launch-day delay risk")', { ...coordination, id: 'S4-Hx',
+      quote: 'Every 5 percentage points of team coordination overhead adds about 1 percentage point of launch-day delay risk.',
+      effect: effect(1, 'percentage points', 5, 'percentage points') }, 'Is 1 percentage point of launch-day delay risk a change in “Feature-launch delay risk”?'],
+    ['"raise <another quantity> by 1 percentage point" ("onboarding costs")', { ...headcount, id: 'S4-Bx',
+      quote: 'Each 2 more developers raise onboarding costs by about 1 percentage point.', effect: effect(1, 'percentage points', 2, 'developers') },
+      'What unit is the 1 change in “Onboarding drag” stated in?'],
+    ['bare "point" on a unitless end stays asked (Science F1)', { ...headcount, id: 'S4-F1',
+      quote: 'Every 2 extra developers add about 1 point of onboarding drag.', effect: effect(1, 'points', 2, 'developers') },
+      'What unit is the 1 change in “Onboarding drag” stated in?'],
+  ] as const)('NOT bound: %s → ONE typed question, nothing stored', async (_n, row, question) => {
+    const w = world(row as CorpusRow); const before = w.graph(); const result = await propose(w, row as CorpusRow);
+    oneQuestion(result, question); expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
   });
 });

@@ -91,6 +91,9 @@ function periodOf(clause: string): string | null | undefined {
   return new Set(periods).size > 1 ? null : periods[0];
 }
 
+/** What may separate two words of an end's name: whitespace, or the single hyphen of a hyphenated name. */
+const NAME_GAP = /^(?:\s*|-)$/;
+
 /** Words that may sit between an end's name and its figure ("waste rate rises by about 1 point"); nothing else may. */
 const LINKING = /^(?:rises?|rising|rose|falls?|falling|fell|increases?|increasing|increased|decreases?|decreasing|decreased|grows?|growing|grew|drops?|dropping|dropped|goes|going|went|up|down|by|about|around|roughly|approximately|nearly|almost|some)$/i;
 
@@ -140,7 +143,9 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
     return m === null || ENDS_PHRASE.test(m[2]!);
   };
   // …and on its left (backward): only a sentence start, punctuation, a determiner or a clause word may precede it.
-  const STARTS_PHRASE = /^(?:the|our|your|its|their|when|if|as|and|each|every|while|because|so|then|once|after|before|that|sees?|saw|makes?|keeps?|gets?|has|have|had|leaves?|puts?|sends?|drives?|watch(?:es)?)$/i;
+  // A transitive movement verb may open the end's phrase too: "developers RAISE onboarding drag by about 1 percentage point"
+  // (Acceptance's served d39c05ba rows, step 4 S4-B). Only the words between the name and the figure stay LINKING.
+  const STARTS_PHRASE = /^(?:the|our|your|its|their|when|if|as|and|each|every|while|because|so|then|once|after|before|that|sees?|saw|makes?|keeps?|gets?|has|have|had|leaves?|puts?|sends?|drives?|watch(?:es)?|rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|lift(?:s|ed|ing)?|lower(?:s|ed|ing)?|cut(?:s|ting)?|reduc(?:e|es|ed|ing)|boost(?:s|ed|ing)?|push(?:es|ed|ing)?)$/i;
   // "per 12 months", "/ 3 years": a numbered period the unit grammar cannot carry → no adoption, so the end is ASKED
   // (buddy r3 P2), never silently stored without its period.
   const numberedPeriodAt = (from: number): boolean => /^\s*(?:per\s+|\/\s*)\d/i.test(quote.slice(from));
@@ -163,8 +168,9 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   let named = 0;
   const run: string[] = [];
   for (const m of tail.matchAll(/[\p{L}]+/gu)) {
-    // The end's label words come FIRST and run contiguously (whitespace only between them).
-    if ((named === 0 && m.index !== 0) || !/^\s*$/.test(tail.slice(named, m.index)) || !inLabel(m[0])) break;
+    // The end's label words come FIRST and run contiguously (whitespace only between them, or the one hyphen of a
+    // hyphenated name: "feature-launch delay risk", Acceptance's served #2602 witness, step 4 S4-H).
+    if ((named === 0 && m.index !== 0) || !NAME_GAP.test(tail.slice(named, m.index)) || !inLabel(m[0])) break;
     named = m.index! + m[0].length;
     run.push(m[0]);
   }
@@ -186,7 +192,7 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   const boundary = cuts.length === 0 ? 0 : cuts[cuts.length - 1]!.index! + 1;
   const words = [...before.slice(boundary).matchAll(/[\p{L}]+/gu)];
   // The text between words must be whitespace only, so a symbol or stray figure never bridges two phrases.
-  const gapOk = (k: number): boolean => /^\s*$/.test(before.slice(boundary + words[k]!.index! + words[k]![0].length,
+  const gapOk = (k: number): boolean => NAME_GAP.test(before.slice(boundary + words[k]!.index! + words[k]![0].length,
     k + 1 < words.length ? boundary + words[k + 1]!.index! : figureStart));
   let k = words.length - 1;
   while (k >= 0 && LINKING.test(words[k]![0]) && gapOk(k)) k--;
