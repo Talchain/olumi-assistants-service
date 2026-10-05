@@ -47,7 +47,7 @@ import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
-import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
@@ -182,8 +182,10 @@ import {
 import { wireInterventionRangePlan } from '../../intervention-range.js';
 import { optionIdOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isRecommendableOption } from './recommendable-option.js';
+import { detectIdenticalArms } from './identical-arms.js';
 import {
   buildAnalysisSubmissionDisclosure,
+  buildIdenticalArmsDisclosure,
   partitionScaffoldedByAnalysisPresence,
 } from '../../coaching/scaffold-disclosure.js';
 import {
@@ -1891,6 +1893,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // ⛔ DL gate 1 v2 (`identical-arms.ts`): read the engine's INTACT outcomes, before any withholder deletes
+    // `downside` or the shares. Applied after every other withhold (below), so each keeps its own reason.
+    const identicalArms = detectIdenticalArms(response, finalWireOptions);
+
     // --- 5. Check analysis status (V5 alpha hardening Phase 2.3) ---------
     // Permissive accept matrix per Docs/v5/v5-resilience-contract.md Part C.
     // Grounded against real staging capture at
@@ -2012,6 +2018,28 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           'run_analysis: goal figures withheld: the goal\'s target can\'t be tested yet',
         );
       }
+    }
+    // ⛔ DL GATE 1 v2: two arms the Run could not tell apart split each other's wins, so the comparison it computed
+    // (shares, leader, robustness, flips) is distorted. Withheld through the ONE goal-figure seam, every arm's outcome
+    // distribution kept; runs after the earlier withholds so a placeholder path keeps its own reason too.
+    if (identicalArms.length > 0) {
+      const said = buildIdenticalArmsDisclosure(identicalArms).trim();
+      response = withholdOptionGoalFigures(response, new Set(identicalArms.flatMap((g) => g.option_ids)), {
+        code: GOAL_FIGURES_OPTIONS_IDENTICAL,
+        message: said.length > 0 && said.length <= 388 ? `Not shown. ${said}` : 'Not shown. On your current model, some options come out the same, so the comparison is held back.',
+        severity: 'warning',
+        option_ids: identicalArms.flatMap((g) => g.option_ids),
+      }, { keepOutcome: true });
+      log.info(
+        {
+          event: 'run_analysis.comparison_withheld_identical_arms',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          // Redacted: ids only.
+          groups: identicalArms.map((g) => ({ option_ids: g.option_ids, baseline_option_id: g.baseline_option_id })),
+        },
+        'run_analysis: comparison withheld: two or more options came out identical',
+      );
     }
 
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
@@ -2748,7 +2776,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // predicates the Run acts on (`goal-reading-disclosure.ts`), on the graph this Run analysed. The forwarder admits
     // them only as its own rebuild from `__goal_reading_source` (AIQ 5895590866 (2), exact equality).
     const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id);
-    const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}`;
+    const identicalArmsDisclosure = buildIdenticalArmsDisclosure(identicalArms);
+    const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases

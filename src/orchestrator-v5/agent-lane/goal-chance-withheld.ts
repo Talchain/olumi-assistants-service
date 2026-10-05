@@ -12,6 +12,7 @@
  */
 
 import {
+  GOAL_FIGURES_OPTIONS_IDENTICAL,
   GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
@@ -77,6 +78,18 @@ export const OUTCOME_KEPT_NOTE =
   + 'options by their outcomes, never name a leading or best option, and never say one option is better or worse than another. '
   + 'Say `say` once, as written, when you describe the run.';
 
+/**
+ * ⛔ GATE 1 v2 (DL 5 Oct, #2574): options the Run could not tell apart split their wins, so EVERY option's share of runs
+ * it did best — and so any leader — is withheld, and the chance of reaching the goal only for the identical options.
+ * Every outcome stays, but identical options share one, so they are never compared with each other.
+ */
+export const OPTIONS_IDENTICAL_NOTE =
+  'This run withheld, for EVERY option, the share of runs in which it did best, so no option may be called leading or best; '
+  + 'and, for the options in `option_ids`, the chance of reaching the goal: those options came out identical in this model, so '
+  + 'the run cannot tell them apart. Never state, estimate, rank or compare those figures, never name a leading option, and never '
+  + 'say one of the options in `option_ids` is better or worse than another. Say `say` once, as written, when you describe the '
+  + 'run. Other results of this run may be described as they are.';
+
 const recordOf = (v: unknown): Record<string, unknown> | undefined =>
   (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
 
@@ -93,6 +106,26 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
     .map(recordOf)
     .filter((w): w is Record<string, unknown> => w !== undefined && typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
   if (warnings.length === 0) return undefined;
+  // Gate 1 v2 (Codex #2574 P1): identical options keep their own reason and scope, alone or beside any other withhold.
+  const identical = warnings.filter((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL);
+  const others = warnings.filter((w) => w.code !== GOAL_FIGURES_OPTIONS_IDENTICAL);
+  if (identical.length === 0) return goalChanceFromWarnings(others);
+  const words = identical.map((w) => (typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : ''))
+    .find((m) => m !== '') ?? '';
+  const ids = [...new Set(identical.flatMap((w) => (Array.isArray(w.option_ids) ? w.option_ids : []))
+    .filter((id): id is string => typeof id === 'string'))];
+  if (others.length === 0) {
+    return { withheld: true, say: words === '' ? OPENING : words, node_ids: [], note: OPTIONS_IDENTICAL_NOTE, option_ids: ids };
+  }
+  // Mixed: the other cause keeps its own reader, note and words; the identical reason is added, and a scoped withhold
+  // widens to the identical options too (an every-option withhold already covers them).
+  const base = goalChanceFromWarnings(others);
+  return { ...base, say: words === '' ? base.say : `${base.say} ${words}`,
+    ...(base.option_ids === undefined ? {} : { option_ids: [...new Set([...base.option_ids, ...ids])] }) };
+}
+
+/** The reader for every withhold code but gate 1 v2's; `warnings` is non-empty. */
+function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): GoalChanceWithheld {
   // (S) speaks alone: CEE writes it only on a run PLoT did not already withhold (`run-analysis.ts`).
   if (warnings.every((w) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) {
     const w = warnings[0]!;
