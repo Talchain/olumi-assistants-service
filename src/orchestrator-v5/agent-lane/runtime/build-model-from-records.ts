@@ -206,8 +206,8 @@ function fitStatedEffects(v1: V1Graph, constraints: readonly GoalConstraintT[]):
     edges: v1.edges.map(({ strength_mean, strength_std, ...edge }): ViewEdge => ({ ...edge, strength: { mean: strength_mean, std: strength_std } })),
     ...(constraints.length > 0 ? { goal_constraints: constraints } : {}),
   };
-  const refit = refitFramesForStatedEffects(view as unknown as Record<string, unknown>);
-  const fitted = refit.graph as unknown as { nodes: ViewNode[]; edges: ViewEdge[] };
+  const refit = refitFramesForStatedEffects(view);
+  const fitted: { nodes: ViewNode[]; edges: ViewEdge[] } = { nodes: refit.graph.nodes as ViewNode[], edges: refit.graph.edges as ViewEdge[] };
   const statedEdges = fitted.edges.filter(userStated);
   const clamped = clampForPersist({ nodes: fitted.nodes, edges: statedEdges });
   if (refit.refits.length === 0 && clamped.edges === statedEdges) return v1;
