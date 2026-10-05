@@ -60,6 +60,94 @@ export function timesTheUserWrote(value: number, unit: unknown, userText: string
 }
 
 /**
+ * ⛔ RT-10 (Codex buddy P1 on #2585, rounds 1-2; Science 5 Oct (1): the comparator must be the USER'S, "never a drafter
+ * default"). Whether `userText` writes `value`, in `unit`, as a CEILING ON A LEVEL of the goal: a ceiling phrase right
+ * before that very figure ("below 2%", "at most £36k", "under the 2% target", "below or equal to 2%") or right after it
+ * ("2% or less", "£36k max"). The drafter must type a comparator (the schema's enum is required), so "Monthly churn
+ * target 2%" carries one the user never wrote.
+ *
+ * Read in the figure's own clause (ends at . ! ? ; , : a dash or a new line, as `figureTheUserWroteFor`), and NOT the
+ * user's ceiling on a level when, before the figure in that clause:
+ *   - "by" is written: a change ("reduce costs by at most 10%", "by a maximum of 2%", "by 2% or less"; R1 S1);
+ *   - a denial is written (not / never / cannot / -n't), or a verb that keeps the quantity above it (avoid / prevent /
+ *     stop / without): often a FLOOR ("must not go below 2%", "cannot fall below £36k");
+ *   - the phrase is "no less / lower / fewer than": a FLOOR.
+ * With `scope`, the clause's left side must not name ANOTHER quantity of the model instead of the goal
+ * (`leftNamesAnotherQuantity`): "Keep the GCP unit-cost saving below 4%" never lends that saving's ceiling to downtime.
+ * And a figure written more than once is a ceiling only when EVERY writing reads as one ("Monthly spend target £36k; tax
+ * below £36k": tax is not in the model, so scope cannot see it, but the target's own writing carries no ceiling).
+ * Every miss under-claims: no comparator is held and the goal reads as base.
+ */
+const CEILING_BEFORE_FIGURE = /(?<!\bno\s+)\b(?:(?:below|under|less\s+than)\s+or\s+equal\s+to|below|under|beneath|less\s+than|lower\s+than|fewer\s+than|at\s+most|no\s+more\s+than|no\s+higher\s+than|up\s+to|(?:a\s+)?maximum\s+of|max(?:imum)?|down\s+to|capped\s+at)\s+(?:(?:the|about|around|roughly|approximately|just)\s+)?$/i;
+const CEILING_AFTER_FIGURE = /^[^\S\n]*(?:or\s+(?:less|lower|below|under|fewer)|at\s+most|max(?:imum)?)\b/i;
+/**
+ * Before the figure in its clause: a change ("by") or a denial — not / never / cannot / -n't, or a verb that keeps the
+ * quantity ABOVE the figure (avoid, prevent, stop, without: "avoid falling below 2%" is a FLOOR). Never the user's
+ * ceiling on a level.
+ */
+const CHANGE_OR_DENIAL_BEFORE = /\bby\b|\bnot\b|\bnever\b|\bcannot\b|n['\u2019]t\b|\bavoid(?:s|ing)?\b|\bprevent(?:s|ing)?\b|\bstop(?:s|ping)?\b|\bwithout\b/i;
+
+/**
+ * RT-10 round 3 (Codex buddy on dee7bbc6): the ceiling's own clause, on the figure's LEFT, names ANOTHER quantity of the
+ * model and not the goal ("keep the GCP unit-cost saving below 4%"). The left side only: a right-hand label is the
+ * clause's next subject, not the ceiling's ("cut it to at most £36k a month without … migration downtime risk"), and an
+ * anaphor ("it") names nothing. Words shared by the goal's and another label name neither (`figureTheUserWroteFor`'s rule).
+ */
+/**
+ * A word of the goal's own label on the ceiling's left, or a PRONOUN pointing back to it ("keep it to at most …").
+ * Only "it" / "them": "this" / "that" / "these" / "those" are as often determiners ("keep THIS year's tax below £36k",
+ * Codex buddy round 6), and a miss here only under-claims.
+ */
+const ANAPHOR = /\b(?:it|them)\b/i;
+function tiedToTheGoal(clauseBefore: string, scope: EntityScope | undefined): boolean {
+  if (ANAPHOR.test(clauseBefore)) return true;
+  if (scope === undefined) return false;
+  const said = wordsOf(clauseBefore);
+  return scope.target.flatMap(wordsOf).some((t) => said.some((w) => sameWord(w, t)));
+}
+
+function leftNamesAnotherQuantity(clauseBefore: string, scope: EntityScope): boolean {
+  const target = [...new Set(scope.target.flatMap(wordsOf))];
+  const others = [...new Set(scope.others.flatMap(wordsOf))];
+  const decisiveTarget = target.filter((t) => !others.some((o) => sameWord(t, o)));
+  const decisiveOther = others.filter((o) => !target.some((t) => sameWord(t, o)));
+  const said = wordsOf(clauseBefore);
+  const names = (pool: readonly string[]): boolean => said.some((w) => pool.some((p) => sameWord(w, p)));
+  return names(decisiveOther) && !names(decisiveTarget);
+}
+
+export function ceilingTheUserWroteFor(
+  value: number,
+  unit: unknown,
+  userText: string | null | undefined,
+  scope?: EntityScope,
+  /** The goal's current level is this same figure (the drafter's `baseline_value`): ONE plain writing of it is today's. */
+  todayIsTheSameFigure = false,
+): boolean {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
+  const family = unitPhraseFamily(unit);
+  const writings = findStatedAmounts(userText).filter((a) => amountIs(a, value, unit, family, userText));
+  // ⛔ Round 4 (Codex buddy on a351e007): EVERY writing of the figure must be accounted for — as the ceiling, or (once)
+  // as today's level when the goal's current level is that same figure ("Monthly spend is £36k; keep it to at most
+  // £36k"). "Monthly spend target £36k; tax below £36k" writes the target once with no ceiling and once as an
+  // unmodelled quantity's: which writing is the goal's is unknown, so nothing is held.
+  const ceilings = writings.filter((a) => {
+    const before = userText.slice(0, a.index);
+    const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
+    const clauseBefore = before.slice(clauseStart);
+    if (CHANGE_OR_DENIAL_BEFORE.test(clauseBefore)) return false;
+    const end = a.index + a.matchedText.length;
+    const ceiling = CEILING_BEFORE_FIGURE.test(clauseBefore) || CEILING_AFTER_FIGURE.test(userText.slice(end, end + 24));
+    if (!ceiling || (scope !== undefined && leftNamesAnotherQuantity(clauseBefore, scope))) return false;
+    // ⛔ Round 5 (Codex buddy on 101ab77a): with the figure written MORE than once, a ceiling writing counts only when its
+    // clause ties it to the goal — a word of the goal's label, or an anaphor ("keep IT to at most £36k"). "Monthly spend
+    // is at its £36k target; tax below £36k": the tax writing names neither, so it is not the goal's ceiling.
+    return writings.length === 1 || tiedToTheGoal(clauseBefore, scope);
+  });
+  return ceilings.length > 0 && writings.length - ceilings.length <= (todayIsTheSameFigure ? 1 : 0);
+}
+
+/**
  * ⛔ A FIGURE WRITTEN ONLY AS THE GOAL'S TARGET IS NOT ALSO ITS CURRENT LEVEL (R3 #72 5885498117; DL 5885526452 (3);
  * AIQ 5885651301). A current level EQUAL to the goal's own target is the user's only when the brief writes that figure
  * AGAIN, beyond the target's own writing (≥ 2): "£85k MRR … above £85k" is; "aiming for £20,000" is not. Any other
@@ -277,7 +365,8 @@ export interface HeldGoalAttributes {
  *  · direction → `goal_direction`: the candidate's comparator, held ONLY beside a target held above — it is the
  *    comparator OF that stated target, the same reading admission already acts on (`admitStatedGoalLevel`) and
  *    `goal_constraints` store. It is not read from words: `comparatorTheUserWrote` is turn-scoped and reads neither
- *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k").
+ *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k"). EXCEPT a CEILING on a level
+ *    target (RT-10): held only where the brief writes that figure as a ceiling (`ceilingTheUserWroteFor`).
  *  · horizon → `goal_horizon_months`: the drafter's month count, held only when MG's `attestHorizon` finds the brief
  *    writing that deadline ("within 12 months", "over the next year"; never "12 subscribers"). Its verdict is returned
  *    as `horizon` whatever it is, so an unresolved deadline's own words ("by Q3") reach the caller, not the node.
@@ -285,7 +374,7 @@ export interface HeldGoalAttributes {
  */
 export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   nodes: readonly N[],
-  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown } | null | undefined,
+  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown; readonly baseline_value?: unknown } | null | undefined,
   brief: string,
 ): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
@@ -313,7 +402,18 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
     && typeof written.figure === 'number' && wrote(Math.round(written.figure * 1e9) / 1e9);
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
-  const operator = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
+  const typed = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
+  // ⛔ RT-10 (Codex buddy P1 on #2585; Science 5 Oct (1)): a held CEILING on a LEVEL target is the run's sense in any
+  // unit (`goal-direction.ts`), so it is held only where the brief WRITES that figure as a ceiling
+  // (`ceilingTheUserWroteFor`): the drafter must type some comparator, and one it chose is not the user's. A change
+  // target keeps its verb's sign as before; a floor is held exactly as before.
+  const ceilingOnALevel = !isChange && (typed === '<' || typed === '<=');
+  const figure = Math.round((written.figure as number) * 1e9) / 1e9;
+  const operator = ceilingOnALevel && !ceilingTheUserWroteFor(figure, written.unit, brief,
+    quantityScope(nodes, (node as { readonly label?: unknown }).label),
+    typeof goal.baseline_value === 'number' && same(goal.baseline_value, figure))
+    ? undefined
+    : typed;
   const direction = operator !== undefined;
   const months = attestation.status === 'attested' ? attestation.months : null;
   const horizon = months !== null;

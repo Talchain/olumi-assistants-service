@@ -153,9 +153,9 @@ describe('AX1: the price × volume arithmetic on the served F8 model', () => {
   // that HOLDS a ceiling is a goal to reduce here too — whatever its label says (the run minimises it).
   it('RED (held ceiling): a goal holding `<=` gets no "stays at least that" / "needs" answer, label unchanged', () => {
     const g = graph((ns) => { node(ns, 'mrr').goal_direction = '<='; });
-    // R1 S1 (AIQ 5871459631): with no stated level the wire cannot prove the ceiling a level, so nothing is SENT —
-    // yet break-even stays silent on the held ceiling itself (its floor words would read backwards).
-    expect(deriveEmittedGoalDirection(g, 'mrr')).toBeUndefined();
+    // RT-10 (Science 5 Oct (1)): a held ceiling on a target typed a level is SENT as minimise with no stated level, and
+    // break-even stays silent on the held ceiling itself (its floor words would read backwards).
+    expect(deriveEmittedGoalDirection(g, 'mrr')).toBe('minimise');
     expect(breakEvenFor(g)).toBeNull();
     // CONTROL: a held floor keeps the served answer.
     expect(breakEvenFor(graph((ns) => { node(ns, 'mrr').goal_direction = '>='; }))).not.toBeNull();
