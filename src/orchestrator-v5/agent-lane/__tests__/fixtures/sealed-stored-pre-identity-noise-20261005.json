@@ -1,0 +1,630 @@
+{
+ "nodes": [
+  {
+   "id": "3a10efb4",
+   "kind": "decision",
+   "label": "Question",
+   "provenance": "ai_inferred",
+   "label_placeholder": true,
+   "ref": "D1"
+  },
+  {
+   "id": "4b7b0125",
+   "kind": "option",
+   "label": "Raise Prices by 10%",
+   "interventions": {
+    "53d1faca": {
+     "value": 0.1,
+     "raw_value": 10,
+     "unit": "%",
+     "source": "brief_extraction",
+     "target_match": {
+      "node_id": "53d1faca",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "high",
+     "reasoning": "Stated option value bound to stated_items[3]: raise prices by 10%"
+    },
+    "c74e0a19": {
+     "value": 0,
+     "raw_value": 0,
+     "unit": "subscribers",
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "c74e0a19",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge c37d7ed3; no stated figure is cited for this option→factor effect"
+    }
+   },
+   "is_baseline": false,
+   "provenance": "from_brief",
+   "source_quote": "raise prices by 10%",
+   "label_authored": true,
+   "ref": "O1"
+  },
+  {
+   "id": "22ae8802",
+   "kind": "option",
+   "label": "Launch a Starter Tier at £49 a Month",
+   "interventions": {
+    "53d1faca": {
+     "value": 0,
+     "raw_value": 0,
+     "unit": "%",
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "53d1faca",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge b09d2ee7; no stated figure is cited for this option→factor effect"
+    },
+    "c74e0a19": {
+     "value": 0.15,
+     "raw_value": 150,
+     "unit": "subscribers",
+     "source": "brief_extraction",
+     "range": {
+      "low": 80,
+      "high": 250,
+      "meaning": "min_max",
+      "source": "brief_extraction",
+      "source_quote": "The starter tier would win about 150 new subscribers, between 80 and 250."
+     },
+     "target_match": {
+      "node_id": "c74e0a19",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "high",
+     "reasoning": "Direct causal value bound by edge 3cfde8c1 to stated_items[11]: The starter tier would win about 150 new subscribers, between 80 and 250."
+    }
+   },
+   "is_baseline": false,
+   "provenance": "ai_inferred",
+   "source_quote": "launch a starter tier at £49 a month",
+   "label_authored": true,
+   "ref": "O2"
+  },
+  {
+   "id": "4dc8a24c",
+   "kind": "option",
+   "label": "Keep Pricing as It Is",
+   "interventions": {},
+   "is_baseline": true,
+   "provenance": "from_brief",
+   "source_quote": "keep pricing as it is",
+   "label_authored": true,
+   "ref": "O3"
+  },
+  {
+   "id": "2b043982",
+   "kind": "goal",
+   "label": "Goal: reach at least £150,000 monthly recurring revenue within 9 months.",
+   "observed_state": {
+    "value": 0.64,
+    "baseline": 0.64,
+    "unit": "£/month",
+    "source": "brief_extraction",
+    "raw_value": 120000,
+    "cap": 187500
+   },
+   "goal_threshold": 0.8,
+   "goal_threshold_raw": 150000,
+   "goal_threshold_unit": "£/month",
+   "goal_threshold_cap": 187500,
+   "goal_threshold_cap_provenance": "target_derived_headroom",
+   "goal_threshold_frame": "level",
+   "threshold_source": "brief_extraction",
+   "goal_direction": ">=",
+   "goal_horizon_months": 9,
+   "provenance": "from_brief",
+   "source_quote": "Goal: reach at least £150,000 monthly recurring revenue within 9 months.",
+   "ref": "G1"
+  },
+  {
+   "id": "53d1faca",
+   "kind": "factor",
+   "label": "Price rise",
+   "observed_state": {
+    "value": 0,
+    "unit": "%",
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred",
+    "declared_scale": "unit_interval"
+   },
+   "category": "controllable",
+   "scale_frame": 100,
+   "display_value": "0%",
+   "provenance": "ai_inferred",
+   "ref": "F1"
+  },
+  {
+   "id": "c74e0a19",
+   "kind": "factor",
+   "label": "Starter subscribers",
+   "observed_state": {
+    "value": 0,
+    "unit": "subscribers",
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   },
+   "category": "controllable",
+   "scale_frame": 1000,
+   "display_value": "0 subscribers",
+   "provenance": "ai_inferred",
+   "ref": "F2"
+  },
+  {
+   "id": "8b9f9397",
+   "kind": "factor",
+   "label": "Customers lost",
+   "observed_state": {
+    "value": 0,
+    "unit": "customers",
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   },
+   "category": "observable",
+   "scale_frame": 400,
+   "display_value": "0 customers",
+   "provenance": "ai_inferred",
+   "ref": "F3"
+  },
+  {
+   "id": "f171bf57",
+   "kind": "outcome",
+   "label": "Monthly recurring revenue",
+   "observed_state": {
+    "value": 0.64,
+    "unit": "£/month",
+    "source": "cee_inference",
+    "raw_value": 120000,
+    "extractionType": "inferred"
+   },
+   "scale_frame": 187500,
+   "display_value": "£120k/month",
+   "provenance": "ai_inferred",
+   "ref": "OC1"
+  }
+ ],
+ "edges": [
+  {
+   "from": "f171bf57",
+   "to": "2b043982",
+   "strength": {
+    "mean": 1,
+    "std": 0.5
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "domain_knowledge",
+    "reasoning": "Model-inferred causal link (records projector)",
+    "natural_effect": {
+     "amount": 1,
+     "amount_unit": "£/month",
+     "per_source_change": 1,
+     "per_source_change_unit": "£/month",
+     "strength_mean": 1,
+     "strength_mean_frame": "edge_strength"
+    },
+    "definitional": true,
+    "provenance_class": "ai_inferred",
+    "quote": "Model-inferred causal link (records projector)",
+    "basis": [],
+    "unbased": true
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "4b7b0125",
+   "to": "53d1faca",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)",
+    "provenance_class": "ai_inferred",
+    "quote": "Model-inferred causal link (records projector)",
+    "basis": [],
+    "unbased": true
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "4b7b0125",
+   "to": "c74e0a19",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)",
+    "provenance_class": "ai_inferred",
+    "quote": "Model-inferred causal link (records projector)",
+    "basis": [],
+    "unbased": true
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "22ae8802",
+   "to": "53d1faca",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)",
+    "provenance_class": "ai_inferred",
+    "quote": "Model-inferred causal link (records projector)",
+    "basis": [],
+    "unbased": true
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "22ae8802",
+   "to": "c74e0a19",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)",
+    "provenance_class": "ai_inferred",
+    "quote": "Model-inferred causal link (records projector)",
+    "basis": [
+     "4d4416fc"
+    ],
+    "unbased": false
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "53d1faca",
+   "to": "f171bf57",
+   "strength": {
+    "mean": 0.64,
+    "std": 0.32
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "brief_extraction",
+    "reasoning": "each 1% price rise adds £1,200 a month to monthly recurring revenue before churn.",
+    "magnitude": "user_stated",
+    "natural_effect": {
+     "amount": 1200,
+     "amount_unit": "£/month",
+     "per_source_change": 1,
+     "per_source_change_unit": "%",
+     "strength_mean": 0.64,
+     "strength_mean_frame": "edge_strength"
+    },
+    "provenance_class": "ai_inferred",
+    "quote": "each 1% price rise adds £1,200 a month to monthly recurring revenue before churn.",
+    "basis": [
+     "d7d93367"
+    ],
+    "unbased": false,
+    "source_quote": "each 1% price rise adds £1,200 a month to monthly recurring revenue before churn.",
+    "stated_relationship": {
+     "from_quantity": 3,
+     "to_quantity": 0,
+     "amount": 1200,
+     "amount_literal": "£1,200",
+     "per_source_change": 1,
+     "per_source_literal": "1%",
+     "amount_span": {
+      "start": 24,
+      "end": 30
+     },
+     "source_span": {
+      "start": 5,
+      "end": 7
+     },
+     "amount_unit": "£/month",
+     "per_source_change_unit": "%",
+     "from_node": "53d1faca",
+     "to_node": "f171bf57"
+    }
+   },
+   "provenance_display": "from_brief",
+   "origin": "ai"
+  },
+  {
+   "from": "53d1faca",
+   "to": "8b9f9397",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.303951367781155
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "brief_extraction",
+    "reasoning": "Each 1% price rise loses about 2 customers, between 1 and 4.",
+    "magnitude": "user_stated",
+    "natural_effect": {
+     "amount": 2,
+     "amount_unit": "customers",
+     "per_source_change": 1,
+     "per_source_change_unit": "%",
+     "strength_mean": 0.5,
+     "strength_mean_frame": "edge_strength"
+    },
+    "provenance_class": "ai_inferred",
+    "quote": "Each 1% price rise loses about 2 customers, between 1 and 4.",
+    "basis": [
+     "11fd76c4"
+    ],
+    "unbased": false,
+    "source_quote": "Each 1% price rise loses about 2 customers, between 1 and 4.",
+    "stated_relationship": {
+     "from_quantity": 3,
+     "to_quantity": 9,
+     "amount": 2,
+     "amount_literal": "2",
+     "range": {
+      "low": 1,
+      "high": 4,
+      "low_literal": "between 1",
+      "high_literal": "4",
+      "low_span": {
+       "start": 44,
+       "end": 53
+      },
+      "high_span": {
+       "start": 58,
+       "end": 59
+      },
+      "unit": "customers"
+     },
+     "per_source_change": 1,
+     "per_source_literal": "1%",
+     "amount_span": {
+      "start": 31,
+      "end": 32
+     },
+     "source_span": {
+      "start": 5,
+      "end": 7
+     },
+     "amount_unit": "customers",
+     "per_source_change_unit": "%",
+     "from_node": "53d1faca",
+     "to_node": "8b9f9397"
+    }
+   },
+   "provenance_display": "from_brief",
+   "origin": "ai"
+  },
+  {
+   "from": "8b9f9397",
+   "to": "f171bf57",
+   "strength": {
+    "mean": -0.64,
+    "std": 0.32
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "brief_extraction",
+    "reasoning": "Each lost customer removes £300 a month of monthly recurring revenue.",
+    "magnitude": "user_stated",
+    "natural_effect": {
+     "amount": -300,
+     "amount_unit": "£/month",
+     "per_source_change": 1,
+     "per_source_change_unit": "customers",
+     "strength_mean": -0.64,
+     "strength_mean_frame": "edge_strength"
+    },
+    "provenance_class": "ai_inferred",
+    "quote": "Each lost customer removes £300 a month of monthly recurring revenue.",
+    "basis": [
+     "45790a03"
+    ],
+    "unbased": false,
+    "source_quote": "Each lost customer removes £300 a month of monthly recurring revenue.",
+    "stated_relationship": {
+     "from_quantity": 9,
+     "to_quantity": 0,
+     "amount": -300,
+     "amount_literal": "£300",
+     "per_source_change": 1,
+     "per_source_literal": "Each",
+     "amount_span": {
+      "start": 27,
+      "end": 31
+     },
+     "source_span": {
+      "start": 0,
+      "end": 4
+     },
+     "amount_unit": "£/month",
+     "per_source_change_unit": "customers",
+     "from_node": "8b9f9397",
+     "to_node": "f171bf57"
+    }
+   },
+   "provenance_display": "from_brief",
+   "origin": "ai"
+  },
+  {
+   "from": "c74e0a19",
+   "to": "f171bf57",
+   "strength": {
+    "mean": 0.2613333333333333,
+    "std": 0.13066666666666665
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "brief_extraction",
+    "reasoning": "Each starter subscriber adds £49 a month to monthly recurring revenue.",
+    "magnitude": "user_stated",
+    "natural_effect": {
+     "amount": 49,
+     "amount_unit": "£/month",
+     "per_source_change": 1,
+     "per_source_change_unit": "subscribers",
+     "strength_mean": 0.2613333333333333,
+     "strength_mean_frame": "edge_strength"
+    },
+    "provenance_class": "ai_inferred",
+    "quote": "Each starter subscriber adds £49 a month to monthly recurring revenue.",
+    "basis": [
+     "f753978c"
+    ],
+    "unbased": false,
+    "source_quote": "Each starter subscriber adds £49 a month to monthly recurring revenue.",
+    "stated_relationship": {
+     "from_quantity": 11,
+     "to_quantity": 0,
+     "amount": 49,
+     "amount_literal": "£49",
+     "per_source_change": 1,
+     "per_source_literal": "Each",
+     "amount_span": {
+      "start": 29,
+      "end": 32
+     },
+     "source_span": {
+      "start": 0,
+      "end": 4
+     },
+     "amount_unit": "£/month",
+     "per_source_change_unit": "subscribers",
+     "from_node": "c74e0a19",
+     "to_node": "f171bf57"
+    }
+   },
+   "provenance_display": "from_brief",
+   "origin": "ai"
+  },
+  {
+   "from": "3a10efb4",
+   "to": "4b7b0125",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector",
+    "provenance_class": "projector_structural",
+    "quote": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "3a10efb4",
+   "to": "22ae8802",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector",
+    "provenance_class": "projector_structural",
+    "quote": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "3a10efb4",
+   "to": "4dc8a24c",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector",
+    "provenance_class": "projector_structural",
+    "quote": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "4dc8a24c",
+   "to": "53d1faca",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied",
+    "quote": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "repair"
+  },
+  {
+   "from": "4dc8a24c",
+   "to": "c74e0a19",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied",
+    "quote": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "repair"
+  }
+ ],
+ "ref_high_water": {
+  "D": 1,
+  "O": 3,
+  "G": 1,
+  "F": 3,
+  "OC": 1
+ }
+}

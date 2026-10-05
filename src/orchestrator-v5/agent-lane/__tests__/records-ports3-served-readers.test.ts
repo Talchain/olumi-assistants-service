@@ -33,6 +33,11 @@ import { GOAL_QUANTITY_IDENTITY_QUOTE } from '../../../cee/draft/records/project
 import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
 import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 import { omitOptionalRecordNulls } from '../runtime/build-model-from-records.js';
+import { LLM_STRENGTH_STD_FLOOR } from '../../../cee/constants.js';
+import { EdgeStrengthV3, GraphV3 } from '../../../schemas/cee-v3.js';
+import { Graph as V1GraphSchema } from '../../../schemas/graph.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
+import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 
 async function build(records: DraftRecordSet, brief: string): Promise<{ result: ToolResult; writes: Record<string, unknown>[] }> {
   const writes: Record<string, unknown>[] = [];
@@ -358,14 +363,31 @@ describe('Science (3): the vans B6(2) Routes case through buildModelFromRecords'
     expect(numbers(identity)).toEqual(numbers(sealedIdentity[0]!));
   });
 
-  // ⛔ UNMET, recorded (report: Science row 1 "no noise" vs the brief's "same writer, sealed unchanged"): the ONE identity
-  // writer (`writeDefinition` → `sizeLink`) stores std 0.5·β and V3 gives a causal link exists_probability 0.8 — on the
-  // sealed brief's identity too. Making it noise-free changes sealed's identity bytes and its analysis hash (row 4).
-  // `it.fails` so it turns RED the day the writer becomes noise-free.
-  it.fails('Science row 1 "no noise": the identity is sent with std 0 and exists_probability 1', async () => {
-    const { stored, goal, outcome } = await vansBuild(vansB62Records());
-    const identity = (stored.edges as Rec[]).find((e) => e.from === outcome.id && e.to === goal.id)!;
-    expect({ std: identity.strength.std, exists_probability: identity.exists_probability }).toEqual({ std: 0, exists_probability: 1 });
+  // IDENTITY NOISE (i) (Science ruling 2026-10-05): a definitional identity is noise-free. Was `it.fails` (the writer stored
+  // std 0.5·β and V3 gave exists 0.8). std 0 itself is not representable on CEE's path (`IDENTITY NOISE (i)` rows below),
+  // so "noise-free" is the estate's definitional floor: std LLM_STRENGTH_STD_FLOOR, exists 1 (as legacy's sum parts).
+  it('Science row 1 "no noise" (identity noise (i)): certain and at the definitional floor — projected, registered, stored, sent', async () => {
+    const records = vansSizedRecords();
+    const replay = await replayRecordSet(structuredClone(records), { brief: VANS_WITH_ROUTES });
+    if (!replay.ok) throw new Error(replay.detail);
+    const { graph, stored, goal, outcome } = await vansBuild(records);
+    const projected = replay.projection.graph.edges.find((e) => e.from === outcome.id && e.to === goal.id)!;
+    expect({ std: projected.strength_std, exists: projected.belief_exists }).toEqual({ std: LLM_STRENGTH_STD_FLOOR, exists: 1 });
+    const noise = (g: Rec) => {
+      const e = (g.edges as Rec[]).find((x) => x.from === outcome.id && x.to === goal.id)!;
+      return { mean: e.strength.mean, std: e.strength.std, exists_probability: e.exists_probability };
+    };
+    const expected = { mean: 1, std: LLM_STRENGTH_STD_FLOOR, exists_probability: 1 };
+    expect(noise(graph)).toEqual(expected);
+    expect(noise(stored)).toEqual(expected);
+    expect(noise((await plotRequest(graph)).sent)).toEqual(expected);
+    // Still the definitional identity it was: the size and its natural_effect are untouched by the noise.
+    expect(holdsByDefinition((stored.edges as Rec[]).find((e) => e.from === outcome.id && e.to === goal.id)!, nodeUnitOf(stored.nodes as unknown[]))).toBe(true);
+    // The ONE writer: the sealed brief's model-drawn identity carries the same noise.
+    const sealed = (await build(sealedRecords(), BRIEF)).writes[0]!.graph as Rec;
+    const sealedGoal = (sealed.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    const sealedIdentity = (sealed.edges as Rec[]).find((e) => e.to === sealedGoal.id && e.provenance?.definitional === true)!;
+    expect({ std: sealedIdentity.strength.std, exists_probability: sealedIdentity.exists_probability }).toEqual({ std: LLM_STRENGTH_STD_FLOOR, exists_probability: 1 });
   });
 
   it('Science row 1 NEGATIVE TWIN: a stated cause on a DIFFERENT quantity (another unit) mints no outcome and no identity edge', async () => {
@@ -483,21 +505,29 @@ describe('Science (3): the vans B6(2) Routes case through buildModelFromRecords'
 /** sha256 of a canonical serialisation: the byte identity row 4 pins. */
 const fingerprint = (value: unknown): string => createHash('sha256').update(stableStringify(value ?? null)).digest('hex');
 
-describe('Science row 4: the sealed brief is byte-identical and its analysis hash unchanged (pinned at base a6617c31a)', () => {
-  // Pinned at base a6617c31a432b80234a55b626656b6a7615a9d3f (before option A) and asserted here, unchanged.
+describe('Science row 4: the sealed brief is byte-identical under option A; re-pinned ONLY for identity noise (i)', () => {
+  // Option A left these byte-identical to base a6617c31a432b80234a55b626656b6a7615a9d3f (pins taken there).
+  // RE-PIN — "Science ruling 2026-10-05 identity noise (i)": the projector's ONE identity writer now writes each definitional
+  // identity certain and at the definitional floor (std 0.5 → LLM_STRENGTH_STD_FLOOR, exists 0.8 → 1). That is the ONLY
+  // byte change (each draw carries projector-written identities). Old (option A / base) → new:
+  //   sealed projection a645a166…7fc25d → 635ed976…271135 · registration f04d5fe2…f27541 → 81c789a4…523afe ·
+  //   analysis a47b8f90…0571fa → 483e9d19…284782 ·
+  //   d1 projection 45d222f1…a1cea6 → 8ea5c39a…0d2266 · analysis d00c20f5…a35485 → 8ec98fdc…c39a51 ·
+  //   d2 projection 655393ed…6cded9 → 3bbd7edc…453439 · analysis 1bb2f360…c0e8d6 → 9f077ed8…6fbb36 ·
+  //   d3 projection f33c319b…8988ea → 3ee81559…25e2eb · analysis 1789a5e8…3c3ce2 → bdb571be…d90231.
   it('sealed v-next: projection, registration body and analysis-affecting hash', async () => {
     const replay = await replayRecordSet(sealedRecords(), { brief: BRIEF });
     if (!replay.ok) throw new Error(replay.detail);
-    expect(fingerprint({ graph: replay.projection.graph, dropped: replay.projection.dropped })).toBe('a645a1660fce5691f2a9510ad8ec6b06c2488f640c644271afc7ff4adb7fc25d');
+    expect(fingerprint({ graph: replay.projection.graph, dropped: replay.projection.dropped })).toBe('635ed976a38296691b609faf815dd6b36c8fb8e04873adad20a35d60b7271135');
     const { writes } = await build(sealedRecords(), BRIEF);
-    expect(fingerprint(writes[0])).toBe('f04d5fe29645c0d8c5f32010a9371ce35192e4a7df56c5d130a99067b2f27541');
-    expect(computeAnalysisAffectingGraphHashSha256(writes[0]!.graph as never)).toBe('a47b8f90834ce3256543b79e8fd96e5750e86c76a5e2b24395d9f7229d0571fa');
+    expect(fingerprint(writes[0])).toBe('81c789a43a9e9b1a3b2cfb73a410e2131fa2cf0db99fa134b511429bb7523afe');
+    expect(computeAnalysisAffectingGraphHashSha256(writes[0]!.graph as never)).toBe('483e9d19708a92167d28808a92d794ec707fbc738035cbe126e5f1f65e284782');
   });
 
   const A16 = [
-    { draw: 1, projection: '45d222f19e1eca98aa4cd14a7d123293dc7b36a5a247b3e74fef8233eda1cea6', analysis: 'd00c20f5747052c6b465de55e1c7acab8ac0f085998157f1c82be9159fa35485' },
-    { draw: 2, projection: '655393ed6db19142f56a9bac6eafe717d57b692d74c125f60d4c46ca296cded9', analysis: '1bb2f36004be925787896de2ad55e097c1f361b8b7f373196947fde7a0c0e8d6' },
-    { draw: 3, projection: 'f33c319bac44b5ba57dadef746db31951373189d805893ada499018a5b8988ea', analysis: '1789a5e80d25f5fcfc9bedfa09626e9200f95ceeb09e89713c6d18c2e33c3ce2' },
+    { draw: 1, projection: '8ea5c39a16ac66aa94fd19d52e916a638136235a23b7c3746b05f6f0d80d2266', analysis: '8ec98fdc7a121d19c9832e16b288303f0ff2a21b78915b464213cc19abc39a51' },
+    { draw: 2, projection: '3bbd7edc1b0455ab8baa4d514559f7fc695310a39330762bffde5fb44a453439', analysis: '9f077ed8fd9415d575591a00443c9279aeb697ded44e51fbcc1de7ce016fbb36' },
+    { draw: 3, projection: '3ee815599bfced0e57b388b2bac3339aad592c73382bc2f73d1aaa3b0d25e2eb', analysis: 'bdb571be2bfffdb14bbe4768c4fced66d0136e9ef95612f7731e623259d90231' },
   ];
   for (const pin of A16) it(`banked sealed draw ${pin.draw}: projection and analysis-affecting hash`, async () => {
     const raw = JSON.parse(readFileSync(new URL(`../../../cee/draft/records/__tests__/compile-spec/fixtures/s2-sealed-d${pin.draw}.records.json`, import.meta.url), 'utf8')) as unknown;
@@ -512,5 +542,88 @@ describe('Science row 4: the sealed brief is byte-identical and its analysis has
     const result = await buildModelFromRecords(SCENARIO, BRIEF, dispatch, async () => ({ text: JSON.stringify(raw), status: 'completed' }));
     expect(result.ok).toBe(true);
     expect(computeAnalysisAffectingGraphHashSha256(registered!.graph as never)).toBe(pin.analysis);
+  });
+});
+
+// ── IDENTITY NOISE (i) (Science ruling 2026-10-05): the Lead's binding conditions, CEE side ─────────────────────────────
+const PRE_NOISE_STORED = new URL('./fixtures/sealed-stored-pre-identity-noise-20261005.json', import.meta.url);
+const C46_BRIEF = 'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase '
+  + 'the Pro plan price from £49 to £59 per month with the next AI feature release?';
+/** C46's product shape (MRR = Pro plan price × Pro subscribers), through the LEGACY constructor: a nonlinear identity. */
+function productWire(): Record<string, unknown> {
+  const link = (from: string, to: string, direction: string) => ({ from, to, direction, provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
+  const price = (value: number) => ({ factor_label: 'Pro plan price', value, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' });
+  return {
+    goal: { metric: 'MRR', operator: '>=', target_stated: true, frame: 'level', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit',
+      baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null },
+    constraints: [],
+    options: [
+      { label: 'Keep Pro at £49', provenance: 'explicit', is_status_quo: true, changes: [], interventions: [price(49)] },
+      { label: 'Raise Pro to £59', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [price(59)] },
+    ],
+    factors: [
+      { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 },
+      { label: 'Pro subscribers', role: 'observable', baseline_known: false, baseline_value: 300, unit: 'subscribers', provenance: 'ai_proposed', plausible_max: 2000 },
+      { label: 'Monthly churn', role: 'observable', baseline_known: false, baseline_value: 5, unit: '%', provenance: 'ai_proposed', plausible_max: 100 },
+    ],
+    risks: [], outcomes: [],
+    links: [link('Pro plan price', 'Monthly churn', 'positive'), link('Monthly churn', 'Pro subscribers', 'negative'),
+      link('Pro plan price', 'MRR', 'positive'), link('Pro subscribers', 'MRR', 'positive')],
+    identities: [{ outcome: 'MRR', operation: 'product', factors: ['Pro plan price', 'Pro subscribers'], provenance: 'inferred' }],
+    unknowns: [], decision_question: null,
+  };
+}
+
+describe('IDENTITY NOISE (i): only the identity edges the projector writes change; schemas, stored graphs, nonlinear', () => {
+  it('validators (CEE): exists 1 and the definitional floor pass V1, V3, GraphV3 and the run ingress; std 0 is refused (why the floor)', async () => {
+    const { graph, stored, goal, outcome } = await vansBuild(vansSizedRecords());
+    const identity = (stored.edges as Rec[]).find((e) => e.from === outcome.id && e.to === goal.id)!;
+    expect(EdgeStrengthV3.safeParse(identity.strength).success).toBe(true);
+    expect(GraphV3.safeParse(stored).success).toBe(true);
+    expect(GraphV3.safeParse(graph).success).toBe(true);
+    expect(GraphStateIngressSchema.safeParse(stored).success).toBe(true);
+    const v1Edge = { from: outcome.id, to: goal.id, strength_mean: 1, belief_exists: 1 };
+    const v1 = (std: number) => V1GraphSchema.safeParse({ nodes: [{ id: outcome.id, kind: 'outcome' }, { id: goal.id, kind: 'goal' }], edges: [{ ...v1Edge, strength_std: std }] }).success;
+    expect(v1(LLM_STRENGTH_STD_FLOOR)).toBe(true);
+    // std 0 itself is refused on CEE's own path — V1 `strength_std` and V3 `std` are `.positive()` — so it is not written.
+    expect(v1(0)).toBe(false);
+    expect(EdgeStrengthV3.safeParse({ mean: 1, std: 0 }).success).toBe(false);
+  });
+
+  it('a STORED pre-change graph is untouched: its analysis hash is the pre-change pin, and a Run sends its identity as stored', async () => {
+    const pre = JSON.parse(readFileSync(PRE_NOISE_STORED, 'utf8')) as Rec;
+    // Pinned at ed49c939c98e1f0e4fb5ab6f4c380e1051049e77 (before identity noise (i)): the sealed brief's stored graph.
+    expect(computeAnalysisAffectingGraphHashSha256(pre as never)).toBe('a47b8f90834ce3256543b79e8fd96e5750e86c76a5e2b24395d9f7229d0571fa');
+    const goal = (pre.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    const stale = (pre.edges as Rec[]).find((e) => e.to === goal.id && e.provenance?.definitional === true)!;
+    expect({ std: stale.strength.std, exists: stale.exists_probability }).toEqual({ std: 0.5, exists: 0.8 });
+    // Nothing on the Run path rewrites it: PLoT is sent the stored numbers.
+    const { sent } = await plotRequest(structuredClone(pre));
+    expect((sent.edges as Rec[]).find((e) => e.from === stale.from && e.to === stale.to)).toMatchObject({ strength: { mean: 1, std: 0.5 }, exists_probability: 0.8 });
+    // Contrast (same run): a fresh build writes the identity noise-free, so its hash differs — the probe sees the change.
+    const fresh = (await build(sealedRecords(), BRIEF)).writes[0]!.graph as Rec;
+    expect(computeAnalysisAffectingGraphHashSha256(fresh as never)).not.toBe('a47b8f90834ce3256543b79e8fd96e5750e86c76a5e2b24395d9f7229d0571fa');
+    expect((fresh.edges as Rec[]).find((e) => e.from === stale.from && e.to === stale.to)).toMatchObject({ strength: { std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1 });
+  });
+
+  it('a NONLINEAR identity is unchanged: the legacy product carrier and the links into it are byte-identical to before (i)', async () => {
+    let registered: Rec | undefined;
+    const dispatch: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph/register')) { registered = structuredClone((body as { graph: Rec }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+      return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+    };
+    const call = (async () => ({ text: JSON.stringify(productWire()) })) as unknown as CallStructuredModel;
+    const out = await buildModelFromBrief('46464646-4646-4646-8646-46464646464e', C46_BRIEF, dispatch, call);
+    expect(out.ok).toBe(true);
+    const carrier = (registered!.nodes as Rec[]).find((n) => n.nonlinear_identity !== undefined)!;
+    expect(carrier).toMatchObject({ id: 'mrr', nonlinear_identity: { operation: 'product', factor_ids: ['pro_plan_price', 'pro_subscribers'] } });
+    const into = (registered!.edges as Rec[]).filter((e) => e.to === carrier.id).map((e) => ({ from: e.from, strength: e.strength, exists: e.exists_probability }));
+    // Pinned at ed49c939c98e1f0e4fb5ab6f4c380e1051049e77 (before identity noise (i)).
+    expect(into).toEqual([
+      { from: 'pro_plan_price', strength: { mean: 0.5, std: 0.125 }, exists: 0.8 },
+      { from: 'pro_subscribers', strength: { mean: 0.5, std: 0.125 }, exists: 0.8 },
+    ]);
+    expect(fingerprint(registered)).toBe('91f58c6171bbf5bdfda2559e4bbab7ad5a8c49a9eca17f4ff5eac2bc42fd3ba4');
+    expect(computeAnalysisAffectingGraphHashSha256(registered as never)).toBe('c5608621972f4d36c0ca0ca73d3bc35f45cae157542cf60293e3a4d4d27e1c0b');
   });
 });
