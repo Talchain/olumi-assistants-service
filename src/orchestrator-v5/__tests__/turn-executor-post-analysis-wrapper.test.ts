@@ -701,6 +701,7 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     // The deterministic leader answer the permitted arm asserts MUST be absent —
     // both the phrase and the probability it carries.
     expect(text).not.toContain('currently leads');
+    expect(text).not.toContain('scored highest');
     expect(text).not.toContain('62%');
     // And nothing else in the response asserts a leader either: scanned with the
     // production alarm's own reader, so this test and the alarm cannot drift.

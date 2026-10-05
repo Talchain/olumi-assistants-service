@@ -231,11 +231,11 @@ describe('run_analysis confirmation_template forwarder', () => {
       // Case A — caution + margin
       'Hire A scored highest against your goal in 24% of runs of this model, but treat this as provisional: the result is sensitive to Quality.',
       // Case C — caution, no margin
-      'Hire A currently leads, but treat this as provisional: the result is sensitive to Quality.',
+      'Hire A scored highest in this model, but treat this as provisional: the result is sensitive to Quality.',
       // Case B — driver + margin
       'Hire A scored highest against your goal in 24% of runs of this model because Cost is the strongest driver.',
       // Case B — driver, no margin
-      'Hire A currently leads because Cost is the strongest driver.',
+      'Hire A scored highest in this model because Cost is the strongest driver.',
       // Case D — margin only
       'Hire A scored highest against your goal in 24% of runs of this model.',
       // Case D — probability (single-option)
@@ -245,7 +245,7 @@ describe('run_analysis confirmation_template forwarder', () => {
       // Case NT — effectively tied
       'Hire A is currently only fractionally ahead, so the options are effectively tied.',
       // Case E — floor
-      'Hire A currently leads.',
+      'Hire A scored highest in this model.',
     ];
     for (const base of baseShapes) {
       for (const suffix of ['', PARTIAL, UNKNOWN]) {
@@ -265,17 +265,17 @@ describe('run_analysis confirmation_template forwarder', () => {
     //   - no ", but the result is sensitive to Y" (Case A/C)
     //   - no "with N% probability. Run the follow-up checks…" (Case D)
     const adversarial =
-      'Hire A currently leads for reasons outside the deterministic headline grammar.';
+      'Hire A scored highest in this model for reasons outside the deterministic headline grammar.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
   it('falls back when text passes the blacklist + length + anchor checks but is structurally arbitrary', () => {
     // Additional anchor-shaped-but-non-grammar variants.
     const adversaries = [
-      'Option A currently leads strongly in this analysis.',
-      'Option A currently leads as the primary path forward.',
-      'Looking at the data, Option A currently leads on every metric.',
-      'In this scenario, Option A currently leads despite the noise.',
+      'Option A scored highest in this model strongly in this analysis.',
+      'Option A scored highest in this model as the primary path forward.',
+      'Looking at the data, Option A scored highest in this model on every metric.',
+      'In this scenario, Option A scored highest in this model despite the noise.',
     ];
     for (const adv of adversaries) {
       expect(fwd({ assistant_text: adv })).toBe(FALLBACK);
@@ -285,7 +285,7 @@ describe('run_analysis confirmation_template forwarder', () => {
   it('falls back when text is Case A shape but missing the " is the strongest driver" clause', () => {
     // Specific grammar gap — typo / partial emission. Must reject.
     const adversarial =
-      'Hire A currently leads because Cost is the dominant factor, but the result is sensitive to Quality.';
+      'Hire A scored highest in this model because Cost is the dominant factor, but the result is sensitive to Quality.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
@@ -297,17 +297,17 @@ describe('run_analysis confirmation_template forwarder', () => {
 
   it('falls back when text is Case D shape with a non-integer percentage (raw decimal)', () => {
     const adversarial =
-      'Hire A currently leads with 62.5% probability. Run the follow-up checks before treating this as final.';
+      'Hire A scored highest in this model with 62.5% probability. Run the follow-up checks before treating this as final.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
-  it('falls back when assistant_text contains "currently leads" mid-sentence with extra prose', () => {
+  it('falls back when assistant_text contains "scored highest in this model" mid-sentence with extra prose', () => {
     // The pre-fix forwarder accepted any string containing the
     // substring " currently leads". This regression test pins the
     // tighter allowlist — improvised prose around the anchor is now
     // rejected, even when the anchor itself is present.
     const adversarial =
-      'Recommend Hire One Senior Technical Lead. Option B currently leads but the model is unreliable.';
+      'Recommend Hire One Senior Technical Lead. Option B scored highest in this model but the model is unreliable.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
@@ -321,42 +321,42 @@ describe('run_analysis confirmation_template forwarder', () => {
   });
 
   it('falls back when assistant_text leaks a recommendation token', () => {
-    const adversarial = 'Hire A currently leads. We recommend you proceed.';
+    const adversarial = 'Hire A scored highest in this model. We recommend you proceed.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
   it('falls back when assistant_text leaks a winner token', () => {
-    const adversarial = 'Hire A currently leads. The winner is clear.';
+    const adversarial = 'Hire A scored highest in this model. The winner is clear.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
   it('falls back when assistant_text leaks an ID-shaped token (opt_a)', () => {
-    const adversarial = 'Hire opt_a currently leads in this run.';
+    const adversarial = 'Hire opt_a scored highest in this model in this run.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
   it('falls back when assistant_text contains a raw decimal (e.g. 0.62)', () => {
-    const adversarial = 'Hire A currently leads with 0.62 probability.';
+    const adversarial = 'Hire A scored highest in this model with 0.62 probability.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
   it('falls back when assistant_text contains a newline (multi-line prose)', () => {
-    const adversarial = 'Hire A currently leads.\nAlso, consider these alternatives.';
+    const adversarial = 'Hire A scored highest in this model.\nAlso, consider these alternatives.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
   it('falls back when assistant_text exceeds the 220-char headline cap', () => {
     const longTail = 'X'.repeat(220);
-    const adversarial = `Hire A currently leads ${longTail}.`;
+    const adversarial = `Hire A scored highest in this model ${longTail}.`;
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
   it('falls back when assistant_text does not end with a period', () => {
-    const adversarial = 'Hire A currently leads in this analysis';
+    const adversarial = 'Hire A scored highest in this model in this analysis';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });
 
-  it('falls back when assistant_text is missing the "currently leads" anchor', () => {
+  it('falls back when assistant_text is missing the "scored highest in this model" anchor', () => {
     const adversarial = 'Hire A is the strongest option in this run.';
     expect(fwd({ assistant_text: adversarial })).toBe(FALLBACK);
   });

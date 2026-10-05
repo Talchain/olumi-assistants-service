@@ -12,6 +12,8 @@ import { POLICY } from '../guidance/policy.js';
 import { BODY_BY_RATIONALE } from '../../compose/lens-selector.js';
 import { textNamesLeadingOption } from '../../compose/leading-option-egress-guard.js';
 import { FORBIDDEN_HEADLINE_VOCABULARY_REGEX } from '../../coaching/assistant-text-defences.js';
+import { buildAnalysisResultHeadline, isAllowedRunAnalysisAssistantText } from '../../coaching/analysis-result-headline.js';
+import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 
 type Copy = string | Readonly<Record<string, string>>;
 const row = (id: string) => POLICY.rows.find(r => r.policy_id === id)! as unknown as {
@@ -76,5 +78,50 @@ describe('the new words sit inside the existing defences (no guard widened)', ()
   });
   it('CONTROL: the retired words were the ones the audit flagged', () => {
     expect('Would ‘Switch to GCP’ still be the best choice if cost turned out different?').toMatch(FORBIDDEN_HEADLINE_VOCABULARY_REGEX);
+  });
+});
+
+describe('W-HEAD: the Run headline names the option only in this model, and is never swapped for the locked template', () => {
+  const FALLBACK = 'Ran analysis on your current scenario.';
+  const template = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
+  const forward = (text: string): string => {
+    if (typeof template !== 'function') throw new Error('expected function-form confirmation_template');
+    return template({ assistant_text: text });
+  };
+  const SHAPES: ReadonlyArray<[string, string]> = [
+    ['Case C (caution, no margin)', 'Hire A scored highest in this model, but treat this as provisional: the result is sensitive to Quality.'],
+    ['Case C (link caution)', 'Hire A scored highest in this model, but treat this as provisional: it rests heavily on how much Price changes Revenue.'],
+    ['Case B (driver, no margin)', 'Hire A scored highest in this model because Cost is the strongest driver.'],
+    ['Case E (floor)', 'Hire A scored highest in this model.'],
+  ];
+
+  it('Case E, built by the real builder, is the new floor and reaches the wire verbatim', () => {
+    const text = buildAnalysisResultHeadline({
+      enrichment: {
+        results: [
+          { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.29 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.2 },
+          { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.2 },
+          { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.23 },
+        ],
+      },
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(text).toBe('Option A scored highest in this model.');
+    expect(forward(text!)).toBe(text);
+  });
+
+  it.each(SHAPES)('%s passes the allowlist and is forwarded verbatim, never the locked template', (_name, text) => {
+    expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
+    expect(forward(text)).toBe(text);
+    expect(text).not.toMatch(FORBIDDEN_HEADLINE_VOCABULARY_REGEX);
+    // A withheld turn still sees the claim (no guard widened).
+    expect(textNamesLeadingOption(text)).toBe(true);
+  });
+
+  it('CONTROL: the retired words are no longer in the grammar, so they fall back', () => {
+    expect(forward('Hire A currently leads.')).toBe(FALLBACK);
+    expect(forward('Hire A currently leads, but treat this as provisional: the link between Price and Revenue is fragile.')).toBe(FALLBACK);
   });
 });

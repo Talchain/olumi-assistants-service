@@ -486,7 +486,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
         fragile_edges: [{ from_label: 'Hiring and Salary Cost', to_label: 'Outcome', switch_probability: 0.45 }],
       },
     },
-    shed: (l) => `${l} currently leads${PROVISIONAL_HIRING}`,
+    shed: (l) => `${l} scored highest in this model${PROVISIONAL_HIRING}`,
     shedCase: 'C',
   },
   {
@@ -501,7 +501,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
       factor_sensitivity: [{ label: 'Technical Leadership in Place', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: { level: 'moderate' },
     },
-    shed: (l) => `${l} currently leads${DRIVER_TECH_LEAD}`,
+    shed: (l) => `${l} scored highest in this model${DRIVER_TECH_LEAD}`,
     shedCase: 'B',
   },
   {
@@ -512,7 +512,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
       { option_id: 'opt_a', option_label: l, win_probability: 0.62 },
       { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.38 },
     ],
-    shed: (l) => `${l} currently leads.`,
+    shed: (l) => `${l} scored highest in this model.`,
     shedCase: 'E',
   },
   {
@@ -521,7 +521,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
     candidate: (l) =>
       `${l} ${GOAL_FRAMED_OPENING} 62% of runs of this model. Run the follow-up checks before treating this as final.`,
     records: (l) => [{ option_id: 'opt_a', option_label: l, win_probability: 0.62 }],
-    shed: (l) => `${l} currently leads.`,
+    shed: (l) => `${l} scored highest in this model.`,
     shedCase: 'E',
   },
   {
@@ -575,7 +575,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
     extra: {
       factor_sensitivity: [{ label: 'Launch Timing', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
     },
-    shed: (l) => `${l} currently leads${PROVISIONAL_LAUNCH}`,
+    shed: (l) => `${l} scored highest in this model${PROVISIONAL_LAUNCH}`,
     shedCase: 'SC',
   },
 ];
@@ -900,7 +900,7 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
         ],
       },
       'E',
-      'Option A currently leads.',
+      'Option A scored highest in this model.',
     ],
     [
       'NT margin (<= 1pp, effectively tied)',
@@ -1148,7 +1148,7 @@ describe('F3 — "could not test" only where it is true; otherwise a sentence wi
     };
     const text = buildAnalysisResultHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' });
     expect(text).toBe(
-      `Option A currently leads.${DIRECTION_DISCLOSURE} The result is not yet robust — small changes could flip it.`,
+      `Option A scored highest in this model.${DIRECTION_DISCLOSURE} The result is not yet robust — small changes could flip it.`,
     );
     expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
   });

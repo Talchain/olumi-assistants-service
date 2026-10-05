@@ -76,7 +76,7 @@ const DIRECTION_CLAUSE = 'The analysis was not told which way your goal points, 
 /** What this envelope must now produce: the withdrawn frame plus the combined sentence (R3-1). */
 const FIXED_HEADLINE =
   'Raise Price to £50 scored highest in 84% of runs of this model,' +
-  ' but treat this as provisional: the link between Price per seat and Monthly revenue is fragile.' +
+  ' but treat this as provisional: it rests heavily on how much Price per seat changes Monthly revenue.' +
   ' The analysis was not told which way your goal points, so it assumed a higher value is better,' +
   ' and it could not test whether any option reaches your goal.';
 
