@@ -264,8 +264,10 @@ describe('every sampled unvalued root kind on the goal path has a typed gap', ()
     const legacy = withRoot('risk'); legacy.nodes.at(-1)!.data = { value: 0.3 };
     expect(rootIssues(legacy)).toEqual([]);
     expect(unvaluedRoots(legacy)).toEqual([]);
-    const sw = withRoot('risk'); sw.nodes.at(-1)!.scale_frame = 1;
-    sw.options.forEach((o) => { (o.interventions as Rec).root_gap = 1; });
+    // The switch exemption is base's FACTOR exemption (the projection carries option levels on factors only); a risk
+    // the options set is still disclosed as treated as zero, which is literally what the engine does with it.
+    const sw = withRoot('factor'); sw.nodes.at(-1)!.scale_frame = 1;
+    sw.options.forEach((o) => { (o.interventions as Rec).root_gap = 1; sw.edges.push(edge(String(o.id), 'root_gap')); });
     expect(rootIssues(sw)).toEqual([]);
     expect(unvaluedRoots(sw)).toEqual([]);
   });
@@ -334,8 +336,11 @@ describe('DL gate 2: non-factor roots disclose zero and ask without refusing Run
     }
     expect(ready.blockers ?? []).toEqual(withoutRisks.analysisReady?.blockers ?? []);
     expect(stillNeededLine(readinessViewOf(g))).toBe(TWO_RISK_LINE);
-    expect(assessment.repairProposal).toBeNull();
-    expect(AnalysisReadyPayloadSchema.parse(ready).unvalued_roots).toEqual(expected);
+    // Differential: the risks add the disclosure and nothing else (the draft's own Carry On asks are unchanged).
+    expect(assessment.repairProposal).toEqual(withoutRisks.repairProposal);
+    // The schema declares the field (an undeclared key would be stripped by z.object).
+    expect(AnalysisReadyPayloadSchema.pick({ unvalued_roots: true }).parse({ unvalued_roots: ready.unvalued_roots }).unvalued_roots)
+      .toEqual(expected);
     const pipeline = { ...ready };
     delete pipeline.unvalued_roots;
     expect((carryCanonicalOnlyFields(pipeline, ready) as typeof ready).unvalued_roots).toBe(ready.unvalued_roots);
@@ -384,23 +389,35 @@ describe('DL gate 2: non-factor roots disclose zero and ask without refusing Run
     expect(assessRouteAdmission(g).unvalued_roots).toEqual(unvaluedRoots(g));
     const view = readinessViewOf(g);
     expect(view.treated_as_zero).toEqual([...RISK_LABELS]);
-    expect(view.needs_from_user).toEqual([]);
-    expect(view.olumi_can_offer).toEqual([]);
-    expect(readinessSentence(view)).toBe('The analysis can run now.');
+    const plain = readinessViewOf(freshHiringDraft(false));
+    expect(view.may_run).toBe(true);
+    expect(view.needs_from_user).toEqual(plain.needs_from_user);
+    expect(view.olumi_can_offer).toEqual(plain.olumi_can_offer);
+    const asks = JSON.stringify([...view.needs_from_user, ...view.olumi_can_offer]);
+    for (const label of RISK_LABELS) expect(asks).not.toContain(label);
+    expect(readinessSentence(view)).toBe(readinessSentence(plain));
     expect(`${readinessSentence(view)} ${stillNeededLine(view)}`).not.toMatch(/can(?:'|’|no)t run/i);
   });
 
   it('zero notices never create a multi-blocker repair proposal or become its inputs', () => {
-    const g = freshHiringDraft();
-    g.nodes.push({ id: 'factor_gap_1', kind: 'factor', label: 'Delivery capacity', category: 'observable' });
-    g.edges.push(edge('factor_gap_1', 'goal'));
-    expect(assessCanonicalAnalysisReadiness(g).repairProposal).toBeNull();
-    g.nodes.push({ id: 'factor_gap_2', kind: 'factor', label: 'Support capacity', category: 'observable' });
-    g.edges.push(edge('factor_gap_2', 'goal'));
-    const assessment = assessCanonicalAnalysisReadiness(g);
+    const withGaps = (withRisks: boolean, n: number) => {
+      const g = freshHiringDraft(withRisks);
+      for (let k = 1; k <= n; k += 1) {
+        g.nodes.push({ id: `factor_gap_${k}`, kind: 'factor', label: `Capacity ${k}`, category: 'observable' });
+        g.edges.push(edge(`factor_gap_${k}`, 'goal'));
+      }
+      return g;
+    };
+    // Differential over 0, 1 and 2 factor gaps: the risks never change the proposal.
+    for (const n of [0, 1, 2]) {
+      expect(assessCanonicalAnalysisReadiness(withGaps(true, n)).repairProposal)
+        .toEqual(assessCanonicalAnalysisReadiness(withGaps(false, n)).repairProposal);
+    }
+    const assessment = assessCanonicalAnalysisReadiness(withGaps(true, 2));
     expect(assessment.repairProposal).not.toBeNull();
-    expect(assessment.repairProposal!.unresolved_inputs.map((i) => i.factor_id).sort())
-      .toEqual(['factor_gap_1', 'factor_gap_2']);
+    const inputs = assessment.repairProposal!.unresolved_inputs.map((i) => i.factor_id);
+    expect(inputs).toEqual(expect.arrayContaining(['factor_gap_1', 'factor_gap_2']));
+    for (const factor_id of RISK_IDS) expect(inputs).not.toContain(factor_id);
     expect(assessment.analysisReady?.unvalued_roots?.map((r) => r.node_id).sort()).toEqual([...RISK_IDS].sort());
     expect(assessment.repairProposal!.issue_ids).toEqual(assessment.issues.map((i) => i.issue_id));
     for (const factor_id of RISK_IDS) {
