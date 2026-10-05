@@ -45,6 +45,23 @@ describe('RT-12: example figures are disclosed from edges only', () => {
     expect(say(g)).toBe(before);
   });
 
+  it('Codex #2591 r1 P2: a link into a factor kept out of the calculation is not disclosed as used (contrast: kept in → 1 link)', () => {
+    const withX = (excluded: boolean) => {
+      const g = exampleGraph(0);
+      g.nodes.push({ ...factor('x'), ...(excluded ? { analysis_participation: 'retained_excluded' } : {}) } as never);
+      g.edges.push(edge('x', 'goal', 'example_figure'));
+      return g;
+    };
+    expect(say(withX(true))).toBe(before);
+    expect(say(withX(false))).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
+  });
+
+  it('Codex #2591 r1 P2: duplicate stored copies of one example link count once', () => {
+    const g = exampleGraph(1);
+    g.edges.push(edge('subscribers', 'revenue', 'example_figure'));
+    expect(say(g)).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
+  });
+
   it('discloses example links even when the factor census is known-empty', () => {
     expect(say(exampleGraph(2), admission([]))).toBe("This comparison uses the example's figures for 2 links.");
   });

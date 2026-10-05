@@ -2,6 +2,7 @@
 import { structureProvenance } from '../../cee/graph-readiness/obligation-provenance.js';
 import { isAcceptedOlumiEstimate } from '../../cee/transforms/provenance-display.js';
 import { winnerOptionResultSource, isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
+import { asAnalysed } from '../../orchestrator/context/placeholder-parts.js';
 import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
 
 type Rec = Record<string, unknown>;
@@ -30,13 +31,17 @@ export function analysedOptionIds(result: unknown): readonly string[] {
 export function conditionalInputBasis(input: ConditionalInputBasis): string | null {
   const basis = factorStartingValueBasis(input);
   const graph = rec(input.graph);
-  // No path reader here: count causal links between non-option, non-decision nodes.
-  const causalNodeIds = new Set((Array.isArray(graph?.nodes) ? graph.nodes : []).map(rec)
+  // The graph the Run computes on (`asAnalysed`): a node kept out of the calculation, and its links, are not "used"
+  // (Codex #2591 r1 P2). Causal links only (non-option, non-decision ends), each relationship once however many
+  // stored copies it has (r1 P2: duplicates).
+  const analysed = asAnalysed({ nodes: Array.isArray(graph?.nodes) ? graph.nodes : [], edges: graph?.edges });
+  const causalNodeIds = new Set(analysed.nodes.map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && n.kind !== 'option' && n.kind !== 'decision')
     .map((n) => n.id));
-  const count = (Array.isArray(graph?.edges) ? graph.edges : []).map(rec)
-    .filter((e) => e !== undefined && causalNodeIds.has(e.from) && causalNodeIds.has(e.to)
-      && rec(e.provenance)?.magnitude === 'example_figure').length;
+  const count = new Set((Array.isArray(analysed.edges) ? analysed.edges : []).map(rec)
+    .filter((e): e is Rec => e !== undefined && causalNodeIds.has(e.from) && causalNodeIds.has(e.to)
+      && rec(e.provenance)?.magnitude === 'example_figure')
+    .map((e) => JSON.stringify([e.from, e.to]))).size;
   if (count === 0) return basis;
   const example = `This comparison uses the example's figures for ${count} ${count === 1 ? 'link' : 'links'}.`;
   return basis === null ? example : `${example} ${basis}`;
