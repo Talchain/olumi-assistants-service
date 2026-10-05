@@ -45,6 +45,9 @@ export const LINK_COPY = {
   no_change: "{leader} would still lead even if {from}'s average effect on {to} fell to zero.",
 } as const;
 
+/** RT-14: the measured answer opens in the model's frame; it never names an option as a fact about the world. */
+export const IN_THIS_MODEL = 'In this model, ';
+
 /** The ladder, largest first. {fraction} = the LARGEST value <= ratio (rounded DOWN: always a sufficient condition). */
 export const FRACTION_LADDER: ReadonlyArray<readonly [number, string]> = [
   [0.9, 'nine tenths'], [0.8, 'four fifths'], [0.75, 'three quarters'], [2 / 3, 'two thirds'], [0.6, 'three fifths'],
@@ -208,5 +211,7 @@ export async function whatChangesTurnFor(chipId: unknown, rb: MethodReadback, as
   const sentences = renderLinkTippingPoints(result.block.links, {
     node: nodeLabelsOf(rb.graph), option: s['model.option_labels'], leaderId,
   });
-  return sentences.length === 0 ? honest() : { reply: sentences.join(' '), outcome: 'measured', actions };
+  // RT-14 (DL #87 5993111927; principle 5992243567): an option is named only inside the model's frame. RC's per-link
+  // sentences stay verbatim (the fixture row binds them); the frame opens the answer once.
+  return sentences.length === 0 ? honest() : { reply: `${IN_THIS_MODEL}${sentences.join(' ')}`, outcome: 'measured', actions };
 }

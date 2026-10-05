@@ -69,8 +69,9 @@ describe('the served D3 case + ISL\'s real D3 block', () => {
       { from_id: 'monthly_cloud_overspend_during_migration', to_id: 'monthly_spend' },
     ]);
     expect(turn?.outcome).toBe('measured');
+    // RT-14 (DL #87 5993111927): the answer names options only inside the model's frame, opened once.
     expect(turn?.reply).toBe(
-      "‘Stay on AWS’ would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
+      "In this model, ‘Stay on AWS’ would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
       + "‘Switch to GCP’ would still lead even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.",
     );
     expect(turn?.reply).not.toMatch(/\d|%|no single (assumption|factor)|nothing would change/i);
