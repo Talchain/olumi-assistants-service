@@ -145,16 +145,18 @@ const valueIn = (g: unknown, id: string) =>
   ((g as Graph | null)?.nodes ?? []).find((n) => n.id === id)?.observed_state?.value;
 
 describe('a freshly built model is admissible for a provisional first analysis (exact cases)', () => {
-  // ⭐ DR row 4 (#2371; PTL #77 5914383843 "maturity rule = YES"): each brief below states a target with no today's
-  // level, on links nobody sized, so the first analysis PROCEEDS but is `exploratory` (no leader, shares or goal
-  // chance) and says why on the mode's field. Was `quantified_provisional` / `comparative_leader` before #2371.
+  // ⭐ DR row 4 (#2371; PTL #77 5914383843 "maturity rule = YES") capped these at `exploratory`. RE-PINNED, RT-10 B′ R2
+  // (Science #87 5999608477; DL e8 CONFIRMED, amending the maturity rule for an untestable target): each brief below
+  // states a target with no today's level, on links nobody sized; the first analysis PROCEEDS at the mode it had before
+  // #2371 (`quantified_provisional` / `comparative_leader`), and only the claims against the target are withheld (in the
+  // Run). The target's sentence rides the readiness view, not the mode's field.
   const targetReason = (g: Graph) => resolveAnalysisAdmission(g).reasons.find((r) => r.field === 'permitted_analysis_mode')?.code;
 
-  it('HIRING: proceeds, exploratory (its target can\'t be tested yet); every current value is Olumi’s estimate', async () => {
+  it('HIRING: proceeds at its pre-#2371 mode (the target no longer caps it); every current value is Olumi’s estimate', async () => {
     const { graph } = await registered(HIRING());
-    expect(targetReason(graph)).toBe('TARGET_NOT_TESTABLE');
+    expect(targetReason(graph)).not.toBe('TARGET_NOT_TESTABLE');
     expect(verdict(graph)).toEqual({
-      willProceed: true, mode: 'exploratory', blockers: [],
+      willProceed: true, mode: 'quantified_provisional', blockers: [],
       ceeInference: ['tech_leads', 'developers', 'coordination_overhead'],
     });
     expect(graph.nodes.find((n) => n.id === 'developers')?.observed_state).toStrictEqual({ value: 6 / 50, raw_value: 6, unit: 'FTE', source: 'cee_inference', extractionType: 'inferred' });
@@ -178,9 +180,9 @@ describe('a freshly built model is admissible for a provisional first analysis (
     // WITH a level, so a held status quo (no stored copy, #1902) beside one price arm refused "nothing to
     // compare" — Paul's own question could not run. The floor now fingerprints the set the run SUBMITS, in
     // which `gateAnalysableOptions` holds the status quo at the current values. Same verdict as two arms.
-    expect(targetReason(graph)).toBe('TARGET_NOT_TESTABLE');
+    expect(targetReason(graph)).not.toBe('TARGET_NOT_TESTABLE');
     expect(verdict(graph)).toEqual({
-      willProceed: true, mode: 'exploratory', blockers: [],
+      willProceed: true, mode: 'comparative_leader', blockers: [],
       ceeInference: ['monthly_churn_rate', 'pro_subscribers'],
     });
     const sq = resolveRunAdmission(graph).assessment.analysisReady?.options.find((o) => o.option_id === 'status_quo_stay_at_49');
@@ -198,9 +200,9 @@ describe('a freshly built model is admissible for a provisional first analysis (
     // is in the comparison's substrate, so "partly user-stated" licenses naming a
     // leader even though churn and subscribers are Olumi's. Pinned, not endorsed —
     // permission to calculate and permission to name a leader are the policy's call.
-    expect(targetReason(graph)).toBe('TARGET_NOT_TESTABLE');
+    expect(targetReason(graph)).not.toBe('TARGET_NOT_TESTABLE');
     expect(verdict(graph)).toEqual({
-      willProceed: true, mode: 'exploratory', blockers: [],
+      willProceed: true, mode: 'comparative_leader', blockers: [],
       ceeInference: ['monthly_churn_rate', 'pro_subscribers'],
     });
     // The semantic floor's own reason still publishes on its own field.

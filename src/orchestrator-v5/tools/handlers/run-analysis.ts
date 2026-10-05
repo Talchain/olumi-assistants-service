@@ -48,7 +48,7 @@ import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/s
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
-import { targetTestabilityOf, targetNotTestableWarning } from '../../admission/target-testability.js';
+import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import type {
@@ -199,7 +199,7 @@ import {
 // headline ON them, and then discarded both — so this handler could only ever
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
-import { heldGoalPointsUp, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
+import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 
@@ -2003,10 +2003,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
-    // ⛔ DR ROW 4 (AIQ #2371 5914730220 / 5915342964): a target this run can't test (the verdict that capped the admission's
-    // mode at `exploratory`) has no goal chance for ANY option, as it has no leader or share. Runs after every earlier
-    // withhold, and withholds whatever options STILL show a goal figure: (S) is per option, so "something was withheld"
-    // never means "every chance is gone" (AIQ's executed run: m1 + one option's placeholder lever kept £59's 0.9929).
+    // ⛔ DR ROW 4 (AIQ #2371 5914730220 / 5915342964): a target this run can't test has no goal chance for ANY option.
+    // ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8): only the claims against the target go; the leader and the shares stay,
+    // as on a run with no target. Runs after every earlier withhold, and withholds whatever options STILL show a goal
+    // figure: (S) is per option, so "something was withheld" never means "every chance is gone" (AIQ's executed run: m1 +
+    // one option's placeholder lever kept £59's 0.9929).
     {
       const before = response;
       response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis);
@@ -2142,9 +2143,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // against the same bytes. Falls back to the persisted graph for snapshots
     // that carry the constraints only there. Hoisted so the identity telemetry
     // below can report what we actually asked for.
+    // ⭐ RT-10 B′ R2 at T1 (Science d5, 5 Oct): the goal's OWN target row, while the target can't be tested, is the
+    // target, not a limit: its claims are withheld and said once under GOAL_FIGURES_TARGET_NOT_TESTABLE (above), so it
+    // never also withholds the leader here. Bound by the row's identity (`untestableGoalTargetRowId`); a deadline row,
+    // another node's limit and a testable target's row stay. It still travels to PLoT unchanged.
+    const untestableTargetRowId = untestableGoalTargetRowId(graphForAnalysis);
     const ratifiedConstraints = readRatifiedConstraints(
       snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
-    );
+    ).filter((c) => c.constraint_id !== untestableTargetRowId);
     // ONE verdict, five states, each declaring whether a leading option may be
     // named. Both withholding predicates (never evaluated / the leader breaks a
     // checked limit) and the seam's third answer (we could not reconcile which
@@ -2368,6 +2374,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // opens. `goal_target_edit` refuses a CHANGE target (`goal_is_a_change`, the same `isChangeFrame`), so there the
       // assumption is stated with no correction promised.
       goal_direction_correctable: goalDirectionCorrectableByTarget(graphForAnalysis, snapshot.goal_node_id),
+      // ⭐ RT-10 B′ (DL e8 condition 1): the lead says "came out lowest for {goal}" only when THIS Run sent minimise, read
+      // off the very payload PLoT received (`plotPayload.goal_direction`, set once above), never re-derived.
+      ...(plotPayload.goal_direction === 'minimise'
+        ? { minimised_goal_label: readGoalLabel(graphForAnalysis, snapshot.goal_node_id) ?? undefined } : {}),
       // T1: withhold the confident "{X} currently leads" claim while any
       // ratified condition is unchecked. A recommendation must not exist
       // unless every user-ratified hard constraint is decision-grade.
@@ -3642,8 +3652,9 @@ function goalFigureOptions(envelope: unknown): { scored: string[]; shown: string
 
 /**
  * ⛔ DR ROW 4 IN THE RUN (AIQ #2371 5914730220 / 5915342964): when the goal's target can't be tested
- * (`targetVerdictCapsOrdering`), every option that STILL shows a goal figure after the earlier withholds has it withheld
- * under `GOAL_FIGURES_TARGET_NOT_TESTABLE` (the leader and shares go with it). Options an earlier withhold already took keep
+ * (`targetVerdictWithholdsTargetClaims`), every option that STILL shows a goal figure after the earlier withholds has its
+ * claims AGAINST THE TARGET withheld under `GOAL_FIGURES_TARGET_NOT_TESTABLE`. ⛔ RT-10 B′ R2 (Science #87 5999608477; DL
+ * e8 CONFIRMED): the shares, the leader and the brief STAY (`keepOrdering`), exactly as on a run with no target. Options an earlier withhold already took keep
  * that withhold's own reason. Returns `response` itself when nothing is left to withhold or the target is testable. Pure.
  */
 export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown): E {
@@ -3663,7 +3674,7 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   if (warning === null) return response;
   // DL [R1] condition: each kept figure carries its sizing label — the options resting on Olumi's accepted estimates.
   const accepted = keepOutcome ? optionsRestingOnAcceptedOlumiSizes(graph, ids) : [];
-  return withholdOptionGoalFigures(response, new Set(ids), accepted.length > 0 ? { ...warning, rests_on_accepted_olumi: accepted } : warning, { keepOutcome });
+  return withholdOptionGoalFigures(response, new Set(ids), accepted.length > 0 ? { ...warning, rests_on_accepted_olumi: accepted } : warning, { keepOutcome, keepOrdering: true });
 }
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */

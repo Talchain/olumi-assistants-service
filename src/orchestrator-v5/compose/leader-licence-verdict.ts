@@ -19,7 +19,7 @@ import {
   WITHHELD_SEPARATION_UNAVAILABLE, WITHHELD_UNREQUESTED_ANALYSIS,
 } from './analysis-state-v1.js';
 import {
-  GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_TARGET_NOT_TESTABLE, goalFiguresWithheldWarning,
+  GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_TARGET_NOT_TESTABLE, goalFiguresWithheldWarnings,
 } from '../../orchestrator/context/option-result-source.js';
 
 export const LEADER_LICENCE_AUTHORITY_VERSION = 1 as const;
@@ -115,7 +115,12 @@ function admissionReason(analysisReady: unknown): LeaderLicenceWithheldReason {
 function goalFigureReason(result: Rec): LeaderLicenceWithheldReason | null {
   const envelope = rec(result.enrichment);
   if (envelope === null) return null;
-  const code = goalFiguresWithheldWarning(envelope)?.code;
+  // RT-10 B′ R2: a withhold that KEPT the shares (its `withheld_claims` lists no `win_share`) withholds no leader. The
+  // reason is the first withhold that did not keep them, in ANY order: a target-only withhold beside a placeholder-path
+  // one never licenses the leader the other withheld (Codex-style order hazard: `goalFiguresWithheldWarning` reads first).
+  const keptShares = (w: Rec): boolean => Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share');
+  const warning = goalFiguresWithheldWarnings(envelope).find((w) => !keptShares(w));
+  const code = warning?.code;
   if (typeof code !== 'string') return null;
   if (code === GOAL_FIGURES_OPTIONS_IDENTICAL) return 'options_do_not_separate';
   if (code === GOAL_FIGURES_TARGET_NOT_TESTABLE) return 'target_not_testable';

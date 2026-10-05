@@ -19,6 +19,7 @@ import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
+import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -74,41 +75,53 @@ type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
-/** The goal's own limit row: the same statement as its target (DECISION-REPRESENTATION row 1). */
-/**
- * The goal's own limit row: the target when the node carries no raw threshold. A DEADLINE on the goal ("within 18
- * months") is DR row 3's time limit, not row 4's target: it is skipped, detected by `deadline_metadata` PRESENCE, the
- * signal `compound-goals.ts` uses for the same split.
- */
-function ownLimitRow(graph: Rec, goal: Rec): Rec | undefined {
-  const rows = Array.isArray(graph.goal_constraints) ? graph.goal_constraints.filter(isRec) : [];
-  return rows.find((c) => c.node_id === goal.id && finite(c.value) && !isRec(c.deadline_metadata));
-}
+/** The goal's own limit row (DECISION-REPRESENTATION row 1): the ONE reader's (`stated-goal-target.ts`). */
+const ownLimitRow = goalOwnLimitRow;
 
-/** The goal's stated target figure: the node's own raw threshold, else the goal's own limit row's value. */
+/** The goal's stated target figure, read by the ONE target reader every surface shares (RT-10 B′ R3). */
 function statedTarget(graph: Rec, goal: Rec): number | null {
-  if (finite(goal.goal_threshold_raw)) return goal.goal_threshold_raw;
-  const own = ownLimitRow(graph, goal);
-  return own !== undefined ? (own.value as number) : null;
+  return statedGoalTargetOf(graph, goal)?.value ?? null;
 }
 
 const PRECONDITION_ORDER: readonly TargetPrecondition[] = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
 
 /**
- * ⭐ WHICH FAILURES ALSO WITHHOLD THE LEADER AND THE SHARES, not only the goal chance: all of them.
- * - AIQ #75 5914209776: an unconfirmed product and a placeholder link into the goal (YES in meaning).
- * - PTL #77 5914383843 ("maturity rule = YES"): no today's level, or a consequential goal path resting only on
- *   defaulted/unsized links, is `exploratory` too: no leader, no win shares, no goal chance, and the one blocking question.
- * One set, so a later ruling is one line.
+ * The failures that withhold the claims made AGAINST the target: the goal chance, the joint chance and (unless the
+ * failures leave it in the goal's units) the outcome distribution. One set, so a later ruling is one line.
+ *
+ * ⛔ RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED) AMENDS PTL #77 5914383843 for a target the run cannot test:
+ * stating a target never removes a finding the Run shows without one. The ordering (shares, leader, brief) needs no level
+ * today and no unit — the shared offset cancels on each draw — so these failures no longer cap the analysis mode at
+ * `exploratory` nor withhold the shares or the leader. Placeholder paths and an unread product keep their own,
+ * target-independent withholds (`placeholderGoalPaths`, Gate 5), exactly as on a run with no target.
  */
-export const CAPS_THE_ORDERING: ReadonlySet<TargetTestabilityFailure['code']> = new Set([
+export const TARGET_CLAIM_FAILURES: ReadonlySet<TargetTestabilityFailure['code']> = new Set([
   'missing_goal_baseline', 'threshold_off_scale', 'comparator_unscorable', 'threshold_unit_mismatch',
   'goal_path_placeholder', 'goal_path_unsized', 'identity_unconfirmed',
 ]);
 
-/** True when a verdict caps the claim at `exploratory` (see {@link CAPS_THE_ORDERING}). */
-export function targetVerdictCapsOrdering(verdict: TargetTestability): boolean {
-  return verdict.kind === 'not_testable' && verdict.failures.some((f) => CAPS_THE_ORDERING.has(f.code));
+/** True when a verdict withholds the claims made against the target (see {@link TARGET_CLAIM_FAILURES}). */
+export function targetVerdictWithholdsTargetClaims(verdict: TargetTestability): boolean {
+  return verdict.kind === 'not_testable' && verdict.failures.some((f) => TARGET_CLAIM_FAILURES.has(f.code));
+}
+
+/**
+ * ⭐ RT-10 B′ R2 AT T1 (Science d5 ruling 5 Oct, on the measured rt10b Run 2): the id of the goal's OWN target row while
+ * the target can't be tested — the row the T1/B5 ratified set must not also count as an unchecked limit. That row IS the
+ * target (DR row 1), not a feasibility limit: its claims are withheld, and said once, under
+ * GOAL_FIGURES_TARGET_NOT_TESTABLE. Counting it in T1 too double-withholds and makes "at most" a precondition for the
+ * leader (served Run 2 after "at most 400": `constraint_withheld`, "One limit on your model could not be checked").
+ * Bound by IDENTITY, as the row that IS the target ({@link goalTargetRow}: the goal's own non-deadline row, and beside a
+ * raw target only the row stating that figure; Codex r1 #2606), never by operator. A deadline row on the goal (DR row 3),
+ * a different-figure row beside a raw target, every other node's limit, and a testable target: null, nothing moves.
+ */
+export function untestableGoalTargetRowId(input: unknown): string | null {
+  const verdict = targetTestabilityOf(input);
+  if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable' || !isRec(input) || !Array.isArray(input.nodes)) return null;
+  const graph = asAnalysed(input as Rec & { nodes: unknown[] });
+  const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && n.id === verdict.goal_id);
+  const row = goal === undefined ? undefined : goalTargetRow(graph, goal);
+  return typeof row?.constraint_id === 'string' && row.constraint_id !== '' ? row.constraint_id : null;
 }
 
 export function targetTestabilityOf(input: unknown): TargetTestability {
@@ -130,7 +143,9 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     failures.push({ precondition: 'P2', case: 'd', code: 'threshold_off_scale' });
   }
   // P3 — a comparator science can score: `>=` / `<=`, and a strict `>` (it travels as `goal_threshold_strict`).
-  if (readHeldGoalComparator(graph, goalId) === '<') failures.push({ precondition: 'P3', case: 'b', code: 'comparator_unscorable' });
+  // The comparator the node HOLDS, else the one its own target row STATES (one reader, Codex r1 #2606).
+  const heldComparator = readHeldGoalComparator(graph, goalId) ?? statedGoalTargetOf(graph, goal)?.held;
+  if (heldComparator === '<') failures.push({ precondition: 'P3', case: 'b', code: 'comparator_unscorable' });
   // P5 — the goal's samples arrive in its own unit (see `linkSized`). LEVEL goals only (R3 #75 5914084339): the ruler
   // artefact is `raw / (raw × 1.25) = 0.8` on a level frame; a change frame ("cut by 20%") is left as it was.
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
@@ -183,12 +198,36 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
 
 const COMPARATOR_WORDS: Readonly<Record<string, string>> = { '>=': 'at least', '>': 'more than', '<=': 'at most', '<': 'below' };
 
+/** How the target's comparator is said in the B′ tail ("keep them at or below 400"), Science #87 5999608477. */
+const TAIL_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '<=': 'at or below', '>=': 'at or above', '<': 'below', '>': 'above' };
+
 /**
- * AIQ's words (#77 5912882031) for a `not_testable` verdict, under AIQ's two rules (#75 5913502854): the reason names
- * EVERY case measured failing (naming one would imply answering it makes the target testable), and the one question is
- * the first failing case, in R3's order, that has one ((b) is a capability gap: named, never asked). `null` otherwise.
+ * ⭐ THE ONE SOURCE of the untestable-target words (Science, B′ template edit 1): every sentence about a target the run
+ * cannot test — the pre-Run readiness, the "Not shown." withhold and the B′ tail — is composed from these parts.
+ * AIQ's rules (#75 5913502854): the reasons name EVERY case measured failing; the one question is the first failing
+ * case, in R3's order, that has one ((b) is a capability gap: named, never asked). Science's edits: (c) names the canvas
+ * object ("a size for the link from {lever} to {goal}", no verb, so a plural label agrees), and the level question is
+ * "What's today's level of {goal}?" (never "What is {plural} today?").
  */
-export function notTargetTestableSentence(graph: unknown, verdict: TargetTestability): string | null {
+export interface UntestableTargetParts {
+  readonly name: string;
+  /** "at most 400 cancellations / month": the readiness sentence's target words. */
+  readonly target: string;
+  /** "at or below 400 cancellations / month" for the tail, or null when no comparator is held. */
+  readonly tailTarget: string | null;
+  /** One clause per failing case for the readiness sentence ("it needs …", "the model doesn't yet …"). */
+  readonly clauses: readonly string[];
+  /** One noun phrase per failing case the user can supply, for the tail's "I need …" ((a) is "today's level"). */
+  readonly needs: readonly string[];
+  /**
+   * (b), a CAPABILITY gap ("'< 5%'"), or null. Science d5 (#2606 words check): the user cannot supply it, so it is
+   * never in "I need …"; the tail names it in its own sentence (AIQ: named, never asked).
+   */
+  readonly untestableComparator: string | null;
+  readonly question: string | null;
+}
+
+export function untestableTargetParts(graph: unknown, verdict: TargetTestability): UntestableTargetParts | null {
   if (verdict.kind !== 'not_testable' || !isRec(graph) || !Array.isArray(graph.nodes)) return null;
   const goal = graph.nodes.filter(isRec).find((n) => n.id === verdict.goal_id);
   const raw = goal === undefined ? null : statedTarget(graph, goal);
@@ -196,34 +235,83 @@ export function notTargetTestableSentence(graph: unknown, verdict: TargetTestabi
   const name = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'your goal';
   const unit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit
     : typeof ownLimitRow(graph, goal)?.unit === 'string' ? ownLimitRow(graph, goal)!.unit as string : '';
-  const comparator = readHeldGoalComparator(graph, verdict.goal_id) ?? ownLimitRow(graph, goal)?.operator;
+  const comparator = readHeldGoalComparator(graph, verdict.goal_id) ?? statedGoalTargetOf(graph, goal)?.held;
   const figure = unit !== '' ? sayFigure(raw, unit) : raw.toLocaleString('en-GB');
   const target = [typeof comparator === 'string' ? COMPARATOR_WORDS[comparator] : undefined, figure].filter(Boolean).join(' ');
+  const tailWords = typeof comparator === 'string' ? TAIL_COMPARATOR_WORDS[comparator] : undefined;
   const lever = verdict.failures.find((f) => f.case === 'c')?.lever;
   const identityCase = verdict.failures.some((f) => f.code === 'identity_unconfirmed');
-  const said = (c: TargetCase): readonly [string, string | null] => c === 'a' ? [`it needs today's level of ${name}`, `What is ${name} today?`]
-    : c === 'c' ? [`the model doesn't yet say how ${lever ?? 'what the options change'} turns into ${name} in ${unit || 'the goal unit'}`,
+  const link = `a size for the link from ${lever ?? 'what the options change'} to ${name}`;
+  // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
+  const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
+    ? [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
+    : c === 'c' ? [`it needs ${link}`, link,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
       identityCase || lever === undefined ? null : `Roughly how much ${name} in ${unit || 'the goal unit'} does a change in ${lever} bring?`]
-    : c === 'b' ? [`it can't yet test a '${typeof comparator === 'string' ? comparator : ''} ${figure}' target on ${name}`, null]
-    : [`your target is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`, `What is ${name} today${unit !== '' ? `, in ${unit}` : ''}?`];
+    : c === 'b' ? [`it can't yet test a '${typeof comparator === 'string' ? comparator : ''} ${figure}' target on ${name}`, null, null]
+    : [`your target is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
+      `${name} measured in ${unit || 'its own units'}`, `What's today's level of ${name}${unit !== '' ? `, in ${unit}` : ''}?`];
   const cases = [...new Set(verdict.failures.map((f) => f.case))];
-  const reasons = cases.map((c) => said(c)[0]);
-  const question = cases.map((c) => said(c)[1]).find((q): q is string => q !== null);
-  const because = reasons.length === 1 ? reasons[0] : `${reasons.slice(0, -1).join(', ')} and ${reasons[reasons.length - 1]}`;
-  return `Olumi can compare your options, but can't yet test them against your target (${target}), because ${because}.${question !== undefined ? ` ${question}` : ''}`;
+  return {
+    name,
+    target,
+    tailTarget: tailWords === undefined ? null : `${tailWords} ${figure}`,
+    clauses: cases.map((c) => said(c)[0]),
+    needs: cases.map((c) => said(c)[1]).filter((n): n is string => n !== null),
+    untestableComparator: cases.includes('b') ? `'${typeof comparator === 'string' ? comparator : ''} ${figure}'` : null,
+    question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
+  };
+}
+
+/**
+ * AIQ's words (#77 5912882031) for a `not_testable` verdict, composed from {@link untestableTargetParts}. `null` otherwise.
+ */
+export function notTargetTestableSentence(graph: unknown, verdict: TargetTestability): string | null {
+  const parts = untestableTargetParts(graph, verdict);
+  if (parts === null) return null;
+  // Consecutive needs share one "it needs" ("it needs today's level of X and a size for the link from L to X").
+  const clauses = parts.clauses.map((c, i) => (i > 0 && c.startsWith('it needs ') && parts.clauses[i - 1]!.startsWith('it needs ') ? c.slice('it needs '.length) : c));
+  const because = clauses.length === 1 ? clauses[0] : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
+  return `Olumi can compare your options, but can't yet test them against your target (${parts.target}), because ${because}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+}
+
+/**
+ * ⭐ RT-10 B′ TAIL (Science #87 5999608477, template approved with edits): what a Run that KEPT the ordering says about
+ * the target it cannot test. "I can't yet say how likely any option is to keep {goal} {at or below} {figure}: I need
+ * {needs}. {question}". Never "reaches the target", never a recommendation. `null` when the verdict is testable or no
+ * comparator is held (no direction to say the target in).
+ *
+ * (b), a comparator Olumi can't yet test, is a capability gap, never a need (Science d5, #2606 words check): alone,
+ * "…: Olumi can't yet test a '{op} {X}' target." with no question; beside needs, "…: I need {A}. Olumi also can't yet
+ * test a '{op} {X}' target. {question for A}".
+ */
+export function untestableTargetTail(graph: unknown, verdict: TargetTestability): string | null {
+  const parts = untestableTargetParts(graph, verdict);
+  if (parts === null || parts.tailTarget === null) return null;
+  const { needs, untestableComparator } = parts;
+  const opening = `I can't yet say how likely any option is to keep ${parts.name} ${parts.tailTarget}:`;
+  const question = parts.question !== null ? ` ${parts.question}` : '';
+  if (needs.length === 0) {
+    return untestableComparator === null ? null : `${opening} Olumi can't yet test a ${untestableComparator} target.`;
+  }
+  const need = needs.length === 1 ? needs[0] : `${needs.slice(0, -1).join(', ')}, and ${needs[needs.length - 1]}`;
+  const gap = untestableComparator === null ? '' : ` Olumi also can't yet test a ${untestableComparator} target.`;
+  return `${opening} I need ${need}.${gap}${question}`;
 }
 
 /**
  * The `run_analysis` warning for a run whose goal figures are withheld because the target can't be tested yet (AIQ #2371
- * 5914730220): the goal chance goes with the leader and the shares. "Not shown." opens it, as every goal-figure withhold
- * does (its readers key on that opener); the rest is the DR sentence. `null` for a verdict that doesn't cap.
+ * 5914730220). RT-10 B′ R2: only the claims AGAINST the target go; the leader and the shares stay. "Not shown." opens it,
+ * as every goal-figure withhold does (its readers key on that opener); the rest is the DR sentence, and `say` is the B′
+ * tail the reply says. `null` for a verdict that withholds no target claim.
  */
 export function targetNotTestableWarning(
   graph: unknown, verdict: TargetTestability, optionIds: readonly string[], code: string,
-): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[] } | null {
-  if (!targetVerdictCapsOrdering(verdict) || verdict.kind !== 'not_testable') return null;
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string } | null {
+  if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable') return null;
   const said = notTargetTestableSentence(graph, verdict);
   const message = said !== null && said.length <= 388 ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
-  return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds] };
+  // RT-10 B′ R2: what the reply says about the target, from the same parts (`untestableTargetTail`).
+  const tail = untestableTargetTail(graph, verdict);
+  return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds], ...(tail !== null ? { say: tail } : {}) };
 }
