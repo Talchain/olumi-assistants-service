@@ -127,10 +127,11 @@ describe("PR-U2a: an edge figure is the user's when the USER sized it, whatever 
     const brief = FIXTURE.brief_text + FACTS_1500;
     const at1500 = brief.indexOf("£1,500");
     const RESIZE = { amount: 1500, amount_unit: "£/month", per_source_change: 1, per_source_change_unit: "%" };
+    const CHAT = "Make it £1,500 a month for each 1%.";
     const resized = () => {
       const g = fresh();
       Object.assign(priceEdge(g).provenance, { source: "cee_hypothesis", magnitude: "user_stated", source_quote: FACTS });
-      const quote = "Make it £1,500 a month for each 1%.";
+      const quote = CHAT;
       const r = applyLinkEffectEdit({
         persistedGraph: g, from: "price_increase", to: MRR, effect: RESIZE as never, quote,
         expected: { graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, "price_increase", MRR)! },
@@ -139,9 +140,14 @@ describe("PR-U2a: an edge figure is the user's when the USER sized it, whatever 
       expect(r.kind, JSON.stringify(r)).toBe("mutated");
       return (r as { mutatedGraph: Graph }).mutatedGraph;
     };
-    it("PRECONDITION: the writer resized the link to £1,500 and kept the £1,200 Fi sentence; £1,500 is written once", () => {
+    // WRITER-AGNOSTIC (github-11, 5 Oct): staging's writer keeps the old Fi sentence; RT-6 #2605 overwrites
+    // `source_quote` with the user's chat sentence. Either way the stored sentence does not state £1,500, so this chain
+    // holds under both, and #2605 merging first or second turns nothing RED. The writer-independent rows below pin each
+    // stale key.
+    it("PRECONDITION: the writer resized the link to £1,500; its stored sentence (old Fi or chat) does not state £1,500", () => {
       const p = priceEdge(resized()).provenance;
-      expect(p).toMatchObject({ source: "user_specified", magnitude: "user_stated", source_quote: FACTS });
+      expect(p).toMatchObject({ source: "user_specified", magnitude: "user_stated" });
+      expect([FACTS, CHAT]).toContain(p.source_quote);
       expect(p.natural_effect).toMatchObject({ amount: 1500, per_source_change: 1 });
       expect(brief.indexOf("£1,500", at1500 + 1)).toBe(-1);
     });
@@ -154,6 +160,16 @@ describe("PR-U2a: an edge figure is the user's when the USER sized it, whatever 
       expect(at(brief, g, AT_1200, "£1,200")).toMatchObject({ matched: null });
       expect(at(brief, g, AT_1200, "£1,200").verdict).not.toBe("in_model");
       expect(at(brief, g, AT_1PCT, "1%").matched).not.toBe("price_increase");
+    });
+    // Writer-independent: a records `quote` (still kept by the writer after #2605) or a kept `source_quote` holding the
+    // brief sentence of the OLD size.
+    it.each(["quote", "source_quote"] as const)("a chat-sized link still carrying a brief `%s` of its OLD size binds quote-less", (key) => {
+      const g = fresh();
+      const p = priceEdge(g).provenance;
+      Object.assign(p, { source: "user_specified", magnitude: "user_stated", [key]: FACTS });
+      Object.assign(p.natural_effect as Record<string, unknown>, { amount: 1500 });
+      expect(at(brief, g, at1500, "£1,500")).toEqual({ verdict: "in_model", matched: MRR });
+      expect(at(brief, g, AT_1200, "£1,200")).toMatchObject({ matched: null });
     });
     it("CONTRAST: a NON-chat link whose sentence does not verify its size is not credited", () => {
       const g = fresh();
