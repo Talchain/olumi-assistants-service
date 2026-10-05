@@ -16,6 +16,7 @@
  * mechanism makes would then hold only on the paths nobody looked at.
  */
 import { describe, expect, it } from "vitest";
+import { projectDraftRecords as projectServedDraftRecords } from "../../records-v25/seam.js";
 import {
   projectDraftRecords,
   isGraphShapedResponse,
@@ -126,6 +127,8 @@ describe("the seam REFUSES anything that is not a record set", () => {
     let r: ReturnType<typeof projectDraftRecords> | undefined;
     expect(() => { r = projectDraftRecords(value); }).not.toThrow();
     expect(r).toMatchObject({ ok: false, reason: "not_a_record_set" });
+    // Parity with the served Anthropic compile (records-v25, frozen at staging): the same typed refusal.
+    expect(projectServedDraftRecords(value)).toMatchObject({ ok: false, reason: "not_a_record_set" });
   });
 
   /**
