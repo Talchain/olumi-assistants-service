@@ -388,7 +388,7 @@ function withStoredEdgeFactsWhenUnstated<T extends { edges: ReadonlyArray<EdgeRe
  * edit) has carried it onto a different model (`orchestrator-v5/graph/stated-dispositions-binding.ts`). Bytes that
  * cannot be hashed cannot be bound, so they get no receipt.
  */
-function withRegisteredStatedDispositions<G>(graph: G, receipt: readonly StatedDisposition[] | undefined): G {
+export function withRegisteredStatedDispositions<G>(graph: G, receipt: readonly StatedDisposition[] | undefined): G {
   const bare = omitStatedDispositions(graph);
   if (receipt === undefined || receipt.length === 0) return bare;
   const reconciledAgainst = statedDispositionsBindingHash(bare);

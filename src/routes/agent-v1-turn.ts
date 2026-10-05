@@ -278,6 +278,129 @@ function isConstructionTimeout(err: unknown): boolean {
   return e?.cause?.code === 'UND_ERR_HEADERS_TIMEOUT' || e?.cause?.code === 'UND_ERR_BODY_TIMEOUT';
 }
 
+/**
+ * Structured construction call (exported so evaluation harnesses drive THIS transport, never a side client;
+ * the route uses it as `callStructured`). Separate from `callModel` because it is a
+ * different contract: strict `json_schema` output and its own measured budget
+ * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
+ *
+ * `deadlineAt` is this turn's `constructionDeadline` — every attempt, the transport retry's too, gets
+ * only what remains of it. A timeout RETURNS a typed `construction_timeout` instead of throwing, so the
+ * retry (kept for a connection-level failure, e.g. a 196 ms `fetch failed`) never repeats it, and with
+ * no answer there is nothing to register.
+ */
+export const constructionCallStructured = async (
+  reqBody: Parameters<CallStructuredModel>[0],
+  deadlineAt: number,
+): ReturnType<CallStructuredModel> => onceMoreOnTransportFailure('construction', async () => {
+  const timedOut = (budgetMs: number, err?: unknown) => {
+    log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', budget_ms: budgetMs, ...(err !== undefined ? { err: String(err).slice(0, 200) } : {}) },
+      'agent-lane: construction call out of turn budget; not retried, nothing registered');
+    return { text: '', status: 'incomplete', incomplete_reason: CONSTRUCTION_TIMEOUT_REASON };
+  };
+  const budgetMs = deadlineAt - Date.now();
+  // Past the deadline no call starts: it could not end before the browser gives up.
+  if (budgetMs <= 0) return timedOut(budgetMs);
+  /**
+   * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
+   *
+   * #1825 wired `callModel` and left this handle discarded, so the caching witness on
+   * served `c2ef0b8` read: 4 conversation calls with usage (9,441 of 14,638 input
+   * tokens cached, 64.5%) and `call 3 construction: (no usage)`. Construction is
+   * banked at ~54s with in 838 / out 3404 incl. 2070 reasoning — by far the largest
+   * single call — so leaving it dark meant the aggregate cache figure could never be
+   * trusted and the obvious optimisation target could not be ranked.
+   *
+   * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
+   * write was missing. Nothing new is fetched or computed here.
+   */
+  // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
+  // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
+  const sentBody: Record<string, unknown> = {
+    model: reqBody.model,
+    instructions: reqBody.instructions,
+    input: reqBody.input,
+    max_output_tokens: reqBody.max_output_tokens,
+    ...(reqBody.reasoning_effort !== undefined
+      ? { reasoning: { effort: reqBody.reasoning_effort } }
+      : {}),
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'whole_candidate',
+        strict: true,
+        schema: reqBody.schema,
+      },
+    },
+  };
+  const identity = agentRequestIdentity('agent.construct', sentBody);
+  const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
+    model: reqBody.model, purpose: 'construction', ...identity,
+  });
+  /**
+   * ⭐ A8b (PAUL-TEST 5 Oct gap A8: "the agent-lane model id is never logged"). ONE server log line per structured call,
+   * whatever its end: the provider, the model id actually sent, the purpose, the prompt and schema identities (the same
+   * values the ledger row carries) and the measured latency. Built from the sent body's identity only — never the key,
+   * the headers, the instructions or the user's text.
+   */
+  const callStartedAt = Date.now();
+  const logStructuredCall = (outcome: string, extra: Record<string, unknown> = {}): void => {
+    log.info({
+      event: 'agent_lane.structured_call', provider: 'openai', model: reqBody.model, purpose: 'construction',
+      prompt_alias: identity['prompt_alias'], prompt_sha256: identity['prompt_sha256'], schema_sha256: identity['schema_sha256'],
+      latency_ms: Date.now() - callStartedAt, outcome, ...extra,
+    }, 'agent-lane: structured call');
+  };
+  let j: {
+    output?: { type?: string; content?: { type?: string; text?: string }[] }[];
+    usage?: Record<string, unknown>;
+    status?: unknown;
+    incomplete_details?: { reason?: unknown } | null;
+  };
+  try {
+    const r = await fetch(OPENAI_RESPONSES_URL, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(sentBody),
+      // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
+      signal: AbortSignal.timeout(budgetMs),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+    }
+    j = (await r.json()) as typeof j;
+  } catch (err) {
+    if (isConstructionTimeout(err)) { logStructuredCall('timeout'); return timedOut(budgetMs, err); }
+    logStructuredCall('error');
+    throw err;
+  }
+  let text = '';
+  for (const item of j.output ?? []) {
+    if (item.type !== 'message') continue;
+    for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
+  }
+  // Same contract as the conversation path: never throws, and records nothing for a
+  // malformed payload, so measuring a call cannot turn a successful one into a failure.
+  recordProviderUsage(usageHandle, j.usage);
+  // ⛔ COMPLETION STATUS IS PART OF THE CONTRACT HERE TOO (AIX-001, as `callModel`). It was dropped, so an answer the
+  // output cap cut off (served 770a477: output_tokens 6000 exactly, 2/14 first briefs) read as a parse error.
+  const incompleteReason = typeof j.incomplete_details?.reason === 'string' ? j.incomplete_details.reason : undefined;
+  if (j.status === 'incomplete') {
+    log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
+  }
+  logStructuredCall(typeof j.status === 'string' ? j.status : 'answered', { output_chars: text.length });
+  return {
+    text,
+    usage: j.usage,
+    ...(typeof j.status === 'string' ? { status: j.status } : {}),
+    ...(incompleteReason !== undefined ? { incomplete_reason: incompleteReason } : {}),
+  };
+}, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
+
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
 const proposals = new ProposalStore();
@@ -1433,127 +1556,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     return j;
   };
 
-  /**
-   * Structured construction call. Separate from `callModel` because it is a
-   * different contract: strict `json_schema` output and its own measured budget
-   * (see BANKED_BUDGETS role 'whole'), not the conversation budget.
-   *
-   * `deadlineAt` is this turn's `constructionDeadline` — every attempt, the transport retry's too, gets
-   * only what remains of it. A timeout RETURNS a typed `construction_timeout` instead of throwing, so the
-   * retry (kept for a connection-level failure, e.g. a 196 ms `fetch failed`) never repeats it, and with
-   * no answer there is nothing to register.
-   */
-  const callStructured = async (
-    reqBody: Parameters<CallStructuredModel>[0],
-    deadlineAt: number,
-  ): ReturnType<CallStructuredModel> => onceMoreOnTransportFailure('construction', async () => {
-    const timedOut = (budgetMs: number, err?: unknown) => {
-      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', budget_ms: budgetMs, ...(err !== undefined ? { err: String(err).slice(0, 200) } : {}) },
-        'agent-lane: construction call out of turn budget; not retried, nothing registered');
-      return { text: '', status: 'incomplete', incomplete_reason: CONSTRUCTION_TIMEOUT_REASON };
-    };
-    const budgetMs = deadlineAt - Date.now();
-    // Past the deadline no call starts: it could not end before the browser gives up.
-    if (budgetMs <= 0) return timedOut(budgetMs);
-    /**
-     * ⭐ THE MOST EXPENSIVE CALL IN THE PRODUCT, AND IT WAS THE ONE NOT MEASURED.
-     *
-     * #1825 wired `callModel` and left this handle discarded, so the caching witness on
-     * served `c2ef0b8` read: 4 conversation calls with usage (9,441 of 14,638 input
-     * tokens cached, 64.5%) and `call 3 construction: (no usage)`. Construction is
-     * banked at ~54s with in 838 / out 3404 incl. 2070 reasoning — by far the largest
-     * single call — so leaving it dark meant the aggregate cache figure could never be
-     * trusted and the obvious optimisation target could not be ranked.
-     *
-     * ⚠ `j.usage` was ALREADY parsed and returned by this function; only the ledger
-     * write was missing. Nothing new is fetched or computed here.
-     */
-    // `agent.construct` covers BUILD_INSTRUCTIONS and its retry/size/compaction suffixes; the sha tells them apart.
-    // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
-    const sentBody: Record<string, unknown> = {
-      model: reqBody.model,
-      instructions: reqBody.instructions,
-      input: reqBody.input,
-      max_output_tokens: reqBody.max_output_tokens,
-      ...(reqBody.reasoning_effort !== undefined
-        ? { reasoning: { effort: reqBody.reasoning_effort } }
-        : {}),
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'whole_candidate',
-          strict: true,
-          schema: reqBody.schema,
-        },
-      },
-    };
-    const identity = agentRequestIdentity('agent.construct', sentBody);
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
-      model: reqBody.model, purpose: 'construction', ...identity,
-    });
-    /**
-     * ⭐ A8b (PAUL-TEST 5 Oct gap A8: "the agent-lane model id is never logged"). ONE server log line per structured call,
-     * whatever its end: the provider, the model id actually sent, the purpose, the prompt and schema identities (the same
-     * values the ledger row carries) and the measured latency. Built from the sent body's identity only — never the key,
-     * the headers, the instructions or the user's text.
-     */
-    const callStartedAt = Date.now();
-    const logStructuredCall = (outcome: string, extra: Record<string, unknown> = {}): void => {
-      log.info({
-        event: 'agent_lane.structured_call', provider: 'openai', model: reqBody.model, purpose: 'construction',
-        prompt_alias: identity['prompt_alias'], prompt_sha256: identity['prompt_sha256'], schema_sha256: identity['schema_sha256'],
-        latency_ms: Date.now() - callStartedAt, outcome, ...extra,
-      }, 'agent-lane: structured call');
-    };
-    let j: {
-      output?: { type?: string; content?: { type?: string; text?: string }[] }[];
-      usage?: Record<string, unknown>;
-      status?: unknown;
-      incomplete_details?: { reason?: unknown } | null;
-    };
-    try {
-      const r = await fetch(OPENAI_RESPONSES_URL, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(sentBody),
-        // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
-        signal: AbortSignal.timeout(budgetMs),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
-      }
-      j = (await r.json()) as typeof j;
-    } catch (err) {
-      if (isConstructionTimeout(err)) { logStructuredCall('timeout'); return timedOut(budgetMs, err); }
-      logStructuredCall('error');
-      throw err;
-    }
-    let text = '';
-    for (const item of j.output ?? []) {
-      if (item.type !== 'message') continue;
-      for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
-    }
-    // Same contract as the conversation path: never throws, and records nothing for a
-    // malformed payload, so measuring a call cannot turn a successful one into a failure.
-    recordProviderUsage(usageHandle, j.usage);
-    // ⛔ COMPLETION STATUS IS PART OF THE CONTRACT HERE TOO (AIX-001, as `callModel`). It was dropped, so an answer the
-    // output cap cut off (served 770a477: output_tokens 6000 exactly, 2/14 first briefs) read as a parse error.
-    const incompleteReason = typeof j.incomplete_details?.reason === 'string' ? j.incomplete_details.reason : undefined;
-    if (j.status === 'incomplete') {
-      log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
-    }
-    logStructuredCall(typeof j.status === 'string' ? j.status : 'answered', { output_chars: text.length });
-    return {
-      text,
-      usage: j.usage,
-      ...(typeof j.status === 'string' ? { status: j.status } : {}),
-      ...(incompleteReason !== undefined ? { incomplete_reason: incompleteReason } : {}),
-    };
-  }, (call, err) => log.warn({ err, call }, 'agent-lane transport failure, retrying once'));
+  const callStructured = constructionCallStructured;
 
   /**
    * ⭐ C6-2: the ONE brief-reading call (`agent-lane/brief-reading.ts`). Same provider policy and usage ledger as every
