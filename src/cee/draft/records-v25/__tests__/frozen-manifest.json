@@ -1,0 +1,329 @@
+{
+ "staging_commit": "890923c9cb0919e5d80fd05c32757d0b81d7e76d",
+ "frozen_dir": "src/cee/draft/records-v25",
+ "files": [
+  {
+   "frozen": "src/cee/draft/records-v25/not-modelled-manifest.ts",
+   "staging_path": "src/cee/context-integrity/not-modelled-manifest.ts",
+   "staging_blob": "164df23e49c662549841119309488ec9b63991ec",
+   "specifiers": [
+    [
+     "../../../utils/magnitude-alphabet.js",
+     "../../utils/magnitude-alphabet.js"
+    ],
+    [
+     "../../context-integrity/stated-role-vocabulary.js",
+     "./stated-role-vocabulary.js"
+    ],
+    [
+     "../../extraction/numeric-parser.js",
+     "../extraction/numeric-parser.js"
+    ],
+    [
+     "../../graph-readiness/obligation-provenance.js",
+     "../graph-readiness/obligation-provenance.js"
+    ],
+    [
+     "../../provenance/stated-amounts.js",
+     "../provenance/stated-amounts.js"
+    ],
+    [
+     "./stated-effect.js",
+     "../provenance/stated-effect.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/completion.ts",
+   "staging_path": "src/cee/draft/records/completion.ts",
+   "staging_blob": "39e190f340a90e8093a9c46d325011cedd00916b",
+   "specifiers": [
+    [
+     "./graph-validator.js",
+     "../../../validators/graph-validator.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/grammar.ts",
+   "staging_path": "src/cee/draft/records/grammar.ts",
+   "staging_blob": "c7278586dc446ce8f008ef414901b087c237e1ab",
+   "specifiers": []
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/index.ts",
+   "staging_path": "src/cee/draft/records/index.ts",
+   "staging_blob": "caacbbdb5a52eeca05f5d3596c0d7ff90e8ba256",
+   "specifiers": [
+    [
+     "../records/instruction.js",
+     "./instruction.js"
+    ],
+    [
+     "../records/option-effect-reference-trust.js",
+     "./option-effect-reference-trust.js"
+    ],
+    [
+     "../records/option-magnitude-census.js",
+     "./option-magnitude-census.js"
+    ],
+    [
+     "../records/sidecar.js",
+     "./sidecar.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/lineage.ts",
+   "staging_path": "src/cee/draft/records/lineage.ts",
+   "staging_blob": "4ed11928b18a0d82a3b8ec3b86e048f0ac7664e6",
+   "specifiers": [
+    [
+     "../records/sidecar.js",
+     "./sidecar.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/option-framing.ts",
+   "staging_path": "src/cee/draft/records/option-framing.ts",
+   "staging_blob": "a6dfb613f7c832a0927503bc20b918a18e462cac",
+   "specifiers": [
+    [
+     "../records/label-bound.js",
+     "./label-bound.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/projector.ts",
+   "staging_path": "src/cee/draft/records/projector.ts",
+   "staging_blob": "b28088372301e5b59c487d756ddf13190f6ce52b",
+   "specifiers": [
+    [
+     "../records/claim-label-shape.js",
+     "./claim-label-shape.js"
+    ],
+    [
+     "../records/label-bound.js",
+     "./label-bound.js"
+    ],
+    [
+     "../records/objective-label.js",
+     "./objective-label.js"
+    ],
+    [
+     "../records/unit-scale-class.js",
+     "./unit-scale-class.js"
+    ],
+    [
+     "./frame-defaulted-links.js",
+     "../../magnitude/frame-defaulted-links.js"
+    ],
+    [
+     "./graph-validator.js",
+     "../../../validators/graph-validator.js"
+    ],
+    [
+     "./link-effect.js",
+     "../../magnitude/link-effect.js"
+    ],
+    [
+     "./no-op-target-repair.js",
+     "../../unified-pipeline/stages/repair/no-op-target-repair.js"
+    ],
+    [
+     "./not-modelled-manifest.js",
+     "../../context-integrity/not-modelled-manifest.js"
+    ],
+    [
+     "./stated-effect.js",
+     "../../provenance/stated-effect.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/seam.ts",
+   "staging_path": "src/cee/draft/records/seam.ts",
+   "staging_blob": "1d097ab96398bbaaebc83624969197fb7eb9984f",
+   "specifiers": []
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/frame-defaulted-links.ts",
+   "staging_path": "src/cee/magnitude/frame-defaulted-links.ts",
+   "staging_blob": "c16d864c758ddcc4da77d848978239d0d76398d3",
+   "specifiers": [
+    [
+     "../../../orchestrator-v5/agent-lane/admit-constraint.js",
+     "../../orchestrator-v5/agent-lane/admit-constraint.js"
+    ],
+    [
+     "../../../orchestrator/context/stable-stringify.js",
+     "../../orchestrator/context/stable-stringify.js"
+    ],
+    [
+     "../../graph-readiness/obligation-provenance.js",
+     "../graph-readiness/obligation-provenance.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/link-effect.ts",
+   "staging_path": "src/cee/magnitude/link-effect.ts",
+   "staging_blob": "dc6354b41cb1bf30865c6a8ee23fa884ca065000",
+   "specifiers": [
+    [
+     "../../../orchestrator-v5/agent-lane/admit-constraint.js",
+     "../../orchestrator-v5/agent-lane/admit-constraint.js"
+    ],
+    [
+     "../../../orchestrator-v5/agent-lane/say-figure.js",
+     "../../orchestrator-v5/agent-lane/say-figure.js"
+    ],
+    [
+     "../../../orchestrator-v5/tools/handlers/d1-shared/format-confirmation.js",
+     "../../orchestrator-v5/tools/handlers/d1-shared/format-confirmation.js"
+    ],
+    [
+     "../../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js",
+     "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js"
+    ],
+    [
+     "../../../schemas/cee-v3.js",
+     "../../schemas/cee-v3.js"
+    ],
+    [
+     "../../provenance/stated-amounts.js",
+     "../provenance/stated-amounts.js"
+    ],
+    [
+     "../records/unit-scale-class.js",
+     "../draft/records/unit-scale-class.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/stated-effect.ts",
+   "staging_path": "src/cee/provenance/stated-effect.ts",
+   "staging_blob": "a01020b08396838d6a929af3f23af285cdde9293",
+   "specifiers": [
+    [
+     "../../provenance/stated-amounts.js",
+     "./stated-amounts.js"
+    ],
+    [
+     "./same-unit.js",
+     "../../orchestrator-v5/agent-lane/same-unit.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/no-op-target-repair.ts",
+   "staging_path": "src/cee/unified-pipeline/stages/repair/no-op-target-repair.ts",
+   "staging_blob": "ce372adc5fd949fc5229cfc4dae9ee947d430e4f",
+   "specifiers": [
+    [
+     "../../../orchestrator-v5/context/cqe/extract-quantities.js",
+     "../../../../orchestrator-v5/context/cqe/extract-quantities.js"
+    ],
+    [
+     "../../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js",
+     "../../../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js"
+    ],
+    [
+     "../../../schemas/graph.js",
+     "../../../../schemas/graph.js"
+    ],
+    [
+     "../../../utils/telemetry.js",
+     "../../../../utils/telemetry.js"
+    ],
+    [
+     "../../../validators/option-no-op.js",
+     "../../../../validators/option-no-op.js"
+    ],
+    [
+     "../../factor-extraction/merge.js",
+     "../../../factor-extraction/merge.js"
+    ],
+    [
+     "./graph-validator.js",
+     "../../../../validators/graph-validator.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/same-unit.ts",
+   "staging_path": "src/orchestrator-v5/agent-lane/same-unit.ts",
+   "staging_blob": "db68ebee62bdf1418b360ffc1f01460aaa1a0065",
+   "specifiers": [
+    [
+     "../../provenance/stated-amounts.js",
+     "../../cee/provenance/stated-amounts.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/graph-validator.ts",
+   "staging_path": "src/validators/graph-validator.ts",
+   "staging_blob": "44033ddd13d2ace76a59ca5254438796f591428b",
+   "specifiers": [
+    [
+     "../../../schemas/graph.js",
+     "../schemas/graph.js"
+    ],
+    [
+     "../../../utils/telemetry.js",
+     "../utils/telemetry.js"
+    ],
+    [
+     "../../../validators/decision-free-shape.js",
+     "./decision-free-shape.js"
+    ],
+    [
+     "../../../validators/graph-validator.types.js",
+     "./graph-validator.types.js"
+    ],
+    [
+     "../../../validators/option-no-op.js",
+     "./option-no-op.js"
+    ],
+    [
+     "../../../validators/violation-paths.js",
+     "./violation-paths.js"
+    ],
+    [
+     "../../provenance/unquantified-factor.js",
+     "../cee/provenance/unquantified-factor.js"
+    ]
+   ]
+  },
+  {
+   "frozen": "src/cee/draft/records-v25/draft-document-acceptance.ts",
+   "staging_path": "src/adapters/llm/draft-document-acceptance.ts",
+   "staging_blob": "803db75cf4e3d14698f5c689ca1a867ae278269e",
+   "specifiers": [
+    [
+     "../../../adapters/llm/normalisation.js",
+     "./normalisation.js"
+    ],
+    [
+     "../../../adapters/llm/shared-schemas.js",
+     "./shared-schemas.js"
+    ],
+    [
+     "../../../schemas/graph.js",
+     "../../schemas/graph.js"
+    ],
+    [
+     "./graph-validator.js",
+     "../../validators/graph-validator.js"
+    ],
+    [
+     "./index.js",
+     "../../cee/draft/records/index.js"
+    ]
+   ]
+  }
+ ]
+}

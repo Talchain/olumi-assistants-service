@@ -3,7 +3,7 @@ import { Agent, fetch as undiciFetch } from "undici";
 import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S, viableRunawayRetryFloorTokens } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import { GIT_COMMIT_SHA } from "../../version.js";
-import { captureDraftLineage, draftRequestIdentity, type DraftRequestIdentity } from "../../cee/draft/records/lineage.js";
+import { captureDraftLineage, draftRequestIdentity, type DraftRequestIdentity } from "../../cee/draft/records-v25/lineage.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
@@ -29,7 +29,7 @@ import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { contentDigest } from "../../utils/redaction.js";
-import { isUsableDraftDocument } from "./draft-document-acceptance.js";
+import { isUsableDraftDocument } from "../../cee/draft/records-v25/draft-document-acceptance.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import {
@@ -97,9 +97,9 @@ import {
   RECORDS_COMPLETION_WALL_MS,
   censusOptionFactorMagnitudes,
   type DraftInferenceClaim,
-} from '../../cee/draft/records/index.js';
+} from '../../cee/draft/records-v25/index.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
-import { reconcileDraftOptionFraming } from '../../cee/draft/records/option-framing.js';
+import { reconcileDraftOptionFraming } from '../../cee/draft/records-v25/option-framing.js';
 
 export { FALLBACK_ANTHROPIC_MODEL, resolveAnthropicModel } from "./model-fallback.js";
 import { resolveAnthropicModel } from "./model-fallback.js";
