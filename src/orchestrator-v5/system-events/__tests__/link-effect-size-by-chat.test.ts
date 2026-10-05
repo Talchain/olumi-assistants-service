@@ -340,6 +340,54 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(prepared.ask).toBeUndefined();
   });
 
+  // Codex buddy r2 (5 Oct): each counterexample, verbatim.
+  it('a movement noun may stand between figure and end ("5 percentage point rise in footfall loss")', () => {
+    const prepared = prepareLinkEffectUnitReadings(unsizedGraph(), SOURCE, TARGET, EFFECT,
+      'Each 5 percentage point rise in footfall loss costs us about 2 percentage points of gross margin.');
+    expect(prepared.unit_readings.find((r) => r.node_id === SOURCE)).toEqual({ node_id: SOURCE, unit_reading: reading('%', '5 percentage point rise in footfall loss') });
+  });
+
+  it('H2 a partial label prefix never names the end ("of gross profit for gross margin")', () => {
+    const prepared = prepareLinkEffectUnitReadings(unsizedGraph(), SOURCE, TARGET, EFFECT,
+      'Each 5 percentage points of footfall loss costs us 2 percentage points of gross profit for gross margin');
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+    expect(prepared.ask).toBeDefined();
+  });
+
+  it.each([
+    ['backward', 'Each £1,000 of marketing spend sees revenue rising by £3 per month', '£3 per month', 'revenue rising by £3 per month'],
+    ['forward', 'Each £1,000 per month of marketing spend brings £3 of revenue per month', '£1,000 per month of marketing spend', '£3 of revenue per month'],
+  ] as const)('P2 a "per" period after the figure is kept (%s)', (_n, said, sourceOrFigure, targetClause) => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2', scale_frame: 10000 });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Revenue' });
+    graph.ref_high_water.F = 2;
+    const perUnit = _n === 'forward' ? 'GBP/month' : 'GBP';
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: 3, amount_unit: 'GBP/month', per_source_change: 1000, per_source_change_unit: perUnit }, said);
+    expect(prepared.unit_readings.find((r) => r.node_id === TARGET)).toEqual({ node_id: TARGET, unit_reading: reading('GBP/month', targetClause) });
+    if (_n === 'forward') expect(prepared.unit_readings.find((r) => r.node_id === SOURCE)).toEqual({ node_id: SOURCE, unit_reading: reading('GBP/month', sourceOrFigure) });
+  });
+
+  it('P2 labels sharing a word: "£3 of marketing revenue" names Marketing revenue beside Marketing spend', () => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2', scale_frame: 10000 });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Marketing revenue' });
+    graph.ref_high_water.F = 2;
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: 3, amount_unit: 'GBP', per_source_change: 1000, per_source_change_unit: 'GBP' }, 'Each £1,000 of marketing spend brings in £3 of marketing revenue');
+    expect(prepared.unit_readings).toEqual([
+      { node_id: SOURCE, unit_reading: reading('GBP', '£1,000 of marketing spend') },
+      { node_id: TARGET, unit_reading: reading('GBP', '£3 of marketing revenue') },
+    ]);
+    expect(prepared.ask).toBeUndefined();
+  });
+
+  it.each(['gbp', 'Gbp', 'GBP'] as const)('P2 an ISO code in any case is GBP on the opt-in scan (%s)', (code) => {
+    expect(findStatedAmounts(`${code} 1,000`, { isoCurrencyCodes: true }).map((a) => a.currencyCode)).toEqual(['GBP']);
+    expect(findStatedAmounts(`${code} 1,000`).map((a) => a.kind)).toEqual(['plain']); // default scan unchanged
+  });
+
   it('R4 own-clause negative: a multiword count noun cannot be adopted from a different counted thing', () => {
     const graph = unsizedGraph();
     Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', scale_frame: 10000 });

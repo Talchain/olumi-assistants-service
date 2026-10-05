@@ -195,7 +195,9 @@ export function findStatedAmounts(text: string | null | undefined, options?: { r
     // brief writes, and reading it as currency keeps the two kinds disjoint.
     const kind: AmountKind = symbol ? "currency" : isPercent ? "percent" : "plain";
     const currencyCode = symbol
-      ? CURRENCY_SYMBOL_TO_CODE[symbol] ?? CURRENCY_SYMBOL_TO_CODE[symbol.toUpperCase()] ?? symbol
+      ? CURRENCY_SYMBOL_TO_CODE[symbol] ?? CURRENCY_SYMBOL_TO_CODE[symbol.toUpperCase()]
+        // Opt-in ISO scan only: "gbp 1,000" is GBP (buddy r2 P2). The default scan never matches a bare code.
+        ?? (options?.isoCurrencyCodes === true && /^[A-Za-z]{3}$/.test(symbol) ? symbol.toUpperCase() : symbol)
       : undefined;
 
     out.push({

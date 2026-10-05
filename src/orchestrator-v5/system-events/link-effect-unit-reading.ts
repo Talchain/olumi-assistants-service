@@ -67,10 +67,18 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   const figureStart = a.index + (a.matchedText.length - a.matchedText.trimStart().length);
   const figureEnd = a.index + a.matchedText.length;
   const next = amounts[i + 1]?.index ?? quote.length;
-  const own = wordsOf(String(node.label ?? node.id)).filter(w => !wordsOf(String(other.label ?? other.id)).some(o => sameWord(w, o)));
-  if (typeof node.count_noun === 'string') own.push(...wordsOf(node.count_noun));
-  if (own.length === 0) return undefined;
-  const isOwn = (w: string): boolean => own.some(o => sameWord(o, w.toLowerCase()));
+  // A run may use any word of the end's label (shared words included: "marketing revenue" beside "marketing spend"), but
+  // it names THIS end only if it holds ≥2 of its distinguishing words, or all of them when it has fewer. So a partial
+  // prefix ("of gross profit" for Gross margin) never names it (Codex buddy r2 HIGH).
+  const labelWords = wordsOf(String(node.label ?? node.id));
+  const distinct = [...new Set([...labelWords.filter(w => !wordsOf(String(other.label ?? other.id)).some(o => sameWord(w, o))),
+    ...(typeof node.count_noun === 'string' ? wordsOf(node.count_noun) : [])])];
+  if (distinct.length === 0) return undefined;
+  const inLabel = (w: string): boolean => [...labelWords, ...distinct].some(o => sameWord(o, w.toLowerCase()));
+  const namesThisEnd = (run: readonly string[]): boolean => {
+    const hit = distinct.filter(d => run.some(w => sameWord(d, w.toLowerCase()))).length;
+    return hit >= Math.min(2, distinct.length);
+  };
   const bounded = (from: number, to: number): string | undefined => {
     const clause = quote.slice(from, to).trimEnd();
     return clause.length >= 1 && clause.length <= 500 ? clause : undefined;
@@ -78,19 +86,24 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   const PERIOD = /^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)*/iu;
   // Forward.
   const rest = quote.slice(figureEnd, next);
-  const unitTail = /^\s*(?:percentage\s+points?\b|pp\b|points?\b)?/iu.exec(rest)![0];
+  // Whitespace is consumed only WITH a unit word, so "£3 per month" keeps its period (buddy r2 P2).
+  const UNIT_WORDS = /^(?:\s*(?:percentage\s+points?|pp|points?)\b)?/iu;
+  const unitTail = UNIT_WORDS.exec(rest)![0];
   const periodTail = PERIOD.exec(rest.slice(unitTail.length))![0];
   let at = unitTail.length + periodTail.length;
-  const lead = /^\s*(?:of\s+)?(?:(?:the|our|your|its|their)\s+)?(?:(?:more|extra|additional)\s+)?/iu.exec(rest.slice(at))![0];
+  // "5% rise in footfall", "a 10% jump in flour prices": a movement noun + in/of may stand between figure and end.
+  const lead = /^\s*(?:(?:rise|increase|fall|drop|decrease|cut|jump|change|reduction|gain|growth|decline)s?\s+(?:in|of)\s+)?(?:of\s+)?(?:(?:the|our|your|its|their)\s+)?(?:(?:more|extra|additional)\s+)?/iu.exec(rest.slice(at))![0];
   at += lead.length;
   const tail = rest.slice(at);
   let named = 0;
+  const run: string[] = [];
   for (const m of tail.matchAll(/[\p{L}]+/gu)) {
-    // The end's own words come FIRST and run contiguously (whitespace only between them).
-    if ((named === 0 && m.index !== 0) || !/^\s*$/.test(tail.slice(named, m.index)) || !isOwn(m[0])) break;
+    // The end's label words come FIRST and run contiguously (whitespace only between them).
+    if ((named === 0 && m.index !== 0) || !/^\s*$/.test(tail.slice(named, m.index)) || !inLabel(m[0])) break;
     named = m.index! + m[0].length;
+    run.push(m[0]);
   }
-  if (named > 0) {
+  if (named > 0 && namesThisEnd(run)) {
     const after = at + named;
     const period = PERIOD.exec(rest.slice(after))![0];
     return bounded(figureStart, figureEnd + after + period.length);
@@ -107,9 +120,10 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   let k = words.length - 1;
   while (k >= 0 && LINKING.test(words[k]![0]) && gapOk(k)) k--;
   let first = -1;
-  while (k >= 0 && isOwn(words[k]![0]) && gapOk(k)) { first = k; k--; }
-  if (first < 0) return undefined;
-  const suffix = /^\s*(?:percentage\s+points?\b|pp\b|points?\b)?/iu.exec(rest)![0];
+  const back: string[] = [];
+  while (k >= 0 && inLabel(words[k]![0]) && gapOk(k)) { first = k; back.push(words[k]![0]); k--; }
+  if (first < 0 || !namesThisEnd(back)) return undefined;
+  const suffix = UNIT_WORDS.exec(rest)![0];
   const period = PERIOD.exec(rest.slice(suffix.length))![0];
   return bounded(previousEnd + boundary + words[first]!.index!, figureEnd + suffix.length + period.length);
 }
