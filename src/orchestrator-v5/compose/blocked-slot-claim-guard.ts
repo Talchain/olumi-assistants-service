@@ -361,6 +361,9 @@ export function readClaimedNumbers(unit: string): ClaimedNumber[] {
  *   2. the FACTOR's own persisted value — the blocker's own message states it
  *      ("Factor … is currently 0.5"), so a reply quoting it is telling the
  *      truth about the model even while the option-level value is missing.
+ *      Both its level and its raw figure: the message states the raw figure in
+ *      the factor's unit where the record carries one ("is currently 4 senior
+ *      developers", not 0.133).
  *
  * ⭐ INCLUDING (2) IS THE ANTI-OVER-REFUSAL PROPERTY, and it is the direction
  * #1007 got wrong: refusing a sentence that correctly quotes persisted state
@@ -394,6 +397,13 @@ export function groundedValuesForSlot(graph: unknown, slot: BlockedValueSlot): n
     if (id === slot.factorId) {
       const view = readFactorValueView(node);
       if (typeof view.value === 'number' && Number.isFinite(view.value)) values.push(view.value);
+      // The same factor's raw figure, in its own unit: the blocker says "is currently 4 senior developers", never the
+      // level 0.133 behind it (CEE-ECHO-F1). Still attributed — read from THIS node only.
+      const observed = node.observed_state;
+      const raw = typeof observed === 'object' && observed !== null
+        ? (observed as Record<string, unknown>).raw_value
+        : undefined;
+      if (typeof raw === 'number' && Number.isFinite(raw)) values.push(raw);
     }
   }
   return values;
