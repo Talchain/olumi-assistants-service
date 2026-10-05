@@ -49,7 +49,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
-import { statedEffectQuoteMatches } from "../provenance/stated-effect.js";
+import { statedEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -1274,6 +1274,10 @@ interface Candidate {
   /** The unit string the model declared, verbatim. A count can only match a
    *  carrier that declares the same unit family. */
   readonly declaredUnit: string | null;
+  /** An edge's `natural_effect` figure, not a node's own value: it never certifies the NODE's figure as the user's. */
+  readonly carrier?: "edge_effect";
+  /** The one place in the brief this figure may match. Absent means anywhere. */
+  readonly boundSpan?: { readonly start: number; readonly end: number };
 }
 
 /**
@@ -1484,8 +1488,9 @@ function collectBriefNaturalEffectCandidates(
     // (`admit-candidate.ts:116` has no such field), so requiring one made this whole route dead on the default path:
     // "£75,000 a year" and "£12,000 upfront" read `absent` while two edges held them, and the coach told the user
     // they "aren't represented". The warrant without a quote is the writer's own rule: `magnitude: 'user_stated'`
-    // is written ONLY on the user's own size (`value-warrant-guard.ts:810`). A quote that IS present must still be
-    // the user's words verbatim and must still match the whole effect — that path is unchanged.
+    // is written ONLY on the user's own size (`value-warrant-guard.ts:810`), and the figure binds to the one place the
+    // brief states it (below). A quote that IS present must still be the user's words verbatim and must still match
+    // the whole effect.
     const quote = typeof p.quote === "string" && p.quote.length > 0 ? p.quote : null;
     if (quote !== null && !briefText.includes(quote)) continue;
 
@@ -1494,6 +1499,16 @@ function collectBriefNaturalEffectCandidates(
     const perSourceChange = natural.per_source_change;
     const perSourceChangeUnit = natural.per_source_change_unit;
     if (typeof amount !== "number" || typeof amountUnit !== "string") continue;
+    // ⛔ Without a quote, nothing says WHICH written figure the edge holds (Codex r1 on #2601: "Pension contributions are
+    // £75,000 a month" was credited to the spending edge too). So the edge binds to the ONE place the brief states its
+    // amount in its declared currency AND period, read by the quote check's own reader: "£75,000 a month" is not
+    // GBP/year. Two such places, or none, and it is not credited — the figure stays visibly unmatched, never guessed.
+    let boundSpan: { start: number; end: number } | undefined;
+    if (quote === null) {
+      const spans = statedTargetAmountSpans(briefText, amount, amountUnit);
+      if (spans.length !== 1) continue;
+      boundSpan = spans[0];
+    }
     const quoteVerified =
       quote !== null &&
       typeof perSourceChange === "number" &&
@@ -1516,12 +1531,13 @@ function collectBriefNaturalEffectCandidates(
       out.push({
         nodeId: to,
         label: targetLabel,
-        // A figure the user WROTE is a magnitude ("reducing … by £75,000"); the direction lives in the verb and in
-        // the edge's sign. Matching the signed amount (−75000) against the written 75000 could never succeed.
-        value: Math.abs(amount) * multiplier,
+        // Held SIGNED, as the edge holds it; `matchCandidate` also accepts the magnitude when the user wrote no sign.
+        value: amount * multiplier,
         unitKind: kind,
         currencyCode: currencyCode ?? null,
         declaredUnit: amountUnit,
+        carrier: "edge_effect",
+        ...(boundSpan !== undefined ? { boundSpan } : {}),
       });
     }
 
@@ -1540,6 +1556,7 @@ function collectBriefNaturalEffectCandidates(
         unitKind: kind,
         currencyCode: currencyCode ?? null,
         declaredUnit: perSourceChangeUnit,
+        carrier: "edge_effect",
       });
     }
   }
@@ -1749,8 +1766,12 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
 function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidate | null {
   if (q.value === null) return null;
   for (const c of candidates) {
+    if (c.boundSpan !== undefined && !(q.at < c.boundSpan.end && q.at + q.literal.length > c.boundSpan.start)) continue;
     if (!unitCompatible(q, c)) continue;
     if (numbersEqual(c.value, q.value)) return c;
+    // An edge holds its effect SIGNED (−75000 = "reducing … by £75,000"). A figure written WITHOUT a sign is a
+    // magnitude whose direction lives in the verb, so it matches |amount|; a written sign is compared as written.
+    if (c.carrier === "edge_effect" && q.value > 0 && numbersEqual(Math.abs(c.value), q.value)) return c;
   }
   return null;
 }
@@ -1977,7 +1998,9 @@ export function deriveNotModelledManifest(
 
   for (const q of quantities) {
     const { verdict, matched } = classify(q, surfaces);
-    if (matched !== null) matchedNodeIds.add(matched.nodeId);
+    // An edge's figure is the user's EFFECT size, not the node's own value: crediting it must never hide Olumi's own
+    // estimate on that node from `inferred_factors` (Codex r1 on #2601).
+    if (matched !== null && matched.carrier !== "edge_effect") matchedNodeIds.add(matched.nodeId);
     if (verdict === "in_model") {
       inModel += 1;
       if (matched !== null) inModelAnchored += 1;
