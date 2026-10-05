@@ -194,7 +194,7 @@ describe("graph.stated_dispositions — register write → stored row → cold r
   });
 
   it("⭐ RED (egress): the UI-facing graph omits the receipt; both hash tokens are those of the STORED bytes", async () => {
-    await register({ graph: structuredClone(GRAPH), brief_text: BRIEF, stated_dispositions: structuredClone(SIDECAR) });
+    const ack = (await register({ graph: structuredClone(GRAPH), brief_text: BRIEF, stated_dispositions: structuredClone(SIDECAR) })).json() as Rec;
     const row = readBackStored();
     expect(row.graph).toHaveProperty("stated_dispositions"); // contrast: the stored row carries it
     const body = (await read()).json() as Rec;
@@ -204,6 +204,10 @@ describe("graph.stated_dispositions — register write → stored row → cold r
     // The CAS tokens a later write is checked against are the stored bytes' own (`computeExpectedGraphCasHashes(base)`).
     expect(body.graph_identity_hash).toEqual(computeGraphIdentityHash(row.graph as never));
     expect(body.graph_hash).toBe(computeAnalysisAffectingGraphHash(row.graph as never));
+    // The UI compares the read's identity with the register ACK's (DGAI `seedWriteBaseAfterRegistration.ts`); a token
+    // derived from the stripped graph would read as `identityMismatch` and leave its write base unseeded.
+    expect(body.graph_identity_hash).toEqual(ack.graph_identity_hash);
+    expect(body.graph_hash).toBe(ack.graph_hash);
   });
 
   it("⭐ RED: a key smuggled inside `graph` is never stored — the sidecar, reconciled, is the only source", async () => {

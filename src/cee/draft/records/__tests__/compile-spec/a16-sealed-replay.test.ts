@@ -46,10 +46,12 @@ describe('A16 banked sealed compile → registered → stored carriers (zero pro
       expect(location.path.length === 0 ? { id: (carrier as { id: string }).id } : readPath(carrier, location.path)).toEqual(row.stored_value);
     }
     expect(reconcileStatedDispositions(rows, stored)).toEqual(rows);
-    // No declared graph field exists for the receipts. The registration sidecar
-    // is deliberately excluded from GET-shaped storage, and schema extension is forbidden here.
+    // The receipts ride the register SIDECAR, never the submitted graph; the register route is the one writer of
+    // `graph.stated_dispositions` (DL ruling 5 Oct 2026). CEE GraphV3 now DECLARES the key, so every real receipt
+    // from the sealed draws must survive a strict GraphV3 read verbatim — a stripped or rewritten row would be lost
+    // on the first read after registration.
     expect(stored).not.toHaveProperty('stated_dispositions');
-    expect(GraphV3.parse({ ...stored, stated_dispositions: rows })).not.toHaveProperty('stated_dispositions');
+    expect(GraphV3.parse({ ...stored, stated_dispositions: rows }).stated_dispositions).toEqual(rows);
 
     const row = (index: number) => rows[index];
     const goalId = draw === 3 ? '6144a59c' : '876e0d81';
