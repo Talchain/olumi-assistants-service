@@ -1442,6 +1442,7 @@ function linkEffectStatementAsk(miss: string, from: string, to: string, figureAs
   if (figureAsk !== undefined && (miss === 'source_figure_a_level' || miss === 'target_figure_a_level' || miss === 'figure_counts_another_unit' || miss === 'figure_of_another_quantity')) return figureAsk;
   if (miss === 'end_not_named') return `Which link do you mean: “${from}” → “${to}”?`;
   if (miss === 'unclear_figure') return `What single change in “${to}” do you mean, rather than a range?`;
+  if (miss === 'figures_not_in_statement') return `How much does “${from}” move “${to}”, in figures?`;
   return `How much does “${from}” move “${to}”, using the figures you wrote?`;
 }
 
@@ -3356,7 +3357,9 @@ export function createAgentCapabilities(
           const miss = linkEffectQuoteContextMiss(entryQuote, text) ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label },
             { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id) });
           if (miss === 'figures_not_in_statement') {
-            fail('not_the_users_figure', 'Nothing was prepared: this quoted statement does not write both figures. Ask the user how much the one moves the other, in numbers.');
+            // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510): ONE fixed
+            // question, said exactly, with the canvas route that always works.
+            fail('not_the_users_figure', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label), from, to));
             continue;
           }
           if (miss !== null) {
@@ -3465,8 +3468,10 @@ export function createAgentCapabilities(
       const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id) };
       const miss = linkEffectQuoteContextMiss(quote, text) ?? linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
       if (miss === 'figures_not_in_statement') {
-        return { ok: false, mutated: false, refusal: 'not_the_users_figure',
-          detail: 'Nothing was prepared: the statement quoted does not write both figures. Ask the user how much the one moves the other, in numbers.' };
+        // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510, where Olumi's
+        // own suggested sentence was refused 3/3): ONE fixed question, said exactly, with the canvas route that always works.
+        const ask = linkEffectStatementAsk(miss, from.label, to.label);
+        return { ok: false, mutated: false, refusal: 'not_the_users_figure', why: miss, question: ask, detail: linkEffectUnitAskWords(ask, from, to) };
       }
       if (miss !== null) {
         const ask = linkEffectStatementAsk(miss, from.label, to.label, linkEffectFigureNotAChange(quote, statedEffect, statedEnds)?.question);
