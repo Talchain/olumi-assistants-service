@@ -86,16 +86,16 @@ export const OUTCOME_KEPT_NOTE =
 export const TARGET_ONLY_NOTE =
   'This run withheld, for EVERY option, the chance of reaching the goal’s target and each option’s outcome for the goal: the '
   + 'target can’t be tested yet. The share of runs in which each option did best IS a result of this run: say it, if at all, as a '
-  + 'finding of this model in the goal’s own direction (where lower is better, the option that came out lowest), never as a '
-  + 'chance of reaching the target and never as a recommendation. Never state, estimate, rank or compare a chance of reaching the '
+  + 'finding of this model in the goal’s own direction (where lower is better, the option that came out lowest), always said as '
+  + '‘in this model’, never as a chance of reaching the target and never as a recommendation. Never state, estimate, rank or compare a chance of reaching the '
   + 'target, and never quote or estimate an option’s outcome. Say `say` once, as written, when you describe the run.';
 /** The same, where the failures leave each option's outcome in the goal's units (P2/P3/P4 only): the panel shows it. */
 export const TARGET_ONLY_OUTCOME_KEPT_NOTE =
   'This run withheld, for EVERY option, the chance of reaching the goal’s target: the target can’t be tested yet. Each option’s '
   + 'outcome for the goal is shown to the user on the results panel; you are not given those figures, so never quote or estimate '
   + 'one. The share of runs in which each option did best IS a result of this run: say it, if at all, as a finding of this model '
-  + 'in the goal’s own direction (where lower is better, the option that came out lowest), never as a chance of reaching the '
-  + 'target and never as a recommendation. Say `say` once, as written, when you describe the run.';
+  + 'in the goal’s own direction (where lower is better, the option that came out lowest), always said as ‘in this model’, never '
+  + 'as a chance of reaching the target and never as a recommendation. Say `say` once, as written, when you describe the run.';
 
 /**
  * ⛔ GATE 1 v2 (DL 5 Oct, #2574): options the Run could not tell apart split their wins, so EVERY option's share of runs

@@ -214,8 +214,13 @@ export interface UntestableTargetParts {
   readonly tailTarget: string | null;
   /** One clause per failing case for the readiness sentence ("it needs …", "the model doesn't yet …"). */
   readonly clauses: readonly string[];
-  /** One noun phrase per failing case for the tail's "I need …" ((a) is "today's level": the goal is already named). */
+  /** One noun phrase per failing case the user can supply, for the tail's "I need …" ((a) is "today's level"). */
   readonly needs: readonly string[];
+  /**
+   * (b), a CAPABILITY gap ("'< 5%'"), or null. Science d5 (#2606 words check): the user cannot supply it, so it is
+   * never in "I need …"; the tail names it in its own sentence (AIQ: named, never asked).
+   */
+  readonly untestableComparator: string | null;
   readonly question: string | null;
 }
 
@@ -234,14 +239,13 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const lever = verdict.failures.find((f) => f.case === 'c')?.lever;
   const identityCase = verdict.failures.some((f) => f.code === 'identity_unconfirmed');
   const link = `a size for the link from ${lever ?? 'what the options change'} to ${name}`;
-  // [readiness clause, tail noun phrase, question]
-  const said = (c: TargetCase): readonly [string, string, string | null] => c === 'a'
+  // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
+  const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
     ? [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
     : c === 'c' ? [`it needs ${link}`, link,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
       identityCase || lever === undefined ? null : `Roughly how much ${name} in ${unit || 'the goal unit'} does a change in ${lever} bring?`]
-    : c === 'b' ? [`it can't yet test a '${typeof comparator === 'string' ? comparator : ''} ${figure}' target on ${name}`,
-      `a way to test a '${typeof comparator === 'string' ? comparator : ''} ${figure}' target`, null]
+    : c === 'b' ? [`it can't yet test a '${typeof comparator === 'string' ? comparator : ''} ${figure}' target on ${name}`, null, null]
     : [`your target is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
       `${name} measured in ${unit || 'its own units'}`, `What's today's level of ${name}${unit !== '' ? `, in ${unit}` : ''}?`];
   const cases = [...new Set(verdict.failures.map((f) => f.case))];
@@ -250,7 +254,8 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     target,
     tailTarget: tailWords === undefined ? null : `${tailWords} ${figure}`,
     clauses: cases.map((c) => said(c)[0]),
-    needs: cases.map((c) => said(c)[1]),
+    needs: cases.map((c) => said(c)[1]).filter((n): n is string => n !== null),
+    untestableComparator: cases.includes('b') ? `'${typeof comparator === 'string' ? comparator : ''} ${figure}'` : null,
     question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
   };
 }
@@ -272,13 +277,23 @@ export function notTargetTestableSentence(graph: unknown, verdict: TargetTestabi
  * the target it cannot test. "I can't yet say how likely any option is to keep {goal} {at or below} {figure}: I need
  * {needs}. {question}". Never "reaches the target", never a recommendation. `null` when the verdict is testable or no
  * comparator is held (no direction to say the target in).
+ *
+ * (b), a comparator Olumi can't yet test, is a capability gap, never a need (Science d5, #2606 words check): alone,
+ * "…: Olumi can't yet test a '{op} {X}' target." with no question; beside needs, "…: I need {A}. Olumi also can't yet
+ * test a '{op} {X}' target. {question for A}".
  */
 export function untestableTargetTail(graph: unknown, verdict: TargetTestability): string | null {
   const parts = untestableTargetParts(graph, verdict);
   if (parts === null || parts.tailTarget === null) return null;
-  const { needs } = parts;
+  const { needs, untestableComparator } = parts;
+  const opening = `I can't yet say how likely any option is to keep ${parts.name} ${parts.tailTarget}:`;
+  const question = parts.question !== null ? ` ${parts.question}` : '';
+  if (needs.length === 0) {
+    return untestableComparator === null ? null : `${opening} Olumi can't yet test a ${untestableComparator} target.`;
+  }
   const need = needs.length === 1 ? needs[0] : `${needs.slice(0, -1).join(', ')}, and ${needs[needs.length - 1]}`;
-  return `I can't yet say how likely any option is to keep ${parts.name} ${parts.tailTarget}: I need ${need}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+  const gap = untestableComparator === null ? '' : ` Olumi also can't yet test a ${untestableComparator} target.`;
+  return `${opening} I need ${need}.${gap}${question}`;
 }
 
 /**
