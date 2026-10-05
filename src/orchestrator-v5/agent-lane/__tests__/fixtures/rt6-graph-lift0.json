@@ -1,0 +1,80 @@
+{
+ "nodes": [
+  {
+   "id": "goal",
+   "kind": "goal",
+   "label": "Grow the resort"
+  },
+  {
+   "id": "customers",
+   "kind": "factor",
+   "label": "Customers",
+   "category": "observable",
+   "observed_state": {
+    "value": 0.1,
+    "raw_value": 3,
+    "cap": 30,
+    "unit": "customers",
+    "source": "user_override"
+   }
+  },
+  {
+   "id": "revenue",
+   "kind": "factor",
+   "label": "Revenue",
+   "description": "Café sales only",
+   "scale_frame": 10000
+  },
+  {
+   "id": "lift_revenue",
+   "kind": "factor",
+   "label": "Lift revenue",
+   "description": "Ski-lift ticket sales",
+   "scale_frame": 10000
+  }
+ ],
+ "edges": [
+  {
+   "from": "customers",
+   "to": "revenue",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.125
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "customers",
+   "to": "lift_revenue",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.125
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "revenue",
+   "to": "goal",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.125
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  }
+ ]
+}

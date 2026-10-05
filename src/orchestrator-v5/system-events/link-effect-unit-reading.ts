@@ -91,6 +91,9 @@ function periodOf(clause: string): string | null | undefined {
   return new Set(periods).size > 1 ? null : periods[0];
 }
 
+/** The transitive movement verbs that may open an end's phrase ("developers RAISE onboarding drag by …", step 4 S4-B). */
+const MOVEMENT_STARTER = /^(?:rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|lift(?:s|ed|ing)?|lower(?:s|ed|ing)?|cut(?:s|ting)?|reduc(?:e|es|ed|ing)|boost(?:s|ed|ing)?|push(?:es|ed|ing)?)$/i;
+
 /** What may separate two words of an end's name: whitespace, or the single hyphen of a hyphenated name. */
 const NAME_GAP = /^(?:\s*|-)$/;
 
@@ -145,7 +148,8 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   // …and on its left (backward): only a sentence start, punctuation, a determiner or a clause word may precede it.
   // A transitive movement verb may open the end's phrase too: "developers RAISE onboarding drag by about 1 percentage point"
   // (Acceptance's served d39c05ba rows, step 4 S4-B). Only the words between the name and the figure stay LINKING.
-  const STARTS_PHRASE = /^(?:the|our|your|its|their|when|if|as|and|each|every|while|because|so|then|once|after|before|that|sees?|saw|makes?|keeps?|gets?|has|have|had|leaves?|puts?|sends?|drives?|watch(?:es)?|rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|lift(?:s|ed|ing)?|lower(?:s|ed|ing)?|cut(?:s|ting)?|reduc(?:e|es|ed|ing)|boost(?:s|ed|ing)?|push(?:es|ed|ing)?)$/i;
+  const STARTS_PHRASE = /^(?:the|our|your|its|their|when|if|as|and|each|every|while|because|so|then|once|after|before|that|sees?|saw|makes?|keeps?|gets?|has|have|had|leaves?|puts?|sends?|drives?|watch(?:es)?)$/i;
+  const startsPhrase = (w: string): boolean => STARTS_PHRASE.test(w) || MOVEMENT_STARTER.test(w);
   // "per 12 months", "/ 3 years": a numbered period the unit grammar cannot carry → no adoption, so the end is ASKED
   // (buddy r3 P2), never silently stored without its period.
   const numberedPeriodAt = (from: number): boolean => /^\s*(?:per\s+|\/\s*)\d/i.test(quote.slice(from));
@@ -179,7 +183,9 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
     const last = run.pop()!;
     named = tail.slice(0, tail.lastIndexOf(last, named)).trimEnd().length;
   }
-  if (named > 0 && namesThisEnd(run) && completeAfter(rest.slice(at + named).replace(/^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)*/iu, ''))) {
+  // "…of feature-launch delay risk'S SHARE of total delivery risk": the name OWNS another quantity (Codex step-4 r1 HIGH).
+  const owned = /^['\u2019]s\b/i.test(rest.slice(at + named));
+  if (named > 0 && !owned && namesThisEnd(run) && completeAfter(rest.slice(at + named).replace(/^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)*/iu, ''))) {
     const after = at + named;
     const period = PERIOD.exec(rest.slice(after))![0];
     if (numberedPeriodAt(figureEnd + unitTail.length) || numberedPeriodAt(figureEnd + after + period.length)) return undefined;
@@ -199,7 +205,11 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   let first = -1;
   const back: string[] = [];
   while (k >= 0 && inLabel(words[k]![0]) && gapOk(k)) { first = k; back.push(words[k]![0]); k--; }
-  if (first < 0 || !namesThisEnd(back) || (k >= 0 && gapOk(k) && !STARTS_PHRASE.test(words[k]![0]))) return undefined;
+  if (first < 0 || !namesThisEnd(back) || (k >= 0 && gapOk(k) && !startsPhrase(words[k]![0]))) return undefined;
+  // A movement verb opens the phrase only as THE verb: in "customers increase LIFT revenue" another movement word stands
+  // before it, so "lift" names a different quantity (Codex step-4 r1 HIGH).
+  if (k >= 1 && MOVEMENT_STARTER.test(words[k]![0]) && gapOk(k - 1)
+    && (MOVEMENT_STARTER.test(words[k - 1]![0]) || LINKING.test(words[k - 1]![0]))) return undefined;
   const suffix = UNIT_WORDS.exec(rest)![0];
   const period = PERIOD.exec(rest.slice(suffix.length))![0];
   if (numberedPeriodAt(figureEnd + suffix.length + period.length)) return undefined;

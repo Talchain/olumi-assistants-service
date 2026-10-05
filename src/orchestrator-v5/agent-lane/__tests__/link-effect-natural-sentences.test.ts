@@ -16,6 +16,7 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../../system-events/dispatch.js';
 import type { LinkEffectStatement } from '../../system-events/link-effect-edit.js';
+import { prepareLinkEffectUnitReadings } from '../../system-events/link-effect-unit-reading.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
@@ -27,7 +28,7 @@ type Json = Record<string, any>;
 type Selection = 'link' | 'nodes' | 'source_only' | 'wrong_link';
 interface CorpusRow {
   id: string;
-  fixture: 'f0eb03ac' | 'b8143909' | '96ea7439' | 'd39c05ba';
+  fixture: 'f0eb03ac' | 'b8143909' | '96ea7439' | 'd39c05ba' | 'lift' | 'lift0';
   from: string;
   to: string;
   quote: string;
@@ -40,7 +41,11 @@ interface CorpusRow {
 }
 const SCENARIOS = { f0eb03ac: 'f0eb03ac-f6c6-4e68-9631-fa41d29d693f', b8143909: 'b8143909-9267-479e-ae3d-da8e19188427',
   // Acceptance's served reads on b644ddb (5 Oct): 96ea7439 (graph ba4fea4e) and d39c05ba (graph 3fe4a430).
-  '96ea7439': '96ea7439-40a4-40d5-a89a-0508e50ec998', d39c05ba: 'd39c05ba-0000-4000-8000-000000000000' } as const;
+  '96ea7439': '96ea7439-40a4-40d5-a89a-0508e50ec998', d39c05ba: 'd39c05ba-0000-4000-8000-000000000000',
+  // Codex step-4 buddy r1's counterexample graph: café "Revenue" (GBP/month) beside a separate "Lift revenue".
+  lift: '11f7c0de-0000-4000-8000-000000000001',
+  // The same graph with café "Revenue" UNITLESS: the unit reader decides (step 4).
+  lift0: '11f7c0de-0000-4000-8000-000000000002' } as const;
 const TAIL = ' Approve, or correct.';
 const wasteHead = 'Record: +1 percentage point on "Production waste rate" → −0.5 percentage points in "gross margin": raising "Production waste rate" by 1 percentage point lowers "gross margin" by 0.5 percentage points.';
 const effect = (amount: number, amount_unit: string, per_source_change: number, per_source_change_unit: string): LinkEffectStatement => ({ amount, amount_unit, per_source_change, per_source_change_unit });
@@ -544,11 +549,69 @@ describe('RT-6 step 4: a hyphenated end name and "raise <end> by N points" bind 
     ['"raise <another quantity> by 1 percentage point" ("onboarding costs")', { ...headcount, id: 'S4-Bx',
       quote: 'Each 2 more developers raise onboarding costs by about 1 percentage point.', effect: effect(1, 'percentage points', 2, 'developers') },
       'What unit is the 1 change in “Onboarding drag” stated in?'],
+    ['Codex step-4 r1 HIGH: a hyphenated name\'s POSSESSIVE ("feature-launch delay risk\'s share of …")', { ...coordination, id: 'S4-Hp',
+      quote: "Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risk's share of total delivery risk.",
+      effect: effect(1, 'percentage points', 5, 'percentage points') },
+      'Is 1 percentage point of feature-launch delay risk\'s share of total delivery risk a change in “Feature-launch delay risk”?'],
+    ['Codex step-4 r1 HIGH: "increase LIFT revenue" on a unitless café Revenue', { fixture: 'lift0', from: 'customers', to: 'revenue', id: 'S4-Bl',
+      quote: 'Every 2 additional customers increase lift revenue by £100 per month.', effect: effect(100, 'GBP/month', 2, 'customers') },
+      'Is £100 of lift revenue a change in “Revenue”?'],
     ['bare "point" on a unitless end stays asked (Science F1)', { ...headcount, id: 'S4-F1',
       quote: 'Every 2 extra developers add about 1 point of onboarding drag.', effect: effect(1, 'points', 2, 'developers') },
       'What unit is the 1 change in “Onboarding drag” stated in?'],
   ] as const)('NOT bound: %s → ONE typed question, nothing stored', async (_n, row, question) => {
     const w = world(row as CorpusRow); const before = w.graph(); const result = await propose(w, row as CorpusRow);
     oneQuestion(result, question); expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
+  });
+});
+
+describe('RT-6 step 4: the UNIT READER itself never takes a unit from another quantity\'s words (the writer re-runs it at commit)', () => {
+  const read = (fixtureId: CorpusRow['fixture'], from: string, to: string, e: LinkEffectStatement, quote: string) =>
+    prepareLinkEffectUnitReadings(fixture({ fixture: fixtureId } as CorpusRow), from, to, e, quote).unit_readings.filter(r => r.node_id === to);
+  it.each([
+    ['a possessive after the name ("…feature-launch delay risk\'s share of …")', '96ea7439', 'team_coordination_overhead', 'feature_launch_delay_risk',
+      effect(1, 'percentage points', 5, 'percentage points'),
+      "Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risk's share of total delivery risk."],
+    ['a movement word before a movement word ("increase LIFT revenue")', 'lift0', 'customers', 'revenue',
+      effect(100, 'GBP/month', 2, 'customers'), 'Every 2 additional customers increase lift revenue by £100 per month.'],
+  ] as const)('NOT adopted: %s', (_n, fx, from, to, e, quote) => {
+    expect(read(fx, from, to, e, quote)).toEqual([]);
+  });
+  it.each([
+    ['the hyphenated name itself', '96ea7439', 'team_coordination_overhead', 'feature_launch_delay_risk', effect(1, 'percentage points', 5, 'percentage points'),
+      'Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risk.', '%',
+      '1 percentage point of feature-launch delay risk'],
+    ['"customers increase revenue by £100" (the verb opens the phrase)', 'lift0', 'customers', 'revenue', effect(100, 'GBP/month', 2, 'customers'),
+      'Every 2 additional customers increase revenue by £100 per month.', 'GBP/month', 'revenue by £100 per month'],
+  ] as const)('CONTROL adopted: %s', (_n, fx, from, to, e, quote, unit, clause) => {
+    expect(read(fx, from, to, e, quote)).toEqual([{ node_id: to, unit_reading: { unit, source: 'user_stated', source_quote: clause } }]);
+  });
+});
+
+// ⛔ Codex step-4 buddy r1 (5 Oct ~20:1xZ): two shapes #2605's other-quantity guard let through as WRONG-reading cards.
+describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never the end', () => {
+  const headcount = { fixture: 'd39c05ba', from: 'developer_headcount', to: 'onboarding_drag' } as const;
+  const resort = { fixture: 'lift', from: 'customers', to: 'revenue' } as const;
+  it.each([
+    ['a possessive continuation ("onboarding drag\'s share of total delivery risk")', { ...headcount, id: 'P-poss',
+      quote: "Every 2 extra developers add about 1 percentage point of onboarding drag's share of total delivery risk.",
+      effect: effect(1, 'percentage points', 2, 'developers') }, 'Is 1 percentage point of onboarding drag\'s share of total delivery risk a change in “Onboarding drag”?'],
+    ['a modifier after the verb ("increase LIFT revenue", Revenue already in GBP/month)', { ...resort, id: 'P-lift',
+      quote: 'Every 2 additional customers increase lift revenue by £100 per month.', effect: effect(100, 'GBP/month', 2, 'customers') }, 'Is £100 of lift revenue a change in “Revenue”?'],
+  ] as const)('%s → ONE typed question, no card, nothing stored', async (_n, row, question) => {
+    const w = world(row as CorpusRow); const before = w.graph(); const result = await propose(w, row as CorpusRow);
+    oneQuestion(result, question); expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
+  });
+  it.each([
+    ['the end itself ("…of onboarding drag")', { ...headcount, id: 'C-poss', quote: 'Every 2 extra developers add about 1 percentage point of onboarding drag.',
+      effect: effect(1, 'percentage points', 2, 'developers') }],
+    ['no modifier ("increase revenue by £100")', { ...resort, id: 'C-lift', quote: 'Every 2 additional customers increase revenue by £100 per month.',
+      effect: effect(100, 'GBP/month', 2, 'customers') }],
+    ['a particle is not a modifier ("push up revenue by £100")', { ...resort, id: 'C-up', quote: 'Every 2 additional customers push up revenue by £100 per month.',
+      effect: effect(100, 'GBP/month', 2, 'customers') }],
+  ] as const)('CONTROL: %s still cards', async (_n, row) => {
+    const w = world(row as CorpusRow); const result = await propose(w, row as CorpusRow);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)[0]?.detail).toContain(`From your words: "${row.quote}"`);
   });
 });
