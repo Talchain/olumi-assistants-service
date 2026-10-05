@@ -2213,6 +2213,7 @@ export function transformResponseToV3(
       node_id?: string;
       value?: number;
       unit?: string;
+      stated?: true;
     }> = [];
     let omitted = 0;
     for (const raw of v1RecordDisclosures) {
@@ -2233,6 +2234,7 @@ export function transformResponseToV3(
         duplicate_of?: unknown;
         value?: unknown;
         unit?: unknown;
+        stated?: unknown;
       };
       // The ONLY other rejection: a record that cannot be rendered at all. It is
       // COUNTED, never silently swallowed — a channel that quietly loses part of
@@ -2266,6 +2268,9 @@ export function transformResponseToV3(
         ...(anchorId ? { node_id: anchorId } : {}),
         ...(statedValue !== undefined ? { value: statedValue } : {}),
         ...(statedUnit !== undefined ? { unit: statedUnit } : {}),
+        // ⭐ SPINE X8: the user's statedness rides the disclosure (literal `true` only), so the notice counts a
+        // stated relationship as the user's. Absent stays an ABSENT KEY: byte-identical for every current input.
+        ...(d.stated === true ? { stated: true as const } : {}),
       });
     }
     if (emitted.length > 0) {

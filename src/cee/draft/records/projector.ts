@@ -854,6 +854,14 @@ export interface DroppedRecordRef {
    * same obligation `intervention_signature` carries for 2(c).
    */
   readonly strength_signature?: string;
+  /**
+   * ⭐ SPINE X8 (schemas 0.77.0): `true` ONLY when the refused record was STATED by the user (its
+   * `provenance_class` is `stated`). A RELATIONSHIP refusal carrying it is counted as
+   * `stated_relationship_not_used` — the user's own words, never "Connections Olumi proposed".
+   * Absent on every current producer path (records-v25, #2576, sets it), so every disclosure that had
+   * none before stays byte-identical. A literal `true`, never a boolean: absence is the only "no".
+   */
+  readonly stated?: true;
 }
 
 /** A bound declaration, not yet an executable constraint. Minted at reference resolution. */
