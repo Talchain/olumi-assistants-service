@@ -171,6 +171,9 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
       'With Pro price £1 raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     ['At a Pro price of £1 raising it loses 50 paying subscribers.',
       'At a Pro price of £1 raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
+    // Codex buddy r2 HIGH: "equals" states today's level as plainly as "is".
+    ['Pro price equals £1, raising it loses 50 paying subscribers.',
+      'Pro price equals £1, raising it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     ['With Pro price £1 increasing it loses 50 paying subscribers.',
       'With Pro price £1 increasing it loses 50 paying subscribers', -50, 1, 'not_the_users_statement', 'source_figure_a_level'],
     // Today's level, then a comma, then a change of NO stated size: the comma ends the figure's phrase (each passes if
@@ -201,6 +204,9 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
       'Record: +£1/month on "Pro plan price" \u2192 \u221250 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month lowers "Pro plan paying subscribers" by 50 subscribers. From your words: "If we raise the Pro price by £1 we lose about 50 paying subscribers".' + TAIL],
     ['Every £1 on the Pro price loses us about 50 paying subscribers.', 'Every £1 on the Pro price loses us about 50 paying subscribers', 50, -1,
       'Record: \u2212£1/month on "Pro plan price" \u2192 +50 subscribers in "Pro plan paying subscribers": lowering "Pro plan price" by £1/month raises "Pro plan paying subscribers" by 50 subscribers. From your words: "Every £1 on the Pro price loses us about 50 paying subscribers".' + TAIL],
+    // Codex buddy r2 P2: "is" after a CHANGE noun states the change's size, not a level.
+    ['The Pro price rise is £1, and we lose 50 paying subscribers for that rise.', 'The Pro price rise is £1, and we lose 50 paying subscribers for that rise', -50, 1,
+      'Record: +£1/month on "Pro plan price" \u2192 \u221250 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month lowers "Pro plan paying subscribers" by 50 subscribers. From your words: "The Pro price rise is £1, and we lose 50 paying subscribers for that rise".' + TAIL],
     ['Every £1 on the Pro price wins us about 50 paying subscribers.', 'Every £1 on the Pro price wins us about 50 paying subscribers', -50, 1,
       'Record: +£1/month on "Pro plan price" \u2192 \u221250 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month lowers "Pro plan paying subscribers" by 50 subscribers. From your words: "Every £1 on the Pro price wins us about 50 paying subscribers".' + TAIL],
   ] as const)('B2 (option B), now a card stating the Agent\'s reading: %s', async (turn, quote, amount, per, card) => {

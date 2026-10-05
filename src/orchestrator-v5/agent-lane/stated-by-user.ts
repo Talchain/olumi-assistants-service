@@ -519,8 +519,10 @@ const stemOf = (w: string): string => {
 };
 /** Two words name the same thing: equal stems, or one stem (four letters or more) begins the other ("month"/"monthly"). */
 /** A word naming the SOURCE end and not the target (a distinguishing source word), for binding a stated transition. */
+/** Movement words in a label ("Footfall loss from price RISE") never name it: "revenue rises from 20%" is revenue's (Codex r2). */
+const MOVEMENT_WORD = /^(?:ris(?:e|es|ing)|rose|increas(?:e|es|ed|ing)|decreas(?:e|es|ed|ing)|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|chang(?:e|es|ed|ing)|jump(?:s|ed|ing)?|cut(?:s|ting)?|growth|gain(?:s|ed|ing)?)$/i;
 export const namesSourceOf = (ends: { readonly source: string; readonly target: string }) => (word: string): boolean =>
-  wordsOf(ends.source).some(s => sameWord(s, word.toLowerCase())) && !wordsOf(ends.target).some(t => sameWord(t, word.toLowerCase()));
+  !MOVEMENT_WORD.test(word) && wordsOf(ends.source).some(s => sameWord(s, word.toLowerCase())) && !wordsOf(ends.target).some(t => sameWord(t, word.toLowerCase()));
 export const sameWord = (a: string, b: string): boolean => {
   const x = stemOf(a);
   const y = stemOf(b);
@@ -1007,8 +1009,11 @@ export function quoteSpansIn(userText: string, quote: string): number[] {
   for (let at = userText.indexOf(quote); at >= 0; at = userText.indexOf(quote, at + 1)) {
     const before = userText[at - 1]; const first = quote[0]; const last = quote[quote.length - 1];
     const after = userText[at + quote.length];
-    const cutBefore = (isWordChar(before) && isWordChar(first)) || (/[.,]/.test(before ?? '') && /\d/.test(userText[at - 2] ?? '') && /\d/.test(first ?? ''));
-    const cutAfter = (isWordChar(after) && isWordChar(last)) || (/\d/.test(last ?? '') && /[.,]/.test(after ?? '') && /\d/.test(userText[at + quote.length + 1] ?? ''));
+    // A separator inside a number is never an edge either: ",500 …" from "1,500" (Codex r2 HIGH), "… 1," from "1,500".
+    const cutBefore = (isWordChar(before) && isWordChar(first)) || (/[.,]/.test(before ?? '') && /\d/.test(userText[at - 2] ?? '') && /\d/.test(first ?? ''))
+      || (/\d/.test(before ?? '') && /[.,]/.test(first ?? '') && /\d/.test(quote[1] ?? ''));
+    const cutAfter = (isWordChar(after) && isWordChar(last)) || (/\d/.test(last ?? '') && /[.,]/.test(after ?? '') && /\d/.test(userText[at + quote.length + 1] ?? ''))
+      || (/[.,]/.test(last ?? '') && /\d/.test(after ?? '') && /\d/.test(quote[quote.length - 2] ?? ''));
     if (!cutBefore && !cutAfter) spans.push(at);
   }
   return spans;
@@ -1109,7 +1114,10 @@ const CHANGE_BEFORE = /^(?:every|each|per|by|a|an|another|extra|additional|one)$
 /** Right after a figure: it is a change ("£1 rise", "50 fewer", "4 points off"). */
 const CHANGE_AFTER = /^\s*(?:(?:percentage\s+)?points?\s+)?(?:rises?|increases?|cuts?|drops?|falls?|jumps?|hikes?|reductions?|decreases?|gains?|loss|more|fewer|less|extra|additional|higher|lower|up|down|off|changes?|swings?)\b/i;
 /** Right before a figure, within its clause: it is a level ("At £1", "Pro price is £1", "we have 50", "With Pro price £1"). */
-const LEVEL_WORD = /^(?:at|is|was|are|were|currently|have|has|had|budget)$/i;
+const LEVEL_WORD = /^(?:at|is|was|are|were|equals?|equalled|totals?|remains|currently|have|has|had|budget)$/i;
+/** "is/equals" after a CHANGE noun states the change's size ("The Pro price rise is £1"), never a level (Codex r2 P2),
+ * unless that noun is part of the end's own name. */
+const COPULA = /^(?:is|was|are|were|equals?|equalled|totals?|remains)$/i;
 const CHANGE_NOUN_OF = /^(?:rise|increase|cut|drop|fall|jump|change|reduction|decrease|gain|growth|loss|hike|swing)s?$/i;
 /** Anywhere in the sentence: SOMETHING changes (presence only; the Agent's args carry the direction, B2). */
 const CHANGE_STATED = /\b(?:ris(?:e|es|ing)|rose|rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|decreas(?:e|es|ed|ing)|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|cut(?:s|ting)?|los(?:e|es|ing|t)|loss|gain(?:s|ed|ing)?|wins?|winning|won|add(?:s|ed|ing)?|cost(?:s|ing)?|bring(?:s|ing)?|brought|knocks?|knocked|push(?:es|ed|ing)?|lift(?:s|ed|ing)?|lower(?:s|ed|ing)?|reduc(?:e|es|ed|ing)|boost(?:s|ed|ing)?|grow(?:s|ing|n)?|grew|shrink(?:s|ing)?|halv(?:e|es|ed|ing)|doubl(?:e|es|ed|ing)|clos(?:e|es|ed|ing)|shut(?:s|ting)?|spend(?:s|ing)?|spent|trim(?:s|med|ming)?|sav(?:e|es|ed|ing)|worth|up|down|off|more|less|fewer|extra|additional|every|each|per|by|jumps?|chang(?:e|es|ed|ing)|mov(?:e|es|ed|ing)|means?|shed(?:s|ding)?|put(?:s|ting)?)\b/i;
@@ -1122,7 +1130,12 @@ function figureIsALevel(q: string, figure: StatedAmount, endLabel: string): bool
   while (words.length > 0 && HEDGE.test(words[words.length - 1]!)) words.pop();
   const last = words[words.length - 1];
   if (last === undefined || CHANGE_BEFORE.test(last)) return false;
-  if (LEVEL_WORD.test(last)) return true;
+  // "The Pro price rise is £1" sizes the rise; "Footfall lost from price rise is 5%" is the end's own name, so a level.
+  if (LEVEL_WORD.test(last)) {
+    const before = words[words.length - 2];
+    return !(COPULA.test(last) && before !== undefined && CHANGE_NOUN_OF.test(before)
+      && !wordsOf(endLabel).some(x => sameWord(x, before.toLowerCase())));
+  }
   // "a price OF £1", never "an increase of £1".
   if (/^of$/i.test(last)) return words.length >= 2 && !CHANGE_NOUN_OF.test(words[words.length - 2]!);
   // "With Pro price £1": the end's own name, opened by "with", straight before its figure.
@@ -1134,10 +1147,12 @@ function figureIsALevel(q: string, figure: StatedAmount, endLabel: string): bool
 /** A number WORD that counts something else: "One more ROUND of conversations" is one round, not one conversation. */
 function wordFigureCountsAnotherUnit(q: string, figure: StatedAmount, ends: { readonly source: string }, unit: string): boolean {
   if (/\d/.test(figure.matchedText)) return false;
-  const m = /^(?:\s+(?:more|extra|additional|new|another|single))?\s+([\p{L}]+)\s+of\b/iu.exec(q.slice(figure.index + figure.matchedText.length));
+  // The counted noun is the HEAD before "of", across any modifiers ("One additional small GROUP of cafés"; Codex r2 HIGH).
+  const m = /^((?:\s+[\p{L}-]+){1,4}?)\s+of\b/iu.exec(q.slice(figure.index + figure.matchedText.length));
   if (m === null) return false;
+  const head = m[1]!.trim().split(/\s+/).pop()!.toLowerCase();
   const own = [...wordsOf(ends.source), ...wordsOf(unit)];
-  return !own.some(w => sameWord(w, m[1]!.toLowerCase()));
+  return !own.some(w => sameWord(w, head));
 }
 
 /**
@@ -1146,8 +1161,20 @@ function wordFigureCountsAnotherUnit(q: string, figure: StatedAmount, ends: { re
  */
 function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: string): string | undefined {
   const after = q.slice(figure.index + figure.matchedText.length);
-  const m = /^(?:\s*(?:percentage\s+points?|pp|points?|percent|per\s+cent))?\s+(?:of|in)\s+((?:(?!(?:while|and|but|which|that|when|if|as|so|for|than|to)\b)[\p{L}-]+\s*){1,5})/iu.exec(after);
-  if (m === null) return undefined;
+  const m = /^(?:\s*(?:percentage\s+points?|pp|points?|percent|per\s+cent))?\s+(?:of|in)\s+((?:(?!(?:while|and|but|which|that|when|if|as|so|for|than|to|this|next|last|each|every|per|a|an|years?|months?|weeks?|quarters?|today|now)\b)[\p{L}-]+\s*){1,5})/iu.exec(after);
+  if (m === null) {
+    // Before the figure: "cuts NET margin by 0.5" names another margin when the word before the target's head is neither
+    // the target's own, a determiner, nor a change word (Codex r2 HIGH). "cuts our gross margin by 0.5" stays the target's.
+    const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
+    const words = [...(q.slice(0, start).split(/[,;:.!?]/).pop() ?? '').matchAll(/[\p{L}-]+/gu)].map(w => w[0]);
+    while (words.length > 0 && (HEDGE.test(words[words.length - 1]!) || /^by$/i.test(words[words.length - 1]!))) words.pop();
+    const label = wordsOf(target);
+    const head = wordsOf(target.split(/\s+(?:from|of|in|for|to|on|per|with|after|by)\s+/i)[0] ?? target).at(-1);
+    const last = words[words.length - 1]; const modifier = words[words.length - 2];
+    if (head === undefined || last === undefined || modifier === undefined || !sameWord(head, last.toLowerCase())) return undefined;
+    if (label.some(t => sameWord(t, modifier.toLowerCase())) || /^(?:our|the|their|its|your|my|a|an)$/i.test(modifier) || CHANGE_STATED.test(modifier)) return undefined;
+    return `${modifier} ${last}`;
+  }
   const run = m[1]!.trim();
   const content = [...run.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase()).filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
   if (content.length === 0 || content.every(w => wordsOf(target).some(t => sameWord(t, w)))) return undefined;
@@ -1167,7 +1194,11 @@ export function linkEffectFigureNotAChange(
     const amounts = findLinkEffectAmounts(q);
     const literal = (value: number, unit: string) => amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), q)
       && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
-    const per = literal(effect.per_source_change, effect.per_source_change_unit);
+    // A distributive "each extra café" or a written "from 8% to 4%" is itself the source change: only the target is checked.
+    const levels = linkEffectSourceLevels(q, namesSourceOf(ends));
+    const writtenChange = levels !== undefined && /^(?:percentage points?|pp|points?)$/i.test(effect.per_source_change_unit)
+      && Math.abs(levels.change) === Math.abs(effect.per_source_change);
+    const per = writtenChange ? [] : literal(effect.per_source_change, effect.per_source_change_unit);
     const amount = literal(effect.amount, effect.amount_unit);
     if (per.length > 0 && per.every(f => wordFigureCountsAnotherUnit(q, f, ends, effect.per_source_change_unit))) {
       return { miss: 'figure_counts_another_unit', question: `What change in “${ends.source}” does “${per[0]!.matchedText.trim()}” stand for?` };
@@ -1212,9 +1243,8 @@ function linkEffectInOneSentence(
     ? amount.index < levels!.from_index || amount.index >= levels!.end_index
     : oneAt >= 0 || perFigures.some(per => per.index !== amount.index));
   if (!bothWritten) return 'figures_not_in_statement';
-  // A distributive "each extra conversation" or a written "from 8% to 4%" is itself the change; literal figures are checked.
-  const notAChange = writtenChange || oneAt >= 0 ? undefined
-    : linkEffectFigureNotAChange(q, effect, ends);
+  // The target is checked even when the source change is distributive or written as levels (Codex r2 HIGH).
+  const notAChange = linkEffectFigureNotAChange(q, effect, ends);
   if (notAChange !== undefined) return notAChange.miss;
   if (!CHANGE_STATED.test(q)) return 'no_change_stated';
   if (scope.link_selected === true) return null;

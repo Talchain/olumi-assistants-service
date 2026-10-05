@@ -652,8 +652,11 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
       expect(w.attempts).toEqual([]);
       expect(applyLinkEffectEdit(writerParams(capless('user_override'), SAID_BARE, BARE))).toEqual({ kind: 'refused', reason: 'unit_mismatch' });
     });
-    it('Codex r1 HIGH: another quantity\'s "from 20% to 25%" never settles, or is shown as, the source\'s change', async () => {
-      const said = 'Footfall loss rises by 5% and revenue moves from 20% to 25% while gross margin falls by 2 percentage points.';
+    it.each([
+      ['Footfall loss rises by 5% and revenue moves from 20% to 25% while gross margin falls by 2 percentage points.'],
+      // Codex r2 HIGH: "rises" is a movement word, never a name for "Footfall loss from price RISE".
+      ['Footfall loss rises by 5% and revenue rises from 20% to 25% while gross margin falls by 2 percentage points.'],
+    ] as const)('Codex r1/r2 HIGH: another quantity\'s "from 20% to 25%" never settles, or is shown as, the source\'s change: %s', async said => {
       const w = world(levelled({ value: 0, raw_value: 0, cap: 100, unit: '%', source: 'cee_inference' }));
       const r = await proposeAs(w, 'single', said, BARE);
       expect(r.question, JSON.stringify(r)).toBe('Is that a 5-point rise in \u201cFootfall loss from price rise\u201d (say 10% \u2192 15%), or 5% of today\u2019s level?');

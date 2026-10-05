@@ -411,6 +411,40 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     expect(edgeOf(projectGraphForPersistence(GraphV3.parse(w.graph())) as Json, row).provenance.natural_effect)
       .toMatchObject({ amount: -0.5000001, per_source_change: 1 });
   });
+  // Codex buddy r2 (final round), each counterexample verbatim. Café rows use S6's link; waste rows S1's.
+  const s6 = NATURAL_SENTENCE_ROWS.find(row => row.id === 'S6')!;
+  it.each([
+    ['r2 HIGH: an implicit source change still checks the target ("which is £400 today")', s6,
+      'Each additional subscribed local café raises monthly wholesale subscription revenue, which is £400 today.', s6.effect,
+      'target_figure_a_level', 'Is £400 a change in “Monthly wholesale subscription revenue”, or its level today?'],
+    ['r2 HIGH: ownership BEFORE the figure ("cuts net margin by 0.5")', NATURAL_SENTENCE_ROWS[0]!,
+      'Each 1 percentage point rise in production waste rate cuts net margin by 0.5 percentage points while gross margin stays steady.', NATURAL_SENTENCE_ROWS[0]!.effect,
+      'figure_of_another_quantity', 'Is 0.5 percentage points of net margin a change in “gross margin”?'],
+    ['r2 HIGH: an adjective before the counted noun ("one additional small group of")', s6,
+      'One additional small group of subscribed local cafés raises monthly wholesale subscription revenue by £400.', s6.effect,
+      'figure_counts_another_unit', 'What change in “Subscribed local cafés” does “One” stand for?'],
+  ] as const)('%s → ONE typed question, no card', async (_name, base, quote, proposed, why, question) => {
+    const row = { ...base, quote, effect: proposed };
+    const w = world(row); const before = w.graph(); const result = await propose(w, row);
+    oneQuestion(result, question);
+    expect(result.why).toBe(why);
+    expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
+  });
+  it('r2 HIGH: a quote starting at the separator inside "1,500" is not the user\'s words', async () => {
+    const words = 'Each 1,500 additional subscribed local cafés raises monthly wholesale subscription revenue by about £400.';
+    const w = world(s6); const before = w.graph();
+    const result = await w.caps.proposeLinkEffect!(ctxFor(s6, words), { from_label: 'Subscribed local cafés', to_label: 'Monthly wholesale subscription revenue',
+      ...s6.effect, per_source_change: 500, quote: ',500 additional subscribed local cafés raises monthly wholesale subscription revenue by about £400.' }) as Json;
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'quote_not_verbatim' });
+    expect(cardsFor(w, result)).toEqual([]); noWrite(w, s6, before);
+  });
+  it('r2 P2: a time phrase is not another quantity ("… of gross margin this year" still cards)', async () => {
+    const quote = 'Each 1 percentage point rise in production waste rate costs us about 0.5 percentage points of gross margin this year.';
+    const row = { ...NATURAL_SENTENCE_ROWS[0]!, quote };
+    const w = world(row); const result = await propose(w, row);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)[0]?.detail).toBe(wasteHead + ` From your words: "${quote}"` + TAIL);
+  });
   it('normalises supported number words deterministically with original spans', () => {
     for (const [words, value] of [['two', 2], ['one and a half points', 1.5], ['half a point', 0.5], ['about a point', 1]] as const) {
       const numbers = findLinkEffectAmounts(words);
