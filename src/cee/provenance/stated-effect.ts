@@ -4,6 +4,7 @@ import {
   nounUnitsAt,
   readUnitParts,
   sameUnit,
+  statedTailParts,
   unitsAt,
 } from "../../orchestrator-v5/agent-lane/same-unit.js";
 
@@ -75,10 +76,11 @@ export function statedTargetAmountSpans(
   return locatedAmounts(text)
     .filter((located) => located.implicitSource !== true
       && magnitudeMatches(expected, located)
-      && located.units.some((candidate) => {
-        const stated = readUnitParts(candidate);
+      && (() => {
+        // Every part the user STATED after the figure (Codex r1, P1): nothing they wrote is dropped before C3 looks.
+        const stated = statedTailParts(text, located);
         return stated !== null && carrierCompatible(stated, declared);
-      }))
+      })())
     .map((located) => ({ start: located.index, end: located.index + located.matchedText.length }));
 }
 

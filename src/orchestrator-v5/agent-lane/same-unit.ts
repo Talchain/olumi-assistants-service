@@ -115,6 +115,9 @@ export function readCount(unit: unknown): string[] | null {
  * reads is compared word for word; no unit on either side is never the same.
  */
 export function sameUnit(a: unknown, b: unknown): boolean {
+  // C1 never contradicts the full reader (Science PR-U1 condition 2; Codex r1 on #2604): a %/pp spelling on ONE side
+  // only ("percent" vs "percents") is not the same unit, whatever the word fallback below would say.
+  if (typeof a === 'string' && typeof b === 'string' && (shareKind(a) === null) !== (shareKind(b) === null)) return false;
   const ca = readCount(a); const cb = readCount(b);
   if (ca !== null || cb !== null) return ca !== null && cb !== null && ca.join(' ') === cb.join(' ');
   const ma = readMoney(a, ''); const mb = readMoney(b, '');
@@ -170,7 +173,7 @@ export function readUnitParts(unit: unknown): UnitParts | null {
     if (kind === null) continue;
     const rest = ws.slice(n);
     const base = rest[0] === 'of' && rest.length > 1 ? rest.slice(1).map(singular) : null;
-    const qualifiers = base === null && rest.length > 0 ? rest : null;
+    const qualifiers = base === null && rest.length > 0 ? rest.map(singular) : null;
     return { kind, code: null, scale: 1, noun: null, per: null, base, qualifiers, period: null };
   }
   let period: UnitPeriod | null = null;
@@ -207,6 +210,9 @@ export function readUnitParts(unit: unknown): UnitParts | null {
       if (['a', 'an', 'each', 'every'].includes(w)) { if (w === 'each' || w === 'every') per = per ?? []; continue; }
       // The last word after a connector, when it is a period noun, is the period ("/year", "per billable day").
       if (afterConnector && j === seg.length - 1 && isLeafPeriodNoun(w)) { if (!setPeriod(periodNoun(w)!)) return null; continue; }
+      // In a MONEY unit string a period noun right after the currency is its period ("£ year" as C1 reads it); in a
+      // count it stays a duration noun ("18 months").
+      if (i === 0 && money !== null && isLeafPeriodNoun(w)) { if (!setPeriod(periodNoun(w)!)) return null; continue; }
       if (!/^[a-z][a-z.'-]*$/.test(w)) return null;
       segNouns.push(w);
     }
@@ -227,6 +233,9 @@ export function readUnitParts(unit: unknown): UnitParts | null {
 }
 
 const sameWords = (a: readonly string[], b: readonly string[]): boolean => a.join(' ') === b.join(' ');
+/** `outer` contains `inner` as a contiguous run (a stated "new subscriber" contains the declared "subscriber"). */
+const containsWords = (outer: readonly string[], inner: readonly string[]): boolean =>
+  inner.length > 0 && ` ${outer.join(' ')} `.includes(` ${inner.join(' ')} `);
 
 /**
  * C3, carrier-compatible (U-GRAMMAR G2): the manifest's and an edge figure's predicate. The kinds and the currency agree,
@@ -235,7 +244,7 @@ const sameWords = (a: readonly string[], b: readonly string[]): boolean => a.joi
  */
 export function carrierCompatible(stated: UnitParts, declared: UnitParts): boolean {
   if (stated.kind !== declared.kind || stated.code !== declared.code) return false;
-  if (stated.kind === 'count' && !sameWords(stated.noun ?? [], declared.noun ?? [])) return false;
+  if (stated.kind === 'count' && !containsWords(stated.noun ?? [], declared.noun ?? [])) return false;
   const conflicts = (a: readonly string[] | null, b: readonly string[] | null): boolean =>
     a !== null && b !== null && a.length > 0 && b.length > 0 && !sameWords(a, b);
   if (stated.period !== null && declared.period !== null && stated.period !== declared.period) return false;
@@ -265,16 +274,6 @@ export function evidencePeriod(parts: readonly string[]): UnitPeriod | null | 'a
 
 const CURRENCY_TOKEN = /(?:A\$|C\$|NZ\$|[£$€¥₹]|CHF|kr)/iu;
 
-/** The period the words directly after a money literal name: "a year", "/year", "annually", "per annum", "p.a.". */
-function periodPhraseAt(tail: string): UnitPeriod | null {
-  const m = /^\s*(\/\s*|(?:per|a|an|each|every)\s+)?(p\.a\.|[a-z]+)/iu.exec(tail);
-  if (m === null) return null;
-  const word = m[2]!.toLowerCase();
-  const adverb = periodAdverb(word);
-  if (adverb !== null) return adverb;
-  return m[1] !== undefined && isLeafPeriodNoun(word) ? periodNoun(word) : null;
-}
-
 /** Every sub-phrase of the first three words after a plain literal ("12,000 tickets a month" → tickets, tickets a, …). */
 export function nounUnitsAt(tail: string): readonly string[] {
   const ws = tail.match(/^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,3})/u)?.[1]
@@ -282,6 +281,79 @@ export function nounUnitsAt(tail: string): readonly string[] {
     .split(/\s+/u)
     .map((word) => word.toLowerCase()) ?? [];
   return ws.flatMap((_, start) => ws.slice(start).map((__, end) => ws.slice(start, end + 1).join(' ')));
+}
+
+/**
+ * ⭐ THE PARTS THE USER STATED after a literal (Codex r1 on #2604, P1): every part the words directly after it state is
+ * KEPT — a denominator ("per client"), a period ("a year", "annually"), a share's base ("of revenue"), a count's noun —
+ * so C3 can see a conflict instead of a "£" or a "%" with the rest thrown away ("£75,000 per client per year" never
+ * binds a "GBP per customer per year" edge). It reads at most four words and stops at punctuation, a digit or a word
+ * that is none of these. Null when the literal names no unit at all.
+ */
+export function statedTailParts(text: string, literal: { index: number; matchedText: string; kind: string }): UnitParts | null {
+  const tail = text.slice(literal.index + literal.matchedText.length);
+  const toks = (tail.match(/^[\s/]*((?:(?:p\.a\.|[A-Za-z%][A-Za-z%'-]*|\/)[\s]*){1,6})/u)?.[1] ?? '')
+    .replace(/\//g, ' / ').trim().toLowerCase().split(/\s+/u).filter((w) => w !== '').slice(0, 6);
+  if (tail.match(/^\s*\//u) !== null) toks.unshift('/');
+  let k = 0;
+  let period: UnitPeriod | null = null;
+  let per: string[] | null = null;
+  const conflictFree = (p: UnitPeriod): boolean => (period === null || period === p ? ((period = p), true) : false);
+  // A period or a denominator, repeatedly: "per client per year", "a month each", "/year".
+  const readRateParts = (): boolean => {
+    while (k < toks.length) {
+      const w = toks[k]!;
+      const adverb = periodAdverb(w);
+      if (adverb !== null) { if (!conflictFree(adverb)) return false; k += 1; continue; }
+      if (isPeriodConnector(w) && k + 1 < toks.length && isLeafPeriodNoun(toks[k + 1]!)) {
+        if (!conflictFree(periodNoun(toks[k + 1]!)!)) return false; k += 2; continue;
+      }
+      if ((w === 'per' || w === '/') && k + 1 < toks.length && /^[a-z]+$/.test(toks[k + 1]!) && !isPeriodConnector(toks[k + 1]!)) {
+        const nouns: string[] = [];
+        let j = k + 1;
+        while (j < toks.length && nouns.length < 2 && /^[a-z]+$/.test(toks[j]!) && !isPeriodConnector(toks[j]!) && periodAdverb(toks[j]!) === null) {
+          nouns.push(toks[j]!); j += 1;
+        }
+        const last = nouns[nouns.length - 1]!;
+        if (nouns.length > 1 && isLeafPeriodNoun(last)) { if (!conflictFree(periodNoun(last)!)) return false; nouns.pop(); }
+        if (per !== null && per.length > 0) return false;
+        per = nouns.map(singular); k = j; continue;
+      }
+      if (w === 'each' || w === 'apiece') { per = per ?? []; k += 1; continue; }
+      break;
+    }
+    return true;
+  };
+  if (literal.kind === 'currency') {
+    const token = literal.matchedText.match(CURRENCY_TOKEN)?.[0];
+    const cur = token === undefined ? null : currencyOf(token);
+    if (cur === null) return null;
+    if (!readRateParts()) return null;
+    return { kind: 'currency', code: cur.code, scale: 1, noun: null, per, base: null, qualifiers: null, period };
+  }
+  // A share: the literal itself ("18%") or a %/pp phrase right after a plain number ("3 percentage points").
+  let share: 'percent' | 'points' | null = literal.kind === 'percent' ? 'percent' : null;
+  // "3% points" is percentage POINTS (G1: bare "point(s)" is pp only on a % quantity).
+  if (share === 'percent' && (toks[0] === 'point' || toks[0] === 'points')) { share = 'points'; k = 1; }
+  if (share === null) {
+    for (let n = Math.min(3, toks.length); n >= 1; n -= 1) {
+      const kind = shareKind(toks.slice(0, n).join(' '));
+      if (kind !== null) { share = kind; k = n; break; }
+    }
+  }
+  if (share !== null) {
+    const base = toks[k] === 'of' && k + 1 < toks.length && /^[a-z]+$/.test(toks[k + 1]!) ? [singular(toks[k + 1]!)] : null;
+    return { kind: share, code: null, scale: 1, noun: null, per: null, base, qualifiers: null, period: null };
+  }
+  // A count: the noun phrase (up to three words, to a connector or a period word), then its rate parts.
+  const noun: string[] = [];
+  while (k < toks.length && noun.length < 3 && /^[a-z][a-z'-]*$/.test(toks[k]!) && !isPeriodConnector(toks[k]!)
+    && periodAdverb(toks[k]!) === null && toks[k] !== 'each') {
+    noun.push(singular(toks[k]!)); k += 1;
+  }
+  if (noun.length === 0) return null;
+  if (!readRateParts()) return null;
+  return { kind: 'count', code: null, scale: 1, noun, per, base: null, qualifiers: null, period };
 }
 
 /**
@@ -295,8 +367,11 @@ export function unitsAt(text: string, literal: { index: number; matchedText: str
   if (literal.kind === 'currency') {
     const currency = literal.matchedText.match(CURRENCY_TOKEN)?.[0];
     if (currency === undefined) return [];
-    const period = periodPhraseAt(tail);
-    return [period === null ? currency : `${currency}/${period}`];
+    // Rendered from the STATED parts, so a denominator is never dropped ("£75,000 per client per year" → £/client/year).
+    const parts = statedTailParts(text, literal);
+    if (parts === null) return [currency];
+    const per = parts.per !== null && parts.per.length > 0 ? `/${parts.per.join(' ')}` : '';
+    return [`${currency}${per}${parts.period !== null ? `/${parts.period}` : ''}`];
   }
   const head = tail.match(/^\s+((?:[A-Za-z%][A-Za-z%-]*\s*){1,3})/u)?.[1]?.trim().toLowerCase().split(/\s+/u) ?? [];
   for (let n = Math.min(3, head.length); n >= 1; n -= 1) {

@@ -50,6 +50,7 @@ import {
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 import { statedEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
+import { readUnitParts } from "../../orchestrator-v5/agent-lane/same-unit.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -1547,7 +1548,12 @@ function collectBriefNaturalEffectCandidates(
       (effectDirection === "negative" && signedEffect >= 0)
     ) continue;
     if (typeof amount === "number" && Number.isFinite(amount) && typeof amountUnit === "string" && amountUnit.trim().length > 0) {
-      const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(amountUnit);
+      // The ONE grammar reads the edge's unit (Codex r1 on #2604, P2): "pounds/year", "GBP p.a." and "£k/year" are money
+      // with their scale, exactly as the span binding read them; the older currency reader stays the fallback.
+      const parts = readUnitParts(amountUnit);
+      const { kind, currencyCode, multiplier } = parts !== null && parts.kind === "currency"
+        ? { kind: "currency" as const, currencyCode: parts.code ?? undefined, multiplier: parts.scale }
+        : readCurrencyUnitWithQualifiers(amountUnit);
       out.push({
         nodeId: to,
         label: targetLabel,

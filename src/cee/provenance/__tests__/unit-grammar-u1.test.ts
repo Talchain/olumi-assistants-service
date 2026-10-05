@@ -120,6 +120,7 @@ describe("PR-U1 condition 2: C1 may abstain but never contradicts the full reade
     ...spellings.flatMap((w) => [`£/${w}`, `£ ${w}`, `GBP per ${w}`, `£ a ${w}`, w, `tickets/${w}`, `tickets ${w}`, `customers per ${w}`]),
     "£", "GBP", "£k/year", "£k/month", "£/subscriber/month", "£ per subscriber-month", "subscribers", "subscriber",
     "%", "percent", "pp", "percentage points", "% of output", "hours", "weeks", "GBP recurring revenue", "£ each",
+    "percents", "percent increase", "percent increases", "£ year", "£ month", "GBP year",
   ];
   it("over every leaf spelling in every unit shape: sameUnit(a, b) ⇒ readUnitParts(a) ≡ readUnitParts(b)", () => {
     let checked = 0;
@@ -127,12 +128,56 @@ describe("PR-U1 condition 2: C1 may abstain but never contradicts the full reade
     for (const a of units) for (const b of units) {
       if (!sameUnit(a, b)) continue;
       const pa = readUnitParts(a); const pb = readUnitParts(b);
-      if (pa === null || pb === null) continue;
+      if (pa === null && pb === null) continue;
       checked += 1;
-      if (!partsEqual(pa, pb)) contradictions.push(`${a} | ${b}`);
+      // Codex r1: a C1 equality where the full reader reads only ONE side is a contradiction too ("£ year" | "£/year").
+      if (pa === null || pb === null || !partsEqual(pa, pb)) contradictions.push(`${a} | ${b}`);
     }
     expect(checked, "the corpus must exercise C1 equalities").toBeGreaterThan(100);
     expect(contradictions).toEqual([]);
+  });
+});
+
+describe("Codex r1 on #2604, P1: every part the user STATED after a figure reaches C3", () => {
+  it("served c1: \"£75,000 per client per year\" never binds a \"GBP per customer per year\" edge; a matching denominator does", () => {
+    const brief = FIXTURE.brief_text.replace("£75,000 a year", "£75,000 per client per year");
+    const g = graph();
+    spendingEffect(g).amount_unit = "GBP per customer per year";
+    expect(verdictAt(brief, g, AT_75K).verdict).toBe("absent");
+    spendingEffect(g).amount_unit = "GBP per client per year";
+    expect(verdictAt(brief, g, AT_75K)).toEqual({ verdict: "in_model", matched: SPENDING });
+  });
+  it("a count's stated period and a share's stated base are kept", () => {
+    expect(statedTargetAmountSpans("We log 500 hours per week.", 500, "hours per month")).toHaveLength(0);
+    expect(statedTargetAmountSpans("We log 500 hours per week.", 500, "hours per week")).toHaveLength(1);
+    expect(statedTargetAmountSpans("Scrap is 18% of revenue.", 18, "% of output")).toHaveLength(0);
+    expect(statedTargetAmountSpans("Scrap is 18% of output.", 18, "% of output")).toHaveLength(1);
+    expect(statedTargetAmountSpans("We handle 12,000 tickets a month.", 12000, "tickets/month")).toHaveLength(1);
+    expect(statedTargetAmountSpans("We handle 12,000 tickets a month.", 12000, "tickets/year")).toHaveLength(0);
+  });
+  it("a stated noun phrase CONTAINS the declared noun (\"new subscribers\" holds \"subscribers\"); another noun does not", () => {
+    expect(statedTargetAmountSpans("We add 40 new subscribers a month.", 40, "subscribers/month")).toHaveLength(1);
+    expect(statedTargetAmountSpans("We add 40 new customers a month.", 40, "subscribers/month")).toHaveLength(0);
+  });
+  it("the writer sees the stated denominator too: \"£75,000 per client per year\" does not evidence GBP/year", () => {
+    const effect = { amount: -75000, per_source_change: 1, per_source_change_unit: "%" };
+    const q = "Merging saves £75,000 per client per year for each 1% of rounds merged";
+    expect(statedEffectQuoteMatches(q, { ...effect, amount_unit: "GBP/year" })).toBe(false);
+    expect(statedEffectQuoteMatches(q, { ...effect, amount_unit: "GBP/client/year" })).toBe(true);
+  });
+});
+
+describe("Codex r1 on #2604, P2: the full reader reaches the manifest's edge candidate", () => {
+  for (const unit of ["pounds/year", "GBP yearly", "GBP p.a.", "sterling/year"]) {
+    it(`an edge declared "${unit}" binds "£75,000 a year"`, () => {
+      const g = graph();
+      spendingEffect(g).amount_unit = unit;
+      expect(verdictAt(FIXTURE.brief_text, g, AT_75K)).toEqual({ verdict: "in_model", matched: SPENDING });
+    });
+  }
+  it("C1 abstains where only one side is a share spelling, and share qualifiers compare singular", () => {
+    expect(sameUnit("percent", "percents")).toBe(false);
+    expect(readUnitParts("percent increase")).toEqual(readUnitParts("percent increases"));
   });
 });
 
