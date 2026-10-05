@@ -1487,9 +1487,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         },
       },
     };
+    const identity = agentRequestIdentity('agent.construct', sentBody);
     const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
-      model: reqBody.model, purpose: 'construction', ...agentRequestIdentity('agent.construct', sentBody),
+      model: reqBody.model, purpose: 'construction', ...identity,
     });
+    /**
+     * ⭐ A8b (PAUL-TEST 5 Oct gap A8: "the agent-lane model id is never logged"). ONE server log line per structured call,
+     * whatever its end: the provider, the model id actually sent, the purpose, the prompt and schema identities (the same
+     * values the ledger row carries) and the measured latency. Built from the sent body's identity only — never the key,
+     * the headers, the instructions or the user's text.
+     */
+    const callStartedAt = Date.now();
+    const logStructuredCall = (outcome: string, extra: Record<string, unknown> = {}): void => {
+      log.info({
+        event: 'agent_lane.structured_call', provider: 'openai', model: reqBody.model, purpose: 'construction',
+        prompt_alias: identity['prompt_alias'], prompt_sha256: identity['prompt_sha256'], schema_sha256: identity['schema_sha256'],
+        latency_ms: Date.now() - callStartedAt, outcome, ...extra,
+      }, 'agent-lane: structured call');
+    };
     let j: {
       output?: { type?: string; content?: { type?: string; text?: string }[] }[];
       usage?: Record<string, unknown>;
@@ -1513,7 +1528,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       j = (await r.json()) as typeof j;
     } catch (err) {
-      if (isConstructionTimeout(err)) return timedOut(budgetMs, err);
+      if (isConstructionTimeout(err)) { logStructuredCall('timeout'); return timedOut(budgetMs, err); }
+      logStructuredCall('error');
       throw err;
     }
     let text = '';
@@ -1530,6 +1546,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (j.status === 'incomplete') {
       log.warn({ site: 'agent-v1-turn.callStructured', purpose: 'construction', incomplete_reason: incompleteReason ?? null, max_output_tokens: reqBody.max_output_tokens }, 'agent-lane: construction answer incomplete');
     }
+    logStructuredCall(typeof j.status === 'string' ? j.status : 'answered', { output_chars: text.length });
     return {
       text,
       usage: j.usage,
