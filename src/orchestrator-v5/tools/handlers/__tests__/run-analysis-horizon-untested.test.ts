@@ -103,6 +103,20 @@ describe('A7 is one rule: the chat line and the Run warning say the same sentenc
     const lines = decisionInputLines(M1.graph, { restingText: 'A sketch.', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
     expect(lines).toContain(A7_12);
   });
+
+  // CEE-A7-F1 (Codex on #2567): a RATE that names a period is an amount per month, not a deadline, so it must not
+  // silence A7. Only a limit counted IN days, weeks or months scores the deadline.
+  const withLimitUnit = (unit: string): Json => ({
+    ...M1.graph, goal_constraints: [...(M1.graph.goal_constraints ?? []), { constraint_id: 'k-rate', node_id: 'mrr', unit, operator: '<=', value: 9000 }],
+  });
+  it.each(['£/month', '% per month', 'percent per month', 'GBP per week', 'tickets/day'])(
+    'RED: a %s rate limit does not silence the untested deadline', (unit) => {
+      expect(untestedHorizonLine(withLimitUnit(unit))).toBe(A7_12);
+    },
+  );
+  it.each(['months', 'Months', ' weeks ', 'day'])('CONTROL: a limit counted in %s scores the deadline', (unit) => {
+    expect(untestedHorizonLine(withLimitUnit(unit))).toBeNull();
+  });
 });
 
 describe('the Run carries A7 as a typed warning (served m1 through the real handler)', () => {
@@ -129,6 +143,12 @@ describe('the Run carries A7 as a typed warning (served m1 through the real hand
     const g = withDurationLimit(M1.graph);
     expect(horizonWarnings(await runOn(g))).toEqual([]);
     expect(untestedHorizonLine(g)).toBeNull();
+  });
+
+  it('RED: a rate limit ("£/month") beside the deadline → the Run still carries the warning (CEE-A7-F1)', async () => {
+    const g = { ...M1.graph, goal_constraints: [...(M1.graph.goal_constraints ?? []),
+      { constraint_id: 'k-rate', node_id: 'mrr', unit: '£/month', operator: '<=', value: 9000 }] };
+    expect(horizonWarnings(await runOn(g)).map((w) => w.message)).toEqual([A7_12]);
   });
 
   it('CONTROL: no held deadline → no horizon warning', async () => {

@@ -53,10 +53,16 @@ export interface DecisionInputAskContext {
   readonly builtOrRan: boolean;
 }
 
-/** A duration limit the analysis scores (a week/month/day constraint): then the deadline is answered, not just held. */
+/**
+ * A duration limit the analysis scores (a limit counted IN days, weeks or months): then the deadline is answered, not
+ * just held. The WHOLE unit must be the duration ("months"), never a rate that names a period: "£/month" and
+ * "% per month" are amounts per month, not deadlines, and used to silence A7 (CEE-A7-F1, found by Codex on #2567).
+ * The house time-unit shape (`display-value.ts` TIME_UNIT_PATTERN), over this predicate's own day/week/month set.
+ */
+const DURATION_UNIT = /^(?:days?|weeks?|months?)$/i;
 function hasDurationLimit(graph: unknown): boolean {
   const ks = recordOf(graph)?.goal_constraints;
-  return Array.isArray(ks) && ks.some((k) => /week|month|day/i.test(String(recordOf(k)?.unit ?? '')));
+  return Array.isArray(ks) && ks.some((k) => DURATION_UNIT.test(String(recordOf(k)?.unit ?? '').trim()));
 }
 
 // ── DecisionGuideAI staging `69c05df1` `serverOpenQuestions.ts` (`splitServerOpenQuestions`), the consumer's predicate:
