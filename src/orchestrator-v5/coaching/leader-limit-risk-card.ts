@@ -58,7 +58,7 @@ export function leaderLimitRiskIds(risks: unknown): readonly string[] | null {
 }
 
 // DL 0df0e1 6002469285 (Part B): never "comes out ahead"; the direction-neutral form, since this card cannot see the Run's direction.
-const RISK = 'On Olumi\'s estimates, the option most runs supported is more likely than not to break';
+const RISK = 'On Olumi\'s estimates, the option the most runs supported is more likely than not to break';
 const ASK = 'Don\'t change the model or re-run anything yet.';
 
 /** The first prompt that fits: a longer one drops its trade-off clause, never the no-write ask. */

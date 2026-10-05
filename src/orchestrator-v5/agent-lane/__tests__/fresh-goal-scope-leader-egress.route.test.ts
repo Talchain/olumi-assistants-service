@@ -188,7 +188,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
   const assertMeasuredWithheld = (body: Record<string, any>) => {
     assertWithheld(body);
     expect.soft(body.assistant_text).not.toContain('would still lead');
-    expect.soft(body.assistant_text).not.toMatch(/runs would (?:still )?support/);
+    expect.soft(body.assistant_text).not.toMatch(/runs would (?:still )?support|be supported by the most runs/);
     expect(body.assistant_text).toContain("There's nothing yet for a change to flip, because this analysis doesn't put one option forward yet."); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
     expect(scripted.calls).toBe(0);
     expect(scripted.measureCalls).toBe(1);
@@ -284,7 +284,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     scripted.duringMeasure = () => { scripted.prior = [pending()]; }; scripted.retireAfterGraphRead = 2;
     const { body } = await measuredTurn();
     assertRestoredResult(body);
-    expect(body.assistant_text).toMatch(/most runs would still support ‘Offshore partner’/i);
+    expect(body.assistant_text).toContain('‘Offshore partner’ would still be supported by the most runs');
     expect(scripted.calls).toBe(0); expect(scripted.measureCalls).toBe(1);
   });
   for (const exit of ['existing-row', 'claim-wait', 'append-repair'] as const) {
@@ -360,7 +360,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
   it('measured control: live and chipless replay without a scope issue keep every pre-fix byte', async () => {
     scripted.measured = true;
     const live = await measuredTurn();
-    expect(live.body.assistant_text).toMatch(/most runs would still support ‘Offshore partner’/i);
+    expect(live.body.assistant_text).toContain('‘Offshore partner’ would still be supported by the most runs');
     const replay = await measuredTurn(true);
     expect(replay.body.assistant_text).toBe(live.body.assistant_text);
     expect(replay.body._agent.replayed).toBe(true);
@@ -379,12 +379,12 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     const replay = await measuredTurn(true);
     expect(replay.body.analysis_state.leader_claim.permitted).toBe(true);
     expect(replay.body.assistant_text).not.toContain('would still lead');
-    expect(replay.body.assistant_text).not.toMatch(/runs would (?:still )?support/);
+    expect(replay.body.assistant_text).not.toMatch(/runs would (?:still )?support|be supported by the most runs/);
     expect(scripted.measureCalls).toBe(1);
   });
   it('measured append-repair replay: the losing turn carries its fresh unresolved issue to the selector', async () => {
     scripted.measured = true; scripted.joinScopeRead = false; scripted.concurrent = true;
-    scripted.concurrentText = 'Most runs would still support ‘Offshore partner’ even if its average effect fell to zero.';
+    scripted.concurrentText = '‘Offshore partner’ would still be supported by the most runs even if its average effect fell to zero.';
     scripted.duringMeasure = () => { scripted.prior = [pending()]; };
     const { body } = await measuredTurn(); assertMeasuredWithheld(body);
     expect(body._agent.replayed).toBe(true);
@@ -392,7 +392,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
   for (const retry of [false, true]) {
     it(`measured existing-row ${retry ? 'chipless ' : ''}replay: the warmed cache reads today's canonical unresolved scope`, async () => {
       scripted.measured = true;
-      expect((await measuredTurn()).body.assistant_text).toContain('would still support');
+      expect((await measuredTurn()).body.assistant_text).toContain('would still be supported by the most runs');
       scripted.prior = [pending()];
       const { body } = await measuredTurn(retry); assertMeasuredWithheld(body);
       expect(body._agent.replayed).toBe(true);
@@ -400,7 +400,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
   }
   it('measured claim-wait replay: the warmed cache reads canonical scope when the winner appears', async () => {
     scripted.measured = true;
-    expect((await measuredTurn()).body.assistant_text).toContain('would still support');
+    expect((await measuredTurn()).body.assistant_text).toContain('would still be supported by the most runs');
     scripted.prior = [pending()]; scripted.hideAnswerOnce = true;
     const { body } = await measuredTurn(true); assertMeasuredWithheld(body);
     expect(body._agent.replayed).toBe(true);
