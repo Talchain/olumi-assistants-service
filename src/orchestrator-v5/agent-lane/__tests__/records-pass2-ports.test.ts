@@ -129,3 +129,28 @@ describe('P2-P2: an option Olumi added carries proposed_by olumi, from the recor
     expect(out.keptOlumiProvisional).toBe(false);
   });
 });
+
+describe('P2-P3: an oversized records draft is refused model_too_large by the legacy size gate, before any write', () => {
+  it('refuses the 35-extra-factor draft with the legacy refusal shape, zero writes, no retry', async () => {
+    const { COMPACT_LIMITS } = await import('../construction-size-gate.js');
+    const { oversizedConstructionRecords } = await import('./records-wire-fixture.js');
+    const { result, writes } = await build(oversizedConstructionRecords(), 'Hire a tech lead for Delivery reliability.');
+    expect(writes, 'nothing registered').toHaveLength(0);
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'model_too_large', retried: false, limits: COMPACT_LIMITS });
+    // Counted on the graph that WOULD have registered: the five-claim topology plus 35 factors Olumi added, by origin.
+    expect(result.by_kind).toMatchObject({ factor: 36, option: 1, goal: 1, outcome: 1 });
+    // Every node minted from an UNBASED claim is Olumi's addition: the 35 extra factors plus the base topology's own two
+    // claims (factor 'Team capacity', outcome 'Delivery reliability'); the stated goal and option are the user's.
+    expect(result.added_beyond_brief).toBe(35 + 2);
+    expect(result.from_your_brief).toBe(2);
+    expect(result.nodes).toBeGreaterThan(COMPACT_LIMITS.maxNodes);
+  });
+
+  it('contrast: the same topology without the extra factors registers, with the compact verdict on the success', async () => {
+    const { constructionRecords } = await import('./records-wire-fixture.js');
+    const { result, writes } = await build(constructionRecords(), 'Hire a tech lead for Delivery reliability.');
+    expect(writes).toHaveLength(1);
+    expect(result).toMatchObject({ ok: true, mutated: true, within_compact_limits: true, size_retried: false });
+    expect('admitted_over_limit_because' in result).toBe(false);
+  });
+});

@@ -11,6 +11,8 @@ import type { V1Graph } from '../../../cee/transforms/schema-v2.js';
 import type { GoalConstraintT } from '../../../schemas/assist.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { PROPOSED_BY_OLUMI } from '../olumi-option-marker.js';
+import { assessConstructionSize } from '../construction-size-gate.js';
+import type { InferenceClass } from '../admit-model.js';
 import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { constructionOperationId, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
@@ -152,6 +154,21 @@ export function markRecordsOlumiOptions<N extends { readonly id: string; readonl
     ? { ...n, proposed_by: PROPOSED_BY_OLUMI } : n));
 }
 
+/**
+ * The size gate's inference class (`admit-model.ts` InferenceClass), from the record's own typed origin: a stated item is
+ * the user's (`brief_stated`), a claim built on stated items is the builder's (`builder_inferred`), an unbased claim is
+ * Olumi's own addition (`model_proposed`, the honest shed target), and projector scaffolding is the builder's.
+ */
+function inferenceClassesOf(origins: ReadonlyMap<string, { cls: unknown; unbased: boolean }>): Record<string, InferenceClass> {
+  const out: Record<string, InferenceClass> = {};
+  for (const [id, origin] of origins) {
+    if (origin.cls === 'stated') out[id] = 'brief_stated';
+    else if (origin.cls === 'ai_inferred') out[id] = origin.unbased ? 'model_proposed' : 'builder_inferred';
+    else if (origin.cls === 'projector_structural') out[id] = 'builder_inferred';
+  }
+  return out;
+}
+
 export async function buildModelFromRecords(
   scenarioId: string,
   brief: string,
@@ -197,6 +214,22 @@ export async function buildModelFromRecords(
     ? { ...authored, goal_constraints: limits.constraints } : authored);
   if (!parsed.success) return { ok: false, mutated: false, refusal: 'construction_failed', detail: parsed.error.message };
   const graph = parsed.data;
+  /**
+   * ⭐ P2-P3: THE SAME SIZE GATE AND REFUSAL AS THE LEGACY CONSTRUCTOR, after compile and before any write. One limit
+   * (`COMPACT_LIMITS`, via `assessConstructionSize`), counted on the graph that WOULD register; the user's own material
+   * over the limit is admitted, never refused. Records construction makes no generative repair call, so nothing is
+   * compacted: an oversized draft is refused with zero writes and zero GRAPH_READY frames, and the route's existing
+   * reader (`agent-v1-turn.ts`, `offerRebuild`) offers "Build it again".
+   */
+  const size = assessConstructionSize({ nodes: graph.nodes, edges: graph.edges, inference_classes: inferenceClassesOf(origins),
+    ...(graph.goal_constraints !== undefined ? { goal_constraints: graph.goal_constraints } : {}) });
+  if (!size.within && !size.user_material_exceeds_limit) {
+    return {
+      ok: false, mutated: false, refusal: 'model_too_large', detail: size.detail,
+      nodes: size.nodes, edges: size.edges, limits: size.limits, by_kind: size.by_kind,
+      added_beyond_brief: size.sheddable_nodes, from_your_brief: size.brief_stated_nodes, retried: false,
+    };
+  }
   const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
   const held = stillEmpty.json.graph;
   if (stillEmpty.status === 200 && object(held) && Array.isArray(held.nodes) && held.nodes.length > 0) {
@@ -226,6 +259,9 @@ export async function buildModelFromRecords(
     ok: true, mutated: true, ...(reg.json.replayed === true ? { replayed: true } : {}),
     ...(reg.json.model_version === undefined ? {} : { model_version: reg.json.model_version }),
     nodes: graph.nodes.length, edges: graph.edges.length, readiness: compiled.readiness,
+    // The compact verdict travels with the success, as on the legacy path; records never retries for size.
+    within_compact_limits: size.within, size_retried: false,
+    ...(size.user_material_exceeds_limit ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' } : {}),
     options: graph.nodes.filter(node => node.kind === 'option').length,
     goal_constraints_carried: graph.goal_constraints?.length ?? 0,
     ...(limits.notCarried.length > 0 ? { goal_constraints_not_carried: limits.notCarried } : {}),

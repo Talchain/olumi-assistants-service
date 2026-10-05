@@ -67,7 +67,9 @@ describe('a first build refused as too large offers "Build it again"', () => {
     const b = res.json() as { assistant_text: string; suggested_actions: { id: string; label: string; message: string; action_type?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; refusal?: string }[] } };
     // Vacuity guards: the real builder refused THIS turn as too large, after its one retry, and said so.
     expect(b._agent.tool_calls).toEqual([expect.objectContaining({ name: 'build_model_from_brief', ok: false, refusal: 'model_too_large' })]);
-    expect(construction, 'the first draft plus its one bounded retry').toBe(2);
+    // Rebound (P2-P3, DL 5 Oct): records construction makes NO generative retry (its trace is always {retried:false}), so
+    // the vacuity guard is the one draft that was refused — was `2` (first draft plus the legacy size retry).
+    expect(construction, 'the one records draft, refused before any write').toBe(1);
     expect(b.assistant_text).toContain('ask me to build it again');
 
     expect(b.suggested_actions).toEqual([{ id: 'agent-rebuild-model', label: 'Build it again', message: 'Build the model again from my brief.' }]);
