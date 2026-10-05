@@ -340,6 +340,12 @@ export interface ConstructedLevel {
   raw_value?: number;
   /** The factor's own unit, beside `raw_value`: its `observed_state.unit`, else the unit the construction declared for it. */
   unit?: string;
+  /**
+   * Present ONLY on a user-grounded total we COMPUTED (`build-model` `derived_total`: a stated baseline plus a stated
+   * change), never on a figure the user wrote. `InterventionV3.value_confidence`; outside the analysis hash. The
+   * not-modelled manifest credits no brief literal to a level below "high" (RT-4 class A, #2603).
+   */
+  value_confidence?: 'medium';
 }
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
@@ -382,11 +388,13 @@ function constructedLevel(
   source: ConstructedLevelSource,
   factor: Pick<AdmittedNode, 'observed_state' | 'scale_frame'> | undefined,
   declaredUnit: string | undefined,
+  derivedTotal = false,
 ): ConstructedLevel {
   const level: ConstructedLevel = {
     value: cap !== undefined ? figure / cap : figure,
     source,
     target_match: { node_id: factorId, match_type: 'exact_id', confidence: 'high' },
+    ...(derivedTotal && source === 'brief_extraction' ? { value_confidence: 'medium' as const } : {}),
   };
   const os = factor?.observed_state;
   const usable = (u: unknown): u is string => typeof u === 'string' && u.trim() !== '';
@@ -3622,7 +3630,8 @@ function admitOnce(
         continue;
       }
       const cap = capByFactorId.get(factorId);
-      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId));
+      bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId),
+        (iv as { derived_total?: unknown }).derived_total === true);
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
