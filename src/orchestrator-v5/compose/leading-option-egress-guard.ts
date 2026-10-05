@@ -292,6 +292,14 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * leading option just as surely without scoring anything.
    */
   { code: 'scored_highest', re: /\bscor(?:e|es|ed|ing)\s+highest\b/i },
+  /**
+   * ⭐ RT-10 B′ (DL e8 condition 1): the deterministic headline of a Run that SENT minimise leads with "{option} came out
+   * lowest for {goal} in N% of runs of this model" (`analysis-result-headline.ts`, `MINIMISED_LEAD_PREFIX`). Added WITH
+   * that template and pinned by its derived control (`coaching/__tests__/bprime-minimise-lead.test.ts` drives the real
+   * builder and asserts `textNamesLeadingOption` sees every leader-naming output), so a withheld leader cannot leave
+   * through the new verb.
+   */
+  { code: 'came_out_lowest', re: /\bcame\s+out\s+lowest\b/i },
   { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
 ];
 

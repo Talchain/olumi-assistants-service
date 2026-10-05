@@ -8,8 +8,9 @@
  * P1; links not sized in the goal's unit, P5), but the ORDERING needs neither: the shared offset cancels on each draw.
  *
  * Fixture: the red team's wire, verbatim. `graph_with_target` is the post-edit graph (`<=` 400 row, held `<=`, no
- * baseline); `plot_envelope` is a real PLoT envelope from the same scenario carrying every option's share. Rows bind by
- * option id.
+ * baseline); `plot_body_minimise` is the real PLoT body for that graph's own payload (minimise, PLoT 2473ace), carrying
+ * every option's share. NOT Run 1's envelope: Run 1 sent no direction, so its shares rank the LARGEST cancellations
+ * (`bprime-run-own-direction.test.ts`). Rows bind by option id.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -20,14 +21,14 @@ import { resolveRunAdmission } from '../analysis-ready-core.js';
 
 type Rec = Record<string, unknown>;
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/bprime-rt10b.json', import.meta.url), 'utf8')) as {
-  graph_without_target: Rec; graph_with_target: Rec; plot_envelope: Rec;
+  graph_without_target: Rec; graph_with_target: Rec; plot_body_minimise: Rec;
 };
 const rows = (env: Rec): Rec[] => env.option_comparison as Rec[];
 const byId = (env: Rec): Map<string, Rec> => new Map(rows(env).map((r) => [r.option_id as string, r]));
 
 /** The served envelope, with a goal chance on every row so the target-relative claim has something to withhold. */
 const envelopeWithGoalChance = (): Rec => {
-  const env = structuredClone(FIXTURE.plot_envelope);
+  const env = structuredClone(FIXTURE.plot_body_minimise);
   for (const r of rows(env)) { r.probability_of_goal = 0.3; r.probability_of_joint_goal = 0.2; }
   return env;
 };
@@ -50,9 +51,9 @@ describe('B′ R2 — "at most" keeps the comparison (the served rt10b journey)'
       expect(shares.get(id)?.win_probability, id).toBe(row.win_probability);
     }
     const brief = after.decision_brief as Rec;
-    expect((brief.analysis_summary as Rec).leading_option).toBe('More Reliable Courier');
-    expect(brief.headline).toBe((FIXTURE.plot_envelope.decision_brief as Rec).headline);
-    expect(after.flip_thresholds).toEqual(FIXTURE.plot_envelope.flip_thresholds);
+    expect((brief.analysis_summary as Rec).leading_option).toBe('15% Loyalty Discount');
+    expect(brief.headline).toBe((FIXTURE.plot_body_minimise.decision_brief as Rec).headline);
+    expect(after.flip_thresholds).toEqual(FIXTURE.plot_body_minimise.flip_thresholds);
   });
 
   it('row 1: only the claims AGAINST the target go — the goal chance, the joint, and (P1/P5) the outcome', () => {

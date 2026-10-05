@@ -48,7 +48,7 @@ import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/s
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
-import { targetTestabilityOf, targetNotTestableWarning } from '../../admission/target-testability.js';
+import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import type {
@@ -199,7 +199,7 @@ import {
 // headline ON them, and then discarded both — so this handler could only ever
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
-import { heldGoalPointsUp, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
+import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 
@@ -2142,9 +2142,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // against the same bytes. Falls back to the persisted graph for snapshots
     // that carry the constraints only there. Hoisted so the identity telemetry
     // below can report what we actually asked for.
+    // ⭐ RT-10 B′ R2 at T1 (Science d5, 5 Oct): the goal's OWN target row, while the target can't be tested, is the
+    // target, not a limit: its claims are withheld and said once under GOAL_FIGURES_TARGET_NOT_TESTABLE (above), so it
+    // never also withholds the leader here. Bound by the row's identity (`untestableGoalTargetRowId`); a deadline row,
+    // another node's limit and a testable target's row stay. It still travels to PLoT unchanged.
+    const untestableTargetRowId = untestableGoalTargetRowId(graphForAnalysis);
     const ratifiedConstraints = readRatifiedConstraints(
       snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
-    );
+    ).filter((c) => c.constraint_id !== untestableTargetRowId);
     // ONE verdict, five states, each declaring whether a leading option may be
     // named. Both withholding predicates (never evaluated / the leader breaks a
     // checked limit) and the seam's third answer (we could not reconcile which
@@ -2368,6 +2373,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // opens. `goal_target_edit` refuses a CHANGE target (`goal_is_a_change`, the same `isChangeFrame`), so there the
       // assumption is stated with no correction promised.
       goal_direction_correctable: goalDirectionCorrectableByTarget(graphForAnalysis, snapshot.goal_node_id),
+      // ⭐ RT-10 B′ (DL e8 condition 1): the lead says "came out lowest for {goal}" only when THIS Run sent minimise, read
+      // off the very payload PLoT received (`plotPayload.goal_direction`, set once above), never re-derived.
+      ...(plotPayload.goal_direction === 'minimise'
+        ? { minimised_goal_label: readGoalLabel(graphForAnalysis, snapshot.goal_node_id) ?? undefined } : {}),
       // T1: withhold the confident "{X} currently leads" claim while any
       // ratified condition is unchecked. A recommendation must not exist
       // unless every user-ratified hard constraint is decision-grade.
