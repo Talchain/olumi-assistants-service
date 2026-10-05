@@ -23,6 +23,10 @@ function project(records: DraftRecordSet, brief = BRIEF) {
   const r = projectDraftRecords(records, brief); expect(r.ok).toBe(true);
   if (!r.ok) throw new Error(r.detail); return r.projection;
 }
+/** Typed read of an option's per-lever binding receipts (the projector types `data` as an open record). */
+function details(node: { data?: Record<string, unknown> } | undefined): Record<string, any> | undefined {
+  return node?.data?.intervention_details as Record<string, any> | undefined;
+}
 function edgeFor(p: ReturnType<typeof project>, index: number, records: DraftRecordSet) {
   return p.graph.edges.find(e => e.provenance?.source_quote === records.stated_items[index]!.source_quote);
 }
@@ -90,8 +94,8 @@ describe('v-next inert flip ladder', () => {
   it('B3 EXTRACTION-UNPROVEN count-with-period differs from a count',()=>{expect(sameUnit('deliveries/month','deliveries')).toBe(false);expect(sameUnit('deliveries per month','delivery/month')).toBe(true);const p=project(vans(),VANS);expect(p.graph.nodes.find(n=>n.kind==='goal')?.goal_baseline_raw).toBe(640);});
   it('B4 relationship alone builds the exact endpoint pair and bundle',()=>{const r=sealedRecordsVNext();expect(edgeFor(project(r),10,r)?.provenance).toMatchObject({natural_effect:{amount:-300,amount_unit:'£/month',per_source_change:1,per_source_change_unit:'customers'}});});
   it('B4 negative duplicate quantity carriers refuse, never select',()=>{const r=sealedRecordsVNext();r.claims.push({claim_kind:'outcome',label:'Other revenue carrier',quantity:0});expect(project(r).dropped).toContainEqual(expect.objectContaining({stated_index:10,reason:'relationship_endpoint_ambiguous'}));});
-  it('B2 option value is bound to its own lever',()=>{const r=sealedRecordsVNext();r.stated_items[3]!.value=10;delete r.stated_items[3]!.value_scale;/* Isolate B2 from B7: undeclared percent convention is literal points. */for(const i of r.stated_items)if(i.relationship?.from_quantity===3)i.relationship.per_source_change=1;const p=project(r);const o=p.graph.nodes.find(n=>n.provenance?.source_quote===r.stated_items[3]!.source_quote)!;const lever=p.graph.nodes.find(n=>n.kind==='factor'&&n.quantity_ref===3)!;expect(o.data!.intervention_details![lever.id]).toMatchObject({raw_value:10,unit:'%',source:'brief_extraction',stated_index:3});expect(o.data!.intervention_details![lever.id]!.reasoning).toContain('stated_items[3]');});
-  it('B7 option unit_interval keeps the literal convention',()=>{const r=sealedRecordsVNext();const p=project(r);const o=p.graph.nodes.find(n=>n.provenance?.source_quote===r.stated_items[3]!.source_quote)!;const lever=p.graph.nodes.find(n=>n.kind==='factor'&&n.quantity_ref===3)!;expect(o.data!.raw_interventions![lever.id]).toBe(10);expect(o.data!.intervention_details![lever.id]).toMatchObject({raw_value:10,unit:'%',source:'brief_extraction',stated_index:3});expect(o.data!.intervention_details![lever.id]!.reasoning).toContain('stated_items[3]');});
+  it('B2 option value is bound to its own lever',()=>{const r=sealedRecordsVNext();r.stated_items[3]!.value=10;delete r.stated_items[3]!.value_scale;/* Isolate B2 from B7: undeclared percent convention is literal points. */for(const i of r.stated_items)if(i.relationship?.from_quantity===3)i.relationship.per_source_change=1;const p=project(r);const o=p.graph.nodes.find(n=>n.provenance?.source_quote===r.stated_items[3]!.source_quote)!;const lever=p.graph.nodes.find(n=>n.kind==='factor'&&n.quantity_ref===3)!;expect(details(o)![lever.id]).toMatchObject({raw_value:10,unit:'%',source:'brief_extraction',stated_index:3});expect(details(o)![lever.id]!.reasoning).toContain('stated_items[3]');});
+  it('B7 option unit_interval keeps the literal convention',()=>{const r=sealedRecordsVNext();const p=project(r);const o=p.graph.nodes.find(n=>n.provenance?.source_quote===r.stated_items[3]!.source_quote)!;const lever=p.graph.nodes.find(n=>n.kind==='factor'&&n.quantity_ref===3)!;expect((o.data!.raw_interventions as Record<string, unknown>)[lever.id]).toBe(10);expect(details(o)![lever.id]).toMatchObject({raw_value:10,unit:'%',source:'brief_extraction',stated_index:3});expect(details(o)![lever.id]!.reasoning).toContain('stated_items[3]');});
   it('B1a stated point and asymmetric 90% spread size the stored edge',()=>{const r=sealedRecordsVNext();const e=edgeFor(project(r),9,r)!;const ne=e.provenance!.natural_effect!;expect(ne?.amount).toBe(2);expect(e.strength_std).toBeCloseTo(Math.abs(e.strength_mean!)* (2/2)/1.645,5);expect(ne).not.toHaveProperty('stated_range');});
   it('B1a EXTRACTION-UNPROVEN range-only stores midpoint and spread',()=>{const r=vans();const e=edgeFor(project(r,VANS),5,r)!;expect(e?.provenance?.natural_effect?.amount).toBe(27);expect(e?.strength_std).toBeCloseTo(Math.abs(e.strength_mean!)/3/1.645,5);});
   it('B1a point outside range is refused',()=>{const r=sealedRecordsVNext();const item=r.stated_items[9]!;item.source_quote=item.source_quote.replace('about 2','about 5');item.value=5;item.value_literal='about 5';item.relationship!.amount=5;item.relationship!.amount_literal='about 5';const p=project(r,BRIEF+' '+item.source_quote);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:9,reason:'range_excludes_point'}));expect(p.stated_dispositions?.find(d=>d.stated_index===9)).toMatchObject({disposition:'rejected',reason:'range_excludes_point'});expect(edgeFor(p,9,r)?.provenance?.natural_effect).toBeUndefined();});
@@ -207,7 +211,7 @@ describe('pass 2 P2-A1: a delta option is a change_by resolved at Run assembly',
     const r = vansDelta(); const p = project(r, VANS);
     const option = p.graph.nodes.find(n => n.provenance?.source_quote === r.stated_items[2]!.source_quote)!;
     const lever = p.graph.nodes.find(n => n.kind === 'factor' && n.quantity_ref === 0)!;
-    expect(option.data?.intervention_details?.[lever.id]).toMatchObject({ stated_index: 2, change_by: 5, raw_value: 13 });
+    expect(details(option)?.[lever.id]).toMatchObject({ stated_index: 2, change_by: 5, raw_value: 13 });
     const graph = await registeredWith(r, VANS);
     const storedLever = graph.nodes.find((n: any) => n.kind === 'factor' && n.label === lever.label)!;
     const storedOption = graph.nodes.find((n: any) => n.kind === 'option' && n.source_quote === r.stated_items[2]!.source_quote)!;
@@ -226,8 +230,8 @@ describe('pass 2 P2-A1: a delta option is a change_by resolved at Run assembly',
     const r = vans(); const p = project(r, VANS);
     const option = p.graph.nodes.find(n => n.provenance?.source_quote === r.stated_items[2]!.source_quote)!;
     const leverId = p.graph.nodes.find(n => n.kind === 'factor' && n.quantity_ref === 0)!.id;
-    expect(option.data?.intervention_details?.[leverId]).toMatchObject({ stated_index: 2, raw_value: 5 });
-    expect(option.data?.intervention_details?.[leverId]).not.toHaveProperty('change_by');
+    expect(details(option)?.[leverId]).toMatchObject({ stated_index: 2, raw_value: 5 });
+    expect(details(option)?.[leverId]).not.toHaveProperty('change_by');
     const graph: any = await registeredWith(r, VANS);
     const lever = graph.nodes.find((n: any) => n.kind === 'factor' && n.label === 'Vans')!;
     lever.observed_state = { ...lever.observed_state, raw_value: 10, value: 10 };
