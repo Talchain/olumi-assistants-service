@@ -64,12 +64,21 @@ function graph(): Rec {
 }
 
 let runKind: 'complete_current' | 'complete_stale' = 'complete_current';
-/** 'g2' = the gate-2 case (withheld leader); 'b5' = the served b5 a6ed1bff graph + PLoT response with a licensed leader. */
-let fixture: 'g2' | 'b5' = 'g2';
+/**
+ * 'g2' = the gate-2 case (withheld leader); 'b5' = the served b5 a6ed1bff graph + PLoT response with a licensed leader
+ * (its one flip row is Pro plan price, a LEVER); 'b5flip' = a later Run on the same graph whose flip row is a factor no
+ * option sets.
+ */
+let fixture: 'g2' | 'b5' | 'b5flip' = 'g2';
+/** A competing writer: every graph read after this many sees the Run gone stale. */
+let staleAfterReads = Number.POSITIVE_INFINITY;
+let graphReads = 0;
 const B5 = '../../../../tests/fixtures/cross-service/b5-per-limit/';
 const B5_STORED = JSON.parse(readFileSync(new URL(`${B5}a6ed1bff.graph.json`, import.meta.url), 'utf8')) as { graph: Rec; graph_hash: string };
 const B5_PLOT = JSON.parse(readFileSync(new URL(`${B5}a6ed1bff.plot-response.json`, import.meta.url), 'utf8')) as Rec;
 const B5_BLOCK = { type: 'analysis_result', computed_against_hash: B5_STORED.graph_hash, enrichment: B5_PLOT };
+const B5_FLIP_BLOCK = { ...B5_BLOCK, enrichment: { ...B5_PLOT, flip_thresholds: [{ ...(B5_PLOT.flip_thresholds as Rec[])[0],
+  factor_id: 'other_mrr_growth', factor_label: 'Other MRR growth' }] } };
 type Row = Record<string, unknown>;
 const rows: Row[] = [];
 const store = {
@@ -89,7 +98,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 
-const state = () => ({ ...SERVED.analysis_state, run_state: runKind === 'complete_current'
+const state = (kind = runKind) => ({ ...SERVED.analysis_state, run_state: kind === 'complete_current'
   ? { kind: 'complete_current', computed_at: '2026-10-05T03:48:55.163Z' }
   : { kind: 'complete_stale', computed_at: '2026-10-05T03:48:55.163Z', cause: 'graph_changed' } });
 
@@ -102,11 +111,16 @@ async function freshApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'unused', suggested_actions: [], insights: [],
     graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY }));
-  app.post('/assist/v1/scenarios/:id/graph', async () => (fixture === 'g2'
-    ? { graph: graph(), graph_hash: HASH, analysis_ready: READY, analysis_state: state(), analysis_result: SERVED.block }
-    : { graph: B5_STORED.graph, graph_hash: B5_STORED.graph_hash, analysis_ready: READY,
-      analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-05T03:48:55.163Z' }, leader_claim: { permitted: true, separation: 'separated' } },
-      analysis_result: B5_BLOCK }));
+  app.post('/assist/v1/scenarios/:id/graph', async () => {
+    graphReads += 1;
+    const moved = graphReads > staleAfterReads;
+    return fixture === 'g2'
+      ? { graph: graph(), graph_hash: HASH, analysis_ready: READY, analysis_state: state(moved ? 'complete_stale' : runKind), analysis_result: SERVED.block }
+      : { graph: B5_STORED.graph, graph_hash: B5_STORED.graph_hash, analysis_ready: READY,
+        analysis_state: { run_state: { kind: 'complete_current', computed_at: fixture === 'b5' ? '2026-10-05T03:48:55.163Z' : '2026-10-05T09:12:00.000Z' },
+          leader_claim: { permitted: true, separation: 'separated' } },
+        analysis_result: fixture === 'b5' ? B5_BLOCK : B5_FLIP_BLOCK };
+  });
   await app.register(agentV1TurnRoute);
   await app.ready();
   return app;
@@ -124,7 +138,13 @@ describe('the "Review this decision" press on the live route', () => {
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; runKind = 'complete_current'; fixture = 'g2'; modelCalls.mockClear(); });
+  beforeEach(() => {
+    rows.length = 0; runKind = 'complete_current'; fixture = 'g2'; staleAfterReads = Number.POSITIVE_INFINITY; graphReads = 0;
+    modelCalls.mockClear();
+  });
+  const chips = (b: Body): string[][] => (b.suggested_actions ?? []).map((a) => [a.id, a.label]);
+  const TEST_LINK = [structuralChallengePressId({ from_id: 'pro_plan_price', to_id: 'mrr' }), 'Test without this link'];
+  const WHAT_WOULD_CHANGE = ['agent-next-what-would-change', 'What would change this?'];
 
   const press = (turnId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
     payload: { scenario_id: SCENARIO, turn_id: turnId, message: 'Review this decision', source: 'chip_click', chip: { id: DECISION_REVIEW_PRESS_ID } } });
@@ -157,14 +177,42 @@ describe('the "Review this decision" press on the live route', () => {
   });
 
   it('RED: each item\'s next step is offered as the existing press — the link test for its link, What would change', async () => {
-    fixture = 'b5';
+    fixture = 'b5flip';
     const body = (await press(randomUUID())).json() as Body;
     expect(body.assistant_text).toContain('The link from ‘Pro plan price’ to ‘MRR’ is one of the links this result is most sensitive to.');
-    expect((body.suggested_actions ?? []).map((a) => [a.id, a.label])).toEqual([
-      [structuralChallengePressId({ from_id: 'pro_plan_price', to_id: 'mrr' }), 'Test without this link'],
-      ['agent-next-what-would-change', 'What would change this?'],
-    ]);
+    expect(chips(body)).toEqual([TEST_LINK, WHAT_WOULD_CHANGE]);
     expect(modelCalls).not.toHaveBeenCalled();
+  });
+
+  it('RED (Science: never a lever): the served flip row is a factor the options set → no What would change', async () => {
+    fixture = 'b5';
+    expect(chips((await press(randomUUID())).json() as Body)).toEqual([TEST_LINK]);
+  });
+
+  it('RED (Codex P2): a review with no press of its own offers none — not the general next steps', async () => {
+    const body = (await press(randomUUID())).json() as Body;
+    expect(body.assistant_text.startsWith(DECISION_REVIEW_OPENING)).toBe(true);
+    expect(chips(body)).toEqual([]);
+  });
+
+  it('RED (Codex P1): a Run another writer replaces before the reply is composed is not reviewed', async () => {
+    staleAfterReads = 1;
+    const body = (await press(randomUUID())).json() as Body;
+    expect(graphReads).toBeGreaterThan(1);
+    expect(body.assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+  });
+
+  it('RED (Codex P2): a replay after the Run is replaced offers today\'s presses only, also after a restart', async () => {
+    fixture = 'b5flip';
+    const turnId = randomUUID();
+    expect(chips((await press(turnId)).json() as Body)).toEqual([TEST_LINK, WHAT_WOULD_CHANGE]);
+    fixture = 'b5';
+    for (const restart of [false, true]) {
+      if (restart) { await app.close(); app = await freshApp(); }
+      const replay = (await press(turnId)).json() as Body;
+      expect(replay.assistant_text, `restart=${restart}`).not.toContain('Other MRR growth');
+      expect(chips(replay), `restart=${restart}`).toEqual([TEST_LINK]);
+    }
   });
 
   it('CONTROL: a Run that is no longer current → the existing unavailable reply, and nothing to press', async () => {

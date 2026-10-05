@@ -634,7 +634,7 @@ function decisionReviewChips(turn: DecisionReviewTurn): OfferedAction[] {
   });
 }
 /** Every press that runs a reasoning method (the selector withholds its rows on one): the next steps and Widen. */
-const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID]);
+const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID, DECISION_REVIEW_PRESS_ID]);
 
 /**
  * The next steps are offered only on a result that is current and that the canonical state lets chips build on
@@ -1999,7 +1999,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...remembered,
         ...(durableRun && !remembered.some((a) => a.id === RUN_OFFER_CHIP.id) ? [RUN_OFFER_CHIP] : []),
       ];
-      const stillValid = stillValidOffers(offered, {
+      // A review replay offers ONLY its recomposed presses (Codex #2581 P2): a remembered offer from another Run is not one.
+      const stillValid = decisionReviewReplay ? [] : stillValidOffers(offered, {
           outstandingProposalIds: new Set([
             ...((id) => (id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
             ...(await liveHeldRefs(scenarioId)),
@@ -3093,7 +3094,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (runStillCurrent !== undefined) dispatchLedger.push({ path: 'store:run-currentness', ms: Date.now() - runCheckStarted, status: runStillCurrent ? 200 : 409 });
     /** A successful bound narration check reuses its read; recomputed methods must see other writers after the wait. */
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
-      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null
+      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
     const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
@@ -3303,7 +3304,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? firstOfEachId([...approvals, ...structuralChallengeTurn.actions])
       // Review this decision, terminal: each item's existing press, nothing else.
       : fastPath === 'method' && decisionReviewTurn !== null
-      ? firstOfEachId([...approvals, ...decisionReviewChips(decisionReviewTurn)])
+      ? firstOfEachId(decisionReviewChips(decisionReviewTurn))
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
@@ -3328,7 +3329,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     ]);
     // ⭐ Nothing specific to press, on a result that is current: the product's own next steps (NEXT_STEP_CHIPS). Never
     // beside another control, and never while a proposal that would still execute waits for its yes (that is the step).
-    const offeredNow: OfferedAction[] = offeredSpecific.length === 0 && offersNextSteps(analysisState)
+    const offeredNow: OfferedAction[] = offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash) === undefined
       // Widen takes the plain "What would change the result?" place when the selector's RC-WIDEN holds on options.
       ? nextStepsWithWiden(NEXT_STEP_CHIPS, widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }))

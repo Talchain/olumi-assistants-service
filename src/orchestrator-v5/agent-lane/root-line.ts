@@ -17,7 +17,7 @@ import { readinessViewOf, treatedAsZeroLine } from './readiness-view.js';
 import { withoutProposalIds } from './display-ids.js';
 import { textAtRest } from './decision-input-ask.js';
 import { dropRankingSentences, rankingLabelContext } from './withheld-leader-fail-closed.js';
-import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
+import { textAssertsLeadingOption } from '../compose/leading-option-egress-guard.js';
 import { optionRosterFromGraph, textNamesAnOption } from '../compose/leading-option-wire-enforcement.js';
 
 /**
@@ -37,9 +37,10 @@ export function survivesReplyEditors(line: string, graph: unknown, analysisReady
   if (textAtRest(line) !== line) return false;
   if (dropRankingSentences(line, rankingLabelContext(graph, analysisReady)).droppedSentences !== 0) return false;
   if (textNamesAnOption(line, optionRosterFromGraph(graph))) return false;
-  // The egress scan's own per-string vocabulary (`findLeaderClaims` → `scanString` on `assistant_text`), exported for
-  // producer-side gates: no envelope, no cast.
-  return !textNamesLeadingOption(line);
+  // The leader vocabulary as the DELETING consumers read it (`textAssertsLeadingOption`: the egress vocabulary minus its
+  // documented false-positive spans, "leads to" and "tech/team lead(s)"). The egress alarm's wider net only observes, so
+  // it edits nothing; reading it here suppressed real labels such as Paul's "Tech leads" (a994c38a; #2581 r1).
+  return !textAssertsLeadingOption(line);
 }
 
 /**
