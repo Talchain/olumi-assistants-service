@@ -44,7 +44,7 @@ jobs:
   # further down, and it decides the verdict of the whole split gate:
   #
   #   required-static  every lint / build / guard step, verbatim   (~2.5 min)
-  #   required-tests   `pnpm test:required`, sharded 3 ways        (~8.5 min each, in parallel)
+  #   required-tests   `pnpm test:required`, sharded 5 ways        (in parallel)
   #   unit-tests       `Lint, TypeCheck, Unit Tests` — RED unless both succeeded
   #                    AND every required test file ran in exactly one shard
   #
@@ -53,6 +53,12 @@ jobs:
   # the steadiest cost between review-ready code and a green check. The test
   # population, config and environment are UNCHANGED — `--shard` only partitions
   # the files, and the gate proves the partition is complete.
+  #
+  # 3 -> 5 SHARDS (5 Oct 2026, CI OPTIMISER). At 3 shards the slowest shard's
+  # test step was 658-691s and the unqueued PR answer 12.0-13.2 min; the brief is
+  # a required answer in <=10 min. Install is not the cost (pnpm cache hits,
+  # 3-4s). Five shards cost two more concurrent jobs per PR on an account whose
+  # job cap every repo shares; measured before/after on the PR that made this change.
   required-static:
     name: Required — lint, typecheck, guards
     runs-on: ubuntu-latest
@@ -320,7 +326,7 @@ jobs:
       matrix:
         # Keep in step with `--shards` in `unit-tests` below (pinned by
         # tests/unit/ci/required-shards-complete.test.ts).
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -418,7 +424,7 @@ jobs:
           path: .vitest-reports
           merge-multiple: true
       - name: Every required test file ran in exactly one shard
-        run: node scripts/ci/assert-required-shards-complete.mjs --expected .vitest-reports/expected.json --dir .vitest-reports --shards 3
+        run: node scripts/ci/assert-required-shards-complete.mjs --expected .vitest-reports/expected.json --dir .vitest-reports --shards 5
 
   # Full Test Suite (advisory): the complete `pnpm test -- --coverage` + Codecov
   # upload, relocated verbatim from the required job. NON-REQUIRED — surfaces the

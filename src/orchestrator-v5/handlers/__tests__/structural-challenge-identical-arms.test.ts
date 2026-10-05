@@ -8,7 +8,7 @@
  *   (1) the candidate is licensed on the baseline's canonical readiness/admission, plus its OWN result (separation);
  *   (2) when every arm of the candidate RESULT is identical (and the baseline's are not), the reply says the lead
  *       rests entirely on this link, and never names a candidate leader;
- *   (3) model-scale amounts keep significant figures (never "0" for 0.0213, never "-0");
+ *   (3) an outcome level is never printed as a unitless model-scale number (DL beat-4 audit): the line says its direction;
  *   (4) a target frequency unavailable in both versions is said once.
  *
  * Real `run_analysis` handler, real snapshot loader and real canonical read, on the served fa027cf5 graph
@@ -51,7 +51,7 @@ import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../../run-analysis-snaps
 import { createRegistry, resolveHandler } from '../../tools/registry.js';
 import { dispatchStructuralChallenge } from '../structural-challenge-dispatch.js';
 import { runArmsDistinct, runArmsIdentical } from '../../coaching/structural-challenge-compare.js';
-import { composeStructuralChallengeReply, formatChallengeAmount, structuralChallengePressId, structuralChallengeTurnFor } from '../../agent-lane/method-turn/structural-challenge-turn.js';
+import { composeStructuralChallengeReply, structuralChallengePressId, structuralChallengeTurnFor } from '../../agent-lane/method-turn/structural-challenge-turn.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'fa027cf5-c5c9-4021-9578-ee79b15c6eb8';
@@ -259,11 +259,16 @@ describe('SCI-DEEP: the candidate is licensed on the baseline admission and its 
     expect(h.turn.identicalArms).toBe(false);
   });
 
-  it('R5: model-scale amounts keep significant figures; never "0" for 0.0213 and never "-0"', async () => {
+  it('R5 (DL beat-4 audit): an outcome level is never a unitless model-scale number; the line says its direction', async () => {
     const h = await harness(LEAD_LINK, 'same');
-    expect(h.turn.reply).toContain('AI Reporting Module Sprint\'s expected result is 0.0213 now and -0.0031 without the link');
+    // Served 0.0213 → SAME -0.0031: lower without the link (fa027cf5 has no target, so no target clause).
+    expect(h.turn.reply).toContain('AI Reporting Module Sprint\'s expected result is lower without the link.');
+    expect(h.turn.reply).not.toContain('0.0213');
+    expect(h.turn.reply).not.toMatch(/expected result is -?\d/);
     expect(h.turn.reply).not.toMatch(/\b-0\b(?!\.)/);
-    expect(h.turn.reply).not.toMatch(/expected result is 0 now/);
+    // With the number gone, "The figures can be compared, but no supported conclusion boundary is available" would refer
+    // to figures the reply no longer shows (Acceptance beat-4 witness 10:10Z: once per option).
+    expect(h.turn.reply).not.toContain('no supported conclusion boundary');
   });
 
   it('R6: a target frequency unavailable in both versions is said once', async () => {
@@ -386,11 +391,3 @@ describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candida
   });
 });
 
-describe('formatChallengeAmount', () => {
-  it.each([
-    [0.02134743573525561, '0.0213'], [-0.0031, '-0.0031'], [-0, '0'], [0, '0'], [-1e-20, '-0.00000000000000000001'],
-    [83433.86, '83,434'], [106250, '106,250'], [99.96, '100'], [-250.4, '-250'], [1.5, '1.5'],
-  ])('%s → %s', (x, expected) => {
-    expect(formatChallengeAmount(x)).toBe(expected);
-  });
-});

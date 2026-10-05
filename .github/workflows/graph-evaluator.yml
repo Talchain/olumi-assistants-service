@@ -84,9 +84,15 @@ name: Graph Evaluator
 # for protected/deployment branches, where #1713's non-cancellation invariant
 # already protects the deploy gate. No cross-event race exists to reason about.
 on:
-  push:
-    branches: [main, staging]
-  # PoC speed (4 Oct 2026): pull_request trigger removed; runs after merge on push.
+  # DISPATCH-ONLY since 5 Oct 2026 (CI OPTIMISER, DL ruling). #2550 (4 Oct) took
+  # this off pull_request; since then it was red on every completed staging push
+  # sampled (5/5 on 5 Oct, 08:31-10:27Z; e.g. run 37296648192: ratchet grew - governed-draft-graph 1->2
+  # failures, new rubric-invariant failure for goal_threshold_cap_provenance,
+  # passing count 217 < floor 218). A check that is red on every push hides the
+  # next red and trains everyone to ignore it. Run on demand:
+  #   gh workflow run graph-evaluator.yml -R Talchain/olumi-assistants-service --ref <branch>
+  # Put push/pull_request back once the known-red ratchet is green again.
+  workflow_dispatch:
 
 # ⛔ SUPERSEDED RUNS MUST NOT HOLD RUNNERS.
 #

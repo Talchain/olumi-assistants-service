@@ -276,6 +276,18 @@ function normaliseSelectedElements(
   };
 }
 
+/**
+ * ⭐ THE ONE READER OF A TURN'S `selected_elements` (RT-1, red team #87 5992417601): the schema above plus its
+ * normaliser, for every route that answers a turn. `/agent/v1/turn` had no reader at all, so "this one" was answered
+ * about whatever the conversation last discussed. `null` = absent or structurally invalid (selection is best-effort
+ * context: a bad value never aborts a turn).
+ */
+export function parseSelectedElements(raw: unknown): SelectedElementsIngress | null {
+  if (raw === undefined || raw === null) return null;
+  const parsed = SelectedElementsIngressSchema.safeParse(raw);
+  return parsed.success ? normaliseSelectedElements(parsed.data) : null;
+}
+
 export type ParsedRequestExtensions = {
   graphState: GraphStateIngress | null;
   analysisState: AnalysisStateIngress | null;

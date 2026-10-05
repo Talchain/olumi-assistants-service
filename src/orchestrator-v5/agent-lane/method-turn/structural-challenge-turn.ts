@@ -50,12 +50,37 @@ function chance(p: number): string {
   return `about ${r}%`;
 }
 
-/** Model-scale amounts keep three significant figures below 100 (0.0213, never "0"); a zero is never signed ("-0"). */
-export const formatChallengeAmount = (x: number): string => {
-  if (x === 0) return '0';
-  return Math.abs(x) >= 100 ? Math.round(x).toLocaleString('en-GB') : x.toLocaleString('en-GB', { maximumSignificantDigits: 3 });
-};
-const amount = formatChallengeAmount;
+/**
+ * ⛔ NO UNITLESS AMOUNTS (DL beat-4 audit, 5 Oct). An outcome level is in the ENCODED model scale (0.0213), not the
+ * goal's authored unit, and the claim carries no unit to say it in. So the line says the DIRECTION (ordering survives
+ * the encoding) and the target relation the claim's own side test proves; it never prints the number.
+ */
+function outcomeLevelLine(who: string, q: StructuralChallengeQuantityClaimV1, reason: string): string {
+  const b = q.baseline, a = q.alternative;
+  // These bases' sentences are carried by the line's own words below (or refer to figures it no longer prints).
+  const tail = reason && q.basis !== 'no_licensed_boundary' && q.basis !== 'within_noise' && q.basis !== 'not_noise_qualified'
+    ? ` ${reason}` : '';
+  if (b === null || a === null) {
+    const where = b === null && a === null ? 'in both versions' : b === null ? 'in the baseline' : 'without the link';
+    return `${who}'s expected result is unavailable ${where}.${tail}`;
+  }
+  // A not-comparable claim asserts no direction: its own reason (definitions, frame, unit…) says why (Codex #2582 P1).
+  if (q.verdict === 'not_comparable') return `${who}'s expected result can't be compared between the two versions.${tail}`;
+  // Construction-invariant: any difference between the two values is sampling, not this link (Codex #2582 r2 P2).
+  if (q.invariant_by_construction) return `${who}'s expected result can't be affected by this link.${tail}`;
+  // Direction only where the noise check supports it (Codex #2582 r3 P2).
+  const core = a === b ? 'is the same without the link'
+    : q.noise_verdict === 'within_noise' ? 'is about the same without the link (the difference is within sampling noise)'
+      : q.noise_verdict === 'not_noise_qualified'
+        ? `is ${a > b ? 'higher' : 'lower'} without the link (a difference that couldn't be checked against sampling noise)`
+        : `is ${a > b ? 'higher' : 'lower'} without the link`;
+  // Target words only on the bases whose strict side test (contract C5) licenses them.
+  const t = q.target;
+  if (t === null || (q.basis !== 'target_crossed' && q.basis !== 'same_side_of_target')) return `${who}'s expected result ${core}.${tail}`;
+  const side = (v: number) => (v > t ? 'above' : v < t ? 'below' : 'at');
+  const target = side(b) === side(a) ? `, and stays ${side(b)} your target` : `, and moves from ${side(b)} your target to ${side(a)} it`;
+  return `${who}'s expected result ${core}${target}.${tail}`;
+}
 const TARGET_FREQUENCY_UNAVAILABLE = 'The target frequency was unavailable.';
 
 const UNSUPPORTED: Record<string, string> = {
@@ -113,13 +138,9 @@ function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string,
   if (q.kind === 'goal_probability') {
     return `${who} — baseline: ${goalSide(q.baseline, q.option_id, certainty?.baseline, q.basis === 'withheld_on_one_side')} Without the link: ${goalSide(q.alternative, q.option_id, certainty?.alternative, q.basis === 'withheld_on_one_side')}${reason ? ` ${reason}` : ''}`;
   }
-  const value = (v: number | null, probability: boolean) => v === null ? 'unavailable' : probability
-    ? v === 1 ? 'all sampled model runs' : v === 0 ? 'none of the sampled model runs' : `${chance(v)} of model runs` : amount(v);
-  if (q.kind === 'outcome_level') {
-    const side = q.target === null ? '' : ` (your target is ${amount(q.target)})`;
-    return `${who}'s expected result is ${value(q.baseline, false)} now and ${value(q.alternative, false)} without the link${side}.${reason ? ` ${reason}` : ''}`;
-  }
-  const limitSide = (v: number | null) => v === null ? 'The frequency within this limit was unavailable.' : `Within the limit in ${value(v, true)}.`;
+  const share = (v: number) => v === 1 ? 'all sampled model runs' : v === 0 ? 'none of the sampled model runs' : `${chance(v)} of model runs`;
+  if (q.kind === 'outcome_level') return outcomeLevelLine(who, q, reason);
+  const limitSide = (v: number | null) => v === null ? 'The frequency within this limit was unavailable.' : `Within the limit in ${share(v)}.`;
   return `${who} — limit ${label(q.constraint_id ?? '')}: baseline: ${limitSide(q.baseline)} Without the link: ${limitSide(q.alternative)}${reason ? ` ${reason}` : ''}`;
 }
 
