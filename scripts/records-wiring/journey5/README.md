@@ -10,7 +10,7 @@ Paul runs the signed-in steps after deployment and the design's live=head prefli
    node --import tsx scripts/records-wiring/write-deployed-identity.ts /private/tmp/mc-wire-out/journey5/deployed-identity.json
    ```
 
-   The manifest binds the full SHA, `draftRecordsInstructionHash()`, and sha256 of `JSON.stringify(buildStrictDraftRecordsSchema())`. Recompute after merging grammar v-next; do not reuse this lease's hashes across a grammar change.
+   The manifest binds the full SHA, `vNextDraftRecordsInstructionHash()` (`src/cee/draft/records/instruction-vnext.ts`, the instruction the served records path sends since the v-next merge), and sha256 of `JSON.stringify(buildStrictDraftRecordsSchema())` (strict over `buildVNextDraftRecordsSchema()`). Recompute at the deployed SHA; do not reuse this lease's hashes across a grammar change.
 
 2. Run the draft witness:
 

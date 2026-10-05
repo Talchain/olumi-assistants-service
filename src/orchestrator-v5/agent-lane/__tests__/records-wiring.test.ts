@@ -5,8 +5,10 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { buildModelFromRecords, buildStrictDraftRecordsSchema } from '../runtime/build-model-from-records.js';
 import { BUILD_INSTRUCTIONS, constructionOperationId, type CallStructuredModel } from '../runtime/build-model.js';
 import { draftRecordsInstructionHash } from '../../../cee/draft/records/instruction.js';
+import { vNextDraftRecordsInstructionHash } from '../../../cee/draft/records/instruction-vnext.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
-import { BRIEF, sealedRecords } from '../../../cee/draft/records/__tests__/compile-spec/sealed-fixture.js';
+// RESTACK: the served wire is the V-NEXT strict schema, so the sealed records are the v-next hand-typed delta (same BRIEF).
+import { BRIEF, sealedRecordsVNext as sealedRecords } from '../../../cee/draft/records/__tests__/compile-spec/sealed-fixture-vnext.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { ProposalStore } from '../proposal.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
@@ -55,7 +57,9 @@ describe('served records construction identity', () => {
     expect(call).toHaveBeenCalledTimes(1);
     const request = call.mock.calls[0]![0];
     expect(sha(JSON.stringify(request.schema))).toBe(sha(JSON.stringify(buildStrictDraftRecordsSchema())));
-    expect(sha(request.instructions)).toBe(draftRecordsInstructionHash());
+    // RESTACK: the served records path sends the V-NEXT instruction (instruction-vnext.ts), never the Anthropic one.
+    expect(sha(request.instructions)).toBe(vNextDraftRecordsInstructionHash());
+    expect(sha(request.instructions), 'contrast: not the Anthropic records instruction').not.toBe(draftRecordsInstructionHash());
     expect(call.mock.calls.filter(([req]) => sha(req.instructions) === sha(BUILD_INSTRUCTIONS))).toHaveLength(0);
     expect(result).toMatchObject({ ok: true, mutated: true });
     const validate = new Ajv({ strict: false }).compile(request.schema);
