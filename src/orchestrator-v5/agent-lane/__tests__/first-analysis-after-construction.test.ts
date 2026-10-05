@@ -1,3 +1,4 @@
+import { constructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 /**
  * ⭐ A RETRIED CONSTRUCTION GIVES EXACTLY ONE FIRST ANALYSIS (PR-B, test 1).
  *
@@ -28,16 +29,6 @@ const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id
 const BRIEF = 'Should we hire a tech lead or two developers to lift delivery reliability?';
 /** The construction identity, derived exactly as production derives it — never typed. */
 const K = registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, BRIEF));
-
-const candidate = (optionLabel: string) => ({
-  goal: { metric: 'Delivery reliability', operator: '>=', value: 90, unit: '%', horizon_months: 6, provenance: 'explicit' },
-  constraints: [],
-  options: [{ label: optionLabel, provenance: 'explicit', interventions: [] }],
-  factors: [{ label: 'Team capacity', role: 'controllable', baseline_known: true, baseline_value: 5, unit: 'people', provenance: 'explicit' }],
-  risks: [], outcomes: [{ label: 'Delivery reliability', provenance: 'inferred' }],
-  links: [{ from: 'Team capacity', to: 'Delivery reliability', direction: 'positive', provenance: 'inferred' }],
-  unknowns: [],
-});
 
 /**
  * One stateful product: graph, versions, the durable (scenario, turn_id) key, and the run facts.
@@ -145,7 +136,7 @@ const autoRuns = (p: Product) => p.runs.filter((r) => r.autoRun !== undefined);
 describe('RED: a retried construction turn gives exactly ONE first analysis', () => {
   it('RED: a fresh construction runs the first analysis once, on the Agent chip, and tells the Agent what it found', async () => {
     const p = product();
-    const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate('Hire a tech lead')) });
+    const call: CallStructuredModel = async () => ({ text: JSON.stringify(strictRecordsWire(constructionRecords('Hire a tech lead'))) });
     const r = await build(capsFor(p, call));
     expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
     expect(autoRuns(p)).toHaveLength(1);
@@ -160,7 +151,7 @@ describe('RED: a retried construction turn gives exactly ONE first analysis', ()
   it('RED: a retry with a NEW turn id and the same brief recovers the construction and runs nothing more', async () => {
     const p = product();
     let generations = 0;
-    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(candidate('Hire a tech lead')) }; };
+    const call: CallStructuredModel = async () => { generations += 1; return { text: JSON.stringify(strictRecordsWire(constructionRecords('Hire a tech lead'))) }; };
     await build(capsFor(p, call));
     const retry = await build(capsFor(p, call));
     expect(retry.replayed, 'the real replay arm (findConstructionVersion)').toBe(true);
@@ -180,7 +171,7 @@ describe('RED: a retried construction turn gives exactly ONE first analysis', ()
       arrived += 1;
       if (arrived === 2) release();
       await bothIn;
-      return { text: JSON.stringify(candidate(mine)) };
+      return { text: JSON.stringify(strictRecordsWire(constructionRecords(mine))) };
     };
     const [a, b] = await Promise.all([build(capsFor(p, call)), build(capsFor(p, call))]);
     expect(p.versions).toHaveLength(1);
@@ -197,7 +188,7 @@ describe('RED: a retried construction turn gives exactly ONE first analysis', ()
       arrived += 1;
       if (arrived === 2) release();
       await bothIn;
-      return { text: JSON.stringify(candidate('Hire a tech lead')) };
+      return { text: JSON.stringify(strictRecordsWire(constructionRecords('Hire a tech lead'))) };
     };
     const [a, b] = await Promise.all([build(capsFor(p, call)), build(capsFor(p, call))]);
     const loser = a.replayed === true ? a : b;
@@ -208,7 +199,7 @@ describe('RED: a retried construction turn gives exactly ONE first analysis', ()
 
   it('RED: defence in depth — a registration that fails to REPORT its replay is caught by the (K, H) fact', async () => {
     const p = product({ reportReplay: false, guest: true });
-    const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate('Hire a tech lead')) });
+    const call: CallStructuredModel = async () => ({ text: JSON.stringify(strictRecordsWire(constructionRecords('Hire a tech lead'))) });
     await build(capsFor(p, call));
     expect(autoRuns(p)).toHaveLength(1);
     // The same brief is built again on the same (cleared) scenario: the SAME bytes, the SAME K, the SAME revision.
@@ -224,7 +215,7 @@ describe('RED: a retried construction turn gives exactly ONE first analysis', ()
 describe('the first analysis is not repeated by the model in the same request', () => {
   it('RED: a model-initiated run_analysis on the build turn returns the first analysis, with no second PLoT call', async () => {
     const p = product();
-    const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate('Hire a tech lead')) });
+    const call: CallStructuredModel = async () => ({ text: JSON.stringify(strictRecordsWire(constructionRecords('Hire a tech lead'))) });
     const caps = capsFor(p, call);
     await build(caps);
     const ran = await dispatchTool('run_analysis', JSON.stringify({ reason: 'compare' }), ctx, caps) as Record<string, unknown>;
@@ -234,7 +225,7 @@ describe('the first analysis is not repeated by the model in the same request', 
 
   it('CONTRAST: a LATER request (an explicit Run) runs again — it never consults the construction', async () => {
     const p = product();
-    const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate('Hire a tech lead')) });
+    const call: CallStructuredModel = async () => ({ text: JSON.stringify(strictRecordsWire(constructionRecords('Hire a tech lead'))) });
     await build(capsFor(p, call));
     await dispatchTool('run_analysis', JSON.stringify({ reason: 'the user pressed Run' }), ctx, capsFor(p, call));
     expect(p.runs).toHaveLength(2);
@@ -246,7 +237,7 @@ describe('goal certainty rides the first analysis too (DL 5887061638; the call-s
   const optionId = String((READY_GRAPH as { nodes: { id: string; kind: string }[] }).nodes.find((n) => n.kind === 'option')!.id);
   const firstPass = async (certain?: { optionId: string; hash?: string; recorded?: unknown[]; executedAt?: string }): Promise<Record<string, unknown>> => {
     const p = product(certain !== undefined ? { certain } : {});
-    const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate('Hire a tech lead')) });
+    const call: CallStructuredModel = async () => ({ text: JSON.stringify(strictRecordsWire(constructionRecords('Hire a tech lead'))) });
     const r = await build(capsFor(p, call));
     expect(r.ok, JSON.stringify(r).slice(0, 300)).toBe(true);
     return r.first_analysis as Record<string, unknown>;
@@ -287,7 +278,7 @@ describe('the confirm card on the first pass (DL 5888399097; `../identity-card.t
     { runs: { run: number; graph: unknown }[] }).runs.find((r) => r.run === 0)!.graph;
 
   it('RED: a first pass whose read model holds a reading tells the Agent a card is waiting; the ordinary model does not', async () => {
-    const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate('Hire a tech lead')) });
+    const call: CallStructuredModel = async () => ({ text: JSON.stringify(strictRecordsWire(constructionRecords('Hire a tech lead'))) });
     const withCard = (await build(capsFor(product({ readGraph: RUN0 }), call))).first_analysis as Record<string, any>;
     expect(withCard.ran).toBe(true);
     expect(withCard.identity_card).toEqual(expect.objectContaining({ available: true }));

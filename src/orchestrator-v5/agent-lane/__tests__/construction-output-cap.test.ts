@@ -1,3 +1,4 @@
+import { constructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 /**
  * ⛔ THE FIRST-BRIEF MODEL IS NOT TRUNCATED BY THE OUTPUT CAP — and when a cap does truncate it, that is SAID as
  * truncation, never passed off as a parse error.
@@ -43,24 +44,8 @@ const PINNED_CONSTRUCTION_CEILING = 12_000;
 
 const SCENARIO = '11111111-1111-4111-8111-111111111111';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-1' };
-
-/** A minimal candidate the admitter accepts (same shape as build-model-capability.test.ts). */
-const CANDIDATE = {
-  goal: { metric: 'MRR', operator: '>=', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit' },
-  constraints: [{ metric: 'Monthly churn', operator: '<', value: 4, unit: '%', provenance: 'explicit' }],
-  options: [{ label: 'Raise Pro to £59', provenance: 'explicit', interventions: [] }],
-  factors: [
-    { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit' },
-    // Olumi's level (DL ruling #72 5863840239): a limited quantity with none is a gap that spends the one retry.
-    { label: 'Monthly churn', role: 'observable', baseline_known: false, baseline_value: 3, unit: '%', provenance: 'ai_proposed' },
-  ],
-  risks: [{ label: 'Churn rises', provenance: 'inferred' }],
-  outcomes: [{ label: 'Monthly recurring revenue', provenance: 'inferred' }],
-  links: [{ from: 'Pro plan price', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' }],
-  unknowns: [],
-};
 /** What the served truncated call looked like: a strict-schema object cut off mid-way. */
-const CUT_OFF = JSON.stringify(CANDIDATE).slice(0, 140);
+const CUT_OFF = JSON.stringify(strictRecordsWire(constructionRecords('Raise Pro to £59', 'MRR', 'Pro plan price'))).slice(0, 140);
 
 function dispatcher() {
   const calls: string[] = [];
@@ -77,7 +62,7 @@ describe('(a) the construction call has room for the reasoning the served corpus
     const seen: number[] = [];
     const capture: CallStructuredModel = async (r) => {
       seen.push(r.max_output_tokens);
-      return { text: JSON.stringify(CANDIDATE) };
+      return { text: JSON.stringify(strictRecordsWire(constructionRecords('Raise Pro to £59', 'MRR', 'Pro plan price'))) };
     };
     const { d } = dispatcher();
     await createAgentCapabilities(d, new ProposalStore(), capture).buildModelFromBrief(ctx, { brief: 'a brief' });
@@ -176,7 +161,7 @@ const constructionResponse = () => constructionMode === 'cut_off'
 
 const VALID_ANSWER = {
   status: 'completed',
-  output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(CANDIDATE) }] }],
+  output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(strictRecordsWire(constructionRecords('Raise Pro to £59', 'MRR', 'Pro plan price'))) }] }],
   usage: { input_tokens: 4584, output_tokens: 2900, output_tokens_details: { reasoning_tokens: 2000 } },
 };
 

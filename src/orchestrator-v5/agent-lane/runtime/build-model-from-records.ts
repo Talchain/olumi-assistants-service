@@ -66,9 +66,14 @@ export async function buildModelFromRecords(
       max_output_tokens: budget.max_output_tokens, reasoning_effort: budget.reasoning_effort,
       schema: buildStrictDraftRecordsSchema(),
     });
-    if (out.status === 'incomplete' || out.text.length === 0) return {
+    if (out.text.length === 0) return {
       ok: false, mutated: false, refusal: 'no_structured_output',
-      ...(out.status === 'incomplete' ? { incomplete_reason: out.incomplete_reason ?? 'unspecified' } : {}),
+      ...(out.status === 'incomplete' ? { incomplete_reason: out.incomplete_reason ?? 'unspecified', detail: `incomplete: ${out.incomplete_reason ?? 'unspecified'}` } : {}),
+    };
+    if (out.status === 'incomplete') return {
+      ok: false, mutated: false, refusal: 'construction_failed',
+      incomplete_reason: out.incomplete_reason ?? 'unspecified',
+      detail: `incomplete: ${out.incomplete_reason ?? 'unspecified'}`,
     };
     raw = omitOptionalRecordNulls(JSON.parse(out.text));
   } catch (err) {
@@ -107,7 +112,7 @@ export async function buildModelFromRecords(
   }
   if (reg.status !== 200) return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) };
   return {
-    ok: true, mutated: reg.json.replayed !== true, ...(reg.json.replayed === true ? { replayed: true } : {}),
+    ok: true, mutated: true, ...(reg.json.replayed === true ? { replayed: true } : {}),
     ...(reg.json.model_version === undefined ? {} : { model_version: reg.json.model_version }),
     nodes: graph.nodes.length, edges: graph.edges.length, readiness: compiled.readiness,
     options: graph.nodes.filter(node => node.kind === 'option').length,

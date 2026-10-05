@@ -1,3 +1,4 @@
+import { constructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 /**
  * ⛔ THREE DEFECTS FROM PAUL'S MANUAL TEST ON SERVED CEE `d5d5839` (#69 5832088673; Runtime's plan 5832133236).
  *
@@ -254,15 +255,6 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 const BRIEF = 'Should I hire a PA or use an agency to free up my time? A PA would cost about £50,000, which includes a recruitment consultant.';
-const CANDIDATE = {
-  goal: { metric: 'Leadership time freed', operator: '>=', value: 10, unit: 'hours per week', horizon_months: 6, provenance: 'explicit' },
-  constraints: [],
-  options: [{ label: 'Hire PA', provenance: 'explicit', interventions: [] }, { label: 'Use an agency', provenance: 'explicit', interventions: [] }],
-  factors: [{ label: 'Annual PA salary', role: 'controllable', baseline_known: true, baseline_value: 40000, unit: 'GBP', provenance: 'explicit' }],
-  risks: [], outcomes: [{ label: 'Leadership time freed', provenance: 'inferred' }],
-  links: [{ from: 'Annual PA salary', to: 'Leadership time freed', direction: 'positive', provenance: 'inferred' }],
-  unknowns: [],
-};
 
 let script: Record<string, unknown>[] = [];
 let modelBodies: Record<string, unknown>[] = [];
@@ -282,7 +274,7 @@ describe('the real route: build + proposal in one turn', () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown> & { text?: { format?: { type?: string } } };
       // The build's own structured call — stubbed, like every model call here.
-      if (body.text?.format?.type === 'json_schema') return new Response(JSON.stringify(say(JSON.stringify(CANDIDATE))), { status: 200 });
+      if (body.text?.format?.type === 'json_schema') return new Response(JSON.stringify(say(JSON.stringify(strictRecordsWire(constructionRecords('Hire PA', 'Leadership time freed', 'Annual PA salary'))))), { status: 200 });
       modelBodies.push(body);
       const next = body['tool_choice'] === 'none' ? undefined : script.shift();
       return new Response(JSON.stringify(next ?? say('Here is where the model stands.')), { status: 200 });

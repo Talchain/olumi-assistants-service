@@ -15,7 +15,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
 import { OPENAI_ONLY, assertProviderAllowed, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
-import { buildCandidateSchema, strictForTheDrafter } from '../runtime/build-model.js';
+import { buildStrictDraftRecordsSchema } from '../runtime/build-model-from-records.js';
 import { GIT_COMMIT_SHA } from '../../../version.js';
 import { getRuntimeEnvResolution } from '../../../config/env-resolver.js';
 
@@ -115,8 +115,8 @@ describe('⭐ PTL row 4: each Agent ledger row carries the WHOLE request identit
       const s = sent[i]!;
       expect(s.text?.format?.type).toBe('json_schema');
       expect(rows[i]!.schema_sha256, `row ${i}`).toBe(shaJson(s.text?.format?.schema));
-      // MG's manifest method, verbatim: sha256(JSON.stringify(buildCandidateSchema())). The served row resolves to it.
-      expect(rows[i]!.schema_sha256, `row ${i} resolves to the manifest's definition`).toBe(shaJson(strictForTheDrafter(buildCandidateSchema())));
+      // Bind to the served records constructor's own strict schema, with the same full JSON hash assertion.
+      expect(rows[i]!.schema_sha256, `row ${i} resolves to the manifest's definition`).toBe(shaJson(buildStrictDraftRecordsSchema()));
       expect(rows[i]!.reasoning_effort, `row ${i}`).toBe(s.reasoning?.effort);
       expect(rows[i]!.max_output_tokens, `row ${i}`).toBe(s['max_output_tokens']);
       expect(rows[i], `row ${i}: construction sends no tools`).not.toHaveProperty('tools_sha256');

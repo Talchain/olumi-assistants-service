@@ -1,3 +1,4 @@
+import { constructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 /**
  * `get_canonical_state` must not strip the carriers the Agent needs to reason
  * truthfully about a magnitude.
@@ -142,17 +143,8 @@ describe('get_canonical_state — absence stays absence', () => {
  * survived this fix. The two must be one projection, not two field lists.
  */
 describe('build_model_from_brief returns the SAME entity semantics as get_canonical_state', () => {
-  /** A minimal candidate the admitter accepts; what is REREAD afterwards is what the test controls. */
-  const CANDIDATE = {
-    goal: { metric: 'MRR', operator: '>=', value: 20000, unit: 'GBP', horizon_months: 12, provenance: 'explicit' },
-    constraints: [],
-    options: [{ label: 'Raise Pro to £59', provenance: 'explicit', interventions: [] }],
-    factors: [{ label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit' }],
-    risks: [], outcomes: [{ label: 'Monthly recurring revenue', provenance: 'inferred' }],
-    links: [{ from: 'Pro plan price', to: 'Monthly recurring revenue', direction: 'positive', provenance: 'inferred' }],
-    unknowns: [],
-  };
-  const structured: CallStructuredModel = async () => ({ text: JSON.stringify(CANDIDATE) });
+  /** Strict records build the model; the reread below remains the test's independent control. */
+  const structured: CallStructuredModel = async () => ({ text: JSON.stringify(strictRecordsWire(constructionRecords('Raise Pro to £59', 'MRR', 'Pro plan price'))) });
 
   /** Empty before registration; after it, the persisted nodes this test chooses. */
   const buildDispatcher = (after: unknown[]): InternalDispatch => {

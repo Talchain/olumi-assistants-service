@@ -1,3 +1,4 @@
+import { pricingConstructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 /**
  * ⛔ C46 STAGE 1 (a)–(d) — THE LEADER IS WITHHELD WHERE THE GOAL IS A PRODUCT THE ANALYSIS ONLY ADDS UP.
  *
@@ -740,9 +741,8 @@ describe('(d) the Agent\'s view carries the product cause, remove-only', () => {
   });
 
   it('RED: the first pass the build runs carries the product cause beside `unrequested_analysis_withheld`', async () => {
-    const wire = paul();
     let registered: unknown = null;
-    const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
+    const call = (async () => ({ text: JSON.stringify(strictRecordsWire(pricingConstructionRecords())) })) as unknown as CallStructuredModel;
     const readback = { leader_claim: { permitted: false, withheld_reason: WITHHELD_UNREQUESTED_ANALYSIS } };
     const dispatch: InternalDispatch = async (path, body) => {
       if (path.endsWith('/graph/register')) {

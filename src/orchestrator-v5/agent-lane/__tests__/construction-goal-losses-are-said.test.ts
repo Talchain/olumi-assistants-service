@@ -1,3 +1,7 @@
+import { strictRecordsWire } from './records-wire-fixture.js';
+import type { DraftRecordSet } from '../../../cee/draft/records/grammar.js';
+import { Ajv } from 'ajv';
+import { buildStrictDraftRecordsSchema } from '../runtime/build-model-from-records.js';
 /**
  * ⛔ THE GOAL'S DEADLINE AND DIRECTION ARE DROPPED, AND ONLY A COUNT TRAVELS.
  *
@@ -27,81 +31,34 @@
 import { describe, it, expect } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
-import { buildCandidateSchema, type CallStructuredModel } from '../runtime/build-model.js';
+import { type CallStructuredModel } from '../runtime/build-model.js';
 
 const SCENARIO = '33333333-3333-4333-8333-333333333333';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: 'user-a', request_id: 'req-goal-loss' };
 
-/** B2 from the estate's brief corpus, shaped the way the builder returns it. */
-const GTM = (goal: Record<string, unknown>) => ({
-  goal,
-  constraints: [
-    { metric: 'Go-to-market budget', operator: '<=', value: 900000, unit: 'GBP', provenance: 'explicit', frame: 'level' },
+/** The records grammar can state a deadline but cannot encode the old drafter's parked questions. */
+const GTM = (horizon?: number, value = 3000000): DraftRecordSet => ({
+  stated_items: [
+    { kind: 'goal', source_quote: 'add £3m of new ARR', value, unit: 'GBP', role: 'target',
+      ...(horizon === undefined ? {} : { horizon_months: horizon }) },
+    { kind: 'option', source_quote: 'three go-to-market moves' },
   ],
-  options: [
-    { label: 'Expand outbound sales', provenance: 'explicit', is_status_quo: null, changes: [],
-      interventions: [{ factor_label: 'Outbound reps', value: 6, unit: 'FTE', provenance: 'explicit' }] },
-    { label: 'Build self-serve motion', provenance: 'explicit', is_status_quo: null, changes: ['Self-serve conversion'], interventions: [] },
+  claims: [
+    { claim_kind: 'factor', label: 'Outbound reps', value: 6, unit: 'FTE', value_scale: 'raw_count' },
+    { claim_kind: 'outcome', label: 'New ARR' },
+    { claim_kind: 'causal_link', label: 'Sales capacity', from_stated: 1, to_claim: 0, sets_to: 6, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Sales effect', from_claim: 0, to_claim: 1, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'ARR reaches goal', from_claim: 1, to_stated: 0, effect: 'positive' },
   ],
-  factors: [
-    { label: 'Outbound reps', role: 'controllable', baseline_known: false, baseline_value: null, unit: 'FTE', provenance: 'explicit', plausible_max: 50 },
-    { label: 'Self-serve conversion', role: 'controllable', baseline_known: false, baseline_value: null, unit: '%', provenance: 'inferred', plausible_max: 100 },
-  ],
-  risks: [],
-  outcomes: [],
-  links: [
-    { from: 'Outbound reps', to: 'New ARR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
-    { from: 'Self-serve conversion', to: 'New ARR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
-  ],
-  identities: [],
-  unknowns: [],
-  decision_question: null,
 });
-
-// `target_stated: true` — both briefs here DO name £3m, frame: 'level', and the field is now required
-// by `buildCandidateSchema`. The live-schema guard below is what caught its absence,
-// which is the one part of that guard this change can vouch for. The goal's current
-// level (`baseline_*`, #1840) is required the same way; neither brief states one.
-const WITH_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, frame: 'level', value: 3000000, unit: 'GBP', horizon_months: 18, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
-const NO_DEADLINE = GTM({ metric: 'New ARR', operator: '>=', target_stated: true, frame: 'level', value: 3000000, unit: 'GBP', horizon_months: null, provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'explicit', scope: null });
-/**
- * G1 (27 Sep): a direction beside a target the brief STATES ("£3m") is now held on the goal (`goal_direction`), so it is
- * no longer a loss and is not said as one. A direction is still dropped, and said, when the brief does not state the
- * target: £2.5m is not written in either brief below. (The deadline here is written in words, "eighteen months", so
- * it is not held and stays said: `holdStatedGoalAttributes` reads only a literal "N months".)
- */
-const unstatedTarget = (c: ReturnType<typeof GTM>) => ({ ...c, goal: { ...c.goal, value: 2500000 } });
-
-/**
- * ⭐ THE FIXTURE MUST BE ONE THE REAL SCHEMA WOULD ACCEPT. A test in this area once
- * passed on a payload the real schema would have REFUSED (`buildCandidateSchema`'s own
- * docblock records it), so the required keys are checked against the LIVE schema object
- * rather than a list copied by hand.
- */
-function assertRealSchemaWouldAccept(payload: Record<string, unknown>): void {
-  const schema = buildCandidateSchema() as {
-    required: string[];
-    properties: Record<string, { required?: string[]; items?: { required?: string[] } }>;
-  };
-  for (const key of schema.required) {
-    expect(payload, `the real schema requires \`${key}\``).toHaveProperty(key);
-  }
-  for (const [key, spec] of Object.entries(schema.properties)) {
-    const value = payload[key];
-    if (spec.required !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value)) {
-      for (const inner of spec.required) {
-        expect(value, `the real schema requires \`${key}.${inner}\``).toHaveProperty(inner);
-      }
-    }
-    const itemRequired = spec.items?.required;
-    if (itemRequired !== undefined && Array.isArray(value)) {
-      for (const [i, entry] of value.entries()) {
-        for (const inner of itemRequired) {
-          expect(entry, `the real schema requires \`${key}[${i}].${inner}\``).toHaveProperty(inner);
-        }
-      }
-    }
-  }
+const WITH_DEADLINE = GTM(18);
+const NO_DEADLINE = GTM();
+const unstatedTarget = (records: DraftRecordSet): DraftRecordSet => ({
+  ...records, stated_items: records.stated_items.map((item, index) => index === 0 ? { ...item, value: 2500000 } : item),
+});
+function assertRealSchemaWouldAccept(payload: DraftRecordSet): void {
+  const validate = new Ajv({ strict: false }).compile(buildStrictDraftRecordsSchema());
+  expect(validate(strictRecordsWire(payload)), JSON.stringify(validate.errors)).toBe(true);
 }
 
 /** The product's storage, and nothing else. */
@@ -120,9 +77,9 @@ function product() {
   return { d };
 }
 
-const structured = (payload: unknown): CallStructuredModel => async () => ({ text: JSON.stringify(payload) });
+const structured = (payload: DraftRecordSet): CallStructuredModel => async () => ({ text: JSON.stringify(strictRecordsWire(payload)) });
 
-async function build(payload: Record<string, unknown>) {
+async function build(payload: DraftRecordSet) {
   assertRealSchemaWouldAccept(payload);
   const caps = createAgentCapabilities(product().d, new ProposalStore(), structured(payload));
   const r = await caps.buildModelFromBrief(ctx, {
@@ -175,7 +132,7 @@ describe('a deadline the model cannot hold is asked where the user always sees i
   it('RED: an 18-month deadline becomes the FIRST open question, naming the goal and the months', async () => {
     // Six parked questions: more than the five the reply shows, so "first" is what keeps the deadline visible.
     const parked = ['Which channel converts best?', 'What does a lost deal cost?', 'Who owns pricing?', 'How long is the sales cycle?', 'What is churn today?', 'Which segment grows fastest?'];
-    const r = await build({ ...WITH_DEADLINE, unknowns: parked });
+    const r = await build(WITH_DEADLINE);
     const qs = r.open_questions ?? [];
     expect(qs.slice(1), 'the drafter\'s own questions follow, unchanged and in order').toEqual(parked);
     expect(qs[0], JSON.stringify(qs)).toBe('Does "New ARR" get there within 18 months? The model holds no deadline yet, so no result answers that.');

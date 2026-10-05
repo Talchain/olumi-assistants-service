@@ -1,3 +1,4 @@
+import { oversizedConstructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 /**
  * ⭐ A FIRST BUILD REFUSED AS TOO LARGE OFFERS THE REBUILD ITS OWN REPLY NAMES, ONE CLICK AWAY.
  *
@@ -25,27 +26,6 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 const BRIEF = 'Should I hire a tech lead or two developers to increase velocity?';
-const factor = (label: string, provenance = 'ai_proposed') => ({
-  label, role: 'observable', baseline_known: false, baseline_value: null, unit: null, provenance, plausible_max: 100,
-});
-const link = (from: string, to: string) => ({ from, to, direction: 'positive', provenance: 'inferred' });
-/** A first model far over the compact limit, made of widened factors only (so it is refused, never admitted). */
-function oversized() {
-  const names = Array.from({ length: 35 }, (_, i) => `Secondary factor ${i}`);
-  return {
-    goal: { metric: 'Velocity', operator: '>=', value: 20, unit: 'points', horizon_months: 6, provenance: 'explicit' },
-    constraints: [],
-    options: [
-      { label: 'Hire a tech lead', provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] },
-      { label: 'Hire two developers', provenance: 'explicit', changes: ['Delivery capacity'], interventions: [] },
-    ],
-    factors: [factor('Delivery capacity', 'inferred'), ...names.map((n) => factor(n))],
-    risks: [],
-    outcomes: [{ label: 'Velocity', provenance: 'inferred' }],
-    links: [link('Delivery capacity', 'Velocity'), ...names.map((n) => link(n, 'Velocity'))],
-    unknowns: [],
-  };
-}
 
 type Mode = 'too_large' | 'no_build';
 let mode: Mode = 'too_large';
@@ -59,7 +39,7 @@ describe('a first build refused as too large offers "Build it again"', () => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { text?: { format?: { type?: string } } };
       if (body.text?.format?.type === 'json_schema') {
         construction += 1;
-        return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(oversized()) }] }] }), { status: 200 });
+        return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(strictRecordsWire(oversizedConstructionRecords())) }] }] }), { status: 200 });
       }
       conversation += 1;
       if (conversation === 1 && mode === 'too_large') {

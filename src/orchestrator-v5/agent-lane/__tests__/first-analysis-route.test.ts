@@ -1,3 +1,4 @@
+import { constructionRecords, strictRecordsWire } from './records-wire-fixture.js';
 /**
  * ⭐ THE AUTOMATIC FIRST ANALYSIS ON THE REAL AGENT ROUTE (PR-B, tests 1a-7 and 9).
  *
@@ -96,15 +97,6 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 const BRIEF = 'Should we hire a tech lead or two developers to lift delivery reliability?';
-const candidate = {
-  goal: { metric: 'Delivery reliability', operator: '>=', value: 90, unit: '%', horizon_months: 6, provenance: 'explicit' },
-  constraints: [],
-  options: [{ label: 'Hire a tech lead', provenance: 'explicit', interventions: [] }],
-  factors: [{ label: 'Team capacity', role: 'controllable', baseline_known: true, baseline_value: 5, unit: 'people', provenance: 'explicit' }],
-  risks: [], outcomes: [{ label: 'Delivery reliability', provenance: 'inferred' }],
-  links: [{ from: 'Team capacity', to: 'Delivery reliability', direction: 'positive', provenance: 'inferred' }],
-  unknowns: [],
-};
 
 /** What the conversation model does, one entry per conversation call; then it just answers. */
 let script: Array<Record<string, unknown>> = [];
@@ -116,7 +108,7 @@ function installFetch() {
   vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
     const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown> & { text?: { format?: { type?: string } } };
     if (body.text?.format?.type === 'json_schema') {
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(candidate) }] }] }), { status: 200 });
+      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(strictRecordsWire(constructionRecords())) }] }] }), { status: 200 });
     }
     modelBodies.push(body);
     const next = body['tool_choice'] === 'none' ? undefined : script.shift();
