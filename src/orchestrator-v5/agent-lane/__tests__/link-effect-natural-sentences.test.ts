@@ -525,6 +525,16 @@ describe('RT-6 row 1 (red team #87 6004429045): a unit the sentence WROTE is nev
     for (const u of POINTS_SPELLINGS) expect(statedInOneOf(u, ends.target.own), u).toBe(true);
     for (const u of ['%', 'percent', 'basis points', 'bps']) expect(statedInOneOf(u, ends.target.own), u).toBe(false);
   });
+  // Codex r1: the same teeth through the REAL path. An established % LEVEL target, the user's literal points sentence, and
+  // the Agent's bare "%": refused at the writer's comparator, never carded.
+  it('CONTROL (real path): a points sentence the Agent sends as a bare "%" on a % LEVEL target gets no card', async () => {
+    const s1 = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'S1')!;
+    const w = world(s1); const before = w.graph();
+    const result = await propose(w, { ...s1, effect: effect(-0.5, '%', 1, 'percentage points') });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false });
+    expect(cardsFor(w, result)).toEqual([]);
+    noWrite(w, s1, before);
+  });
   // ...and the SOURCE arm reads the same list (S1: a % level source stated in points).
   it.each([...POINTS_SPELLINGS])('source stated in "%s": a card, never unit_mismatch', async (unit) => {
     const s1 = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'S1')!;

@@ -1446,6 +1446,20 @@ function linkEffectStatementAsk(miss: string, from: string, to: string, figureAs
 }
 
 /** Canonical's link-effect refusal, said to the Agent in words it can relay truthfully (never a code). */
+/**
+ * The approved readings that a fresh read of THIS graph still makes (Codex r1 on the RT-6 row-1 fix). A reading the graph
+ * has since contradicted (an end now reads GBP, the hash unchanged) is what the writer just refused, so the refusal's
+ * words must never put it back and say the end "is measured in %".
+ */
+function stillReadUnitReadings(graph: unknown, item: { readonly from: string; readonly to: string;
+  readonly effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
+  readonly quote: string; readonly unit_readings?: readonly LinkEffectUnitReading[]; readonly link_selected?: true }): readonly LinkEffectUnitReading[] | undefined {
+  if (item.unit_readings === undefined || item.unit_readings.length === 0) return undefined;
+  const fresh = prepareLinkEffectUnitReadings(graph, item.from, item.to, item.effect, item.quote, { link_selected: item.link_selected === true }).unit_readings;
+  return item.unit_readings.filter((r) => fresh.some((f) => f.node_id === r.node_id && f.unit_reading.unit === r.unit_reading.unit
+    && f.unit_reading.source_quote === r.unit_reading.source_quote));
+}
+
 function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string },
   /** RT-6: the stated effect, when known, so a unit refusal names the END that failed. */
   effect?: { readonly amount_unit: string; readonly per_source_change_unit: string },
@@ -2737,7 +2751,7 @@ export function createAgentCapabilities(
       if (dry.kind === 'refused') {
         const from = { id: item.from, label: approvedRead.nodes.find((n) => n.id === item.from)?.label ?? item.from };
         const to = { id: item.to, label: approvedRead.nodes.find((n) => n.id === item.to)?.label ?? item.to };
-        return notApplied('link_effect_refused', linkEffectRefusalWords(dry.reason, working, from, to, item.effect, item.unit_readings));
+        return notApplied('link_effect_refused', linkEffectRefusalWords(dry.reason, working, from, to, item.effect, stillReadUnitReadings(working, item)));
       }
       working = dry.mutatedGraph;
       const written = linkEffectTargetOf(working, item.from, item.to);
@@ -2767,7 +2781,8 @@ export function createAgentCapabilities(
       const from = { id: failed.from, label: approvedRead.nodes.find((n) => n.id === failed.from)?.label ?? failed.from };
       const to = { id: failed.to, label: approvedRead.nodes.find((n) => n.id === failed.to)?.label ?? failed.to };
       const approved = approvedEffects.find((e) => e.from === failed.from && e.to === failed.to);
-      return notApplied('link_effect_refused', linkEffectRefusalWords(reason, approvedRead.raw, from, to, approved?.effect, approved?.unit_readings));
+      return notApplied('link_effect_refused', linkEffectRefusalWords(reason, approvedRead.raw, from, to, approved?.effect,
+        approved === undefined ? undefined : stillReadUnitReadings(approvedRead.raw, approved)));
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
