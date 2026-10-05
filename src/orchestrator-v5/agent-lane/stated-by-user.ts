@@ -60,6 +60,26 @@ export function timesTheUserWrote(value: number, unit: unknown, userText: string
 }
 
 /**
+ * ⛔ RT-10 (Codex buddy P1 on #2585; Science 5 Oct (1): the comparator must be the USER'S, "never a drafter default").
+ * Whether `userText` writes `value`, in `unit`, as a CEILING on a level: a ceiling word right before that very figure
+ * ("below 2%", "at most £36k", "under about £40k", "down to 2%") or right after it ("2% or less", "£36k max"). The
+ * drafter must type a comparator (the schema's enum is required), so "Monthly churn target 2%" carries one the user never
+ * wrote. NOT a ceiling on a level: the word after "by" ("reduce costs by at most 10%" is a change, R1 S1), or within
+ * three words of "not" / "never" / "-n't" ("must not go below 2%" is a FLOOR). Tied to the figure, unlike `comparatorTheUserWrote` (which reads both ways on a brief that
+ * also says "more than a day"). Every miss under-claims: the comparator is not held and the goal reads as base.
+ */
+const CEILING_BEFORE_FIGURE = /(?<!\bby\s+)(?<!(?:\bnot|\bnever|n't)\s+(?:\w+\s+){0,3})\b(?:below|under|beneath|less\s+than|lower\s+than|fewer\s+than|at\s+most|no\s+more\s+than|not\s+more\s+than|no\s+higher\s+than|up\s+to|(?:a\s+)?maximum\s+of|max(?:imum)?|down\s+to|capped\s+at)\s+(?:(?:about|around|roughly|approximately|just)\s+)?$/i;
+const CEILING_AFTER_FIGURE = /^[^\S\n]*(?:or\s+(?:less|lower|below|under|fewer)|at\s+most|max(?:imum)?)\b/i;
+
+export function ceilingTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined): boolean {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
+  const family = unitPhraseFamily(unit);
+  return findStatedAmounts(userText).some((a) => amountIs(a, value, unit, family, userText)
+    && (CEILING_BEFORE_FIGURE.test(userText.slice(Math.max(0, a.index - 48), a.index))
+      || CEILING_AFTER_FIGURE.test(userText.slice(a.index + a.matchedText.length, a.index + a.matchedText.length + 24))));
+}
+
+/**
  * ⛔ A FIGURE WRITTEN ONLY AS THE GOAL'S TARGET IS NOT ALSO ITS CURRENT LEVEL (R3 #72 5885498117; DL 5885526452 (3);
  * AIQ 5885651301). A current level EQUAL to the goal's own target is the user's only when the brief writes that figure
  * AGAIN, beyond the target's own writing (≥ 2): "£85k MRR … above £85k" is; "aiming for £20,000" is not. Any other
@@ -277,7 +297,8 @@ export interface HeldGoalAttributes {
  *  · direction → `goal_direction`: the candidate's comparator, held ONLY beside a target held above — it is the
  *    comparator OF that stated target, the same reading admission already acts on (`admitStatedGoalLevel`) and
  *    `goal_constraints` store. It is not read from words: `comparatorTheUserWrote` is turn-scoped and reads neither
- *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k").
+ *    PJ-A2 brief (null on both, measured — "churn under 4%" sits beside "reaching £100k"). EXCEPT a CEILING on a level
+ *    target (RT-10): held only where the brief writes that figure as a ceiling (`ceilingTheUserWroteFor`).
  *  · horizon → `goal_horizon_months`: the drafter's month count, held only when MG's `attestHorizon` finds the brief
  *    writing that deadline ("within 12 months", "over the next year"; never "12 subscribers"). Its verdict is returned
  *    as `horizon` whatever it is, so an unresolved deadline's own words ("by Q3") reach the caller, not the node.
@@ -313,7 +334,15 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   const target = typeof raw === 'number' && Number.isFinite(raw) && goal.provenance === 'explicit'
     && typeof written.figure === 'number' && wrote(Math.round(written.figure * 1e9) / 1e9);
   // The stored comparator's own schema reads it (one list, `NodeV3`): anything else is undefined, i.e. not held.
-  const operator = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
+  const typed = target ? NodeV3.shape.goal_direction.parse(goal.operator) : undefined;
+  // ⛔ RT-10 (Codex buddy P1 on #2585; Science 5 Oct (1)): a held CEILING on a LEVEL target is the run's sense in any
+  // unit (`goal-direction.ts`), so it is held only where the brief WRITES that figure as a ceiling
+  // (`ceilingTheUserWroteFor`): the drafter must type some comparator, and one it chose is not the user's. A change
+  // target keeps its verb's sign as before; a floor is held exactly as before.
+  const ceilingOnALevel = !isChange && (typed === '<' || typed === '<=');
+  const operator = ceilingOnALevel && !ceilingTheUserWroteFor(Math.round((written.figure as number) * 1e9) / 1e9, written.unit, brief)
+    ? undefined
+    : typed;
   const direction = operator !== undefined;
   const months = attestation.status === 'attested' ? attestation.months : null;
   const horizon = months !== null;

@@ -177,10 +177,11 @@ describe('a ceiling the user WROTE: the run minimises, and the stated current le
     expect(directionLogs()).toEqual([expect.objectContaining({ goal_node_id: goal.id, provenance: 'stated_comparator' })]);
   });
 
-  it('⭐ RED row 9 (R1 S1, AIQ 5871459631): "reduce costs by at most 10%" — a held `<=` on a CHANGE target ("% reduction") → nothing sent, the comparator still held (authored variant of the real cloud-2 draft)', async () => {
+  it('⭐ RED row 9 (R1 S1, AIQ 5871459631; RT-10): "reduce costs by at most 10%" — a CHANGE written as "by at most", never a ceiling on a level → not held as one, nothing sent (authored variant of the real cloud-2 draft)', async () => {
     const brief = 'Should we switch our cloud provider from AWS to GCP? Monthly spend is £45k; we want to reduce costs by at most 10% without more than 2 weeks of migration downtime risk.';
     const { graph, goal } = await build(brief, withGoal('cloud-2', { metric: 'costs', operator: '<=', value: 10, unit: '% reduction' }));
-    expect(goal.goal_direction, 'the comparator the user wrote is still held').toBe('<=');
+    // RT-10 (Codex buddy P1 on #2585): a ceiling on a level target is held only where the brief writes the figure as one.
+    expect(Object.hasOwn(goal, 'goal_direction'), '"by at most 10%" is a change, not a ceiling on a level').toBe(false);
     const req = await plotRequestFor(graph);
     expect('goal_direction' in req).toBe(false);
     expect(directionLogs()).toEqual([]);
@@ -203,6 +204,55 @@ describe('a ceiling the user WROTE: the run minimises, and the stated current le
     expect(Object.hasOwn(goal, 'observed_state')).toBe(false);
     const req = await plotRequestFor(graph);
     expect(req.goal_direction).toBe('minimise');
+  });
+});
+
+describe('RT-10 (Codex buddy on #2585): a ceiling on a level is held — and minimised — only where the brief WRITES it as one', () => {
+  // ⚠ AUTHORED brief variants on the real cloud-2 draft (its goal edited, `frame: 'level'` typed as served drafts do).
+  const downtime = (operator: string, extra: Rec = {}) => withGoal('cloud-2', {
+    metric: 'Downtime', operator, value: 4, unit: '%', frame: 'level', baseline_value: null, baseline_known: false, ...extra,
+  });
+
+  it('⭐ RED: "keep downtime below 4%" (no level) → `<` held beside the typed level, and the run MINIMISES', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? We want to keep downtime below 4% without more than 2 weeks of migration risk.';
+    const { graph, goal } = await build(brief, downtime('<'));
+    expect(goal.goal_direction).toBe('<');
+    expect(goal.goal_threshold_frame).toBe('level');
+    const req = await plotRequestFor(graph);
+    expect(req.goal_direction).toBe('minimise');
+    expect(directionLogs()).toEqual([expect.objectContaining({ goal_node_id: goal.id, provenance: 'stated_comparator' })]);
+  });
+
+  it('⭐ RED (P1-a): "a downtime target of 4%" — the drafter\'s `<=` is ITS pick, not the user\'s → not held, nothing sent', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? We have a downtime target of 4% and want no more than 2 weeks of migration risk.';
+    const { graph, goal } = await build(brief, downtime('<='));
+    expect(goal.goal_threshold_raw, 'the target itself is still held as the user\'s').toBe(4);
+    expect(Object.hasOwn(goal, 'goal_direction')).toBe(false);
+    const req = await plotRequestFor(graph);
+    expect('goal_direction' in req).toBe(false);
+  });
+
+  it('⭐ RED (P1-c): a pre-R1 candidate (no frame) for "reduce downtime by at most 4%" → not held as a ceiling on a level, nothing sent', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? We want to reduce downtime by at most 4% without more than 2 weeks of migration risk.';
+    const legacy = downtime('<=');
+    delete ((legacy.goal as Rec).frame);
+    const { graph, goal } = await build(brief, legacy);
+    expect(Object.hasOwn(goal, 'goal_direction')).toBe(false);
+    const req = await plotRequestFor(graph);
+    expect('goal_direction' in req).toBe(false);
+  });
+
+  it('CONTROL: "4% or less" (the ceiling written AFTER the figure) → held, minimised', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? We want downtime at 4% or less, with no more than 2 weeks of migration risk.';
+    const { graph, goal } = await build(brief, downtime('<='));
+    expect(goal.goal_direction).toBe('<=');
+    expect((await plotRequestFor(graph)).goal_direction).toBe('minimise');
+  });
+
+  it('CONTROL: a FLOOR the drafter typed beside the same worded-less target is held exactly as before (no words needed): `>=`', async () => {
+    const brief = 'Should we switch our cloud provider from AWS to GCP? We want a downtime target of 4% and no more than 2 weeks of migration risk.';
+    const { goal } = await build(brief, downtime('>='));
+    expect(goal.goal_direction).toBe('>=');
   });
 });
 

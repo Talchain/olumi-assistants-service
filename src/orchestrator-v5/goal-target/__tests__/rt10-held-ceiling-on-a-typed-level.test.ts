@@ -34,6 +34,7 @@ import { createRunAnalysisHandler, type RunAnalysisScenarioSnapshot } from '../.
 import type { HandlerInvocation } from '../../tools/registry.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { heldGoalPointsUp, resolveGoalDirection } from '../goal-direction.js';
+import { ceilingTheUserWroteFor } from '../../agent-lane/stated-by-user.js';
 
 type Rec = Record<string, unknown>;
 type Node = Rec & { id: string; kind: string; label: string };
@@ -186,6 +187,12 @@ describe('CONTRASTS: what is not a ceiling on a typed level stays exactly as bas
     }
   });
 
+  it('⭐ a COUNTED event keeps its noun (Codex P1-b: "patient falls below 2 per month") → minimised, never read as a change', () => {
+    const graph = goalGraph({ id: 'patient_falls', label: 'Patient falls', unit: 'falls per month', cap: 10, held: '<', raw: 2, frame: 'level' });
+    expect(resolveGoalDirection(graph, 'patient_falls')).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
+    expect(resolveGoalDirection(goalGraph({ id: 'outages', label: 'Power cuts', unit: 'power cuts per month', cap: 10, held: '<=', raw: 3, frame: 'level' }), 'outages')?.direction).toBe('minimise');
+  });
+
   it('⭐ an UNTYPED frame (no `goal_threshold_frame`: a graph saved before it) — the level proof still decides, so "%" with no level sends nothing', () => {
     expect(resolveGoalDirection(goalGraph({ ...CHURN, held: '<', raw: 2 }), CHURN.id)).toBeUndefined();
   });
@@ -197,5 +204,30 @@ describe('CONTRASTS: what is not a ceiling on a typed level stays exactly as bas
   it('a typed CHANGE ceiling ("cut by 15%", change_rel) still minimises from its own branch, as before', () => {
     const graph = goalGraph({ id: 'monthly_bill', label: 'Monthly cloud bill', unit: 'GBP per month', cap: 100, held: '<=', raw: -0.15, frame: 'change_rel' });
     expect(resolveGoalDirection(graph, 'monthly_bill')).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
+  });
+});
+
+describe('ceilingTheUserWroteFor: a ceiling is the USER\'S only where the brief writes THAT figure as one (Codex P1-a/c on #2585)', () => {
+  it('⭐ the SERVED B2 brief writes "below 2%" → the 2 % ceiling is the user\'s (while "more than a day" sits elsewhere)', () => {
+    expect(ceilingTheUserWroteFor(2, '%', SERVED.brief)).toBe(true);
+    // CONTRAST, same brief: the 4% the brief gives for churn after a long wait is never written as a ceiling.
+    expect(ceilingTheUserWroteFor(4, '%', SERVED.brief)).toBe(false);
+  });
+
+  it.each([
+    ['below, before the figure', 'Keep patient falls below 2 per month.', 2, 'falls per month', true],
+    ['at most, money', 'We want to cut it to at most £36k a month.', 36000, 'GBP/month', true],
+    ['or less, after the figure', 'Keep churn at 2% or less.', 2, '%', true],
+    ['under about', 'Keep MRR churn under about 3%.', 3, '%', true],
+    ['a target with NO comparator written (P1-a)', 'Our monthly churn target is 2%.', 2, '%', false],
+    ['"by at most": a change, not a level (P1-c)', 'Reduce monthly churn by at most 2%.', 2, '%', false],
+    ['"by up to": a change', 'Cut costs by up to 10%.', 10, '%', false],
+    ['negated: a FLOOR ("must not go below")', 'Margin must not go below 2%.', 2, '%', false],
+    ['negated: "never drops below"', 'Make sure margin never drops below 2%.', 2, '%', false],
+    ['negated: "don\'t let it fall below"', "Don't let margin fall below 2%.", 2, '%', false],
+    ['a FLOOR', 'Get conversion above 5%.', 5, '%', false],
+    ['the words on ANOTHER figure', 'Get churn to 2% with no more than 3 new hires.', 2, '%', false],
+  ] as const)('%s → %s', (_n, text, value, unit, expected) => {
+    expect(ceilingTheUserWroteFor(value, unit, text)).toBe(expected);
   });
 });

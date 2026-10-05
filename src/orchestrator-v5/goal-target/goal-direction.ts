@@ -178,13 +178,19 @@ function ceilingTargetIsALevelOnItsNode(graph: unknown, goalNodeId: unknown): bo
     && targetUnit !== null && unit(level.unit) === targetUnit;
 }
 
-/** A word in a target unit that makes the figure a CHANGE from today ("% reduction", "% increase"), not a level. */
-const CHANGE_WORD_IN_UNIT = /\b(?:reductions?|decreases?|cuts?|savings?|drops?|falls?|declines?|increases?|rises?|growth|uplifts?|changes?)\b/i;
+/**
+ * A target unit that makes the figure a CHANGE from today: a change noun ON a percent, points or money figure ("%
+ * reduction", "percentage point increase", "£k cut"), not a level. Counted events keep their noun ("falls per month",
+ * "power cuts per month": Codex buddy P1 on #2585), so the noun alone never decides.
+ */
+const CHANGE_UNIT = /(?:%|\bper\s?cent(?:age)?(?:\s+points?)?|\bpp\b|\bpoints?\b|[£$€]\S*)\s*(?:reductions?|decreases?|cuts?|drops?|declines?|falls?|increases?|rises?|growth|uplifts?|changes?|savings?)\b/i;
 
 /**
  * ⭐ RT-10 (Science ruling (1), 5 Oct): the goal holds a target figure (`goal_threshold_raw`) TYPED as a level
  * (`goal_threshold_frame` `'level'`, which the drafter must state), in a unit that does not itself name a change. Beside
- * a held ceiling that is the user's own sense, in any unit (percent included), with or without today's level.
+ * a held ceiling that is the user's own sense, in any unit (percent included), with or without today's level: since
+ * #2585 construction holds a ceiling on a level only where the brief WRITES that figure as one
+ * (`ceilingTheUserWroteFor`, `stated-by-user.ts`), so the drafter's own comparator never reaches here.
  */
 function heldTargetIsATypedLevel(graph: unknown, goalNodeId: unknown): boolean {
   if (typeof goalNodeId !== 'string' || goalNodeId === '') return false;
@@ -192,7 +198,7 @@ function heldTargetIsATypedLevel(graph: unknown, goalNodeId: unknown): boolean {
   if (node?.goal_threshold_frame !== 'level') return false;
   const raw = node.goal_threshold_raw;
   const unit = node.goal_threshold_unit;
-  return typeof raw === 'number' && Number.isFinite(raw) && !(typeof unit === 'string' && CHANGE_WORD_IN_UNIT.test(unit));
+  return typeof raw === 'number' && Number.isFinite(raw) && !(typeof unit === 'string' && CHANGE_UNIT.test(unit));
 }
 
 /** R1 S4-core: the goal's target is typed as a change from today (`goal_threshold_frame` `change_abs` | `change_rel`). */
