@@ -1,5 +1,6 @@
 import type { DraftQuoteSpan, DraftStatedRelationship } from "../draft/records/grammar.js";
 import { findStatedAmounts, readUnit, type StatedAmount } from "./stated-amounts.js";
+import { boundLiteral } from "../draft/records/quantity-evidence.js";
 import { sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
 
 export interface StatedEffectDetail {
@@ -114,6 +115,20 @@ export function statedEffectQuoteMatches(
   detail: StatedEffectDetail,
   authority?: DraftStatedRelationship,
 ): boolean {
+  if(authority?.range !== undefined && authority.source_span !== undefined) {
+    const r=authority.range;
+    if(authority.amount !== detail.amount || authority.per_source_change !== detail.per_source_change
+      || !sameUnit(authority.amount_unit,detail.amount_unit) || !sameUnit(authority.per_source_change_unit,detail.per_source_change_unit)
+      || r.low>detail.amount || detail.amount>r.high || r.low>r.high || r.low<0 && r.high>0) return false;
+    if(r.low_literal===undefined || r.high_literal===undefined || boundLiteral(quote,r.low_literal,r.low).reason!==undefined
+      || boundLiteral(quote,r.high_literal,r.high).reason!==undefined) return false;
+    if(authority.amount_literal!==undefined && boundLiteral(quote,authority.amount_literal,detail.amount).reason!==undefined)return false;
+    const source=oneMatchingAmount(locatedAmounts(quote),detail.per_source_change,detail.per_source_change_unit,true);
+    if(source===undefined || !atSpan(source,authority.source_span,quote))return false;
+    const spans=[authority.source_span,r.low_span,r.high_span,authority.amount_span].filter((s):s is DraftQuoteSpan=>s!==undefined);
+    const left=Math.min(...spans.map(s=>s.start)),right=Math.max(...spans.map(s=>s.end));
+    return !['.','!','?',';'].some(d=>quote.slice(left,right).includes(d));
+  }
   if (authority === undefined || authority.amount_span === undefined || authority.source_span === undefined || !statedEffectFiguresMatch(quote, detail)) return false;
   if (authority.amount !== detail.amount || authority.per_source_change !== detail.per_source_change
     || !sameUnit(authority.amount_unit, detail.amount_unit)

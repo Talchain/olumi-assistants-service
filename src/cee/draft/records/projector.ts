@@ -484,6 +484,7 @@ export interface DroppedRecordRef {
   /** The unit the user stated, alongside `value`. Same conditions, same source. */
   readonly unit?: string;
   readonly reason:
+    | "range_bounds_inverted" | "range_excludes_point" | "range_straddles_zero" | "relationship_unsized"
     | "option_lever_undeclared" | "option_lever_is_goal" | "option_value_unbound" | "option_lever_link_conflict" | "lever_endpoint_ambiguous"
     | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
     | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
@@ -1656,7 +1657,7 @@ function quotedEffectForEdge(args: {
   readonly nodes: readonly ProjectedNode[];
   readonly statedItems: readonly DraftStatedItem[];
   readonly brief: string;
-}): { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; authority: NonNullable<DraftStatedItem["relationship"]>; stated_range?: StatedRangeEnd } | undefined {
+}): { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; authority: NonNullable<DraftStatedItem["relationship"]>; stated_range?: StatedRangeEnd; amount_range?: {low:number;high:number} } | undefined {
   const { edge, claim, nodes, statedItems, brief } = args;
   const source = nodes.find((node) => node.id === edge.from);
   const target = nodes.find((node) => node.id === edge.to);
@@ -1670,7 +1671,7 @@ function quotedEffectForEdge(args: {
   if(detail !== undefined && (detail.amount !== authority.amount || detail.per_source_change !== authority.per_source_change
     || !sameUnit(detail.amount_unit,authority.amount_unit) || !sameUnit(detail.per_source_change_unit,authority.per_source_change_unit))) return undefined;
   return { amount:authority.amount,amount_unit:authority.amount_unit,per_source_change:authority.per_source_change,
-    per_source_change_unit:authority.per_source_change_unit,quote,authority };
+    per_source_change_unit:authority.per_source_change_unit,quote,authority, ...(authority.range!==undefined ? {amount_range:{low:authority.range.low,high:authority.range.high}} : {}) };
 
 }
 
@@ -3824,7 +3825,18 @@ function projectOnce(
   // Relationship endpoints are resolved solely by quantity identity, before connectivity pruning.
   statedItems.forEach((item,stated_index)=>{
     const r=item.relationship;
-    if(item.kind!=="cause" || r===undefined || r.amount===undefined || r.per_source_change===undefined) return;
+    if(item.kind!=="cause" || r===undefined) return;
+    const rangeRefuse=(reason:DroppedRecordRef["reason"])=>{dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index,label:item.source_quote,reason});delete r.amount_span;delete r.source_span;};
+    if(r.range!==undefined){
+      const {low,high}=r.range;
+      if(![low,high].every(Number.isFinite) || low>high){rangeRefuse("range_bounds_inverted");return;}
+      if(r.amount!==undefined && (r.amount<low || r.amount>high)){rangeRefuse("range_excludes_point");return;}
+      if(low<0 && high>0){rangeRefuse("range_straddles_zero");return;}
+      if(r.amount===undefined)r.amount=(low+high)/2;
+    }
+    if(r.amount===undefined || r.per_source_change===undefined){
+      if(r.no_effect_literal===undefined)rangeRefuse("relationship_unsized");return;
+    }
     const refuse=(reason:DroppedRecordRef["reason"])=>{
       dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index,label:item.source_quote,reason});
       // An unresolved authority cannot leak back through an existing model link.
@@ -4584,6 +4596,7 @@ function projectOnce(
         effect_amount: effect.amount,
         effect_per_source_change: effect.per_source_change,
         user_stated: true,
+        ...(effect.amount_range !== undefined ? {amount_range:effect.amount_range} : {}),
         ...(effect.stated_range !== undefined ? { stated_range: effect.stated_range } : {}),
       }, source, target);
       if (sizing.outcome !== "user_stated" || sizing.natural_effect === undefined || sizing.problem !== undefined) continue;
