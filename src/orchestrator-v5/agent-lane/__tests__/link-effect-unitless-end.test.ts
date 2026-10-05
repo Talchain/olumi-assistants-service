@@ -237,6 +237,26 @@ describe('RT-6 row 2 (Science): points size a % LEVEL goal, through the writer\'
     expect(String(r.detail)).toContain('recorded in percentage points');
     expectRefused(r, 'unit_mismatch', undefined, store, graph, before);
   });
+  it('(c2) Codex P2: a % level goal with NO goal_threshold_unit never adopts a stored "%"; points still record (control)', async () => {
+    const marked = (): Json => {
+      const g = structuredClone(SERVED) as Json;
+      const goal = (g.nodes as Json[]).find((n) => n.id === TARGET)!;
+      delete goal.goal_threshold_unit;
+      const link = linkOf(g);
+      link.provenance = { ...link.provenance, natural_effect: { ...link.provenance.natural_effect, amount_unit: '%' } };
+      return g;
+    };
+    const said = 'Each 5% rise in footfall lost from price rise costs us about 2% of gross margin.';
+    const refusedWorld = world(marked());
+    const before = structuredClone(linkOf(refusedWorld.graph).provenance);
+    const r = await refusedWorld.caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, amount_unit: '%', quote: said }) as Json;
+    expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
+    expect(String(r.detail)).toContain('recorded in percentage points');
+    expectRefused(r, 'unit_mismatch', undefined, refusedWorld.store, refusedWorld.graph, before);
+    const control = world(marked());
+    const ok = await control.caps.proposeLinkEffect!(ctxSaying(SAID_READ), { ...LINK, quote: SAID_READ }) as Json;
+    expect(ok, JSON.stringify(ok)).toEqual(expect.objectContaining({ ok: true }));
+  });
   it('(d) a COUNT goal is not a % level: points into it stay unsized', () => {
     const count = goalPath('percentage points', 'user_stated', { goal_threshold_unit: 'customers', goal_threshold_raw: 600, goal_threshold_cap: 1000 });
     expect(p5Of(count).length).toBeGreaterThan(0);

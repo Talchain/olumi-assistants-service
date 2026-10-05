@@ -138,15 +138,18 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   // (Science, #87 5993238492): "gross margin falls 2%" may mean 2 points or 2% of today's level, so a bare "%" for that
   // target is refused and the user is asked for points. A % goal not so marked keeps the pre-existing comparison
   // (follow-up for Science).
+  // A % LEVEL target's unit is fixed (points), so it is never adopted from the link: a stored "%" must not let a
+  // relative % size it (Codex buddy #2586 @b278c84d, P2: a marked level with no `goal_threshold_unit`).
+  const levelPoints = targetNode.percent_level === true ? present(targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode))) : [];
   const targetOwn = targetNode.percent_level === true
-    ? present(targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))
+    ? (levelPoints.length > 0 ? levelPoints : ['percentage points'])
     : present(unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)));
   const provenance = isRec(found.edge.provenance) ? found.edge.provenance : {};
   const stored = isRec(provenance.natural_effect) ? provenance.natural_effect : undefined;
   const storedUnit = (key: 'amount_unit' | 'per_source_change_unit'): string | undefined =>
     typeof stored?.[key] === 'string' && (stored[key] as string).trim() !== '' ? stored[key] as string : undefined;
   const sourceAdopted = sourceOwn.length === 0 ? storedUnit('per_source_change_unit') : undefined;
-  const targetAdopted = targetOwn.length === 0 ? storedUnit('amount_unit') : undefined;
+  const targetAdopted = targetOwn.length === 0 && targetNode.percent_level !== true ? storedUnit('amount_unit') : undefined;
   return {
     source: { own: sourceOwn, ...(sourceAdopted !== undefined ? { adopted: sourceAdopted } : {}) },
     target: { own: targetOwn, ...(targetAdopted !== undefined ? { adopted: targetAdopted } : {}) },
