@@ -330,7 +330,7 @@ export { AGENT_ANSWER_REQUEST_HASH_PREFIX } from "../orchestrator-v5/session/con
  * `null` and the graph read stands.
  */
 async function readConversationTurns(
-  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; request_hash?: string; user_message?: string | null; assistant_message?: string | null; pending_actions?: readonly unknown[] }[]> },
+  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; request_hash?: string; user_message?: string | null; assistant_message?: string | null }[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null> },
   scenarioId: string,
   requestId: string,
   authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[] },
@@ -348,7 +348,7 @@ async function readConversationTurns(
       }))
       .filter((t) => t.user_message !== null || t.assistant_message !== null)
       .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
-    return { turns, heldOffers: readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers }) };
+    return { turns, heldOffers: await readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers, store }) };
   } catch (err) {
     log.warn(
       {

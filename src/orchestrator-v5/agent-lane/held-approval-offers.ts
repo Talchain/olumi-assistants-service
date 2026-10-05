@@ -46,19 +46,23 @@ export interface HeldProposalOfferRead {
   readonly suggested_actions: readonly SuggestedAction[];
 }
 
+/** At most eight per-turn durable reads per opt-in graph request. */
+export const HELD_OFFER_ROWS_READ_CAP = 8;
+
 /**
  * Latest-carrier membership/expiry and integrity FIRST; then the turn's own executable authority.
  * Durable rows supply only the EXACT originally offered control (including detail). At most one card is armed:
  * the newest answer that offered that proposal. A failed authority is unknown and serves no controls.
- * Reading never settles a proposal or writes a row; rehydration refills the same turn cache after a restart.
+ * Reading never changes the turn cache: only a fresh local store is rehydrated. Warm settlement is consulted read-only.
  */
-export function readExecutableHeldProposalOffers(input: {
+export async function readExecutableHeldProposalOffers(input: {
   scenarioId: string; userId: string | null; graphHash: string | undefined;
   latest: readonly PendingAction[];
-  rows: readonly { turn_id: string; pending_actions?: readonly unknown[] }[]; // newest first, answer rows only
-}): HeldProposalOfferRead[] {
+  rows: readonly { turn_id: string }[]; // newest first, answer rows only
+  store: { readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null> };
+}): Promise<HeldProposalOfferRead[]> {
   try {
-    if (input.graphHash === undefined) return [];
+    if (input.graphHash === undefined || typeof input.store.readCommittedTurn !== 'function') return [];
     const subject = { scenario_id: input.scenarioId, user_id: input.userId };
     const live = input.latest.filter(pa => !isPendingActionExpired(pa, Date.now()));
     // A fresh, bounded membership check ensures warm memory cannot resurrect a dropped/expired carrier.
@@ -66,12 +70,18 @@ export function readExecutableHeldProposalOffers(input: {
     rehydrateProposals(live, membership, subject);
     const candidates = membership.outstanding(input.scenarioId, input.userId);
     if (candidates.length !== 1) return [];
-    rehydrateProposals(live, proposals, subject);
-    const id = executableProposalId(candidates[0]!.proposal_id, input.scenarioId, input.userId, input.graphHash);
-    if (id === undefined) return [];
-    for (const row of input.rows) {
-      // readRecent uses the vendored session-row schema; recover the same locally parsed carrier a turn replay reads.
-      const pending = (row.pending_actions ?? []).map(parsePendingAction).filter((pa): pa is PendingAction => pa !== null);
+    const id = candidates[0]!.proposal_id;
+    const request = { proposal_id: id, scenario_id: input.scenarioId,
+      authenticated_user_id: input.userId, current_graph_identity_hash: input.graphHash };
+    if (membership.authorise(request).status !== 'execute') return [];
+    // get and authorise only read Maps; neither changes order, capacity, or settlement.
+    // A known warm refusal (including applied/partial/stale/integrity) vetoes durable authority.
+    if (proposals.get(id) !== undefined && proposals.authorise(request).status !== 'execute') return [];
+    for (const row of input.rows.slice(0, HELD_OFFER_ROWS_READ_CAP)) {
+      // readRecent deliberately omits pending_actions, including on cache hits. Read the scenario-scoped
+      // committed carrier for this exact answer, through the SAME path as turn replay.
+      const committed = await input.store.readCommittedTurn(input.scenarioId, row.turn_id);
+      const pending = (committed?.pending_actions ?? []).map(parsePendingAction).filter((pa): pa is PendingAction => pa !== null);
       const chip = offeredApproveChipOnRow(pending, subject);
       if (chip === undefined || typedApprovalOf({ chip: { id: chip.id } }) !== id) continue;
       return [{ turn_id: row.turn_id, proposal_id: id,
