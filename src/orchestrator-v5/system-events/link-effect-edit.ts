@@ -352,6 +352,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (sizing.outcome !== 'user_stated' || sizing.natural_effect === undefined) return refuse('unconvertible');
 
   const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance } };
+  // Olumi's why, its old size and its clamp marker describe OLUMI's figure, never the user's (Review Desk, RT-6 step 3):
+  // `reasoning` would be read as the stated reason for a user-set link, and a stale `clamped_from` keeps "cut short" asked.
+  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
   // RT-6: an end taking this link's stored unit, or a newly disclosed sentence unit, keeps its change in the words
@@ -363,8 +366,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     ...(endUnits.target.adopted !== undefined || endUnits.target.storeAsStated === true || unitReadings.some(r => r.node_id === to)
       ? { amount_unit: effect.amount_unit } : {}),
   };
-  // The confirmed reading is identity content, outside the analysis hash; every other existing provenance key survives.
-  edge.provenance = { ...provenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect,
+  // The confirmed reading is identity content, outside the analysis hash; every other provenance key (not Olumi's) survives.
+  edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect,
     source_quote: params.quote, reading: 'agent_proposed_user_confirmed' };
   edge.provenance_display = 'user_set';
   // A6e: `defaulted` is whole-edge; the statement sizes the strength only, so existence stays Olumi's per field.

@@ -379,10 +379,11 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     expect(w.attempts).toHaveLength(1); expect(w.commits).toHaveLength(1);
     expect(w.proposals.outstanding(SCENARIOS[row.fixture], null)).toHaveLength(1);
   });
-  it('B4 preserves every other provenance key through approve → real commit → strict /graph reload', async () => {
+  it('B4 keeps every other provenance key, and drops Olumi\'s why and clamp marker, through approve → real commit → strict /graph reload', async () => {
     const row = NATURAL_SENTENCE_ROWS[0]!; const initial = fixture(row);
-    const extras = { note: { held: 'untouched' }, reasoning: 'Keep this prior explanation', clamped_from: 0.3 };
-    Object.assign(edgeOf(initial, row).provenance, extras);
+    const extras = { note: { held: 'untouched' } };
+    // Olumi's reasoning and clamp marker describe Olumi's figure: never carried onto the user's (Review Desk; base strip).
+    Object.assign(edgeOf(initial, row).provenance, extras, { reasoning: 'Olumi\'s explanation of its own estimate', clamped_from: 0.3 });
     const w = world(row, initial); const result = await propose(w, row);
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
     const card = cardsFor(w, result)[0]!;
@@ -392,5 +393,7 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     await w.caps.getCanonicalState(ctxFor(row));
     const reload = projectGraphForPersistence(GraphV3.parse(w.graph())) as Json;
     expect(edgeOf(reload, row).provenance).toMatchObject({ ...extras, reading: 'agent_proposed_user_confirmed', source_quote: row.quote });
+    expect(edgeOf(reload, row).provenance).not.toHaveProperty('reasoning');
+    expect(edgeOf(reload, row).provenance).not.toHaveProperty('clamped_from');
   });
 });
