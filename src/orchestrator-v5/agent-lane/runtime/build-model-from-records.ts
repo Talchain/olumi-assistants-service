@@ -13,12 +13,12 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { CompileStageEvent, CompileStageName } from '../../../cee/unified-pipeline/types.js';
 import { PROPOSED_BY_OLUMI } from '../olumi-option-marker.js';
 import { assessConstructionSize } from '../construction-size-gate.js';
-import type { InferenceClass } from '../admit-model.js';
+import { goalScopeLoss, unstatedGoalScope, type InferenceClass } from '../admit-model.js';
 import { structuralFactorCategories } from '../../../validators/graph-validator.js';
 import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { holdStatedGoalAttributes } from '../stated-by-user.js';
-import { constructionOperationId, deadlineOpenQuestion, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
+import { constructionOperationId, deadlineOpenQuestion, goalScopePendingAction, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import type { ToolResult } from './agent-tools.js';
 
@@ -180,18 +180,52 @@ function inferenceClassesOf(origins: ReadonlyMap<string, { cls: unknown; unbased
  * label when none does), and whether the goal holds the deadline's own words (`goal_deadline_as_stated`; nothing on the
  * records path writes it, so the question never claims the model keeps them). One goal, as legacy's `held` requires.
  */
-function recordsDeadlineQuestion(v1: V1Graph, idOf: ReadonlyMap<string, string>, graph: { readonly nodes: readonly unknown[] }, brief: string): string | undefined {
-  const nodes = graph.nodes as ReadonlyArray<{ readonly id: string; readonly kind?: unknown; readonly label?: unknown; readonly goal_horizon_months?: unknown; readonly goal_deadline_as_stated?: unknown }>;
+type RegisteredNode = { readonly id: string; readonly kind?: unknown; readonly label?: unknown; readonly goal_horizon_months?: unknown; readonly goal_deadline_as_stated?: unknown };
+
+/**
+ * The ONE goal this build registers and the metric it measures (the quantity it names: the node sharing its
+ * `quantity_ref`, by its registered label; the goal's own label when none does): legacy's `candidate.goal.metric`.
+ * Undefined unless exactly one goal, as legacy's `held` requires.
+ */
+function recordsGoalAndMetric(v1: V1Graph, idOf: ReadonlyMap<string, string>, graph: { readonly nodes: readonly unknown[] }): { goal: RegisteredNode; metric: unknown; compiledGoal: V1Graph['nodes'][number] | undefined } | undefined {
+  const nodes = graph.nodes as ReadonlyArray<RegisteredNode>;
   const goals = nodes.filter((node) => node.kind === 'goal');
   if (goals.length !== 1) return undefined;
   const goal = goals[0]!;
-  const compiledGoal = v1.nodes.find((node) => (idOf.get(node.id) ?? node.id) === goal.id) as { quantity_ref?: unknown } | undefined;
-  const ref = compiledGoal?.quantity_ref;
+  const compiledGoal = v1.nodes.find((node) => (idOf.get(node.id) ?? node.id) === goal.id);
+  const ref = (compiledGoal as { quantity_ref?: unknown } | undefined)?.quantity_ref;
   const measured = ref === undefined ? undefined : v1.nodes.find((node) => node.kind !== 'goal' && node.kind !== 'option' && node.kind !== 'decision'
     && (node as { quantity_ref?: unknown }).quantity_ref === ref);
   const metric = measured === undefined ? goal.label : nodes.find((node) => node.id === (idOf.get(measured.id) ?? measured.id))?.label ?? goal.label;
-  const statedGoal = holdStatedGoalAttributes(nodes, { horizon_months: goal.goal_horizon_months }, brief);
+  return { goal, metric, compiledGoal };
+}
+
+function recordsDeadlineQuestion(v1: V1Graph, idOf: ReadonlyMap<string, string>, graph: { readonly nodes: readonly unknown[] }, brief: string): string | undefined {
+  const held = recordsGoalAndMetric(v1, idOf, graph);
+  if (held === undefined) return undefined;
+  const { goal, metric } = held;
+  const statedGoal = holdStatedGoalAttributes(graph.nodes as ReadonlyArray<RegisteredNode>, { horizon_months: goal.goal_horizon_months }, brief);
   return deadlineOpenQuestion(statedGoal, metric, goal.goal_horizon_months, typeof goal.goal_deadline_as_stated === 'string');
+}
+
+/**
+ * ⭐ PORT 2 (DL WIRING PORTS 2+3, C46): THE GOAL'S UNSTATED SCOPE, by CALLING its producers, never a second detector.
+ * The drafter's declaration is the goal stated item's `scope` (v-next grammar), bound to the registered goal by the
+ * item's own verbatim quote (the goal node's `provenance.source_quote`). It is compiled to the `{ metric, scope }` shape
+ * legacy feeds `unstatedGoalScope`; the question and the served action are `goalScopeLoss` and `goalScopePendingAction`.
+ * No declaration, a scope the brief stated, or a metric that already names it: no question, no action.
+ */
+function recordsGoalScope(scenarioId: string, records: DraftRecordSet, v1: V1Graph, idOf: ReadonlyMap<string, string>, graph: { readonly nodes: readonly unknown[] }): { question?: string; pending: ReturnType<typeof goalScopePendingAction> } {
+  const held = recordsGoalAndMetric(v1, idOf, graph);
+  const quote = (held?.compiledGoal as { provenance?: { source_quote?: unknown } } | undefined)?.provenance?.source_quote;
+  if (held === undefined || typeof quote !== 'string') return { pending: {} };
+  const declared = records.stated_items.filter((item) => item.kind === 'goal' && item.source_quote === quote && item.scope !== undefined);
+  if (declared.length !== 1) return { pending: {} };
+  const goal = { metric: String(held.metric ?? ''), scope: declared[0]!.scope! };
+  const scope = unstatedGoalScope(goal);
+  if (scope === null) return { pending: {} };
+  const loss = [goalScopeLoss(goal.metric, held.goal.id, scope)];
+  return { question: loss[0]!.reason, pending: goalScopePendingAction(scenarioId, held.goal.id, goal.metric, goal.scope, loss) };
 }
 
 export async function buildModelFromRecords(
@@ -323,9 +357,12 @@ export async function buildModelFromRecords(
   stage({ stage: 'registered', status: 'ok', replayed: reg.json.replayed === true, model_version: reg.json.model_version ?? null });
   // PORT 1: the deadline question FIRST, ahead of the five-question cap, exactly as the legacy constructor places it.
   const deadline = recordsDeadlineQuestion(joined.graph, idOf, graph, brief);
+  // PORT 2 (C46): the unstated goal scope, ahead of the deadline, exactly as the legacy constructor places it.
+  const goalScope = recordsGoalScope(scenarioId, compiled.records, joined.graph, idOf, graph);
   return {
     ok: true, mutated: true, ...(reg.json.replayed === true ? { replayed: true } : {}),
     ...(reg.json.model_version === undefined ? {} : { model_version: reg.json.model_version }),
+    ...goalScope.pending,
     nodes: graph.nodes.length, edges: graph.edges.length, readiness: compiled.readiness,
     // The compact verdict travels with the success, as on the legacy path; records never retries for size.
     within_compact_limits: size.within, size_retried: false,
@@ -333,7 +370,8 @@ export async function buildModelFromRecords(
     options: graph.nodes.filter(node => node.kind === 'option').length,
     goal_constraints_carried: graph.goal_constraints?.length ?? 0,
     ...(limits.notCarried.length > 0 ? { goal_constraints_not_carried: limits.notCarried } : {}),
-    open_questions: [...(deadline !== undefined ? [deadline] : []), ...compiled.ask.items.map(item => item.detail)],
+    open_questions: [...(goalScope.question !== undefined ? [goalScope.question] : []), ...(deadline !== undefined ? [deadline] : []),
+      ...compiled.ask.items.map(item => item.detail)],
     // Preserve the projector's typed identities and reasons; do not reconstruct them from labels.
     not_represented: compiled.projection.dropped,
   };

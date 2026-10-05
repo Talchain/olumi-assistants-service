@@ -82,6 +82,8 @@ baseline and horizon_months must agree with their references. direction_literal
 copies the comparator words for a typed floor or ceiling. Preserve out-of-goal
 figures as evidence; never invent a causal connection to bring them into the
 goal. The compiler discloses what it cannot place.
+
+Never pick the scope of the goal silently. When the goal's measure could mean one part (a plan, product, segment or region) or the whole, the goal item sets scope: modelled is what the model actually measures, alternative is the other reading, and stated_in_brief is true only when the brief itself says which. Keep the goal in the user's own words: Olumi states the modelled scope as its own assumption and asks the user which they meant. When the measure has no part-or-whole reading, omit scope.
 `;
 
 export const V_NEXT_DRAFT_RECORDS_INSTRUCTION =

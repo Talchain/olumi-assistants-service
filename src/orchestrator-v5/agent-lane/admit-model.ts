@@ -1181,13 +1181,31 @@ export function findMechanismPath(
  * stated, or a declaration with nothing to name. Read only from the drafter's declaration —
  * never from the metric's wording.
  */
-function unstatedGoalScope(goal: CandidateModel['goal']): { modelled: string; alternative: string } | null {
+export function unstatedGoalScope(goal: Pick<CandidateModel['goal'], 'metric' | 'scope'>): { modelled: string; alternative: string } | null {
   const s = goal.scope;
   if (s === null || s === undefined || typeof s !== 'object' || s.stated_in_brief !== false) return null;
   const modelled = typeof s.modelled === 'string' ? s.modelled.trim() : '';
   const alternative = typeof s.alternative === 'string' ? s.alternative.trim() : '';
   if (modelled === '' || alternative === '') return null;
   return metricNamesScope(String(goal.metric ?? ''), modelled, alternative) ? null : { modelled, alternative };
+}
+
+/**
+ * The goal-scope ledger entry: its `after` IS the assumption the build says, and its `reason` IS the question the build
+ * asks. One producer, called by admission (legacy) and by the records constructor (PORTS 2+3), never a second writer.
+ */
+export function goalScopeLoss(metric: string, goalNodeId: string, goalScope: { modelled: string; alternative: string }): RepairEntry {
+  return {
+    field_path: `nodes[${goalNodeId}].goal_scope`,
+    before: { metric, modelled: goalScope.modelled, alternative: goalScope.alternative },
+    after:
+      `The model measures your "${metric}" goal for ${goalScope.modelled} \u2014 Olumi's assumption; the ` +
+      `brief does not say whether it covers ${goalScope.modelled} or ${goalScope.alternative}.`,
+    reason:
+      `The brief does not say whether your "${metric}" goal covers ${goalScope.modelled} or ` +
+      `${goalScope.alternative}, so the model measures it for ${goalScope.modelled}. Which did you mean?`,
+    severity: 'warn',
+  } as RepairEntry;
 }
 
 /** Words that never tell one scope from another. */
@@ -3376,19 +3394,7 @@ function admitOnce(
 
   // The scope choice, recorded with both readings: its `after` IS the assumption the build says, and
   // its `reason` IS the question the build asks.
-  if (goalScope !== null) {
-    loss.push({
-      field_path: `nodes[${ids.get(model.goal.metric)!}].goal_scope`,
-      before: { metric: model.goal.metric, modelled: goalScope.modelled, alternative: goalScope.alternative },
-      after:
-        `The model measures your "${model.goal.metric}" goal for ${goalScope.modelled} \u2014 Olumi's assumption; the ` +
-        `brief does not say whether it covers ${goalScope.modelled} or ${goalScope.alternative}.`,
-      reason:
-        `The brief does not say whether your "${model.goal.metric}" goal covers ${goalScope.modelled} or ` +
-        `${goalScope.alternative}, so the model measures it for ${goalScope.modelled}. Which did you mean?`,
-      severity: 'warn',
-    } as RepairEntry);
-  }
+  if (goalScope !== null) loss.push(goalScopeLoss(model.goal.metric, ids.get(model.goal.metric)!, goalScope));
 
   /** The node a limit names: its exact label, else a case-insensitive label match; never a fuzzy guess. */
   const nodeIdForMetric = (metric: string): string | undefined => {

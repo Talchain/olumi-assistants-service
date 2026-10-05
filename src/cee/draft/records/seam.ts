@@ -87,6 +87,8 @@ const StatedItemWire = z.object({
   value_literal: z.string().optional(), unit_literals: z.array(z.string()).optional(), direction_literal: z.string().optional(),
   setting: z.enum(DRAFT_RECORD_OPTION_SETTINGS).optional(),
   plausible_max: z.number().optional(),
+  // C46 (PORTS 2+3): the goal's part-or-whole declaration (v-next grammar).
+  scope: z.object({ modelled: z.string(), alternative: z.string(), stated_in_brief: z.boolean() }).optional(),
   legacy_evidence: z.literal(true).optional(), evidence_conflicts: z.array(z.string()).optional(),
   value_span: QuoteSpanWire.optional(), unit_span: QuoteSpanWire.optional(),
   baseline: z.number().optional(),
@@ -357,6 +359,7 @@ export function projectDraftRecords(
       ...(item.direction_literal !== undefined ? { direction_literal: item.direction_literal } : {}),
       ...(item.setting !== undefined ? { setting: item.setting } : {}),
       ...(item.plausible_max !== undefined ? { plausible_max: item.plausible_max } : {}),
+      ...(item.scope !== undefined ? { scope: { modelled: item.scope.modelled, alternative: item.scope.alternative, stated_in_brief: item.scope.stated_in_brief } } : {}),
       ...(item.legacy_evidence !== undefined ? { legacy_evidence: item.legacy_evidence } : {}),
       ...(item.evidence_conflicts !== undefined ? { evidence_conflicts: item.evidence_conflicts } : {}),
       ...(item.value_span !== undefined ? { value_span: item.value_span } : {}),

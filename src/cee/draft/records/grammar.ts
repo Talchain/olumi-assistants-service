@@ -509,6 +509,13 @@ const STATED_RELATIONSHIP_SCHEMA = {
   }, required: ["from_quantity", "to_quantity"], additionalProperties: false,
 };
 
+/** C46: what the goal's measure covers when it could be one part or the whole (legacy `GoalScopeDeclaration`). */
+export interface DraftGoalScope {
+  modelled: string;
+  alternative: string;
+  stated_in_brief: boolean;
+}
+
 export interface DraftStatedItem {
   kind: DraftRecordStatedKind;
   /** REQUIRED, verbatim. Verified by substring location against the brief. */
@@ -521,6 +528,11 @@ export interface DraftStatedItem {
   setting?: DraftRecordOptionSetting;
   /** v-next only, on a quantity's declaring item: the top of its plausible range, i.e. its frame (P2-FRAME). */
   plausible_max?: number;
+  /**
+   * v-next only, `goal` only (C46, PORTS 2+3): the drafter's declaration that the goal's measure could mean one part or
+   * the whole, the same shape as the legacy candidate's `goal.scope`. Absent means no part-or-whole reading.
+   */
+  scope?: DraftGoalScope;
   /** Seam-only compatibility and typed conflict diagnostics. */
   legacy_evidence?: true;
   evidence_conflicts?: string[];
@@ -1023,6 +1035,12 @@ export function buildVNextDraftRecordsSchema(): Record<string, unknown> {
             horizon_months: { type: "number" }, horizon_ref: { type: "integer" }, direction_literal: { type: "string" },
             setting: { type: "string", enum: [...DRAFT_RECORD_OPTION_SETTINGS] },
             plausible_max: { type: "number" },
+            // C46 (PORTS 2+3): `goal` only, the drafter's part-or-whole declaration. v-next only.
+            scope: {
+              type: "object", properties: {
+                modelled: { type: "string" }, alternative: { type: "string" }, stated_in_brief: { type: "boolean" },
+              }, required: ["modelled", "alternative", "stated_in_brief"], additionalProperties: false,
+            },
             unit: { type: "string" },
             role: { type: "string", enum: [...DRAFT_RECORD_ROLES] },
             // What convention `value` is written in. See the interface note:

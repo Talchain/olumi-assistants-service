@@ -37,6 +37,8 @@ describe('DL: accept the loss or port the build-time output', () => {
   // commit.ts:628/1459, persist-graph-write.ts:352, compose/goal-scope-claim-input.ts:18). Needs a records scope carrier.
   it('holds a reconcile_goal_scope action for an ambiguous part-or-whole MRR goal', async () => {
     const records = constructionRecords('Raise Pro to £59', 'MRR', 'Pro plan price');
+    // PORTS 2+3: the drafter's declaration, as the legacy candidate's goal.scope carried it (v-next grammar `scope`).
+    records.stated_items[0] = { ...records.stated_items[0]!, scope: { modelled: 'the Pro plan only', alternative: 'all plans together', stated_in_brief: false } };
     const { result } = await build(records, 'Should we raise the Pro plan from £49 to £59 to reach £20k MRR?');
     expect(result.ok).toBe(true);
     expect(result.pending_action).toMatchObject({ action: { kind: 'reconcile_goal_scope' } });

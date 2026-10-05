@@ -1970,12 +1970,7 @@ export async function buildModelFromBrief(
     mutated: true,
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     ...(replayed ? { replayed: true } : {}),
-    ...(candidate.goal.scope && admitted.loss.some(l => /\.goal_scope$/.test(l.field_path)) && goalNodes.find(n => n.kind === 'goal') ? {
-      pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
-        goal_id: goalNodes.find(n => n.kind === 'goal')!.id, goal_label: candidate.goal.metric,
-        declared_scope: candidate.goal.scope, expected: 'scope',
-        question: admitted.loss.find(l => /\.goal_scope$/.test(l.field_path))!.reason, operands: [], derivations: [] }),
-    } : {}),
+    ...goalScopePendingAction(scenarioId, goalNodes.find(n => n.kind === 'goal')?.id, candidate.goal.metric, candidate.goal.scope, admitted.loss),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
     // The compact verdict travels with the success, so a caller never has to
@@ -2144,6 +2139,24 @@ function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAside
  * `wordsHeld` is whether the goal node the caller registers holds the deadline's own words (`goal_deadline_as_stated`),
  * so "the model keeps your words" is said only where it does. Undefined: no deadline to ask about.
  */
+/**
+ * ⛔ C46: THE GOAL-SCOPE ACTION the served route keeps (`agent-v1-turn.ts` reads `pending_action`; `goalScopeClaimInput`),
+ * from the drafter's declaration and the `goal_scope` ledger entry (`goalScopeLoss`, `admit-model.ts`). One producer,
+ * called by this constructor and by the records constructor (PORTS 2+3), never a second writer. Empty when there is no
+ * declaration, no `goal_scope` entry, or no goal node.
+ */
+export function goalScopePendingAction(
+  scenarioId: string, goalId: string | undefined, goalLabel: string,
+  declaredScope: CandidateModel['goal']['scope'], loss: AdmittedModel['loss'],
+): { pending_action?: ReturnType<typeof reconciliationPending> } {
+  return declaredScope && loss.some(l => /\.goal_scope$/.test(l.field_path)) && goalId !== undefined ? {
+    pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
+      goal_id: goalId, goal_label: goalLabel,
+      declared_scope: declaredScope, expected: 'scope',
+      question: loss.find(l => /\.goal_scope$/.test(l.field_path))!.reason, operands: [], derivations: [] }),
+  } : {};
+}
+
 export function deadlineOpenQuestion(
   statedGoal: { readonly horizon: HorizonAttestation; readonly held: { readonly horizon: boolean } },
   metric: unknown,

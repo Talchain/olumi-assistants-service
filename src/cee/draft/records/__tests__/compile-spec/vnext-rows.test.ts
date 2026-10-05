@@ -81,8 +81,11 @@ describe('v-next inert flip ladder', () => {
     // 44→45 optional on the unstrict builder). Anthropic bytes are unchanged and pinned by the G0 row above.
     // P2-FRAME re-pin (reason): +1 optional `plausible_max` number on v-next stated items (5064→5142 strict bytes;
     // 3239→3273 and 45→46 optional on the unstrict builder). Anthropic bytes unchanged (G0 row above).
-    expect(measureDraftRecordsSchemaBudget(schema)).toMatchObject({serializedBytes:5142,optionalParams:0,objectSchemas:7});
-    expect(measureDraftRecordsSchemaBudget(buildVNextDraftRecordsSchema())).toMatchObject({serializedBytes:3273,optionalParams:46,objectSchemas:7});
+    // PORTS 2+3 re-pin (reason): +1 optional C46 goal `scope` object {modelled, alternative, stated_in_brief} on v-next
+    // stated items (5142→5402 strict bytes, 7→8 object schemas; 3273→3497, 46→47 optional, 7→8 objects unstrict).
+    // Anthropic bytes unchanged (G0 row above).
+    expect(measureDraftRecordsSchemaBudget(schema)).toMatchObject({serializedBytes:5402,optionalParams:0,objectSchemas:8});
+    expect(measureDraftRecordsSchemaBudget(buildVNextDraftRecordsSchema())).toMatchObject({serializedBytes:3497,optionalParams:47,objectSchemas:8});
   });
   it('B5 literal offsets are stored by relationship identity', () => {
     const r=sealedRecords();const i=r.stated_items[10]!;const a=i.relationship!;delete a.amount_span;delete a.source_span; a.amount_literal='£300';a.per_source_literal='Each';
@@ -129,8 +132,9 @@ describe('v-next inert flip ladder', () => {
   it('B1a EXTRACTION-UNPROVEN currency bounds contradict a count quantity',()=>{const r=vans();const item=r.stated_items[5]!;item.source_quote='Adding 5 vans changes deliveries by £18 to £36 every month.';item.relationship!.per_source_literal='5 vans';item.relationship!.range={low:18,high:36,low_literal:'£18',high_literal:'£36'};const p=project(r,VANS+' '+item.source_quote);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'unit_literal_contradicts_unit'}));expect(edgeFor(p,5,r)?.provenance?.natural_effect).toBeUndefined();});
   it('B4 EXTRACTION-UNPROVEN a calendar determiner cannot stand for a van',()=>{const r=vans();const item=r.stated_items[5]!;delete item.relationship!.range;Object.assign(item.relationship!,{amount:18,amount_literal:'18',per_source_change:1,per_source_literal:'every month'});const p=project(r,VANS);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'unit_literal_contradicts_unit'}));expect(edgeFor(p,5,r)?.provenance?.natural_effect).toBeUndefined();});
   // P2-A1 re-pin (reason): the v-next option `setting` rule; was fe150807…ab3e. P2-FRAME re-pin: the `plausible_max`
-  // rule; was 2b2f88fa…930c. v25 is pinned in instruction-pin.
-  it('instruction new generic v-next hash is pinned without moving v25',()=>{expect(createHash('sha256').update(V_NEXT_DRAFT_RECORDS_INSTRUCTION).digest('hex')).toBe('5535ce16fdea8896f4a9b0a6a18cd9c9a189f7bc36b45d8970a570fecfe83831');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('effect_detail');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('value_span');});
+  // rule; was 2b2f88fa…930c. PORTS 2+3 re-pin (reason): the C46 goal `scope` rule; was 5535ce16…3831. v25 is pinned in
+  // instruction-pin.
+  it('instruction new generic v-next hash is pinned without moving v25',()=>{expect(createHash('sha256').update(V_NEXT_DRAFT_RECORDS_INSTRUCTION).digest('hex')).toBe('4bb61d8140ed488955bf0c00b68f19091aec6c79346c307b67176008a3d1ecc3');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('effect_detail');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('value_span');});
   it('determinism is byte identical',async()=>{expect(JSON.stringify(await registered())).toBe(JSON.stringify(await registered()));expect(projectionFingerprint(project(sealedRecordsVNext()))).toBe(projectionFingerprint(project(sealedRecordsVNext())));});
 });
 
