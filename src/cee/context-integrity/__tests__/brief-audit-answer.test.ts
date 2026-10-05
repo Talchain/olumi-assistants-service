@@ -414,7 +414,8 @@ describe("composeBriefAuditAnswer", () => {
       return {
         manifest,
         lossSections: paragraphs.filter(
-          (p) => p.startsWith("Not in the model:") || p.startsWith("Mentioned in the commentary"),
+          // The composer's CURRENT loss headings (brief-audit-answer.ts); "Not in the model:" no longer exists.
+          (p) => p.startsWith("Figures I could not find in the model:") || p.startsWith("Mentioned in the commentary"),
         ),
       };
     }
