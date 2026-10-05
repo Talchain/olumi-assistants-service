@@ -56,7 +56,7 @@ const cardFor = (store: ProposalStore, r: Json) => approvalChipsFor([{ name: 'pr
 const linkOf = (g: Json) => (g.edges as Json[]).find((e) => e.from === 'footfall_lost_from_price_rise' && e.to === 'gross_margin')!;
 
 describe('RT-6 recorder by card: the user\'s plain answer reaches an approval card, and the card is the consent', () => {
-  it.each([['"goes up by 5%" (was direction_not_stated)', SAID_UP], ['"a 5% fall in footfall" (was direction_contradicts)', SAID_FALL]])(
+  it.each([['"a 5% fall in footfall" (was direction_contradicts)', SAID_FALL]])(
     'P1 %s → ONE card showing the signed reading, both ends, and the user\'s words', async (_why, said) => {
       const { caps, store } = world();
       const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
@@ -75,14 +75,14 @@ describe('RT-6 recorder by card: the user\'s plain answer reaches an approval ca
   it('P2 approve from the card → the REAL writer records THEIR figure in the link\'s own unit, and the read-back says recorded', async () => {
     const { caps, store, graph } = world();
     expect(linkOf(graph).provenance.magnitude, 'control: Olumi\'s estimate before').toBe('olumi_estimate');
-    const r = await caps.proposeLinkEffect!(ctxSaying(SAID_UP), { ...LINK, quote: SAID_UP }) as Json;
+    const r = await caps.proposeLinkEffect!(ctxSaying(SAID_FALL), { ...LINK, quote: SAID_FALL }) as Json;
     const out = await caps.authoriseChange(ctxPressing(String(r.proposal_id), cardFor(store, r).message), { proposal_id: String(r.proposal_id) }) as Json;
     expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, applied: true }));
     expect(linkOf(graph).provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated',
       natural_effect: { amount: -2, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: '%' } });
     expect(linkOf(graph).effect_direction).toBe('negative');
     // The adopted unit was stored, so the link stays stateable: a second statement in the same unit is prepared too.
-    const again = 'When footfall lost from price rise goes up by 5%, gross margin falls by about 3 percentage points.';
+    const again = 'A 5% fall in footfall would cost us about 3 percentage points of gross margin.';
     const r2 = await caps.proposeLinkEffect!(ctxSaying(again), { ...LINK, amount: -3, quote: again }) as Json;
     expect(r2.ok, JSON.stringify(r2)).toBe(true);
   });
@@ -96,8 +96,12 @@ describe('RT-6 recorder by card: the user\'s plain answer reaches an approval ca
   });
 
   it.each([
-    ['a budget', 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.', 'source_figure_not_a_change'],
+    // Codex buddy P1s (#2586 @7d906c28 and @d75fedbd): a figure that sizes something else never reaches a card.
+    ['a budget', 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.', 'direction_not_stated'],
     ["today's level", 'Footfall lost from price rise is 5% today and gross margin falls by about 2 percentage points.', 'figure_not_bound'],
+    ['a budget that goes up', 'Our budget for footfall goes up by 5%, gross margin falls by about 2 percentage points.', 'direction_not_stated'],
+    ['a target level', 'When footfall goes up by 5%, gross margin of 2 percentage points is our target.', 'direction_not_stated'],
+    ["a target's current level", "When footfall goes up by 5%, gross margin of 2 percentage points is today's level.", 'direction_not_stated'],
   ])('N %s → refused with its true typed reason, nothing prepared or proposed', async (_why, said, why) => {
     const ends = { source: FOOTFALL, target: MARGIN };
     const scope = { quantities: (SERVED.nodes as Json[]).filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => String(n.label)) };
@@ -111,27 +115,28 @@ describe('RT-6 recorder by card: the user\'s plain answer reaches an approval ca
     expect(store.outstanding('0c6dcb3d-de66-4b46-8860-4b7dce0bb107', null)).toEqual([]);
   });
 
+  // ⚠ FOLLOW-UP, pinned as it stands: an end whose NAME holds movement words ("footfall LOST from price RISE") defeats
+  // the word rule's early direction read. Widening the rule to read it let a budget and a target level through (Codex
+  // buddy r2), so these stay refused with their true reason — the Agent asks again, nothing is fabricated.
   it.each([
     ['SAID_UP', SAID_UP],
     ['"rises by 5%"', 'When footfall lost from price rise rises by 5%, gross margin falls by about 2 percentage points.'],
-  ])('P control: %s is prepared for the card with read_by_rule false', async (_why, said) => {
-    const ends = { source: FOOTFALL, target: MARGIN };
-    const scope = { quantities: (SERVED.nodes as Json[]).filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => String(n.label)) };
-    expect(linkEffectPrefilter(said, LINK, ends, scope)).toEqual({ kind: 'prepared', said, read_by_rule: false });
+  ])('FOLLOW-UP %s stays refused (direction_not_stated), nothing proposed', async (_why, said) => {
     const { caps, store } = world();
     const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
-    expect(r).toEqual(expect.objectContaining({ ok: true, reading_check: 'read_by_olumi' }));
-    expect(cardFor(store, r).detail).toContain(said);
-    expect(store.outstanding('0c6dcb3d-de66-4b46-8860-4b7dce0bb107', null)).toHaveLength(1);
+    expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'not_the_users_statement', why: 'direction_not_stated' }));
+    expect(store.outstanding('0c6dcb3d-de66-4b46-8860-4b7dce0bb107', null)).toEqual([]);
   });
 
-  it('N direct rule: default keeps its direction miss; card mode checks the source change', () => {
+  it('direct rule: card mode skips ONLY the final sign checks; the early direction miss, binding and change checks still refuse', () => {
     const ends = { source: FOOTFALL, target: MARGIN };
     const scope = { quantities: (SERVED.nodes as Json[]).filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => String(n.label)) };
-    const said = 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.';
-    expect(linkEffectTheUserStated(said, LINK, ends, scope)).toBe('direction_not_stated');
-    expect(linkEffectTheUserStated(said, LINK, ends, scope, { directionOnCard: true })).toBe('source_figure_not_a_change');
-    expect(linkEffectTheUserStated(SAID_UP, LINK, ends, scope, { directionOnCard: true })).toBeNull();
+    expect(linkEffectTheUserStated(SAID_FALL, LINK, ends, scope)).toBe('direction_contradicts');
+    expect(linkEffectTheUserStated(SAID_FALL, LINK, ends, scope, { directionOnCard: true })).toBeNull();
+    const budget = 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.';
+    expect(linkEffectTheUserStated(budget, LINK, ends, scope, { directionOnCard: true })).toBe('direction_not_stated');
+    const level = 'Footfall lost from price rise is 5% today and gross margin falls by about 2 percentage points.';
+    expect(linkEffectTheUserStated(level, LINK, ends, scope, { directionOnCard: true })).toBe('figure_not_bound');
   });
 
   it.each([
@@ -167,7 +172,7 @@ describe('RT-6 recorder by card: the user\'s plain answer reaches an approval ca
     const { natural_effect: _dropped, ...kept } = linkOf(graph).provenance;
     linkOf(graph).provenance = kept;
     const { caps } = world(graph);
-    const r = await caps.proposeLinkEffect!(ctxSaying(SAID_UP), { ...LINK, quote: SAID_UP }) as Json;
+    const r = await caps.proposeLinkEffect!(ctxSaying(SAID_FALL), { ...LINK, quote: SAID_FALL }) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
     expect(String(r.detail)).toContain(`"${FOOTFALL}" has no unit or scale`);
     expect(String(r.detail), 'the % goal is never called unitless').not.toContain(`"${MARGIN}" has no unit`);

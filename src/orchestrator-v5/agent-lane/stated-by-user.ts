@@ -909,7 +909,6 @@ const TARGET_DOWN = /^(?:lose|loses|losing|lost|cost|costs|costing|fewer)$/;
 const TARGET_UP = /^(?:gain|gains|gaining|gained|win|wins|winning|won|adds|added|adding)$/;
 const MOVE_UP = /^(?:rise|rises|rising|rose|increase|increases|increasing|increased|raise|raises|raising|raised|boost|boosts|boosted|boosting|lift|lifts|lifted|lifting|grow|grows|growing|grew|add)$/;
 const MOVE_DOWN = /^(?:fall|falls|falling|fell|drop|drops|dropping|dropped|decrease|decreases|decreasing|decreased|reduce|reduces|reducing|reduced|lower|lowers|lowering|lowered|cut|cuts|cutting)$/;
-const CARD_GO_VERB = /^(?:go|goes|going|went|gone|gets|get|got)$/;
 /**
  * A figure SIZES a change only when words of that change join it, and only such words stand between (PR Review's third
  * CR, #2275 @ 157b42ae: "Our budget is £1 and Pro price rises, losing 50 paying subscribers" sits £1 beside "price"
@@ -941,6 +940,11 @@ export function linkEffectTheUserStated(
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
+  /**
+   * `directionOnCard` (RT-6): the approval card shows the signed reading and the writer's sign guard checks it, so the two
+   * FINAL sign checks are skipped. Nothing else is: the early direction miss (no movement word, or both ways), binding and
+   * the source-change check all still refuse, so a card is offered only for words this rule read as one sized statement.
+   */
   opts?: { readonly directionOnCard?: boolean },
 ): LinkEffectStatementMiss | null {
   const q = quote.trim();
@@ -1066,34 +1070,25 @@ function linkEffectInOneSentence(
     else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1, i);
     else if (MOVE_DOWN.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', -1, i);
   });
-  if (!opts?.directionOnCard && (target === 0 || targetBoth || sourceBoth)) return 'direction_not_stated';
+  if (target === 0 || targetBoth || sourceBoth) return 'direction_not_stated';
   // Each figure SIZES its change: the amount joined to the target's movement, the source's figure to a source word.
   const sourceLinkWord = (w: string): boolean => SOURCE_LINK.test(w) || MOVE_UP.test(w) || MOVE_DOWN.test(w)
-    || sourceLabel.some((x) => sameWord(x, w))
-    || (opts?.directionOnCard === true && (CARD_GO_VERB.test(w) || /^(?:up|down|by)$/.test(w)));
-  const targetLabel = wordsOf(ends.target);
-  // The three-token source rule can read "falls" in "5%, gross margin falls" as a source move; the card still binds it to margin.
-  const figuresBound = (targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))
-    || (opts?.directionOnCard === true && tokens.some((t, i) => targetLabel.some((w) => sameWord(w, t.w))
-      && joined(amountAt, i, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w) || MOVE_UP.test(w) || MOVE_DOWN.test(w)))))
-    && sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord));
-  // Card mode reports a source LEVEL below before a binding miss; both checks must still pass to prepare a card.
-  if (!figuresBound && !opts?.directionOnCard) return 'figure_not_bound';
+    || sourceLabel.some((x) => sameWord(x, w));
+  if (!targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))
+    || !sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord))) return 'figure_not_bound';
   // The source's figure is itself IN a change phrase (PR Review's fifth CR: "With Pro price £1, raising it" is today's
   // price, then a rise of no stated size): distributive ("every £1"), its own move straight after ("£10 rise", "£1 price
   // increase"), or "by £1" after a move ("falls by £1", "raise the Pro price by £1").
-  const isMove = (w: string, i: number): boolean => MOVE_UP.test(w) || MOVE_DOWN.test(w)
-    || (opts?.directionOnCard === true && /^(?:up|down)$/.test(w) && CARD_GO_VERB.test(tokens[i - 1]?.w ?? '') && unbroken(i - 1, i));
+  const isMove = (w: string): boolean => MOVE_UP.test(w) || MOVE_DOWN.test(w);
   const isLabel = (w: string): boolean => sourceLabel.some((x) => sameWord(x, w));
   const distributive = perFigure === undefined || (perAt > 0 && DELTA_BEFORE.test(tokens[perAt - 1]!.w) && unbroken(perAt - 1, perAt));
   const moveAfter = [1, 2, 3].some((d) => perAt + d < tokens.length && CHANGE_NOUN.test(tokens[perAt + d]!.w) && unbroken(perAt, perAt + d)
     && tokens.slice(perAt + 1, perAt + d).every((t, k) => inFigure(perAt + 1 + k) || isLabel(t.w)));
   const byAfterMove = perAt > 1 && tokens[perAt - 1]!.w === 'by' && tokens.slice(Math.max(0, perAt - 7), perAt - 1).some((t, k, xs) => {
     const m = Math.max(0, perAt - 7) + k;
-    return isMove(t.w, m) && unbroken(m, perAt) && xs.slice(k + 1).every((u) => BY_LINK.test(u.w) || isLabel(u.w));
+    return isMove(t.w) && unbroken(m, perAt) && xs.slice(k + 1).every((u) => BY_LINK.test(u.w) || isLabel(u.w));
   });
   if (!distributive && !moveAfter && !byAfterMove) return 'source_figure_not_a_change';
-  if (!figuresBound) return 'figure_not_bound';
   if (opts?.directionOnCard) return null;
   if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
   if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
