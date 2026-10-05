@@ -34,8 +34,13 @@ export interface StatedGoalTarget {
  * months") is a time limit, not the target: skipped, detected by `deadline_metadata` PRESENCE (`compound-goals.ts`).
  */
 export function goalOwnLimitRow(graph: Rec, goal: Rec): Rec | undefined {
+  return goalOwnLimitRows(graph, goal)[0];
+}
+
+/** Every one of the goal's own non-deadline limit rows, in stored order. */
+function goalOwnLimitRows(graph: Rec, goal: Rec): Rec[] {
   const rows = Array.isArray(graph.goal_constraints) ? graph.goal_constraints.filter(isRec) : [];
-  return rows.find((c) => c.node_id === goal.id && finite(c.value) && !isRec(c.deadline_metadata));
+  return rows.filter((c) => c.node_id === goal.id && finite(c.value) && !isRec(c.deadline_metadata));
 }
 
 /**
@@ -44,9 +49,10 @@ export function goalOwnLimitRow(graph: Rec, goal: Rec): Rec | undefined {
  * separate limit, never the target (Codex r1 #2606: raw £1.2m beside its own "<= £1.4m" read as "<= £1.2m").
  */
 export function goalTargetRow(graph: Rec, goal: Rec): Rec | undefined {
-  const row = goalOwnLimitRow(graph, goal);
-  if (row === undefined) return undefined;
-  return !finite(goal.goal_threshold_raw) || row.value === goal.goal_threshold_raw ? row : undefined;
+  if (!finite(goal.goal_threshold_raw)) return goalOwnLimitRow(graph, goal);
+  // Beside a raw target: the own row stating THAT figure, wherever it is stored (Codex r2 #2606: order-independent).
+  const raw = goal.goal_threshold_raw;
+  return goalOwnLimitRows(graph, goal).find((r) => r.value === raw);
 }
 
 const rowComparator = (row: Rec | undefined): string | undefined => {

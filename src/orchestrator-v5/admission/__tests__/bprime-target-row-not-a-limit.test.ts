@@ -86,6 +86,15 @@ describe('B′ R2 at T1 — the goal\'s own target row is the target, never also
     expect(statedGoalTargetOf(g, goalOf(g))).toEqual({ value: 1200000, unit: '£', frame: 'level' });
   });
 
+  it.each([['target row first', false], ['limit row first', true]])('Codex r2 #2606 — raw £1.2m with its own ">= £1.2m" row AND a "<= £1.4m" limit (%s): the target row is found by its figure, in either order', (_o, limitFirst) => {
+    const g = poundsInto(RAW.paul);
+    const target = g.goal_constraints[0];
+    const limit = { ...target, constraint_id: 'gc-limit-1-4m', operator: '<=', value: 1400000 };
+    g.goal_constraints = limitFirst ? [limit, target] : [target, limit];
+    expect(untestableGoalTargetRowId(g)).toBe('gc-063988fd-b2ad-4a51-8261-cf2f1ab105f6');
+    expect(statedGoalTargetOf(g, goalOf(g))?.held).toBe('>=');
+  });
+
   it('CONTRAST: a target that can be tested moves nothing; the same graph without today\'s level names its own row', () => {
     const testable = poundsInto(withToday(RAW.paul));
     expect(targetTestabilityOf(testable).kind).toBe('testable');
