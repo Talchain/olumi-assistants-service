@@ -46,13 +46,17 @@ export function survivesReplyEditors(line: string, graph: unknown, analysisReady
 
 /**
  * The Run reply's treated-as-zero line for this readback: `treatedAsZeroLine`'s words when they survive the reply's
- * editors, else the label-free form with the same count; `null` when no root is treated as zero.
+ * editors and every label it quotes says something, else the label-free form with the same count; `null` when no root
+ * is treated as zero. A blank label quoted as `""` names nothing and asks about nothing (Codex #2581 r3), so it takes the
+ * label-free form too; only the first two labels are ever quoted ("and N more" counts the rest).
  */
 export function treatedAsZeroReplyLine(graph: unknown, analysisReady: unknown): string | null {
   const view = readinessViewOf(graph);
   const labelled = treatedAsZeroLine(view);
   if (labelled === null) return null;
-  if (survivesReplyEditors(labelled, graph, analysisReady)) return labelled;
+  const quoted = (view.treated_as_zero ?? []).slice(0, 2);
+  const quotesBlank = quoted.some((label) => label.replace(/\s+/g, ' ').trim() === '');
+  if (!quotesBlank && survivesReplyEditors(labelled, graph, analysisReady)) return labelled;
   const n = (view.treated_as_zero ?? []).length;
   return n === 1 ? TREATED_AS_ZERO_UNNAMED_ONE : treatedAsZeroUnnamedMany(n);
 }
