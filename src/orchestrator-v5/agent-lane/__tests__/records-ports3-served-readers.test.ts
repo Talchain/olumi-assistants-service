@@ -526,7 +526,11 @@ describe('Science row 4: the sealed brief is byte-identical under option A; re-p
 
   const A16 = [
     { draw: 1, projection: '8ea5c39a16ac66aa94fd19d52e916a638136235a23b7c3746b05f6f0d80d2266', analysis: '8ec98fdc7a121d19c9832e16b288303f0ff2a21b78915b464213cc19abc39a51' },
-    { draw: 2, projection: '3bbd7edc1b0455ab8baa4d514559f7fc695310a39330762bffde5fb44a453439', analysis: '9f077ed8fd9415d575591a00443c9279aeb697ded44e51fbcc1de7ce016fbb36' },
+    // RE-PIN (projection ONLY) — "Science ruling 2026-10-05 S3: more accurate drop reason (relationship_endpoint_missing →
+    // effect_detail_conflicts_with_relationship); graph and analysis hash unchanged". Fix (d) resolves stated_items[9]'s
+    // endpoints, so the EXISTING claim-side check names the real conflict. Diffed against the vans tip 9787d21b: the ONLY
+    // difference is dropped[3].reason. Old → new projection: 3bbd7edc…453439 → 5a98e623…5b7d2b. The analysis pin is untouched.
+    { draw: 2, projection: '5a98e623b9e5d1725efc0b1903e513936f91d4349e1a390dec8f0ddf7b5b7d2b', analysis: '9f077ed8fd9415d575591a00443c9279aeb697ded44e51fbcc1de7ce016fbb36' },
     { draw: 3, projection: '3ee815599bfced0e57b388b2bac3339aad592c73382bc2f73d1aaa3b0d25e2eb', analysis: 'bdb571be2bfffdb14bbe4768c4fced66d0136e9ef95612f7731e623259d90231' },
   ];
   for (const pin of A16) it(`banked sealed draw ${pin.draw}: projection and analysis-affecting hash`, async () => {

@@ -5649,13 +5649,17 @@ export function projectRecordsToGraph(
   /** Authored input before seam compatibility enrichment, for diagnostic receipts only. */
   originalRecords: DraftRecordSet = records,
 ): RecordProjection {
-  // Fix (a): every required link the drafter typed "unresolved" is a TYPED ASK on its own stated index, one row per
-  // link, in the item's own order. The link itself stays absent, so nothing below can read it as a value.
-  const unresolvedLinks: DroppedRecordRef[] = records.stated_items.flatMap((item, stated_index) =>
-    (item.unresolved ?? []).map((field) => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: item.source_quote,
-      stated_index, reason: "link_unresolved" as const, unresolved_field: field, source_quote: item.source_quote })));
   const located = locateRecordEvidence(records);
   const units = canonicalQuantityUnits(located.records);
+  // Fix (a): every required link the drafter typed "unresolved" is a TYPED ASK on its own stated index, one row per
+  // link, in the item's own order. The link itself stays absent, so nothing below can read it as a value.
+  // ⭐ S2 (Lead/Science, 5 Oct): ONLY a link the compile could not resolve is asked. A link the compile's own typed
+  // canonicalisation supplies (a goal's `unit` from its quantity's declaring item, `canonicalQuantityUnits`) is resolved,
+  // not missing: asking for it raised a junk question while the register carried the goal. No wording participates.
+  const unresolvedLinks: DroppedRecordRef[] = records.stated_items.flatMap((item, stated_index) =>
+    (item.unresolved ?? []).filter((field) => units.records.stated_items[stated_index]?.[field] === undefined)
+      .map((field) => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: item.source_quote,
+        stated_index, reason: "link_unresolved" as const, unresolved_field: field, source_quote: item.source_quote })));
   records = unifyGoalQuantityReferences(units.records);
   const claimCount = (records.claims ?? []).length;
   const demoted = new Map<number, DemoteDecision>();

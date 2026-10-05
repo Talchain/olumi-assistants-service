@@ -48,11 +48,15 @@ export function deriveStatedDispositions(
     if (projection.dropped.some(d => d.stated_index === stated_index && d.reason === 'goal_quantity_missing')) {
       return { ...origin, disposition: 'asked', reason: 'goal_quantity_missing' };
     }
-    // Fix (a): a required link the drafter typed "unresolved" is an ask on this item — the same class, the same
-    // precedence. The rows naming each link stay in `projection.dropped`; the decoded item names them too.
-    if (projection.dropped.some(d => d.stated_index === stated_index && d.reason === 'link_unresolved')) {
+    // Fix (a): a required link the drafter typed "unresolved" is an ask on this item, ahead of a rejection.
+    // ⭐ S2 (Lead/Science, 5 Oct): A CARRIED ITEM IS REPORTED CARRIED. The ask on its unresolved link stays (its
+    // `link_unresolved` row and open question), but the receipt never contradicts the graph that holds its value.
+    const settled = settle();
+    if (settled.disposition !== 'carried' && projection.dropped.some(d => d.stated_index === stated_index && d.reason === 'link_unresolved')) {
       return { ...origin, disposition: 'asked', reason: 'link_unresolved' };
     }
+    return settled;
+    function settle(): StatedDisposition {
     const evidenceFailure = projection.dropped.find(d => d.stated_index === stated_index && FAILED_EVIDENCE.has(d.reason));
     if (evidenceFailure !== undefined) return { ...origin, disposition: 'rejected', reason: evidenceFailure.reason };
     const nodeId = statedNodeIds.get(stated_index);
@@ -95,6 +99,7 @@ export function deriveStatedDispositions(
     const dropped = projection.dropped.find(row => row.stated_index === stated_index);
     return { ...origin, disposition: 'rejected', reason: dropped?.reason
       ?? (item.relationship !== undefined ? 'stated_relationship_not_carried' : 'stated_value_not_carried') };
+    }
   });
 }
 

@@ -49,6 +49,17 @@ const acceptsUnresolved = (node: Json): boolean => (node.enum ?? []).includes('u
 const OWNED: Record<string, readonly string[]> = { goal: ['direction', 'direction_literal', 'unit', 'baseline_ref'], figure: ['quantity'], cause: ['relationship'] };
 const OWNER_INDEX: Record<string, number> = { goal: 6, figure: 1, cause: 10 };
 const ROWS = Object.entries(OWNED).flatMap(([kind, fields]) => fields.map(field => ({ kind, field, index: OWNER_INDEX[kind]! })));
+/**
+ * S2 REBIND (Lead/Science ruling, 5 Oct: "a carried item is reported carried; an unresolved field on a carried item
+ * raises an ask only when the compile could not resolve it"). Old → new, per row:
+ *   · goal.direction / goal.direction_literal / goal.baseline_ref: receipt asked/link_unresolved → CARRIED (the goal's
+ *     threshold is stored at goal_threshold_raw); the link_unresolved row and the open question are unchanged.
+ *   · goal.unit: the compile resolves it from the goal's quantity declaration (`canonicalQuantityUnits`), so it is no
+ *     longer asked at all; pinned in resolved-link-receipt.test.ts (with the no-declaration twin that still asks).
+ *   · figure.quantity / cause.relationship: unchanged (those items are not carried).
+ */
+const ASKED_ROWS = ROWS.filter(r => r.kind !== 'goal');
+const CARRIED_GOAL_ROWS = ROWS.filter(r => r.kind === 'goal' && r.field !== 'unit');
 /** The question words each field asks for (completion.ts UNRESOLVED_LINK_ASKS), bound per field. */
 const ASK_WORDS: Record<string, string> = {
   direction: 'whether it is a floor (at least) or a ceiling (at most)',
@@ -144,7 +155,23 @@ describe('fix (a) the sealed ideal, every link stated, is unchanged through the 
 });
 
 describe("fix (a) each required link's 'unresolved' is a TYPED ASK — never a guess, never a silent drop", () => {
-  for (const { kind, field, index } of ROWS) {
+  for (const { kind, field, index } of CARRIED_GOAL_ROWS) {
+    it(`${kind}.${field} 'unresolved' on the CARRIED goal → a link_unresolved row and an open question; the receipt says carried`, async () => {
+      const wire = wireWith(index, field);
+      expect(validate(wire), JSON.stringify(validate.errors)).toBe(true);
+      const quote = sealedRecordsVNextLinked().stated_items[index]!.source_quote;
+      const { result, body } = await construct(JSON.stringify(wire));
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      expect(result.not_represented).toContainEqual(expect.objectContaining({ stated_index: index, reason: 'link_unresolved', unresolved_field: field, label: quote }));
+      const row = (body!.stated_dispositions as Json[]).find(d => d.stated_index === index)!;
+      expect(row).toMatchObject({ disposition: 'carried', location: { path: ['goal_threshold_raw'] }, stored_value: 150000, stated_item: { source_quote: quote, unresolved: [field] } });
+      const questions = (result.open_questions as string[]).filter(q => q.includes(`"${quote}"`));
+      expect(questions).toHaveLength(1);
+      expect(questions[0]).toContain(ASK_WORDS[field]);
+      expect(JSON.stringify(body!.graph)).not.toContain('unresolved');
+    });
+  }
+  for (const { kind, field, index } of ASKED_ROWS) {
     it(`${kind}.${field} 'unresolved' → a link_unresolved row, an asked receipt and an open question naming the item`, async () => {
       const wire = wireWith(index, field);
       expect(validate(wire), JSON.stringify(validate.errors)).toBe(true);
