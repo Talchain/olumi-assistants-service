@@ -16,7 +16,7 @@
 import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
-import { linkEffectEndUnits, statedInOneOf } from '../system-events/link-effect-edit.js';
+import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
@@ -75,9 +75,10 @@ function sizedInGoalUnit(e: Rec, goalUnit: string | undefined, graph?: unknown):
   // WRITER's own comparator over the goal end's own units. A % goal not so marked keeps the pre-existing comparison
   // (follow-up for Science). A count goal's units hold no "points": unchanged.
   const ends = graph !== undefined && typeof e.from === 'string' && typeof e.to === 'string' ? linkEffectEndUnits(graph, e.from, e.to) : null;
-  // Points spelled any way ("pp", "percentage point(s)", "point(s)") by the writer's own comparator; never "basis points"
+  // Points spelled any way U1's leaf spells them ("pp", "percentage point(s)", "% points", …, plus the bare word) by the
+  // writer's own comparator, over the SAME list the writer's arms hold (red team #87 6004429045); never "basis points"
   // (1 bp = 0.01 pp), which the old /point/ regex wrongly admitted. A plain "%" target unit is unchanged (not admitted).
-  const isPoints = (u: string): boolean => statedInOneOf(u, ['percentage points', 'pp', 'points']) || /^(?:percentage\s+)?points?$/i.test(u.trim());
+  const isPoints = (u: string): boolean => statedInOneOf(u, POINTS_STATED) || /^(?:percentage\s+)?points?$/i.test(u.trim());
   return ends !== null && ends.target.own.every(isPoints) && statedInOneOf(ne.amount_unit, ends.target.own);
 }
 

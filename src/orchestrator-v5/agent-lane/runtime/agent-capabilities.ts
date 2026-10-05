@@ -15,7 +15,6 @@
  */
 
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
-import { POINTS_SPELLINGS } from '../../../utils/unit-alphabet.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
@@ -39,7 +38,7 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLinkEffectUnitReadings, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
@@ -1449,16 +1448,25 @@ function linkEffectStatementAsk(miss: string, from: string, to: string, figureAs
 /** Canonical's link-effect refusal, said to the Agent in words it can relay truthfully (never a code). */
 function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string },
   /** RT-6: the stated effect, when known, so a unit refusal names the END that failed. */
-  effect?: { readonly amount_unit: string; readonly per_source_change_unit: string }): string {
+  effect?: { readonly amount_unit: string; readonly per_source_change_unit: string },
+  /**
+   * The card's disclosed unit readings, when the sentence stated an end's unit: the words read the SAME view the writer
+   * refused on (red team #87 6004429045 — off the stored graph, an end whose unit the user had just written was called
+   * "no unit or scale").
+   */
+  unitReadings?: readonly LinkEffectUnitReading[]): string {
+  const view = withLinkEffectUnitReadings(raw, unitReadings);
   const unitOfNode = (id: string): string => {
-    const n = ((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as { observed_state?: { unit?: unknown } } | undefined;
-    return typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit : 'its own unit';
+    const n = ((view as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as
+      { observed_state?: { unit?: unknown }; unit_reading?: { unit?: unknown } } | undefined;
+    return typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit
+      : typeof n?.unit_reading?.unit === 'string' ? n.unit_reading.unit : 'its own unit';
   };
   switch (reason) {
     case 'unit_mismatch': {
       // RT-6: an end with no unit (and no size already said for this link) has nothing to state a figure in. Say THAT,
       // never "in its own unit": the user cannot answer in a unit the model does not have.
-      const ends = linkEffectEndUnits(raw, from.id, to.id);
+      const ends = linkEffectEndUnits(view, from.id, to.id);
       const fails = (stated: string | undefined, u: { own: readonly string[]; adopted?: string }): boolean =>
         stated === undefined || !statedInOneOf(stated, [...u.own, u.adopted]);
       const sourceFails = ends !== null && fails(effect?.per_source_change_unit, ends.source);
@@ -1477,7 +1485,7 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
           + 'or Very strong. That records how strong you judge the link, not your figure."';
       }
       // A % LEVEL target takes its change in points only: say THAT (Science 5993238492), never "measured in %".
-      if (ends !== null && effect !== undefined && targetFails && !sourceFails && ends.target.own.length > 0 && ends.target.own.every(u => statedInOneOf(u, [...POINTS_SPELLINGS, 'points']))) {
+      if (ends !== null && effect !== undefined && targetFails && !sourceFails && ends.target.own.length > 0 && ends.target.own.every(u => statedInOneOf(u, POINTS_STATED))) {
         return `Nothing was prepared: a change in "${to.label}" is recorded in percentage points. Ask the user whether they mean `
           + 'points (62% → 60% is 2 points) and for their figure in points; never convert a relative % yourself.';
       }
@@ -2729,7 +2737,7 @@ export function createAgentCapabilities(
       if (dry.kind === 'refused') {
         const from = { id: item.from, label: approvedRead.nodes.find((n) => n.id === item.from)?.label ?? item.from };
         const to = { id: item.to, label: approvedRead.nodes.find((n) => n.id === item.to)?.label ?? item.to };
-        return notApplied('link_effect_refused', linkEffectRefusalWords(dry.reason, working, from, to));
+        return notApplied('link_effect_refused', linkEffectRefusalWords(dry.reason, working, from, to, item.effect, item.unit_readings));
       }
       working = dry.mutatedGraph;
       const written = linkEffectTargetOf(working, item.from, item.to);
@@ -2758,7 +2766,8 @@ export function createAgentCapabilities(
       const failed = res.link ?? approvedEffects[0]!;
       const from = { id: failed.from, label: approvedRead.nodes.find((n) => n.id === failed.from)?.label ?? failed.from };
       const to = { id: failed.to, label: approvedRead.nodes.find((n) => n.id === failed.to)?.label ?? failed.to };
-      return notApplied('link_effect_refused', linkEffectRefusalWords(reason, approvedRead.raw, from, to));
+      const approved = approvedEffects.find((e) => e.from === failed.from && e.to === failed.to);
+      return notApplied('link_effect_refused', linkEffectRefusalWords(reason, approvedRead.raw, from, to, approved?.effect, approved?.unit_readings));
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
@@ -3402,7 +3411,7 @@ export function createAgentCapabilities(
           if (dry.kind === 'refused') {
             const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(working, from.id, to.id, g.identity_run_use ?? null) : null;
             fail(dry.reason, definition !== null ? `${definitionalLinkRefusalText(working, definition)} Tell the user exactly this.`
-              : linkEffectRefusalWords(dry.reason, working, from, to, effect));
+              : linkEffectRefusalWords(dry.reason, working, from, to, effect, unitReading.unit_readings));
             continue;
           }
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
@@ -3509,7 +3518,7 @@ export function createAgentCapabilities(
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,
-          detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to, effect) };
+          detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to, effect, unitReading.unit_readings) };
       }
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
