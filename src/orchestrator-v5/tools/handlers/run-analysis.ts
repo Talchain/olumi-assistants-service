@@ -1,3 +1,5 @@
+import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
+import { goalOrderedLinks } from '../../admission/target-testability.js';
 /**
  * V5 `run_analysis` handler (slice C2) — first real handler on the C1 spine.
  *
@@ -46,7 +48,8 @@ import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js'
 import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
-import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
+import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../../agent-lane/unsized-path-cause.js';
+import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
@@ -1955,38 +1958,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
 
     // ⛔ (S) THE GOAL'S CHANCE, PER OPTION (DL #75 5902570568; AIQ 5902548598): an option whose path into the goal runs
-    // through an `olumi_placeholder` has its goal figures withheld HERE, before any reader, and every win share and the
+    // through a link nobody sized has its goal figures withheld HERE (R4 shared P5 walk), before any reader, and every win share and the
     // leader with them (`withholdOptionGoalFigures`). A run PLoT already withheld (#416 / #422) says its own reason.
     const envelope = response as Record<string, unknown>;
+    let withheldBecauseUnsizedPath: UnsizedPathLeaderCause | undefined;
+    let legacyFiguresDisclosure = '';
+    let legacyFiguresLinks: Array<{ from: string; to: string }> = [];
     if (!runWithheldGoalFigures(envelope)) {
       const scoredIds = [...new Set(readOptionResultSources(envelope).flat().map((r) => (typeof r.option_id === 'string' ? r.option_id : r.id))
         .filter((id): id is string => typeof id === 'string' && id !== ''))];
       const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
-      const scored = new Map(finalWireOptions.flatMap((o) => {
-        const rec = o as Record<string, unknown>;
-        const id = typeof rec.option_id === 'string' ? rec.option_id : typeof rec.id === 'string' ? rec.id : undefined;
-        const iv = rec.interventions !== null && typeof rec.interventions === 'object' && !Array.isArray(rec.interventions)
-          ? rec.interventions as Record<string, unknown> : undefined;
-        return id !== undefined && iv !== undefined ? [[id, iv] as const] : [];
-      }));
-      const goalPaths = placeholderGoalPaths(graphForAnalysis, scoredIds, evaluations, scored);
-      if (goalPaths.length > 0) {
-        response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
-          placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH));
-        log.info(
-          {
-            event: 'run_analysis.goal_figures_withheld_for_placeholder_paths',
-            request_id: invocation.requestId,
-            scenario_id: args.scenario_id,
-            // Redacted: ids only.
-            withheld: goalPaths.map((p) => ({ option_id: p.option_id, links: p.links.length })),
-          },
-          'run_analysis: goal figures withheld for the options an unsized Olumi link moves',
-        );
-      }
+      const scoredInterventions = new Map(finalWireOptions.map(o => [optionIdOf(o as Record<string, unknown>) ?? '', o.interventions as Record<string, unknown>]));
+      const goalPaths = unsizedLeaderGoalPaths(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
       // ⛔ GATE 5 (DL #75 5904272507): the user's own levels make the goal rate × count within 5%, and this run did not
       // evaluate that product, so its goal figures come from a walk those figures contradict. Every option, the leader too.
-      const unread = runWithheldGoalFigures(response as Record<string, unknown>) ? null : unreadGoalProduct(graphForAnalysis);
+      const unread = unreadGoalProduct(graphForAnalysis);
       if (unread !== null && scoredIds.length > 0) {
         response = withholdOptionGoalFigures(response, new Set(scoredIds),
           unreadGoalProductWarning(unread, scoredIds, GOAL_FIGURES_PRODUCT_NOT_READ));
@@ -2000,6 +1986,37 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           },
           'run_analysis: goal figures withheld: the user\'s own figures make the goal a product this run did not evaluate',
         );
+      }
+      if (goalPaths.length > 0) {
+        const allLinks = goalOrderedLinks(graphForAnalysis, goalPaths.flatMap(p => p.links));
+        const first = allLinks[0]!;
+        const label = (id: string): string => {
+          const node = readGraphNodesForCostAsk(graphForAnalysis).find(n => n.id === id);
+          return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label : id;
+        };
+        withheldBecauseUnsizedPath = { ...first, from_label: label(first.from), to_label: label(first.to),
+          links: allLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })),
+        };
+        response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
+          placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH));
+        log.info(
+          {
+            event: 'run_analysis.goal_figures_withheld_for_placeholder_paths',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            // Redacted: ids only.
+            withheld: goalPaths.map((p) => ({ option_id: p.option_id, links: p.links.length })),
+          },
+          'run_analysis: goal figures withheld for the options an unsized Olumi link moves',
+        );
+      }
+      const legacyLinks = legacyLeaderGoalLinks(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
+      if (legacyLinks.length > 0) {
+        const warning = legacyGoalWarning(graphForAnalysis, legacyLinks);
+        const current = response as Record<string, unknown>;
+        response = { ...response, inference_warnings: [...(Array.isArray(current.inference_warnings) ? current.inference_warnings : []), warning] };
+        legacyFiguresDisclosure = ` ${warning.message}`;
+        legacyFiguresLinks = warning.links;
       }
     }
 
@@ -2479,7 +2496,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis: leader withheld — its sign on a multiplied goal is not proven',
       );
     }
-    const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional
+    let headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional
       ? null : buildAnalysisResultHeadline(headlineInput);
     // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
     // objective-contradiction tail below must not say "against your goal" where
@@ -2796,6 +2813,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // them only as its own rebuild from `__goal_reading_source` (AIQ 5895590866 (2), exact equality).
     const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id);
     const identicalArmsDisclosure = buildIdenticalArmsDisclosure(identicalArms);
+    if (headline !== null) headline = appendLegacyFiguresAfterLeaderSentence(headline, legacyFiguresDisclosure);
     const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
@@ -2839,7 +2857,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // Every new Run records the existing projection version in persisted
         // enrichment. Transport strips this internal key; the provider response
         // is unchanged. Freshness still uses the one analysis-affecting hash.
-        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
+        enrichment: stampRunAnalysisProjection({ ...(response as Record<string, unknown>),
+          ...(withheldBecauseUnsizedPath !== undefined ? { [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath } : {}),
+        }),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run
@@ -3000,6 +3020,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         : {}),
       // Internal channel — the graph and goal the goal-reading tail was built from, so the registry forwarder can
       // rebuild that exact tail and admit nothing else (`goalReadingTailOf`). Only when a reading spoke.
+      // Server-only source for exact disclosure validation, using the same
+      // complete link list and labels that produced this Run's warning.
+      ...(legacyFiguresDisclosure !== ''
+        ? { __legacy_figures_source: { graph: graphForAnalysis, links: legacyFiguresLinks } }
+        : {}),
       ...(goalReadingDisclosure !== ''
         ? { __goal_reading_source: { graph: graphForAnalysis, goal_node_id: snapshot.goal_node_id } }
         : {}),

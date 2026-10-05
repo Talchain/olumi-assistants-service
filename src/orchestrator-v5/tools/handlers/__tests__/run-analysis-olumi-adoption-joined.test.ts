@@ -159,6 +159,7 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
         // warning (`decision-input-ask.ts` `untestedHorizonLine`), and the COLD READ returns it: the stored fact keeps it.
         inference_warnings: [
           { code: 'GOAL_FIGURES_PRODUCT_NOT_READ' },
+          { code: 'GOAL_FIGURES_OLUMI_SUPPLIED_LINK' },
           { code: 'GOAL_HORIZON_NOT_TESTED', severity: 'info',
             message: 'This model doesn\'t yet say whether any option gets there within 12 months.' },
         ],

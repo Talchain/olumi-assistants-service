@@ -1,3 +1,4 @@
+import { linkList } from '../agent-lane/unsized-path-cause.js';
 /**
  * ⭐ IS THE GOAL'S TARGET TESTABLE, BEFORE ANY RUN (DECISION-REPRESENTATION-v1 row 4; PTL A #77 5912737934).
  *
@@ -40,6 +41,8 @@ export interface TargetTestabilityFailure {
   readonly link_to?: string;
   /** For P5: the FAILING link's two node ids, so its question sizes that same link in its own ends' units. */
   readonly link?: { readonly from: string; readonly to: string };
+  /** R8-6c: every failing P5 link, nearest the goal first; lever remains the first label. */
+  readonly links?: Array<{ from: string; to: string }>;
 }
 
 export type TargetTestability =
@@ -134,6 +137,74 @@ export function untestableGoalTargetRowId(input: unknown): string | null {
   return typeof row?.constraint_id === 'string' && row.constraint_id !== '' ? row.constraint_id : null;
 }
 
+/**
+ * The ONE target-independent option reach computation, shared by P5 and the Run's leader licence.
+ * `reached` preserves P5's reach set (including off-goal branches); `paths` selects only causal links on a compared
+ * option's path to the goal. Options/decisions are never traversed and option set-edges are excluded. Exact operand
+ * edges carry no causal size. Callers supply seeds: P5's option nodes, or the licence's actual moved factors.
+ * No target, unit, sizing or intervention-level judgement is made by this walk.
+ */
+export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], seeds: ReadonlyMap<string, readonly unknown[]>, identityEvaluations?: readonly unknown[]): {
+  reached: Set<unknown>;
+  paths: Array<{ option_id: string; links: Record<string, unknown>[] }>;
+  exactLinks: Set<Record<string, unknown>>;
+} {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const byId = new Map(nodes.map(n => [n.id, n] as const));
+  const goal = nodes.find(n => n.kind === 'goal');
+  const ids = optionIds;
+  const walkable = (id: unknown): boolean => byId.get(id)?.kind !== 'option' && byId.get(id)?.kind !== 'decision';
+  const toGoal = new Set<unknown>(goal === undefined ? [] : [goal.id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) if (toGoal.has(e.to) && walkable(e.from) && walkable(e.to) && !toGoal.has(e.from)) {
+      toGoal.add(e.from); grew = true;
+    }
+  }
+  const evaluated = new Set((identityEvaluations ?? []).filter(isRec).filter(e => e.evaluated === true).map(e => e.node_id));
+  const exactLinks = new Set(edges.filter(e => {
+    if (isRec(e.provenance) && e.provenance.definitional === true) return true;
+    const to = byId.get(e.to);
+    const identity = isRec(to?.nonlinear_identity) ? to.nonlinear_identity : undefined;
+    return identity !== undefined && (identity.stated_in_brief !== false || evaluated.has(to?.id))
+      && Array.isArray(identity.factor_ids) && identity.factor_ids.includes(e.from);
+  }));
+  const reached = new Set<unknown>();
+  const paths = ids.map(option_id => {
+    const seen = new Set<unknown>(seeds.get(option_id) ?? []);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const e of edges) if (seen.has(e.from) && !seen.has(e.to) && walkable(e.to)) {
+        seen.add(e.to); grew = true;
+      }
+    }
+    for (const id of seen) reached.add(id);
+    return { option_id, links: edges.filter(e => seen.has(e.from) && seen.has(e.to) && walkable(e.from)
+      && walkable(e.to) && toGoal.has(e.to)) };
+  });
+  return { reached, paths, exactLinks };
+}
+
+/** Stable endpoint de-duplication, ordered by shortest distance of the target from the goal. */
+export function goalOrderedLinks(graph: unknown, links: readonly { from: string; to: string }[]): Array<{ from: string; to: string }> {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const distance = new Map<unknown, number>(nodes.filter(n => n.kind === 'goal').map(n => [n.id, 0]));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) {
+      const to = distance.get(e.to);
+      if (to !== undefined && (distance.get(e.from) ?? Infinity) > to + 1) {
+        distance.set(e.from, to + 1); grew = true;
+      }
+    }
+  }
+  return [...new Map(links.map(l => [JSON.stringify([l.from, l.to]), { from: l.from, to: l.to }])).values()]
+    .sort((a, b) => (distance.get(a.to) ?? Infinity) - (distance.get(b.to) ?? Infinity)
+      || edges.findIndex(e => e.from === a.from && e.to === a.to) - edges.findIndex(e => e.from === b.from && e.to === b.to));
+}
+
 export function targetTestabilityOf(input: unknown): TargetTestability {
   if (!isRec(input) || !Array.isArray(input.nodes)) return { kind: 'no_goal' };
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
@@ -166,14 +237,8 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     const kindOf = new Map(nodes.map((n) => [n.id, n.kind] as const));
     const labelOf = new Map(nodes.map((n) => [n.id, typeof n.label === 'string' && n.label.trim() !== '' ? n.label.trim() : String(n.id)] as const));
     const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
-    // Every node an option moves, directly or downstream (options and the decision are never walked through).
-    const reached = new Set<unknown>(nodes.filter((n) => n.kind === 'option').map((n) => n.id));
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const e of edges) {
-        if (reached.has(e.from) && !reached.has(e.to) && kindOf.get(e.to) !== 'option' && kindOf.get(e.to) !== 'decision') { reached.add(e.to); grew = true; }
-      }
-    }
+    const optionIds = nodes.filter(n => n.kind === 'option' && typeof n.id === 'string').map(n => n.id as string);
+    const { reached } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])));
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
@@ -182,17 +247,20 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     // subscribers-at-12-months) that does not hold by definition: B6's ONE test (`olumiGuessedLink`), so the goal and a
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
-    const guess = edges.find((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
+    const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
       && olumiGuessedGoalLink(e, unitOf));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
-    const unconverted = identityForwarded ? undefined : into.find((e) => !sizedInGoalUnit(e, goalUnit, graph));
-    const failing = unconverted ?? guess;
+    const unconverted = identityForwarded ? [] : into.filter((e) => !sizedInGoalUnit(e, goalUnit, graph));
+    const links = goalOrderedLinks(graph, [...unconverted, ...guesses].flatMap(e =>
+      typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []));
+    const failing = links.length > 0 ? edges.find(e => e.from === links[0]!.from && e.to === links[0]!.to) : undefined;
     if ((!identityForwarded && into.length === 0) || failing !== undefined) {
-      const placeholderLink = failing !== undefined && isPlaceholderLink(failing);
+      const originalFirst = unconverted[0] ?? guesses[0];
+      const placeholderLink = originalFirst !== undefined && isPlaceholderLink(originalFirst);
       failures.push({ precondition: 'P5', case: 'c',
         code: identity !== undefined && !identityForwarded ? 'identity_unconfirmed' : placeholderLink ? 'goal_path_placeholder' : 'goal_path_unsized',
-        ...(failing !== undefined ? { lever: labelOf.get(failing.from) ?? String(failing.from), link_to: labelOf.get(failing.to) ?? String(failing.to),
+        links, ...(failing !== undefined ? { lever: labelOf.get(failing.from) ?? String(failing.from), link_to: labelOf.get(failing.to) ?? String(failing.to),
           link: { from: String(failing.from), to: String(failing.to) } } : {}) });
     }
   }
@@ -254,7 +322,15 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const failingLink = verdict.failures.find((f) => f.case === 'c');
   const lever = failingLink?.lever;
   const identityCase = verdict.failures.some((f) => f.code === 'identity_unconfirmed');
-  const link = `a size for the link from ${lever ?? 'what the options change'} to ${lever === undefined ? name : failingLink?.link_to ?? name}`;
+  const failedLinks = verdict.failures.find(f => f.case === 'c')?.links ?? [];
+  const nodes = graph.nodes.filter(isRec);
+  const labelOf = (id: string): string => {
+    const node = nodes.find(n => n.id === id);
+    return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : id;
+  };
+  const link = failedLinks.length > 0
+    ? `a size for the ${linkList(failedLinks.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), Math.min(3, failedLinks.length), false)}`
+    : `a size for the link from ${lever ?? 'what the options change'} to ${failingLink?.link_to ?? name}`;
   // The (c) question sizes the SAME link the clause names (Science d5, #2606): a link into the goal keeps AIQ's words, in
   // the goal's unit; an upstream link is asked in its own ends' units (the RT-6 sizing route's reader), never as the
   // lever's whole effect on the goal, which recorded on that link double-counts any non-definitional link after it.

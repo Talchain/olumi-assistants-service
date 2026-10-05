@@ -1,3 +1,4 @@
+import { keepMeanProjectionWhenSizeUnchanged } from '../../cee/magnitude/link-sizing.js';
 /**
  * Track 3 — candidate-graph construction over the V5-owned seam
  * `applyAndValidateMutation` (apply-graph-mutation.ts). PURE: builds an in-memory
@@ -365,12 +366,14 @@ export function buildUpdateEdgeFieldCandidate(
           `Edge ${payload.from_node} -> ${payload.to_node} not found in graph.`,
         );
       }
+      const before = structuredClone(edge);
       setTunableFieldPath(
         edge as Record<string, unknown>,
         payload.field,
         payload.to,
         EDGE_REQUIRED_NESTED_FIELDS,
       );
+      Object.assign(edge, keepMeanProjectionWhenSizeUnchanged(before, edge));
       return { before: null, after: { from: payload.from_node, to: payload.to_node } };
     });
     return { candidate: exposeCandidate(mutatedGraph) };

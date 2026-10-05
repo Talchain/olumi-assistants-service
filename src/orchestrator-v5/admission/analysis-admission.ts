@@ -305,12 +305,18 @@ export function semanticReasonFromAnalysisReady(
   if (!Array.isArray(reasons)) return null;
   const code = (reasons as { readonly field?: unknown; readonly code?: unknown }[])
     .find((r) => r !== null && typeof r === 'object' && r.field === 'semantic_quality_sufficient')?.code;
+  const published = (reasons as { readonly field?: unknown; readonly message?: unknown }[])
+    .find(r => r?.field === 'semantic_quality_sufficient')?.message;
+  if (code === ALL_MATERIAL_LINKS_USER_STATED_REASON.code && published === ALL_MATERIAL_LINKS_USER_STATED_REASON.message) {
+    return ALL_MATERIAL_LINKS_USER_STATED_REASON;
+  }
+  if (code === MIXED_MATERIAL_LINKS_USER_STATED_SHORT.code && published === MIXED_MATERIAL_LINKS_USER_STATED_SHORT.message) return MIXED_MATERIAL_LINKS_USER_STATED_SHORT;
   return Object.values(SEMANTIC_REASON).find((r) => r.code === code) ?? null;
 }
 
 /** Every semantic cause this module can put on a payload, for callers that must probe each sentence they derive from one. */
 export function semanticReasons(): readonly { readonly code: AdmissionReasonCode; readonly message: string }[] {
-  return Object.values(SEMANTIC_REASON);
+  return [...Object.values(SEMANTIC_REASON), ALL_MATERIAL_LINKS_USER_STATED_REASON, MIXED_MATERIAL_LINKS_USER_STATED_SHORT];
 }
 
 /**
@@ -889,11 +895,19 @@ function goalTargetStated(graph: unknown): boolean {
  * yields `semantic_quality_sufficient: false` — absence is not sufficiency.
  */
 export function censusConfidenceParameters(graph: unknown): SemanticQualitySignals {
+  return censusConfidenceParametersWithLinks(graph).signals;
+}
+
+function censusConfidenceParametersWithLinks(graph: unknown): {
+  signals: SemanticQualitySignals; materialLinksTotal: number; materialLinksUserStated: number;
+} {
   let userStated = 0;
   let machineAuthored = 0;
   let unattributed = 0;
   let materialTotal = 0;
   let materialUserStated = 0;
+  let materialLinksTotal = 0;
+  let materialLinksUserStated = 0;
   let intervenedTotal = 0;
   let intervenedUserStated = 0;
   const materialAwaitingUser: string[] = [];
@@ -992,7 +1006,7 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
     const to = typeof edge.to === 'string' ? edge.to : undefined;
     if (strippedByPlot(from === undefined ? undefined : kindById.get(from))) continue;
     if (strippedByPlot(to === undefined ? undefined : kindById.get(to))) continue;
-    // R11: the link's STRENGTH authorship — its source, except that a defaulted strength never earns credit.
+    // FD: the link's strength authorship follows its mean, through the shared reader.
     const provenance = edgeStrengthProvenance(edge);
     tally(provenance);
     if (
@@ -1002,10 +1016,12 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
       materialNodeIds.has(to)
     ) {
       tallyMaterial(provenance);
+      materialLinksTotal += 1;
+      if (earnsAuthorshipCredit(provenance)) materialLinksUserStated += 1;
     }
   }
 
-  return {
+  return { materialLinksTotal, materialLinksUserStated, signals: {
     confidence_parameters_total: userStated + machineAuthored + unattributed,
     confidence_parameters_user_stated: userStated,
     confidence_parameters_machine_authored: machineAuthored,
@@ -1016,7 +1032,7 @@ export function censusConfidenceParameters(graph: unknown): SemanticQualitySigna
     intervened_factor_baselines_user_stated: intervenedUserStated,
     material_parameters_awaiting_user_node_ids: materialAwaitingUser,
     goal_target_stated: goalTargetStated(graph),
-  };
+  } };
 }
 
 /**
@@ -1159,6 +1175,11 @@ const SEMANTIC_REASON: Readonly<
   },
 };
 
+export const ALL_MATERIAL_LINKS_USER_STATED_REASON = {
+  code: 'CONFIDENCE_PARAMETERS_PARTLY_USER_STATED' as const,
+  message: "The sizes of the links that decide it are yours, from your brief. How uncertain they are, and whether each link holds, are Olumi's assumptions.",
+};
+
 /**
  * The sentence for each MODE.
  *
@@ -1168,6 +1189,12 @@ const SEMANTIC_REASON: Readonly<
  * product telling a user who HAS set a value that everything in the model is
  * Olumi's. `SEMANTIC_REASON` supplies it; the omission is enforced by the type.
  */
+export const MIXED_MATERIAL_LINKS_USER_STATED_REASON = SEMANTIC_REASON.material_user_stated;
+export const MIXED_MATERIAL_LINKS_USER_STATED_SHORT = {
+  code: MIXED_MATERIAL_LINKS_USER_STATED_REASON.code,
+  message: 'At least one of the estimates this comparison rests on is yours.',
+} as const;
+
 const MODE_REASON: Readonly<
   Record<
     Exclude<PermittedAnalysisMode, 'quantified_provisional'>,
@@ -1255,7 +1282,8 @@ export function analysisAdmissionFrom(
   graph: unknown,
   graphHash?: string | null,
 ): AnalysisAdmission {
-  const signals = censusConfidenceParameters(graph);
+  const census = censusConfidenceParametersWithLinks(graph);
+  const signals = census.signals;
   const semanticSufficient = semanticQualitySufficient(signals);
   const cause = semanticVerdictCause(signals);
   // ⛔ RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED) RETIRES DR row 4's mode cap (PTL #77 5914383843): a target
@@ -1274,6 +1302,9 @@ export function analysisAdmissionFrom(
   const missing = admission.assessment.blockingIssues.map(toMissingInput);
 
   const reasons: AnalysisAdmissionReason[] = [];
+  const semanticReason = cause === 'material_user_stated' && census.materialLinksTotal > 0
+    && census.materialLinksUserStated === census.materialLinksTotal
+    ? ALL_MATERIAL_LINKS_USER_STATED_REASON : SEMANTIC_REASON[cause];
 
   // ── structurally_analysable ────────────────────────────────────────────────
   // ⚠ A REFUSAL IS NEVER SILENT. `blockedNextStep` is `RunAdmission`'s own
@@ -1323,8 +1354,8 @@ export function analysisAdmissionFrom(
   // reads, so the two cannot disagree; a test pins that.
   reasons.push({
     field: 'semantic_quality_sufficient',
-    code: SEMANTIC_REASON[cause].code,
-    message: SEMANTIC_REASON[cause].message,
+    code: semanticReason.code,
+    message: semanticReason.message,
   });
 
   // ── permitted_analysis_mode ────────────────────────────────────────────────

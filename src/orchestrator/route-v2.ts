@@ -1029,6 +1029,8 @@ async function sendFinalised200(
     readonly mayNameLeadingOption: boolean;
     /** Same selected claim fact as mayNameLeadingOption on the executor path. */
     readonly claimConstraintVerdictState?: import('./context/constraint-feasibility.js').ConstraintVerdictState | null;
+    readonly leaderWithheldBecauseUnsizedPath?: import('../orchestrator-v5/agent-lane/unsized-path-cause.js').UnsizedPathLeaderCause;
+    readonly leaderWithheldBecauseUnrequested?: boolean;
     /**
      * WHERE the permission above came from (2026-07-27).
      *
@@ -8797,6 +8799,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // the next exit family to ship unguarded.
       mayNameLeadingOption: run.mayNameLeadingOption,
       claimConstraintVerdictState: run.mayNameLeadingOptionConstraintVerdictState,
+      leaderWithheldBecauseUnsizedPath: run.leaderWithheldBecauseUnsizedPath,
+      leaderWithheldBecauseUnrequested: run.leaderWithheldBecauseUnrequested,
       // …and its evidence. REQUIRED on the run result for the same reason the
       // boolean is: a value reported without its provenance is a value no walk
       // can falsify.

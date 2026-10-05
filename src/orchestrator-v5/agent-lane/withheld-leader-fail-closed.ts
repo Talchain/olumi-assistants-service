@@ -1,3 +1,4 @@
+import { readUnsizedPathLeaderCause, unsizedLinkSentence } from './unsized-path-cause.js';
 /**
  * ⛔ AGENT LANE — WHEN THE LEADER IS WITHHELD, NO RANKING SENTENCE REACHES THE USER.
  *
@@ -75,6 +76,7 @@ import { goalChanceWithheldForAgent, sameWordsIn } from './goal-chance-withheld.
 import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
 import { leaderLicence } from '../compose/leader-licence.js';
 import {
+  WITHHELD_GOAL_PATH_UNSIZED,
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_LEADER_CAUSE_UNRECORDED,
   WITHHELD_NEAR_TIE,
@@ -1055,7 +1057,7 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
   return warnings.map((w) => (w as { code?: unknown } | null)?.code).filter((c): c is string => typeof c === 'string');
 }
 
-type GoalFigureCoHold = { readonly why: string; readonly action?: string };
+type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string };
 
 /** The run's own goal-figure warning, kept separate from decision-brief limit warnings. */
 function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold | undefined {
@@ -1064,30 +1066,32 @@ function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold |
     { enrichment?: { inference_warnings?: unknown }; inference_warnings?: unknown } | undefined;
   const warnings = result?.enrichment?.inference_warnings ?? result?.inference_warnings;
   if (!Array.isArray(warnings)) return undefined;
-  const codes = warnings.filter((w): w is { code: string; node_ids?: unknown; message?: unknown } =>
+  const codes = warnings.filter((w): w is { code: string; node_ids?: unknown; message?: unknown; links?: unknown } =>
     typeof (w as { code?: unknown } | null)?.code === 'string');
-  if (codes.some((w) => w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')) {
+  if (codes.some((w) => w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')
+    && !codes.some((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')) {
     return { why: 'Olumi has not read your goal as the product of your own figures, so its figures cannot yet support a comparison' };
   }
   const warning = codes.find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
   if (warning === undefined) return undefined;
-  const ids = new Set(Array.isArray(warning.node_ids) ? warning.node_ids.filter((id): id is string => typeof id === 'string') : []);
-  const g = graph as { nodes?: unknown; edges?: unknown } | null;
+  const cause = readUnsizedPathLeaderCause(result);
+  const g = graph as { nodes?: unknown } | null;
   const nodes = Array.isArray(g?.nodes) ? g.nodes as Array<{ id?: unknown; label?: unknown }> : [];
-  const edges = Array.isArray(g?.edges) ? g.edges as Array<{ from?: unknown; to?: unknown }> : [];
-  const matches = edges.filter((e) => typeof e.from === 'string' && typeof e.to === 'string' && ids.has(e.from) && ids.has(e.to));
-  if (matches.length !== 1) return { why: 'Olumi has not sized a link on the way to your goal, so its figures cannot yet support a comparison' };
-  const label = (id: unknown): string => {
-    const value = nodes.find((n) => n.id === id)?.label;
-    return `‘${typeof value === 'string' && value.trim() !== '' ? value.trim() : String(id)}’`;
+  const label = (id: string): string => {
+    const value = nodes.find(n => n.id === id)?.label;
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : id;
   };
-  const link = `how ${label(matches[0]!.from)} moves ${label(matches[0]!.to)}`;
-  return {
-    why: `Olumi has not sized ${link}, so its figures cannot yet support a comparison`,
-    // Only the producer's own warning can attest that asking for this size is an available next step.
-    action: typeof warning.message === 'string' && warning.message.includes('Give a figure for')
-      ? `give a figure for ${link} and Olumi will use it` : undefined,
-  };
+  const ids = Array.isArray(warning.node_ids) ? warning.node_ids : [];
+  const oldEdges = (graph as { edges?: Array<{ from: string; to: string }> } | null)?.edges ?? [];
+  const legacyLinks = oldEdges.filter(l => ids.includes(l.from) && ids.includes(l.to));
+  const links = cause?.links ?? (cause !== undefined ? [cause] : Array.isArray(warning.links)
+    ? warning.links.flatMap(l => {
+      const link = l as { from?: unknown; to?: unknown } | null;
+      return typeof link?.from === 'string' && typeof link.to === 'string'
+        ? [{ from: link.from, to: link.to, from_label: label(link.from), to_label: label(link.to) }] : [];
+    }) : legacyLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })));
+  const words = unsizedLinkSentence(links);
+  return words !== '' ? { why: words, say: words } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
 }
 
 /** Keyed by the admission's `permitted_analysis_mode` reason code, when the claim itself did not withhold. */
@@ -1194,6 +1198,8 @@ export function agentNoLeaderSentence(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
   limitAskIds?: ReadonlySet<string>, separation?: string, goalFigureCoHold?: GoalFigureCoHold,
 ): string {
+  if (goalFigureCoHold?.say !== undefined && (withheldReason === WITHHELD_GOAL_PATH_UNSIZED
+    || withheldReason === undefined || withheldReason === WITHHELD_SEPARATION_UNAVAILABLE || withheldReason === WITHHELD_LEADER_CAUSE_UNRECORDED)) return goalFigureCoHold.say;
   return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds, separation, goalFigureCoHold));
 }
 
@@ -1214,7 +1220,7 @@ function singleCauseClause(
   const admission = admissionClause(analysisReady);
   // A warning in an old Run is not a current blocker after the model changes. Only the claim's generic
   // separation/unrecorded states can be explained by this Run's goal-figure warning.
-  const goalWarningExplainsClaim = withheldReason === undefined || withheldReason === WITHHELD_SEPARATION_UNAVAILABLE
+  const goalWarningExplainsClaim = withheldReason === WITHHELD_GOAL_PATH_UNSIZED || withheldReason === undefined || withheldReason === WITHHELD_SEPARATION_UNAVAILABLE
     || withheldReason === WITHHELD_LEADER_CAUSE_UNRECORDED;
   if (admission !== undefined && goalFigureCoHold !== undefined && goalWarningExplainsClaim) {
     const why = admission.split(';')[0]!.trim();
