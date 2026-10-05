@@ -4,7 +4,9 @@
  * or reads it: the fact, the reply and every hash are unchanged.
  *
  * Real `run_analysis` handler and real snapshot loader. Fixtures:
- * - the served fa027cf5 graph (Acceptance receipt hourly-0325-20261005), with the served Run's own option rows;
+ * - the served fa027cf5 graph (Acceptance receipt hourly-0325-20261005) and the served Run's own option statistics,
+ *   inside a SYNTHETIC envelope: the golden happy response, whose `robustness.level: 'moderate'` supplies the
+ *   separation. These rows cover the handler; they do NOT establish the served Run's own licence (Codex r2 P2);
  * - the served cut-costs graph + PLoT body (scenario 714abc5c, CEE 1f9d769), whose goal figures are withheld on the
  *   placeholder path (the a994c38a class: the constraint verdict permits, the Run stores no leader).
  * Shapes marked SYNTHETIC are self-authored variations of the served rows.
@@ -46,7 +48,8 @@ import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../../../run-analysis-sn
 import { createRegistry, resolveHandler } from '../../registry.js';
 import { config } from '../../../../config/index.js';
 import { GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../../orchestrator/context/option-result-source.js';
-import { leaderLicenceVerdict, type LeaderLicenceVerdictInput } from '../../../compose/leader-licence-verdict.js';
+import { leaderLicenceVerdict, storedResultRecords, type LeaderLicenceVerdictInput } from '../../../compose/leader-licence-verdict.js';
+import { readResultRecords } from '../run-analysis.js';
 import {
   WITHHELD_CONSTRAINT_VERDICT, WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT, WITHHELD_GOAL_SCOPE_UNRESOLVED,
   WITHHELD_LEADER_CAUSE_UNRECORDED, WITHHELD_NEAR_TIE, WITHHELD_NO_OPTION_MEETS_LIMIT,
@@ -77,7 +80,7 @@ const PAIR: Record<string, Stats> = {
   integration_bug_fix_sprint: { w: 0.3, mean: 0.012, std: 0.05, p10: -0.05, p50: 0.01, p90: 0.08 },
   continue_current_plan: { w: 0.3, mean: 0.012, std: 0.05, p10: -0.05, p50: 0.01, p90: 0.08 },
 };
-type Shape = 'served' | 'pair_same' | 'near_tie' | 'label_only';
+type Shape = 'served' | 'pair_same' | 'near_tie' | 'label_only' | 'label_collision';
 
 function plotDouble(shape: Shape) {
   return {
@@ -96,6 +99,12 @@ function plotDouble(shape: Shape) {
       });
       // SYNTHETIC label_only: the engine's rows carry labels but no ids (the picker's documented label fallback).
       if (shape === 'label_only') for (const row of response.option_comparison as Rec[]) delete row.option_id;
+      // SYNTHETIC label_collision (Codex r2 P1): no ids, and each row's label is ANOTHER option's id.
+      if (shape === 'label_collision') {
+        const rows = response.option_comparison as Rec[];
+        const ids = rows.map((r) => String(r.option_id));
+        rows.forEach((row, i) => { delete row.option_id; row.option_label = ids[(i + 1) % ids.length]; });
+      }
       response.option_comparison_status = 'computed';
       response.results = (response.option_comparison as Rec[]).map((r) => ({ ...(r.option_id === undefined ? {} : { option_id: r.option_id }),
         option_label: r.option_label, win_probability: r.win_probability }));
@@ -152,14 +161,14 @@ function shadowOf(r: { fact: Rec; shadows: Rec[] }): Rec {
 }
 
 describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
-  it('PRE: the served fa027cf5 Run stores AI Reporting Module Sprint as its leader and its constraint verdict entitles it', async () => {
+  it('PRE (served graph + statistics, SYNTHETIC envelope): the Run stores AI Reporting Module Sprint as its leader and its constraint verdict entitles it', async () => {
     const r = await runOnce(FA027, fa027Graph, plotDouble('served'));
     expect(r.fact.result.leading_option_id).toBe(LEADER);
     expect(r.fact.result.constraint_verdict.may_name_leading_option).toBe(true);
     expect(warningCodes(r.fact)).toEqual([]);
   });
 
-  it('L1-b: a separated comparative_leader Run is `permitted`, names the stored leader, and every live site agrees', async () => {
+  it('L1-b (SYNTHETIC envelope): a separated comparative_leader Run is `permitted`, names the stored leader, and every live site agrees', async () => {
     const e = shadowOf(await runOnce(FA027, fa027Graph, plotDouble('served')));
     expect(e).toMatchObject({ verdict: 'permitted', leader_option_id: LEADER, reason: null, caveats: [],
       admission_mode: 'comparative_leader', claim_reason: null, failed_closed: false });
@@ -239,6 +248,15 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
     for (const label of labels) expect(logged).not.toContain(label);
   });
 
+  it('P1-2 r2: a label that equals ANOTHER option\'s id never licenses that option', async () => {
+    const r = await runOnce(FA027, fa027Graph, plotDouble('label_collision'));
+    // Precondition: the winner (AI Reporting, the largest share) carried the NEXT option's id as its label, and the
+    // picker stored that id: a sent id, for the wrong option.
+    expect(r.fact.result.leading_option_id).toBe('integration_bug_fix_sprint');
+    const e = shadowOf(r);
+    expect(e).toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: 'identity_conflict' });
+  });
+
   it('L1-g: nothing is stored: the result has no verdict key and parses; the strict schema REJECTS one (why L1 is log-only)', async () => {
     const r = await runOnce(FA027, fa027Graph, plotDouble('served'));
     expect(r.fact.result).not.toHaveProperty('leader_licence');
@@ -249,7 +267,8 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
 
 const BASE: LeaderLicenceVerdictInput = {
   runId: 'run-1', graphHash: 'gh-1',
-  result: { leading_option_id: 'opt_a', enrichment: { inference_warnings: [] },
+  result: { leading_option_id: 'opt_a',
+    enrichment: { inference_warnings: [], option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }, { option_id: 'opt_b', win_probability: 0.3 }] },
     input_snapshot: { options: [{ option_id: 'opt_a' }, { option_id: 'opt_b' }] } },
   licence: 'permitted', leaderClaim: { permitted: true, separation: 'separated' },
   analysisReady: { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } },
@@ -277,6 +296,27 @@ describe('A2 L1 verdict mapping (pure; SYNTHETIC inputs)', () => {
   it('a licence with no stored leader names nobody (withheld, reason unknown)', () => {
     expect(leaderLicenceVerdict({ ...BASE, result: { ...BASE.result, leading_option_id: undefined } }))
       .toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: null });
+  });
+
+  it('P1-2 r2: rows without their own sent id (labels only, or mixed) are `identity_conflict` even when the leader is a sent id', () => {
+    const snap = { options: [{ option_id: 'opt_a' }, { option_id: 'opt_b' }] };
+    const collision = { leading_option_id: 'opt_b', input_snapshot: snap, enrichment: { inference_warnings: [],
+      option_comparison: [{ option_label: 'opt_b', win_probability: 0.8 }, { option_label: 'Second', win_probability: 0.2 }] } };
+    expect(leaderLicenceVerdict({ ...BASE, result: collision })).toMatchObject({ verdict: 'withheld', reason: 'identity_conflict' });
+    const mixed = { ...collision, enrichment: { inference_warnings: [],
+      option_comparison: [{ option_id: 'opt_b', win_probability: 0.8 }, { option_label: 'Second', win_probability: 0.2 }] } };
+    expect(leaderLicenceVerdict({ ...BASE, result: mixed })).toMatchObject({ verdict: 'withheld', reason: 'identity_conflict' });
+    // Contrast: the same Run with ids on every row names opt_b.
+    const ided = { ...collision, enrichment: { inference_warnings: [],
+      option_comparison: [{ option_id: 'opt_b', win_probability: 0.8 }, { option_id: 'opt_a', win_probability: 0.2 }] } };
+    expect(leaderLicenceVerdict({ ...BASE, result: ided })).toMatchObject({ verdict: 'permitted', leader_option_id: 'opt_b' });
+  });
+
+  it('PARITY: the verdict reads the rows the picker reads (`readResultRecords`)', () => {
+    const cmp = [{ option_id: 'a' }]; const res = [{ option_id: 'b' }];
+    for (const env of [{ option_comparison: cmp, results: res }, { option_comparison: [], results: res }, { results: res }, {}]) {
+      expect(storedResultRecords(env)).toEqual(readResultRecords(env as never));
+    }
   });
 
   it('P1-2: a stored leader that is not an option this Run sent is `identity_conflict`; no snapshot names nobody', () => {

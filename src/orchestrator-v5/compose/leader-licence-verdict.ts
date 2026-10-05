@@ -122,6 +122,19 @@ function goalFigureReason(result: Rec): LeaderLicenceWithheldReason | null {
   return 'goal_figures_withheld';
 }
 
+/**
+ * The per-option rows the leader picker read, off the STORED envelope: `option_comparison`, else `results` (the same
+ * precedence as `readResultRecords`, run-analysis.ts; a parity row pins the two together).
+ */
+export function storedResultRecords(envelope: Rec | null): readonly Rec[] {
+  if (envelope === null) return [];
+  for (const key of ['option_comparison', 'results'] as const) {
+    const v = envelope[key];
+    if (Array.isArray(v) && v.length > 0) return v.filter((r): r is Rec => rec(r) !== null);
+  }
+  return [];
+}
+
 /** The option ids this Run sent to the engine, or null when the Run recorded no input snapshot. */
 function sentOptionIds(result: Rec): ReadonlySet<string> | null {
   const options = rec(result.input_snapshot)?.options;
@@ -169,7 +182,13 @@ export function leaderLicenceVerdict(input: LeaderLicenceVerdictInput): LeaderLi
   if (stored === null) return withheld(null);
   const sent = sentOptionIds(input.result);
   if (sent === null) return withheld(null);
-  if (!sent.has(stored)) return withheld('identity_conflict');
+  // Membership alone cannot tell an id from a label that happens to equal another option's id (Codex #2579 r2 P1):
+  // every row the picker read must carry its own sent `option_id`, and the leader must be one of those ids.
+  const rows = storedResultRecords(rec(input.result.enrichment));
+  const rowIds = rows.map((r) => r.option_id);
+  const everyRowIdentified = rows.length > 0
+    && rowIds.every((id) => typeof id === 'string' && id !== '' && sent.has(id));
+  if (!sent.has(stored) || !everyRowIdentified || !rowIds.includes(stored)) return withheld('identity_conflict');
   const leader = stored;
   const caveats: LeaderLicenceCaveat[] = [];
   if (mode === 'quantified_provisional') caveats.push('provisional_mode');
