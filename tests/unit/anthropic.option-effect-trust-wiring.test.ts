@@ -36,8 +36,10 @@ vi.mock("../../src/adapters/llm/prompt-loader.js", () => ({
  * added since it was written (CLAUDE.md trap 12 — it once killed 51 tests here).
  * Only `shouldKeepCompletion` is wrapped, and it still calls through.
  */
-vi.mock("../../src/cee/draft/records/index.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/cee/draft/records/index.js")>();
+// The Anthropic route compiles records through the frozen records-v25 (#2573 F1, DL FREEZE), so the wrap is on the
+// module anthropic.ts actually imports.
+vi.mock("../../src/cee/draft/records-v25/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/cee/draft/records-v25/index.js")>();
   return {
     ...actual,
     shouldKeepCompletion: (...args: unknown[]) => {
@@ -160,7 +162,7 @@ describe("the adapter threads the trust decision into the production keep logic"
     streamSpy.mockImplementation(fakeStream(RECORDS_WITH_INVALID_OPTION_EFFECT_SOURCE));
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
     const result = await draftGraphWithAnthropic({ brief: "Should we hold the price at £49 to reach £20k MRR?", docs: [], seed: 3, model: "claude-sonnet-4-6" });
-    const { draftRequestIdentity } = await import("../../src/cee/draft/records/lineage.js");
+    const { draftRequestIdentity } = await import("../../src/cee/draft/records-v25/lineage.js");
     const lineage = result.meta?.raw_draft_lineage;
     expect(lineage).toBeDefined();
     expect(lineage!.provider_output.decoded_input).toEqual(JSON.parse(RECORDS_WITH_INVALID_OPTION_EFFECT_SOURCE));

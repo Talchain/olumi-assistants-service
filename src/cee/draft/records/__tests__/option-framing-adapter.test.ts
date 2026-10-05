@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { CEEGraphResponseV3 } from '../../../../schemas/cee-v3.js';
 import { transformResponseToV3 } from '../../../transforms/schema-v3.js';
 import { projectDraftRecords } from '../seam.js';
+import { projectDraftRecords as projectFrozenV25Records } from '../../records-v25/seam.js';
 import { enumerateCompletionAsk, modelAnswerableAskItems } from '../completion.js';
 import type { DraftRecordSet } from '../grammar.js';
 
@@ -135,7 +136,19 @@ describe('final adapter reconciliation before any graph consumer', () => {
     const option = wire.options.find(o => o.id === before.id)!;
     const ready = wire.analysis_ready!.options.find((o: { id: string }) => o.id === before.id)!;
     expect(adapterNode.label).toBe('Hold Price (Status Quo)');
-    expect(adapterNode.data?.interventions).toEqual(before.data?.interventions);
+    // Science ruling 2026-10-05 P2-FRAME accepted change. The Anthropic route compiles through the FROZEN records-v25
+    // copy, which keeps the {1,2,5} ladder (frame 2 → 0.5); the records seam now frames by defaultFrameFor (frame 10 →
+    // 0.1). Old: adapter interventions toEqual the records seam's. New: they equal the frozen v25 seam's own projection
+    // (reconciliation still preserves the intervention by identity), and the records-seam level is pinned to its ruled
+    // value. raw_interventions still agree across both (asserted next).
+    const frozen = projectFrozenV25Records(JSON.parse(fixture.raw_text), fixture.brief);
+    expect(frozen.ok).toBe(true);
+    if (!frozen.ok) throw new Error('Captured record set must validate on the frozen v25 seam');
+    const frozenNodes = frozen.projection.graph.nodes.filter(n => n.id === before.id);
+    expect(frozenNodes, 'identity: the captured option on the frozen v25 seam').toHaveLength(1);
+    expect(adapterNode.data?.interventions).toEqual(frozenNodes[0]!.data?.interventions);
+    expect(adapterNode.data?.interventions).toEqual({ '5f3b2b5d': 0.5 });
+    expect(before.data?.interventions).toEqual({ '5f3b2b5d': 0.1 });
     expect(adapterNode.data?.raw_interventions).toEqual(before.data?.raw_interventions);
     expect(node.label).toBe(adapterNode.label);
     expect(option.label).toBe(node.label);

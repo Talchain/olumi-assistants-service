@@ -605,6 +605,11 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "incidental — one comment occurrence; delegates all magnitude matching to isAmountStatedInBrief and spells no alphabet",
     "cee/draft/records/projector.ts":
       "incidental — one comment occurrence quoting the audit fixture; the file spells no alphabet and parses no magnitude words",
+    // #2573 F1 (DL FREEZE): byte-identical staging copies (890923c9) for the Anthropic route; same reasons as the live files.
+    "cee/draft/records-v25/projector.ts":
+      "frozen staging copy of cee/draft/records/projector.ts — incidental, one comment occurrence; no alphabet, no magnitude parsing",
+    "cee/draft/records-v25/not-modelled-manifest.ts":
+      "frozen staging copy of cee/context-integrity/not-modelled-manifest.ts — no lookup; imports the canonical alphabet, words only in a comment",
     "utils/magnitude-alphabet.ts": "the canonical alphabet itself",
     "cee/extraction/numeric-parser.ts":
       "DERIVED from the canonical alphabet since ROADMAP 2.1130 — `MULTIPLIERS` is a re-export and every " +

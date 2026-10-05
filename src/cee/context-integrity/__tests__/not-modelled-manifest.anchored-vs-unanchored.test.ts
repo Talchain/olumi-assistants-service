@@ -1,3 +1,6 @@
+/** A16: historical label-only matches are now prose_only. The published tally
+ * fields remain compatible, with zero unanchored admissions. Original captures
+ * and literal identities below stay unchanged. */
 /**
  * AN `in_model` VERDICT THAT NAMES NO NODE IS NOT THE SAME CLAIM AS ONE THAT
  * DOES — and until this spec there was no field in which to say so.
@@ -101,7 +104,7 @@ describe("the corpus is real, non-empty and untruncated", () => {
     expect(q, "the capture must derive").not.toBeNull();
     expect(q!.truncated, "a truncated capture invalidates every union assertion here").toBe(false);
     expect(q!.items.length).toBe(q!.total);
-    expect(q!.in_model, "the capture must carry at least one in_model verdict").toBeGreaterThan(0);
+    expect(q!.in_model + q!.prose_only, "the capture must contain retained numbers or disclosure text").toBeGreaterThan(0);
   });
 });
 
@@ -127,10 +130,9 @@ describe("an in_model verdict that names no node is counted as unanchored", () =
     (name, capture) => {
       const q = manifestFor(capture).quantities!;
       const unanchored = q.items.filter(isUnanchoredInModel);
-      expect(
-        unanchored.map((i) => i.literal),
-        "the capture must still carry the measured unanchored figures",
-      ).toEqual(EXPECTED_UNANCHORED[name]);
+      expect(unanchored).toEqual([]);
+      expect(q.items.filter(i => EXPECTED_UNANCHORED[name]!.includes(i.literal)
+        && i.verdict === "prose_only").map(i => i.literal)).toEqual(EXPECTED_UNANCHORED[name]);
       expect(q.in_model_unanchored).toBe(unanchored.length);
     },
   );
@@ -155,7 +157,7 @@ describe("an in_model verdict that names no node is counted as unanchored", () =
     },
   );
 
-  it("holds at the measured 11-of-18 scale across the whole corpus", () => {
+  it("reclassifies all eleven historical label echoes and preserves seven anchored figures", () => {
     let inModel = 0;
     let unanchored = 0;
     let anchored = 0;
@@ -165,8 +167,8 @@ describe("an in_model verdict that names no node is counted as unanchored", () =
       unanchored += q.in_model_unanchored;
       anchored += q.in_model_anchored;
     }
-    expect(inModel).toBe(18);
-    expect(unanchored).toBe(11);
+    expect(inModel).toBe(7);
+    expect(unanchored).toBe(0);
     expect(anchored).toBe(7);
   });
 });

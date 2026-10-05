@@ -49,13 +49,18 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
-import { statedEffectQuoteMatches } from "../provenance/stated-effect.js";
+import { magnitudeNodes, percentLevelIds } from "../magnitude/frame-defaulted-links.js";
+import { sizeLink, unitOf } from "../magnitude/link-effect.js";
+import { sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
+import { statedEffectQuoteMatches, statedEffectFiguresMatch, readStatedRelationship } from "../provenance/stated-effect.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
 } from "../graph-readiness/obligation-provenance.js";
 import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
 import type { ObservedStateStatedRole } from "./stated-role-vocabulary.js";
+import { STATED_DISPOSITIONS_KEY } from "../../schemas/graph-stated-dispositions.js";
+import type { StatedDispositionV3T } from "../../schemas/graph-stated-dispositions.js";
 
 /** Wire schema discriminator. The UI lane builds against this. */
 export const NOT_MODELLED_SCHEMA = "not_modelled.v1" as const;
@@ -70,7 +75,7 @@ export const MAX_ITEMS = 200;
 
 export type QuantityKind = "money" | "percent" | "count" | "date" | "period";
 
-/** in_model = carried as a value, cap, unit or label. prose_only = mentioned in
+/** in_model = carried by a numeric carrier. A label echo is prose_only: mentioned in
  *  commentary/coaching but not parameterising anything. absent = nowhere. */
 export type QuantityVerdict = "in_model" | "prose_only" | "absent";
 
@@ -169,6 +174,8 @@ export interface NotModelledItem {
    * silence.
    */
   readonly stated_kind: StatedKind;
+  /** Read-only coverage gap; it supplies no value, range or causal link. */
+  readonly reason?: "no_executable_quantity_carrier";
 }
 
 export interface NotModelledManifest {
@@ -281,6 +288,39 @@ export interface NotModelledManifest {
   };
   /** Loss classes this derivation CANNOT observe. The anti-reassurance field. */
   readonly not_tracked: readonly string[];
+  /**
+   * WHAT THE RECORDS COMPILER ITSELF DECIDED, read from the graph's persisted receipt (`graph.stated_dispositions`,
+   * written only by the register route). PRESENT ONLY when the stored graph carries one, so every other manifest is
+   * byte-identical to before. See `readStatedDispositions`.
+   */
+  readonly stated_dispositions?: StatedDispositionsBlock;
+}
+
+/**
+ * One stated item the compiler REJECTED (with its typed reason) or ASKED about — a disposition the compiler TYPED,
+ * as opposed to the read-time `no_executable_quantity_carrier` label this module stamps on every unmodelled figure.
+ * `char_offset` addresses the user's own bytes in `brief_text`: the stated figure when its span is recorded (the same
+ * identity as the matching `quantities.items[]` row), else the start of the stated sentence.
+ */
+export interface StatedDispositionRow {
+  readonly stated_index: number;
+  readonly stated_item_kind: string;
+  readonly literal: string;
+  readonly char_offset: number;
+  readonly disposition: "rejected" | "clarification_asked";
+  readonly reason: string;
+  readonly typed: true;
+}
+
+export interface StatedDispositionsBlock {
+  readonly status: "recorded";
+  /** Receipts whose item the compiler CARRIED onto the model — counted, never rows: they are not losses. */
+  readonly carried: number;
+  /** Receipts whose sentence is not in this brief — counted, never placed at a guessed offset. */
+  readonly unlocated: number;
+  /** Read-time `quantities.items` rows NOT reported because a typed row holds the same `char_offset` AND literal. */
+  readonly superseded: number;
+  readonly items: readonly StatedDispositionRow[];
 }
 
 /**
@@ -512,6 +552,9 @@ const TOP_KEY_CLASS: ReadonlyMap<string, TopKeyClass> = new Map<string, TopKeyCl
   ["quality", "skip"],
   ["analysis_ready", "skip"],
   ["schema_version", "skip"],
+  // The records compiler's receipt QUOTES the user's sentences. It is our bookkeeping about the model, not the model:
+  // searched, it would turn a figure the model does not hold from `absent` into `prose_only`.
+  [STATED_DISPOSITIONS_KEY, "skip"],
   ["coaching", "prose"],
   ["draft_warnings", "prose"],
   ["validation_warnings", "prose"],
@@ -1454,6 +1497,8 @@ function collectBriefNaturalEffectCandidates(
   briefText: string,
 ): Candidate[] {
   if (!Array.isArray(graph.edges)) return [];
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === "object" && !Array.isArray(n)) : [];
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
   const labels = new Map<string, string>();
   if (Array.isArray(graph.nodes)) {
     for (const raw of graph.nodes) {
@@ -1479,25 +1524,59 @@ function collectBriefNaturalEffectCandidates(
     const sourceLabel = labels.get(from);
     const targetLabel = labels.get(to);
     if (sourceLabel === undefined || targetLabel === undefined) continue;
-    const quote = p.quote;
+    // Codex R2 F3: only the records compiler writes `stated_relationship`. A carrier without it (the frozen Anthropic
+    // compile, native agent admission) is read back by staging's check: its `quote`, its four typed fields located in
+    // that quote, and the direction rule below. The literal-backed, re-sized check is for the records evidence alone.
+    const recordsEvidence = p.stated_relationship !== undefined && p.stated_relationship !== null;
+    const quote = recordsEvidence ? p.source_quote ?? p.quote : p.quote;
     if (typeof quote !== "string" || quote.length === 0 || !briefText.includes(quote)) continue;
 
     const amount = natural.amount;
     const amountUnit = natural.amount_unit;
     const perSourceChange = natural.per_source_change;
     const perSourceChangeUnit = natural.per_source_change_unit;
-    if (
-      typeof amount !== "number" ||
-      typeof amountUnit !== "string" ||
-      typeof perSourceChange !== "number" ||
-      typeof perSourceChangeUnit !== "string" ||
-      !statedEffectQuoteMatches(quote, {
-        amount,
-        amount_unit: amountUnit,
-        per_source_change: perSourceChange,
-        per_source_change_unit: perSourceChangeUnit,
-      })
-    ) continue;
+    if (!recordsEvidence) {
+      if (typeof amount !== "number" || typeof amountUnit !== "string" || typeof perSourceChange !== "number"
+        || typeof perSourceChangeUnit !== "string" || !statedEffectFiguresMatch(quote, {
+          amount, amount_unit: amountUnit, per_source_change: perSourceChange, per_source_change_unit: perSourceChangeUnit,
+        })) continue;
+    } else {
+      const authority = readStatedRelationship(p.stated_relationship);
+      const evidence = p.stated_relationship as { from_node?: unknown; to_node?: unknown } | undefined;
+      const source = view.get(from), target = view.get(to);
+      const strength = edge.strength as { mean?: unknown } | undefined;
+      const mean = strength?.mean ?? edge.strength_mean;
+      if (authority === undefined || evidence?.from_node !== from || evidence.to_node !== to
+        || source === undefined || target === undefined || typeof mean !== "number" || !Number.isFinite(mean)
+        || typeof amount !== "number" || typeof perSourceChange !== "number"
+        || typeof amountUnit !== "string" || typeof perSourceChangeUnit !== "string"
+        || !sameUnit(amountUnit, unitOf(target) ?? "") || !sameUnit(perSourceChangeUnit, unitOf(source) ?? "")) continue;
+      // Codex R2 F4: a stated range is re-sized by the compiler's own contract (sizeLink's `amount_range`, the B1 rule),
+      // never by the default spread. A range that is present but unreadable earns nothing.
+      const storedRange = (p.stated_relationship as { range?: unknown }).range;
+      const range = storedRange as { low?: unknown; high?: unknown } | null | undefined;
+      const amountRange = range !== null && typeof range === "object" && typeof range.low === "number" && Number.isFinite(range.low)
+        && typeof range.high === "number" && Number.isFinite(range.high) ? { low: range.low, high: range.high } : undefined;
+      if (storedRange !== undefined && amountRange === undefined) continue;
+      const sized = sizeLink({ direction: amount * perSourceChange < 0 ? "negative" : "positive",
+        effect_amount: amount, effect_per_source_change: perSourceChange, user_stated: true,
+        ...(amountRange !== undefined ? { amount_range: amountRange } : {}) }, source, target);
+      const std = (edge.strength as { std?: unknown } | undefined)?.std ?? edge.strength_std;
+      if (sized.problem !== undefined || sized.outcome !== "user_stated" || mean !== sized.mean
+        || std !== sized.std || natural.strength_mean !== mean) continue;
+      if (
+        typeof amount !== "number" ||
+        typeof amountUnit !== "string" ||
+        typeof perSourceChange !== "number" ||
+        typeof perSourceChangeUnit !== "string" ||
+        !statedEffectQuoteMatches(quote, {
+          amount,
+          amount_unit: amountUnit,
+          per_source_change: perSourceChange,
+          per_source_change_unit: perSourceChangeUnit,
+        }, authority)
+      ) continue;
+    }
     const effectDirection = edge.effect_direction;
     const signedEffect = Math.sign(amount) * Math.sign(perSourceChange);
     if (
@@ -1749,10 +1828,8 @@ function classify(
 ): { verdict: QuantityVerdict; matched: Candidate | null } {
   const matched = matchCandidate(q, s.candidates);
   if (matched !== null) return { verdict: "in_model", matched };
-  // Text is the second route: a figure written into a label, a unit string or
-  // an encoding-map caption ("45 roles offshored (~40% saving)", "(Jan 2027)")
-  // is genuinely carried by the model even though it is not a numeric field.
-  if (appearsInStrings(q, s.modelStrings)) return { verdict: "in_model", matched: null };
+  // A label echo is disclosure text, never an executable quantity carrier.
+  if (appearsInStrings(q, s.modelStrings)) return { verdict: "prose_only", matched: null };
   if (appearsInStrings(q, s.proseStrings)) return { verdict: "prose_only", matched: null };
   return { verdict: "absent", matched: null };
 }
@@ -1926,6 +2003,61 @@ const UNAVAILABLE = (
   not_tracked: NOT_TRACKED_CLASSES,
 });
 
+/** A recorded span inside its own quote, or null — never a guessed position. */
+function spanIn(quote: string, span: unknown): { start: number; end: number } | null {
+  if (span === null || typeof span !== "object") return null;
+  const { start, end } = span as { start?: unknown; end?: unknown };
+  return Number.isInteger(start) && Number.isInteger(end) && (start as number) >= 0
+    && (start as number) < (end as number) && (end as number) <= quote.length
+    ? { start: start as number, end: end as number }
+    : null;
+}
+
+/**
+ * The compiler's TYPED dispositions. The rows arrive ALREADY BOUND by the caller: the cold read passes
+ * `currentStatedDispositionRows(graph)` (`orchestrator-v5/graph/stated-dispositions-binding.ts`), which yields them only
+ * while the graph's full-content hash, receipt omitted, equals the receipt's `reconciled_against` (P1/R2). The binding is not
+ * computed here: this pure module is shared with the draft pipeline (boundary stage, enricher, narrative), none of
+ * which reads a stored graph, and keeping the identity hash's module graph out of it leaves this module's imports as
+ * they were. `undefined` — no bound rows passed, or a stale/unbound/malformed receipt — is absence, never a guess:
+ * the manifest gains no key and every clause keeps its untyped read-time row.
+ */
+function readStatedDispositions(
+  briefText: string,
+  rows: readonly StatedDispositionV3T[] | undefined,
+): Omit<StatedDispositionsBlock, "superseded"> | undefined {
+  if (rows === undefined) return undefined;
+  let carried = 0;
+  let unlocated = 0;
+  const items: StatedDispositionRow[] = [];
+  for (const row of rows) {
+    if (row.disposition === "carried") {
+      carried += 1;
+      continue;
+    }
+    const item = row.stated_item;
+    const quote = item.source_quote;
+    const at = quote.length === 0 ? -1 : briefText.indexOf(quote);
+    if (at < 0) {
+      unlocated += 1;
+      continue;
+    }
+    const relationship = item.relationship as { amount_span?: unknown } | undefined;
+    const figure = spanIn(quote, item.value_span) ?? spanIn(quote, relationship?.amount_span);
+    items.push({
+      stated_index: row.stated_index,
+      stated_item_kind: item.kind,
+      literal: figure === null ? quote : quote.slice(figure.start, figure.end),
+      char_offset: at + (figure?.start ?? 0),
+      ...(row.disposition === "rejected"
+        ? { disposition: "rejected" as const, reason: row.reason }
+        : { disposition: "clarification_asked" as const, reason: "clarification_asked" }),
+      typed: true,
+    });
+  }
+  return { status: "recorded", carried, unlocated, items };
+}
+
 /**
  * Derive the manifest for one scenario.
  *
@@ -1936,6 +2068,8 @@ const UNAVAILABLE = (
 export function deriveNotModelledManifest(
   briefText: string | null | undefined,
   graph: unknown,
+  /** The graph's receipt rows, ONLY if bound to this graph (`currentStatedDispositionRows`). Omitted = no typed rows. */
+  options: { readonly statedDispositionRows?: readonly StatedDispositionV3T[] } = {},
 ): NotModelledManifest {
   if (typeof briefText !== "string" || briefText.trim().length === 0) {
     return UNAVAILABLE("no_brief_text");
@@ -1945,6 +2079,11 @@ export function deriveNotModelledManifest(
   }
 
   const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
+  const typedDispositions = readStatedDispositions(briefText, options.statedDispositionRows);
+  // The SAME quantity = same offset AND same located literal (R3): a typed `3` at the start of a scanned `30%` is not it.
+  const typedSpan = (at: number, literal: string): string => `${at}\u0000${literal}`;
+  const typedSpans = new Set(typedDispositions?.items.map((row) => typedSpan(row.char_offset, row.literal)) ?? []);
+  let superseded = 0;
   const quantities = extractStatedQuantities(briefText);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 
@@ -1972,7 +2111,12 @@ export function deriveNotModelledManifest(
       else inModelUnanchored += 1;
     } else if (verdict === "prose_only") proseOnly += 1;
     else absent += 1;
-    if (items.length < MAX_ITEMS) {
+    // ONE AUTHORITATIVE DISPOSITION PER SPAN (R2, Codex P2): where the compiler TYPED this figure, its typed row
+    // (`stated_dispositions.items`, same `char_offset` AND same literal) is the disposition, and the read-time row is not
+    // also reported. A quantity the typed row does not cover exactly is never hidden. Tallies above still count every quantity found; `superseded` says how many rows were replaced.
+    if (typedSpans.has(typedSpan(q.at, q.literal))) {
+      superseded += 1;
+    } else if (items.length < MAX_ITEMS) {
       const statedKind = classifyStatedKind(q, spans);
       tally[statedKind] += 1;
       items.push({
@@ -1984,6 +2128,7 @@ export function deriveNotModelledManifest(
         // match. A numeric match that cannot name its carrier is not a match.
         matched_node_id: matched?.nodeId ?? null,
         stated_kind: statedKind,
+        ...(verdict !== "in_model" ? { reason: "no_executable_quantity_carrier" as const } : {}),
       });
     }
   }
@@ -2001,7 +2146,7 @@ export function deriveNotModelledManifest(
       in_model_unanchored: inModelUnanchored,
       prose_only: proseOnly,
       absent,
-      truncated: quantities.length > items.length,
+      truncated: quantities.length > items.length + superseded,
       items,
     },
     stated_kinds: {
@@ -2018,6 +2163,7 @@ export function deriveNotModelledManifest(
       numericTokensIn(briefText),
     ),
     not_tracked: NOT_TRACKED_CLASSES,
+    ...(typedDispositions === undefined ? {} : { stated_dispositions: { ...typedDispositions, superseded } }),
   };
 }
 

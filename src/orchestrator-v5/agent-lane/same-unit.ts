@@ -4,13 +4,14 @@
  * the ONE Olumi-guess test DR row 4 and B6 share) can use `sameUnit` without importing admission (its import chain
  * reaches `placeholder-parts.ts` itself). `reconciling-product.ts` re-exports what it exported before.
  */
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 
 type Period = 'month' | 'year' | null;
 const MONTH = new Set(['month', 'months', 'mo', 'monthly', 'pcm', 'mrr']);
 const YEAR = new Set(['year', 'years', 'yr', 'annum', 'annual', 'annually', 'pa', 'arr']);
 export const words = (s: string): string[] => s.toLowerCase().replace(/[()]/g, ' ').replace(/\//g, ' / ').split(/[\s-]+/).filter((w) => w !== '');
-export const singular = (w: string): string => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
+export const singular = (w: string): string => (w.length > 4 && w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
 
 function periodOf(ws: readonly string[]): Period | 'both' {
   const m = ws.some((w) => MONTH.has(w));
@@ -87,12 +88,28 @@ export function readMoneyTotal(unit: unknown, label: string): { code: string; pe
   return m === null || m.mixed === true || m.per !== null || m.period === null ? null : { code: m.code, period: m.period };
 }
 
-/** A COUNT: words only ("subscribers", "paying customers") — no currency, no %, no period, no "per" (a rate). */
-export function readCount(unit: unknown): string[] | null {
-  if (typeof unit !== 'string' || !/^[a-z][a-z\s-]*$/i.test(unit.trim())) return null;
+/** A count with at most one monthly/yearly period. Reuses the money period vocabulary. */
+export function readCountRate(unit: unknown): { noun: string[]; period: Period } | null {
+  if (typeof unit !== 'string' || !/^[a-z][a-z\s/-]*$/i.test(unit.trim())) return null;
   const ws = words(unit);
-  if (ws.length === 0 || ws.includes('per') || periodOf(ws) !== null || readCurrencyUnitWithQualifiers(unit).kind === 'currency') return null;
-  return ws.map(singular);
+  if (ws.length === 0 || readCurrencyUnitWithQualifiers(unit).kind === 'currency') return null;
+  const periods = ws.filter(isPeriod);
+  if (periods.length > 1) return null;
+  const period = periodOf(ws);
+  if (period === 'both') return null;
+  const noun = ws.filter(w => !isPeriod(w) && w !== '/' && w !== 'per' && w !== 'a');
+  if (noun.length === 0 || (ws.includes('/') || ws.includes('per')) && period === null) return null;
+  return { noun: noun.map(singular), period };
+}
+/** Total-count consumer compatibility: a rate never becomes a count total. */
+export function readCount(unit: unknown): string[] | null {
+  const rate = readCountRate(unit);
+  return rate === null || rate.period !== null ? null : rate.noun;
+}
+/** Evidence periods use the same vocabulary and reject duplicates or competing periods. */
+export function evidencePeriod(parts: readonly string[]): Period | 'ambiguous' {
+  const ps = parts.flatMap(words).filter(isPeriod);
+  return ps.length > 1 ? 'ambiguous' : periodOf(ps) as Period;
 }
 
 /**
@@ -101,8 +118,9 @@ export function readCount(unit: unknown): string[] | null {
  * reads is compared word for word; no unit on either side is never the same.
  */
 export function sameUnit(a: unknown, b: unknown): boolean {
-  const ca = readCount(a); const cb = readCount(b);
-  if (ca !== null || cb !== null) return ca !== null && cb !== null && ca.join(' ') === cb.join(' ');
+  if(typeof a==='string' && typeof b==='string' && words(a).length===1 && words(b).length===1 && classifyUnitScaleClass(a)==='percent' && classifyUnitScaleClass(b)==='percent')return true;
+  const ca = readCountRate(a); const cb = readCountRate(b);
+  if (ca !== null || cb !== null) return ca !== null && cb !== null && ca.noun.join(' ') === cb.noun.join(' ') && ca.period === cb.period;
   const ma = readMoney(a, ''); const mb = readMoney(b, '');
   if (ma !== null || mb !== null) {
     return ma !== null && mb !== null && ma.code === mb.code && ma.period === mb.period && ma.mixed === mb.mixed

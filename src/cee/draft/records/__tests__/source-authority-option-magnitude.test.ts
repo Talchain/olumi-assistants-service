@@ -298,9 +298,11 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
   it("keeps £20k on the full switch, £0 on status quo, and £8k on a distinct pilot", () => {
     const projection = projectRecordsToGraph(records(), BRIEF);
 
-    expect(interventionOf(projection, FULL_SWITCH)).toBe(0.4);
+    // Science ruling 2026-10-05 P2-FRAME accepted change: the cost factor {20000, 0, 8000} frames at defaultFrameFor = 100000, not the ladder's 50000;
+    // 0.4 → 0.2 and 0.16 → 0.08 (raw values unchanged). The same move applies to every level in this file.
+    expect(interventionOf(projection, FULL_SWITCH)).toBe(0.2);
     expect(interventionOf(projection, STATUS_QUO)).toBe(0);
-    expect(interventionOf(projection, PILOT)).toBe(0.16);
+    expect(interventionOf(projection, PILOT)).toBe(0.08);
 
     expect(rawInterventionOf(projection, FULL_SWITCH)).toBe(20_000);
     expect(rawInterventionOf(projection, STATUS_QUO)).toBe(0);
@@ -358,12 +360,12 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     ).toBe(8_000);
 
     const projection = projectRecordsToGraph(records(), BRIEF);
-    expect(interventionOf(projection, FULL_SWITCH)).toBe(0.4);
+    expect(interventionOf(projection, FULL_SWITCH)).toBe(0.2); // Science ruling 2026-10-05 P2-FRAME accepted change: 0.4 → 0.2
 
     // Discrimination: mutating only the pilot cannot move the stated option.
     const changedPilot = projectRecordsToGraph(records({ pilotCost: 7_000 }), BRIEF);
-    expect(interventionOf(changedPilot, FULL_SWITCH)).toBe(0.4);
-    expect(interventionOf(changedPilot, PILOT)).toBe(0.14);
+    expect(interventionOf(changedPilot, FULL_SWITCH)).toBe(0.2); // Science ruling 2026-10-05 P2-FRAME accepted change: 0.4 → 0.2
+    expect(interventionOf(changedPilot, PILOT)).toBe(0.07); // Science ruling 2026-10-05 P2-FRAME accepted change: 0.14 → 0.07
     expect(rawInterventionOf(changedPilot, PILOT)).toBe(7_000);
   });
 
@@ -371,7 +373,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     const twinBrief = BRIEF.replace("£20,000", "£25,000");
     const twin = projectRecordsToGraph(records({ fullSwitchCost: 25_000 }), twinBrief);
 
-    expect(interventionOf(twin, FULL_SWITCH)).toBe(0.5);
+    expect(interventionOf(twin, FULL_SWITCH)).toBe(0.25); // Science ruling 2026-10-05 P2-FRAME accepted change: frame 50000 → 100000; 0.5 → 0.25
     expect(rawInterventionOf(twin, FULL_SWITCH)).toBe(25_000);
     expect(bindingOf(twin, FULL_SWITCH)).toMatchObject({
       raw_value: 25_000,
@@ -379,7 +381,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
       source: "brief_extraction",
     });
     expect(interventionOf(twin, STATUS_QUO)).toBe(0);
-    expect(interventionOf(twin, PILOT)).toBe(0.16);
+    expect(interventionOf(twin, PILOT)).toBe(0.08); // Science ruling 2026-10-05 P2-FRAME accepted change: 0.16 → 0.08
 
     const normalised = normaliseDraftResponse(structuredClone(twin.graph));
     const v3 = projectGraphAndOptionsToV3(normalised as never, { brief: twinBrief });
@@ -387,13 +389,13 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     const fullSwitch = v3OptionByLabel(v3.options, FULL_SWITCH);
     const pilot = v3OptionByLabel(v3.options, PILOT);
     expect(fullSwitch.interventions[factor.id]).toMatchObject({
-      value: 0.5,
+      value: 0.25, // Science ruling 2026-10-05 P2-FRAME accepted change: 0.5 → 0.25
       raw_value: 25_000,
       unit: "£",
       source: "brief_extraction",
     });
     expect(pilot.interventions[factor.id]).toMatchObject({
-      value: 0.16,
+      value: 0.08, // Science ruling 2026-10-05 P2-FRAME accepted change: 0.16 → 0.08
       raw_value: 8_000,
       source: "cee_hypothesis",
     });
@@ -423,7 +425,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     const v3 = projectGraphAndOptionsToV3(normalised as never, { brief: twinBrief });
     const factor = v3.graph.nodes.find((node) => node.label === COST)!;
     expect(v3OptionByLabel(v3.options, FULL_SWITCH).interventions[factor.id]).toMatchObject({
-      value: 0.5,
+      value: 0.25, // Science ruling 2026-10-05 P2-FRAME accepted change: 0.5 → 0.25
       raw_value: 25_000,
       unit: "£",
       source: "brief_extraction",
@@ -518,7 +520,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     });
 
     const projected = projectRecordsToGraph(runtimeShape, FACTOR_CARRIED_BRIEF);
-    expect(interventionOf(projected, FULL_SWITCH)).toBe(0.5);
+    expect(interventionOf(projected, FULL_SWITCH)).toBe(0.25); // Science ruling 2026-10-05 P2-FRAME accepted change: 0.5 → 0.25
     expect(rawInterventionOf(projected, FULL_SWITCH)).toBe(25_000);
     expect(bindingOf(projected, FULL_SWITCH)).toMatchObject({
       raw_value: 25_000,
@@ -540,7 +542,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     const fullSwitch = v3OptionByLabel(v3.options, FULL_SWITCH);
     const statusQuo = v3OptionByLabel(v3.options, STATUS_QUO);
     expect(fullSwitch.interventions[factor.id]).toMatchObject({
-      value: 0.5,
+      value: 0.25, // Science ruling 2026-10-05 P2-FRAME accepted change: 0.5 → 0.25
       raw_value: 25_000,
       unit: "£",
       source: "brief_extraction",
@@ -560,6 +562,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     //   display_value : "25,000"
     //   observed_state: { value: 0.5, raw_value: 25000 }   ← note: no `unit`
     //   scale_frame   : 50000
+    //   (Science ruling 2026-10-05 P2-FRAME accepted change: now { value: 0.25, … } / 100000.)
     //
     // So the blocker was telling the user "0.5" about a factor the rest of the
     // payload calls "25,000". The message now renders the factor's OWN display
@@ -587,7 +590,8 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     const factorDisplay = (factor as { display_value?: string }).display_value;
     expect(factorDisplay).toBe("25,000");
     expect(statusQuoBlocker!.message).toContain(`is currently ${factorDisplay}`);
-    expect(statusQuoBlocker!.message).not.toContain("is currently 0.5");
+    // Science ruling 2026-10-05 P2-FRAME accepted change: the internal level is now 0.25, so the negative binds the NEW level (0.5 would pass vacuously).
+    expect(statusQuoBlocker!.message).not.toContain("is currently 0.25");
   });
 
   it.each([
@@ -889,7 +893,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
 
     expect(projection.graph.nodes.filter((node) => node.kind === "option")).toHaveLength(2);
     expect(nodeByLabel(projection, FULL_SWITCH).provenance?.merged_refinements).toContain(PILOT);
-    expect(interventionOf(projection, FULL_SWITCH)).toBe(0.4);
+    expect(interventionOf(projection, FULL_SWITCH)).toBe(0.2); // Science ruling 2026-10-05 P2-FRAME accepted change: 0.4 → 0.2
     expect(rawInterventionOf(projection, FULL_SWITCH)).toBe(20_000);
     expect(interventionOf(projection, STATUS_QUO)).toBe(0);
   });
@@ -904,7 +908,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     const statusQuo = v3OptionByLabel(v3.options, STATUS_QUO);
 
     expect(fullSwitch.interventions[factor.id]).toMatchObject({
-      value: 0.4,
+      value: 0.2, // Science ruling 2026-10-05 P2-FRAME accepted change: 0.4 → 0.2
       raw_value: 20_000,
       unit: "£",
       source: "brief_extraction",
@@ -914,14 +918,14 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
       (node) => node.kind === "option" && node.source_quote === FULL_SWITCH,
     );
     expect(fullSwitchGraphNode?.interventions?.[factor.id]).toMatchObject({
-      value: 0.4,
+      value: 0.2, // Science ruling 2026-10-05 P2-FRAME accepted change: 0.4 → 0.2
       raw_value: 20_000,
       unit: "£",
       source: "brief_extraction",
     });
     expect(fullSwitch.raw_interventions?.[factor.id]).toBe(20_000);
     expect(pilot.interventions[factor.id]).toMatchObject({
-      value: 0.16,
+      value: 0.08, // Science ruling 2026-10-05 P2-FRAME accepted change: 0.16 → 0.08
       raw_value: 8_000,
       source: "cee_hypothesis",
     });
@@ -977,7 +981,7 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     const fullSwitch = v3OptionByLabel(v3.options, FULL_SWITCH);
 
     expect(fullSwitch.interventions[factor.id]).toMatchObject({
-      value: 0.4,
+      value: 0.2, // Science ruling 2026-10-05 P2-FRAME accepted change: 0.4 → 0.2
       raw_value: 20_000,
       source: "cee_hypothesis",
       reasoning: expect.stringContaining("unresolved stated-item binding"),

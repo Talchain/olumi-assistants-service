@@ -72,8 +72,9 @@ import type { DraftRecordSet } from "../grammar.js";
 const COST = "Annual support cost";
 const IN_HOUSE = "keep support in house";
 
-/** Draft frame for [300000, 400000]: smallest {1,2,5}·10^k strictly above 400000. */
-const EXPECTED_FRAME = 500_000;
+/** Draft frame for [300000, 400000]: the smallest power of ten strictly above 400000 (`defaultFrameFor`).
+ *  Science ruling 2026-10-05 P2-FRAME accepted change: 500_000 (the {1,2,5} ladder) → 1_000_000. */
+const EXPECTED_FRAME = 1_000_000;
 
 const RECORDS: DraftRecordSet = {
   stated_items: [
@@ -131,7 +132,7 @@ describe("pass 3d persists the frame it derives", () => {
     // would make every assertion below agree for the wrong reason.
     const { factor, option } = draft(RECORDS);
     const levels = (option.data as { interventions: Record<string, number> }).interventions;
-    expect(levels[factor.id]).toBe(400_000 / EXPECTED_FRAME); // 0.8, not 400000
+    expect(levels[factor.id]).toBe(400_000 / EXPECTED_FRAME); // 0.4 (was 0.8 under the ladder), not 400000
     expect(factor.observed_state).toBeUndefined(); // nothing encodes the frame
   });
 

@@ -210,6 +210,8 @@ import type { FastifyInstance } from "fastify";
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import { deriveNotModelledManifest } from "../cee/context-integrity/not-modelled-manifest.js";
+import { omitStatedDispositions } from "../schemas/graph-stated-dispositions.js";
+import { currentStatedDispositionRows } from "../orchestrator-v5/graph/stated-dispositions-binding.js";
 import {
   authorizeScenarioOwnership,
   CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
@@ -686,7 +688,10 @@ export default async function route(app: FastifyInstance) {
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         scenario_id: scenarioId,
-        graph: graphPresent ? graph : null,
+        // EGRESS (DL ruling 5 Oct 2026, condition 4): the records compiler's receipt (`graph.stated_dispositions`) is
+        // CEE bookkeeping and reaches the client only as the `not_modelled.stated_dispositions` rows derived below.
+        // The hash tokens stay those of the STORED bytes — the base every later write is compared against.
+        graph: graphPresent ? omitStatedDispositions(graph) : null,
         graph_present: graphPresent,
         brief_text: briefText,
         // identity.v1, from the single normaliser authority. Null when the
@@ -758,6 +763,8 @@ export default async function route(app: FastifyInstance) {
         not_modelled: deriveNotModelledManifest(
           briefText,
           graphPresent ? graph : null,
+          // P1/R2: the compiler's receipt counts ONLY while it is bound to THIS graph (full-content hash, receipt omitted).
+          { statedDispositionRows: graphPresent ? currentStatedDispositionRows(graph) : undefined },
         ),
         // ROADMAP 2.1271 — see §5 above. `null` on either means "this leg did
         // not answer", never a state: a consumer must leave what it already

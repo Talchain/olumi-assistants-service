@@ -89,7 +89,8 @@ const HYBRID = "Hire One Tech Lead and One Developer";
 describe("B1 — a pass-1 magnitude is withheld once completion authors one on the same factor", () => {
   it("B1a PRECONDITION: with no boundary supplied, the live defect reproduces", () => {
     const p = projectRecordsToGraph(CROSS_BOUNDARY(), undefined);
-    expect(iv(p, HYBRID, COST), "the £0.85 priced at effectively zero").toBeCloseTo(0.00000425, 10);
+    // Science ruling 2026-10-05 P2-FRAME accepted change: frame 200,000 (ladder) → 1,000,000 (defaultFrameFor(120000)); 0.00000425 → 0.00000085.
+    expect(iv(p, HYBRID, COST), "the £0.85 priced at effectively zero").toBeCloseTo(0.00000085, 10);
   });
 
   it("B1b with the boundary, the divergence is REPORTED — and the value is left alone", () => {
@@ -106,18 +107,19 @@ describe("B1 — a pass-1 magnitude is withheld once completion authors one on t
   });
 
   it("B1b2 WHAT THIS DOES NOT FIX, pinned so nobody reads more into it", () => {
-    // The live harm survives: £0.85 against an £200,000 frame still normalises
-    // to ~4e-06 and can still read as free. Disclosure makes that visible to a
+    // The live harm survives: £0.85 against a £1,000,000 frame still normalises
+    // to ~8.5e-07 and can still read as free.  (Science ruling 2026-10-05 P2-FRAME accepted change: was a £200,000 frame, ~4e-06.) Disclosure makes that visible to a
     // consumer instead of silent. Deciding what the product DOES about the
     // ranking has an owner; it is not a guess for the projector to make.
     const p = projectRecordsToGraph(CROSS_BOUNDARY(), undefined, 6);
-    expect(iv(p, HYBRID, COST)).toBeCloseTo(0.00000425, 10);
+    expect(iv(p, HYBRID, COST)).toBeCloseTo(0.00000085, 10); // Science ruling 2026-10-05 P2-FRAME accepted change: 0.00000425 → 0.00000085
   });
 
   it("B1c the completion-authored pounds are untouched", () => {
     const p = projectRecordsToGraph(CROSS_BOUNDARY(), undefined, 6);
-    expect(iv(p, "hire a Tech lead", COST), "80000 / 200000").toBeCloseTo(0.4, 6);
-    expect(iv(p, "two developers", COST), "120000 / 200000").toBeCloseTo(0.6, 6);
+    // Science ruling 2026-10-05 P2-FRAME accepted change: frame 200,000 → 1,000,000; 0.4 → 0.08 and 0.6 → 0.12.
+    expect(iv(p, "hire a Tech lead", COST), "80000 / 1000000").toBeCloseTo(0.08, 6);
+    expect(iv(p, "two developers", COST), "120000 / 1000000").toBeCloseTo(0.12, 6);
   });
 
   it("B1d THE PROPOSAL SURVIVES — a number is refused, never an alternative", () => {

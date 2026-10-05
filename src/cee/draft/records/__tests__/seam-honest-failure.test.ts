@@ -16,6 +16,7 @@
  * mechanism makes would then hold only on the paths nobody looked at.
  */
 import { describe, expect, it } from "vitest";
+import { projectDraftRecords as projectServedDraftRecords } from "../../records-v25/seam.js";
 import {
   projectDraftRecords,
   isGraphShapedResponse,
@@ -113,6 +114,21 @@ describe("the seam REFUSES anything that is not a record set", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toBe("not_a_record_set");
+  });
+
+  // Codex R1 F7 (PR #2573 @ 5d35e906): the legacy upgrader ran Object.keys over each entry before validating it, so a
+  // null ENTRY threw a TypeError past the typed refusal the Anthropic route reads (`draft_records_not_a_record_set`).
+  it.each([
+    ["stated_items:[null]", { stated_items: [null], claims: [] }],
+    ["claims:[null]", { stated_items: [{ kind: "option", source_quote: "keep pricing as it is" }], claims: [null] }],
+    ["a string stated item", { stated_items: ["keep pricing as it is"], claims: [] }],
+    ["an array claim", { stated_items: [{ kind: "option", source_quote: "keep pricing as it is" }], claims: [[]] }],
+  ])("refuses a malformed ENTRY %s with the typed not_a_record_set, never a TypeError", (_label, value) => {
+    let r: ReturnType<typeof projectDraftRecords> | undefined;
+    expect(() => { r = projectDraftRecords(value); }).not.toThrow();
+    expect(r).toMatchObject({ ok: false, reason: "not_a_record_set" });
+    // Parity with the served Anthropic compile (records-v25, frozen at staging): the same typed refusal.
+    expect(projectServedDraftRecords(value)).toMatchObject({ ok: false, reason: "not_a_record_set" });
   });
 
   /**

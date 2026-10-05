@@ -389,6 +389,31 @@ export function completionRegressesProtectedContent(
   const optionEffectsUnreliable = opts?.optionEffectsUnreliable === true;
   const violations: string[] = [];
   const afterById = new Map(after.graph.nodes.map((n) => [n.id, n]));
+  const sizedBundle = (edge: RecordProjection["graph"]["edges"][number]) => JSON.stringify({
+    from: edge.from, to: edge.to, mean: edge.strength_mean, std: edge.strength_std,
+    direction: edge.effect_direction, magnitude: edge.provenance?.magnitude,
+    source: edge.provenance?.source, quote: edge.provenance?.source_quote ?? edge.provenance?.quote,
+    natural_effect: edge.provenance?.natural_effect,
+    stated_relationship: edge.provenance?.stated_relationship,
+    frames: [edge.from, edge.to].map(id => {
+      const node = before.graph.nodes.find(n => n.id === id);
+      const successor = after.graph.nodes.find(n => n.id === id);
+      return { old: node?.scale_frame ?? node?.goal_threshold_cap, next: successor?.scale_frame ?? successor?.goal_threshold_cap };
+    }),
+  });
+  for (const edge of before.graph.edges) {
+    if (edge.provenance?.magnitude !== "user_stated") continue;
+    const successor = after.graph.edges.find(e => e.from === edge.from && e.to === edge.to);
+    if (successor === undefined || sizedBundle(edge) !== sizedBundle(successor)
+      || [edge.from, edge.to].some(id => {
+        const old = before.graph.nodes.find(n => n.id === id);
+        const next = after.graph.nodes.find(n => n.id === id);
+        return old?.scale_frame !== next?.scale_frame || old?.goal_threshold_cap !== next?.goal_threshold_cap
+          || old?.quantity_ref !== next?.quantity_ref || old?.data?.unit !== next?.data?.unit
+          || old?.observed_state?.unit !== next?.observed_state?.unit;
+      })) violations.push(`stated_edge_bundle_changed:${edge.id}`);
+  }
+
 
   // ⭐⭐ A DISAPPEARANCE IS NOT AUTOMATICALLY A LOSS — AND THE FIRST VERSION OF
   // THIS FUNCTION GOT THAT WRONG, WHICH IS WHY THIS NOTE EXISTS.

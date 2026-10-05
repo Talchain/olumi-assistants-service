@@ -12,6 +12,7 @@
  */
 
 import type { z } from "zod";
+import type { InterventionV3T } from "../../schemas/cee-v3.js";
 import { GoalThresholdFrame } from "@talchain/schemas";
 import type { GoalThresholdCapProvenance } from "../../utils/goal-threshold-cap.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
@@ -66,6 +67,7 @@ export interface V1OptionData {
   raw_interventions?: Record<string, number>;
   /** Existing intervention detail fields carried through the V1 passthrough seam. */
   intervention_details?: Record<string, {
+    range?: InterventionV3T["range"];
     raw_value: number;
     unit?: string;
     source: "brief_extraction" | "cee_hypothesis";
@@ -98,6 +100,9 @@ export function isOptionData(data: V1NodeData | undefined): data is V1OptionData
 }
 
 export interface V1Node {
+  threshold_source?: string;
+  goal_direction?: ">=" | "<=";
+  goal_horizon_months?: number;
   id: string;
   kind: string;
   label?: string;
