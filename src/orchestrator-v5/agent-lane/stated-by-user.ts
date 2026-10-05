@@ -940,12 +940,6 @@ export function linkEffectTheUserStated(
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
-  /**
-   * `directionOnCard` (RT-6): the approval card shows the signed reading and the writer's sign guard checks it, so the two
-   * FINAL sign checks are skipped. Nothing else is: the early direction miss (no movement word, or both ways), binding and
-   * the source-change check all still refuse, so a card is offered only for words this rule read as one sized statement.
-   */
-  opts?: { readonly directionOnCard?: boolean },
 ): LinkEffectStatementMiss | null {
   const q = quote.trim();
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
@@ -953,7 +947,7 @@ export function linkEffectTheUserStated(
   // ⛔ PR Review's second CR (#2275 @ f5aaec34): every element must come from ONE sentence — "Pro price rises. Paying
   // subscribers fall. Our budget is £1 per month. We currently have 50 paying subscribers." states no £1 → 50.
   const sentences = sentencesOf(q);
-  const misses = sentences.map((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope, opts));
+  const misses = sentences.map((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope));
   if (misses.some((m) => m === null)) return null;
   return sentences.length === 1 ? misses[0]! : 'not_one_statement';
 }
@@ -1017,7 +1011,6 @@ function linkEffectInOneSentence(
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
-  opts?: { readonly directionOnCard?: boolean },
 ): LinkEffectStatementMiss | null {
   const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
   const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
@@ -1089,7 +1082,6 @@ function linkEffectInOneSentence(
     return isMove(t.w) && unbroken(m, perAt) && xs.slice(k + 1).every((u) => BY_LINK.test(u.w) || isLabel(u.w));
   });
   if (!distributive && !moveAfter && !byAfterMove) return 'source_figure_not_a_change';
-  if (opts?.directionOnCard) return null;
   if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
   if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
     return source === 0 ? 'direction_not_stated' : 'direction_contradicts';

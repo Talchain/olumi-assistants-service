@@ -182,8 +182,7 @@ import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-ru
 import { selectedRunDeltaForModel } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, quoteOfFigure, sameWord, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
-import { linkEffectPrefilter, READ_BY_OLUMI_NOTE } from '../link-effect-prefilter.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -3247,8 +3246,6 @@ export function createAgentCapabilities(
         const prepared: { from: string; to: string; effect: { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string };
           quote: string; edge_token: string; said: string; from_label: string; to_label: string }[] = [];
         const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string }[] = [];
-        /** RT-6: any link whose reading Olumi, not the word rule, made; the user is then asked to check the card. */
-        let readByOlumi = false;
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
           const toLabel = String(entry.to_label ?? '');
@@ -3282,12 +3279,18 @@ export function createAgentCapabilities(
           const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
           const effect = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
-          // ⭐ RT-6 (recorder by card): the words show the figures are the user's; the card shows the reading (`link-effect-prefilter.ts`).
-          const pre = linkEffectPrefilter(entryQuote, effect, { source: from.label, target: to.label },
+          const miss = linkEffectTheUserStated(entryQuote, effect, { source: from.label, target: to.label },
             { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') });
-          if (pre.kind === 'refused') { fail(pre.refusal, pre.detail); continue; }
-          if (!pre.read_by_rule) readByOlumi = true;
-          const said = pre.said;
+          if (miss === 'figures_not_in_statement') {
+            fail('not_the_users_figure', 'Nothing was prepared: this quoted statement does not write both figures. Ask the user how much the one moves the other, in numbers.');
+            continue;
+          }
+          if (miss !== null) {
+            fail('not_the_users_statement', `Nothing was prepared: the words quoted do not state, as one statement of the user, how much "${from.label}" moves "${to.label}" (${miss.replace(/_/g, ' ')}).`);
+            continue;
+          }
+          const said = statingSentenceOf(entryQuote, effect, { source: from.label, target: to.label },
+            { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') }) ?? entryQuote;
           const endpoints = linkEffectTargetOf(working, from.id, to.id);
           if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
             fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
@@ -3331,9 +3334,7 @@ export function createAgentCapabilities(
         return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
           links: prepared.map((item) => ({ from: item.from_label, to: item.to_label, effect: item.effect, your_words: item.said })),
           ...(notPrepared.length > 0 ? { not_prepared: notPrepared } : {}),
-          ...(readByOlumi ? { reading_check: 'read_by_olumi' } : {}),
-          note: (readByOlumi ? READ_BY_OLUMI_NOTE : '')
-            + 'Nothing has changed yet. Tell the user these figures will be recorded as THEIR figures for the listed links, in their words, and call authorise_change with this proposal_id once they agree.' };
+          note: 'Nothing has changed yet. Tell the user these figures will be recorded as THEIR figures for the listed links, in their words, and call authorise_change with this proposal_id once they agree.' };
       }
       const quote = typeof args?.quote === 'string' ? args.quote.trim() : '';
       if (quote === '' || !text.includes(quote)) {
@@ -3373,12 +3374,19 @@ export function createAgentCapabilities(
       const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const statedEnds = { source: from.label, target: to.label };
       const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') };
-      // ⭐ RT-6 (recorder by card): the words show the figures are the user's and that they state, not ask or deny; the card
-      // shows the signed reading and the writer refuses any other (`link-effect-prefilter.ts`). AIQ 5884881500: the
-      // sentence stored and shown is the one the rule read when it read one, else the user's quote verbatim.
-      const pre = linkEffectPrefilter(quote, statedEffect, statedEnds, statedScope);
-      if (pre.kind === 'refused') return { ok: false, mutated: false, refusal: pre.refusal, why: pre.why, detail: pre.detail };
-      const said = pre.said;
+      const miss = linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
+      if (miss === 'figures_not_in_statement') {
+        return { ok: false, mutated: false, refusal: 'not_the_users_figure',
+          detail: 'Nothing was prepared: the statement quoted does not write both figures. Ask the user how much the one moves the other, in numbers.' };
+      }
+      if (miss !== null) {
+        return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss,
+          detail: `Nothing was prepared: the words quoted do not state, as one statement of the user\u2019s, how much "${from.label}" moves `
+            + `"${to.label}" (${miss.replace(/_/g, ' ')}). A figure is recorded as theirs only when they say it: ask them to say it as one `
+            + 'statement naming both, which way, and both figures. Never fill in a figure or a direction for them.' };
+      }
+      // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
+      const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
       const endpoints = linkEffectTargetOf(g.raw, from.id, to.id);
       if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
         return { ok: false, mutated: false, refusal: 'target_ambiguous', detail: linkEffectRefusalWords('target_ambiguous', g.raw, from, to) };
@@ -3415,9 +3423,7 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: said },
-        ...(pre.read_by_rule ? {} : { reading_check: 'read_by_olumi' }),
-        note: (pre.read_by_rule ? '' : READ_BY_OLUMI_NOTE)
-          + 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
+        note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
       };
     },
