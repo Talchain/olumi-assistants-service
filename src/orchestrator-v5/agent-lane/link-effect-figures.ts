@@ -42,13 +42,22 @@ export interface LinkEffectSourceLevels {
   readonly from_index: number;
   readonly end_index: number;
 }
-/** Explicit percent levels state their difference, never a relative percent chosen by the Agent. */
-export function linkEffectSourceLevels(quote: string): LinkEffectSourceLevels | undefined {
+/**
+ * Explicit percent levels state their difference, never a relative percent chosen by the Agent. They are the SOURCE's
+ * levels only when the clause opening them names the source ("Halving waste from 8% to 4%"); "… and gross margin moves
+ * from 20% to 25%" is another quantity's transition and never settles, or appears as, the source's change (Codex r1 HIGH).
+ */
+export function linkEffectSourceLevels(quote: string, namesSource: (word: string) => boolean): LinkEffectSourceLevels | undefined {
   const amounts = findLinkEffectAmounts(quote);
+  const opensWithSource = (before: string): boolean => {
+    const clause = before.split(/[,;:.!?\n]|\b(?:and|while|whereas|but|so|then|when|if|as)\b/i).pop() ?? '';
+    return [...clause.matchAll(/[\p{L}]+/gu)].some(m => namesSource(m[0]));
+  };
   const transitions = amounts.flatMap((a, i) => {
     const b = amounts[i + 1];
     if (b === undefined || a.kind !== 'percent' || b.kind !== 'percent'
       || !/\bfrom\s*$/i.test(quote.slice(0, a.index))
+      || !opensWithSource(quote.slice(0, a.index).replace(/\bfrom\s*$/i, ''))
       || !/^\s+to\s+$/i.test(quote.slice(a.index + a.matchedText.length, b.index))) return [];
     return [{ from: a.magnitude, to: b.magnitude, change: b.magnitude - a.magnitude,
       quote: quote.slice(a.index, b.index + b.matchedText.length), unit: 'percentage points' as const,
@@ -67,12 +76,15 @@ const FRACTION = '(?:thirds?|quarters?|halves)';
 const UNIT_WORD = '(?:percentage\\s+)?(?:points?|pp|percent|per\\s+cent)\\b';
 const fractionOfANumber = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE}|\\d+(?:\\.\\d+)?)\\s+${FRACTION}\\b`, 'iu');
 const fractionOfAUnit = new RegExp(`\\b${FRACTION}\\s+${UNIT_WORD}`, 'iu');
+// "2 and a half points", "2½": the normaliser reads "and a half" only after a number WORD; after digits, or as a
+// vulgar fraction, the scanner would keep only the integer (Codex buddy r1 HIGH).
+const digitsAndAFraction = /\d(?:\s+and\s+(?:a\s+|one\s+)?(?:half|halves|thirds?|quarters?)\b|\s*[\u00BC-\u00BE\u2150-\u215E])/iu;
 const fractionOfAFigure = new RegExp(`\\b(?:${FRACTION}|half)\\s+of\\s+(?:(?:a|an|the|our|your|its|their|that|this|those|these|each|every)\\s+)?`
   + `(?:[£$€]|\\d|(?:${CARDINAL_AMOUNT_SOURCE})\\b|${UNIT_WORD})`, 'iu');
 
 /** Ranges cannot license either endpoint or a midpoint as a single user's figure. */
 export function hasLinkEffectRange(quote: string): boolean {
-  if (fractionOfANumber.test(quote) || fractionOfAUnit.test(quote) || fractionOfAFigure.test(quote)
+  if (fractionOfANumber.test(quote) || fractionOfAUnit.test(quote) || fractionOfAFigure.test(quote) || digitsAndAFraction.test(quote)
     || new RegExp(`\\bpoint\\s+(?:${CARDINAL_AMOUNT_SOURCE}|\\d)\\b`, 'iu').test(quote)) return true;
   const amounts = findLinkEffectAmounts(quote);
   return amounts.some((a, i) => {

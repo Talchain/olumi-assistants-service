@@ -518,6 +518,9 @@ const stemOf = (w: string): string => {
   return x.endsWith('e') && x.length >= 4 ? x.slice(0, -1) : x;
 };
 /** Two words name the same thing: equal stems, or one stem (four letters or more) begins the other ("month"/"monthly"). */
+/** A word naming the SOURCE end and not the target (a distinguishing source word), for binding a stated transition. */
+export const namesSourceOf = (ends: { readonly source: string; readonly target: string }) => (word: string): boolean =>
+  wordsOf(ends.source).some(s => sameWord(s, word.toLowerCase())) && !wordsOf(ends.target).some(t => sameWord(t, word.toLowerCase()));
 export const sameWord = (a: string, b: string): boolean => {
   const x = stemOf(a);
   const y = stemOf(b);
@@ -991,9 +994,39 @@ type LinkEffectScope = { readonly quantities: readonly string[]; readonly link_s
 /** Keep the exact sentence, including its terminal punctuation, for the approval and provenance quote. */
 const sentencesOf = (q: string): string[] => (q.match(/(?:[^.!?;:\n]|(?<=\d)\.(?=\d))+[.!?;:]?/g) ?? [])
   .map(x => x.trim()).filter(x => x !== '');
-/** A quoted fragment cannot omit the question or denial surrounding it in the user's actual sentence. */
+/**
+ * Where `quote` occurs in the user's text as whole words and whole numbers (Codex buddy r1 HIGH): never starting or ending
+ * inside a word or a number, so "1 percentage points…" is not the user's words when they wrote "11 percentage points…",
+ * and "5 points" is not cut from "0.5 points" or "1,5 points".
+ */
+export function quoteSpansIn(userText: string, quote: string): number[] {
+  if (quote === '') return [];
+  const isWordChar = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}]/u.test(c);
+  const spans: number[] = [];
+  for (let at = userText.indexOf(quote); at >= 0; at = userText.indexOf(quote, at + 1)) {
+    const before = userText[at - 1]; const first = quote[0]; const last = quote[quote.length - 1];
+    const after = userText[at + quote.length];
+    const cutBefore = (isWordChar(before) && isWordChar(first)) || (/[.,]/.test(before ?? '') && /\d/.test(userText[at - 2] ?? '') && /\d/.test(first ?? ''));
+    const cutAfter = (isWordChar(after) && isWordChar(last)) || (/\d/.test(last ?? '') && /[.,]/.test(after ?? '') && /\d/.test(userText[at + quote.length + 1] ?? ''));
+    if (!cutBefore && !cutAfter) spans.push(at);
+  }
+  return spans;
+}
+/** The whole sentence (".", "!", "?" or a line break; never a decimal point) around each place the quote occurs. */
+function enclosingSentences(userText: string, quote: string): string[] {
+  const ends = [...userText.matchAll(/[!?\n]|(?<!\d)\.|\.(?!\d)/g)].map(m => m.index!);
+  return quoteSpansIn(userText, quote).map(at => {
+    const start = ends.filter(e => e < at).pop();
+    const end = ends.find(e => e >= at + quote.length - 1);
+    return userText.slice(start === undefined ? 0 : start + 1, end === undefined ? userText.length : end + 1).trim();
+  });
+}
+/**
+ * A quoted fragment cannot omit the question or denial surrounding it in the user's actual sentence. The WHOLE sentence
+ * counts: "I do not believe this claim: Each 1 point …" denies what follows its colon (Codex buddy r1 HIGH).
+ */
 export function linkEffectQuoteContextMiss(quote: string, userText: string): 'question' | 'denied' | null {
-  const enclosing = sentencesOf(userText).filter(sentence => sentence.includes(quote));
+  const enclosing = enclosingSentences(userText, quote);
   const misses = enclosing.map(sentence => sentence.includes('?') || (AUXILIARY_FIRST.test(sentence) && !REQUEST_FORM.test(sentence))
     ? 'question' as const : NEGATOR.test(sentence) ? 'denied' as const : null);
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
@@ -1077,7 +1110,7 @@ function linkEffectInOneSentence(
     && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
   const amountFigures = literalAmount(effect.amount, effect.amount_unit);
   const perFigures = literalAmount(effect.per_source_change, effect.per_source_change_unit);
-  const levels = linkEffectSourceLevels(q);
+  const levels = linkEffectSourceLevels(q, namesSourceOf(ends));
   const writtenChange = levels !== undefined && /^(?:percentage points?|pp|points?)$/i.test(effect.per_source_change_unit)
     && Math.abs(levels.change) === Math.abs(effect.per_source_change);
   const oneAt = perFigures.length === 0 && Math.abs(effect.per_source_change) === 1

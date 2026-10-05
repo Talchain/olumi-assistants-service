@@ -346,6 +346,9 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
   it.each([
     ['question', 'Does each 1 percentage point rise in production waste rate cut gross margin by 0.5 percentage points?', 'each 1 percentage point rise in production waste rate cut gross margin by 0.5 percentage points'],
     ['denied', "It doesn't mean each 1 percentage point rise in production waste rate cuts gross margin by 0.5 percentage points.", 'each 1 percentage point rise in production waste rate cuts gross margin by 0.5 percentage points'],
+    // Codex buddy r1 HIGH: a colon or semicolon does not end the sentence that denies or asks.
+    ['denied', 'I do not believe this claim: Each 1 percentage point rise in production waste rate cuts gross margin by 0.5 percentage points.', 'Each 1 percentage point rise in production waste rate cuts gross margin by 0.5 percentage points.'],
+    ['question', 'Is this right; each 1 percentage point rise in production waste rate cuts gross margin by 0.5 percentage points.', 'each 1 percentage point rise in production waste rate cuts gross margin by 0.5 percentage points.'],
   ])('a quoted fragment cannot omit its original %s', async (why, words, quote) => {
     const row = { ...NATURAL_SENTENCE_ROWS[0]!, quote: words! };
     const w = world(row); const before = w.graph();
@@ -361,6 +364,8 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     ['unsupported decimal words', 'Each one point five points of production waste rate cuts gross margin by 0.5 points.', effect(-0.5, 'points', 1, 'points')],
     ['transition endpoint reused as target figure', 'Halving waste from 8% to 4% lifts gross margin.', effect(4, 'points', -4, 'points')],
     ['a fraction after a number ("two" would read as 2)', 'Each 4 percentage point rise in production waste rate costs us two thirds of our gross margin.', effect(-2, 'points', 4, 'percentage points')],
+    ['digits and a half (Codex r1 HIGH: 2 would be read)', 'Each 2 and a half percentage points rise in production waste rate cuts our gross margin by about 0.5 percentage points.', effect(-0.5, 'percentage points', 2, 'percentage points')],
+    ['a vulgar fraction after digits ("2½")', 'Each 2½ percentage points rise in production waste rate cuts our gross margin by about 0.5 percentage points.', effect(-0.5, 'percentage points', 2, 'percentage points')],
     ['a fraction OF a written figure', 'Each 1 percentage point rise in production waste rate costs a third of 6 points of gross margin.', effect(-6, 'points', 1, 'percentage points')],
     ['half OF a written figure', 'Each 1 percentage point rise in production waste rate costs half of 0.5 percentage points of gross margin.', effect(-0.5, 'percentage points', 1, 'percentage points')],
     ['a fraction before a unit', 'Each 2 percentage point rise in production waste rate costs 1 and a quarter points of gross margin.', effect(-1, 'points', 2, 'percentage points')],
@@ -369,6 +374,42 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     const w = world(row); const before = w.graph(); const result = await propose(w, row);
     expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false });
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
+  });
+  it('a denial in a DIFFERENT sentence does not touch the quoted one (the context is the quote\'s own sentence)', async () => {
+    const row = NATURAL_SENTENCE_ROWS[0]!;
+    const words = 'I don\'t think waste is our biggest issue. ' + row.quote;
+    const w = world(row);
+    const result = await w.caps.proposeLinkEffect!(ctxFor(row, words), { from_label: 'Production waste rate', to_label: 'gross margin',
+      ...row.effect, quote: row.quote }) as Json;
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)[0]?.detail).toBe(row.card);
+  });
+  it.each([
+    ['starts inside "11"', 'Each 11 percentage points rise in production waste rate cuts our gross margin by about 0.5 percentage points.',
+      '1 percentage points rise in production waste rate cuts our gross margin by about 0.5 percentage points.', effect(-0.5, 'percentage points', 1, 'percentage points')],
+    ['ends inside "0.55"', 'Each 1 percentage point rise in production waste rate cuts our gross margin by about 0.55 percentage points.',
+      'Each 1 percentage point rise in production waste rate cuts our gross margin by about 0.5', effect(-0.5, 'percentage points', 1, 'percentage points')],
+    ['ends before ".5" of "1.5"', 'Each 2 percentage point rise in production waste rate cuts our gross margin by about 1.5 percentage points.',
+      'Each 2 percentage point rise in production waste rate cuts our gross margin by about 1', effect(-1, 'percentage points', 2, 'percentage points')],
+  ] as const)('Codex r1 HIGH: a quote that %s is not the user\'s words, so no card', async (_name, words, quote, proposed) => {
+    const row = NATURAL_SENTENCE_ROWS[0]!; const w = world(row); const before = w.graph();
+    const result = await w.caps.proposeLinkEffect!(ctxFor(row, words), { from_label: 'Production waste rate', to_label: 'gross margin',
+      ...proposed, quote }) as Json;
+    expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'quote_not_verbatim' });
+    expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
+  });
+  it('Codex r1 P2: the card\'s exact figure is the stored one (no 6-significant-figure rounding of the user\'s number)', async () => {
+    const quote = 'Each 1 percentage point rise in production waste rate cuts our gross margin by about 0.5000001 percentage points.';
+    const row = { ...NATURAL_SENTENCE_ROWS[0]!, quote, effect: effect(-0.5000001, 'percentage points', 1, 'percentage points') };
+    const w = world(row); const result = await propose(w, row);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    const card = cardsFor(w, result)[0]!;
+    expect(card.detail).toContain('lowers "gross margin" by 0.5000001 percentage points');
+    const approved = await w.caps.authoriseChange({ ...ctxFor(row, card.message), typed_approval_of: String(result.proposal_id),
+      typed_approval_words: card.message }, { proposal_id: String(result.proposal_id) });
+    expect(approved, JSON.stringify(approved)).toMatchObject({ ok: true, applied: true });
+    expect(edgeOf(projectGraphForPersistence(GraphV3.parse(w.graph())) as Json, row).provenance.natural_effect)
+      .toMatchObject({ amount: -0.5000001, per_source_change: 1 });
   });
   it('normalises supported number words deterministically with original spans', () => {
     for (const [words, value] of [['two', 2], ['one and a half points', 1.5], ['half a point', 0.5], ['about a point', 1]] as const) {
@@ -392,7 +433,7 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     const row = NATURAL_SENTENCE_ROWS[0]!; const initial = fixture(row);
     const extras = { note: { held: 'untouched' } };
     // Olumi's reasoning and clamp marker describe Olumi's figure: never carried onto the user's (Review Desk; base strip).
-    Object.assign(edgeOf(initial, row).provenance, extras, { reasoning: 'Olumi\'s explanation of its own estimate', clamped_from: 0.3 });
+    Object.assign(edgeOf(initial, row).provenance, extras, { reasoning: 'Olumi\'s explanation of its own estimate', clamped_from: 0.3, definitional: true });
     const w = world(row, initial); const result = await propose(w, row);
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
     const card = cardsFor(w, result)[0]!;
@@ -404,5 +445,6 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     expect(edgeOf(reload, row).provenance).toMatchObject({ ...extras, reading: 'agent_proposed_user_confirmed', source_quote: row.quote });
     expect(edgeOf(reload, row).provenance).not.toHaveProperty('reasoning');
     expect(edgeOf(reload, row).provenance).not.toHaveProperty('clamped_from');
+    expect(edgeOf(reload, row).provenance, 'Codex r1 P2: never a definition at the user\'s size').not.toHaveProperty('definitional');
   });
 });

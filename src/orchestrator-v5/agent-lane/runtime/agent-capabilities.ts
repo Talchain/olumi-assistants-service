@@ -183,7 +183,7 @@ import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-ru
 import { selectedRunDeltaForModel } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectQuoteContextMiss, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectQuoteContextMiss, linkEffectTheUserStated, quoteOfFigure, quoteSpansIn, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -3322,7 +3322,7 @@ export function createAgentCapabilities(
           const toLabel = String(entry.to_label ?? '');
           const fail = (refusal: string, detail: string): void => { notPrepared.push({ from_label: fromLabel, to_label: toLabel, refusal, detail }); };
           const entryQuote = typeof entry.quote === 'string' ? entry.quote.trim() : '';
-          if (entryQuote === '' || !text.includes(entryQuote)) {
+          if (quoteSpansIn(text, entryQuote).length === 0) {
             fail('quote_not_verbatim', 'Nothing was prepared: this link\u2019s `quote` must be the user\u2019s own words from THIS message, copied exactly.');
             continue;
           }
@@ -3423,7 +3423,7 @@ export function createAgentCapabilities(
           note: 'Nothing has changed yet. Tell the user these figures will be recorded as THEIR figures for the listed links, in their words, and call authorise_change with this proposal_id once they agree.' };
       }
       const quote = typeof args?.quote === 'string' ? args.quote.trim() : '';
-      if (quote === '' || !text.includes(quote)) {
+      if (quoteSpansIn(text, quote).length === 0) {
         return { ok: false, mutated: false, refusal: 'quote_not_verbatim',
           detail: 'Nothing was prepared: `quote` must be the user\u2019s own words from THIS message, copied exactly. Quote them and propose again.' };
       }

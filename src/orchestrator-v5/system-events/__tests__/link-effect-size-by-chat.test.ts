@@ -631,6 +631,34 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
       expect(r.question).toBe('Is that a 2-point fall in “Gross margin” (say 12% → 10%), or 2% of today’s level?');
       expect(w.attempts).toEqual([]);
     });
+    /** The source with NO stored cap or scale_frame: the writer pins % on 100, so the reader must too (Codex r1 HIGH). */
+    const capless = (source: string | undefined): Json => {
+      const graph = unsizedGraph();
+      delete nodeOf(graph, SOURCE).scale_frame;
+      nodeOf(graph, SOURCE).observed_state = { value: 0, raw_value: 0, unit: '%', ...(source === undefined ? {} : { source }) };
+      nodeOf(graph, TARGET).goal_threshold_unit = '%';
+      return projectGraphForPersistence(GraphV3.parse(graph)) as Json;
+    };
+    it.each([['cee_inference'], [undefined]] as const)('F1 no stored cap, source %s: the pinned % frame still asks U3; nothing prepared', async source => {
+      const w = world(capless(source));
+      const r = await proposeAs(w, 'single', SAID_BARE, BARE);
+      expect(r.question, JSON.stringify(r)).toBe('Is that a 5-point rise in \u201cFootfall loss from price rise\u201d (say 10% \u2192 15%), or 5% of today\u2019s level?');
+      expect(w.attempts).toEqual([]);
+    });
+    it('F1 no stored cap, the user\'s 0: never the bare % card; the writer cannot size points off a frame of 1, so no card (follow-up row)', async () => {
+      const w = world(capless('user_override'));
+      const r = await proposeAs(w, 'single', SAID_BARE, BARE);
+      expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'unit_mismatch' });
+      expect(w.attempts).toEqual([]);
+      expect(applyLinkEffectEdit(writerParams(capless('user_override'), SAID_BARE, BARE))).toEqual({ kind: 'refused', reason: 'unit_mismatch' });
+    });
+    it('Codex r1 HIGH: another quantity\'s "from 20% to 25%" never settles, or is shown as, the source\'s change', async () => {
+      const said = 'Footfall loss rises by 5% and revenue moves from 20% to 25% while gross margin falls by 2 percentage points.';
+      const w = world(levelled({ value: 0, raw_value: 0, cap: 100, unit: '%', source: 'cee_inference' }));
+      const r = await proposeAs(w, 'single', said, BARE);
+      expect(r.question, JSON.stringify(r)).toBe('Is that a 5-point rise in \u201cFootfall loss from price rise\u201d (say 10% \u2192 15%), or 5% of today\u2019s level?');
+      expect(w.attempts).toEqual([]);
+    });
     it('F1 writer: a forged reading that stores a bare % at the user\'s 0 is refused at commit (the card said points)', () => {
       const graph = levelled({ value: 0, raw_value: 0, cap: 100, unit: '%', source: 'user_override' });
       expect(applyLinkEffectEdit(writerParams(graph, SAID_BARE, BARE))).toEqual({ kind: 'refused', reason: 'unit_mismatch' });

@@ -352,15 +352,23 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (sizing.outcome !== 'user_stated' || sizing.natural_effect === undefined) return refuse('unconvertible');
 
   const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance } };
-  // Olumi's why, its old size and its clamp marker describe OLUMI's figure, never the user's (Review Desk, RT-6 step 3):
-  // `reasoning` would be read as the stated reason for a user-set link, and a stale `clamped_from` keeps "cut short" asked.
-  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, ...keptProvenance } = provenance;
+  // Olumi's why, its old size, its clamp marker and its "holds by definition" claim describe OLUMI's figure, never the
+  // user's (Review Desk; Codex buddy r1): `reasoning` would be read as the stated reason for a user-set link, a stale
+  // `clamped_from` keeps "cut short" asked, and `definitional` would call the user's size a definition.
+  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, definitional: _olumisDefinition, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
   // RT-6: an end taking this link's stored unit, or a newly disclosed sentence unit, keeps its change in the words
   // STATED (checked equal to that end above), so the card's read-back holds, including source percentage points.
+  // The card's figures ARE the stored ones (Codex buddy r1 P2): the sizing rounds to 6 significant figures to cancel float
+  // error, so once it reproduces the user's figures their exact numbers are stored; a sizing that does not is no write.
+  const sameToSixFigures = (stated: number, sized: number): boolean => Number(stated.toPrecision(6)) === sized;
+  if (!sameToSixFigures(effect.amount, sizing.natural_effect.amount)
+    || !sameToSixFigures(effect.per_source_change, sizing.natural_effect.per_source_change)) return refuse('unconvertible');
   const naturalEffect = {
     ...sizing.natural_effect,
+    amount: effect.amount,
+    per_source_change: effect.per_source_change,
     ...(endUnits.source.adopted !== undefined || unitReadings.some(r => r.node_id === from)
       ? { per_source_change_unit: effect.per_source_change_unit } : {}),
     ...(endUnits.target.adopted !== undefined || endUnits.target.storeAsStated === true || unitReadings.some(r => r.node_id === to)

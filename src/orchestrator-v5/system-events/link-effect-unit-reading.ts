@@ -1,11 +1,11 @@
-import { percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
+import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 /** Literal, per-end unit readings for an unsized link (RT-6 U1–U4). No graph writes. */
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
-import { sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
-import { isPercentageLevelUnit } from '../../cee/magnitude/link-effect.js';
+import { isPercentageLevelUnit, resolveMagnitudeFrame } from '../../cee/magnitude/link-effect.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectStatement } from './link-effect-edit.js';
 
@@ -43,7 +43,7 @@ function pointsOrShareAsk(label: string, value: number, level: number | undefine
   const by = Math.abs(value);
   const move = `${by}-point ${value < 0 ? 'fall' : 'rise'} in \u201c${label}\u201d`;
   const to = level === undefined ? undefined : tidy(level + value);
-  if (level !== undefined && to !== undefined && to >= 0 && to <= (frame ?? 100)) {
+  if (level !== undefined && to !== undefined && to >= 0 && to <= (frame !== undefined && frame > 1 ? frame : 100)) {
     return `Is that a ${move} (${level}% → ${to}%), or ${by}% of today\u2019s ${level}%, i.e. ${tidy(level * (1 + value / 100))}%?`;
   }
   const example = value < 0 ? `${10 + by}% → 10%` : `10% → ${10 + value}%`;
@@ -251,6 +251,9 @@ export function prepareLinkEffectUnitReadings(
   const current = edges.find(e => e.from === from && e.to === to);
   const amounts = findLinkEffectAmounts(quote);
   const percentLevels = percentLevelIds(graph);
+  // The writer's ONE frame authority (D2), so a % with no stored cap is read on the same pinned frame it is sized on
+  // (Codex buddy r1 HIGH: an explicit-only read skipped U3 where the writer still sized the bare %).
+  const view = magnitudeNodes(nodes, percentLevels);
   const unit_readings: LinkEffectUnitReading[] = [];
   const points_at_zero: string[] = [];
   const asks: string[] = [];
@@ -259,14 +262,16 @@ export function prepareLinkEffectUnitReadings(
     const label = String(node.label ?? node.id);
     const establishedUnit = unitOf(node) ?? (current === undefined ? undefined : endpointUnit(current, String(node.id)));
     const literalPercent = amounts.find(a => a.magnitude === Math.abs(value) && a.kind === 'percent');
-    const sourceLevels = node === source ? linkEffectSourceLevels(quote) : undefined;
+    const sourceLevels = node === source
+      ? linkEffectSourceLevels(quote, namesSourceOf({ source: String(source.label ?? source.id), target: String(target.label ?? target.id) })) : undefined;
     const explicitSourceLevels = sourceLevels !== undefined && Math.abs(sourceLevels.change) === Math.abs(value);
-    const frame = typeof node.scale_frame === 'number' ? node.scale_frame
-      : isRec(node.observed_state) && typeof node.observed_state.cap === 'number' ? node.observed_state.cap
-        : typeof node.goal_threshold_cap === 'number' ? node.goal_threshold_cap : undefined;
+    const magnitude = view.get(String(node.id));
+    const frame = magnitude === undefined ? undefined : resolveMagnitudeFrame(magnitude);
     if (establishedUnit !== undefined && literalPercent !== undefined && !explicitSourceLevels) {
       if ((unitOf(node) !== undefined || percentLevels.has(String(node.id)))
-        && (percentLevels.has(String(node.id)) || isPercentageLevelUnit(establishedUnit, frame))) {
+        // A bare % on a percent LEVEL is two readings whatever frame it is stored on (Codex r1 HIGH: a capless 0 resolves to
+        // frame 1, and an explicit-100-only test skipped the question); the writer's own dry run decides what it can size.
+        && (percentLevels.has(String(node.id)) || isPercentageLevelUnit(establishedUnit, 100))) {
         const level = usersLevelOf(node);
         // Science F1: 10% of 0 is 0, so at the user's own 0 the % can only be points: no question, and the card says
         // points for approval. Only a TYPED 0 settles it; Olumi's estimated 0 is read through the question like any level.

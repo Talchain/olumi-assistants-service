@@ -25,6 +25,7 @@ import type { ToolResult } from './runtime/agent-tools.js';
 import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
 import { linkEffectSourceLevels } from './link-effect-figures.js';
+import { namesSourceOf } from './stated-by-user.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -357,7 +358,7 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
   }
   const words = `${e.per_source_change < 0 ? 'lowering' : 'raising'} "${labels.from}" by ${unsigned(e.per_source_change, e.per_source_change_unit)} `
     + `${e.amount < 0 ? 'lowers' : 'raises'} "${labels.to}" by ${unsigned(e.amount, e.amount_unit)}`;
-  const levels = linkEffectSourceLevels(op.quote);
+  const levels = linkEffectSourceLevels(op.quote, namesSourceOf({ source: labels.from, target: labels.to }));
   const transition = levels !== undefined && levels.change === e.per_source_change
     ? ` Source change: ${levels.from}% \u2192 ${levels.to}% = ${signed(levels.change, levels.unit)}.` : '';
   const head = `${reversal}Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}": ${words}.${transition}`;
