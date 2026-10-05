@@ -184,7 +184,7 @@ const RecordZ = z.object({
   unit_literals: z.array(z.string()).optional(),
   value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
   quantity_of: FigZ.optional(),
-  direction: z.enum([...DRAFT_RECORD_DIRECTIONS, DRAFT_RECORD_UNRESOLVED]).optional(),
+  direction: z.union([z.enum(DRAFT_RECORD_DIRECTIONS), z.literal(DRAFT_RECORD_UNRESOLVED)]).optional(),
   direction_literal: z.string().optional(),
   baseline_figure: FigZ.optional(),
   setting: z.enum(DRAFT_RECORD_OPTION_SETTINGS).optional(),
