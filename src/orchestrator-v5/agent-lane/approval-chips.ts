@@ -392,7 +392,9 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
     labelled.push(label);
   }
   if (labelled.length > 0) {
-    disclosures.push(`I've read that as ${signed(e.amount, e.amount_unit)} per ${unsigned(e.per_source_change, e.per_source_change_unit)} `
+    // Codex r1: a negative source change keeps its sign ("−1 percentage point per −10 cafés"), never a reversed ratio.
+    const perWords = e.per_source_change < 0 ? signed(e.per_source_change, e.per_source_change_unit) : unsigned(e.per_source_change, e.per_source_change_unit);
+    disclosures.push(`I've read that as ${signed(e.amount, e.amount_unit)} per ${perWords} `
       + `(the unit${labelled.length > 1 ? 's' : ''} of ${labelled.map((l) => `"${l}"`).join(' and ')}).`);
   }
   // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.

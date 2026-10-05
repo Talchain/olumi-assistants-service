@@ -4,7 +4,8 @@ import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-read
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
-import { namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { afterChangeWord, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { singular, words } from '../agent-lane/same-unit.js';
 import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
 import { isPercentageLevelUnit, resolveMagnitudeFrame } from '../../cee/magnitude/link-effect.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -49,6 +50,24 @@ function pointsOrShareAsk(label: string, value: number, level: number | undefine
   }
   const example = value < 0 ? `${10 + by}% → 10%` : `10% → ${10 + value}%`;
   return `Is that a ${move} (say ${example}), or ${by}% of today\u2019s level?`;
+}
+
+/**
+ * ⭐ RT-6 row 1b (Codex r1 on the follow-up; Science #87 6005615422): the user's own COUNTED PHRASE for an end is its node's
+ * label. Right after a figure equal to that end's change (one change word such as "more"/"fewer" skipped), the sentence's
+ * words begin with the label's words (case + `singular()` only). "Every 10 more café subscribers" counts "Café
+ * subscribers"; "Every 10 more subscribers" does not, whatever unit the Agent passes.
+ */
+export function sentenceCountsLabel(said: string, figure: number, label: unknown): boolean {
+  if (typeof label !== 'string' || !Number.isFinite(figure) || figure === 0) return false;
+  const want = words(label).map(singular);
+  if (want.length === 0) return false;
+  return findLinkEffectAmounts(said).some((a) => {
+    if (Math.abs(a.magnitude) !== Math.abs(figure)) return false;
+    const got = words(afterChangeWord(said.slice(a.index + a.matchedText.length)))
+      .map((w) => singular(w.replace(/[.,;:!?"'\u2018\u2019\u201c\u201d]+$/u, '')));
+    return want.every((w, i) => got[i] === w);
+  });
 }
 
 /** The reading the card shows and the writer stores: a typed-zero end's change is said in points (B3). */
