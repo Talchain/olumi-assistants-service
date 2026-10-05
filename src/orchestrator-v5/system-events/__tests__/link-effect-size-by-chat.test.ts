@@ -452,6 +452,26 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
   });
 
+  // Discriminating twins: COMPLETE phrases (ending at a full stop), so only the head rule can refuse them.
+  it('H4 head by exact token: a complete "… of gross marginal." never names Gross margin', () => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Operating margin' });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Gross margin' });
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET, EFFECT,
+      'Each 5 percentage points of operating margin costs us 2 percentage points of gross marginal.');
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+  });
+
+  it('H4 count noun needs its head token: a complete "… of enterprise." never names Enterprise customers', () => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2' });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Enterprise customers', count_noun: 'enterprise customers' });
+    graph.ref_high_water.F = 2;
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: 3, amount_unit: 'GBP', per_source_change: 1000, per_source_change_unit: 'GBP' }, 'Each £1,000 of marketing spend brings in £3 of enterprise.');
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+  });
+
   it('H4 control: a complete phrase still names the end ("… £3 of revenue, every month")', () => {
     const graph = unsizedGraph();
     Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2' });
