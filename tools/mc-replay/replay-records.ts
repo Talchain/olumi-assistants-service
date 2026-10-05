@@ -117,7 +117,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     source = file === '' && schema === PASS_SCHEMA ? 'pass_absent' : 'fixture';
   }
   if (schema === PASS_SCHEMA) releasePass();
-  else if (mode !== 'live') await passAnswered;
+  // Offline the main answer is released only after the pass's answer and a settling delay, so the pass has finished
+  // first, as the parallel design expects live (pass cap ~53 s < main 53-92 s); MC_MAIN_FIRST=1 tests the abandon arm.
+  else if (mode !== 'live' && process.env.MC_MAIN_FIRST !== '1') { await passAnswered; await new Promise((r) => setTimeout(r, 50)); }
   let parsedStatus: unknown = null, text = '';
   try {
     const j = JSON.parse(rawBody) as { status?: unknown; output?: { type?: string; content?: { type?: string; text?: string }[] }[] };
@@ -172,7 +174,8 @@ const dispatch = async (path: string, body: unknown): Promise<{ status: number; 
 const startedAt = Date.now();
 const deadlineAt = constructionDeadline(startedAt);
 const result = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () =>
-  buildModelFromRecords(SCENARIO, brief, dispatch as never, (reqBody) => constructionCallStructured(reqBody, deadlineAt)));
+  buildModelFromRecords(SCENARIO, brief, dispatch as never, (reqBody) => constructionCallStructured(reqBody, deadlineAt),
+    undefined, undefined, (reqBody) => constructionCallStructured(reqBody, deadlineAt)));
 const constructionMs = Date.now() - startedAt;
 
 let stored: unknown = null;

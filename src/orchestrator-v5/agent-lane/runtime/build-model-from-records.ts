@@ -2,8 +2,12 @@
 import { buildVNextDraftRecordsSchema, DRAFT_RECORD_REQUIRED_LINKS, DRAFT_RECORD_STATED_KINDS, DRAFT_RECORD_UNRESOLVED, type DraftRecordSet } from '../../../cee/draft/records/grammar.js';
 import { V_NEXT_DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction-vnext.js';
 import { reconcileStatedDispositions } from '../../../cee/draft/records/stated-dispositions.js';
-import { replayRecordSet } from '../../../cee/draft/records/replay.js';
-import { buildSentencePassBaseSchema, strictSentencePassSchema } from '../../../cee/draft/records/sentence-pass.js';
+import { replayRecordSet, type ReplaySuccess } from '../../../cee/draft/records/replay.js';
+import {
+  buildSentencePassBaseSchema, buildSentenceInventory, parseSentencePassOutput, renderSentencePassInput, sentencePassSelected,
+  strictSentencePassSchema, SENTENCE_PASS_INSTRUCTION, SENTENCE_PASS_PROMPT_ALIAS, SENTENCE_PASS_SCHEMA_NAME, type SentenceInventory,
+} from '../../../cee/draft/records/sentence-pass.js';
+import { mergeSentenceLinks, neverWorse, type SentenceLinkFill, type SentenceLinkRefusal } from '../../../cee/draft/records/sentence-links.js';
 import type { RecordConstraintCandidate } from '../../../cee/draft/records/projector.js';
 import { runCompoundGoals } from '../../../cee/unified-pipeline/stages/repair/compound-goals.js';
 import { sameRecordConstraintEvidence, type RecordConstraintDisposition } from '../../../cee/compound-goal/record-constraint-carrier.js';
@@ -314,6 +318,83 @@ function recordsGoalScope(scenarioId: string, records: DraftRecordSet, v1: V1Gra
   return { question: loss[0]!.reason, pending: goalScopePendingAction(scenarioId, held.goal.id, goal.metric, goal.scope, loss) };
 }
 
+/**
+ * ⭐ THE SENTENCE PASS'S RECEIPT (design §3–§4). Present only when a pass was started and answered or was abandoned; a
+ * build with no pass, or whose pass returned no text, carries no receipt and is byte-identical to the main-only build.
+ */
+export interface SentencePassReceipt {
+  readonly status: 'merged' | 'sentence_pass_not_ready' | 'sentence_pass_failed' | 'sentence_pass_incomplete'
+    | 'sentence_pass_unparsable' | 'sentence_pass_not_a_record_set' | 'no_fill' | 'merged_refused_by_seam' | 'never_worse_refused';
+  readonly fills?: readonly SentenceLinkFill[];
+  readonly refusals?: readonly SentenceLinkRefusal[];
+  readonly appended?: number;
+  /** never_worse_refused: the main stated indices the merged compile would have stopped carrying. */
+  readonly lost?: readonly number[];
+  readonly detail?: string;
+}
+
+type PassState = { kind: 'pending' } | { kind: 'done'; out: Awaited<ReturnType<CallStructuredModel>> } | { kind: 'failed'; detail: string };
+
+/**
+ * Start the sentence pass (design §3): its input is the brief alone, so it starts BEFORE the main call and runs in
+ * parallel under the same transport deadline. No figure located, no call. Never throws; its state is read, not awaited.
+ */
+function startSentencePass(brief: string, call: CallStructuredModel): { inventory: SentenceInventory; state: () => PassState; abandon: () => void } | undefined {
+  const inventory = buildSentenceInventory(brief);
+  if (!sentencePassSelected(inventory)) return undefined;
+  const budget = budgetFor('gpt-5.6-terra', 'sentence_links');
+  const controller = new AbortController();
+  let state: PassState = { kind: 'pending' };
+  void (async () => {
+    try {
+      const out = await call({
+        model: budget.model, instructions: SENTENCE_PASS_INSTRUCTION, input: renderSentencePassInput(brief, inventory),
+        max_output_tokens: budget.max_output_tokens, reasoning_effort: budget.reasoning_effort,
+        schema: buildStrictSentencePassSchema(), schema_name: SENTENCE_PASS_SCHEMA_NAME, prompt_alias: SENTENCE_PASS_PROMPT_ALIAS,
+        signal: controller.signal,
+      });
+      if (state.kind === 'pending') state = { kind: 'done', out };
+    } catch (err) {
+      if (state.kind === 'pending') state = { kind: 'failed', detail: String(err).slice(0, 200) };
+    }
+  })();
+  return {
+    inventory,
+    state: () => state,
+    // The main call finished first: the pass is abandoned (its call aborted, so it stops spending) and never read.
+    abandon: () => { if (state.kind === 'pending') { state = { kind: 'failed', detail: 'abandoned' }; controller.abort(); } },
+  };
+}
+
+/**
+ * Merge the pass into the main records and compile the merged set through the SAME chain; serve it only if the seam
+ * accepts it and the never-worse gate holds (design §4). Otherwise the main compile is served, with the receipt.
+ */
+async function withSentencePass(
+  brief: string, raw: unknown, main: ReplaySuccess,
+  pass: { inventory: SentenceInventory; state: () => PassState; abandon: () => void },
+): Promise<{ compiled: ReplaySuccess; receipt?: SentencePassReceipt }> {
+  const state = pass.state();
+  if (state.kind === 'pending') { pass.abandon(); return { compiled: main, receipt: { status: 'sentence_pass_not_ready' } }; }
+  if (state.kind === 'failed') return { compiled: main, receipt: { status: state.detail === 'abandoned' ? 'sentence_pass_not_ready' : 'sentence_pass_failed', detail: state.detail } };
+  // No text at all is "pass absent": no receipt, so the build is byte-identical to the main-only build.
+  if (state.out.text.length === 0) return { compiled: main };
+  if (state.out.status === 'incomplete') return { compiled: main, receipt: { status: 'sentence_pass_incomplete', detail: state.out.incomplete_reason ?? 'unspecified' } };
+  const parsed = parseSentencePassOutput(state.out.text);
+  if (!parsed.ok) return { compiled: main, receipt: { status: parsed.reason as SentencePassReceipt['status'] } };
+  const merge = mergeSentenceLinks({
+    brief, main: raw as DraftRecordSet, inventory: pass.inventory, pass: parsed.records,
+    facts: { dropped: main.projection.dropped, dispositions: main.projection.stated_dispositions ?? [] },
+  });
+  const receipt = { fills: merge.fills, refusals: merge.refusals, appended: merge.appended };
+  if (merge.fills.length === 0) return { compiled: main, receipt: { status: 'no_fill', ...receipt } };
+  const merged = await replayRecordSet(merge.records, { brief });
+  if (!merged.ok) return { compiled: main, receipt: { status: 'merged_refused_by_seam', ...receipt, detail: `${merged.reason}: ${merged.detail}`.slice(0, 200) } };
+  const gate = neverWorse(main.projection.stated_dispositions ?? [], merged.projection.stated_dispositions ?? []);
+  if (!gate.ok) return { compiled: main, receipt: { status: 'never_worse_refused', ...receipt, lost: gate.lost } };
+  return { compiled: merged, receipt: { status: 'merged', ...receipt } };
+}
+
 export async function buildModelFromRecords(
   scenarioId: string,
   brief: string,
@@ -322,6 +403,11 @@ export async function buildModelFromRecords(
   observeConstruction?: (trace: ConstructionTrace) => void,
   /** A8a: one typed event per compile stage, in order (see `CompileStageEvent`). An observer never costs the build. */
   observeStage?: (event: CompileStageEvent) => void,
+  /**
+   * The sentence-level typed link pass's transport (design DESIGN-SENTENCE-PASS.md). Absent = no pass: one call and a
+   * build byte-identical to the main-only build.
+   */
+  sentencePass?: CallStructuredModel,
 ): Promise<ToolResult> {
   // Records construction never makes a generative repair call. Observers cannot cost the build.
   try { observeConstruction?.({ retried: false }); } catch { /* diagnostic only */ }
@@ -332,6 +418,8 @@ export async function buildModelFromRecords(
     return result;
   };
   const budget = budgetFor('gpt-5.6-terra', 'whole');
+  // The pass starts FIRST and in parallel: its input is the brief alone. The main call is never delayed by it.
+  const pass = sentencePass === undefined ? undefined : startSentencePass(brief, sentencePass);
   let raw: unknown;
   try {
     const out = await callStructured({
@@ -352,11 +440,18 @@ export async function buildModelFromRecords(
     raw = omitOptionalRecordNulls(JSON.parse(out.text));
   } catch (err) {
     return refuse('parsed', { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) }, 'unparsable_output');
+  } finally {
+    // The main call has ended: a pass still running is abandoned now, whatever the main outcome (design §3).
+    if (pass !== undefined && pass.state().kind === 'pending') pass.abandon();
   }
   // replayRecordSet owns the entire existing compile chain, including the seam's runtime validation.
-  const compiled = await replayRecordSet(raw as DraftRecordSet, { brief });
+  const mainCompiled = await replayRecordSet(raw as DraftRecordSet, { brief });
   // The seam's own reason, unchanged (`ReplayFailure.reason`), on the typed event.
-  if (!compiled.ok) return refuse('parsed', { ok: false, mutated: false, refusal: 'construction_failed', detail: compiled.detail }, compiled.reason);
+  if (!mainCompiled.ok) return refuse('parsed', { ok: false, mutated: false, refusal: 'construction_failed', detail: mainCompiled.detail }, mainCompiled.reason);
+  // The sentence pass fills only what the main compile left open; the merged compile is served only if never worse.
+  const withPass = pass === undefined ? { compiled: mainCompiled } : await withSentencePass(brief, raw, mainCompiled, pass);
+  const compiled = withPass.compiled;
+  const passReceipt = withPass.receipt;
   stage({ stage: 'parsed', status: 'ok', stated_items: compiled.records.stated_items.length, claims: compiled.records.claims.length });
   // ⭐ P2-A6: each factor's driver role, typed from the compile on the EXISTING V3 `category` field: the lever an option
   // sets is `controllable`; a stated or derived quantity no option sets is `observable` (it holds a level) or
@@ -462,5 +557,6 @@ export async function buildModelFromRecords(
       ...compiled.ask.items.map(item => item.detail), ...compiled.inventedRootAsks],
     // Preserve the projector's typed identities and reasons; do not reconstruct them from labels (rule (e)'s included).
     not_represented: compiled.projection.dropped,
+    ...(passReceipt !== undefined ? { sentence_pass: passReceipt } : {}),
   };
 }

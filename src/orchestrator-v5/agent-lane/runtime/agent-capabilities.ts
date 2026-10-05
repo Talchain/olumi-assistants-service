@@ -6534,7 +6534,8 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
-        built = await buildModelFromRecords(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace, opts.onCompileStage);
+        // The sentence-level typed link pass rides the SAME transport, in parallel, under the same turn deadline.
+        built = await buildModelFromRecords(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace, opts.onCompileStage, callStructured);
         if (built.ok !== true) return built;
       }
 

@@ -222,7 +222,7 @@ You read a decision brief and type the links its sentences state. The input give
 Write one record for each stated figure the brief uses, and one record for each sentence that states an effect of one quantity on another or states that something has no effect. Each field has one rule. Set a field to null when its rule does not apply to the record.
 
 sentence: the id of the sentence the record transcribes.
-role: goal for the target the user wants to reach; figure for a stated current level or amount of a quantity; cause for a sentence that states how a change in one quantity changes another, or that it changes nothing; option_setting for the figure an option names as its own setting; context for any other stated figure.
+role: goal for the target the user wants to reach; figure for a stated current level of a quantity; cause for a sentence that states how a change in one quantity changes another, or that it changes nothing; option_setting for the figure an option names as its own setting; context for any other stated figure.
 figure: the id of the figure the record is about, or "unresolved" when the record has no figure of its own.
 value: the figure's number, signed as the brief states it, in the convention value_scale declares.
 value_literal: the figure's characters copied exactly from its own sentence, keeping any currency or percent sign, with a neighbouring word added when the bare characters occur more than once in that sentence.
