@@ -3471,7 +3471,7 @@ export function createAgentCapabilities(
         // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510, where Olumi's
         // own suggested sentence was refused 3/3): ONE fixed question, said exactly, with the canvas route that always works.
         const ask = linkEffectStatementAsk(miss, from.label, to.label);
-        return { ok: false, mutated: false, refusal: 'not_the_users_figure', why: miss, question: ask, detail: linkEffectUnitAskWords(ask, from, to) };
+        return { ok: false, mutated: false, refusal: 'not_the_users_figure', question: ask, detail: linkEffectUnitAskWords(ask, from, to) };
       }
       if (miss !== null) {
         const ask = linkEffectStatementAsk(miss, from.label, to.label, linkEffectFigureNotAChange(quote, statedEffect, statedEnds)?.question);

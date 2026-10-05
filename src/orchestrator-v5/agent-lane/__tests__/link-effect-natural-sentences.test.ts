@@ -529,7 +529,7 @@ describe('RT-6: figures the recorder cannot read → ONE fixed question + the ca
   ] as const)('%s', async (_n, row, question, [from, to]) => {
     const w = world(row as CorpusRow); const before = w.graph(); const result = await propose(w, row as CorpusRow);
     oneQuestion(result, question);
-    expect(result).toMatchObject({ refusal: 'not_the_users_figure', why: 'figures_not_in_statement' });
+    expect(result).toMatchObject({ refusal: 'not_the_users_figure' });
     expect(String(result.detail)).toMatch(/^Nothing was prepared\. Tell the user exactly this: "/);
     expect(String(result.detail)).toContain(`click the link from “${from}” to “${to}”, and under “How strong is this effect?”`);
     expect(String(result.detail)).not.toMatch(/Ask the user|in numbers/);
