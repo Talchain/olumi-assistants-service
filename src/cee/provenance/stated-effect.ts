@@ -126,6 +126,13 @@ function localCountUnit(quote: string, amount: LocatedAmount): { readonly nouns:
   return { nouns, period, closed };
 }
 
+/** The words after a numeral up to its clause end: the sentence end or the next figure, whichever comes first. */
+function clauseWordsAfter(quote: string, amount: LocatedAmount): readonly string[] {
+  const tail = quote.slice(amount.index + amount.matchedText.length);
+  const end = tail.search(/[.!?;]|\d/u);
+  return (end === -1 ? tail : tail.slice(0, end)).replace(/\//gu, " / ").match(/[A-Za-z][A-Za-z-]*|\//gu)?.map(word => word.toLowerCase()) ?? [];
+}
+
 /**
  * Missing local unit words are not contradictions to the owning quantity declaration; written ones are checked whole.
  * A count is its noun WITH its period: "18 deliveries per year" contradicts deliveries/month, and a noun written at the
@@ -144,6 +151,17 @@ function unitAgrees(amount: LocatedAmount, expected: string, other: string, quot
     const runs=local.nouns.flatMap((_,start)=>local.nouns.slice(start).map((__,end)=>local.nouns.slice(start,start+end+1).join(' ')));
     if(local.nouns.length>0 && local.closed && !runs.some(run=>sameNoun(run,count.noun)))return false;
     if(local.period!==null && local.period!==count.period)return false;
+    // ⛔ A phrase that runs on past a comma or "and" hides its period and noun from the scan above, so it is read to the
+    // clause end (the sentence end or the next figure): a written period that is not the declared one refuses, and so
+    // does a clause that never writes the declared noun (Codex R3 P1: "3 highly experienced, carefully vetted hires a
+    // year" earned hires/month). A clause that writes no content word ("1 and 4", a range's bounds) stays no evidence.
+    if(!local.closed){
+      const rest=clauseWordsAfter(quote,amount);
+      const restRuns=rest.flatMap((_,start)=>rest.slice(start,start+6).map((__,end)=>rest.slice(start,start+end+1).join(' ')));
+      const content=rest.filter(word=>!LOCAL_FUNCTION_WORD.has(word) && word!=='/' && localPeriod(word)===undefined && !PERIOD_ADJECTIVE.test(word));
+      if(rest.some(word=>{const period=localPeriod(word);return period!==undefined && period!==count.period;}))return false;
+      if(content.length>0 && !restRuns.some(run=>sameNoun(run,count.noun)))return false;
+    }
   }
   if(amount.units.some(u=>sameNoun(u,count.noun)))return true;
   return otherCount===null || !amount.units.some(u=>sameNoun(u,otherCount.noun));

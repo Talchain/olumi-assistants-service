@@ -551,6 +551,28 @@ describe('Codex R2 F2: a noun the scanner cannot place is no contradiction; only
   });
 });
 
+describe('Codex R3 P1: a phrase that runs on is read to the clause end, so its written period and noun still bind', () => {
+  it('R4-1 a run-on phrase ending in a contradictory period is a typed unit refusal, never user_stated', () => {
+    for (const quote of ['Each recruiter we sign adds 3 highly experienced, carefully vetted hires a year.', 'Each recruiter we sign adds 3 seasoned and vetted hires per annum.']) {
+      const r = hiresEffect(quote); const p = project(r, HIRES + ' ' + quote);
+      expect(p.dropped, quote).toContainEqual(expect.objectContaining({ stated_index: 5, reason: 'unit_literal_contradicts_unit' }));
+      expect(edgeFor(p, 5, r)?.provenance?.natural_effect, quote).toBeUndefined();
+    }
+  });
+  it('R4-1 a run-on phrase that never writes the declared noun is a typed unit refusal', () => {
+    const quote = 'Each van we lease adds 18 highly experienced, carefully vetted elephants a month.';
+    const r = vanEffect(quote); const p = project(r, VANS + ' ' + quote);
+    expect(p.dropped).toContainEqual(expect.objectContaining({ stated_index: 5, reason: 'unit_literal_contradicts_unit' }));
+    expect(p.graph.edges.some(e => e.provenance?.magnitude === 'user_stated' && e.provenance?.natural_effect?.amount === 18)).toBe(false);
+  });
+  it('R4-1 BOUNDARY the clause read stops at the next figure: a later figure\'s period is not this one\'s', () => {
+    const quote = 'Each recruiter we sign adds 3 seasoned and vetted hires a month, lifting output by 2 placements a year.';
+    const r = hiresEffect(quote); const p = project(r, HIRES + ' ' + quote);
+    expect(p.dropped.filter(d => d.stated_index === 5 && d.reason !== 'unconnected_to_goal')).toEqual([]);
+    expect(edgeFor(p, 5, r)?.provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: 3, amount_unit: 'hires/month' } });
+  });
+});
+
 describe('Codex R2 F4: the cold reader re-sizes a stated range by the compiler\'s own sizing contract', () => {
   const churn = (graph: any) => graph.edges.find((e: any) => e.provenance?.natural_effect?.amount_unit === 'customers' && e.provenance?.stated_relationship?.range !== undefined);
   const twoCustomers = (graph: any) => deriveNotModelledManifest(BRIEF, graph).quantities!.items.filter(i => /^(about )?2( customers)?$/u.test(i.literal));
