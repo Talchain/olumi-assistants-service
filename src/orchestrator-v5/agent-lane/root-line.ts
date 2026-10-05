@@ -4,7 +4,7 @@
  * `treatedAsZeroLine` quotes the user's own node labels. A label is user text, and every editor the reply passes after
  * the line is placed reads text: the proposal-id scrub (`withoutProposalIds`), the at-rest marker parse (`textAtRest`),
  * the withheld-leader ranking drop (`dropRankingSentences`), the shared leader gate (keyed on option names) and the
- * egress scan (`findLeaderClaims`). A label such as `Hire a Tech Lead leads. Demand falls`, one holding a `prop_…` id, or
+ * egress scan (`findLeaderClaims`, read here through its exported string vocabulary `textNamesLeadingOption`). A label such as `Hire a Tech Lead leads. Demand falls`, one holding a `prop_…` id, or
  * one holding "Questions this model does not answer yet:" was rewritten, cut or truncated by one of them.
  *
  * So the labelled line is said only when EVERY one of those editors leaves it byte-identical, in the strictest posture
@@ -17,9 +17,8 @@ import { readinessViewOf, treatedAsZeroLine } from './readiness-view.js';
 import { withoutProposalIds } from './display-ids.js';
 import { textAtRest } from './decision-input-ask.js';
 import { dropRankingSentences, rankingLabelContext } from './withheld-leader-fail-closed.js';
-import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
+import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
 import { optionRosterFromGraph, textNamesAnOption } from '../compose/leading-option-wire-enforcement.js';
-import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /**
  * The label-free form, said only when a label would not survive the reply's editors. Science's words (5 Oct): the
@@ -38,7 +37,9 @@ export function survivesReplyEditors(line: string, graph: unknown, analysisReady
   if (textAtRest(line) !== line) return false;
   if (dropRankingSentences(line, rankingLabelContext(graph, analysisReady)).droppedSentences !== 0) return false;
   if (textNamesAnOption(line, optionRosterFromGraph(graph))) return false;
-  return findLeaderClaims({ assistant_text: line, blocks: [], suggested_actions: [] } as unknown as OlumiResponse).length === 0;
+  // The egress scan's own per-string vocabulary (`findLeaderClaims` → `scanString` on `assistant_text`), exported for
+  // producer-side gates: no envelope, no cast.
+  return !textNamesLeadingOption(line);
 }
 
 /**
