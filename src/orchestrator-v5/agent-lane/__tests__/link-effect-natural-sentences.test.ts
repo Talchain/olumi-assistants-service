@@ -616,6 +616,48 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
   });
 });
 
+// ⛔ Codex step-4 buddy r2 (5 Oct ~20:4xZ, final round): the residual shapes of the same two classes, verbatim.
+describe('RT-6 step 3 (Codex r2): determiner, plural and backward possessives name ANOTHER quantity; a clause\'s verb stays the verb', () => {
+  const resort = { fixture: 'lift', from: 'customers', to: 'revenue' } as const;
+  const per100 = effect(100, 'GBP/month', 2, 'customers');
+  /** A served-graph twin with ONE change, re-projected through the persistence boundary. */
+  const twin = (row: CorpusRow, change: (g: Json) => void): Json => {
+    const g = structuredClone(fixture(row)); change(g); return projectGraphForPersistence(GraphV3.parse(g)) as Json;
+  };
+  const risks = (g: Json) => { g.nodes.find((n: Json) => n.id === 'feature_launch_delay_risk').label = 'Feature-launch delay risks'; };
+  const priceIncrease = (g: Json) => {
+    g.nodes.push({ id: 'price_increase', kind: 'factor', label: 'Price increase', category: 'controllable',
+      observed_state: { value: 0, raw_value: 0, cap: 100, unit: '%', source: 'user_override' } });
+    g.edges.push({ from: 'price_increase', to: 'revenue', strength: { mean: 0.5, std: 0.125 }, defaulted: true,
+      provenance: { source: 'cee_hypothesis' }, effect_direction: 'positive', exists_probability: 0.8 });
+  };
+  it.each([
+    ['a determiner before the modifier ("increase OUR lift revenue")', { ...resort, id: 'R2-det', quote: 'Every 2 additional customers increase our lift revenue by £100 per month.', effect: per100 },
+      undefined, 'Is £100 of lift revenue a change in “Revenue”?'],
+    ['a possessive BEFORE the figure ("increase revenue\'s tax by £100")', { ...resort, id: 'R2-back', quote: "Every 2 additional customers increase revenue's tax by £100 per month.", effect: per100 },
+      undefined, 'Is £100 of revenue\'s tax a change in “Revenue”?'],
+    ['a PLURAL possessive ("…delay risks’ share of total delivery risk")', { fixture: '96ea7439', from: 'team_coordination_overhead', to: 'feature_launch_delay_risk', id: 'R2-plural',
+      quote: 'Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risks’ share of total delivery risk.',
+      effect: effect(1, 'percentage points', 5, 'percentage points') }, risks,
+      'Is 1 percentage point of feature-launch delay risks’ share of total delivery risk a change in “Feature-launch delay risks”?'],
+  ] as const)('%s → ONE typed question, no card, nothing stored', async (_n, row, change, question) => {
+    const initial = change === undefined ? fixture(row as CorpusRow) : twin(row as CorpusRow, change);
+    const w = world(row as CorpusRow, initial); const before = w.graph(); const result = await propose(w, row as CorpusRow);
+    oneQuestion(result, question); expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
+  });
+  it.each([
+    ['a relative clause\'s verb is not a modifier ("customers we ADD increase revenue")', { ...resort, id: 'R2-rel',
+      quote: 'Every 2 customers we add increase revenue by £100 per month.', effect: per100 }, undefined],
+    ['an inflected verb is THE verb ("a price increase RAISES revenue")', { ...resort, from: 'price_increase', id: 'R2-infl',
+      quote: 'A 2 percentage point price increase raises revenue by £100 per month.', effect: effect(100, 'GBP/month', 2, 'percentage points') }, priceIncrease],
+  ] as const)('CONTROL (Codex r2 P2): %s still cards', async (_n, row, change) => {
+    const initial = change === undefined ? fixture(row as CorpusRow) : twin(row as CorpusRow, change);
+    const w = world(row as CorpusRow, initial); const result = await propose(w, row as CorpusRow);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)[0]?.detail).toContain(`From your words: "${row.quote}"`);
+  });
+});
+
 // ⛔ DL 0df0e1 ruling (5 Oct ~20:2xZ) on Acceptance 6001583510: Olumi suggested an exact wording and the recorder refused it
 // 3/3. The chat never improvises a wording: a statement whose figures the recorder cannot read gets ONE fixed question, said
 // exactly, WITH the canvas route that always works. Acceptance's own untyped rows 7 and 8, on their served f0eb03ac graph.
