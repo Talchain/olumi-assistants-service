@@ -37,6 +37,13 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   buildTurnContext: vi.fn(async () => turnContext.current),
 }));
+/** R1b: force the candidate's OWN licence to `withheld` (gate 1 v2's identical-arm withhold will do this on staging). */
+const forceCandidateWithheld = vi.hoisted(() => ({ on: false }));
+vi.mock('../../model-management/version-result-binding.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../model-management/version-result-binding.js')>();
+  return { ...original, boundRunLeaderLicence: (...args: Parameters<typeof original.boundRunLeaderLicence>) =>
+    forceCandidateWithheld.on ? 'withheld' : original.boundRunLeaderLicence(...args) };
+});
 
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { priorRunForSeed } from '../../coaching/seed-reuse.js';
@@ -158,7 +165,7 @@ async function harness(link: { from_id: string; to_id: string }, candidate: Shap
 
 const leaderClaim = (result: Rec | null) => (result?.claims as Rec[] | undefined)?.find((c) => c.kind === 'leader');
 
-afterEach(() => { currentnessStore.current = undefined; turnContext.current = null; });
+afterEach(() => { currentnessStore.current = undefined; turnContext.current = null; forceCandidateWithheld.on = false; });
 
 describe('SCI-DEEP: the candidate is licensed on the baseline admission and its own result', () => {
   it('precondition: the served graph gives Run A a licensed leader, AI Reporting Module Sprint', async () => {
@@ -179,6 +186,16 @@ describe('SCI-DEEP: the candidate is licensed on the baseline admission and its 
     // Never a named candidate leader: the typed claim names the baseline leader only.
     expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
     expect(h.turn.identicalArms).toBe(true);
+  });
+
+  it('R1b: a WITHHELD candidate licence with identical arms still names the baseline leader, never a candidate one', async () => {
+    forceCandidateWithheld.on = true;
+    const h = await harness(LEAD_LINK, 'same');
+    expect(h.turn.candidateLeaderLicence).toBe('withheld');
+    expect(h.turn.identicalArms).toBe(true);
+    expect(h.turn.reply).toContain('AI Reporting Module Sprint’s lead rests entirely on this link');
+    expect(h.turn.reply).not.toContain('Which option leads cannot be compared');
+    expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
   });
 
   it('R2 (contrast, RED-first for the licence): removing a link that leaves the arms distinct compares leaders and never says "rests entirely"', async () => {
