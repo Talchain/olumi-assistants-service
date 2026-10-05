@@ -235,13 +235,21 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     expect(result.not_compared).toEqual(expect.arrayContaining(['structural_influence', 'e_values', 'driver_rank', 'robustness_label', 'fragile_edges']));
   });
 
-  it('S1b / P1-1: the unchanged served exploratory MRR graph licenses no quantitative comparison', async () => {
+  // RE-PINNED, RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): the untestable target no longer caps the mode,
+  // so the unchanged served graph is challenged as its target-free twin would be (it was refused only through that cap).
+  // What it may NOT do is compare a claim the Run withheld: Run A withholds the leader (Gate 5, the goal is a product
+  // this Run did not read) and the goal figures, so every claim is not_comparable and NO claim carries a figure.
+  it('S1b / P1-1: the unchanged served MRR graph is challenged, but compares no withheld claim (every claim not_comparable, no figure)', async () => {
     const h = await harness({ keepExploratory: true });
     const result = resultOf(await h.ask());
-    expect(result).toMatchObject({ status: 'withheld', reason: 'exploratory_work_not_permitted',
-      baseline: { run_id: h.runA.result.run_id }, claims: [], pair_provenance: null });
     expect(h.runA.result.leading_option_id).toBeNull();
-    expect(h.plot.runBodies).toHaveLength(1);
+    expect(result).toMatchObject({ status: 'completed', baseline: { run_id: h.runA.result.run_id } });
+    const claims = result.claims as Rec[];
+    expect(new Set(claims.map((c) => c.kind))).toEqual(new Set(['leader', 'goal_probability', 'outcome_level']));
+    for (const c of claims) expect(c.verdict, String(c.kind)).toBe('not_comparable');
+    const figures = (v: unknown): number => (typeof v === 'number' ? 1 : Array.isArray(v) ? v.reduce((n: number, x) => n + figures(x), 0)
+      : v !== null && typeof v === 'object' ? Object.values(v).reduce((n: number, x) => n + figures(x), 0) : 0);
+    expect(figures(claims)).toBe(0);
   });
 
   it('S2: a model edited since the Run is stale, and PLoT is never asked', async () => {

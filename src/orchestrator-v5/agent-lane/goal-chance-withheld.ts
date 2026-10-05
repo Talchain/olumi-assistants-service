@@ -79,6 +79,26 @@ export const OUTCOME_KEPT_NOTE =
   + 'Say `say` once, as written, when you describe the run.';
 
 /**
+ * ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): the untestable target KEPT the ordering. Only the chance of
+ * reaching the target (and, unless the failures leave it in the goal's units, the outcome) is withheld; the shares and the
+ * leader are this run's findings and may be said as such, in the run's own direction.
+ */
+export const TARGET_ONLY_NOTE =
+  'This run withheld, for EVERY option, the chance of reaching the goal’s target and each option’s outcome for the goal: the '
+  + 'target can’t be tested yet. The share of runs in which each option did best IS a result of this run: say it, if at all, as a '
+  + 'finding of this model in the goal’s own direction (where lower is better, the option that came out lowest), always said as '
+  + '‘in this model’, never as a chance of reaching the target and never as a recommendation. Never state, estimate, rank or compare a chance of reaching the '
+  + 'target, and never quote or estimate an option’s outcome. Say `say` once, as written, when you describe the run.';
+/** The same, where the failures leave each option's outcome in the goal's units (P2/P3/P4 only): the panel shows it. */
+export const TARGET_ONLY_OUTCOME_KEPT_NOTE =
+  'This run withheld, for EVERY option, the chance of reaching the goal’s target: the target can’t be tested yet. Each option’s '
+  + 'outcome for the goal is shown to the user on the results panel; you are not given those figures, so never quote or estimate '
+  + 'one, never rank or order the options by those outcomes, and never say one option is better or worse than another (DL #2448 '
+  + 'condition (1)). The share of runs in which each option did best IS a result of this run: say it, if at all, as a finding of this model '
+  + 'in the goal’s own direction (where lower is better, the option that came out lowest), always said as ‘in this model’, never '
+  + 'as a chance of reaching the target and never as a recommendation. Say `say` once, as written, when you describe the run.';
+
+/**
  * ⛔ GATE 1 v2 (DL 5 Oct, #2574): options the Run could not tell apart split their wins, so EVERY option's share of runs
  * it did best — and so any leader — is withheld, and the chance of reaching the goal only for the identical options.
  * Every outcome stays, but identical options share one, so they are never compared with each other.
@@ -139,6 +159,16 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
     const words = typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
     return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PRODUCT_NOT_READ_NOTE, option_ids: ids('option_ids') };
+  }
+  // RT-10 B′ R2: every withhold is the untestable target and it KEPT the shares (no `win_share` withheld) → the target-only
+  // licence, and the reply says the B′ tail the warning carries (`say`, from `untestableTargetParts`).
+  const targetOnly = warnings.every((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE
+    && Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share'));
+  if (targetOnly) {
+    const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
+    const tail = warnings.map((w) => (typeof w.say === 'string' ? w.say.trim() : '')).find((t) => t !== '');
+    const outcomeWithheld = warnings.some((w) => (w.withheld_claims as unknown[]).includes('outcome'));
+    return { withheld: true, say: tail ?? OPENING, node_ids: nodeIds, note: outcomeWithheld ? TARGET_ONLY_NOTE : TARGET_ONLY_OUTCOME_KEPT_NOTE };
   }
   // F1b [R1]: every withhold is the untestable target with the outcome KEPT → the outcome-kept licence, never the ban on
   // quoting an option's value (which would contradict the outcomes the panel now shows).

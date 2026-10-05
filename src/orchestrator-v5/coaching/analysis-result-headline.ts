@@ -146,6 +146,7 @@ import {
 import {
   OBJECTIVE_CONTRADICTION_ARM_GRAMMARS,
   OBJECTIVE_CONTRADICTION_MAX_CHARS,
+  deriveGoalIntent,
   recordsCarryGoalAttainment,
   type GoalFrame,
 } from './objective-contradiction.js';
@@ -240,6 +241,30 @@ const LEAD_CLAUSE_COPY_DELTA_CHARS =
   LEAD_CLAUSE_OPENING.length - RETIRED_LEAD_CLAUSE_OPENING_CHARS;
 
 export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
+
+/**
+ * ⭐ RT-10 B′ — THE LEAD OF A RUN THAT SENT `minimise` (DL e8 condition 1; Science d5's words, #87).
+ *
+ * When THIS Run sent `goal_direction: minimise`, ISL's `win_probability` is the share of runs in which the option kept
+ * the goal LOWEST, and the lead says so in the goal's own words: "{option} came out lowest for {goal} in N% of runs of
+ * this model". Measured on the red team's rt10b graph (guest 078e521e): Run 1 sent no direction, so ISL ranked by the
+ * LARGEST cancellations and the headline read "More Reliable Courier scored highest in 87% of runs of this model"; the
+ * same graph after "at most 400" sends minimise, and ISL names 15% Loyalty Discount at 71% (PLoT 2473ace, 5 Oct).
+ *
+ * The goal's label rides only when it NAMES the quantity (no aim verb: "Reduce churn" would read "came out lowest for
+ * Reduce churn"), passes the content defences, and fits {@link MINIMISED_GOAL_LABEL_MAX_CHARS}; otherwise the lead is
+ * the one this module emitted before, which is true under either direction. It never rides beside a sentence that says
+ * the direction was assumed (this Run sent it). The number-free shed form is the same words without the share.
+ */
+const MINIMISED_LEAD_PREFIX = 'came out lowest for';
+/** The number-free shed form of the default lead (Case C/B/E and the stability-caution shed). */
+const SCORED_HIGHEST_PLAIN = 'scored highest in this model';
+const MINIMISED_GOAL_LABEL_MAX_CHARS = 48;
+/** The most the minimise lead, in either form, adds over the form it replaces: budgeted on the registry cap. */
+const MINIMISED_LEAD_EXTRA_MAX_CHARS = Math.max(
+  `${MINIMISED_LEAD_PREFIX} ${'x'.repeat(MINIMISED_GOAL_LABEL_MAX_CHARS)} in`.length - LEAD_CLAUSE_OPENING.length,
+  `${MINIMISED_LEAD_PREFIX} ${'x'.repeat(MINIMISED_GOAL_LABEL_MAX_CHARS)} in this model`.length - SCORED_HIGHEST_PLAIN.length,
+);
 
 /**
  * ⛔ WHEN THE RUN COULD NOT TEST THE GOAL, THE LEAD CLAUSE DOES NOT CLAIM IT.
@@ -483,6 +508,8 @@ export const REDUCED_SAMPLES_SUFFIX =
  */
 export const MAX_ASSISTANT_TEXT_CHARS =
   MAX_HEADLINE_CHARS +
+  // RT-10 B′: the minimise lead's goal label (bounded), so an honest minimise headline is never swapped for the template.
+  MINIMISED_LEAD_EXTRA_MAX_CHARS +
   // 2.278: derived over EVERY robustness-honesty variant, not just the first.
   NOT_ROBUST_SENTENCE_MAX_CHARS +
   ELIMINATED_SENTENCE_MAX_CHARS +
@@ -746,6 +773,11 @@ export interface AnalysisResultHeadlineInput {
    */
   readonly goal_direction_correctable?: boolean;
   /**
+   * ⭐ RT-10 B′ (DL e8 condition 1): the goal's label, present ONLY when THIS Run sent `goal_direction: minimise` to
+   * PLoT — the handler's own `plotPayload.goal_direction`, never re-derived here. See {@link MINIMISED_LEAD_PREFIX}.
+   */
+  readonly minimised_goal_label?: string;
+  /**
    * T1. True for the constraint verdict's `identity_unresolved` state: the
    * producer plainly evaluated constraints, but not one of the ids it returned
    * reconciles with anything the user ratified.
@@ -982,6 +1014,20 @@ function resolveGoalFrame(enrichment: Record<string, unknown>, goalPointsUpAsHel
   return attainmentTested ? 'direction_assumed' : 'direction_assumed_and_attainment_untested';
 }
 
+/**
+ * RT-10 B′: the goal label the minimise lead may carry, or null (the lead is then the one this module emitted before).
+ * Only on the frames that do not say the direction was assumed; only a label that names the quantity rather than an aim
+ * (`deriveGoalIntent` finds no direction verb), survives the content defences, and fits the budget.
+ */
+function minimisedLeadGoalLabel(raw: unknown, goalFrame: GoalFrame): string | null {
+  if (goalFrame !== 'goal_framed' && goalFrame !== 'attainment_untested') return null;
+  if (typeof raw !== 'string') return null;
+  const label = sanitiseLabel(raw, '');
+  if (label === null || label.length > MINIMISED_GOAL_LABEL_MAX_CHARS) return null;
+  if (deriveGoalIntent(label).direction !== 'undetermined') return null;
+  return passesAssistantTextContentDefences(label) ? label : null;
+}
+
 function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   const {
     enrichment,
@@ -1177,7 +1223,20 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // unless the goal frame was withdrawn, when it is reduced by exactly the
   // characters the withdrawal saved, so every length verdict (and therefore the
   // leader permission) is the one the goal-framed sentence would have got.
-  const leadCap = lengthCap - (goalUntestable ? GOAL_UNTESTED_LEAD_SHORTFALL_CHARS : 0);
+  //
+  // RT-10 B′: a Run that sent minimise leads with "came out lowest for {goal}" (see MINIMISED_LEAD_PREFIX). Its cap is
+  // moved by exactly the characters its opening adds over the goal-framed one, so the length verdict, and therefore the
+  // leader permission, is the one the goal-framed sentence would have got. The number-free shed forms are measured
+  // the same way against `plainCap`.
+  const minimisedLabel = minimisedLeadGoalLabel(input.minimised_goal_label, goalFrame);
+  const leadOpening = minimisedLabel !== null
+    ? `${MINIMISED_LEAD_PREFIX} ${minimisedLabel} in`
+    : goalUntestable ? UNTESTED_GOAL_LEAD_CLAUSE_OPENING : LEAD_CLAUSE_OPENING;
+  const leadCap = lengthCap - (minimisedLabel !== null
+    ? LEAD_CLAUSE_OPENING.length - leadOpening.length
+    : goalUntestable ? GOAL_UNTESTED_LEAD_SHORTFALL_CHARS : 0);
+  const leadsPlain = minimisedLabel !== null ? `${MINIMISED_LEAD_PREFIX} ${minimisedLabel} in this model` : SCORED_HIGHEST_PLAIN;
+  const plainCap = lengthCap + (leadsPlain.length - SCORED_HIGHEST_PLAIN.length);
   const marginBucket = computeMarginBucket(winner);
   const hasDriver = driverLabel !== null;
   const hasFragility = caution !== null;
@@ -1272,14 +1331,15 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // goal as stated, "against your goal" is withdrawn and the statistic is
   // reported for what it is (see GOAL_UNTESTED_DISCLOSURE).
   const leadPercent = Math.round(winnerProbability * 100);
-  const leadClause = `${goalUntestable ? UNTESTED_GOAL_LEAD_CLAUSE_OPENING : LEAD_CLAUSE_OPENING} ${leadPercent}% of runs of this model`;
+  const leadClause = `${leadOpening} ${leadPercent}% of runs of this model`;
 
   // The number-free shed form, kept verbatim for the bands that must not carry
   // a statistic: the Case E floor (every enriching gate declined the run) and
   // the length-shed A→C / B variants, where dropping the clause IS the shed.
   // Principle audit (5 Oct, DL ruling on W-HEAD): the number-free floor names the option only as a finding about this
-  // model, in the lead clause's own verb. "Scored highest" stays visible to `LEADER_CLAIM_PATTERNS` (scored_highest).
-  const LEADS_PLAIN = 'scored highest in this model';
+  // model, in the lead clause's own verb. "Scored highest" stays visible to `LEADER_CLAIM_PATTERNS` (scored_highest),
+  // and RT-10 B′'s "came out lowest for {goal}" to its `came_out_lowest`.
+  const LEADS_PLAIN = leadsPlain;
 
   // Doctrine D-W (ROADMAP 2.52): the DECLARED leader (PLoT's leading_option_id)
   // is NOT the highest raw win_probability — a runner-up strictly edges it on
@@ -1389,7 +1449,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         };
       }
       const caseC = `${winnerLabel} ${LEADS_PLAIN}${cautionTail}`;
-      if (caseC.length <= lengthCap) {
+      if (caseC.length <= plainCap) {
         return {
           text: caseC,
           descriptor: buildDescriptor('C', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -1409,7 +1469,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         };
       }
       const caseB = `${winnerLabel} ${LEADS_PLAIN}${driverTail}`;
-      if (caseB.length <= lengthCap) {
+      if (caseB.length <= plainCap) {
         return {
           text: caseB,
           descriptor: buildDescriptor('B', 'unknown', { hasDriver, hasFragility, marginBucket }),
@@ -1647,7 +1707,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       // condition's lower floor already excluded the very weak < 0.30 leads), so
       // it is a caveated, bounded fallback — not a free-for-all sub-40% claim.
       const scNoMargin = `${winnerLabel} ${LEADS_PLAIN}${cautionTail}`;
-      if (scNoMargin.length <= lengthCap) {
+      if (scNoMargin.length <= plainCap) {
         return {
           text: scNoMargin,
           descriptor: buildDescriptor('SC', 'soft_confidence', { hasDriver, hasFragility, marginBucket }),
@@ -1750,7 +1810,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // probability number. No driver/fragility clauses.
   const caseE = `${winnerLabel} ${LEADS_PLAIN}.${suffix}`;
   const reason = deriveCaseEReason(winner, driverLabel, hasFragility);
-  if (caseE.length <= lengthCap) {
+  if (caseE.length <= plainCap) {
     return {
       text: caseE,
       descriptor: buildDescriptor('E', reason, { hasDriver, hasFragility, marginBucket }),
@@ -2883,9 +2943,24 @@ const CAUTION_REASON_PATTERN =
 // withdrawn clause only when one IS present (the user is owed the reason the
 // goal frame is gone). The builder emits exactly these two shapes, so the
 // allowlist admits exactly these two.
+//
+// RT-10 B′ adds a THIRD: the minimise lead ("came out lowest for {goal}"), admitted with no goal-frame sentence or
+// beside the untested one, and never beside a sentence that says the direction was assumed (the Run sent it).
+const GOAL_DIRECTION_ASSUMED_RE_SRC = `(?:${[
+  GOAL_DIRECTION_ASSUMED_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE,
+  GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE,
+]
+  .map(escapeForRegex)
+  .join('|')})`;
 const LEAD_CLAUSE_RE_SRC =
   `(?:${LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model(?!.*${GOAL_FRAME_WITHDRAWN_RE_SRC})` +
-  `|${UNTESTED_GOAL_LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model(?=.*${GOAL_FRAME_WITHDRAWN_RE_SRC}))`;
+  `|${UNTESTED_GOAL_LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model(?=.*${GOAL_FRAME_WITHDRAWN_RE_SRC})` +
+  `|${MINIMISED_LEAD_PREFIX} .+? in \\d{1,3}% of runs of this model(?!.*${GOAL_DIRECTION_ASSUMED_RE_SRC}))`;
+/** The number-free shed forms: the default, and RT-10 B′'s minimise form under the same frame rule as its lead. */
+const PLAIN_LEAD_RE_SRC =
+  `(?:${SCORED_HIGHEST_PLAIN}|${MINIMISED_LEAD_PREFIX} .+? in this model(?!.*${GOAL_DIRECTION_ASSUMED_RE_SRC}))`;
 
 const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // Case A: winner + margin + provisional caution naming the fragile reason.
@@ -2894,7 +2969,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   ),
   // Case C: provisional caution naming the fragile reason, no margin.
   new RegExp(
-    `^.+? scored highest in this model, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
+    `^.+? ${PLAIN_LEAD_RE_SRC}, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
   ),
   // Case B (with margin): winner + margin + driver.
   new RegExp(
@@ -2902,7 +2977,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   ),
   // Case B (no margin): winner + driver.
   new RegExp(
-    `^.+? scored highest in this model because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
+    `^.+? ${PLAIN_LEAD_RE_SRC} because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
   ),
   // Case D (margin only): winner + margin.
   new RegExp(
@@ -2962,7 +3037,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // ", but", "with N% probability", or " is currently only fractionally
   // ahead" before the terminal period), so ordering is for clarity rather
   // than correctness.
-  new RegExp(`^.+? scored highest in this model\\.${TAIL_PATTERN}$`),
+  new RegExp(`^.+? ${PLAIN_LEAD_RE_SRC}\\.${TAIL_PATTERN}$`),
 ];
 
 function matchesHeadlineGrammar(text: string): boolean {
