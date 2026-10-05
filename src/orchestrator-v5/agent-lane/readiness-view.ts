@@ -17,6 +17,7 @@
  * (ChatGPT 5839692762: "require the typed blocker code in the machine-readable result, but its accurate
  * PLAIN-ENGLISH explanation in user prose").
  */
+import { buildExcludedOptionNotice } from '../coaching/scaffold-disclosure.js';
 import { assessRouteAdmission } from '../../cee/graph-readiness/canonical-readiness.js';
 import { targetTestabilityOf, notTargetTestableSentence } from '../admission/target-testability.js';
 
@@ -37,6 +38,8 @@ export interface ReadinessView {
   readonly olumi_can_offer: readonly ReadinessItem[];
   /** Options a run would leave out until they are complete, by label. */
   readonly will_run_without: readonly string[];
+  /** Per-option true reasons when a run leaves out a no-change option. */
+  readonly exclusion_notices?: readonly string[];
   /**
    * Option levels no one has set (`MISSING_OPTION_VALUE`, not waived by leaving the option out), by label — whether
    * the verdict demands them or only offers help: either way the figure is the user's to give. A run can still be
@@ -116,6 +119,9 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
     needs_from_user: dedupe(needs),
     olumi_can_offer: dedupe(offers),
     will_run_without: excluded,
+    ...(verdict.scaffold_plan.excluded_options?.some((e) => e.reason === 'no_change_from_today')
+      ? { exclusion_notices: verdict.scaffold_plan.excluded_options.map(buildExcludedOptionNotice) }
+      : {}),
     levels_not_set: levelsNotSet,
     ...(reason !== undefined ? { reason } : {}),
     ...(target !== null ? { target_not_testable: target } : {}),
@@ -159,6 +165,9 @@ export function withoutCantRunOpening(reason: string): string {
 export function readinessSentence(view: ReadinessView): string {
   if (!view.checked) return 'I could not check whether the analysis can run yet.';
   if (view.may_run === true) {
+    if (view.exclusion_notices && view.exclusion_notices.length > 0) {
+      return `${view.target_not_testable ?? 'The analysis can run now.'} ${view.exclusion_notices.join(' ')}`;
+    }
     const one = view.will_run_without.length === 1;
     const leaveOut = view.will_run_without.length === 0 ? ''
       : `leave out ${one ? `"${view.will_run_without[0]}"` : listOf(view.will_run_without)} until ${one ? 'its levels are' : 'their levels are'} set.`;

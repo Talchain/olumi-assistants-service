@@ -1208,14 +1208,14 @@ function relationshipAsk(option: unknown): string | undefined {
  *     not stop at an everywhere-pinned node for the same reason.
  *   · A switch (`isSwitch`, levels only 0/1) is exempt, because 0 is a real
  *     status-quo level for it ("not done"), not a placeholder.
- * Risks and other non-factor kinds are out of scope here: their missing input
- * is a likelihood, a different ask.
+ * Every sampled root kind is covered; risks carry a likelihood/magnitude ask.
+ * Goal, option, decision and constraint (limit) nodes are not sampled roots.
  */
 function goalRootsWithoutStatusQuoLevel(
   graph: GraphV3T,
   payload: AnalysisReadyPayload,
   rawGraph: unknown,
-): Array<{ id: string; label: string }> {
+): Array<{ id: string; label: string; kind: GraphV3T['nodes'][number]['kind'] }> {
   // The V1 `data.value` level lives on the RAW node: GraphV3 does not keep `data`.
   const rawNodes = isPlainObject(rawGraph) && Array.isArray(rawGraph.nodes) ? rawGraph.nodes : [];
   const legacyLevel = new Map<string, unknown>(
@@ -1263,9 +1263,9 @@ function goalRootsWithoutStatusQuoLevel(
       .filter((blocker) => readNonEmptyString(blocker.option_id) === null)
       .map((blocker) => readNonEmptyString(blocker.factor_id)),
   );
-  const gaps: Array<{ id: string; label: string }> = [];
+  const gaps: Array<{ id: string; label: string; kind: GraphV3T['nodes'][number]['kind'] }> = [];
   for (const node of graph.nodes) {
-    if (node.kind !== 'factor' || node.id === payload.goal_node_id) continue;
+    if (node.kind === 'goal' || nonCausal(node.id) || node.id === payload.goal_node_id) continue;
     if (alreadyFactorBlocked.has(node.id)) continue;
     if ((parents.get(node.id) ?? 0) > 0) continue;
     const observed = (node as { observed_state?: { value?: unknown } }).observed_state;
@@ -1287,7 +1287,7 @@ function goalRootsWithoutStatusQuoLevel(
     };
     if (isSwitch(magnitudeNode, resolveMagnitudeFrame(magnitudeNode))) continue;
     if (!reachesGoal(node.id)) continue;
-    gaps.push({ id: node.id, label: node.label ?? node.id });
+    gaps.push({ id: node.id, label: node.label ?? node.id, kind: node.kind });
   }
   return gaps;
 }
@@ -1309,6 +1309,11 @@ function hasSampledPrior(prior: unknown): boolean {
 
 const statusQuoLevelAsk = (label: string): string =>
   `What is "${label}" today, before any option changes it? Without a current level the analysis would treat it as zero.`;
+
+const rootLevelAsk = (gap: { label: string; kind: string }): string =>
+  gap.kind === 'risk'
+    ? `How likely or how large is "${gap.label}" today? Without a figure it would be treated as zero.`
+    : statusQuoLevelAsk(gap.label);
 
 function appendSemanticIssues(
   payload: AnalysisReadyPayload | undefined,
@@ -1552,7 +1557,7 @@ export function assessCanonicalAnalysisReadiness(
       blockingIssues,
       repairWiredFactorCountByOption(parsed.data),
     );
-    // PLACEHOLDER-ZERO: factor-scoped, so neither admission waiver (both need an
+    // PLACEHOLDER-ZERO: node-scoped, so neither admission waiver (both need an
     // option id) can answer it — excluding options does not give the remaining
     // arms a status-quo level.
     const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic, graph) : [];
@@ -1561,7 +1566,7 @@ export function assessCanonicalAnalysisReadiness(
         issue_id: `level_${index + 1}`,
         code: 'MISSING_FACTOR_LEVEL',
         category: 'option_values',
-        message: statusQuoLevelAsk(gap.label),
+        message: rootLevelAsk(gap),
         repairability: 'human_input_required',
         factor_id: gap.id,
         factor_label: gap.label,
@@ -1644,7 +1649,7 @@ export function assessCanonicalAnalysisReadiness(
                     factor_id: gap.id,
                     factor_label: gap.label,
                     blocker_type: 'missing_value' as const,
-                    message: statusQuoLevelAsk(gap.label),
+                    message: rootLevelAsk(gap),
                     suggested_action: 'add_value' as const,
                   })),
                 ],

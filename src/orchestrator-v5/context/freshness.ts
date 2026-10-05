@@ -37,6 +37,7 @@ import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
  *     derivation; tests may skip emitting entirely).
  */
 
+import { gateAnalysableOptions } from '../tools/handlers/analysable-option-gate.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { LegacyAnalysisEditFacts, HandlerFactWithTurn } from '../types/handler-fact.js';
 
@@ -1076,8 +1077,14 @@ function runProjectionAllowsFreshness(fact: HandlerFact, _storedHash: string, gr
     || (raw.options !== undefined && !Array.isArray(raw.options))) return false;
   if (notAnalysable.length > 0) {
     const ready = buildCanonicalAnalysisReadyFromGraph(raw);
-    if (ready === undefined || notAnalysable.some(excluded => ready.options.some(option =>
-      option.option_id === excluded.option_id && option.status === 'ready'))) return false;
+    if (ready === undefined) return false;
+    const gateExcluded = new Set(gateAnalysableOptions({
+      options: ready.options as unknown as ReadonlyArray<Record<string, unknown>>,
+      graph: raw, rawPersistedGraph: raw, scaleNetEnabled: true,
+    }).excluded.map(option => option.option_id));
+    if (notAnalysable.some(excluded => ready.options.some(option =>
+      option.option_id === excluded.option_id && option.status === 'ready'
+        && !gateExcluded.has(option.option_id)))) return false;
   }
   // On a gap-free graph, the caller's equal hashes remain the authority.
   // Rehashing here breaks hash-only callers and creates a second hash verdict.

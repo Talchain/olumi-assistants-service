@@ -58,6 +58,9 @@ import { passesAssistantTextContentDefences } from './assistant-text-defences.js
  * type is a lie the type then launders.
  */
 export interface OmittedOptionRecord {
+  /** Absent on legacy engine omissions; present on gate exclusions. */
+  readonly reason?: 'no_interventions' | 'no_change_from_today';
+  readonly factor_labels?: readonly string[];
   readonly option_id: string;
   /** Raw option label (unsanitised); null when the node carried none. */
   readonly label: string | null;
@@ -106,6 +109,7 @@ export interface ScaffoldedOptionRecord extends OmittedOptionRecord {
  * {@link SCAFFOLD_DISCLOSURE_RE_SRC}.
  */
 export const SCAFFOLD_LABEL_MAX_CHARS = 40;
+const NO_CHANGE_TARGET_MAX_CHARS = 99 * (SCAFFOLD_LABEL_MAX_CHARS + 2) + 3;
 
 /**
  * Return a label safe to interpolate into the disclosure suffix / chip, or
@@ -457,15 +461,36 @@ export function buildScaffoldDisclosureSuffix(
   return pluralSuffix(Math.min(scaffolded.length, 99));
 }
 
-/**
- * Build the suffix for scaffolded options that did NOT reach the comparison.
- * Same shape rules as {@link buildScaffoldDisclosureSuffix}; different claim.
- */
+/** Exact reason sentence shared by run disclosure, admission and readiness. */
+export function buildExcludedOptionNotice(record: OmittedOptionRecord): string {
+  if (record.reason !== 'no_change_from_today') {
+    return buildScaffoldOmittedSuffix([record]).trimStart();
+  }
+  const label = safeScaffoldOptionLabel(record.label) ?? 'One of your options';
+  const factors = (record.factor_labels ?? []).map((l) => safeScaffoldOptionLabel(l) ?? 'a factor');
+  const targets = factors.length === 0 ? 'its factors'
+    : factors.length === 1 ? factors[0]!
+    : `${factors.slice(0, -1).join(', ')} and ${factors[factors.length - 1]}`;
+  return noChangeNotice(label, targets);
+}
+
+function noChangeNotice(label: string, targets: string): string {
+  return `${label} was left out: it sets ${targets} to today's level, so it changes nothing. Edit its value if you meant a change.`;
+}
+
+/** Build omission sentences from the recorded reason, preserving legacy copy. */
 export function buildScaffoldOmittedSuffix(
   omitted: readonly OmittedOptionRecord[],
   keptLabelFor?: DedupKeptLabelResolver,
 ): string {
   if (omitted.length === 0) return '';
+  // Mixed reasons are always named per option. Legacy missing-values-only
+  // copy remains byte-identical, including its singular/plural forms.
+  if (omitted.some((record) => record.reason === 'no_change_from_today')) {
+    return omitted.map((record) => record.reason === 'no_change_from_today'
+      ? ` ${buildExcludedOptionNotice(record)}`
+      : buildScaffoldOmittedSuffix([record], keptLabelFor)).join('');
+  }
 
   // 2.120(c) — the ACCURATE branch, claimed only when the engine's own reason
   // covers EVERY option the sentence speaks for. A sentence about "2 of your
@@ -695,7 +720,9 @@ export const SCAFFOLD_DEDUP_OMITTED_RE_SRC =
  * while the egress silently swallows the summary carrying it.
  */
 export const SCAFFOLD_OMITTED_ANY_RE_SRC =
-  `(?:${SCAFFOLD_OMITTED_RE_SRC}|${SCAFFOLD_DEDUP_OMITTED_RE_SRC})`;
+  `(?:${SCAFFOLD_OMITTED_RE_SRC}|${SCAFFOLD_DEDUP_OMITTED_RE_SRC}|` +
+  ` [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS}} was left out: it sets [^'\\n]{1,${NO_CHANGE_TARGET_MAX_CHARS}} ` +
+  "to today's level, so it changes nothing\\. Edit its value if you meant a change\\.){1,99}";
 
 /**
  * The union every consumer compiles — the registry egress allowlist tail,
@@ -737,7 +764,14 @@ export const SCAFFOLD_DISCLOSURE_MAX_CHARS =
     baselineHoldGenericSingleSuffix().length,
     baselineHoldPluralSuffix(99).length,
   ) +
-  Math.max(
+  99 * Math.max(
+    // Per-option mixed reasons can occupy up to 99 omission sentences.
+    // Budget the bounded label slots without invoking the lazily compiled
+    // grammar while its source constants are still being initialised.
+    1 + noChangeNotice(
+      'x'.repeat(SCAFFOLD_LABEL_MAX_CHARS),
+      'x'.repeat(NO_CHANGE_TARGET_MAX_CHARS),
+    ).length,
     omittedLabelledSuffix('x'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,
     omittedGenericSingleSuffix().length,
     omittedPluralSuffix(99).length,

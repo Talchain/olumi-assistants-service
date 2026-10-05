@@ -159,6 +159,7 @@
  * defect; an invariant test asserts the reasons are non-empty on every refusing
  * verdict, and a mutant proves it bites.
  */
+import { buildExcludedOptionNotice } from '../coaching/scaffold-disclosure.js';
 import type { RunAdmission } from '../tools/handlers/analysis-ready-core.js';
 import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
@@ -1297,7 +1298,10 @@ export function analysisAdmissionFrom(
     reasons.push({
       field: 'structurally_analysable',
       code: 'RUN_WILL_EXCLUDE_OPTIONS',
-      message: `Analysis can run, leaving out ${left === 1 ? 'one option' : `${left} options`} you have not set values for.`,
+      message: admission.plan.excluded_options?.some((e) => e.reason === 'no_change_from_today')
+        ? `Analysis can run, leaving out ${left === 1 ? 'one option' : `${left} options`}. `
+          + admission.plan.excluded_options.map(buildExcludedOptionNotice).join(' ')
+        : `Analysis can run, leaving out ${left === 1 ? 'one option' : `${left} options`} you have not set values for.`,
     });
   } else {
     reasons.push({

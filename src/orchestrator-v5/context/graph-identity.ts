@@ -1,4 +1,5 @@
 import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
+import { gateAnalysableOptions } from '../tools/handlers/analysable-option-gate.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { runAnalysisProjectionNeedsStamp } from './analysis-projection-policy.js';
 import { goalScopeMeaning } from '../../schemas/goal-scope.js';
@@ -111,11 +112,15 @@ export function matchesHistoricalRunAnalysisIdentity(
   // sent arms when every arm was excluded. Check the states actually attested
   // rather than requiring a present-day, nonempty exhaustive sent population.
   // With gaps, every admission state must be recorded as well as hash-bound.
+  const gateExcluded = new Set(gateAnalysableOptions({
+    options: ready.options as unknown as ReadonlyArray<Record<string, unknown>>,
+    graph, rawPersistedGraph: graph, scaleNetEnabled: true,
+  }).excluded.map(option => option.option_id));
   return ready.options.every(option => {
     if (sent.has(option.option_id)) return option.status === 'ready';
     const reason = excluded.get(option.option_id);
     if (reason === undefined) return !carriesGaps;
-    return reason === 'not_analysable' ? option.status !== 'ready'
+    return reason === 'not_analysable' ? option.status !== 'ready' || gateExcluded.has(option.option_id)
       : reason === 'olumi_proposed' ? graph.nodes.some(node => node.id === option.option_id
         && node.proposed_by === 'olumi' && node.analysis_participation !== 'included')
       : graph.nodes.some(node => node.id === option.option_id && node.option_status === reason);

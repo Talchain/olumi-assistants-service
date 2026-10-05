@@ -192,6 +192,7 @@ export interface RouteScaffoldPlan {
    * invisible until after it happens.
    */
   readonly excluded_option_ids?: readonly string[];
+  readonly excluded_options?: readonly import('../../orchestrator-v5/tools/handlers/analysable-option-gate.js').ExcludedOptionRecord[];
 }
 
 /**
@@ -454,7 +455,10 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
             // is waived (its gap is not the user's task) but it is compared, so
             // it is never named here (served bf-20260926T054503Z, "Status Quo").
             ...(admission.plan.excluded_option_ids.length > 0
-              ? { excluded_option_ids: [...admission.plan.excluded_option_ids] }
+              ? {
+                  excluded_option_ids: [...admission.plan.excluded_option_ids],
+                  ...(admission.plan.excluded_options ? { excluded_options: admission.plan.excluded_options } : {}),
+                }
               : {}),
           }
         : {}),

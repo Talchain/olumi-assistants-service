@@ -452,6 +452,13 @@ export const CEEGraphReadinessResponseV1Schema = z
       .object({
         will_scaffold_options: z.boolean(),
         option_count: z.number().int().min(0).optional(),
+        excluded_option_ids: z.array(z.string()).optional(),
+        excluded_options: z.array(z.object({
+          option_id: z.string(),
+          label: z.string().nullable(),
+          reason: z.enum(['no_interventions', 'no_change_from_today']),
+          factor_labels: z.array(z.string()).optional(),
+        })).optional(),
       })
       .optional(),
     /**

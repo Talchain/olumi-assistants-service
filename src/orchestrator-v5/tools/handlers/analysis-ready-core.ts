@@ -703,6 +703,12 @@ function resolveRunAdmissionTerms(
     };
   }
   if (strict.status !== 'unrecoverable') {
+    // Individually valid values can still be today's levels. Ready graphs
+    // must expose the same reason-bearing submission plan as the Run.
+    const plan = computeScaffoldPlan({
+      options: (assessment.analysisReady?.options ?? []) as unknown as ReadonlyArray<Record<string, unknown>>,
+      graph: rawGraph, rawPersistedGraph: rawGraph, scaleNetEnabled: true,
+    });
     // ⭐ THE IDENTICAL_OPTIONS FLOOR APPLIES HERE TOO. Strictly ready means "every
     // option is individually well-formed"; it says NOTHING about whether the
     // options DIFFER FROM EACH OTHER. PLoT's `IDENTICAL_OPTIONS` is a predicate
@@ -718,7 +724,7 @@ function resolveRunAdmissionTerms(
       return {
         strict,
         assessment,
-        plan: empty,
+        plan,
         willProceed: false,
         waivedOptionIds: [],
         canonicalGraph: strict.canonicalGraph,
@@ -727,7 +733,7 @@ function resolveRunAdmissionTerms(
     return {
       strict,
       assessment,
-      plan: empty,
+      plan,
       willProceed: true,
       waivedOptionIds: [],
       canonicalGraph: strict.canonicalGraph,

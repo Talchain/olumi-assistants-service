@@ -702,7 +702,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const olumiFilter = filterOlumiProposedOptions({
       submitted: gate.options as ReadonlyArray<Record<string, unknown>>,
       graph: snapshot.rawPersistedGraph ?? snapshot.graph,
-      unanalysableOptionIds: gate.excluded.map((s) => s.option_id),
+      // This legacy participation field means missing values, not no change.
+      unanalysableOptionIds: gate.excluded.filter((s) => s.reason === 'no_interventions').map((s) => s.option_id),
     });
     const keptOlumiProvisional = olumiFilter.keptOlumiProvisional;
 
@@ -1262,6 +1263,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       heldFactorIdsByOptionId: scaffoldedFactorIdsByOptionId,
       optionsNotSent: [
         ...userStatus.excluded.map((e) => ({ option_id: e.option_id, label: e.label, reason: e.status })),
+        // SC-24's published enum groups gate exclusions as `not_analysable`;
+        // the exact reason travels in the disclosure and __excluded_options.
         ...gate.excluded.map((e) => ({ option_id: e.option_id, label: e.label, reason: 'not_analysable' as const })),
         ...olumiExcluded,
       ],

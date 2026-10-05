@@ -432,10 +432,10 @@ export function composeHandlerFailureBody(
       // `{ handler_id, first_option_label?, option_count | plot_preflight_recovery,
       // analysis_status }` — no factor list — and the gate's own
       // `ExcludedOptionRecord` (`analysable-option-gate.ts:133`) carries
-      // `reason: 'no_interventions'`, an ENUM WITH ONE VALUE. Naming the
-      // factors is a PRODUCER change (run-analysis.ts + the
-      // `HandlerFailureDetails` contract), not a copy change, so it is filed
-      // rather than invented here.
+      // `no_interventions` or `no_change_from_today`. The latter is disclosed
+      // by the submission/readiness path and cannot reach this missing-values
+      // recovery: its gate preserves the minimum submitted option count.
+      // Missing-value records still carry no factor list; do not invent one.
       const labelUsable = rawLabel !== null && !entityRef.startsWith('that ');
       if (labelUsable) {
         return {

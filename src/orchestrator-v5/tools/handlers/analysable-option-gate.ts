@@ -39,6 +39,10 @@
  *     submission entirely. Nothing is minted for it, so it cannot reach
  *     `option_comparison[]` or `decision_brief.options[]`: no rank, no win
  *     probability, by construction rather than by suppression downstream.
+ *   - a non-baseline option whose absolute levels equal today's held levels
+ *     is EXCLUDED only when another submitted arm represents today, and the
+ *     minimum comparison count survives. Without a baseline, keep the first
+ *     such arm as today. Nothing rewrites its authored intervention values.
  *
  * ## The consumer predicate this gate mirrors (13d — derive, don't infer)
  *
@@ -67,9 +71,9 @@
  * The gate exists ONLY on the outbound PLoT projection; the persisted graph
  * (and therefore `graph_hash_at_run` / freshness) is untouched.
  *
- * Byte-stable no-op: when every option is analysable the submitted set is the
- * INPUT ARRAY BY REFERENCE, so a fully-configured scenario is unchanged to the
- * byte. Pinned by identity (`toBe`), not by deep equality.
+ * Byte-stable no-op: when no hold or exclusion is needed the submitted set is
+ * the INPUT ARRAY BY REFERENCE. Authored values that now equal today can still
+ * require exclusion; having values alone no longer guarantees this no-op.
  */
 
 import type { ScaffoldedOptionRecord } from '../../coaching/scaffold-disclosure.js';
@@ -119,9 +123,8 @@ export interface AnalysableOptionGateInput {
  * One option EXCLUDED from the PLoT submission — no values minted for it, so
  * it cannot be ranked or scored.
  *
- * `reason` is an ENUM, not a boolean: today exclusion has exactly one cause,
- * and a boolean would have to be renamed the day it gains a second. It is also
- * what lets a consumer say WHY without re-deriving the verdict.
+ * `reason` distinguishes missing values from authored values that now equal
+ * today's levels. Consumers carry that reason rather than re-deriving it.
  *
  * Deliberately NOT a {@link ScaffoldedOptionRecord}: that type carries
  * `value_defaulted: true`, which is FALSE for an excluded option — nothing was
@@ -131,7 +134,9 @@ export interface ExcludedOptionRecord {
   readonly option_id: string;
   /** Raw option label (unsanitised); null when the node carried none. */
   readonly label: string | null;
-  readonly reason: 'no_interventions';
+  readonly reason: 'no_interventions' | 'no_change_from_today';
+  /** Names of ALL unchanged targets, carried for truthful disclosure. */
+  readonly factor_labels?: readonly string[];
 }
 
 export interface AnalysableOptionGateOutcome {
@@ -171,6 +176,8 @@ export interface ScaffoldPlan {
    * The run's own record makes the same split (`run-analysis.ts`).
    */
   readonly excluded_option_ids: readonly string[];
+  /** Additive: the reason-bearing counterpart of excluded_option_ids. */
+  readonly excluded_options?: readonly ExcludedOptionRecord[];
 }
 
 /**
@@ -205,6 +212,7 @@ export function computeScaffoldPlan(input: AnalysableOptionGateInput): ScaffoldP
     option_count: touchedIds.length,
     scaffolded_option_ids: touchedIds,
     excluded_option_ids: outcome.excluded.map((s) => s.option_id),
+    ...(outcome.excluded.length > 0 ? { excluded_options: outcome.excluded } : {}),
   };
 }
 
@@ -264,9 +272,9 @@ function nodesOf(graph: unknown): Dict[] {
  *
  * ⚠ THE PRIOR-RANGE MIDPOINT RUNG WAS DELETED WITH THE RULING. A
  * centre-of-range guess answers *"where might this factor sit?"*; the status
- * quo is a claim about *where it does sit*. The hold is now this function's
- * only caller, so a rung that cannot support the hold's claim has no honest
- * caller left. Deleted outright rather than left behind a pinned-true flag: a
+ * quo is a claim about *where it does sit*. Both the hold and no-change
+ * detection need that same evidence; neither may infer today's level from a
+ * prior midpoint. Deleted outright rather than left behind a pinned-true flag: a
  * branch no production path can reach, kept alive by its own tests, is how a
  * rule quietly stops being enforced.
  */
@@ -445,6 +453,24 @@ function collectInterventionIntentOptionIds(graph: unknown): Set<string> {
   return intent;
 }
 
+/**
+ * Absolute intervention LEVELS equal today's holdable LEVELS. Never compare
+ * raw magnitudes with levels, or infer a missing target's value. Pure / typed.
+ */
+export function isNoChangeFromToday(
+  option: Readonly<Record<string, unknown>>,
+  holdValues: ReadonlyMap<string, unknown>,
+): boolean {
+  if (isBaselineOption(option)) return false;
+  const entries = Object.entries(interventionsOf(option));
+  return entries.length > 0 && entries.every(([id, intervention]) => {
+    const hold = extractNumericInterventionValue(holdValues.get(id));
+    const value = extractNumericInterventionValue(intervention);
+    return hold !== null && value !== null
+      && Math.abs(value - hold) <= 1e-9 * Math.max(1, Math.abs(hold));
+  });
+}
+
 export function gateAnalysableOptions(
   input: AnalysableOptionGateInput,
 ): AnalysableOptionGateOutcome {
@@ -457,10 +483,6 @@ export function gateAnalysableOptions(
     const options = input.options.filter(isPlainObject);
     if (options.length !== input.options.length) return ungated;
 
-    const unanalysable = options.filter(hasEmptyInterventions);
-    // BYTE-STABLE NO-OP: every option is analysable, so there is nothing to
-    // decide. The submitted set is the INPUT ARRAY BY REFERENCE.
-    if (unanalysable.length === 0) return ungated;
     const analysable = options.filter((o) => !hasEmptyInterventions(o));
     // All-unanalysable is owned by the pre-PLoT `options_not_configured` guard
     // (`run-analysis.ts` §2.5), which tests the same emptiness predicate over
@@ -534,8 +556,35 @@ export function gateAnalysableOptions(
       excluded.push({ option_id: optionId, label, reason: 'no_interventions' });
     }
 
+    // First finish the existing hold/exclusion pass: only a SUBMITTED baseline
+    // can represent today. Without one, the first no-change arm is today's arm.
+    let todayRepresented = submitted.some(isBaselineOption);
+    const noChangeExcluded = new Set<Dict>();
+    const labels = new Map(nodesOf(input.graph).map((n) => [n.id, n.label] as const));
+    for (const opt of submitted) {
+      if (!isNoChangeFromToday(opt, holdValues)) continue;
+      if (!todayRepresented) {
+        todayRepresented = true;
+        continue;
+      }
+      // Never remove a no-change arm below PLoT's minimum. Existing guards
+      // remain responsible for a comparison that cannot run in this shape.
+      if (submitted.length - noChangeExcluded.size - 1 < PLOT_MIN_COMPARISON_OPTIONS) continue;
+      const optionId = optionIdOf(opt);
+      if (optionId === null) continue; // an undisclosable option stays for existing guards
+      noChangeExcluded.add(opt);
+      excluded.push({
+        option_id: optionId,
+        label: typeof opt.label === 'string' ? opt.label : null,
+        reason: 'no_change_from_today',
+        factor_labels: Object.keys(interventionsOf(opt)).map((id) => {
+          const label = labels.get(id);
+          return typeof label === 'string' && label.length > 0 ? label : id;
+        }),
+      });
+    }
     if (held.length === 0 && excluded.length === 0) return ungated;
-    return { options: submitted, held, excluded };
+    return { options: submitted.filter((o) => !noChangeExcluded.has(o)), held, excluded };
   } catch (err) {
     // TOTAL: fail-safe is today's behaviour (the run blocks; nothing is
     // half-gated, nothing undisclosed reaches PLoT). Review fix B5: the
