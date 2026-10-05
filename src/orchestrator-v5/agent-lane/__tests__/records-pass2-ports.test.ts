@@ -251,7 +251,7 @@ describe('P2-FRAME-CHECK: the /v2/run scale for a declared plausible_max equals 
   it('a declared range inside the levels: frame and the option level on /v2/run equal the legacy framing', async () => {
     const { framedObservedState } = await import('../admit-model.js');
     const { factor, option, scale, wireLevel } = await wireFor(300);
-    const legacy = framedObservedState({ baseline_value: factor.observed_state!.raw_value!, unit: factor.observed_state!.unit, provenance: 'explicit', plausible_max: 300 }) as { cap?: number };
+    const legacy = framedObservedState({ baseline_value: factor.observed_state!.raw_value!, unit: factor.observed_state!.unit ?? null, provenance: 'explicit', plausible_max: 300 }) as { cap?: number };
     const raw = option.interventions![factor.id]!.raw_value!;
     expect({ frame: scale?.cap, stored_frame: factor.scale_frame, wire_level: wireLevel })
       .toEqual({ frame: legacy.cap, stored_frame: legacy.cap, wire_level: raw / legacy.cap! });
