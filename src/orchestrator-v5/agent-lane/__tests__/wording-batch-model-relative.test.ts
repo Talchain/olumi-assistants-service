@@ -136,7 +136,6 @@ describe('explain and flip fallbacks: the leader and runner-up are said in this 
     margin_pp: 35,
     robustness_band: 'stable',
     top_drivers: [{ factor_label: 'Engineering Capacity', sensitivity_value: 0.65 }],
-    staleness_reason: null,
   };
 
   it('explain fallback: exact leader sentence and the runner-up in its own share', () => {
