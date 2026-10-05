@@ -1,3 +1,4 @@
+import { authorshipReasonForRun } from './compose/authorship-reason-for-run.js';
 /**
  * V5 response finaliser — single structurally-guaranteed stamping point for
  * envelope-level fields the product depends on, plus a *type-system* and
@@ -515,7 +516,7 @@ export function finaliseV5Response(
   // analysis block to the composed identity verdict. Other exits retain the
   // additive behaviour. Composed from already-loaded inputs — no engine call,
   // model call or store read.
-  const withAnalysisState = attachAnalysisState(withGraphHash, ctx);
+  const withAnalysisState = authorshipReasonForRun(attachAnalysisState(withGraphHash, ctx));
   // THE RUN-OVER-RUN CONSEQUENCE (schemas 0.39.0 `OlumiResponseSchema.run_delta`).
   // ADDITIVE BY CONSTRUCTION: adds at most one top-level key and rewrites none,
   // so a consumer that ignores it sees byte-identical behaviour.
@@ -1024,3 +1025,5 @@ function stripCeeTrace(response: OlumiResponse): OlumiResponse {
   }
   return clone as OlumiResponse;
 }
+
+export { authorshipReasonForRun } from './compose/authorship-reason-for-run.js';
