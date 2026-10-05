@@ -86,7 +86,9 @@ export function nodeUnitOf(nodes: readonly unknown[]): (id: unknown) => string |
     const n = byId.get(id);
     return n === undefined ? undefined
       : [n.unit, isRec(n.observed_state) ? n.observed_state.unit : undefined, n.kind === 'goal' ? n.goal_threshold_unit : undefined,
-        isRec(n.data) ? n.data.unit : undefined, isRec(n.unit_reading) ? n.unit_reading.unit : undefined]
+        // RT-6 step 2: only the user's own stated reading, after every own unit; never data.unit or an Olumi reading
+        // (DL 5999243055: those must not govern P5 goal testability).
+        isRec(n.unit_reading) && n.unit_reading.source === 'user_stated' ? n.unit_reading.unit : undefined]
         .find((x): x is string => typeof x === 'string' && x.trim() !== '');
   };
 }
