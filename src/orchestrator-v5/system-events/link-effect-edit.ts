@@ -38,6 +38,7 @@ import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitio
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
+import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -225,6 +226,44 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
     source: { own: sourceOwn, ...(sourceAdopted !== undefined ? { adopted: sourceAdopted } : {}) },
     target: { own: targetOwn, ...(targetAdopted !== undefined ? { adopted: targetAdopted } : {}),
       ...(targetIsLevel && levelPoints.length === 0 ? { storeAsStated: true } : {}) },
+  };
+}
+
+/** An end the user stated by its node's own LABEL, read as that node's count unit (shown on the card for approval). */
+export interface LinkEffectLabelReading {
+  readonly node_id: string;
+  /** The user's words for the unit, exactly as the Agent passed them ("café subscribers"). */
+  readonly said: string;
+  /** The node's own unit the effect is now stated in ("cafés"). */
+  readonly unit: string;
+}
+
+/**
+ * ⭐ RT-6 row 1b (Science ruling #87 6005615422; red team 6005529714, 2 of 3 live sentences): "Every 10 more café
+ * subscribers adds …" names the SOURCE by its label, and the Agent passes those words as the unit. When an end's stated
+ * unit is none of its own but IS its node's label (`labelStandsForCountUnit`: identity, count units only), the effect is
+ * restated in the node's own unit and the reading is returned, so the card says it and the user approves it. It is never
+ * a silent credit. Both arms read the ONE matcher; an end already stated in one of its own units is untouched.
+ */
+export function withLabelCountUnits(graph: unknown, from: string, to: string, effect: LinkEffectStatement):
+  { readonly effect: LinkEffectStatement; readonly label_readings: readonly LinkEffectLabelReading[] } {
+  const ends = linkEffectEndUnits(graph, from, to);
+  if (ends === null || !isRec(graph) || !Array.isArray(graph.nodes)) return { effect, label_readings: [] };
+  const nodes = graph.nodes.filter(isRec);
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  const readEnd = (id: string, stated: string, end: LinkEndUnits): LinkEffectLabelReading | undefined => {
+    if (statedInOneOf(stated, [...end.own, end.adopted])) return undefined;
+    const label = nodes.find((n) => n.id === id)?.label;
+    const magnitude = view.get(id);
+    const unit = magnitude === undefined ? undefined : unitOf(magnitude);
+    return typeof unit === 'string' && labelStandsForCountUnit(stated, label, unit) ? { node_id: id, said: stated, unit } : undefined;
+  };
+  const source = readEnd(from, effect.per_source_change_unit, ends.source);
+  const target = readEnd(to, effect.amount_unit, ends.target);
+  return {
+    effect: { ...effect, ...(source !== undefined ? { per_source_change_unit: source.unit } : {}),
+      ...(target !== undefined ? { amount_unit: target.unit } : {}) },
+    label_readings: [source, target].filter((r): r is LinkEffectLabelReading => r !== undefined),
   };
 }
 
