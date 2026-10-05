@@ -399,8 +399,8 @@ export type CallStructuredModel = (req: {
   reasoning_effort?: 'low' | 'medium' | 'high';
   /** The strict schema's name (`text.format.name`). Absent = `whole_candidate`, the construction call's own. */
   schema_name?: string;
-  /** The ledger's prompt alias. Absent = `agent.construct`. */
-  prompt_alias?: string;
+  /** The ledger's prompt alias (one of the registered `AGENT_PROMPT_ALIASES`). Absent = `agent.construct`. */
+  prompt_alias?: import('./prompt-identity.js').AgentPromptAlias;
   /** Aborts the call (the sentence pass is abandoned when the main call finishes first). */
   signal?: AbortSignal;
 }) => Promise<{

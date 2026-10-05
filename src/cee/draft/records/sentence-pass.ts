@@ -20,8 +20,12 @@ import {
 
 /** The wire schema's name: the transport sends it as `text.format.name`, and the eval bank keys on it. */
 export const SENTENCE_PASS_SCHEMA_NAME = 'sentence_links';
-/** The prompt alias the usage ledger records for this call. */
-export const SENTENCE_PASS_PROMPT_ALIAS = 'agent.construct.sentence_links';
+/**
+ * The prompt alias the usage ledger records for this call: the registered construction alias (the registry is pinned;
+ * `agent.construct` already covers several construction instructions, told apart by `prompt_sha256` and here also by the
+ * schema name `sentence_links`).
+ */
+export const SENTENCE_PASS_PROMPT_ALIAS = 'agent.construct' as const;
 
 export interface InventorySentence { readonly id: number; readonly start: number; readonly end: number; readonly text: string }
 export interface InventoryFigure {

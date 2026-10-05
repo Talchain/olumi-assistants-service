@@ -85,12 +85,15 @@ describe.skipIf(!present)('LOCAL-ONLY bank rows (CEILING, self-authored pass)', 
       if (raw.direction === 'unresolved') expect(merge.records.stated_items[goal]).toMatchObject({ direction: 'floor', direction_literal: 'reach' });
     }
   });
-  it('(c) sealed d1: the refused causes (8-10) are filled by the pass and re-judged by the compile', async () => {
+  // Design §6 said "causes 8-10"; at this HEAD cause 10 is already CARRIED by fix (d), so it must NOT be touched.
+  it('(c) sealed d1: the refused causes 8 and 9 are filled and re-judged by the compile; carried cause 10 is never overwritten', async () => {
     const d = draws().find((x) => x.name === 'sealed' && x.draw === 1)!;
     const { merge, after } = await mergeDraw(d);
     const filled = merge.fills.filter((f) => f.field === 'relationship').map((f) => f.stated_index);
     console.log(JSON.stringify({ row: 'c-sealed-d1', filled, refusals: merge.refusals, after: [8, 9, 10].map((i) => after.ok ? after.projection.stated_dispositions!.find((x) => x.stated_index === i) : null).map((x) => x && { i: x.stated_index, d: x.disposition, r: (x as { reason?: string }).reason }) }));
-    expect(filled).toEqual(expect.arrayContaining([8, 9, 10]));
+    expect(filled).toEqual(expect.arrayContaining([8, 9]));
+    expect(filled).not.toContain(10);
+    expect(merge.refusals).toContainEqual(expect.objectContaining({ stated_index: 10, reason: 'main_link_compiled' }));
   });
   it('(h) sealed d1: the invented "Net MRR Change" / "MRR Target Progress" claims are set aside by rule (e) once stated paths exist', async () => {
     const d = draws().find((x) => x.name === 'sealed' && x.draw === 1)!;
