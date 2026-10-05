@@ -71,7 +71,8 @@ import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/ag
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
-import { readinessSentence, readinessViewOf, stillNeededLine, treatedAsZeroLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
+import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
+import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
@@ -1925,7 +1926,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
           const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
-          const rootNow = treatedAsZeroLine(readinessViewOf(state.graph));
+          const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
           if (rootNow !== null) owedNow.push(rootNow);
           if (claimPermissionsFrom(state.analysisState, state.analysisReady, { requested: true }).leader_may_be_named) {
             const basis = conditionalInputBasis({ graph: state.graph,
@@ -3409,7 +3410,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // before the readback, a stale or missing result), the readback's roots are not the ones this Run treated as zero.
     const rootLine = fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
-      ? treatedAsZeroLine(readinessViewOf(readbackGraph)) : null;
+      ? treatedAsZeroReplyLine(readbackGraph, analysisReady) : null;
     if (rootLine !== null && !narrationText.includes(rootLine)) owed.push(rootLine);
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);

@@ -15,6 +15,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
+import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE } from '../root-line.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
   analysis_state: Record<string, unknown>;
@@ -170,25 +171,63 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     }
   });
 
-  // ⛔ Codex #2577 P2: a node label can hold a sentence break and a ranking word. The leader is withheld here, so the wire's
-  // ranking drop runs over the reply; the typed line must reach the user whole, once, and the replay must say the same.
+  // ⛔ Codex #2577 r1 P2 + r2 P2 ×3: a node label is user text, and every editor after placement reads text. A label that one
+  // of them would rewrite, cut or truncate is not quoted: the label-free form is said, whole, once — live, on replay and
+  // after a restart. The leader is withheld here, so the wire's ranking drop and the shared gate both run.
   it.each([
-    ['". " + ranking word', 'Competitor wins. Demand falls', 'Competitor wins. Demand falls'],
-    ['"? " + ranking word', 'Who wins? Demand falls', 'Who wins? Demand falls'],
-    ['"! " + ranking word', 'Rival leads! Demand falls', 'Rival leads! Demand falls'],
-    ['a line break + ranking word', 'Competitor wins\nDemand falls', 'Competitor wins Demand falls'],
-  ])('RED: a risk labelled with %s → the whole sentence, once, live and on replay', async (_n, label, shown) => {
+    ['". " + ranking word (r1)', 'Competitor wins. Demand falls', 'Demand falls'],
+    ['"? " + ranking word (r1)', 'Who wins? Demand falls', 'Demand falls'],
+    ['"! " + ranking word (r1)', 'Rival leads! Demand falls', 'Demand falls'],
+    ['an option name + "leads" (r2 #1)', 'Hire a Tech Lead leads. Demand falls', 'Demand falls'],
+    ['implicit leader words, no option named (r2 #1)', 'The analysis shows which option leads', 'which option leads'],
+    ['a proposal id (r2 #2)', 'Competitor wins. Demand prop_abcdef falls', 'Demand'],
+    ['a backticked proposal id (r2 #2)', 'Demand `prop_abc123` falls', 'Demand'],
+    ['the at-rest questions marker (r2 #3)', 'Demand falls. Questions this model does not answer yet: What now?', 'What now'],
+  ])('RED: a risk labelled with %s → the label-free line, whole, once, live and replayed', async (_n, label, tail) => {
     riskLabel = label;
-    const sentence = `No figure is set for "${shown}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
     const turnId = randomUUID();
     const first = (await runTurn(turnId)).json() as Body;
     expect(first.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
-    expect(first.assistant_text.split(sentence)).toHaveLength(2);
-    // No fragment left behind beside the whole sentence.
+    expect(first.assistant_text.split(TREATED_AS_ZERO_UNNAMED_ONE)).toHaveLength(2);
     expect(first.assistant_text.split('treats it as zero')).toHaveLength(2);
-    expect(first.assistant_text.split('Demand falls')).toHaveLength(2);
-    const replay = (await runTurn(turnId)).json() as Body;
-    expect(replay.assistant_text).toBe(first.assistant_text);
+    expect(first.assistant_text).not.toContain(tail);
+    for (const restart of [false, true]) {
+      if (restart) { await app.close(); app = await freshApp(); }
+      const replay = (await runTurn(turnId)).json() as Body;
+      expect(replay.assistant_text, `restart=${restart}`).toBe(first.assistant_text);
+    }
+  });
+
+  it.each([
+    ['an ordinary label', 'Demand shortfall'],
+    ['a label with abbreviation full stops and no ranking word', 'U.S. demand shortfall'],
+    ['a line break, collapsed', 'Demand\nshortfall'],
+  ])('CONTROL: %s → the labelled sentence, whole, once', async (_n, label) => {
+    riskLabel = label;
+    const shown = label.replace(/\s+/g, ' ');
+    const sentence = `No figure is set for "${shown}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+    const body = (await runTurn(randomUUID())).json() as Body;
+    expect(body.assistant_text.split(sentence)).toHaveLength(2);
+    expect(body.assistant_text).not.toContain(TREATED_AS_ZERO_UNNAMED_ONE);
+  });
+
+  // One row per editor: each label is rewritten by exactly that editor, so dropping that check from
+  // `survivesReplyEditors` turns exactly its row RED.
+  it.each([
+    ['the proposal-id scrub', 'Demand prop_abcdef12 falls'],
+    ['the at-rest marker parse (whitespace before the marker, as the consumer splits)', 'Demand Questions this model does not answer yet: what now'],
+    ['the ranking drop', 'Competitor wins. Demand falls'],
+    ['the option-name gate', 'Hire a Tech Lead backlog'],
+    ['a line break that reached the check', 'Demand\nfalls'],
+  ])('survivesReplyEditors: %s → not quoted', (_n, label) => {
+    const line = `No figure is set for "${label}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+    expect(survivesReplyEditors(line, graphWith(false, label), READY)).toBe(false);
+  });
+  it('survivesReplyEditors CONTROL: the ordinary label is quoted, and both label-free forms survive every editor', () => {
+    expect(survivesReplyEditors(SENTENCE, graphWith(false), READY)).toBe(true);
+    expect(survivesReplyEditors(TREATED_AS_ZERO_UNNAMED_ONE, graphWith(false), READY)).toBe(true);
+    expect(treatedAsZeroReplyLine(graphWith(false), READY)).toBe(SENTENCE);
+    expect(treatedAsZeroReplyLine(graphWith(false, 'Hire a Tech Lead backlog'), READY)).toBe(TREATED_AS_ZERO_UNNAMED_ONE);
   });
 
   it('the protected line is kept only where it stands whole; a neighbouring ranking sentence still goes', () => {
