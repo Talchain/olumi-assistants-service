@@ -50,7 +50,7 @@ export const GOAL_CHANCE_WITHHELD_NOTE =
  */
 export const PLACEHOLDER_PATH_NOTE =
   'This run withheld the chance of reaching the goal for the options in `option_ids`, and for EVERY option the share of runs '
-  + 'in which it did best: they move with a link Olumi has not sized. Never state, estimate, rank or compare those figures, never '
+  + 'that supported it: they move with a link Olumi has not sized. Never state, estimate, rank or compare those figures, never '
   + 'quote those options’ estimated value for the goal itself, and never name a leading option. Say `say` once, as written, when '
   + 'you describe the run: it names the link, and asks for its size only where it does. Never ask the user to size a link `say` '
   + 'calls a guess. Other results of this run may be described as they are.';
@@ -61,7 +61,7 @@ export const PLACEHOLDER_PATH_NOTE =
  */
 export const PRODUCT_NOT_READ_NOTE =
   'This run withheld, for EVERY option, the chance of reaching the goal, the option’s estimated value for the goal itself, and '
-  + 'the share of runs in which it did best: the user’s own figures make the goal the product `say` names, and this run did not '
+  + 'the share of runs that supported it: the user’s own figures make the goal the product `say` names, and this run did not '
   + 'calculate it that way. Never state, estimate, rank or compare those figures, never name a leading option, and never say '
   + 'Olumi will calculate it that way. Say `say` once, as written, when you describe the run. Other results of this run may be '
   + 'described as they are.';
@@ -72,7 +72,7 @@ export const PRODUCT_NOT_READ_NOTE =
  * them — one option's own range — and forbids every comparative use: no rank, no leader, no better or worse.
  */
 export const OUTCOME_KEPT_NOTE =
-  'This run withheld, for EVERY option, the chance of reaching the goal’s target and the share of runs in which it did best: '
+  'This run withheld, for EVERY option, the chance of reaching the goal’s target and the share of runs that supported it: '
   + 'the target can’t be tested yet. Each option’s outcome for the goal (its centre and spread) is shown to the user on the '
   + 'results panel; you are not given those figures. Never quote or estimate an option’s outcome, never rank or order the '
   + 'options by their outcomes, never name a leading or best option, and never say one option is better or worse than another. '
@@ -85,7 +85,7 @@ export const OUTCOME_KEPT_NOTE =
  */
 export const TARGET_ONLY_NOTE =
   'This run withheld, for EVERY option, the chance of reaching the goal’s target and each option’s outcome for the goal: the '
-  + 'target can’t be tested yet. The share of runs in which each option did best IS a result of this run: say it, if at all, as a '
+  + 'target can’t be tested yet. The share of runs that supported each option IS a result of this run: say it, if at all, as a '
   + 'finding of this model in the goal’s own direction (where lower is better, the option that came out lowest), always said as '
   + '‘in this model’, never as a chance of reaching the target and never as a recommendation. Never state, estimate, rank or compare a chance of reaching the '
   + 'target, and never quote or estimate an option’s outcome. Say `say` once, as written, when you describe the run.';
@@ -94,7 +94,7 @@ export const TARGET_ONLY_OUTCOME_KEPT_NOTE =
   'This run withheld, for EVERY option, the chance of reaching the goal’s target: the target can’t be tested yet. Each option’s '
   + 'outcome for the goal is shown to the user on the results panel; you are not given those figures, so never quote or estimate '
   + 'one, never rank or order the options by those outcomes, and never say one option is better or worse than another (DL #2448 '
-  + 'condition (1)). The share of runs in which each option did best IS a result of this run: say it, if at all, as a finding of this model '
+  + 'condition (1)). The share of runs that supported each option IS a result of this run: say it, if at all, as a finding of this model '
   + 'in the goal’s own direction (where lower is better, the option that came out lowest), always said as ‘in this model’, never '
   + 'as a chance of reaching the target and never as a recommendation. Say `say` once, as written, when you describe the run.';
 
@@ -104,7 +104,7 @@ export const TARGET_ONLY_OUTCOME_KEPT_NOTE =
  * Every outcome stays, but identical options share one, so they are never compared with each other.
  */
 export const OPTIONS_IDENTICAL_NOTE =
-  'This run withheld, for EVERY option, the share of runs in which it did best, so no option may be called leading or best; '
+  'This run withheld, for EVERY option, the share of runs that supported it, so no option may be called leading or best; '
   + 'and, for the options in `option_ids`, the chance of reaching the goal: those options came out identical in this model, so '
   + 'the run cannot tell them apart. Never state, estimate, rank or compare those figures, never name a leading option, and never '
   + 'say one of the options in `option_ids` is better or worse than another. Say `say` once, as written, when you describe the '

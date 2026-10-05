@@ -61,7 +61,7 @@ describe('the doctrine states the product this is, not the one it was', () => {
   });
 
   it('requires the computed uncertainty to be reported, and a near-tie named as a finding', () => {
-    expect(SYSTEM_PROMPT_DOCTRINE).toContain('which single links in the model would flip the answer');
+    expect(SYSTEM_PROMPT_DOCTRINE).toContain('which single links in the model would change how the options compare if they are wrong');
     expect(SYSTEM_PROMPT_DOCTRINE).toContain('A close result is a finding, not a failure');
   });
 

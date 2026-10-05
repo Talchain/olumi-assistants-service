@@ -1117,9 +1117,9 @@ test('LEADER LIMIT RISK — a named option that probably breaks the user\'s own 
  assert.equal(runTurnCards(out.blocks as any).length,0,'and every link/limit/tie card');
  assert.equal(CoachingBlockSchema.safeParse(risk[0]).success,true);
  assert.ok(risk[0].signal_id.startsWith(`${RISK_CARD}${PAUL_HASH}:2026-09-25T17:27:54.315Z:`));
- assert.equal(risk[0].body,"On Olumi's estimates, the option that comes out ahead is more likely than not to break your limit on “Monthly churn” (10 percent per month). Worth deciding how firm it is before acting on this result.");
+ assert.equal(risk[0].body,"On Olumi's estimates, the option the most runs supported is more likely than not to break your limit on “Monthly churn” (10 percent per month). Worth deciding how firm it is before acting on this result.");
  assert.equal(risk[0].action_label,'Decide how firm my limit is');
- assert.equal(risk[0].action_prompt,"On Olumi's estimates, the option that comes out ahead is more likely than not to break my limit on “Monthly churn” (10 percent per month). Ask me how firm that limit is, and what I would give up to hold to it. Don't change the model or re-run anything yet.");
+ assert.equal(risk[0].action_prompt,"On Olumi's estimates, the option the most runs supported is more likely than not to break my limit on “Monthly churn” (10 percent per month). Ask me how firm that limit is, and what I would give up to hold to it. Don't change the model or re-run anything yet.");
  // Never a fit claim; the only number is the user's own figure (no probability quoted).
  for (const t of [risk[0].title,risk[0].body,risk[0].action_label,risk[0].action_prompt]) {
   assert.doesNotMatch(String(t),NEVER_CLAIMS_FIT);
@@ -1144,7 +1144,7 @@ test('LEADER LIMIT RISK — only on evaluated_feasible, a PERMITTED leader and a
  assert.equal(riskCards(withheld).length,0);
 });
 test('LEADER LIMIT RISK — limits are named only by identity on the run\'s own graph; otherwise the card speaks without a name',()=>{
- const generic="On Olumi's estimates, the option that comes out ahead is more likely than not to break at least one of your limits. Worth deciding how firm they are before acting on this result.";
+ const generic="On Olumi's estimates, the option the most runs supported is more likely than not to break at least one of your limits. Worth deciding how firm they are before acting on this result.";
  // A risk id the graph does not carry → no name, still the risk.
  const unknownId=riskCards(riskCase({risks:[{...CHURN_RISK,constraint_id:'gc-not-on-this-graph'}]}));
  assert.equal(unknownId.length,1); assert.equal(unknownId[0].body,generic);
@@ -1158,10 +1158,10 @@ test('LEADER LIMIT RISK — limits are named only by identity on the run\'s own 
  two.goal_constraints=[...two.goal_constraints,{...two.goal_constraints[0],constraint_id:'agent-lane:pro_subscribers:>=',node_id:'pro_subscribers',operator:'>=',value:200,unit:'subscribers',label:'Pro subscribers'}];
  const both=riskCards(riskCase({graph:two,risks:[CHURN_RISK,{...CHURN_RISK,constraint_id:'agent-lane:pro_subscribers:>=',label:'Pro subscribers',probability:0.2}]}));
  assert.equal(both.length,1);
- assert.equal(both[0].body,"On Olumi's estimates, the option that comes out ahead is more likely than not to break each of your limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Worth deciding how firm they are before acting on this result.");
+ assert.equal(both[0].body,"On Olumi's estimates, the option the most runs supported is more likely than not to break each of your limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Worth deciding how firm they are before acting on this result.");
  assert.equal(both[0].action_label,'Decide how firm my limits are');
  // The long prompt drops its trade-off clause to fit, never the figures or the no-write ask.
- assert.equal(both[0].action_prompt,"On Olumi's estimates, the option that comes out ahead is more likely than not to break each of my limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Ask me how firm each one is. Don't change the model or re-run anything yet.");
+ assert.equal(both[0].action_prompt,"On Olumi's estimates, the option the most runs supported is more likely than not to break each of my limits on “Monthly churn” (10 percent per month) and “Pro subscribers” (200 subscribers). Ask me how firm each one is. Don't change the model or re-run anything yet.");
  for (const t of [both[0].title,both[0].body,both[0].action_label,both[0].action_prompt]) assert.doesNotMatch(String(t),NEVER_CLAIMS_FIT);
 });
 test('sayLevel — EVERY key of the canonical currency map: an all-letter key follows the figure, every other key prefixes it (#1948 AI Quality nit 5842591105)',()=>{

@@ -1385,9 +1385,15 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       rawGap >= MIN_MARGINAL_RAW_ODDS_GAP - RAW_ODDS_GAP_FLOAT_EPSILON &&
       rawGap <= MARGINAL_RAW_ODDS_GAP_PP / 100 + RAW_ODDS_GAP_FLOAT_EPSILON
     ) {
+      // DL 0df0e1 (#2609): no selection claim ("the option this analysis names" read as Olumi picking). The served
+      // leader is the strict win-share argmax of the Run's own records (run-analysis.ts selectLeadingOptionId), so
+      // this arm fires only when the headline's source array disagrees — there is no "on average" reason to state.
+      // The sentence says what is true in that source and invites the change that would separate them.
+      const leaderPct = Math.round(winner.winnerProb * 100);
+      const runnerUpPct = Math.round(winner.runnerUpProb * 100);
       const disambig =
-        `${winnerLabel} leads overall, though ${winner.runnerUpLabel} has marginally better raw probability.${suffix}`;
-      if (disambig.length <= lengthCap) {
+        `In this model, ${winner.runnerUpLabel} was supported by marginally more runs than ${winnerLabel} (${runnerUpPct}% against ${leaderPct}%), so the two are close. Change a figure you’re unsure about to see what separates them.${suffix}`;
+      if (runnerUpPct > leaderPct && disambig.length <= lengthCap) {
         return {
           text: disambig,
           descriptor: buildDescriptor('LT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
@@ -1850,7 +1856,7 @@ function tieHeadlineText(
   suffix: string,
 ): string {
   return tieReason === 'margin'
-    ? `${winnerLabel} is currently only fractionally ahead, so the options are effectively tied.${suffix}`
+    ? `${winnerLabel} was supported by only fractionally more runs of this model, so the options are effectively tied.${suffix}`
     : `${winnerLabel} ${leadClause}, but the analysis treats this as a close call.${suffix}`;
 }
 
@@ -2993,7 +2999,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   ),
   // Case NT (tied): effectively tied, no margin number.
   new RegExp(
-    `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${TAIL_PATTERN}$`,
+    `^.+? was supported by only fractionally more runs of this model, so the options are effectively tied\\.${TAIL_PATTERN}$`,
   ),
   // Case NT (override tie): a WIDER gap the raw near_tie.is_tie override still
   // flagged as a tie — the winner is nominally ahead but the analysis treats it
@@ -3028,7 +3034,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // banned vocabulary, so the ordinary forbidden-vocab / ID / decimal defences
   // (applied after the grammar match) still bite on a leaky slot.
   new RegExp(
-    `^.+? leads overall, though .+? has marginally better raw probability\\.${TAIL_PATTERN}$`,
+    `^In this model, .+? was supported by marginally more runs than .+? \\(\\d{1,3}% against \\d{1,3}%\\), so the two are close\\. Change a figure you’re unsure about to see what separates them\\.${TAIL_PATTERN}$`,
   ),
   // Case E (link-safe floor): minimal "{label} currently leads.{suffix}".
   // MUST stay last — the trailing `\\.${TAIL_PATTERN}$` anchor is

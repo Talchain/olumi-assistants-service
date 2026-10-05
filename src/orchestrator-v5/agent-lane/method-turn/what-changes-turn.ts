@@ -40,9 +40,14 @@ export function isWhatChangesPress(chipId: unknown): boolean {
  * The RC contract update is owed by its owner (#87/5972845636 ii).
  */
 export const LINK_COPY = {
-  quoted: "{other} would come out ahead if {from}'s effect on {to} fell below about {fraction} of what it is now.",
-  below_a_tenth: "{other} would come out ahead only if {from}'s effect on {to} all but disappeared.",
-  no_change: "{leader} would still lead even if {from}'s average effect on {to} fell to zero.",
+  // DL 0df0e1 #87 6002469285 (Part B; Paul 20:2xZ "never a winner"): RC's "would come out ahead" / "would still lead" become
+  // the direction-NEUTRAL form, true whichever way the Run ranked, because this turn cannot see the Run's sent direction.
+  // A PLURALITY, never a majority (Codex r1 #2609): `no_change` attests an unchanged ORDERING, and .40/.35/.25 keeps
+  // the ordering without a majority, so "the most runs", never "most runs".
+  // Codex r2: ISL certifies the NEAREST crossing only (another option may take over further below), so "the first".
+  quoted: "{other} would be the first to be supported by the most runs if {from}'s effect on {to} fell below about {fraction} of what it is now.",
+  below_a_tenth: "{other} would be the first to be supported by the most runs only if {from}'s effect on {to} all but disappeared.",
+  no_change: "{leader} would still be supported by the most runs even if {from}'s average effect on {to} fell to zero.",
 } as const;
 
 /** RT-14: the measured answer opens in the model's frame; it never names an option as a fact about the world. */
