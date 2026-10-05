@@ -38,7 +38,7 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLinkEffectUnitReadings, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, type LinkEffectLabelReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
@@ -3347,7 +3347,7 @@ export function createAgentCapabilities(
         if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
         let working: unknown = g.raw;
         const prepared: { from: string; to: string; effect: { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string };
-          quote: string; edge_token: string; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true }[] = [];
+          quote: string; edge_token: string; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; label_readings?: readonly LinkEffectLabelReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true }[] = [];
         const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string }[] = [];
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
@@ -3412,16 +3412,20 @@ export function createAgentCapabilities(
             fail('unreadable_model', 'Nothing was prepared: the model could not be read in the form needed to size this link. Read the state again and try once more.');
             continue;
           }
-          const consent = { ...linkEffectConsent(working, from.id, to.id, stated),
+          // RT-6 row 1b (Science #87 6005615422): an end stated by its node's own LABEL is read as that node's unit, a
+          // reading the card shows for approval (never a silent credit).
+          const labelled = withLabelCountUnits(working, from.id, to.id, stated);
+          const labelReadings = labelled.label_readings.length > 0 ? { label_readings: labelled.label_readings } : {};
+          const consent = { ...linkEffectConsent(working, from.id, to.id, labelled.effect),
             ...(linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {}) };
-          const unitReading = prepareLinkEffectUnitReadings(working, from.id, to.id, stated, said, { link_selected: consent.link_selected });
+          const unitReading = prepareLinkEffectUnitReadings(working, from.id, to.id, labelled.effect, said, { link_selected: consent.link_selected });
           const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
             ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
           if (unitAsk !== undefined) {
             fail('unit_mismatch', linkEffectUnitAskWords(unitAsk, from, to));
             continue;
           }
-          const effect = withPointsAtZero(stated, unitReading.points_at_zero, from.id, to.id);
+          const effect = withPointsAtZero(labelled.effect, unitReading.points_at_zero, from.id, to.id);
           const unitReadings = unitReading.unit_readings.length > 0 ? { unit_readings: unitReading.unit_readings } : {};
           const dry = applyLinkEffectEdit({ persistedGraph: working, from: from.id, to: to.id, effect,
             expected: { graph_hash: expectedHash, edge_token: edgeToken }, quote: said,
@@ -3434,7 +3438,7 @@ export function createAgentCapabilities(
             continue;
           }
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
-            ...unitReadings, ...consent,
+            ...unitReadings, ...labelReadings, ...consent,
             from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
           working = dry.mutatedGraph;
         }
@@ -3447,7 +3451,8 @@ export function createAgentCapabilities(
         const operations = prepared.map((item) => ({ op: 'set_link_effect' as const, path: `${item.from}::${item.to}`,
           value: { from: item.from, to: item.to, effect: item.effect, quote: item.said, edge_token: item.edge_token,
             ...(item.reversal !== undefined ? { reversal: item.reversal } : {}), ...(item.link_selected ? { link_selected: true } : {}),
-            ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}) } }));
+            ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}),
+            ...(item.label_readings !== undefined ? { label_readings: item.label_readings } : {}) } }));
         const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
           operations, provenance: { authored_by: 'user_stated', basis: prepared.map((item) => item.said).join('\n') },
           validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: `Record your figures for ${prepared.length} links` });
@@ -3517,7 +3522,11 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'no_such_link',
           detail: `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.` };
       }
-      const stated = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
+      // RT-6 row 1b (Science #87 6005615422): an end stated by its node's own LABEL is read as that node's unit, a reading
+      // the card shows for approval (never a silent credit).
+      const labelled = withLabelCountUnits(g.raw, from.id, to.id, { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit });
+      const stated = labelled.effect;
+      const labelReadings = labelled.label_readings.length > 0 ? { label_readings: labelled.label_readings } : {};
       const consent = { ...linkEffectConsent(g.raw, from.id, to.id, stated),
         ...(linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {}) };
       const unitReading = prepareLinkEffectUnitReadings(g.raw, from.id, to.id, stated, said, { link_selected: consent.link_selected });
@@ -3544,7 +3553,7 @@ export function createAgentCapabilities(
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_link_effect', path: `${from.id}::${to.id}`,
-          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, ...unitReadings, ...consent } }],
+          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, ...unitReadings, ...labelReadings, ...consent } }],
         provenance: { authored_by: 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`,

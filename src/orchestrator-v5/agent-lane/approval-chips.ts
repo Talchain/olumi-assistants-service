@@ -339,7 +339,7 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
 export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
     { from?: unknown; to?: unknown; effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown };
-      quote?: unknown; unit_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
+      quote?: unknown; unit_readings?: unknown; label_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
   const e = op?.effect;
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
     || typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0
@@ -376,6 +376,24 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
       || !op.quote.includes(reading.source_quote)) return undefined;
     seen.add(item.node_id);
     disclosures.push(`I've taken "${item.node_id === op.from ? labels.from : labels.to}" to be in ${reading.unit}, from your words.`);
+  }
+  // ⭐ RT-6 row 1b (Science #87 6005615422): an end the user named by its node's own LABEL is said back in that node's
+  // unit, for approval, never silently: "I've read that as +1 percentage point per 10 cafés (the unit of "Café
+  // subscribers")". Each reading must be exactly the unit the effect now carries at its end; anything else, no card.
+  if (op.label_readings !== undefined && (!Array.isArray(op.label_readings) || op.label_readings.length > 2)) return undefined;
+  const labelled: string[] = [];
+  for (const raw of (op.label_readings ?? []) as unknown[]) {
+    const item = raw as { node_id?: unknown; said?: unknown; unit?: unknown } | null;
+    if (item === null || typeof item !== 'object' || Object.keys(item).length !== 3 || typeof item.node_id !== 'string'
+      || (item.node_id !== op.from && item.node_id !== op.to) || typeof item.said !== 'string' || item.said.trim() === ''
+      || typeof item.unit !== 'string' || (item.node_id === op.from ? e.per_source_change_unit : e.amount_unit) !== item.unit) return undefined;
+    const label = item.node_id === op.from ? labels.from : labels.to;
+    if (labelled.includes(label)) return undefined;
+    labelled.push(label);
+  }
+  if (labelled.length > 0) {
+    disclosures.push(`I've read that as ${signed(e.amount, e.amount_unit)} per ${unsigned(e.per_source_change, e.per_source_change_unit)} `
+      + `(the unit${labelled.length > 1 ? 's' : ''} of ${labelled.map((l) => `"${l}"`).join(' and ')}).`);
   }
   // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.
   return `${head} From your words: "${op.quote}"${/[.!?]$/.test(op.quote) ? '' : '.'}`
