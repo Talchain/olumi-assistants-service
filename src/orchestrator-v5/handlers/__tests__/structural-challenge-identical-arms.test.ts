@@ -50,7 +50,8 @@ import { priorRunForSeed } from '../../coaching/seed-reuse.js';
 import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
 import { createRegistry, resolveHandler } from '../../tools/registry.js';
 import { dispatchStructuralChallenge } from '../structural-challenge-dispatch.js';
-import { formatChallengeAmount, structuralChallengePressId, structuralChallengeTurnFor } from '../../agent-lane/method-turn/structural-challenge-turn.js';
+import { runArmsDistinct, runArmsIdentical } from '../../coaching/structural-challenge-compare.js';
+import { composeStructuralChallengeReply, formatChallengeAmount, structuralChallengePressId, structuralChallengeTurnFor } from '../../agent-lane/method-turn/structural-challenge-turn.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'fa027cf5-c5c9-4021-9578-ee79b15c6eb8';
@@ -79,18 +80,21 @@ const DISTINCT: Record<string, Stats> = {
 
 const hasLink = (g: Rec, l: { from_id: string; to_id: string }) => (g.edges as Rec[]).some((e) => e.from === l.from_id && e.to === l.to_id);
 
-type Shape = 'served' | 'same' | 'distinct' | 'near_same';
+/** same_unequal: identical outcomes but the served (unequal) win shares. served_no_nvalid: no valid-draw counts. */
+type Shape = 'served' | 'same' | 'distinct' | 'near_same' | 'same_unequal' | 'served_no_nvalid';
 function rowsOf(shape: Shape, options: Rec[]): Rec[] {
   const ids = options.map((o) => String(o.option_id ?? o.id));
   return options.map((o, i) => {
     const id = ids[i];
-    const s: Stats = shape === 'served' ? SERVED[id] ?? { w: 0, mean: 0.01, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
+    const s: Stats = shape === 'served' || shape === 'served_no_nvalid' ? SERVED[id] ?? { w: 0, mean: 0.01, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
+      : shape === 'same_unequal' ? { ...SAME, w: SERVED[id]?.w ?? 0 }
       : shape === 'distinct' ? DISTINCT[id] ?? { w: 0, mean: 0.009, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
         // near_same: one arm differs by 1e-9 relative in its mean only (a contrast for the 1e-12 tolerance).
         : { ...SAME, w: 1 / ids.length, ...(shape === 'near_same' && i === 0 ? { mean: SAME.mean * (1 + 1e-9) } : {}) };
     return {
       option_id: id, option_label: o.label, win_probability: s.w, probability_of_goal: null, status: 'computed',
-      outcome: { mean: s.mean, std: s.std, p10: s.p10, p50: s.p50, p90: s.p90, n_samples: 10_000, n_valid_samples: 10_000, validity_ratio: 1, percentiles_source: 'samples' },
+      outcome: { mean: s.mean, std: s.std, p10: s.p10, p50: s.p50, p90: s.p90, n_samples: 10_000,
+        ...(shape === 'served_no_nvalid' ? {} : { n_valid_samples: 10_000 }), validity_ratio: 1, percentiles_source: 'samples' },
     };
   });
 }
@@ -150,17 +154,19 @@ async function harness(link: { from_id: string; to_id: string }, candidate: Shap
     () => handler({ context: context('turn-a', []), payload: payloadOf('turn-a'), requestId: 'turn-a', signal: new AbortController().signal, orientationText: '' } as unknown as HandlerInvocation));
   const runA = a.handler_facts.find((f) => f.fact_type === 'run_analysis') as Rec;
   expect(runA, 'Run A commits one Run fact').toBeDefined();
-  const ask = (selected: { from_id: string; to_id: string }) => {
+  let dispatched: Awaited<ReturnType<typeof dispatchStructuralChallenge>> | undefined;
+  const ask = async (selected: { from_id: string; to_id: string }) => {
     turnContext.current = context('turn-q', [runA]);
     currentnessStore.current ??= canonicalStore([runA]);
-    return dispatchStructuralChallenge({
+    dispatched = await dispatchStructuralChallenge({
       payload: payloadOf('turn-q'), requestId: 'turn-q', link: selected, origin: 'user_selected',
       turnMayNameLeader: true, exploratoryWorkAllowed: true, plotClient: plot.client, scenarioReader: reader,
     });
+    return dispatched;
   };
   const turn = await structuralChallengeTurnFor(structuralChallengePressId(link), ask);
   expect(turn, 'the press yields a turn').not.toBeNull();
-  return { runA, plot, turn: turn! };
+  return { runA, plot, turn: turn!, dispatched: dispatched! };
 }
 
 const leaderClaim = (result: Rec | null) => (result?.claims as Rec[] | undefined)?.find((c) => c.kind === 'leader');
@@ -171,6 +177,8 @@ describe('SCI-DEEP: the candidate is licensed on the baseline admission and its 
   it('precondition: the served graph gives Run A a licensed leader, AI Reporting Module Sprint', async () => {
     const h = await harness(LEAD_LINK, 'same');
     expect(h.runA.result.leading_option_id).toBe(LEADER);
+    // Licensed by the CANONICAL read the dispatch consumed, not merely stored.
+    expect(h.dispatched.kind === 'result' && h.dispatched.finalRead?.currentness?.permissions?.leader_may_be_named).toBe(true);
     expect(h.plot.runBodies).toHaveLength(2); // Run A + the one candidate
     expect(hasLink(h.plot.runBodies[1].graph, LEAD_LINK)).toBe(false);
   });
@@ -235,6 +243,64 @@ describe('SCI-DEEP: the candidate is licensed on the baseline admission and its 
     const h = await harness(LEAD_LINK, 'same');
     expect(h.turn.reply).not.toContain('The target frequency was unavailable');
     expect(h.turn.reply.match(/isn't available in either version/g)).toHaveLength(1);
+  });
+});
+
+describe('SCI-DEEP: Codex review 1 findings (a690458b)', () => {
+  it('C1 (P1): identical outcomes with UNEQUAL win shares never name a candidate leader', async () => {
+    const h = await harness(LEAD_LINK, 'same_unequal');
+    expect(h.turn.identicalArms).toBe(true);
+    expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
+    expect(h.turn.reply).toContain('AI Reporting Module Sprint’s lead rests entirely on this link');
+    expect(h.turn.reply).not.toContain('leads in both versions');
+  });
+
+  it('C2 (P1): an arm that is not computed (status skipped) never establishes identity; a computed copy does', async () => {
+    const h = await harness(LEAD_LINK, 'same');
+    const sameFact = structuredClone(h.runA);
+    for (const row of sameFact.result.enrichment.option_comparison as Rec[]) Object.assign(row.outcome, { mean: 0.5, std: 0.1, p10: 0.4, p50: 0.5, p90: 0.6 });
+    expect(runArmsIdentical(sameFact as never)).toBe(true); // control
+    (sameFact.result.enrichment.option_comparison as Rec[])[1].status = 'skipped';
+    expect(runArmsIdentical(sameFact as never)).toBe(false);
+  });
+
+  it('C3 (P1): a baseline without valid-draw counts is not affirmatively distinct, so no "rests entirely"', async () => {
+    const control = await harness(LEAD_LINK, 'same');
+    expect(runArmsDistinct(control.runA as never)).toBe(true); // control: the served rows differ
+    const h = await harness(LEAD_LINK, 'same', 'served_no_nvalid');
+    expect(runArmsDistinct(h.runA as never)).toBe(false);
+    expect(h.turn.identicalArms).toBe(false);
+    expect(h.turn.reply).not.toContain('rests entirely');
+  });
+
+  it('C4 (P2): a partial unavailability names whom it covers, never "each option"', async () => {
+    const h = await harness(LEAD_LINK, 'same');
+    const result = structuredClone(h.turn.result!) as Rec;
+    const goal = (option_id: string, baseline: number | null, alternative: number | null) => ({ kind: 'goal_probability', option_id, constraint_id: null,
+      baseline, alternative, target: null, constraint_boundary: null, invariant_by_construction: false,
+      ...(baseline === null ? { noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'missing_on_one_side' }
+        : { noise_verdict: 'signal', verdict: 'delta_only', basis: 'no_licensed_boundary' }) });
+    result.claims = [...(result.claims as Rec[]).filter((c) => c.kind !== 'goal_probability'),
+      goal('ai_reporting_module_sprint', null, null), goal('integration_bug_fix_sprint', null, null), goal('continue_current_plan', 0.5, 0.6)];
+    const reply = composeStructuralChallengeReply({ result: result as never, labels: h.turn.labels });
+    expect(reply).toContain('- How often AI Reporting Module Sprint and Integration Bug Fix Sprint reach the target isn\'t available in either version, so it isn\'t compared.');
+    expect(reply).not.toContain('each option');
+    expect(reply).toContain('Continue Current Plan — baseline: Reaches the target in about 50% of model runs.');
+  });
+
+  it('C5 (P2): stored certainty sentences are kept and the generic unavailable side is said once', async () => {
+    const h = await harness(LEAD_LINK, 'same');
+    const result = structuredClone(h.turn.result!) as Rec;
+    const ids = ['ai_reporting_module_sprint', 'integration_bug_fix_sprint', 'continue_current_plan'];
+    result.claims = [...(result.claims as Rec[]).filter((c) => c.kind !== 'goal_probability'), ...ids.map((option_id) => ({ kind: 'goal_probability', option_id,
+      constraint_id: null, baseline: null, alternative: null, target: null, constraint_boundary: null, invariant_by_construction: false,
+      noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side' }))];
+    const certainty = { baseline: ids.map((option_id, i) => ({ option_id, probability_of_goal: null, earned: false, say: `Stored sentence ${i + 1}.` })), alternative: undefined };
+    const reply = composeStructuralChallengeReply({ result: result as never, labels: h.turn.labels, certainty: certainty as never });
+    expect(reply).not.toContain('The target frequency was unavailable');
+    expect(reply.match(/isn't available in at least one version/g)).toHaveLength(1);
+    expect(reply).toContain('- How often each option reaches the target isn\'t available in at least one version, so it isn\'t compared.');
+    for (const [i, id] of ids.entries()) expect(reply).toContain(`- ${h.turn.labels.get(id)} — baseline: Stored sentence ${i + 1}.`);
   });
 });
 

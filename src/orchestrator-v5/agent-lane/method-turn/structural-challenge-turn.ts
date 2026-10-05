@@ -186,15 +186,26 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
     ? ['- Without the link, no option leads: every option comes out the same, so the choice between them makes no difference in that version.'] : [];
   if (changes.length > 0 || identicalLine.length > 0) lines.push('', 'What changes:', ...identicalLine, ...bullet(changes));
   if (held.length > 0) lines.push('', 'What holds:', ...bullet(held));
-  // A target frequency unavailable in BOTH versions is said once, not once per option.
-  const unavailableBoth = (c: StructuralChallengeClaimV1) => c.kind === 'goal_probability' && c.baseline === null && c.alternative === null
-    && goalSide(null, c.option_id, input.certainty?.baseline, c.basis === 'withheld_on_one_side') === TARGET_FREQUENCY_UNAVAILABLE
-    && goalSide(null, c.option_id, input.certainty?.alternative, c.basis === 'withheld_on_one_side') === TARGET_FREQUENCY_UNAVAILABLE;
-  const collapsed = open.filter(unavailableBoth);
-  const uncertain = bullet(open.filter((c) => !unavailableBoth(c) && !(input.identicalArms === true && c.kind === 'leader')));
-  if (collapsed.length > 0) {
-    const whose = collapsed.length === 1 && collapsed[0].kind === 'goal_probability' ? label(collapsed[0].option_id) : 'each option';
-    uncertain.unshift(`- How often ${whose} reaches the target isn't available in either version, so it isn't compared.`);
+  // A generic "unavailable" target frequency is said ONCE, naming whom it covers; stored certainty sentences stay.
+  const nullSides = (c: StructuralChallengeClaimV1) => {
+    if (c.kind !== 'goal_probability' || c.baseline !== null || c.alternative !== null) return null;
+    const withheld = c.basis === 'withheld_on_one_side';
+    const baseline = goalSide(null, c.option_id, input.certainty?.baseline, withheld);
+    const alternative = goalSide(null, c.option_id, input.certainty?.alternative, withheld);
+    const generic = { baseline: baseline === TARGET_FREQUENCY_UNAVAILABLE, alternative: alternative === TARGET_FREQUENCY_UNAVAILABLE };
+    return generic.baseline || generic.alternative ? { optionId: c.option_id, baseline, alternative, generic } : null;
+  };
+  const aggregated = open.map(nullSides).filter((x): x is NonNullable<ReturnType<typeof nullSides>> => x !== null);
+  const uncertain = bullet(open.filter((c) => nullSides(c) === null && !(input.identicalArms === true && c.kind === 'leader')));
+  if (aggregated.length > 0) {
+    const names = aggregated.map((x) => label(x.optionId));
+    const roster = result.claims.filter((c) => c.kind === 'goal_probability').length;
+    const whom = aggregated.length === roster && roster > 1 ? 'each option reaches'
+      : names.length === 1 ? `${names[0]} reaches` : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} reach`;
+    const where = aggregated.every((x) => x.generic.baseline && x.generic.alternative) ? 'either version' : 'at least one version';
+    const stored = aggregated.filter((x) => !x.generic.baseline || !x.generic.alternative).map((x) => `- ${label(x.optionId)} — ${
+      x.generic.baseline ? `Without the link: ${x.alternative}` : `baseline: ${x.baseline}`}`);
+    uncertain.unshift(`- How often ${whom} the target isn't available in ${where}, so it isn't compared.`, ...stored);
   }
   if (unaffected.length > 0) {
     uncertain.push(...bullet(unaffected));

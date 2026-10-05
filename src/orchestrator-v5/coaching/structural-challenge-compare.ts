@@ -228,32 +228,54 @@ export const IDENTICAL_ARMS_RELATIVE_TOLERANCE = 1e-12;
 const ARM_STATS = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
 
 /**
- * Every submitted arm of this Run carries the same outcome distribution: mean and std present, every percentile the
- * rows carry equal, and the same positive valid-draw count. Read from the RESULT, never from graph structure: with no
- * option reaching the goal, ISL evaluates every arm on the same draws, so the arms come out identical.
+ * Every submitted arm's outcome, or null when ANY arm is unusable: a missing row, a non-computed status (the same
+ * gate `optionRows` applies), no positive valid-draw count, or a non-finite mean/std.
  */
-export function runArmsIdentical(fact: HandlerFact): boolean {
+function usableArmOutcomes(fact: HandlerFact): Rec[] | null {
   const result = (fact as { result?: Rec }).result;
   const enrichment = isRec(result?.enrichment) ? result.enrichment : null;
-  if (enrichment === null) return false;
+  if (enrichment === null) return null;
   const submitted = submittedIdentities(enrichment, fact);
-  if (submitted === null || submitted.options.size < 2) return false;
+  if (submitted === null || submitted.options.size < 2) return null;
   const nested = isRec(enrichment.results) ? enrichment.results : {};
   const current = Array.isArray(enrichment.option_comparison) ? enrichment.option_comparison : nested.option_comparison;
   const source = Array.isArray(current) ? current : readOptionResultSources(enrichment)[0] ?? [];
-  const outcomes = new Map<string, Rec>();
-  for (const o of source) if (isRec(o) && typeof o.option_id === 'string' && isRec(o.outcome)) outcomes.set(o.option_id, o.outcome);
-  const arms = [...submitted.options].map((id) => outcomes.get(id));
+  const rows = new Map<string, Rec>();
+  for (const o of source) if (isRec(o) && typeof o.option_id === 'string') rows.set(o.option_id, o);
+  const arms: Rec[] = [];
+  for (const id of submitted.options) {
+    const row = rows.get(id);
+    if (row === undefined || !isRecommendableOption(row) || !isRec(row.outcome)) return null;
+    const n = num(row.outcome.n_valid_samples);
+    if (n === null || !Number.isSafeInteger(n) || n <= 0 || num(row.outcome.mean) === null || num(row.outcome.std) === null) return null;
+    arms.push(row.outcome);
+  }
+  return arms;
+}
+
+const sameStat = (x: unknown, y: unknown): boolean => {
+  const a = num(x); const b = num(y);
+  return a !== null && b !== null && Math.abs(a - b) <= IDENTICAL_ARMS_RELATIVE_TOLERANCE * Math.max(Math.abs(a), Math.abs(b));
+};
+
+/**
+ * Every submitted arm of this Run carries the same outcome distribution: mean and std, every percentile the rows carry,
+ * and the same valid-draw count. Read from the RESULT, never from graph structure: with no option reaching the goal,
+ * ISL evaluates every arm on the same draws, so the arms come out identical.
+ */
+export function runArmsIdentical(fact: HandlerFact): boolean {
+  const arms = usableArmOutcomes(fact);
+  if (arms === null) return false;
   const first = arms[0];
-  const n = first === undefined ? null : num(first.n_valid_samples);
-  if (first === undefined || n === null || !Number.isSafeInteger(n) || n <= 0) return false;
-  const same = (x: unknown, y: unknown): boolean => {
-    const a = num(x); const b = num(y);
-    return a !== null && b !== null && Math.abs(a - b) <= IDENTICAL_ARMS_RELATIVE_TOLERANCE * Math.max(Math.abs(a), Math.abs(b));
-  };
-  return arms.every((arm) => arm !== undefined && num(arm.n_valid_samples) === n
-    && same(first.mean, arm.mean) && same(first.std, arm.std)
-    && ARM_STATS.every((k) => (first[k] === undefined && arm[k] === undefined) || same(first[k], arm[k])));
+  return arms.every((arm) => num(arm.n_valid_samples) === num(first.n_valid_samples)
+    && ARM_STATS.every((k) => (first[k] === undefined && arm[k] === undefined) || sameStat(first[k], arm[k])));
+}
+
+/** Affirmatively distinct: every arm usable, and some arm's mean or std differs beyond the tolerance. */
+export function runArmsDistinct(fact: HandlerFact): boolean {
+  const arms = usableArmOutcomes(fact);
+  if (arms === null) return false;
+  return arms.some((arm) => !sameStat(arms[0].mean, arm.mean) || !sameStat(arms[0].std, arm.std));
 }
 
 function deltaOnlyBasis(noise: RunDeltaNoiseVerdictLiteral): StructuralChallengeClaimV1['basis'] {
@@ -292,13 +314,15 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   const goalReached = input.reachable.has(input.goalNodeId);
   const identityChanged = identityStatus(a.enrichment) !== identityStatus(b.enrichment);
   const claims: StructuralChallengeClaimV1[] = [];
+  const candidateArmsIdentical = runArmsIdentical(input.candidateFact);
 
   // ── Leader ─────────────────────────────────────────────────────────────────────────────────────────────────────
   {
     const entitledA = mayPresentComparedRunLeader(input.turnMayNameLeader, input.baselineFact);
     const entitledB = mayPresentComparedRunLeader(input.candidateMayNameLeader ?? input.turnMayNameLeader, input.candidateFact);
     const idA = entitledA ? leaderOf(input.baselineFact) : null;
-    const idB = idA !== null && entitledB ? leaderOf(input.candidateFact) : null;
+    // Identical arms have no leader, whatever win shares the Run carries: never name one (DL condition 1).
+    const idB = idA !== null && entitledB && !candidateArmsIdentical ? leaderOf(input.candidateFact) : null;
     const base = { kind: 'leader' as const, baseline_option_id: idA, alternative_option_id: idB };
     if (idA === null || idB === null) {
       claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side', invariant_by_construction: false });
@@ -429,5 +453,5 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   return { ok: true, pair_provenance, claims, certainty: {
     baseline: readStoredGoalCertainty((input.baselineFact as { result?: Rec }).result?.goal_certainty),
     alternative: readStoredGoalCertainty((input.candidateFact as { result?: Rec }).result?.goal_certainty),
-  }, identical_arms: runArmsIdentical(input.candidateFact) && !runArmsIdentical(input.baselineFact) };
+  }, identical_arms: candidateArmsIdentical && runArmsDistinct(input.baselineFact) };
 }
