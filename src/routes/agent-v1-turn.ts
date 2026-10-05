@@ -127,9 +127,10 @@ import {
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
-import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
+import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
+import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn } from '../orchestrator-v5/agent-lane/decision-review-press.js';
 import { guidanceRequestOf, turnGuidanceFor, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -616,6 +617,22 @@ export const NEXT_STEP_CHIPS = [
 ] as const satisfies readonly OfferedAction[];
 
 const NEXT_STEP_CHIP_IDS: ReadonlySet<string> = new Set(NEXT_STEP_CHIPS.map((c) => c.id));
+
+/**
+ * ⭐ A4 slice 1: each review item's next step is an EXISTING press, offered as the chip that press already answers: the
+ * next steps' own chips (no `action_type`, so What would change keeps its measured operation) and the UI's own
+ * "Test without this link" press for the item's link (`TestWithoutLinkButton.tsx`). Nothing new is answerable.
+ */
+const DECISION_REVIEW_CHIP_OPERATION = chipOperationOf({ chip: { id: DECISION_REVIEW_PRESS_ID } });
+function decisionReviewChips(turn: DecisionReviewTurn): OfferedAction[] {
+  return turn.steps.flatMap((step): OfferedAction[] => {
+    if (step.kind === 'test_without_link') {
+      return [{ id: structuralChallengePressId({ from_id: step.from_id, to_id: step.to_id }), label: 'Test without this link', message: 'Test without this link' }];
+    }
+    const id = step.kind === 'what_would_change' ? TIPPING_POINT_PRESS_ID : STRENGTHEN_PRESS_CHIP_ID;
+    return NEXT_STEP_CHIPS.filter((c) => c.id === id).map((c) => ({ ...c }));
+  });
+}
 /** Every press that runs a reasoning method (the selector withholds its rows on one): the next steps and Widen. */
 const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID]);
 
@@ -1888,7 +1905,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const boundControl: OfferedAction[] = [];
       const whatChangesReplay = approvedProposal === undefined && (explanationId === TIPPING_POINT_PRESS_ID
         || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, WHAT_CHANGES_CHIP_OPERATION)));
-      if (whatChangesReplay) {
+      const decisionReviewReplay = approvedProposal === undefined && (explanationId === DECISION_REVIEW_PRESS_ID
+        || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, DECISION_REVIEW_CHIP_OPERATION)));
+      if (decisionReviewReplay) {
+        // Deterministic on the readback: today's bound Run gives the same review; a Run that moved gives today's (or the
+        // unavailable reply). The SAME owner as the live turn, never a model call.
+        const review = decisionReviewFor(scenarioId, state);
+        replayText = review.reply;
+        boundControl.push(...decisionReviewChips(review));
+      } else if (whatChangesReplay) {
         // This unbound question asks about today's result: retry/cold read reconstructs today's answer, never Run A's
         // words. The SAME owner as the live turn (`whatWouldChangeAnswer`): this turn's measured answer while its Run is
         // still the bound one, else today's coaching. Never measured again here.
@@ -2648,6 +2673,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let measuredRunKey: string | null = null;
     let whatChangesRead: Awaited<ReturnType<typeof readBackState>> | undefined;
     let measuredCandidate: MeasuredWhatChanges | null = null;
+    // ⭐ A4 slice 1: "Review this decision" — typed facts on the bound Run, no model call (`decision-review-press.ts`).
+    let decisionReviewRequested = false;
+    let decisionReviewTurn: DecisionReviewTurn | null = null;
     if (result === undefined && approvedProposal === undefined && pressedChipId === TIPPING_POINT_PRESS_ID) {
       const rb = await readBackState(readingDispatch, scenarioId);
       whatChangesRead = rb;
@@ -2667,6 +2695,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       // Selection and cache insertion wait for the final pending read and canonical scope composition below.
       measuredRunKey = measuredCandidate?.runKey ?? null;
+      fastPath = 'method';
+      result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false,
+        hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+    }
+    if (result === undefined && approvedProposal === undefined && pressedChipId === DECISION_REVIEW_PRESS_ID) {
+      // Composed at assembly from the final, scope-composed read below (the one the response is built from).
+      decisionReviewRequested = true;
       fastPath = 'method';
       result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false,
         hops: 0, stopped_reason: 'answered',
@@ -3102,6 +3138,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       measuredRunKey = answer.measured?.runKey ?? null;
       if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
     }
+    if (decisionReviewRequested) {
+      decisionReviewTurn = decisionReviewFor(scenarioId, composedRead);
+      text = decisionReviewTurn.reply;
+      result = { ...result, assistant_text: text };
+    }
     /** The final pending read may narrow dispatch's licence: presentation uses this graph and retained scope afresh. */
     if (structuralChallengeTurn !== null) {
       const receipt = await readStructuralChallengeReceipt({ scenarioId, graph: readbackGraph ?? null, requestId: String(req.id),
@@ -3260,6 +3301,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? firstOfEachId([...approvals, ...whatChangesTurn.actions])
       : fastPath === 'method' && structuralChallengeTurn !== null
       ? firstOfEachId([...approvals, ...structuralChallengeTurn.actions])
+      // Review this decision, terminal: each item's existing press, nothing else.
+      : fastPath === 'method' && decisionReviewTurn !== null
+      ? firstOfEachId([...approvals, ...decisionReviewChips(decisionReviewTurn)])
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
@@ -3528,7 +3572,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         protectedGoalChanceSay: goalChanceSayFromThisTurn(result.tool_results),
         // The host's own typed line from this readback (gate 2): a node label can hold ". " and a ranking word, and a
         // fragment of the sentence must never be dropped or left behind (Codex #2577 P2).
-        protectedHostLines: rootLine !== null ? [rootLine] : [],
+        protectedHostLines: [...(rootLine !== null ? [rootLine] : []), ...(decisionReviewTurn?.lines ?? [])],
         // AX2: the build turn's automatic first pass was not asked to rank anything — drop a ranking, add no "why".
         // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
         // user's model followed a reply about public evidence).
