@@ -93,8 +93,12 @@ const CHANGE_OR_DENIAL_BEFORE = /\bby\b|\bnot\b|\bnever\b|\bcannot\b|n['\u2019]t
  * clause's next subject, not the ceiling's ("cut it to at most £36k a month without … migration downtime risk"), and an
  * anaphor ("it") names nothing. Words shared by the goal's and another label name neither (`figureTheUserWroteFor`'s rule).
  */
-/** A word of the goal's own label on the ceiling's left, or an anaphor pointing back to it ("keep it to at most …"). */
-const ANAPHOR = /\b(?:it|this|that|them|these|those)\b/i;
+/**
+ * A word of the goal's own label on the ceiling's left, or a PRONOUN pointing back to it ("keep it to at most …").
+ * Only "it" / "them": "this" / "that" / "these" / "those" are as often determiners ("keep THIS year's tax below £36k",
+ * Codex buddy round 6), and a miss here only under-claims.
+ */
+const ANAPHOR = /\b(?:it|them)\b/i;
 function tiedToTheGoal(clauseBefore: string, scope: EntityScope | undefined): boolean {
   if (ANAPHOR.test(clauseBefore)) return true;
   if (scope === undefined) return false;

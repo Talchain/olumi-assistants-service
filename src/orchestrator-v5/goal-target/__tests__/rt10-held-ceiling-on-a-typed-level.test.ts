@@ -233,6 +233,8 @@ describe('ceilingTheUserWroteFor: a ceiling is the USER\'S only where the brief 
     expect(ceilingTheUserWroteFor(2, '%', 'Keep churn below 2%; keep it below 2%.', churn), 'CONTROL: both writings are the goal\'s ceilings').toBe(true);
     // Round 5 (Codex on 101ab77a): the goal AT its target today, and an unmodelled quantity's ceiling on the same figure.
     expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend is at its £36k target; tax below £36k.', { target: ['Monthly spend'], others: [] }, true)).toBe(false);
+    // Round 6 (Codex on abb2a912): "this" is a determiner here, never the goal's anaphor.
+    expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend is at its £36k target; keep this year\'s tax below £36k.', { target: ['Monthly spend'], others: [] }, true)).toBe(false);
     // Today's level is the same figure, written plainly once: that writing is today's, the other is the ceiling.
     expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend is £36k; keep it to at most £36k.', undefined, true)).toBe(true);
     expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend is £36k; keep it to at most £36k.'), 'not today\'s: unaccounted').toBe(false);
