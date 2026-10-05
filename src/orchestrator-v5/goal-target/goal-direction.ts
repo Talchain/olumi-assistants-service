@@ -63,7 +63,7 @@
  *   |----------------------|-------------------------------|-------------------------|
  *   | `'<='` or `'<'`, PROVEN (below) | `'minimise'`       | `stated_comparator`     |
  *   | no proven ceiling; Olumi's `goal_sense_reading` of a NEGATIVE typed change ("cut by 20%") | `'minimise'` | `typed_change_sign` |
- *   | the goal item's TYPED comparator (`goal_sense_reading` `typed_comparator`, records; Science 5 Oct), uncontradicted | floor `'maximise'`, ceiling `'minimise'` | `stated_comparator` |
+ *   | the goal item's TYPED comparator (`goal_sense_reading` `typed_comparator`, records; Science 5 Oct), its target PROVEN a level (as above), uncontradicted | floor `'maximise'`, ceiling `'minimise'` | `stated_comparator` |
  *   | anything else (a held floor, an unproven ceiling, none) | the label classifier, exactly as base | `derived_from_goal_label` |
  *
  * ⚠ R1 S1 (AIQ 5871459631, DL 5871433038): a held ceiling sends `minimise` only when the goal carries the current
@@ -71,7 +71,8 @@
  * the frame, that the target is a LEVEL of the node and not a change ("reduce costs by at most 10%" is a floor on
  * cost). Otherwise nothing is sent. `maximise` for a held floor waits for R1 S4 (a real draft, `cloud-0`: "costs >=
  * 20 % reduction", would otherwise be attested a false maximiser, MG 5871403407).
- * `maximise` is sent ONLY from a typed floor (Science ruling 5 Oct, the row above) — from no label, held floor or default,
+ * `maximise` is sent ONLY from a typed floor whose target is a proven level (Science ruling 5 Oct, the row above; CR-1) —
+ * from no label, held floor or default,
  * so the one-sided argument above is unchanged for every other class. A held floor (and an unproven ceiling)
  * reads exactly as base — the label classifier (DL E13, 5872375159); the held floor's own sense belongs to S4.
  */
@@ -216,12 +217,20 @@ function goalHoldsOlumisDecreaseReading(graph: unknown, goalNodeId: unknown): bo
  * card over a typed ceiling) and no goal limit of the other side on this goal (`goal_constraints`, e.g. the card's
  * approved ceiling, which clears a held floor and holds only a `<=` row). Either ⇒ the reading is silent and the goal
  * reads exactly as base. The latest statement replaces.
+ *
+ * ⛔ CR-1 (MC owner on d0b39ca9): ONLY FOR A TARGET PROVEN A LEVEL OF THE GOAL NODE, for BOTH senses — the SAME proof the
+ * held ceiling needs (`ceilingTargetIsALevelOnItsNode`: the user's stated current level in the target's own
+ * non-percent, non-points unit). A v-next goal item cannot type a change (`change_by` is option-only), so "reduce costs
+ * by at least 20%" typed `floor` in `%` would otherwise be sent `maximise` on cost (the false maximiser of MG
+ * 5871403407), and "reduce costs by at most 10%" typed `ceiling` is a floor on cost (R1 S1). Unproven ⇒ silent: the
+ * goal reads exactly as base, with the assumption line. No second level detector.
  */
 function typedComparatorSense(graph: unknown, goalNodeId: unknown): 'maximise' | 'minimise' | undefined {
   if (typeof goalNodeId !== 'string' || goalNodeId === '') return undefined;
   const node = readNodes(graph).find((n) => n.id === goalNodeId);
   const reading = node?.goal_sense_reading as { sense?: unknown; basis?: unknown } | undefined;
   if (reading?.basis !== 'typed_comparator' || (reading.sense !== 'maximise' && reading.sense !== 'minimise')) return undefined;
+  if (!ceilingTargetIsALevelOnItsNode(graph, goalNodeId)) return undefined;
   const otherSide: readonly unknown[] = reading.sense === 'maximise' ? ['<=', '<'] : ['>=', '>'];
   if (otherSide.includes(node?.goal_direction)) return undefined;
   const limits = graph !== null && typeof graph === 'object' ? (graph as Record<string, unknown>).goal_constraints : undefined;

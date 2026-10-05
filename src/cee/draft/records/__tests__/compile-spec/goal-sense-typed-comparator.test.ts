@@ -167,6 +167,54 @@ describe('goal sense: a later statement by the USER is never overruled by the ty
   });
 });
 
+/**
+ * ⛔ CR-1 (MC owner on d0b39ca9): the typed sense speaks only for a target PROVEN a LEVEL of the goal node, the held
+ * ceiling's own proof (`ceilingTargetIsALevelOnItsNode`): the user's stated current level (`observed_state`,
+ * `brief_extraction`) in the target's own non-percent, non-points unit. A v-next goal cannot type a change, so a typed
+ * floor on "reduce costs by at least 20%" would otherwise MAXIMISE cost. Each goal below is the stored records-goal
+ * shape (level frame; the reading exactly as `applyStatedGoalEvidence` writes it from the typed field).
+ */
+describe('goal sense: CR-1 — the typed sense speaks only for a target proven a LEVEL of the goal', () => {
+  const goalGraph = (label: string, raw: number, unit: string, sense: 'maximise' | 'minimise', level?: { raw_value: number; unit: string }) => ({
+    nodes: [{ id: 'g', kind: 'goal', label, goal_threshold_raw: raw, goal_threshold_unit: unit, goal_threshold_frame: 'level',
+      goal_sense_reading: { sense, basis: 'typed_comparator' },
+      ...(level !== undefined ? { observed_state: { source: 'brief_extraction', value: 0.5, ...level } } : {}) }],
+    edges: [],
+  });
+  /** The same goal as base reads it: no typed reading on the node. */
+  const asBase = (graph: Json): Json => ({ ...graph, nodes: (graph.nodes as Json[]).map(({ goal_sense_reading: _r, ...n }) => n) });
+  it('(a) "reduce costs by at least 20%" (typed floor, %), even with a stated level in %: NOT maximise; reads exactly as base', () => {
+    for (const level of [undefined, { raw_value: 30, unit: '%' }, { raw_value: 45000, unit: '£/month' }]) {
+      const graph = goalGraph('reduce costs by at least 20%', 20, '%', 'maximise', level);
+      const read = resolveGoalDirection(graph, 'g');
+      expect(read?.direction, JSON.stringify(level)).not.toBe('maximise');
+      expect(read, JSON.stringify(level)).toEqual(resolveGoalDirection(asBase(graph), 'g'));
+    }
+  });
+  it('(b) "reduce costs by at most 10%" (typed ceiling, %), with a stated level in %: no minimise FROM THE TYPED BRANCH; reads as base', () => {
+    const graph = goalGraph('reduce costs by at most 10%', 10, '%', 'minimise', { raw_value: 30, unit: '%' });
+    const read = resolveGoalDirection(graph, 'g');
+    expect(read?.provenance).not.toBe('stated_comparator');
+    expect(read).toEqual(resolveGoalDirection(asBase(graph), 'g'));
+  });
+  it('(c) the sealed MRR "reach at least £150,000" (typed floor, £; stated level £120,000 in £/month), through the served constructor → maximise / stated_comparator', async () => {
+    const { stored, goal } = await built(JSON.stringify(strictRecordsWire(sealedRecordsVNextLinked())));
+    expect(goal.observed_state).toMatchObject({ source: 'brief_extraction', raw_value: 120000, unit: '£/month' });
+    expect(goal.goal_threshold_unit).toBe('£/month');
+    expect(resolveGoalDirection(stored, goal.id)).toEqual({ direction: 'maximise', provenance: 'stated_comparator' });
+  });
+  it('(d) heldout-shaped "reach 1,100 completed appointments a month" with a stated level in the same unit → maximise / stated_comparator; no assumption line', () => {
+    const graph = goalGraph('reach 1,100 completed appointments a month', 1100, 'appointments/month', 'maximise', { raw_value: 900, unit: 'appointments/month' });
+    expect(resolveGoalDirection(graph, 'g')).toEqual({ direction: 'maximise', provenance: 'stated_comparator' });
+    expect(saysDirectionAssumed(graph, 'g')).toBe(false);
+  });
+  it('(e) the same with NO stated level → silent: reads as base (nothing sent), WITH the assumption line', () => {
+    const graph = goalGraph('reach 1,100 completed appointments a month', 1100, 'appointments/month', 'maximise');
+    expect(resolveGoalDirection(graph, 'g')).toBeUndefined();
+    expect(saysDirectionAssumed(graph, 'g')).toBe(true);
+  });
+});
+
 describe('goal sense: CONTRAST — the legacy typed_change_sign reading is unchanged', () => {
   const legacyGoal = () => ({ id: 'g', kind: 'goal', label: 'Monthly spend', goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.2, goal_threshold_unit: '%' });
   it('withGoalSenseReading still writes its own reading and the reader still sends minimise / typed_change_sign from it', () => {
@@ -197,8 +245,8 @@ describe('goal sense: the sealed ideal\'s analysis hash (Science ruling 5 Oct, b
   });
   it('with goal_node_id named (a GraphStateIngress that carries it), run_semantics moves none → maximise / stated_comparator: pinned', async () => {
     const { stored, goal } = await built(JSON.stringify(strictRecordsWire(sealedRecordsVNextLinked())));
-    const named = { ...stored, goal_node_id: goal.id };
-    const withoutReading = structuredClone(named);
+    const named: Json = { ...stored, goal_node_id: goal.id };
+    const withoutReading: Json = structuredClone(named);
     delete (withoutReading.nodes as Json[]).find(n => n.id === goal.id)!.goal_sense_reading;
     // The base semantics (no reading ⇒ the held floor reads as base: nothing sent).
     expect(computeAnalysisAffectingGraphHash(withoutReading as never)).toBe('5cb489d39e84ab88');

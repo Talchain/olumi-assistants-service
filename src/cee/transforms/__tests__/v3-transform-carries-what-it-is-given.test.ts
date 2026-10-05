@@ -268,6 +268,8 @@ function fullV1Node(kind: string, data: V1FactorData | V1OptionData): Required<V
     scale_frame: 100,
     threshold_source: 'brief_extraction',
     goal_direction: '>=',
+    // The typed comparator's sense (records compile; Science ruling 5 Oct), carried under its own name on a goal only.
+    goal_sense_reading: { sense: 'maximise', basis: 'typed_comparator' },
     goal_horizon_months: 9,
   };
 }
@@ -417,7 +419,7 @@ const NODE_CASES: readonly NodeCase[] = [
     // Goal-only fields. `transformNodeToV3` builds the baseline limb under
     // `kind === "goal"` (schema-v3.ts:395), so on a factor they have no carrier
     // — which is correct, not a defect, and pinned here so it stays visible.
-    knownDropped: new Set(['goal_baseline', 'goal_baseline_raw', 'threshold_source', 'goal_direction', 'goal_horizon_months']),
+    knownDropped: new Set(['goal_baseline', 'goal_baseline_raw', 'threshold_source', 'goal_direction', 'goal_sense_reading', 'goal_horizon_months']),
   },
   {
     kind: 'option',
@@ -428,7 +430,7 @@ const NODE_CASES: readonly NodeCase[] = [
     // `transformGraphToV3` (schema-v3.ts:1532-1533, read back onto the node at
     // :1591) instead. Pinned as absent FROM THIS FUNCTION, with the graph-level
     // carrier named — scoped, not excused.
-    knownDropped: new Set(['data', 'goal_baseline', 'goal_baseline_raw', 'threshold_source', 'goal_direction', 'goal_horizon_months']),
+    knownDropped: new Set(['data', 'goal_baseline', 'goal_baseline_raw', 'threshold_source', 'goal_direction', 'goal_sense_reading', 'goal_horizon_months']),
   },
 ];
 
@@ -588,6 +590,7 @@ describe('V3 transform — it carries what it is given, or the loss is pinned', 
       if (nodeCase.kind === 'goal') {
         expect(out.threshold_source).toBe('brief_extraction');
         expect(out.goal_direction).toBe('>=');
+        expect(out.goal_sense_reading).toEqual({ sense: 'maximise', basis: 'typed_comparator' });
         expect(out.goal_horizon_months).toBe(9);
       }
       expect(out.id).toBe('n_1');
