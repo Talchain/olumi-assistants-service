@@ -157,16 +157,16 @@ function baseItems(): DraftRecordSet['stated_items'] {
   const r = statedPath();
   return [r.stated_items[0]!, { ...r.stated_items[1]! }, r.stated_items[2]!];
 }
-/** heldout1-d1 shape: the baseline figure is carried as an option's setting on an invented, unlevelled root. */
+/** heldout1-d1 shape: a baseline figure is carried as an option's setting on an invented, unlevelled root. */
 function figureOnInventedRoot(): DraftRecordSet {
   const items = baseItems();
-  delete items[1]!.baseline_ref;
-  items.push({ kind: 'option', source_quote: 'keep pricing as it is', is_baseline: true }, { kind: 'option', source_quote: 'launch a starter tier at £49 a month', is_baseline: false });
+  items.push(statedPath().stated_items[3]!, { kind: 'option', source_quote: 'keep pricing as it is', is_baseline: true },
+    { kind: 'option', source_quote: 'launch a starter tier at £49 a month', is_baseline: false });
   return { stated_items: items, claims: [
-    { claim_kind: 'factor', label: 'Revenue capacity', basis: [0], quantity: 0 },
+    { claim_kind: 'factor', label: 'Customer base', basis: [3], quantity: 3 },
     { claim_kind: 'outcome', label: 'Monthly revenue achieved', basis: [0, 1], quantity: 0 },
-    { claim_kind: 'causal_link', label: 'Keeping pricing holds revenue capacity', basis: [0, 3], from_stated: 3, to_claim: 0, effect: 'positive', sets_to: 120000 },
-    { claim_kind: 'causal_link', label: 'Capacity delivers revenue', from_claim: 0, to_claim: 1, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Keeping pricing holds the customer base', basis: [3, 4], from_stated: 4, to_claim: 0, effect: 'positive', sets_to: 400 },
+    { claim_kind: 'causal_link', label: 'Customers deliver revenue', from_claim: 0, to_claim: 1, effect: 'positive' },
     { claim_kind: 'causal_link', label: 'Revenue achieved reaches the goal', from_claim: 1, to_stated: 1, effect: 'positive' },
   ] };
 }
@@ -179,7 +179,9 @@ function causeFromContextQuantityRoot(): DraftRecordSet {
   return { stated_items: items, claims: [
     { claim_kind: 'factor', label: 'Starter subscribers', basis: [4], quantity: 4 },
     { claim_kind: 'outcome', label: 'Monthly recurring revenue', quantity: 0 },
-    { claim_kind: 'causal_link', label: 'The starter tier wins subscribers', basis: [3, 4], from_stated: 3, to_claim: 0, effect: 'positive', sets_to: 150 },
+    // The option's setting on the root is Olumi's own number (120, no stated figure), so it is NOT a stated receipt:
+    // the root carries the user's evidence ONLY through the stated cause's edge.
+    { claim_kind: 'causal_link', label: 'The starter tier wins subscribers', basis: [3], from_stated: 3, to_claim: 0, effect: 'positive', sets_to: 120 },
     { claim_kind: 'causal_link', label: 'Subscribers add revenue', basis: [5], from_claim: 0, to_claim: 1, effect: 'positive' },
     { claim_kind: 'causal_link', label: 'Same revenue quantity', from_claim: 1, to_stated: 1, effect: 'positive' },
   ] };
@@ -199,7 +201,7 @@ function causeFromOptionQuantityRoot(): DraftRecordSet {
   ] };
 }
 const CR_E1 = [
-  { shape: 'heldout1-d1: a figure carried as an option setting on the root', records: figureOnInventedRoot, index: 0, root: 'Revenue capacity' },
+  { shape: 'heldout1-d1: a figure carried as an option setting on the root', records: figureOnInventedRoot, index: 3, root: 'Customer base' },
   { shape: 'heldout2-d4: a stated cause drawn from the root (context-figure quantity)', records: causeFromContextQuantityRoot, index: 5, root: 'Starter subscribers' },
   { shape: 'sealed-d5: a stated cause drawn from the root (option-declared quantity)', records: causeFromOptionQuantityRoot, index: 5, root: 'Price Increase' },
 ];
@@ -209,7 +211,7 @@ describe('CR-E1: a node carrying ANY stated receipt is user evidence; neither (e
     it(`${shape}: the stated item stays carried and its carrier stays on the graph`, async () => {
       const { result, body } = await build(records());
       const row = (body.stated_dispositions as Json[]).find(d => d.stated_index === index)!;
-      expect(row, JSON.stringify(row)).toMatchObject({ disposition: 'carried' });
+      expect(row, JSON.stringify(row)).toMatchObject({ disposition: 'carried', location: { kind: shape.startsWith('heldout1') ? 'node' : 'edge' } });
       expect(labelled(body, root)).toBeDefined();
       expect([...aside(result, 'invented_root_level_unknown'), ...aside(result, 'superseded_by_stated_path')].map(d => d.label)).not.toContain(root);
     });
