@@ -137,11 +137,12 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     expect(String(r.detail), 'the % goal is never called unitless').not.toContain(`\u201c${MARGIN}\u201d has no unit`);
     // RT-6 step 1: never a dead end — the route that works, by THIS link's two ends and the link panel's own words.
     // The ONE sentence the Agent is told to say verbatim (Science wording check), by THIS link's two ends.
+    // Step 2 U3: an eligible unsized bare-% end is clarified before the same canvas alternative.
     expect(String(r.detail)).toBe('Nothing was prepared. Tell the user exactly this: "'
-      + `\u201c${FOOTFALL}\u201d has no unit or scale in this model yet, so I can\u2019t record your figure from chat, and nothing was recorded. `
-      + `You can set how strong this link is now: on the canvas, click the link from \u201c${FOOTFALL}\u201d to \u201c${MARGIN}\u201d, and under `
-      + '\u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, '
-      + 'not your figure."');
+      + `Is that a 5-point rise in \u201c${FOOTFALL}\u201d (say 10% → 15%), or 5% of today\u2019s level? Nothing is recorded until you answer. `
+      + `If you\u2019d rather not give a figure, you can set how strong this link is on the canvas: click the link from \u201c${FOOTFALL}\u201d `
+      + `to \u201c${MARGIN}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. `
+      + 'That records how strong you judge the link, not your figure."');
     expect(String(r.detail), 'Science: no reassurance without content').not.toContain('Your wording is fine');
     expect(String(r.detail)).not.toMatch(/available tools/i);
   });

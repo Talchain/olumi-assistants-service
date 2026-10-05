@@ -85,7 +85,8 @@ export function nodeUnitOf(nodes: readonly unknown[]): (id: unknown) => string |
   return (id) => {
     const n = byId.get(id);
     return n === undefined ? undefined
-      : [n.unit, isRec(n.observed_state) ? n.observed_state.unit : undefined, n.kind === 'goal' ? n.goal_threshold_unit : undefined]
+      : [n.unit, isRec(n.observed_state) ? n.observed_state.unit : undefined, n.kind === 'goal' ? n.goal_threshold_unit : undefined,
+        isRec(n.data) ? n.data.unit : undefined, isRec(n.unit_reading) ? n.unit_reading.unit : undefined]
         .find((x): x is string => typeof x === 'string' && x.trim() !== '');
   };
 }

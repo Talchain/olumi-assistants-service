@@ -3245,6 +3245,7 @@ export type CommitOptionLevelsInput = {
      * No reading shown ⇒ no token ⇒ the writer refuses (`link_reading_not_confirmed`); `user_stated` is never stamped.
      */
     readonly reading_token: string;
+    readonly unit_readings?: ApprovedLinkEffect['unit_readings'];
   };
   /** Several approved natural-effect edits, held together by one approval and one commit. */
   readonly link_effects?: readonly {
@@ -3254,6 +3255,7 @@ export type CommitOptionLevelsInput = {
     readonly edge_token: string;
     readonly quote: string;
     readonly reading_token: string;
+    readonly unit_readings?: ApprovedLinkEffect['unit_readings'];
   }[];
   /**
    * ⭐ ONE PRODUCT CONFIRMATION (DL #72 5887510885; Canonical 5887564539): "MRR = price × subscribers" recorded as the
@@ -3344,9 +3346,11 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       // DEFECT 1: Olumi's band kept on its own link is a review, which holds the figure (`ApprovedLinkStrength.review`).
       ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) } : {}),
     ...(input.link_effect !== undefined ? { linkEffect: { from: input.link_effect.from, to: input.link_effect.to, effect: input.link_effect.effect,
-      edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token } } : {}),
+      edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token,
+      ...(input.link_effect.unit_readings !== undefined ? { unit_readings: input.link_effect.unit_readings } : {}) } } : {}),
     ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { linkEffects: input.link_effects.map((effect) => ({ from: effect.from, to: effect.to, effect: effect.effect,
-      edge_token: effect.edge_token, quote: effect.quote, reading_token: effect.reading_token })) } : {}),
+      edge_token: effect.edge_token, quote: effect.quote, reading_token: effect.reading_token,
+      ...(effect.unit_readings !== undefined ? { unit_readings: effect.unit_readings } : {}) })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
       reading_token: input.identity_confirm.reading_token } } : {}),

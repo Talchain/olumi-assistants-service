@@ -2,7 +2,7 @@ import { CANONICAL_ID_REGEX } from '../../cee/utils/id-normalizer.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { z } from 'zod';
-import { InterventionV3, TargetMatch } from '../../schemas/cee-v3.js';
+import { InterventionV3, NodeV3, TargetMatch } from '../../schemas/cee-v3.js';
 
 /**
  * ⭐⭐ WHAT THIS WRITER NEEDS TO READ OFF AN EXISTING ENTRY — deliberately NOT
@@ -83,6 +83,7 @@ import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.j
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, type LinkEffectStatement } from './link-effect-edit.js';
+import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
@@ -560,6 +561,8 @@ export interface ApprovedLinkEffect {
   readonly quote: string;
   /** `linkEffectReadingToken` of the reading the approval card SHOWED; the writer refuses a write it does not match. */
   readonly reading_token: string;
+  /** Each disclosed end-unit reading, bound into the approval token and written atomically with this link. */
+  readonly unit_readings?: readonly LinkEffectUnitReading[];
 }
 
 /**
@@ -580,15 +583,35 @@ export interface ApprovedIdentityConfirm {
 const LINK_WRITER_OWNED_EDGE_MEMBERS = ['strength', 'effect_direction', 'provenance', 'provenance_display', 'defaulted', 'exists_defaulted', 'std_defaulted'] as const;
 
 /**
- * ⛔ ONLY THE DECLARED LINKS MAY CHANGE, and on each only what the link writer owns: no node, no other link, no edge
- * added or removed or re-ordered, no top-level field.
+ * ⛔ ONLY THE DECLARED LINKS MAY CHANGE, and on each only what the link writer owns. The size-by-chat door additionally
+ * owns exactly each approved end's unit_reading: no other node field, other link, order or top-level field may move.
  */
-export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unknown, links: readonly { from: string; to: string }[]): boolean {
+export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unknown,
+  links: readonly { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }[]): boolean {
   const before = normaliseAbsenceOnly(storedBefore);
   if (!isEditableGraph(before) || !isEditableGraph(after) || links.length === 0) return false;
   if (new Set(links.map(l => `${l.from}::${l.to}`)).size !== links.length) return false;
   if (after.edges.length !== before.edges.length) return false;
   const restored = structuredClone(after);
+  const readings = new Map<string, LinkEffectUnitReading['unit_reading']>();
+  for (const link of links) {
+    for (const reading of link.unit_readings ?? []) {
+      if (reading.node_id !== link.from && reading.node_id !== link.to) return false;
+      const checked = NodeV3.shape.unit_reading.safeParse(reading.unit_reading);
+      if (!checked.success || checked.data === undefined || !isDeepStrictEqual(checked.data, reading.unit_reading)
+        || reading.unit_reading.source !== 'user_stated') return false;
+      const existing = readings.get(reading.node_id);
+      if (existing !== undefined && !isDeepStrictEqual(existing, reading.unit_reading)) return false;
+      readings.set(reading.node_id, reading.unit_reading);
+    }
+  }
+  for (const [nodeId, reading] of readings) {
+    const was = before.nodes.filter(node => node.id === nodeId);
+    const now = restored.nodes.filter(node => node.id === nodeId);
+    if (was.length !== 1 || now.length !== 1 || !isDeepStrictEqual(now[0]!.unit_reading, reading)) return false;
+    if (Object.hasOwn(was[0]!, 'unit_reading')) now[0]!.unit_reading = structuredClone(was[0]!.unit_reading);
+    else delete now[0]!.unit_reading;
+  }
   for (let i = 0; i < restored.edges.length; i += 1) {
     const now = restored.edges[i]! as Record<string, unknown> & { from: string; to: string };
     const was = before.edges[i]! as Record<string, unknown> & { from: string; to: string };
@@ -691,6 +714,7 @@ async function applyApprovedLinkEffects(
     if (!graphHash) return { kind: 'refused', reason: 'canonical_graph_unavailable', linkIndex: i };
     const written = applyLinkEffectEdit({ persistedGraph: working, from: link.from, to: link.to, effect: link.effect,
       expected: { graph_hash: graphHash, edge_token: link.edge_token }, quote: link.quote, reading_token: link.reading_token,
+      unit_readings: link.unit_readings,
       lastRunIdentityUse: ctx.lastRunIdentityUse });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: i };
     working = written.mutatedGraph;
@@ -909,11 +933,11 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyLinkEffectEdit({ persistedGraph: before, from: linkEffect.from, to: linkEffect.to, effect: linkEffect.effect,
       expected: { graph_hash: input.expectedGraphHash, edge_token: linkEffect.edge_token }, quote: linkEffect.quote,
-      reading_token: linkEffect.reading_token,
+      reading_token: linkEffect.reading_token, unit_readings: linkEffect.unit_readings,
       lastRunIdentityUse: input.lastRunIdentityUse ?? null });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: 0 };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, [{ from: linkEffect.from, to: linkEffect.to }])) {
+    if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, [linkEffect])) {
       return { kind: 'refused', reason: 'link_scope_mismatch' };
     }
     const appliedHash = computeAnalysisAffectingGraphHash(graph);
