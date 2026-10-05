@@ -126,7 +126,7 @@ async function freshApp(): Promise<FastifyInstance> {
   return app;
 }
 
-type Body = { assistant_text: string; suggested_actions?: Array<{ id: string; label: string }>; diagnostic?: { fast_path?: string; timing?: { provider_calls?: number } } };
+type Body = { assistant_text: string; suggested_actions?: Array<{ id: string; label: string }>; guidance?: { slot1?: unknown; slot2?: unknown }; diagnostic?: { fast_path?: string; timing?: { provider_calls?: number } } };
 
 describe('the "Review this decision" press on the live route', () => {
   let app: FastifyInstance;
@@ -189,10 +189,13 @@ describe('the "Review this decision" press on the live route', () => {
     expect(chips((await press(randomUUID())).json() as Body)).toEqual([TEST_LINK]);
   });
 
-  it('RED (Codex P2): a review with no press of its own offers none — not the general next steps', async () => {
+  it.each(['g2', 'b5'] as const)('RED (Codex P2): a review offers its own presses only — no general next steps, no other method (%s)', async (f) => {
+    fixture = f;
     const body = (await press(randomUUID())).json() as Body;
     expect(body.assistant_text.startsWith(DECISION_REVIEW_OPENING)).toBe(true);
-    expect(chips(body)).toEqual([]);
+    expect(chips(body)).toEqual(f === 'g2' ? [] : [TEST_LINK]);
+    expect(body.guidance?.slot1).toBeUndefined();
+    expect(body.guidance?.slot2).toBeUndefined();
   });
 
   it('RED (Codex P1): a Run another writer replaces before the reply is composed is not reviewed', async () => {

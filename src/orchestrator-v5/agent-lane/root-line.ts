@@ -4,7 +4,8 @@
  * `treatedAsZeroLine` quotes the user's own node labels. A label is user text, and every editor the reply passes after
  * the line is placed reads text: the proposal-id scrub (`withoutProposalIds`), the at-rest marker parse (`textAtRest`),
  * the withheld-leader ranking drop (`dropRankingSentences`), the shared leader gate (keyed on option names) and the
- * egress scan (`findLeaderClaims`, read here through its exported string vocabulary `textNamesLeadingOption`). A label such as `Hire a Tech Lead leads. Demand falls`, one holding a `prop_…` id, or
+ * leader enforcement (`textAssertsLeadingOption`, the vocabulary its deleting consumers read). A label such as
+ * `Hire a Tech Lead leads. Demand falls`, one holding a `prop_…` id, or
  * one holding "Questions this model does not answer yet:" was rewritten, cut or truncated by one of them.
  *
  * So the labelled line is said only when EVERY one of those editors leaves it byte-identical, in the strictest posture
