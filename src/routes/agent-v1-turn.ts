@@ -531,8 +531,27 @@ export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.j
 export const REPLY_LENGTH_INSTRUCTION =
   'Length: your words are only part of what the user reads, because Olumi adds its own status, disclosure and receipt lines after them. Stay under 110 words on the turn that builds the model from a brief, under 100 when you explain an analysis result, and under 90 otherwise: these are limits, not targets. Ask at most one question, as your last sentence. On a turn that builds the model or runs the analysis, never ask for the goal\'s target or name it as the next step: Olumi asks for it after your words. To fit, cut restated model contents, process narration and extra questions first; never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure.';
 
+/**
+ * ⭐ AN OPTION IS NAMED ONLY IN THIS MODEL, AND NEVER "FRAGILE" (WORDING BATCH; DL 0df0e1 lease, 5 Oct ~15:0xZ; Acceptance
+ * #87 5996853005 on CEE 0b37e2d). #2588 made Olumi's own Run lines model-relative, but the words the user reads after a Run
+ * are this lane's narration, and it said "…scoring highest in about 73% of simulations" and "The finding is fragile…".
+ * Host rule #34 itself says "When the result is fragile or a near tie, say that this uncertainty is itself the finding".
+ * APPENDED after the reply-length sentence, like it: the v0.2 template and every host rule reach the model unchanged
+ * (a swap drops every rule it does not restate, #2379). It reaches both served aliases: `agent.converse` and the Run's
+ * `agent.interpret`, whose instructions begin with AGENT_INSTRUCTIONS. It grants nothing: whether a leader may be named
+ * is still #34's `claim_permissions.leader_may_be_named`, and the wire gates still drop a ranking on a withheld turn.
+ * N is the option's share of runs in which it scored highest, never `probability_of_goal` (#35's "reaches the target").
+ */
+export const MODEL_RELATIVE_NAMING_INSTRUCTION =
+  'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, \u2018X\u2019 scored highest in N% of runs\u201d, '
+  + 'with X its display label and N the share of model runs in which it scored highest, taken from the result; N is never its chance of reaching the goal. '
+  + 'If the result gives no such share, say \u201cIn this model, \u2018X\u2019 scored highest\u201d. Keep any provisional or limit condition the rules above require in that same sentence. '
+  + 'Never name an option as leading, ahead, favoured, on top or winning in other words, and never without \u201cin this model\u201d. '
+  + 'Never call a result, finding, option or link \u201cfragile\u201d: say what the result rests on instead, in the result\u2019s own terms, '
+  + 'such as the assumption its decision_sensitivity names when measured, and whose figure it is.';
+
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
-  '{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION].join(' '),
+  '{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION].join(' '),
 );
 
 /**

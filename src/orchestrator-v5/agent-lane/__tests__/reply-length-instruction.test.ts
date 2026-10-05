@@ -28,7 +28,8 @@ describe('the reply-length sentence', () => {
 
   it('is appended AFTER the host contract in the route source: the template and every host rule are unchanged', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(src).toContain("'{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION].join(' ')");
+    // The naming rule (WORDING BATCH, 5 Oct) is appended AFTER this sentence; the reply-length sentence still follows the host contract.
+    expect(src).toContain("'{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION].join(' ')");
     // The slot is filled once; nothing else in the template or the contract mentions the budget.
     expect(SELECTED_COACH_V02_TEMPLATE.split('{{MODE_AND_AUTHORITY}}')).toHaveLength(2);
     expect(HOST_TOOL_CONTRACT).not.toContain(REPLY_LENGTH_INSTRUCTION);
