@@ -15,7 +15,9 @@ import { enforceLeaderLicenceAtFinalEgress } from '../leader-final-egress.js';
 describe('the model-relative naming rule', () => {
   it('names an option only in the one model-relative form, with or without its share of runs', () => {
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('when the rules above let you name a leading option, name it only as “In this model, N% of runs supported ‘X’”');
-    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('If the result gives no such share, say “In this model, the most runs supported ‘X’”.');
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('If the result gives no such share, make no claim about how runs fell: say what the result rests on instead.');
+    // Codex r2: a lone option can be named with no share, so no plurality or share is ever asserted without one.
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).not.toContain('the most runs supported');
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never name an option as leading, ahead, favoured, on top or winning in other words, and never without “in this model”.');
   });
 

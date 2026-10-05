@@ -546,6 +546,8 @@ export const REPLY_LENGTH_INSTRUCTION =
  * gives N's meaning in positive words and bans the stem outright. Codex r1 #2614: "scored highest" is false for a
  * minimise Run (it came out lowest) and inexact when tied runs split their credit, and the agent cannot rely on knowing
  * the Run's direction, so the rule names an option in Part B's neutral form (DL 6002469285): "N% of runs supported X".
+ * Codex r2 #2614: a single option can be named with NO share (run-analysis selectLeadingOptionId accepts a lone row
+ * without win_probability), so with no share the rule makes no claim about how runs fell at all.
  */
 export const MODEL_RELATIVE_NAMING_INSTRUCTION =
   'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d, '
@@ -553,7 +555,7 @@ export const MODEL_RELATIVE_NAMING_INSTRUCTION =
   + 'That form holds whichever way the goal points and when runs tie, so use it rather than saying the option scored highest or came out lowest. '
   + 'When you say what N means, say it as what it is: \u201cThat share is the part of this model\u2019s runs that supported it, not its chance of meeting your target.\u201d '
   + 'Never write recommend or recommendation in any form, not even to deny it. '
-  + 'If the result gives no such share, say \u201cIn this model, the most runs supported \u2018X\u2019\u201d. Keep any provisional or limit condition the rules above require in that same sentence. '
+  + 'If the result gives no such share, make no claim about how runs fell: say what the result rests on instead. Keep any provisional or limit condition the rules above require in that same sentence. '
   + 'Never name an option as leading, ahead, favoured, on top or winning in other words, and never without \u201cin this model\u201d. '
   + 'Never call a result, finding, option or link \u201cfragile\u201d: say what the result rests on instead, in the result\u2019s own terms, '
   + 'such as the assumption its decision_sensitivity names when measured, and whose figure it is.';
