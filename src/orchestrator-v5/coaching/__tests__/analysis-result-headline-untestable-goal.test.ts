@@ -151,16 +151,16 @@ const DISCLOSURE = ' The model could not test whether any option reaches your go
  * carry attainment data. Bound by identity, spelled here, never imported.
  */
 const DIRECTION_DISCLOSURE =
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better.';
+  ' In this model I’ve assumed a higher value is better for your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
 /**
  * R3-1: GOAL_DIRECTION_UNATTESTED present AND (THRESHOLD present, or no
  * attainment data). ONE sentence that states both. Bound by identity.
  */
 const COMBINED_DISCLOSURE =
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better,' +
-  ' and it could not test whether any option reaches your goal.';
+  ' In this model I’ve assumed a higher value is better for your goal,' +
+  ' and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
 /** The clause that must ride WHENEVER the DIRECTION code is present (R3-1). */
-const DIRECTION_CLAUSE = 'The analysis was not told which way your goal points, so it assumed a higher value is better';
+const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
 
 /**
  * TODAY'S served headline, captured from the UNCHANGED source (c1ddb50) on this

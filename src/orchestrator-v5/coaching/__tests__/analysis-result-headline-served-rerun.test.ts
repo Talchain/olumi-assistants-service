@@ -79,13 +79,13 @@ const CURRENT_GOAL_FRAMED_HEADLINE =
 /** The served summary's scaffold sentence, which run-analysis.ts appends after the headline. */
 const SCAFFOLD_SENTENCE = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
 
-const DIRECTION_CLAUSE = 'The analysis was not told which way your goal points, so it assumed a higher value is better';
+const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
 /** What this envelope must now produce: the withdrawn frame plus the combined sentence (R3-1). */
 const FIXED_HEADLINE =
   'Raise Price to £50 scored highest in 84% of runs of this model,' +
   ' but treat this as provisional: it rests heavily on how much Price per seat changes Monthly revenue.' +
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better,' +
-  ' and it could not test whether any option reaches your goal.';
+  ' In this model I’ve assumed a higher value is better for your goal,' +
+  ' and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
 
 function input(enrichment: Json): AnalysisResultHeadlineInput {
   return { enrichment, leading_option_id: BLOCK['leading_option_id'] as string, status_kind: 'ok' };
@@ -164,8 +164,8 @@ describe('⭐ R3-5 — the served rerun shape makes no goal claim and discloses 
     // CONTRAST: the served summary with the disclosure appended contradicts itself and is rejected.
     expect(
       isAllowedRunAnalysisAssistantText(
-        `${CURRENT_GOAL_FRAMED_HEADLINE} The analysis was not told which way your goal points, so it assumed a higher value is better,` +
-          ` and it could not test whether any option reaches your goal.${SCAFFOLD_SENTENCE}`,
+        `${CURRENT_GOAL_FRAMED_HEADLINE} In this model I’ve assumed a higher value is better for your goal,` +
+          ` and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.${SCAFFOLD_SENTENCE}`,
       ),
     ).toBe(false);
   });

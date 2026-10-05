@@ -1051,7 +1051,8 @@ export function createAddConstraintHandler(): HandlerFn {
       // ⭐ RT-10 B′ (Science 5 Oct Q1; DL ruling): the approved ceiling IS the user's sense of the goal, so the goal HOLDS
       // it (`<` when stated strict, else `<=`) instead of losing its direction. `resolveGoalDirection` reads a held ceiling
       // beside its own approved row on the goal and sends `minimise`, so the run is never left on the maximiser and the
-      // ceiling is never scored as a floor. "If lower is better, tell me and I'll re-order" re-orders.
+      // ceiling is never scored as a floor. The assumption line's correction ("set the goal’s target to ‘at most’ and
+      // re-run", `analysis-result-headline.ts`) is this door, so it re-orders.
       // ⛔ Only where the goal holds NO target figure, or this very figure: the threshold channel is untouched, and a held
       // ceiling beside a DIFFERENT figure (a floor's £1.2m under an approved "at most £1.4m") would be minimised against
       // the stale figure. There the direction still goes, exactly as before (the assumption line then says so).

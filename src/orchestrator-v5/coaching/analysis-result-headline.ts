@@ -294,13 +294,18 @@ export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
  * drift from either half.
  */
 const UNTESTED_GOAL_LEAD_CLAUSE_OPENING = 'scored highest in';
-const GOAL_DIRECTION_ASSUMED_CLAUSE =
-  'The analysis was not told which way your goal points, so it assumed a higher value is better';
+// ⭐ RT-10 B′ (DL ruling; words APPROVED 5 Oct): the assumption is OLUMI'S and model-relative, and the sentence after it
+// names the ONE correction that works. An "at most" target set on the goal in the Model panel (`goal_target_edit`) now
+// holds the user's ceiling (`add-constraint.ts`), so the rerun minimises (`resolveGoalDirection`, the goal-row branch);
+// chat has no door that holds a direction, so the words never say "tell me". It works on a goal with no target yet (the
+// goal editor opens with its at least / at most select). No goal label: the headline input carries none (see above).
+const GOAL_DIRECTION_ASSUMED_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
+const GOAL_DIRECTION_CORRECTION = ' If lower is better, set the goal’s target to ‘at most’ and re-run.';
 const GOAL_UNTESTED_CLAUSE = 'could not test whether any option reaches your goal';
 const GOAL_UNTESTED_DISCLOSURE = ` The model ${GOAL_UNTESTED_CLAUSE}.`;
-const GOAL_DIRECTION_ASSUMED_DISCLOSURE = ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}.`;
+const GOAL_DIRECTION_ASSUMED_DISCLOSURE = ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}.${GOAL_DIRECTION_CORRECTION}`;
 const GOAL_DIRECTION_ASSUMED_AND_UNTESTED_DISCLOSURE =
-  ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}, and it ${GOAL_UNTESTED_CLAUSE}.`;
+  ` ${GOAL_DIRECTION_ASSUMED_CLAUSE}, and the model ${GOAL_UNTESTED_CLAUSE}.${GOAL_DIRECTION_CORRECTION}`;
 /**
  * The sentence each goal frame carries. A total map over {@link GoalFrame}, so a
  * new frame cannot compile without choosing its sentence.

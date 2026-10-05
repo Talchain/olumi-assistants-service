@@ -91,11 +91,11 @@ const SERVED_GOAL_WARNINGS = (((T2.blocks[0] as Json)['enrichment'] as Json)['in
 // The two headline sentences, spelled here and never imported.
 const COULD_NOT_TEST = ' The model could not test whether any option reaches your goal.';
 const DIRECTION_ASSUMED =
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better.';
+  ' In this model I’ve assumed a higher value is better for your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
 const COMBINED =
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better,' +
-  ' and it could not test whether any option reaches your goal.';
-const DIRECTION_CLAUSE = 'The analysis was not told which way your goal points, so it assumed a higher value is better';
+  ' In this model I’ve assumed a higher value is better for your goal,' +
+  ' and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
+const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
 const GLOSS = 'Scoring highest counts how often an option scored highest on your goal';
 
 const HOLD = 'Hold at £49 Per Seat (Status Quo)';

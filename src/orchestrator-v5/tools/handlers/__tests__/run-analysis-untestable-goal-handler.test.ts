@@ -222,10 +222,10 @@ const FRAMED_LEAD = 'Hold at £49 Per Seat scored highest against your goal in 7
 const WITHDRAWN_LEAD = 'Hold at £49 Per Seat scored highest in 71% of runs of this model.';
 const COULD_NOT_TEST = ' The model could not test whether any option reaches your goal.';
 const DIRECTION_ASSUMED =
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better.';
+  ' In this model I’ve assumed a higher value is better for your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
 const COMBINED =
-  ' The analysis was not told which way your goal points, so it assumed a higher value is better,' +
-  ' and it could not test whether any option reaches your goal.';
+  ' In this model I’ve assumed a higher value is better for your goal,' +
+  ' and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
 const ARM_B_FRAMED =
   ' Two different questions have two different answers here: “Hold at £49 Per Seat” scored highest against your goal most often,' +
   ' but “Raise to £59 Per Seat” is more likely to reach your stated target (48% against 0%).' +
@@ -324,7 +324,7 @@ describe('⭐ R3-3 — the EXECUTED run_analysis handler composes the untestable
         expect(summary).not.toMatch(/more likely to reach your stated target/);
         expect(summary).not.toContain('Scoring highest counts how often');
       }
-      expect(summary.includes('it assumed a higher value is better')).toBe(codes === 'D' || codes === 'D+T');
+      expect(summary.includes('I’ve assumed a higher value is better')).toBe(codes === 'D' || codes === 'D+T');
     });
   }
 });
