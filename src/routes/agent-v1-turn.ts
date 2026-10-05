@@ -77,7 +77,7 @@ import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestr
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
-import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
+import { agentProposals as proposals, executableWaitingProposal, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
@@ -287,7 +287,6 @@ function isConstructionTimeout(err: unknown): boolean {
 
 /** The conversation of record stays Olumi's; this is a per-process cache. */
 const histories = new HistoryStore();
-const proposals = new ProposalStore();
 /** The approval carrier each scenario and subject's latest answer row persisted — see `carrierForAnswerRow`. */
 const carriedProposals = new CarriedProposals();
 
@@ -422,22 +421,6 @@ function rememberApprove(key: string, offered: readonly OfferedAction[]): void {
 }
 
 /**
- * THE ONE PREDICATE for "may an approve chip be shown now": the ONE proposal still awaiting a yes for this
- * subject, when the store would EXECUTE it on the revision read back this turn — else nothing (a missing
- * readback fails closed). Used by the fresh Run carry AND by every replay (Codex #1807 5810816841: a
- * replay checked only id membership, so after the model moved a retried Run showed a chip that could not
- * commit).
- */
-function executableWaitingProposal(scenarioId: string, userId: string | null, graphHash: string | undefined): string | undefined {
-  if (graphHash === undefined) return undefined;
-  const waiting = proposals.outstanding(scenarioId, userId);
-  if (waiting.length !== 1) return undefined;
-  const id = waiting[0]!.proposal_id;
-  const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
-  return decision.status === 'execute' ? id : undefined;
-}
-
-/**
  * EVERY proposal still waiting for its yes that would execute on this graph, however many (`executableWaitingProposal`
  * wants exactly one, for the chip it re-offers). Any of them makes the turn a decision point for guidance (T2).
  */
@@ -459,10 +442,7 @@ export function stillValidOffers(
   offered: readonly OfferedAction[],
   now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown; modelExists: boolean },
 ): OfferedAction[] {
-  const approvals = offered.filter((a) => {
-    const id = typedApprovalOf({ chip: { id: a.id } });
-    return id !== undefined && now.outstandingProposalIds.has(id);
-  });
+  const approvals = stillValidApprovalOffers(offered, now.outstandingProposalIds);
   const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
     && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
@@ -478,7 +458,7 @@ export function stillValidOffers(
   // next step after a blocked Run: after a restart the replay carries the words only).
   const nextSteps = offersNextSteps(now.analysisState) && now.outstandingProposalIds.size === 0
     ? offered.filter((a) => METHOD_PRESS_IDS.has(a.id)) : [];  // Widen sits in a next step's place (DL P2 on #2512)
-  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
+  return [...approvals, ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
 }
 const sessions = new SessionBindingRegistry();
 
