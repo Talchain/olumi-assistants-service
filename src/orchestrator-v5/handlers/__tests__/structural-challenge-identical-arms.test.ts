@@ -81,7 +81,7 @@ const DISTINCT: Record<string, Stats> = {
 const hasLink = (g: Rec, l: { from_id: string; to_id: string }) => (g.edges as Rec[]).some((e) => e.from === l.from_id && e.to === l.to_id);
 
 /** same_unequal: identical outcomes but the served (unequal) win shares. served_no_nvalid: no valid-draw counts. */
-type Shape = 'served' | 'same' | 'distinct' | 'near_same' | 'same_unequal' | 'served_no_nvalid' | 'pair_same' | 'distinct_change' | 'served_pair';
+type Shape = 'served' | 'same' | 'distinct' | 'near_same' | 'same_unequal' | 'served_no_nvalid' | 'pair_same' | 'distinct_change' | 'served_pair' | 'served_pair_int_no_nvalid';
 /** SYNTHETIC pair_same (revenue-lost link removed): Integration ≡ Carry On — both leave AI capacity at today's 0% —
  *  so their wins split; AI Reporting Module Sprint distinct with the larger single share. */
 const PAIR: Record<string, Stats> = {
@@ -109,7 +109,7 @@ function rowsOf(shape: Shape, options: Rec[]): Rec[] {
     const s: Stats = shape === 'served' || shape === 'served_no_nvalid' ? SERVED[id] ?? { w: 0, mean: 0.01, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
       : shape === 'same_unequal' ? { ...SAME, w: SERVED[id]?.w ?? 0 }
       : shape === 'pair_same' ? PAIR[id] ?? { w: 0, mean: 0.009, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
-      : shape === 'served_pair' ? SERVED_PAIR[id] ?? { w: 0, mean: 0.0005, std: 0.04, p10: -0.05, p50: 0.0001, p90: 0.05 }
+      : shape === 'served_pair' || shape === 'served_pair_int_no_nvalid' ? SERVED_PAIR[id] ?? { w: 0, mean: 0.0005, std: 0.04, p10: -0.05, p50: 0.0001, p90: 0.05 }
       : shape === 'distinct_change' ? CHANGE[id] ?? { w: 0, mean: 0.008, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
       : shape === 'distinct' ? DISTINCT[id] ?? { w: 0, mean: 0.009, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
         // near_same: one arm differs by 1e-9 relative in its mean only (a contrast for the 1e-12 tolerance).
@@ -117,7 +117,8 @@ function rowsOf(shape: Shape, options: Rec[]): Rec[] {
     return {
       option_id: id, option_label: o.label, win_probability: s.w, probability_of_goal: null, status: 'computed',
       outcome: { mean: s.mean, std: s.std, p10: s.p10, p50: s.p50, p90: s.p90, n_samples: 10_000,
-        ...(shape === 'served_no_nvalid' ? {} : { n_valid_samples: 10_000 }), validity_ratio: 1, percentiles_source: 'samples' },
+        ...(shape === 'served_no_nvalid' || (shape === 'served_pair_int_no_nvalid' && id === 'integration_bug_fix_sprint') ? {} : { n_valid_samples: 10_000 }),
+        validity_ratio: 1, percentiles_source: 'samples' },
     };
   });
 }
@@ -355,6 +356,14 @@ describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candida
     expect(h.turn.reply).not.toContain('rests entirely');
     expect(h.turn.reply).toContain('- Without the link, Integration Bug Fix Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
     expect(h.turn.reply).not.toContain('Which option leads cannot be compared');
+  });
+
+  it('C6 (Codex review 3 P1): an unrelated arm without valid-draw counts never hides the pair', async () => {
+    const h = await harness(LEAD_LINK, 'served_pair_int_no_nvalid');
+    expect(h.turn.identicalGroups).toEqual([['ai_reporting_module_sprint', 'continue_current_plan']]);
+    expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
+    expect(h.turn.reply).not.toContain('leads in the version without the link');
+    expect(h.turn.reply).toContain('- Without the link, AI Reporting Module Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
   });
 
   it('D2 (contrast): every arm distinct → a clear leader change is still stated, and nothing is disclosed as the same', async () => {

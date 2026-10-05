@@ -268,8 +268,39 @@ const sameStat = (x: unknown, y: unknown): boolean => {
  * and the same valid-draw count. Read from the RESULT, never from graph structure: with no option reaching the goal,
  * ISL evaluates every arm on the same draws, so the arms come out identical.
  */
-const sameArm = (a: Rec, b: Rec): boolean => num(a.n_valid_samples) === num(b.n_valid_samples)
+/** The draw count `optionRows` trusts: a present `n_valid_samples` is authoritative, else `n_samples`. */
+const drawCount = (o: Rec): number | null => {
+  const n = num(o.n_valid_samples !== undefined ? o.n_valid_samples : o.n_samples);
+  return n !== null && Number.isSafeInteger(n) && n > 0 ? n : null;
+};
+
+const sameArm = (a: Rec, b: Rec): boolean => drawCount(a) !== null && drawCount(a) === drawCount(b)
   && ARM_STATS.every((k) => (a[k] === undefined && b[k] === undefined) || sameStat(a[k], b[k]));
+
+/**
+ * Each submitted arm that is usable ON ITS OWN, by `optionRows`' own reading (computed status, its trusted draw count,
+ * finite mean/std). Unlike `usableArmOutcomes`, an unusable arm never hides a pair among the others: this reader only
+ * BLOCKS a leader, so it must see every pair `optionRows` could rank.
+ */
+function individuallyUsableArms(fact: HandlerFact): { readonly id: string; readonly outcome: Rec }[] {
+  const result = (fact as { result?: Rec }).result;
+  const enrichment = isRec(result?.enrichment) ? result.enrichment : null;
+  const submitted = enrichment === null ? null : submittedIdentities(enrichment, fact);
+  if (enrichment === null || submitted === null) return [];
+  const nested = isRec(enrichment.results) ? enrichment.results : {};
+  const current = Array.isArray(enrichment.option_comparison) ? enrichment.option_comparison : nested.option_comparison;
+  const source = Array.isArray(current) ? current : readOptionResultSources(enrichment)[0] ?? [];
+  const rows = new Map<string, Rec>();
+  for (const o of source) if (isRec(o) && typeof o.option_id === 'string') rows.set(o.option_id, o);
+  const arms: { readonly id: string; readonly outcome: Rec }[] = [];
+  for (const id of submitted.options) {
+    const row = rows.get(id);
+    if (row === undefined || !isRecommendableOption(row) || !isRec(row.outcome)) continue;
+    if (drawCount(row.outcome) === null || num(row.outcome.mean) === null || num(row.outcome.std) === null) continue;
+    arms.push({ id, outcome: row.outcome });
+  }
+  return arms;
+}
 
 export function runArmsIdentical(fact: HandlerFact): boolean {
   const arms = usableArmOutcomes(fact);
@@ -281,8 +312,7 @@ export function runArmsIdentical(fact: HandlerFact): boolean {
  * (ISL shares ties), so ANY such group means the Run's win shares cannot name a leader (DL ruling, #2575).
  */
 export function runIdenticalArmGroups(fact: HandlerFact): string[][] {
-  const arms = usableArmOutcomes(fact);
-  if (arms === null) return [];
+  const arms = individuallyUsableArms(fact);
   const groups: string[][] = [];
   const grouped = new Set<number>();
   for (let i = 0; i < arms.length; i++) {
