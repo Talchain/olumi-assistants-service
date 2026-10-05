@@ -185,10 +185,11 @@ describe('⭐ a user-stated link effect is ONE commit through the real level doo
     expect(facts.map((fact) => fact.result.after.stated_quote)).toEqual(effects.map((effect) => effect.quote));
     for (const effect of effects) {
       const edge = (persisted as { edges: Array<Record<string, unknown>> }).edges.find((candidate) => candidate.from === effect.from && candidate.to === effect.to)!;
-      // The user's two figures exactly; the writer stores each end in its OWN unit (a point is one raw unit of a % level), so a
-      // points-stated source reads back as "percent per month" (pinned in link-effect-natural-sentences / size-by-chat).
+      // The user's two figures exactly, and each source in its OWN stored unit (a point is one raw unit of a % level): the
+      // units staging asserted here before the points wording (Codex buddy r2: keep the unit coverage).
+      const sourceUnit = ({ pro_plan_price: 'GBP per month', monthly_churn: 'percent per month', feature_delivery_scope: 'percent of proposed release' } as Record<string, string>)[effect.from];
       expect(edge.provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated',
-        natural_effect: { amount: effect.effect.amount, per_source_change: effect.effect.per_source_change } });
+        natural_effect: { ...effect.effect, per_source_change_unit: sourceUnit } });
     }
   });
 });
