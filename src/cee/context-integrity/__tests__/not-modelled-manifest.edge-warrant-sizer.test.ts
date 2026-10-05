@@ -14,6 +14,7 @@ import { buildModelFromBrief, type CallStructuredModel } from "../../../orchestr
 import type { InternalDispatch } from "../../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js";
 import { computeAnalysisAffectingGraphHash } from "../../../orchestrator-v5/context/graph-hash.js";
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken } from "../../../orchestrator-v5/system-events/link-effect-edit.js";
+import { prepareLinkEffectUnitReadings, withPointsAtZero } from "../../../orchestrator-v5/system-events/link-effect-unit-reading.js";
 import { GraphV3 } from "../../../schemas/cee-v3.js";
 
 type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
@@ -126,16 +127,22 @@ describe("PR-U2a: an edge figure is the user's when the USER sized it, whatever 
     const FACTS_1500 = " Finance now puts the rise at £1,500 a month.";
     const brief = FIXTURE.brief_text + FACTS_1500;
     const at1500 = brief.indexOf("£1,500");
-    const RESIZE = { amount: 1500, amount_unit: "£/month", per_source_change: 1, per_source_change_unit: "%" };
-    const CHAT = "Make it £1,500 a month for each 1%.";
+    const RESIZE = { amount: 1500, amount_unit: "£/month", per_source_change: 1, per_source_change_unit: "percentage points" };
+    const CHAT = "Make it £1,500 a month for each 1 percentage point of price rise.";
     const resized = () => {
       const g = fresh();
       Object.assign(priceEdge(g).provenance, { source: "cee_hypothesis", magnitude: "user_stated", source_quote: FACTS });
       const quote = CHAT;
+      // The effect exactly as the approval card shows it (RT-6 #2605): its unit readings, and a % at the user's own 0 in
+      // points (Science F1). The writer refuses any other reading.
+      const prepared = prepareLinkEffectUnitReadings(g, "price_increase", MRR, RESIZE, quote);
+      expect(prepared.ask, "the card asks instead of showing a reading").toBeUndefined();
+      const effect = withPointsAtZero(RESIZE, prepared.points_at_zero, "price_increase", MRR);
+      const unit_readings = prepared.unit_readings;
       const r = applyLinkEffectEdit({
-        persistedGraph: g, from: "price_increase", to: MRR, effect: RESIZE as never, quote,
+        persistedGraph: g, from: "price_increase", to: MRR, effect, quote, unit_readings,
         expected: { graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, "price_increase", MRR)! },
-        reading_token: linkEffectReadingToken({ from: "price_increase", to: MRR, effect: RESIZE as never, quote }),
+        reading_token: linkEffectReadingToken({ from: "price_increase", to: MRR, effect, quote, unit_readings }),
       });
       expect(r.kind, JSON.stringify(r)).toBe("mutated");
       return (r as { mutatedGraph: Graph }).mutatedGraph;
