@@ -1,11 +1,10 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { targetTestabilityOf, notTargetTestableSentence } from '../../../admission/target-testability.js';
 import { linkList, legacyLinkSentence } from '../../../agent-lane/unsized-path-cause.js';
 import { runP0Graph } from './mc-p0-run-helper.js';
 
 type R = Record<string, any>;
-const out = '/private/tmp/mc-codex-p0/cee-evidence/round10';
 const edge = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8,
   effect_direction: 'positive', defaulted: true, provenance: { source: 'cee_hypothesis', mean_projected: true } });
 function graph(count: number, repeat = 1): R {
@@ -47,7 +46,6 @@ it.each([12, 100])('R10 science: five-link Run shortening accounts for all five 
   accounting(w.message, links);
   accounting(legacyLinkSentence(links), links);
   if (repeat === 100) expect(w.message).toContain('…');
-  writeFileSync(`${out}/withhold-long-${repeat}.json`, JSON.stringify({ sentence: w.message, links: w.links }, null, 2));
 });
 it('R10 science: P5 asks about just the first nearest-goal link; its reason lists the other two', () => {
   const g = graph(3);
@@ -65,7 +63,6 @@ it('R10 science: P5 asks about just the first nearest-goal link; its reason list
   expect(question).toBe('how much Revenue in GBP/month does a change in Capacity 2 bring?');
   expect(said.match(/how much/g)).toHaveLength(1);
   expect(question).not.toMatch(/Capacity [01]/);
-  writeFileSync(`${out}/p5-three.txt`, said);
 });
 it('R10 quoted withholds: single, three-link and more-than-three Run warnings retain complete lists', async () => {
   const rows = [];
@@ -76,7 +73,6 @@ it('R10 quoted withholds: single, three-link and more-than-three Run warnings re
     expect(r.leading_option_id).toBeNull();
     rows.push({ count, sentence: w.message, links: w.links });
   }
-  writeFileSync(`${out}/withholds.json`, JSON.stringify(rows, null, 2));
 });
 it('R10 verbatim summaries from stored d1/d2/d3, without changing their graphs', async () => {
   const brief = readFileSync(new URL('../../../admission/__tests__/fixtures/mc-p0/BRIEF.txt', import.meta.url), 'utf8');
@@ -86,5 +82,4 @@ it('R10 verbatim summaries from stored d1/d2/d3, without changing their graphs',
     const r = await runP0Graph(g, brief);
     rows.push({ draw, summary: r.summary, leading_option_id: r.leading_option_id });
   }
-  writeFileSync(`${out}/draw-summaries.json`, JSON.stringify(rows, null, 2));
 });

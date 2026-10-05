@@ -948,10 +948,10 @@ export function nonEffectQuantitySpans(brief: string, labels: readonly string[],
   return scanQuantities(brief).filter(occ => labels.some(label => {
     const role = judgeOccurrence(brief, occ, label, 'absent', pair);
     return (role.ok && targets.some(t => t.label === label
-      && sameQuantity(occ, { ...occ, value: t.unit === '%' ? t.value / 100 : t.value, unit: t.unit })))
+      && sameQuantity(occ, { ...occ, value: classifyUnitScaleClass(t.unit) === 'percent' ? t.value / 100 : t.value, unit: t.unit })))
       || role.refusal === 'stated_as_current_level'
       || (role.refusal === 'limit_direction_not_representable' && targets.some(t => t.label === label
-        && sameQuantity(occ, { ...occ, value: t.unit === '%' ? t.value / 100 : t.value, unit: t.unit })));
+        && sameQuantity(occ, { ...occ, value: classifyUnitScaleClass(t.unit) === 'percent' ? t.value / 100 : t.value, unit: t.unit })));
   })).map(occ => ({ start: occ.index, end: occ.end }));
 }
 

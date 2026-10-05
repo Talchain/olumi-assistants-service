@@ -1,6 +1,6 @@
 import { applyPatchOperations } from '../../../../orchestrator/patch-applier.js';
 import { buildUpdateEdgeFieldCandidate } from '../../../graph-management/candidate-graph.js';
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 import { expect, it, vi } from 'vitest';
@@ -312,7 +312,6 @@ it('RD-1/RD-2 fa027 stored shape: licence permitted, all legacy names immediatel
   expect(cold.analysis_state?.leader_claim).toMatchObject({ permitted: true });
   expect(cold.analysis_result?.leading_option_id).toBe(r.leading_option_id);
   expect(cold.analysis_result?.enrichment?.inference_warnings).toEqual(r.enrichment.inference_warnings);
-  writeFileSync('/private/tmp/mc-codex-p0/cee-evidence/round10/fa027.json', JSON.stringify({ result: r, cold, verdict: shadow.verdict }, null, 2));
 });
 
 it('R8 plural list caps at three names, then N more; 400-char fallback uses fewer names and keeps complete count', () => {
@@ -322,7 +321,6 @@ it('R8 plural list caps at three names, then N more; 400-char fallback uses fewe
   const said = unsizedLinkSentence(long);
   expect(said.length).toBeLessThanOrEqual(400);
   expect(said).toContain(' and 4 more, whose strengths nobody has set yet.');
-  writeFileSync('/private/tmp/mc-codex-p0/cee-evidence/round10/400-char-fallback.txt', said);
 });
 
 

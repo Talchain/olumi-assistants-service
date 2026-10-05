@@ -34,7 +34,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
-import { asServedBeforeOneForm } from './fixtures/one-form-levels.js';
+import { asProjectedMeanCapture, asServedBeforeOneForm, asServedBeforeProjectedMeans } from './fixtures/one-form-levels.js';
 
 type Edge = { from: string; to: string; provenance?: { source?: string } };
 type Node = { id: string; kind: string; label: string; provenance?: string; interventions?: Record<string, { value: number; source: string }> };
@@ -248,7 +248,7 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     // P2 A5 (#2139), landed after this capture too: option levels are read back in the served short form, on the SERVED
     // factors' own frames and units (`one-form-levels.ts`); anything else they carry still fails this compare.
     expect(asServedBeforeOneForm(body, SERVED.draft_graph).nodes.map((n) => canon(withoutG1(n)))).toEqual(servedNodes.map(canon));
-    expect(body.edges.map(canon)).toEqual(SERVED.draft_graph.edges.filter((e) => !withheld.has(`${e.from}->${e.to}`)).map(canon));
+    expect(body.edges.map(canon)).toEqual(asProjectedMeanCapture(SERVED.draft_graph, body).edges.filter((e) => !withheld.has(`${e.from}->${e.to}`)).map(canon));
     expect(canon(body.goal_constraints)).toEqual(canon(SERVED.draft_graph.goal_constraints));
   });
 
@@ -334,7 +334,7 @@ describe('CONTRAST — nothing else moves, and nothing of the user’s is droppe
     // are inside the same digest, so a wrong frame, figure or unit still moves it.
     // 0.67.0's goal `unit_reading` postdates the digest too: the stand-in "served" graph is the body without it, so the
     // helper removes it only in the writer's closed shape; every frame is still read off the same factor nodes.
-    const readBack = asServedBeforeOneForm(body, { ...body, nodes: (body.nodes as Record<string, unknown>[]).map(({ unit_reading: _r, ...n }) => n) });
+    const readBack = asServedBeforeProjectedMeans(asServedBeforeOneForm(body, { ...body, nodes: (body.nodes as Record<string, unknown>[]).map(({ unit_reading: _r, ...n }) => n) }));
     expect(createHash('sha256').update(canon({ ...readBack, nodes: readBack.nodes.map(withoutG1) })).digest('hex')).toBe(ACYCLIC_BODY_SHA256_AT_BASE);
   });
 

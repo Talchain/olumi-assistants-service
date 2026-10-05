@@ -1693,7 +1693,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         const body = lostTypedSay
           ? [withoutTypedFragments.trimEnd(), typedSay].filter((part) => part !== '').join('\n\n')
           : withoutTypedFragments.trimEnd();
-        const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
+        const alreadySaid = (closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph))
+          || (typedSay !== null && sameWordsIn(body, typedSay) && sameWordsIn(closing, typedSay));
         next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
         log.info(
           {

@@ -50,7 +50,7 @@ import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/s
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../../agent-lane/unsized-path-cause.js';
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
-import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
@@ -2020,8 +2020,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       const legacyLinks = productGateWithholds ? [] : legacyLeaderGoalLinks(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
       if (legacyLinks.length > 0) {
         const warning = legacyGoalWarning(graphForAnalysis, legacyLinks);
-        const current = response as Record<string, unknown>;
-        response = { ...response, inference_warnings: [...(Array.isArray(current.inference_warnings) ? current.inference_warnings : []), warning] };
+        response = appendInferenceWarning(response, warning);
         legacyFiguresDisclosure = ` ${warning.message}`;
         legacyFiguresLinks = warning.links;
       }
@@ -2503,7 +2502,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis: leader withheld — its sign on a multiplied goal is not proven',
       );
     }
-    let headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional
+    const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional
       ? null : buildAnalysisResultHeadline(headlineInput);
     // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
     // objective-contradiction tail below must not say "against your goal" where
@@ -2820,8 +2819,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // them only as its own rebuild from `__goal_reading_source` (AIQ 5895590866 (2), exact equality).
     const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id);
     const identicalArmsDisclosure = buildIdenticalArmsDisclosure(identicalArms);
-    if (headline !== null) headline = appendLegacyFiguresAfterLeaderSentence(headline, legacyFiguresDisclosure);
-    const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
+    const disclosedHeadline = headline !== null
+      ? appendLegacyFiguresAfterLeaderSentence(headline, legacyFiguresDisclosure) : null;
+    const composedSummary = (() => {
+      const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
+      return disclosedHeadline !== null && headline !== null
+        ? disclosedHeadline + summary.slice(headline.length) : summary;
+    })();
+    const summary = composedSummary;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -2849,6 +2854,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ),
       nonlinearIdentityWithhold,
     );
+    // Record the caller's internal cause before the single owned projection/validation boundary.
+    if (withheldBecauseUnsizedPath !== undefined) {
+      response = { ...response, [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath };
+    }
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -2864,9 +2873,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // Every new Run records the existing projection version in persisted
         // enrichment. Transport strips this internal key; the provider response
         // is unchanged. Freshness still uses the one analysis-affecting hash.
-        enrichment: stampRunAnalysisProjection({ ...(response as Record<string, unknown>),
-          ...(withheldBecauseUnsizedPath !== undefined ? { [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath } : {}),
-        }),
+        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run

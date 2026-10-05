@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { runP0Graph } from './mc-p0-run-helper.js';
 import { unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
@@ -15,7 +15,6 @@ function sized(includeUnmarked: boolean) {
 it('R5 capture :212/:219 original and :241 old/new setups', async () => {
   const rows = [];
   for (const [tag, g] of [['original-212-219', F.graph], ['241-old-setup', sized(false)], ['241-new-setup', sized(true)]] as const) rows.push({ tag, result: await runP0Graph(g, F._provenance.brief_text, F.plot_body) });
-  writeFileSync(`/private/tmp/mc-codex-p0/cee-evidence/round5/fixture-${process.env.R5_CAPTURE ?? 'after'}.json`, JSON.stringify(rows, null, 2));
 });
 it('R5 original :241 setup: legacy workload-share link keeps leader and discloses by endpoint identity', async () => {
   const g = sized(false);

@@ -44,6 +44,8 @@ import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { bindStatedLinkSizes } from './stated-size-binding.js';
 export { bindStatedLinkSizes } from './stated-size-binding.js';
+import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
+export { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { admitCandidateLinks, definitionalLink, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
 import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
@@ -549,9 +551,6 @@ export function slugId(label: string): string {
     .slice(0, MAX_ID);
   return base.length > 0 ? base : 'node';
 }
-
-/** Same words, ignoring case and spacing — the test for "the same thing". */
-export const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
 
 /** A copied question is 8 to 240 characters once its whitespace is collapsed; anything else is not taken as one. */
 const DECISION_QUESTION_MIN_CHARS = 8;
@@ -2348,8 +2347,6 @@ function sayKeptLoop(loopLabels: readonly string[], links: readonly KeptLoopLink
  * change-versus-level classification whose corpus must come from served captures, not from
  * this file's author, so it is not guessed here.
  */
-export const TODAY_LEVEL = 100;
-export const TODAY_UNIT = '% of today';
 function restateSignedPercentChanges(model: CandidateModel): {
   model: CandidateModel;
   restated: { label: string; frame: number }[];

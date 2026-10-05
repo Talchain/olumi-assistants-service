@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../../../agent-lane/goal-certainty.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../../orchestrator/context/option-result-source.js';
@@ -102,7 +102,6 @@ it('R6 capture :212, authorised :219, and :241 original/authorised setup results
   for (const [tag, g] of [['212-and-219-original', F.graph], ['219-authorised', sizesWorkload()], ['241-original', old241], ['241-authorised', allSized]] as const) {
     rows.push({ tag, result: await runP0Graph(g, F._provenance.brief_text, F.plot_body) });
   }
-  writeFileSync(`/private/tmp/mc-codex-p0/cee-evidence/round6/fixture-${process.env.R6_CAPTURE ?? 'after'}.json`, JSON.stringify(rows, null, 2));
   const tails = [];
   for (const [tag, stamps] of [['nobody-sized', ['olumi_placeholder', 'olumi_placeholder']], ['estimated-only', ['olumi_estimate', 'olumi_estimate']], ['both-kinds', ['olumi_placeholder', 'olumi_estimate']]] as const) {
     const { g, paths } = twin([...stamps]);
@@ -112,7 +111,6 @@ it('R6 capture :212, authorised :219, and :241 original/authorised setup results
   singular.paths[0]!.links.pop();
   singular.g.nodes.find((n: any) => n.id === ids[1]).label += ' across many teams'.repeat(9);
   tails.push({ tag: 'singular', message: placeholderGoalWarning(singular.g, singular.paths, GOAL_FIGURES_PLACEHOLDER_PATH).message });
-  writeFileSync(`/private/tmp/mc-codex-p0/cee-evidence/round6/tails-${process.env.R6_CAPTURE ?? 'after'}.json`, JSON.stringify(tails, null, 2));
   const g = JSON.parse(readFileSync(new URL('../../../admission/__tests__/fixtures/mc-p0/draw2.json', import.meta.url), 'utf8'));
   for (const e of g.edges) if (e.provenance?.natural_effect) e.provenance.magnitude = 'user_stated';
   const semantics = [];
@@ -127,5 +125,4 @@ it('R6 capture :212, authorised :219, and :241 original/authorised setup results
     semantics.push({ tag, reason, mode: admission.reasons.find(r => r.field === 'permitted_analysis_mode'),
       withoutLeader: authorshipReasonForRun({ analysis_ready: { analysis_admission: { reasons: [reason] } }, blocks: [] }).analysis_ready.analysis_admission.reasons[0] });
   }
-  writeFileSync(`/private/tmp/mc-codex-p0/cee-evidence/round6/semantics-${process.env.R6_CAPTURE ?? 'after'}.json`, JSON.stringify(semantics, null, 2));
 });

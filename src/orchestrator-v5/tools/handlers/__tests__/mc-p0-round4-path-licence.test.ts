@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import * as target from '../../../admission/target-testability.js';
 import * as certainty from '../../../agent-lane/goal-certainty.js';
@@ -59,7 +59,6 @@ describe('MC P0 R4: target-independent licence on stored T1b paths', () => {
     for (const d of [1, 2, 3]) for (const noTarget of [false, true]) {
       const g = graph(d, noTarget); rows.push({ draw: d, tag: noTarget ? 'no-target' : 'target', result: await run(g) });
     }
-    writeFileSync(`/private/tmp/mc-codex-p0/cee-evidence/round10/handler-${process.env.R4_CAPTURE ?? 'after'}-full.json`, JSON.stringify(rows, null, 2));
   });
   it.each([1, 2, 3])('d%i stored rows and no-target twins give identical actual handler leader decisions', async d => {
     const before = graph(d); const noTarget = graph(d, true);
@@ -82,7 +81,6 @@ describe('MC P0 R4: target-independent licence on stored T1b paths', () => {
       measurements.push({ draw: d, tag, leading_option_id: r.leading_option_id, paths, warnings, result: r }); outputs.push(r.leading_option_id);
     }
     expect(outputs[0]).toBe(outputs[1]);
-    writeFileSync('/private/tmp/mc-codex-p0/cee-evidence/round10/handler-after.json', JSON.stringify(measurements, null, 2));
   });
   it('d2 before Fi retains the leader on its actual olumi_estimate + natural_effect path (over-withholding mutant)', async () => {
     const g = JSON.parse(readFileSync(new URL('../../../admission/__tests__/fixtures/mc-p0/draw2.json', import.meta.url), 'utf8'));

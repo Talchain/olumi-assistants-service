@@ -26,8 +26,8 @@ describe('MC P0 round 2 binding and DL gates', () => {
   it('R2-2 real stored draft 1 invented support chain has no credit and cannot license comparative_leader', async () => {
     control();
     const g = draw1();
-    const realPath = '/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/a320bf52-a93a-43ab-ae80-d7d8e435a988/scratchpad/served-t1b/out/draw1/graph-read.json';
-    expect(g).toEqual(JSON.parse(readFileSync(realPath, 'utf8')).body.graph);
+    const realPath = new URL('./fixtures/mc-p0-t1b-draw1-graph-read.json', import.meta.url);
+    expect(g).toEqual(JSON.parse(readFileSync(realPath, 'utf8')));
     const nodes = g.nodes.map((n: any) => ({ ...n, unit: n.observed_state?.unit ?? (n.kind === 'goal' ? n.goal_threshold_unit : undefined) ?? n.unit }));
     const bindings = bind(g.edges.map((e: any) => ({ ...e, natural_effect: e.provenance?.natural_effect })), nodes, brief);
     const projected = structuredClone(g);

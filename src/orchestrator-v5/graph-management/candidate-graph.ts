@@ -1,4 +1,3 @@
-import { keepMeanProjectionWhenSizeUnchanged } from '../../cee/magnitude/link-sizing.js';
 /**
  * Track 3 — candidate-graph construction over the V5-owned seam
  * `applyAndValidateMutation` (apply-graph-mutation.ts). PURE: builds an in-memory
@@ -19,6 +18,7 @@ import {
   NODE_REQUIRED_NESTED_FIELDS,
   describeNonObjectWrite,
   isPlainObjectWrite,
+  keepMeanProjectionWhenSizeUnchanged,
   mergeRequiredNestedWrite,
 } from '../../schemas/required-nested-merge.js';
 import {

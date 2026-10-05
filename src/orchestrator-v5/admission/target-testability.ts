@@ -307,7 +307,7 @@ export interface UntestableTargetParts {
   readonly question: string | null;
 }
 
-export function untestableTargetParts(graph: unknown, verdict: TargetTestability): UntestableTargetParts | null {
+export function untestableTargetParts(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): UntestableTargetParts | null {
   if (verdict.kind !== 'not_testable' || !isRec(graph) || !Array.isArray(graph.nodes)) return null;
   const goal = graph.nodes.filter(isRec).find((n) => n.id === verdict.goal_id);
   const raw = goal === undefined ? null : statedTarget(graph, goal);
@@ -329,7 +329,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label.trim() : id;
   };
   const link = failedLinks.length > 0
-    ? `a size for the ${linkList(failedLinks.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), Math.min(3, failedLinks.length), false)}`
+    ? `a size for the ${linkList(failedLinks.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), Math.min(namedLinkCount, 3, failedLinks.length), false)}`
     : `a size for the link from ${lever ?? 'what the options change'} to ${failingLink?.link_to ?? name}`;
   // The (c) question sizes the SAME link the clause names (Science d5, #2606): a link into the goal keeps AIQ's words, in
   // the goal's unit; an upstream link is asked in its own ends' units (the RT-6 sizing route's reader), never as the
@@ -368,13 +368,21 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
 /**
  * AIQ's words (#77 5912882031) for a `not_testable` verdict, composed from {@link untestableTargetParts}. `null` otherwise.
  */
+const TARGET_TESTABLE_SENTENCE_CAP = 388;
+
 export function notTargetTestableSentence(graph: unknown, verdict: TargetTestability): string | null {
-  const parts = untestableTargetParts(graph, verdict);
-  if (parts === null) return null;
-  // Consecutive needs share one "it needs" ("it needs today's level of X and a size for the link from L to X").
-  const clauses = parts.clauses.map((c, i) => (i > 0 && c.startsWith('it needs ') && parts.clauses[i - 1]!.startsWith('it needs ') ? c.slice('it needs '.length) : c));
-  const because = clauses.length === 1 ? clauses[0] : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
-  return `Olumi can compare your options, but can't yet test them against your target (${parts.target}), because ${because}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+  // Keep the target, every failing reason and the question before giving up the warning's long form.
+  // The P5 list first names fewer links, keeping the full missing-link count in "and N more".
+  for (let count = 3; count > 0; count--) {
+    const parts = untestableTargetParts(graph, verdict, count);
+    if (parts === null) return null;
+    // Consecutive needs share one "it needs" ("it needs today's level of X and a size for the link from L to X").
+    const clauses = parts.clauses.map((c, i) => (i > 0 && c.startsWith('it needs ') && parts.clauses[i - 1]!.startsWith('it needs ') ? c.slice('it needs '.length) : c));
+    const because = clauses.length === 1 ? clauses[0] : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
+    const said = `Olumi can compare your options, but can't yet test them against your target (${parts.target}), because ${because}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+    if (said.length <= TARGET_TESTABLE_SENTENCE_CAP || count === 1) return said;
+  }
+  return null;
 }
 
 /**
@@ -412,7 +420,7 @@ export function targetNotTestableWarning(
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string } | null {
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable') return null;
   const said = notTargetTestableSentence(graph, verdict);
-  const message = said !== null && said.length <= 388 ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
+  const message = said !== null && said.length <= TARGET_TESTABLE_SENTENCE_CAP ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
   // RT-10 B′ R2: what the reply says about the target, from the same parts (`untestableTargetTail`).
   const tail = untestableTargetTail(graph, verdict);
   return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds], ...(tail !== null ? { say: tail } : {}) };

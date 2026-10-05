@@ -148,7 +148,12 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   const candidate = (outcome as { assistant_text: unknown }).assistant_text;
   // ⭐ The goal-reading tail is REBUILT here from the handler's own graph, never taken from its text (AIQ 5895590866).
   const goalReadingTail = goalReadingTailOf(outcome);
-  if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail, legacyFiguresDisclosureOf(outcome))) {
+  const legacyFiguresDisclosure = legacyFiguresDisclosureOf(outcome);
+  if (legacyFiguresDisclosure === '') {
+    if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail)) {
+      return candidate as string;
+    }
+  } else if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail, legacyFiguresDisclosure)) {
     return candidate as string;
   }
   // Review fix B6 (honesty floor): if the rejected composed summary carried a

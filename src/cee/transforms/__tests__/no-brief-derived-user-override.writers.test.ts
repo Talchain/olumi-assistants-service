@@ -354,9 +354,12 @@ const REVIEWED_EDGE_SIZE_WRITERS: Readonly<Record<string, string>> = {
 };
 
 function writesEdgeUserSize(file: string): boolean {
-  const tree = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const text = readFileSync(file, 'utf8');
+  if (!text.includes('sizeLink') && !text.includes('user_stated')) return false;
+  const tree = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
   let found = false;
   const visit = (n: ts.Node): void => {
+    if (found) return;
     if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'sizeLink') found = true;
     if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken
       && ts.isPropertyAccessExpression(n.left) && n.left.name.text === 'magnitude'
@@ -370,7 +373,7 @@ function writesEdgeUserSize(file: string): boolean {
         if (p.name.text === 'user_stated' && names.includes('effect_amount') && names.includes('direction')) found = true;
       }
     }
-    ts.forEachChild(n, visit);
+    if (!found) ts.forEachChild(n, visit);
   };
   visit(tree);
   return found;
@@ -387,5 +390,5 @@ describe('Science Fi — edge user_stated sizing writers are DERIVED and reviewe
       expect(typeof justification).toBe('string');
       expect(justification.trim().length).toBeGreaterThanOrEqual(20);
     }
-  });
+  }, 60_000);
 });

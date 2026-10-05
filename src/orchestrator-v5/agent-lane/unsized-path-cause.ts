@@ -19,6 +19,18 @@ export const UNSIZED_PATH_LEADER_CAUSE_KEY = '__cee_unsized_path_leader_cause';
 const record = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
 
+function isUnsizedPathLink(value: unknown): value is UnsizedPathLink {
+  const link = record(value);
+  return link !== null && ['from', 'to', 'from_label', 'to_label'].every(key => {
+    const label = link[key];
+    return typeof label === 'string' && label.trim() !== '';
+  });
+}
+
+function isUnsizedPathLinks(value: unknown): value is UnsizedPathLink[] {
+  return Array.isArray(value) && value.every(isUnsizedPathLink);
+}
+
 /** Read only a complete caller-stated cause from the SAME result as the permission. */
 export function readUnsizedPathLeaderCause(result: unknown): UnsizedPathLeaderCause | undefined {
   const cause = record(record(record(result)?.enrichment)?.[UNSIZED_PATH_LEADER_CAUSE_KEY]);
@@ -26,10 +38,7 @@ export function readUnsizedPathLeaderCause(result: unknown): UnsizedPathLeaderCa
     typeof cause[k] === 'string' && (cause[k] as string).trim() !== '')) return undefined;
   return { from: cause.from as string, to: cause.to as string,
     from_label: cause.from_label as string, to_label: cause.to_label as string,
-    ...(Array.isArray(cause.links) && cause.links.every(l => {
-      const link = record(l);
-      return link !== null && ['from', 'to', 'from_label', 'to_label'].every(k => typeof link[k] === 'string' && (link[k] as string).trim() !== '');
-    }) ? { links: cause.links as unknown as UnsizedPathLink[] } : {}),
+    ...(isUnsizedPathLinks(cause.links) ? { links: cause.links } : {}),
   };
 }
 
