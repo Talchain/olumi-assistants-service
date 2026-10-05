@@ -121,7 +121,7 @@ const CASE_B_HEADLINE_WITH_DRIVER =
   'Sales Rep Adoption Rate is the strongest driver.';
 
 /** The same run with the driver clause omitted — an existing Case-E shape. */
-const CASE_B_HEADLINE_WITHOUT_DRIVER = 'Keep what we have currently leads.';
+const CASE_B_HEADLINE_WITHOUT_DRIVER = 'Keep what we have scored highest in this model.';
 
 describe('unset option-effect disclosure — registry egress', () => {
   // ───────────────────────────────────────────────────────────────────────

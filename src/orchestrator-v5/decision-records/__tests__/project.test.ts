@@ -243,6 +243,7 @@ describe('projectDecisionRecords — the withheld-claim gate (ROADMAP 1.231)', (
     )!;
     expect(p.text).not.toContain('17 percentage points');
     expect(p.text).not.toContain('currently leads');
+    expect(p.text).not.toContain('scored highest');
     expect(p.text).not.toContain('Double Down on SMB');
     expect(p.text).not.toContain('Chose "');
     // Read with the PRODUCTION alarm's own vocabulary rather than by

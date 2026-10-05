@@ -2826,7 +2826,7 @@
       "variant": null,
       "item": "gcp_savings_at_full_migration",
       "title": "GCP savings at full migration could change which option leads.",
-      "why": "The analysis found that the answer is sensitive to GCP savings at full migration.",
+      "why": "In this model, which option scores highest is sensitive to GCP savings at full migration.",
       "question": "Do you know GCP savings at full migration more precisely? Within Olumi's assumed range it could change which option leads."
      }
     ]

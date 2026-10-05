@@ -1250,7 +1250,9 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // The number-free shed form, kept verbatim for the bands that must not carry
   // a statistic: the Case E floor (every enriching gate declined the run) and
   // the length-shed A→C / B variants, where dropping the clause IS the shed.
-  const LEADS_PLAIN = 'currently leads';
+  // Principle audit (5 Oct, DL ruling on W-HEAD): the number-free floor names the option only as a finding about this
+  // model, in the lead clause's own verb. "Scored highest" stays visible to `LEADER_CLAIM_PATTERNS` (scored_highest).
+  const LEADS_PLAIN = 'scored highest in this model';
 
   // Doctrine D-W (ROADMAP 2.52): the DECLARED leader (PLoT's leading_option_id)
   // is NOT the highest raw win_probability — a runner-up strictly edges it on
@@ -2195,7 +2197,8 @@ function cautionReasonText(caution: CautionCandidate): string {
     case 'factor':
       return `the result is sensitive to ${caution.label}`;
     case 'edge':
-      return `the link between ${caution.fromLabel} and ${caution.toLabel} is fragile`;
+      // Principle audit (5 Oct): "fragile" is retired from user copy; say what the result rests on.
+      return `it rests heavily on how much ${caution.fromLabel} changes ${caution.toLabel}`;
     case 'generic':
       return 'the result is not highly stable';
   }
@@ -2812,7 +2815,7 @@ const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
 // claim-safe bodies emitted by cautionReasonText. Pinned verbatim so
 // improvised "provisional" prose cannot ride through the caution shapes.
 const CAUTION_REASON_PATTERN =
-  '(?:the result is sensitive to .+?|the link between .+? and .+? is fragile|the result is not highly stable)';
+  '(?:the result is sensitive to .+?|it rests heavily on how much .+? changes .+?|the result is not highly stable)';
 
 /**
  * Grammar source for the lead clause emitted by `leadClause` in
@@ -2862,7 +2865,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   ),
   // Case C: provisional caution naming the fragile reason, no margin.
   new RegExp(
-    `^.+? currently leads, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
+    `^.+? scored highest in this model, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
   ),
   // Case B (with margin): winner + margin + driver.
   new RegExp(
@@ -2870,7 +2873,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   ),
   // Case B (no margin): winner + driver.
   new RegExp(
-    `^.+? currently leads because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
+    `^.+? scored highest in this model because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
   ),
   // Case D (margin only): winner + margin.
   new RegExp(
@@ -2930,7 +2933,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // ", but", "with N% probability", or " is currently only fractionally
   // ahead" before the terminal period), so ordering is for clarity rather
   // than correctness.
-  new RegExp(`^.+? currently leads\\.${TAIL_PATTERN}$`),
+  new RegExp(`^.+? scored highest in this model\\.${TAIL_PATTERN}$`),
 ];
 
 function matchesHeadlineGrammar(text: string): boolean {
