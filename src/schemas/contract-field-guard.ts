@@ -597,15 +597,6 @@ export const DECISIONS: readonly Decision[] = [
   },
   // ── F1 semantic model (schemas 0.69.0) ────────────────────────────────
   {
-    id: "orphan:count_noun",
-    status: "ACCEPTED",
-    decision:
-      "ACCEPTED, TEMPORARY. `count_noun` (0.69.0, F1 spec §5 S1: the noun a unitless count counts, no digits) is declared " +
-      "on cee.NodeV3 so the strict mirror KEEPS it rather than stripping it (the strip is what made `type` a 0-of-45,876 " +
-      "field). Its writer is F1 T8 (the drafter writes it at construction; `size_link` reads it for the per-unit list), " +
-      "which lands next. When T8 lands, this finding stops reproducing and the guard demands this entry be deleted.",
-  },
-  {
     id: "orphan:goal_period",
     status: "ACCEPTED",
     decision:
