@@ -136,6 +136,12 @@ export interface AgentTurnInput {
    * otherwise hop 0 calls the model as before. Absent ⇒ exactly as before.
    */
   readonly hostFirstCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>> };
+  /**
+   * ⭐ RT-1: WHAT THE USER HAD SELECTED ON THE CANVAS, as one developer note for THIS turn (`selection-context.ts`).
+   * Placed after the model state it is resolved against, and like that state never handed on into the history: the
+   * next turn carries its own selection. Context only: it adds no tool and no authority. Absent ⇒ exactly as before.
+   */
+  readonly selectionNote?: string;
 }
 
 /**
@@ -318,13 +324,18 @@ export async function runAgentTurn(
     && eligibility.omitted.some((o) => o.name === 'get_canonical_state')
     ? { role: 'developer', content: [{ type: 'input_text', text: `${CURRENT_MODEL_STATE_PREFIX}${JSON.stringify(input.canonicalContext.packet.state)}` }] }
     : undefined;
+  const selectionItem = input.selectionNote !== undefined && input.selectionNote !== ''
+    ? { role: 'developer', content: [{ type: 'input_text', text: input.selectionNote }] }
+    : undefined;
   const items: unknown[] = [
     ...input.history,
     ...(stateItem !== undefined ? [stateItem] : []),
+    ...(selectionItem !== undefined ? [selectionItem] : []),
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
   ];
-  /** What this turn hands on as history: everything but the state it was given. */
-  const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
+  /** What this turn hands on as history: everything but the state and the selection it was given. */
+  const handedOn = (): unknown[] => (stateItem === undefined && selectionItem === undefined
+    ? items : items.filter((i) => i !== stateItem && i !== selectionItem));
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
