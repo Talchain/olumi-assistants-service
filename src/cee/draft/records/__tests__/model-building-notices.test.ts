@@ -17,6 +17,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { NOTICE_KIND_BY_REASON, buildModelBuildingNotices } from "../model-building-notices.js";
+import { ModelBuildingNoticeKindSchema } from "@talchain/schemas/boundary";
 
 /**
  * Every `DroppedRecordRef["reason"]` the projector declares, transcribed from
@@ -60,14 +61,9 @@ const PRODUCER_REASONS = [
   "claim_label_not_a_name",
 ] as const;
 
-const CONTRACT_KINDS = new Set([
-  "detail_not_connected",
-  "relationship_not_used",
-  "alternative_consolidated",
-  "conflict_resolved_conservatively",
-  "target_not_modelled_as_threshold",
-  "other",
-]);
+// Derived from the vendored contract, never re-spelled (it went stale once already: 0.77.0 added
+// `stated_relationship_not_used` and a hand list would have kept passing while no longer naming the contract).
+const CONTRACT_KINDS = new Set<string>(ModelBuildingNoticeKindSchema.options);
 
 describe("NOTICE_KIND_BY_REASON — completeness against the producer", () => {
   it("maps every reason the projector can emit, and no reason it cannot", () => {
