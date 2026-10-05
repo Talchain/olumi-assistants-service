@@ -160,7 +160,7 @@ const InferenceClaimWire = z.object({
   from_claim: z.number().int().optional(),
   to_stated: z.number().int().optional(),
   to_claim: z.number().int().optional(),
-  change_of: z.number().int().nonnegative().optional(),
+  change_of: z.number().int().optional(),
   effect: z.enum(DRAFT_RECORD_EFFECTS).optional(),
   quantity: z.number().int().nonnegative().optional(),
   range: ValueRangeWire.optional(),

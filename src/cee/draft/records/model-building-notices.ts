@@ -80,6 +80,14 @@ export const NOTICE_KIND_BY_REASON: Record<
   ModelBuildingNoticeKind
 > = {
   // v-next evidence and endpoint refusals retain the existing notice channel.
+  user_stated_no_effect: "relationship_not_used",
+  no_effect_with_amount: "relationship_not_used",
+  change_of_index_invalid: "relationship_not_used",
+  change_of_self: "relationship_not_used",
+  change_of_unit_mismatch: "relationship_not_used",
+  change_of_horizon_mismatch: "relationship_not_used",
+  change_of_target_not_quantity: "relationship_not_used",
+  change_of_not_definitional: "relationship_not_used",
   range_bounds_inverted: "relationship_not_used",
   range_excludes_point: "relationship_not_used",
   range_straddles_zero: "relationship_not_used",

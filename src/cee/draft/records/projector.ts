@@ -106,9 +106,10 @@ import { generateConstraintId } from "../../compound-goal/extractor.js";
 import { classifyUnitScaleClass } from "./unit-scale-class.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
+import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/placeholder-parts.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
 import { admitGoalBaseline } from "../../factor-extraction/goal-baseline-admissibility.js";
-import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits, literalConventionValue } from "./quantity-evidence.js";
+import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits, literalConventionValue, locateLiteral } from "./quantity-evidence.js";
 import { statedEffectQuoteMatches } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
 import { sizeLink, resolveMagnitudeFrame, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
@@ -484,6 +485,8 @@ export interface DroppedRecordRef {
   /** The unit the user stated, alongside `value`. Same conditions, same source. */
   readonly unit?: string;
   readonly reason:
+    | "user_stated_no_effect" | "no_effect_with_amount"
+    | "change_of_index_invalid" | "change_of_self" | "change_of_unit_mismatch" | "change_of_horizon_mismatch" | "change_of_target_not_quantity" | "change_of_not_definitional"
     | "range_bounds_inverted" | "range_excludes_point" | "range_straddles_zero" | "relationship_unsized"
     | "option_lever_undeclared" | "option_lever_is_goal" | "option_value_unbound" | "option_lever_link_conflict" | "lever_endpoint_ambiguous"
     | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
@@ -3827,6 +3830,19 @@ function projectOnce(
     const r=item.relationship;
     if(item.kind!=="cause" || r===undefined) return;
     const rangeRefuse=(reason:DroppedRecordRef["reason"])=>{dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index,label:item.source_quote,reason});delete r.amount_span;delete r.source_span;};
+    if(r.no_effect_literal!==undefined){
+      if(r.amount!==undefined || r.range!==undefined){rangeRefuse("no_effect_with_amount");return;}
+      const literal=locateLiteral(item.source_quote,r.no_effect_literal);
+      if(literal.reason!==undefined || typeof brief!=="string" || !brief.includes(item.source_quote))return;
+      const from=carrier(r.from_quantity),to=carrier(r.to_quantity);
+      if(from.reason || to.reason){rangeRefuse(from.reason ?? to.reason!);return;}
+      const source=from.node!,target=to.node!;
+      const fromKind=PROJECTED_KIND_AFTER_NORMALISATION[source.kind] ?? source.kind;
+      const toKind=PROJECTED_KIND_AFTER_NORMALISATION[target.kind] ?? target.kind;
+      if(source.id===target.id || UNRESCUABLE_EDGE_SHAPES.has(`${fromKind}->${toKind}`)){rangeRefuse("relationship_endpoint_illegal");return;}
+      for(let i=edges.length-1;i>=0;i--)if(edges[i]!.from===source.id && edges[i]!.to===target.id){delete provenance[edges[i]!.id];edges.splice(i,1);}
+      rangeRefuse("user_stated_no_effect");return;
+    }
     if(r.range!==undefined){
       const {low,high}=r.range;
       if(![low,high].every(Number.isFinite) || low>high){rangeRefuse("range_bounds_inverted");return;}
@@ -4544,28 +4560,51 @@ function projectOnce(
       if (!changed) break;
     }
     const view = magnitudeNodes(nodes.map(node => ({ ...node, interventions: node.data?.interventions })), percentLevelIds({ goal_constraints: goalConstraints }));
-    // Equality of an explicit quantity identity is an exact unit conversion.
-    // It contributes no newly stated business figure and no inferred causal effect.
-    for (const edge of edges) {
-      const sourceNode = nodes.find(node => node.id === edge.from);
-      const targetNode = nodes.find(node => node.id === edge.to);
-      const origin = claimOriginByEdgeId.get(edge.id);
-      const claim = origin === undefined ? undefined : claims[origin.index];
-      if (sourceNode?.quantity_ref === undefined || sourceNode.quantity_ref !== targetNode?.quantity_ref
-        || claim?.effect !== "positive" || claim.effect_detail !== undefined) continue;
-      const source = view.get(edge.from), target = view.get(edge.to);
-      const unit = statedItems[sourceNode.quantity_ref]?.unit;
-      if (source === undefined || target === undefined || unit === undefined) continue;
-      const sourceUnit = source.observed_state?.unit ?? source.unit;
-      const targetUnit = target.observed_state?.unit ?? target.goal_threshold_unit ?? target.unit;
-      if (typeof sourceUnit !== "string" || typeof targetUnit !== "string"
-        || !sameUnit(unit, sourceUnit) || !sameUnit(unit, targetUnit)) continue;
-      const sized = sizeLink({ direction: "positive", effect_amount: 1, effect_per_source_change: 1, user_stated: true }, source, target);
-      if (sized.problem !== undefined || sized.natural_effect === undefined) continue;
-      edge.strength_mean = sized.mean;
-      edge.strength_std = sized.std;
-      edge.provenance = { ...edge.provenance!, source: "domain_knowledge", definitional: true, natural_effect: sized.natural_effect };
-      provenance[edge.id] = edge.provenance;
+    // Both existing same-quantity identities and explicit own-horizon flows use one checked writer.
+    const writeDefinition=(edge:ProjectedEdge,unit:string,amount:number,source:NonNullable<ReturnType<typeof view.get>>,target:NonNullable<ReturnType<typeof view.get>>):boolean=>{
+      const sized=sizeLink({direction:amount<0 ? "negative" : "positive",effect_amount:amount,effect_per_source_change:1,user_stated:true},source,target);
+      if(sized.problem!==undefined || sized.natural_effect===undefined)return false;
+      const prov:RecordProvenance={...edge.provenance!,source:"domain_knowledge",definitional:true,natural_effect:{...sized.natural_effect,amount,amount_unit:unit,per_source_change:1,per_source_change_unit:unit}};
+      const v3nodes=nodes.map(n=>({id:n.id,kind:n.kind,unit:n.data?.unit,observed_state:n.observed_state,goal_threshold_unit:n.goal_threshold_unit}));
+      if(!holdsByDefinition({from:edge.from,to:edge.to,strength:{mean:sized.mean,std:sized.std},provenance:prov},nodeUnitOf(v3nodes)))return false;
+      edge.strength_mean=sized.mean;edge.strength_std=sized.std;edge.provenance=prov;provenance[edge.id]=prov;return true;
+    };
+    for(const edge of edges){
+      const sourceNode=nodes.find(n=>n.id===edge.from),targetNode=nodes.find(n=>n.id===edge.to);
+      const origin=claimOriginByEdgeId.get(edge.id),link=origin===undefined ? undefined : claims[origin.index];
+      const sourceIndex=[...claimIdByIndex].find(([,id])=>id===edge.from)?.[0];
+      const flow=sourceIndex===undefined ? undefined : claims[sourceIndex];
+      const q=flow?.change_of;
+      const refuse=(reason:DroppedRecordRef["reason"])=>{
+        dropped.push({claim_index:sourceIndex ?? -1,claim_kind:flow?.claim_kind ?? "claim",label:sourceNode?.label ?? "",reason});
+        if(edge.provenance?.definitional){const {definitional:_,natural_effect:__,...rest}=edge.provenance;edge.provenance=rest;provenance[edge.id]=rest;}
+      };
+      if(q!==undefined){
+        if(!Number.isInteger(q) || q<0 || statedItems[q]===undefined || !["factor","risk","outcome"].includes(flow!.claim_kind)){refuse("change_of_index_invalid");continue;}
+        if(flow!.quantity===q){refuse("change_of_self");continue;}
+        const declaration=flow!.quantity===undefined ? undefined : statedItems[flow!.quantity];
+        const own=flow!.quantity===undefined ? flow!.unit : declaration?.unit,unit=statedItems[q]?.unit;
+        if(own===undefined || unit===undefined || !sameUnit(own,unit)){refuse("change_of_unit_mismatch");continue;}
+        if(targetNode?.quantity_ref!==q){refuse("change_of_target_not_quantity");continue;}
+        const goal=nodes.find(n=>n.kind==="goal" && n.quantity_ref===q);
+        const goalItem=statedItems.find(i=>i.kind==="goal" && i.quantity===q);
+        if(goal?.goal_horizon_months===undefined || declaration?.horizon_ref!==undefined && declaration.horizon_ref!==goalItem?.horizon_ref){refuse("change_of_horizon_mismatch");continue;}
+        const target=view.get(edge.to),heldSource=view.get(edge.from);
+        if(sourceNode===undefined || target===undefined || heldSource===undefined || link?.effect===undefined){refuse("change_of_not_definitional");continue;}
+        const frame=resolveMagnitudeFrame(target);
+        if(frame===undefined){refuse("change_of_not_definitional");continue;}
+        // No level is invented. The flow's one-unit conversion uses the target's calculation frame.
+        if(sourceNode.scale_frame===undefined)sourceNode.scale_frame=frame;
+        const source={...heldSource,scale_frame:sourceNode.scale_frame};
+        if(!writeDefinition(edge,unit,link.effect==="negative" ? -1 : 1,source,target))refuse("change_of_not_definitional");
+      }else{
+        if(sourceNode?.quantity_ref===undefined || sourceNode.quantity_ref!==targetNode?.quantity_ref
+          || link?.effect!=="positive" || link.effect_detail!==undefined)continue;
+        const unit=statedItems[sourceNode.quantity_ref]?.unit,source=view.get(edge.from),target=view.get(edge.to);
+        if(unit===undefined || source===undefined || target===undefined)continue;
+        if(!sameUnit(unit,source.observed_state?.unit ?? source.unit) || !sameUnit(unit,target.observed_state?.unit ?? target.goal_threshold_unit ?? target.unit))continue;
+        writeDefinition(edge,unit,1,source,target);
+      }
     }
     const groups = new Map<string, StatedEdgeEffectCandidate[]>();
     for (const edge of edges) {
