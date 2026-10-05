@@ -12,7 +12,8 @@ import { resolveAnalysisAdmission } from '../../../../../orchestrator-v5/admissi
 import { GraphV3, type GraphV3T } from '../../../../../schemas/cee-v3.js';
 import { GraphStateIngressSchema } from '../../../../../orchestrator-v5/boundary/request-extensions.js';
 // The strict attach site now accepts v-next literals; legacy draws have their own replay rows.
-import { BRIEF, sealedRecordsVNext as sealedRecords } from './sealed-fixture-vnext.js';
+import { BRIEF, sealedRecordsVNext as sealedRecords, sealedRecordsVNextLinked } from './sealed-fixture-vnext.js';
+import { strictRecordsWire } from '../../../../../orchestrator-v5/agent-lane/__tests__/records-wire-fixture.js';
 
 const SCENARIO = '11111111-1111-4111-8111-111111111111';
 type RegisterBody = { graph: GraphV3T; brief_text: string; operation_id: string; expected_graph_identity_hash: null };
@@ -67,19 +68,14 @@ describe('Agent-route records bridge', () => {
     };
     walk(schema);
     const validate = new Ajv({ strict: false, allErrors: true }).compile(schema);
-    const materialise = (value: unknown, node: Record<string, any>): unknown => {
-      const shape = node.anyOf?.find((entry: any) => entry.type !== 'null') ?? node;
-      if (Array.isArray(value)) return value.map(item => materialise(item, shape.items));
-      if (!shape.properties || value === null || typeof value !== 'object') return value;
-      return Object.fromEntries(Object.entries(shape.properties).map(([key, child]) => [key,
-        (key in value && (value as Record<string, unknown>)[key] !== undefined) ? materialise((value as Record<string, unknown>)[key], child as Record<string, any>) : null]));
-    };
-    const response = materialise(sealedRecords(), schema);
+    // Fix (a) re-pin (reason): stated items are encoded against their KIND variant, and the sealed ideal is sent with
+    // its two absent REQUIRED links stated from the brief (`sealedRecordsVNextLinked`, compile pinned identical).
+    const response = strictRecordsWire(sealedRecordsVNextLinked());
     expect(validate(response), JSON.stringify(validate.errors)).toBe(true);
-    expect(omitOptionalRecordNulls(response)).toEqual(sealedRecords());
+    expect(omitOptionalRecordNulls(response)).toEqual(sealedRecordsVNextLinked());
     const seam = projectDraftRecords(omitOptionalRecordNulls(response), BRIEF);
     expect(seam.ok).toBe(true);
-    if (seam.ok) expect(seam.records).toEqual(sealedRecords());
+    if (seam.ok) expect(seam.records).toEqual(sealedRecordsVNextLinked());
     expect(validate({ stated_items: [{ kind: null, source_quote: '' }], claims: [] })).toBe(false);
   });
   it('asks for records, reuses the deterministic chain and registers with the same create-only operation', async () => {

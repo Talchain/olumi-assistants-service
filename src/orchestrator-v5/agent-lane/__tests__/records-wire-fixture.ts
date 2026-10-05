@@ -4,17 +4,33 @@ import type { DraftRecordSet } from '../../../cee/draft/records/grammar.js';
 
 const validateStrictRecords = new Ajv({ strict: false, allErrors: true }).compile(buildStrictDraftRecordsSchema());
 
-type Schema = { type?: string; properties?: Record<string, Schema>; items?: Schema; anyOf?: Schema[] };
+type Schema = { type?: string; properties?: Record<string, Schema>; items?: Schema; anyOf?: Schema[]; enum?: unknown[] };
 
-/** Test-only wire encoding: strict optional fields are explicit nulls, exactly as the provider must emit. */
+const UNRESOLVED = 'unresolved';
+const takesUnresolved = (node: Schema): boolean =>
+  node.enum?.includes(UNRESOLVED) === true || node.anyOf?.some(branch => branch.enum?.includes(UNRESOLVED) === true) === true;
+/** The branch a value is encoded against: a stated item's own KIND variant (fix (a)), else the non-null branch. */
+const branchFor = (node: Schema, value: unknown): Schema => {
+  if (node.anyOf === undefined) return node;
+  const kind = value !== null && typeof value === 'object' ? (value as { kind?: unknown }).kind : undefined;
+  return node.anyOf.find(entry => entry.properties?.kind?.enum?.includes(kind) === true)
+    ?? node.anyOf.find(entry => entry.type !== 'null')!;
+};
+
+/**
+ * Test-only wire encoding, exactly as the provider must emit: a strict optional field is an explicit null, and a
+ * REQUIRED link (fix (a)) the records leave absent — or name in their decoded `unresolved` list — is `"unresolved"`.
+ */
 export function strictRecordsWire(records: DraftRecordSet): unknown {
   const encode = (value: unknown, node: Schema): unknown => {
-    const shape = node.anyOf?.find(entry => entry.type !== 'null') ?? node;
+    const shape = branchFor(node, value);
     if (Array.isArray(value)) return value.map(item => encode(item, shape.items!));
     if (!shape.properties || value === null || typeof value !== 'object') return value;
     const held = value as Record<string, unknown>;
+    const unresolved = Array.isArray(held.unresolved) ? held.unresolved as unknown[] : [];
     return Object.fromEntries(Object.entries(shape.properties).map(([key, child]) => [key,
-      key in held ? encode(held[key], child) : null]));
+      unresolved.includes(key) ? UNRESOLVED
+        : key in held && held[key] !== undefined ? encode(held[key], child) : takesUnresolved(child) ? UNRESOLVED : null]));
   };
   const wire = encode(records, buildStrictDraftRecordsSchema() as Schema);
   if (!validateStrictRecords(wire)) throw new Error(`Invalid records stub: ${JSON.stringify(validateStrictRecords.errors)}`);

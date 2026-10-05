@@ -8,7 +8,7 @@ import { draftRecordsInstructionHash } from '../../../cee/draft/records/instruct
 import { vNextDraftRecordsInstructionHash } from '../../../cee/draft/records/instruction-vnext.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
 // RESTACK: the served wire is the V-NEXT strict schema, so the sealed records are the v-next hand-typed delta (same BRIEF).
-import { BRIEF, sealedRecordsVNext as sealedRecords } from '../../../cee/draft/records/__tests__/compile-spec/sealed-fixture-vnext.js';
+import { BRIEF, sealedRecordsVNext as sealedRecords, sealedRecordsVNextLinked } from '../../../cee/draft/records/__tests__/compile-spec/sealed-fixture-vnext.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { ProposalStore } from '../proposal.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
@@ -100,7 +100,9 @@ describe('served records construction identity', () => {
 
 describe('records ToolResult adapter', () => {
   it('carries compiler questions and typed dropped identities unchanged, and reports no retry', async () => {
-    const records = sealedRecords();
+    // Fix (a) re-pin (reason): the strict wire must state every REQUIRED link (an absent one is sent as 'unresolved',
+    // a typed ask), so the wire and the direct replay compare the SAME information: the ideal with its links stated.
+    const records = sealedRecordsVNextLinked();
     records.claims.push({ claim_kind: 'causal_link', label: 'Unresolved endpoint', from_claim: 999, to_stated: 6, effect: 'positive' });
     const compiled = await replayRecordSet(records, { brief: BRIEF });
     expect(compiled.ok).toBe(true);

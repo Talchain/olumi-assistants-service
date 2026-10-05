@@ -3,7 +3,8 @@ import { Ajv } from 'ajv';
 import { describe, expect, it } from 'vitest';
 import frozen from './fixtures/grammar-vcurrent.strict.json';
 import { sealedRecords, BRIEF } from './sealed-fixture.js';
-import { sealedRecordsVNext } from './sealed-fixture-vnext.js';
+import { sealedRecordsVNext, sealedRecordsVNextLinked } from './sealed-fixture-vnext.js';
+import { strictRecordsWire } from '../../../../../orchestrator-v5/agent-lane/__tests__/records-wire-fixture.js';
 import { buildDraftRecordsSchema, buildVNextDraftRecordsSchema, measureDraftRecordsSchemaBudget, type DraftRecordSet } from '../../grammar.js';
 import { projectDraftRecords, findGrammarFieldsDroppedBySeam } from '../../seam.js';
 import { buildStrictDraftRecordsSchema, omitOptionalRecordNulls, buildModelFromRecords } from '../../../../../orchestrator-v5/agent-lane/runtime/build-model-from-records.js';
@@ -73,8 +74,13 @@ describe('v-next inert flip ladder', () => {
     expect(createHash('sha256').update(JSON.stringify(frozen)).digest('hex')).toBe('73091f05aaddc4b11e94ead4786e538b8963efa8e41fdc15e60522ad2c2b23da');
     const schema=buildStrictDraftRecordsSchema();
     const walk=(n:any)=>{if(!n || typeof n!=='object')return; if(n.type==='object'){expect(n.required).toEqual(Object.keys(n.properties));expect(n.additionalProperties).toBe(false);} Object.values(n).forEach(walk);}; walk(schema);
-    const wire=materialise(sealedRecordsVNext(),schema); const validate=new Ajv({strict:false}).compile(schema);
-    expect(validate(wire),JSON.stringify(validate.errors)).toBe(true); expect(omitOptionalRecordNulls(wire)).toEqual(JSON.parse(JSON.stringify(sealedRecordsVNext())));
+    // Fix (a) re-pin (reason): the strict stated item is one variant per owning kind, so the wire is encoded by kind
+    // (`strictRecordsWire`), and the sealed ideal is sent with its two absent REQUIRED links stated from the brief
+    // (`sealedRecordsVNextLinked`; its compile is pinned identical to the unlinked ideal in unresolved-links.test.ts).
+    const wire=strictRecordsWire(sealedRecordsVNextLinked()); const validate=new Ajv({strict:false}).compile(schema);
+    expect(validate(wire),JSON.stringify(validate.errors)).toBe(true); expect(omitOptionalRecordNulls(wire)).toEqual(JSON.parse(JSON.stringify(sealedRecordsVNextLinked())));
+    // The unlinked ideal is no longer a legal provider emission: its goal unit and figure-14 quantity are absent.
+    expect(validate(materialise(sealedRecordsVNext(),schema))).toBe(false);
     expect(new Ajv({strict:false}).compile(frozen)(wire)).toBe(false);
     expect(findGrammarFieldsDroppedBySeam()).toEqual({claims:[],statedItems:[]});
     // Budget reason: nullable strict parameters are OpenAI inputs, not Anthropic optional parameters.
@@ -85,7 +91,12 @@ describe('v-next inert flip ladder', () => {
     // PORTS 2+3 re-pin (reason): +1 optional C46 goal `scope` object {modelled, alternative, stated_in_brief} on v-next
     // stated items (5142→5402 strict bytes, 7→8 object schemas; 3273→3497, 46→47 optional, 7→8 objects unstrict).
     // Anthropic bytes unchanged (G0 row above).
-    expect(measureDraftRecordsSchemaBudget(schema)).toMatchObject({serializedBytes:5402,optionalParams:0,objectSchemas:8});
+    // Fix (a) re-pin (reason): the strict stated item becomes 4 kind variants (goal, figure, cause, option|constraint)
+    // so goal direction/direction_literal/unit/baseline_ref, figure quantity and cause relationship are REQUIRED and
+    // NON-NULL on their owning kind with the typed 'unresolved' escape (live 3×3: null was the easy path). 5402→15470
+    // strict bytes, 8→23 object schemas, 0 optional. OpenAI strict, not an Anthropic budget: the served legacy
+    // candidate schema on the same model is 10644 strict bytes. The unstrict builder below and Anthropic are unchanged.
+    expect(measureDraftRecordsSchemaBudget(schema)).toMatchObject({serializedBytes:15470,optionalParams:0,objectSchemas:23});
     expect(measureDraftRecordsSchemaBudget(buildVNextDraftRecordsSchema())).toMatchObject({serializedBytes:3497,optionalParams:47,objectSchemas:8});
   });
   it('B5 literal offsets are stored by relationship identity', () => {
@@ -134,9 +145,11 @@ describe('v-next inert flip ladder', () => {
   it('B1a EXTRACTION-UNPROVEN currency bounds contradict a count quantity',()=>{const r=vans();const item=r.stated_items[5]!;item.source_quote='Adding 5 vans changes deliveries by £18 to £36 every month.';item.relationship!.per_source_literal='5 vans';item.relationship!.range={low:18,high:36,low_literal:'£18',high_literal:'£36'};const p=project(r,VANS+' '+item.source_quote);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'unit_literal_contradicts_unit'}));expect(edgeFor(p,5,r)?.provenance?.natural_effect).toBeUndefined();});
   it('B4 EXTRACTION-UNPROVEN a calendar determiner cannot stand for a van',()=>{const r=vans();const item=r.stated_items[5]!;delete item.relationship!.range;Object.assign(item.relationship!,{amount:18,amount_literal:'18',per_source_change:1,per_source_literal:'every month'});const p=project(r,VANS);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'unit_literal_contradicts_unit'}));expect(edgeFor(p,5,r)?.provenance?.natural_effect).toBeUndefined();});
   // P2-A1 re-pin (reason): the v-next option `setting` rule; was fe150807…ab3e. P2-FRAME re-pin: the `plausible_max`
-  // rule; was 2b2f88fa…930c. PORTS 2+3 re-pin (reason): the C46 goal `scope` rule; was 5535ce16…3831. v25 is pinned in
-  // instruction-pin.
-  it('instruction new generic v-next hash is pinned without moving v25',()=>{expect(createHash('sha256').update(V_NEXT_DRAFT_RECORDS_INSTRUCTION).digest('hex')).toBe('4bb61d8140ed488955bf0c00b68f19091aec6c79346c307b67176008a3d1ecc3');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('effect_detail');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('value_span');});
+  // rule; was 2b2f88fa…930c. PORTS 2+3 re-pin (reason): the C46 goal `scope` rule; was 5535ce16…3831. Fix (a) re-pin
+  // (reason): the required-links paragraph ('unresolved' escape, goal direction/unit/baseline_ref, figure quantity,
+  // cause relationship), +648 bytes; was 4bb61d8140ed488955bf0c00b68f19091aec6c79346c307b67176008a3d1ecc3. v25 is
+  // pinned in instruction-pin.
+  it('instruction new generic v-next hash is pinned without moving v25',()=>{expect(createHash('sha256').update(V_NEXT_DRAFT_RECORDS_INSTRUCTION).digest('hex')).toBe('4b2e5ed98cdffa080f271f4229a1e668fa556c8fa18e0d2b3fb95a20de9a1299');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('effect_detail');expect(V_NEXT_DRAFT_RECORDS_INSTRUCTION).not.toContain('value_span');});
   it('determinism is byte identical',async()=>{expect(JSON.stringify(await registered())).toBe(JSON.stringify(await registered()));expect(projectionFingerprint(project(sealedRecordsVNext()))).toBe(projectionFingerprint(project(sealedRecordsVNext())));});
 });
 

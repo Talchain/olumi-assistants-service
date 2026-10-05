@@ -37,7 +37,11 @@ import {
   DRAFT_RECORD_CLAIM_KINDS,
   DRAFT_RECORD_DIRECTIONS,
   DRAFT_RECORD_EFFECTS,
+  DRAFT_RECORD_LINK_FIELDS,
   DRAFT_RECORD_OPTION_SETTINGS,
+  DRAFT_RECORD_REQUIRED_LINKS,
+  DRAFT_RECORD_UNRESOLVED,
+  type DraftRecordLinkField,
   DRAFT_RECORD_ROLES,
   DRAFT_RECORD_STATED_KINDS,
   DRAFT_RECORD_VALUE_SCALES,
@@ -90,6 +94,8 @@ const StatedItemWire = z.object({
   // C46 (PORTS 2+3): the goal's part-or-whole declaration (v-next grammar).
   scope: z.object({ modelled: z.string(), alternative: z.string(), stated_in_brief: z.boolean() }).optional(),
   legacy_evidence: z.literal(true).optional(), evidence_conflicts: z.array(z.string()).optional(),
+  // Fix (a): decoded by `decodeUnresolvedLinks` from the strict wire's typed escape; never emitted by a model.
+  unresolved: z.array(z.enum(DRAFT_RECORD_LINK_FIELDS as [DraftRecordLinkField, ...DraftRecordLinkField[]])).optional(),
   value_span: QuoteSpanWire.optional(), unit_span: QuoteSpanWire.optional(),
   baseline: z.number().optional(),
   quantity: z.number().int().nonnegative().optional(),
@@ -330,7 +336,10 @@ export function projectDraftRecords(
         `edges=${Array.isArray(rec.edges) ? rec.edges.length : "absent"}) instead of a record set`,
     };
   }
-  const parsed = DraftRecordSetWire.safeParse(upgradeLegacyRecords(rawJson));
+  // Fix (a): the typed escape is decoded first, and the receipt's authored input is the DECODED item — its
+  // `unresolved` list names each link, and no typed field ever carries the token downstream.
+  const decoded = decodeUnresolvedLinks(rawJson);
+  const parsed = DraftRecordSetWire.safeParse(upgradeLegacyRecords(decoded));
   if (!parsed.success) {
     const flat = parsed.error.flatten();
     const fieldIssues = Object.entries(flat.fieldErrors || {})
@@ -360,6 +369,7 @@ export function projectDraftRecords(
       ...(item.setting !== undefined ? { setting: item.setting } : {}),
       ...(item.plausible_max !== undefined ? { plausible_max: item.plausible_max } : {}),
       ...(item.scope !== undefined ? { scope: { modelled: item.scope.modelled, alternative: item.scope.alternative, stated_in_brief: item.scope.stated_in_brief } } : {}),
+      ...(item.unresolved !== undefined ? { unresolved: [...item.unresolved] } : {}),
       ...(item.legacy_evidence !== undefined ? { legacy_evidence: item.legacy_evidence } : {}),
       ...(item.evidence_conflicts !== undefined ? { evidence_conflicts: item.evidence_conflicts } : {}),
       ...(item.value_span !== undefined ? { value_span: item.value_span } : {}),
@@ -529,7 +539,7 @@ export function projectDraftRecords(
     "Draft record set accepted at the seam",
   );
 
-  return { ok: true, records, projection: projectRecordsToGraph(records, brief, undefined, rawJson as DraftRecordSet) };
+  return { ok: true, records, projection: projectRecordsToGraph(records, brief, undefined, decoded as DraftRecordSet) };
 }
 
 /**
@@ -641,6 +651,35 @@ export function isSalvageableRecordSet(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
   const rec = value as Record<string, unknown>;
   return Array.isArray(rec.stated_items) && rec.stated_items.length > 0;
+}
+
+/**
+ * ⭐ FIX (a): THE STRICT WIRE'S TYPED ESCAPE, DECODED BEFORE VALIDATION. On its OWNING kind only
+ * (`DRAFT_RECORD_REQUIRED_LINKS`), a link whose value is exactly `"unresolved"` is removed and named in the item's
+ * `unresolved` list, so every downstream reader sees the link ABSENT (its behaviour before the escape existed) and the
+ * compile asks about it by type. On any other kind the token is left in place, so the wire parse treats it exactly as
+ * before (a string field keeps it as text; a typed field refuses it). Defensive like `upgradeLegacyRecords`: anything
+ * that is not a record-set shape is handed on untouched for the wire parse to refuse. Never mutates its input.
+ */
+export function decodeUnresolvedLinks(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const record = raw as Record<string, unknown>;
+  if (!Array.isArray(record.stated_items)) return raw;
+  let changed = false;
+  const statedItems = record.stated_items.map((entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const item = entry as Record<string, unknown>;
+    const links = (DRAFT_RECORD_REQUIRED_LINKS as Record<string, readonly DraftRecordLinkField[]>)[String(item.kind)];
+    const unresolved = (links ?? []).filter((field) => item[field] === DRAFT_RECORD_UNRESOLVED);
+    if (unresolved.length === 0) return entry;
+    changed = true;
+    const copy: Record<string, unknown> = { ...item };
+    for (const field of unresolved) delete copy[field];
+    const prior = Array.isArray(item.unresolved) ? (item.unresolved as unknown[]) : [];
+    copy.unresolved = [...new Set([...prior, ...unresolved])];
+    return copy;
+  });
+  return changed ? { ...record, stated_items: statedItems } : raw;
 }
 
 /** V-current spans are checked inputs, not a second extraction route. No figure is inferred. */

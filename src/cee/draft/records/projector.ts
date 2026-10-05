@@ -457,6 +457,8 @@ export interface DroppedRecordRef {
    * reconstructing from a string.
    */
   readonly node_id?: string;
+  /** Fix (a), `link_unresolved` only: WHICH required link the drafter typed `"unresolved"` on this stated item. */
+  readonly unresolved_field?: import("./grammar.js").DraftRecordLinkField;
   /**
    * ⭐⭐ THE MAGNITUDE THE USER STATED, CARRIED THROUGH THE WITHDRAWAL THAT
    * REMOVES ITS NODE — present only on the two CONNECTIVITY-PRUNE reasons
@@ -499,6 +501,8 @@ export interface DroppedRecordRef {
     // P2-B6x (a994c38a): a deadline goal that names no measurable quantity. An ASK for the quantity, never a guess
     // and never a default "higher is better" direction.
     | "goal_quantity_missing"
+    // Fix (a): the drafter typed a REQUIRED link "unresolved" (`unresolved_field` names it). An ASK, never a guess.
+    | "link_unresolved"
     | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
     | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
     | import("./quantity-evidence.js").UnitRefusal
@@ -5523,6 +5527,11 @@ export function projectRecordsToGraph(
   /** Authored input before seam compatibility enrichment, for diagnostic receipts only. */
   originalRecords: DraftRecordSet = records,
 ): RecordProjection {
+  // Fix (a): every required link the drafter typed "unresolved" is a TYPED ASK on its own stated index, one row per
+  // link, in the item's own order. The link itself stays absent, so nothing below can read it as a value.
+  const unresolvedLinks: DroppedRecordRef[] = records.stated_items.flatMap((item, stated_index) =>
+    (item.unresolved ?? []).map((field) => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: item.source_quote,
+      stated_index, reason: "link_unresolved" as const, unresolved_field: field, source_quote: item.source_quote })));
   const located = locateRecordEvidence(records);
   const units = canonicalQuantityUnits(located.records);
   records = unifyGoalQuantityReferences(units.records);
@@ -5538,6 +5547,7 @@ export function projectRecordsToGraph(
     repairStatedOptionTargets(projection);
   }
   projection = { ...projection, dropped: [
+    ...unresolvedLinks,
     ...[...located.refusals, ...units.refusals].filter(r => records.stated_items[r.stated_index] !== undefined).map(r => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: records.stated_items[r.stated_index]!.source_quote,
       stated_index: r.stated_index, reason: r.reason, source_quote: records.stated_items[r.stated_index]!.source_quote })), ...projection.dropped,
   ] };

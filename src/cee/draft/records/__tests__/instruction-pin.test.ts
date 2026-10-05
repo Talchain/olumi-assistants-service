@@ -1948,8 +1948,10 @@ describe("v20 — the current-level ask reaches risk and outcome claims", () => 
 // Pass 2 P2-A1 re-pin (reason): the v-next rule for an option's typed `setting` (change_by vs sets_to) was added;
 // was fe150807d06c4c25fe41cb2e88eaf8cf87026fd67d5bbbf808e8148b01b4ab3e. P2-FRAME re-pin (reason): the declaring
 // item's `plausible_max` rule; was 2b2f88fa…930c. PORTS 2+3 re-pin (reason): the C46 goal `scope` rule; was
-// 5535ce16fdea8896f4a9b0a6a18cd9c9a189f7bc36b45d8970a570fecfe83831. The served v25 pins above are unchanged.
-const PREREGISTERED_VNEXT_INSTRUCTION_SHA256 = '4bb61d8140ed488955bf0c00b68f19091aec6c79346c307b67176008a3d1ecc3';
+// 5535ce16fdea8896f4a9b0a6a18cd9c9a189f7bc36b45d8970a570fecfe83831. Fix (a) re-pin (reason): the required-links
+// paragraph (the 'unresolved' escape and the goal/figure/cause set rules); was
+// 4bb61d8140ed488955bf0c00b68f19091aec6c79346c307b67176008a3d1ecc3. The served v25 pins above are unchanged.
+const PREREGISTERED_VNEXT_INSTRUCTION_SHA256 = '4b2e5ed98cdffa080f271f4229a1e668fa556c8fa18e0d2b3fb95a20de9a1299';
 describe('inert v-next instruction identity', () => {
   it('pins new generic relationship/literal rules separately from served v25', () => {
     expect(vNextDraftRecordsInstructionHash()).toBe(PREREGISTERED_VNEXT_INSTRUCTION_SHA256);

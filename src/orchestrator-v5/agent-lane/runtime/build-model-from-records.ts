@@ -1,5 +1,5 @@
 /** Agent construction: one records extraction, deterministic compile, canonical registration. */
-import { buildVNextDraftRecordsSchema, type DraftRecordSet } from '../../../cee/draft/records/grammar.js';
+import { buildVNextDraftRecordsSchema, DRAFT_RECORD_REQUIRED_LINKS, DRAFT_RECORD_STATED_KINDS, DRAFT_RECORD_UNRESOLVED, type DraftRecordSet } from '../../../cee/draft/records/grammar.js';
 import { V_NEXT_DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction-vnext.js';
 import { reconcileStatedDispositions } from '../../../cee/draft/records/stated-dispositions.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
@@ -28,7 +28,19 @@ function object(value: unknown): value is JsonSchema {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** OpenAI STRICT requires every key; original optionality becomes explicit nullability. */
+/** The typed escape a required link takes (fix (a)): a one-member enum, the only keyword family this grammar already sends. */
+const UNRESOLVED_LINK: JsonSchema = { type: 'string', enum: [DRAFT_RECORD_UNRESOLVED] };
+
+/**
+ * OpenAI STRICT requires every key; original optionality becomes explicit nullability.
+ *
+ * ⭐ FIX (a): A REQUIRED LINK IS NEVER NULL ON ITS OWNING KIND. `stated_items[]` is one variant per owning kind
+ * (`DRAFT_RECORD_REQUIRED_LINKS`: goal, figure, cause) plus one for every other kind, each the SAME nullable item with
+ * its `kind` enum narrowed. On an owning variant each owned link is required and non-null: an enum link widens its own
+ * enum with `"unresolved"` (`direction`), any other type takes `anyOf [the real type, "unresolved"]`. Every other
+ * field, and every field on the other kinds, is byte-for-byte the nullable shape it was. Built from the unchanged
+ * `buildVNextDraftRecordsSchema()`, so `omitOptionalRecordNulls` and the seam guard read the same base grammar.
+ */
 export function buildStrictDraftRecordsSchema(): JsonSchema {
   const nullable = (schema: JsonSchema): JsonSchema => {
     const out: JsonSchema = { ...schema };
@@ -44,7 +56,25 @@ export function buildStrictDraftRecordsSchema(): JsonSchema {
     if (object(schema.items)) out.items = nullable(schema.items);
     return out;
   };
-  return strictForTheDrafter(nullable(buildVNextDraftRecordsSchema()));
+  const strict = nullable(buildVNextDraftRecordsSchema());
+  const statedItems = (strict.properties as Record<string, JsonSchema>).stated_items!;
+  const item = statedItems.items as JsonSchema;
+  const properties = item.properties as Record<string, JsonSchema>;
+  const linked = (key: string): JsonSchema => {
+    const real = (properties[key]!.anyOf as JsonSchema[]).find((branch) => branch.type !== 'null')!;
+    return Array.isArray(real.enum) ? { ...real, enum: [...real.enum, DRAFT_RECORD_UNRESOLVED] } : { anyOf: [real, UNRESOLVED_LINK] };
+  };
+  const variant = (kinds: readonly string[], links: readonly string[]): JsonSchema => ({
+    ...item,
+    properties: Object.fromEntries(Object.entries(properties).map(([key, value]) => [key,
+      key === 'kind' ? { ...value, enum: [...kinds] } : links.includes(key) ? linked(key) : value])),
+  });
+  const owners = Object.keys(DRAFT_RECORD_REQUIRED_LINKS);
+  statedItems.items = { anyOf: [
+    ...Object.entries(DRAFT_RECORD_REQUIRED_LINKS).map(([kind, links]) => variant([kind], links)),
+    variant(DRAFT_RECORD_STATED_KINDS.filter((kind) => !owners.includes(kind)), []),
+  ] };
+  return strictForTheDrafter(strict);
 }
 
 /** Null means omitted only for a key that the records grammar actually marks optional. */

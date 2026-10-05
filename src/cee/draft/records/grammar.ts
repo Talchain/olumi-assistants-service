@@ -205,6 +205,30 @@ export type DraftRecordRole = (typeof DRAFT_RECORD_ROLES)[number];
 
 /** The GATE's language. Never the wire operator — see design note 4. */
 export const DRAFT_RECORD_DIRECTIONS = ["floor", "ceiling"] as const;
+/**
+ * ⭐ FIX (a): THE TYPED ESCAPE FOR A LINK THE BRIEF DOES NOT STATE (v-next OpenAI strict grammar ONLY).
+ *
+ * Measured on the live 3×3 (a6617c31): with these links nullable, null was the drafter's easy path — goal direction
+ * null 15/15, goal unit 9/15, goal baseline_ref 8/15, figure quantity 22/64, cause relationship 25/58 — and the compile
+ * rightly refused to guess. So on their owning kind they are REQUIRED and NON-NULL in the strict schema
+ * (`buildStrictDraftRecordsSchema`): the real value, or this token. The seam decodes the token into
+ * `DraftStatedItem.unresolved` and the compile turns each one into a TYPED ASK (a `link_unresolved` disclosure, an
+ * `asked` receipt row and an open question naming the item). Never a value, never a guess, never a silent drop.
+ *
+ * ⛔ Neither constant reaches `buildDraftRecordsSchema` or the frozen Anthropic `records-v25` grammar.
+ */
+export const DRAFT_RECORD_UNRESOLVED = "unresolved" as const;
+/** Each owning stated kind's required links, in the order its typed asks are named. */
+export const DRAFT_RECORD_REQUIRED_LINKS = {
+  goal: ["direction", "direction_literal", "unit", "baseline_ref"],
+  figure: ["quantity"],
+  cause: ["relationship"],
+} as const;
+export type DraftRecordLinkKind = keyof typeof DRAFT_RECORD_REQUIRED_LINKS;
+export type DraftRecordLinkField = (typeof DRAFT_RECORD_REQUIRED_LINKS)[DraftRecordLinkKind][number];
+/** Every required link field, derived — never re-listed. */
+export const DRAFT_RECORD_LINK_FIELDS = [...new Set(Object.values(DRAFT_RECORD_REQUIRED_LINKS).flat())] as readonly DraftRecordLinkField[];
+
 /** P2-A1: how an option sets its lever: an absolute level, or a change to the lever's current level. */
 export const DRAFT_RECORD_OPTION_SETTINGS = ["sets_to", "change_by"] as const;
 export type DraftRecordOptionSetting = (typeof DRAFT_RECORD_OPTION_SETTINGS)[number];
@@ -533,6 +557,11 @@ export interface DraftStatedItem {
    * the whole, the same shape as the legacy candidate's `goal.scope`. Absent means no part-or-whole reading.
    */
   scope?: DraftGoalScope;
+  /**
+   * Seam-decoded only (fix (a)): the required links the drafter typed `"unresolved"` on this item. Each one is a typed
+   * ask in the compile; the field itself stays absent, exactly as before the escape existed. Never on the wire.
+   */
+  unresolved?: DraftRecordLinkField[];
   /** Seam-only compatibility and typed conflict diagnostics. */
   legacy_evidence?: true;
   evidence_conflicts?: string[];

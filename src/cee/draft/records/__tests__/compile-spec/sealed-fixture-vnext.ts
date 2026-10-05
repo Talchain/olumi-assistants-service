@@ -40,3 +40,19 @@ export function sealedRecordsVNext(): DraftRecordSet {
   // Optional fields are omitted on the wire, never own properties with undefined values.
   return JSON.parse(JSON.stringify({ stated_items: items, claims })) as DraftRecordSet;
 }
+
+/**
+ * Fix (a): the SAME sealed ideal with every REQUIRED link stated, as the strict grammar now obliges a drafter to emit
+ * it. `sealedRecordsVNext()` above is unchanged; only the two links it left absent are typed, each from the brief:
+ *   · the goal states its unit, "£/month" — the unit its quantity (0) declares, so nothing is restated differently;
+ *   · figure 14 ("Keeping pricing as it is adds nothing.", unit subscribers) names the quantity it measures: 11, the
+ *     starter-subscriber quantity whose unit it shares.
+ * Measured before this was written: the registered graph, receipt rows and open questions are identical to the
+ * unlinked ideal's (unresolved-links.test.ts pins it).
+ */
+export function sealedRecordsVNextLinked(): DraftRecordSet {
+  const records = sealedRecordsVNext();
+  records.stated_items[6]!.unit = '£/month';
+  records.stated_items[14]!.quantity = 11;
+  return records;
+}

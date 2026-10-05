@@ -11,7 +11,7 @@ export type StatedCarrier = (
 export type StatedDisposition = { readonly stated_index: number; readonly stated_item: DraftStatedItem } & (
   | { readonly disposition: 'carried'; readonly location: StatedCarrier; readonly stored_value: unknown }
   | { readonly disposition: 'rejected'; readonly reason: DroppedRecordRef['reason'] | 'stated_value_not_carried' | 'stated_relationship_not_carried' | 'carrier_removed' }
-  | { readonly disposition: 'asked'; readonly reason?: 'goal_quantity_missing' }
+  | { readonly disposition: 'asked'; readonly reason?: 'goal_quantity_missing' | 'link_unresolved' }
 );
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -47,6 +47,11 @@ export function deriveStatedDispositions(
     // P2-B6x: an unknown the projector asks about is an ask, never a carried value or a silent default.
     if (projection.dropped.some(d => d.stated_index === stated_index && d.reason === 'goal_quantity_missing')) {
       return { ...origin, disposition: 'asked', reason: 'goal_quantity_missing' };
+    }
+    // Fix (a): a required link the drafter typed "unresolved" is an ask on this item — the same class, the same
+    // precedence. The rows naming each link stay in `projection.dropped`; the decoded item names them too.
+    if (projection.dropped.some(d => d.stated_index === stated_index && d.reason === 'link_unresolved')) {
+      return { ...origin, disposition: 'asked', reason: 'link_unresolved' };
     }
     const evidenceFailure = projection.dropped.find(d => d.stated_index === stated_index && FAILED_EVIDENCE.has(d.reason));
     if (evidenceFailure !== undefined) return { ...origin, disposition: 'rejected', reason: evidenceFailure.reason };

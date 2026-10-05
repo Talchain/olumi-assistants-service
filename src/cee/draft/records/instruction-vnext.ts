@@ -76,6 +76,16 @@ A change_by needs the lever's current level stated elsewhere; never assume zero.
 Keep sets_to for other option-to-factor links. The same range shape belongs to
 a figure's value or an option link's sets_to, never to a neighbouring quantity.
 
+A link you cannot state from the brief is "unresolved", never left empty.
+The goal item types direction: "floor" when the user wants the quantity at or
+above the value, "ceiling" when at or below. direction_literal copies the
+comparator words. Both are "unresolved" when the brief states no comparator.
+The goal item also states its unit, the same unit its quantity declares, and
+sets baseline_ref to the quoted baseline item of the same quantity. Every
+figure sets quantity: its own index when it declares the quantity, else the
+declaring index. Every cause sets relationship: the quantities it links and
+any size the brief states for that link.
+
 Keep baseline_ref and horizon_ref: the baseline is a quoted baseline item of the
 same quantity, and the horizon is a quoted month-count item. If supplied,
 baseline and horizon_months must agree with their references. direction_literal

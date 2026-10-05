@@ -131,6 +131,11 @@ export interface CompletionAskItem {
      * stays in `ask.items` for telemetry and `shouldKeepCompletion`.
      */
     | "constraint_target_unbindable"
+    /**
+     * Fix (a): a REQUIRED link the drafter typed `"unresolved"` (`link_unresolved`). A question for the USER, named
+     * by the item's own quote; withheld from the completion turn, whose grammar cannot change a stated item.
+     */
+    | "stated_link_unresolved"
     | "no_chain_reaches_goal"
     | "no_outcome_or_risk"
     | "options_indistinguishable";
@@ -225,7 +230,19 @@ export interface CompletionAsk {
  */
 const ASK_KINDS_NEEDING_A_STATED_ITEM: ReadonlySet<CompletionAskItem["kind"]> = new Set([
   "no_goal",
+  // Fix (a): the answer is a field on an EXISTING stated item, and only the user can give it.
+  "stated_link_unresolved",
 ]);
+
+/** Fix (a): what each required link asks the user for. Generic: no domain word and no brief text. */
+const UNRESOLVED_LINK_ASKS: Readonly<Record<import("./grammar.js").DraftRecordLinkField, string>> = {
+  direction: "whether it is a floor (at least) or a ceiling (at most)",
+  direction_literal: "whether it is a floor (at least) or a ceiling (at most)",
+  unit: "the unit it is measured in",
+  baseline_ref: "its current level",
+  quantity: "which quantity it measures",
+  relationship: "which quantities it links, and by how much",
+};
 
 /**
  * ⭐⭐ THE TWO VERBS, NAMED APART — this set used to hold both, and that was
@@ -829,6 +846,22 @@ export function enumerateCompletionAsk(
     push({
       kind: "constraint_target_unbindable",
       detail: `"${limit.quote}" \u2014 this limit does not say what it bounds, so nothing is holding it; name the factor or outcome it applies to`,
+      validatorCode: null,
+    });
+  }
+
+  // Fix (a): ONE question per stated item, naming the item by its own quote and every link it left unresolved.
+  const unresolvedByItem = new Map<number, { quote: string; asks: Set<string> }>();
+  for (const d of projection.dropped) {
+    if (d.reason !== "link_unresolved" || d.stated_index === undefined || d.unresolved_field === undefined) continue;
+    const entry = unresolvedByItem.get(d.stated_index) ?? { quote: d.label, asks: new Set<string>() };
+    entry.asks.add(UNRESOLVED_LINK_ASKS[d.unresolved_field]);
+    unresolvedByItem.set(d.stated_index, entry);
+  }
+  for (const { quote, asks } of unresolvedByItem.values()) {
+    push({
+      kind: "stated_link_unresolved",
+      detail: `"${quote}" \u2014 the brief does not state ${[...asks].join(", or ")}, so it was left open rather than assumed; please say`,
       validatorCode: null,
     });
   }
