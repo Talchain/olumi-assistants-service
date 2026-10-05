@@ -17,6 +17,10 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import {
+  bindRecentMutationHistoryToPriorFacts,
+  readRecentMutationHistoryFromPriorFacts,
+} from './reconcile-recent-mutation-facts.js';
+import {
   isReconciledScenarioAnalysisFactSet,
   isScenarioAnalysisReasoningAuthority,
   type ScenarioAnalysisFactSet,
@@ -49,10 +53,17 @@ export function runLedgerFor(input: {
 /**
  * What a Run-history reader reads: the window's own facts (every type, in order), then each ledger Run the window has
  * lost. Those are older than every window row, so newest-first order holds. A `window` ledger adds nothing.
+ *
+ * ⛔ The window array can CARRY the turn's reconciled recent-mutation history as non-enumerable properties
+ * (`bindRecentMutationHistoryToPriorFacts`); a plain spread would drop it, and its readers would then read "no history".
+ * So a carried history is re-bound, unchanged, onto the result.
  */
 export function withLedgerRuns(hotWindow: readonly HandlerFact[], ledger: RunLedgerV1): readonly HandlerFact[] {
   if (ledger.source === 'window') return hotWindow;
   const held = new Set(hotWindow.filter(isRun).map((f) => stableStringify(f)));
   const lost = ledger.runs.filter((f) => !held.has(stableStringify(f)));
-  return lost.length === 0 ? hotWindow : [...hotWindow, ...lost];
+  if (lost.length === 0) return hotWindow;
+  const merged = [...hotWindow, ...lost];
+  const history = readRecentMutationHistoryFromPriorFacts(hotWindow);
+  return history === null ? merged : bindRecentMutationHistoryToPriorFacts(merged, history);
 }

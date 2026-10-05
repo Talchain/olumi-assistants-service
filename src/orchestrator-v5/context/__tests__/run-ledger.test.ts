@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { reconcileScenarioAnalysisFacts, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT } from '../reconcile-scenario-analysis-facts.js';
 import { RUN_LEDGER_VERSION, runLedgerFor, withLedgerRuns } from '../run-ledger.js';
+import { bindRecentMutationHistoryToPriorFacts, readRecentMutationHistoryFromPriorFacts } from '../reconcile-recent-mutation-facts.js';
 import { createSetFactorValueHandler, STALENESS_NARRATIVE } from '../../tools/handlers/set-factor-value.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
@@ -52,6 +53,16 @@ describe('runLedgerFor: the scenario\'s Runs from the attested durable set, else
 });
 
 describe('withLedgerRuns: the window, then each Run it has lost', () => {
+  it('RED-on-spread: the window\'s carried recent-mutation history survives the merge, unchanged', () => {
+    const window = bindRecentMutationHistoryToPriorFacts(Array.from({ length: 20 }, () => EDIT), {
+      recent_mutation_facts: [EDIT], recent_changes_status: 'complete',
+    } as never);
+    const out = withLedgerRuns(window, runLedgerFor({ scenarioId: SID, hotWindow: window, durable: durable([R1], window) }));
+    expect(out).toEqual([...window, R1]);
+    expect(readRecentMutationHistoryFromPriorFacts(out)).toEqual(readRecentMutationHistoryFromPriorFacts(window));
+    expect(readRecentMutationHistoryFromPriorFacts(out)).not.toBeNull();
+  });
+
   it('RED-on-window: 20 edits and no Run in the window → the window, then the lost Runs newest first', () => {
     const window = Array.from({ length: 20 }, () => EDIT);
     const out = withLedgerRuns(window, runLedgerFor({ scenarioId: SID, hotWindow: window, durable: durable([R2, R1], window) }));
