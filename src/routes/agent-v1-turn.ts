@@ -72,6 +72,7 @@ import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
+import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
 import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
@@ -1924,6 +1925,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
           const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
           const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
+          // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
+          const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
+          if (rootNow !== null) owedNow.push(rootNow);
           if (claimPermissionsFrom(state.analysisState, state.analysisReady, { requested: true }).leader_may_be_named) {
             const basis = conditionalInputBasis({ graph: state.graph,
               admission: (state.analysisReady as { analysis_admission?: unknown } | undefined)?.analysis_admission,
@@ -3399,6 +3403,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? conditionalInputBasis({ graph: readbackGraph,
         admission: (analysisReady as { analysis_admission?: unknown } | undefined)?.analysis_admission,
         analysedOptionIds: analysedOptionIds(analysisResult) }) : null;
+    // ⭐ GATE 2 CONSUMER (DL 0df0e1; Science #2571; Acceptance #87 5987804248): a Run that RAN on a model with an unvalued
+    // non-factor root says it was treated as zero and asks for its figure — the post-write ask's own sentence. The replay
+    // above says the same, from the same readback, in the same place.
+    // ⛔ Only about the result on screen (Codex #2577 P1): when the readback no longer binds to this Run (an edit landed
+    // before the readback, a stale or missing result), the readback's roots are not the ones this Run treated as zero.
+    const rootLine = fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true
+      && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
+      ? treatedAsZeroReplyLine(readbackGraph, analysisReady) : null;
+    if (rootLine !== null && !narrationText.includes(rootLine)) owed.push(rootLine);
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
@@ -3503,6 +3516,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisReady,
         // Only the Run tool's typed sentence matching this final readback may survive ranking redaction.
         protectedGoalChanceSay: goalChanceSayFromThisTurn(result.tool_results),
+        // The host's own typed line from this readback (gate 2): a node label can hold ". " and a ranking word, and a
+        // fragment of the sentence must never be dropped or left behind (Codex #2577 P2).
+        protectedHostLines: rootLine !== null ? [rootLine] : [],
         // AX2: the build turn's automatic first pass was not asked to rank anything — drop a ranking, add no "why".
         // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
         // user's model followed a reply about public evidence).

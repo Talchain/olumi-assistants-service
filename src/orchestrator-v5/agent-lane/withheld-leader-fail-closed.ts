@@ -1431,7 +1431,7 @@ export interface FailClosedProseResult {
  */
 const CITATION_ONLY = /^\s*(?:\[\d+\]\s*)+$/;
 
-export function dropRankingSentences(text: string, labels: RankingLabelContext = NO_LABELS, protectedExactLine?: string): FailClosedProseResult {
+export function dropRankingSentences(text: string, labels: RankingLabelContext = NO_LABELS, protectedExactLine?: string | readonly string[]): FailClosedProseResult {
   if (typeof text !== 'string' || text.length === 0) return { text, droppedSentences: 0 };
   type Seg = Segment;
   const segs: Seg[] = [];
@@ -1533,10 +1533,12 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
   // Classify against the ORIGINAL prose, including the typed warning's option names: a later bare
   // 71%/29% split can depend on that context. Only after every contextual rule has run do we keep
   // the exact standalone warning line itself, without excusing neighboring model-authored claims.
-  if (protectedExactLine !== undefined) {
+  // Each protected line is kept once, only where it stands as its own whole line (byte for byte): it never adds text.
+  const protectedLines = protectedExactLine === undefined ? [] : typeof protectedExactLine === 'string' ? [protectedExactLine] : protectedExactLine;
+  for (const line of protectedLines) {
     let kept = false;
     segs.forEach((seg, r) => {
-      if (!kept && 'units' in seg && seg.units.join('') === protectedExactLine) {
+      if (!kept && 'units' in seg && seg.units.join('') === line) {
         drops[r] = drops[r]!.map(() => false);
         kept = true;
       }
@@ -1626,6 +1628,11 @@ export function enforceAgentLaneLeaderClaimsAtWire(
     readonly limitAskIds?: ReadonlySet<string>;
     /** Typed goal explanation offered by this turn's Run tool; checked against the final readback. */
     readonly protectedGoalChanceSay?: string | null;
+    /**
+     * Lines the route composed from this turn's own readback, never model prose (gate 2's treated-as-zero sentence). Each
+     * is kept whole where it stands as its own line: a label inside it can hold ". " and a ranking word.
+     */
+    readonly protectedHostLines?: readonly string[];
   },
 ): WireLeaderClaimEnforcementResult {
   let next = response;
@@ -1653,8 +1660,10 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const typedSay = (response as { analysis_state?: { run_state?: { kind?: unknown } } }).analysis_state?.run_state?.kind === 'complete_current'
         && typeof readbackSay === 'string' && readbackSay !== '' && readbackSay === opts.protectedGoalChanceSay
         ? readbackSay : null;
+      const protectedLines = [...(typedSay !== null && !typedSay.includes('\n') ? [typedSay] : []),
+        ...(opts.protectedHostLines ?? []).filter((line) => line !== '' && !line.includes('\n'))];
       const projected = dropRankingSentences(projectionInput, rankingLabelContext(opts.graph, opts.analysisReady),
-        typedSay !== null && !typedSay.includes('\n') ? typedSay : undefined);
+        protectedLines.length > 0 ? protectedLines : undefined);
       if (projected.droppedSentences > 0) {
         droppedSentences = projected.droppedSentences;
         /**
