@@ -1,7 +1,9 @@
 /** DL decision rows: retained output requirements, deliberately RED where records has no producer. */
 import { describe, expect, it } from 'vitest';
 import type { DraftRecordSet } from '../../../cee/draft/records/grammar.js';
-import { BRIEF, sealedRecords } from '../../../cee/draft/records/__tests__/compile-spec/sealed-fixture.js';
+// RESTACK2: the served wire is the v-next strict schema; the legacy sealed records no longer build on it, so these rows
+// read the v-next hand-typed delta of the SAME sealed brief (sealedRecordsVNext) to keep measuring the loss.
+import { BRIEF, sealedRecordsVNext as sealedRecords } from '../../../cee/draft/records/__tests__/compile-spec/sealed-fixture-vnext.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
 import { buildModelFromRecords } from '../runtime/build-model-from-records.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
