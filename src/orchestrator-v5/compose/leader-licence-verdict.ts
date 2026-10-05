@@ -26,8 +26,8 @@ export const LEADER_LICENCE_AUTHORITY_VERSION = 1 as const;
 
 export type LeaderLicenceWithheldReason =
   | 'separation_unavailable' | 'options_do_not_separate' | 'admission_exploratory' | 'target_not_testable'
-  | 'goal_figures_withheld' | 'constraint_infeasible' | 'scope_unresolved' | 'identity_conflict' | 'not_requested'
-  | 'sign_unproven' | 'cause_unrecorded';
+  | 'goal_figures_withheld' | 'constraint_infeasible' | 'limit_likely_breaks' | 'constraint_withheld'
+  | 'scope_unresolved' | 'identity_conflict' | 'not_requested' | 'sign_unproven' | 'cause_unrecorded';
 
 /** `estimates_accepted` and `robustness_low` are reserved: no ruled Run-time input emits them in L1. */
 export type LeaderLicenceCaveat =
@@ -78,9 +78,10 @@ const CLAIM_REASON: Readonly<Record<string, LeaderLicenceWithheldReason>> = {
   [WITHHELD_NEAR_TIE]: 'options_do_not_separate',
   [WITHHELD_SEPARATION_UNAVAILABLE]: 'separation_unavailable',
   [WITHHELD_GOAL_SCOPE_UNRESOLVED]: 'scope_unresolved',
-  [WITHHELD_CONSTRAINT_VERDICT]: 'constraint_infeasible',
+  // The stored verdict withheld; its state (unevaluated, infeasible, identity unresolved) is NOT established here.
+  [WITHHELD_CONSTRAINT_VERDICT]: 'constraint_withheld',
   [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'constraint_infeasible',
-  [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'constraint_infeasible',
+  [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'limit_likely_breaks',
   [WITHHELD_RUN_IDENTITY_CONFLICT]: 'identity_conflict',
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'identity_conflict',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'not_requested',
@@ -121,6 +122,13 @@ function goalFigureReason(result: Rec): LeaderLicenceWithheldReason | null {
   return 'goal_figures_withheld';
 }
 
+/** The option ids this Run sent to the engine, or null when the Run recorded no input snapshot. */
+function sentOptionIds(result: Rec): ReadonlySet<string> | null {
+  const options = rec(result.input_snapshot)?.options;
+  if (!Array.isArray(options)) return null;
+  return new Set(options.map((o) => rec(o)?.option_id).filter((id): id is string => typeof id === 'string' && id !== ''));
+}
+
 const unvaluedRoots = (analysisReady: unknown): boolean => {
   const roots = rec(analysisReady)?.unvalued_roots;
   return Array.isArray(roots) && roots.length > 0;
@@ -153,10 +161,16 @@ export function leaderLicenceVerdict(input: LeaderLicenceVerdictInput): LeaderLi
     if (mode !== 'comparative_leader' && mode !== 'quantified_provisional') return withheld(admissionReason(input.analysisReady));
     return withheld(null);
   }
-  // 3. Licensed: the ONE leader is the stored `leading_option_id`. A licence with no stored leader names nobody.
-  const leader = typeof input.result.leading_option_id === 'string' && input.result.leading_option_id !== ''
+  // 3. Licensed: the ONE leader is the stored `leading_option_id`, and only as an option this Run SENT
+  //    (`input_snapshot.options`). The picker falls back to a row's label when PLoT omits ids: a label is not an
+  //    identity, so it names nobody (and is never logged). A licence with no stored leader names nobody either.
+  const stored = typeof input.result.leading_option_id === 'string' && input.result.leading_option_id !== ''
     ? input.result.leading_option_id : null;
-  if (leader === null) return withheld(null);
+  if (stored === null) return withheld(null);
+  const sent = sentOptionIds(input.result);
+  if (sent === null) return withheld(null);
+  if (!sent.has(stored)) return withheld('identity_conflict');
+  const leader = stored;
   const caveats: LeaderLicenceCaveat[] = [];
   if (mode === 'quantified_provisional') caveats.push('provisional_mode');
   // DL 5 Oct ~01:3xZ: a leader resting on a root the engine treated as zero is `permitted_with_caveat` AT MOST.

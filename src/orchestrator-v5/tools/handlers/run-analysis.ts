@@ -115,7 +115,7 @@ import {
   HandlerResultInvalidError,
 } from '../handler-errors.js';
 import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
-import { leaderLicenceShadow } from '../../compose/leader-licence-shadow.js';
+import { leaderLicenceShadow, summaryNamesLeader } from '../../compose/leader-licence-shadow.js';
 import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/turn-timings.js';
 import { config } from '../../../config/index.js';
 import { hasReducedSamplesDisclosure, withoutDirectionUnattestedOnHeldFloor } from '../../compose/claim-safety-cage.js';
@@ -2344,8 +2344,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // than the silence it exists to fix. Same house rule the defaulted-value
     // egress states at its own chokepoint: never throw at a disclosure seam.
     let unsetOptionEffects: readonly UnsetOptionEffect[] = [];
+    // A2 L1: the shadow reuses THIS admission (step 7b), so it never resolves readiness a second time.
+    let runAdmission: ReturnType<typeof resolveRunAdmission> | null = null;
     try {
       const admission = resolveRunAdmission(snapshot.rawPersistedGraph ?? snapshot.graph);
+      runAdmission = admission;
       unsetOptionEffects = collectUnsetOptionEffects(
         admission.assessment.blockingIssues,
         analysedOptionIds,
@@ -2902,16 +2905,31 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // --- 8. Emit HandlerOutcome ------------------------------------------
+    // Fix 4 (observability): per-handler PLoT timings travel back to the
+    // turn-executor via the typed `__plot_timings` slot on HandlerOutcome
+    // (see ../registry.ts). The executor copies the block into the V5 turn
+    // timings; it never reaches the wire envelope directly from here. Slow-
+    // heuristic uses the PLOT_SLOW_LIKELY_MS threshold (see the constant's
+    // doc comment) — the field is reported as `boolean | null` so consumers
+    // know when it has been computed and is paired with `plot_request_ms`
+    // for downstream dashboards.
+    const plotTimings = buildPlotTimings(
+      typeof analysisStatus === 'string' ? analysisStatus : null,
+    );
+    emitPlotTimings(plotTimings);
+
     // --- 7b. A2 L1 SHADOW (Science 0df0e1) --------------------------------
     // The ONE leader-licence verdict for this Run, compared with the live predicates L2 will replace. LOG-ONLY: it is
     // not stored (the result schema is strict) and nothing reads it, so the Run, its fact and its reply are unchanged.
-    // Ids and codes only, never labels or prose.
+    // Ids and codes only, never labels or prose. AFTER the timings are taken, so `handler_total_ms` is unchanged.
     try {
       const shadow = leaderLicenceShadow({
         fact: parsed.data,
         graph: snapshot.rawPersistedGraph,
         scenarioId: args.scenario_id,
-        summaryNamesLeader: headlineDescriptor.has_leading_option,
+        summaryNamesLeader: summaryNamesLeader(headline, headlineDescriptor),
+        admission: runAdmission,
       });
       log.info(
         {
@@ -2934,19 +2952,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // Shadow only: a failure here must never reach the Run.
     }
 
-    // --- 8. Emit HandlerOutcome ------------------------------------------
-    // Fix 4 (observability): per-handler PLoT timings travel back to the
-    // turn-executor via the typed `__plot_timings` slot on HandlerOutcome
-    // (see ../registry.ts). The executor copies the block into the V5 turn
-    // timings; it never reaches the wire envelope directly from here. Slow-
-    // heuristic uses the PLOT_SLOW_LIKELY_MS threshold (see the constant's
-    // doc comment) — the field is reported as `boolean | null` so consumers
-    // know when it has been computed and is paired with `plot_request_ms`
-    // for downstream dashboards.
-    const plotTimings = buildPlotTimings(
-      typeof analysisStatus === 'string' ? analysisStatus : null,
-    );
-    emitPlotTimings(plotTimings);
     // When timingsEnabled=false, `plotTimings` is the empty object and we
     // omit `__plot_timings` entirely so HandlerOutcome carries no debug
     // surface in default-OFF production.

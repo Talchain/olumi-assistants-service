@@ -20,18 +20,21 @@ import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { createNoopSessionStore } from '../../../session/__tests__/fixtures.js';
 
 const logInfo = vi.hoisted(() => vi.fn());
+const tele = vi.hoisted(() => ({ warn: vi.fn(), error: vi.fn(), debug: vi.fn(), emit: vi.fn() }));
 vi.mock('../../../../utils/telemetry.js', () => ({
-  log: { info: logInfo, warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-  emit: vi.fn(), TelemetryEvents: new Proxy({}, { get: (_t, p) => String(p) }),
+  log: { info: logInfo, warn: tele.warn, error: tele.error, debug: tele.debug },
+  emit: tele.emit, TelemetryEvents: new Proxy({}, { get: (_t, p) => String(p) }),
 }));
 /** L1-f: `off` makes the shadow throw (as if it were absent); `seen` records the fact before and after it ran. */
-const shadowSwitch = vi.hoisted(() => ({ off: false, seen: [] as Array<{ before: string; after: string }> }));
+const shadowSwitch = vi.hoisted(() => ({ off: false, slowMs: 0, seen: [] as Array<{ before: string; after: string }> }));
 vi.mock('../../../compose/leader-licence-shadow.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../compose/leader-licence-shadow.js')>();
   return { ...original, leaderLicenceShadow: (input: Parameters<typeof original.leaderLicenceShadow>[0]) => {
     if (shadowSwitch.off) throw new Error('shadow disabled');
     const before = JSON.stringify(input.fact);
     const out = original.leaderLicenceShadow(input);
+    // L1-f: a SLOW shadow (the fake clock jumps) must not reach any returned timing.
+    if (shadowSwitch.slowMs > 0) vi.setSystemTime(Date.now() + shadowSwitch.slowMs);
     shadowSwitch.seen.push({ before, after: JSON.stringify(input.fact) });
     return out;
   } };
@@ -41,6 +44,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { priorRunForSeed } from '../../../coaching/seed-reuse.js';
 import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../../../run-analysis-snapshot-binding.js';
 import { createRegistry, resolveHandler } from '../../registry.js';
+import { config } from '../../../../config/index.js';
 import { GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH } from '../../../../orchestrator/context/option-result-source.js';
 import { leaderLicenceVerdict, type LeaderLicenceVerdictInput } from '../../../compose/leader-licence-verdict.js';
 import {
@@ -73,7 +77,7 @@ const PAIR: Record<string, Stats> = {
   integration_bug_fix_sprint: { w: 0.3, mean: 0.012, std: 0.05, p10: -0.05, p50: 0.01, p90: 0.08 },
   continue_current_plan: { w: 0.3, mean: 0.012, std: 0.05, p10: -0.05, p50: 0.01, p90: 0.08 },
 };
-type Shape = 'served' | 'pair_same' | 'near_tie';
+type Shape = 'served' | 'pair_same' | 'near_tie' | 'label_only';
 
 function plotDouble(shape: Shape) {
   return {
@@ -90,8 +94,11 @@ function plotDouble(shape: Shape) {
             validity_ratio: 1, percentiles_source: 'samples' },
         };
       });
+      // SYNTHETIC label_only: the engine's rows carry labels but no ids (the picker's documented label fallback).
+      if (shape === 'label_only') for (const row of response.option_comparison as Rec[]) delete row.option_id;
       response.option_comparison_status = 'computed';
-      response.results = (response.option_comparison as Rec[]).map((r) => ({ option_id: r.option_id, option_label: r.option_label, win_probability: r.win_probability }));
+      response.results = (response.option_comparison as Rec[]).map((r) => ({ ...(r.option_id === undefined ? {} : { option_id: r.option_id }),
+        option_label: r.option_label, win_probability: r.win_probability }));
       // SYNTHETIC near_tie: the engine's own tie flag on the served rows.
       if (shape === 'near_tie') response.robustness = { ...(response.robustness as Rec), near_tie: { is_tie: true } };
       response.fact_objects = [];
@@ -128,7 +135,10 @@ async function runOnce(scenarioId: string, graph: Rec, plotClient: PLoTClient, b
   return { outcome, fact, shadows };
 }
 
-afterEach(() => { logInfo.mockClear(); shadowSwitch.off = false; shadowSwitch.seen = []; vi.useRealTimers(); });
+afterEach(() => {
+  logInfo.mockClear(); for (const f of Object.values(tele)) f.mockClear();
+  shadowSwitch.off = false; shadowSwitch.slowMs = 0; shadowSwitch.seen = []; vi.useRealTimers();
+});
 
 const warningCodes = (fact: Rec): string[] => ((fact.result.enrichment?.inference_warnings ?? []) as Rec[]).map((w) => w.code);
 const cutPlot = () => ({ validatePatch: vi.fn().mockResolvedValue({}),
@@ -187,18 +197,46 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
     ]);
   });
 
-  it('L1-f (NO BEHAVIOUR CHANGE): the Run outcome is identical with the shadow running and with it absent; the fact is never mutated', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-10-05T09:00:00.000Z'));
-    const on = await runOnce(FA027, fa027Graph, plotDouble('near_tie'));
-    expect(on.shadows).toHaveLength(1);
-    expect(shadowSwitch.seen).toHaveLength(1);
-    expect(shadowSwitch.seen[0].after).toBe(shadowSwitch.seen[0].before);
-    logInfo.mockClear();
-    shadowSwitch.off = true;
-    const off = await runOnce(FA027, fa027Graph, plotDouble('near_tie'));
-    expect(off.shadows).toHaveLength(0);
-    expect(on.outcome).toEqual(off.outcome);
+  it('L1-f (NO BEHAVIOUR CHANGE): with timings ON and a SLOW shadow, the outcome and every other telemetry call are identical to the Run without it; the fact is never mutated', async () => {
+    const timing = config.cee.timingDebugEnabled;
+    (config.cee as { timingDebugEnabled: boolean }).timingDebugEnabled = true;
+    try {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const others = () => ({
+        info: logInfo.mock.calls.filter((c) => (c[0] as Rec)?.event !== 'cee.leader_licence.shadow'),
+        warn: tele.warn.mock.calls, error: tele.error.mock.calls, debug: tele.debug.mock.calls, emit: tele.emit.mock.calls,
+      });
+      vi.setSystemTime(new Date('2026-10-05T09:00:00.000Z'));
+      shadowSwitch.slowMs = 5_000;
+      const on = await runOnce(FA027, fa027Graph, plotDouble('near_tie'));
+      const onTelemetry = structuredClone(others());
+      expect(on.shadows).toHaveLength(1);
+      expect(shadowSwitch.seen).toHaveLength(1);
+      expect(shadowSwitch.seen[0].after).toBe(shadowSwitch.seen[0].before);
+      expect((on.outcome as Rec).__plot_timings, 'timings are ON, so a slow shadow inside them would show').toBeDefined();
+      logInfo.mockClear(); for (const f of Object.values(tele)) f.mockClear();
+      shadowSwitch.off = true;
+      vi.setSystemTime(new Date('2026-10-05T09:00:00.000Z'));
+      const off = await runOnce(FA027, fa027Graph, plotDouble('near_tie'));
+      expect(off.shadows).toHaveLength(0);
+      expect(on.outcome).toEqual(off.outcome);
+      expect(onTelemetry).toEqual(structuredClone(others()));
+    } finally {
+      (config.cee as { timingDebugEnabled: boolean }).timingDebugEnabled = timing;
+    }
+  });
+
+  it('P1-2: a Run whose rows carry labels but no ids never names (or logs) the label as a leader', async () => {
+    const r = await runOnce(FA027, fa027Graph, plotDouble('label_only'));
+    const labels = (fa027Graph.nodes as Rec[]).filter((n) => n.kind === 'option').map((n) => String(n.label));
+    expect(labels.length).toBeGreaterThan(1);
+    // The precondition the finding needs: the picker stored a LABEL as the leader.
+    expect(labels).toContain(r.fact.result.leading_option_id);
+    const e = shadowOf(r);
+    expect(e.leader_option_id).toBeNull();
+    expect(e.verdict).toBe('withheld');
+    const logged = JSON.stringify(e);
+    for (const label of labels) expect(logged).not.toContain(label);
   });
 
   it('L1-g: nothing is stored: the result has no verdict key and parses; the strict schema REJECTS one (why L1 is log-only)', async () => {
@@ -210,7 +248,9 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
 });
 
 const BASE: LeaderLicenceVerdictInput = {
-  runId: 'run-1', graphHash: 'gh-1', result: { leading_option_id: 'opt_a', enrichment: { inference_warnings: [] } },
+  runId: 'run-1', graphHash: 'gh-1',
+  result: { leading_option_id: 'opt_a', enrichment: { inference_warnings: [] },
+    input_snapshot: { options: [{ option_id: 'opt_a' }, { option_id: 'opt_b' }] } },
   licence: 'permitted', leaderClaim: { permitted: true, separation: 'separated' },
   analysisReady: { analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader', reasons: [] } },
   constraintEntitled: true, robustnessLevel: 'moderate',
@@ -235,7 +275,15 @@ describe('A2 L1 verdict mapping (pure; SYNTHETIC inputs)', () => {
   });
 
   it('a licence with no stored leader names nobody (withheld, reason unknown)', () => {
-    expect(leaderLicenceVerdict({ ...BASE, result: { enrichment: {} } })).toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: null });
+    expect(leaderLicenceVerdict({ ...BASE, result: { ...BASE.result, leading_option_id: undefined } }))
+      .toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: null });
+  });
+
+  it('P1-2: a stored leader that is not an option this Run sent is `identity_conflict`; no snapshot names nobody', () => {
+    expect(leaderLicenceVerdict({ ...BASE, result: { ...BASE.result, leading_option_id: 'Alice Smith' } }))
+      .toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: 'identity_conflict' });
+    expect(leaderLicenceVerdict({ ...BASE, result: { ...BASE.result, input_snapshot: undefined } }))
+      .toMatchObject({ verdict: 'withheld', leader_option_id: null, reason: null });
   });
 
   it('an exploratory admission → `admission_exploratory`; TARGET_NOT_TESTABLE → `target_not_testable`', () => {
@@ -248,8 +296,8 @@ describe('A2 L1 verdict mapping (pure; SYNTHETIC inputs)', () => {
   it('CLASS: every Run-time leader_claim withheld code maps to a closed reason (none unnamed)', () => {
     const expected: Record<string, string> = {
       [WITHHELD_NEAR_TIE]: 'options_do_not_separate', [WITHHELD_SEPARATION_UNAVAILABLE]: 'separation_unavailable',
-      [WITHHELD_GOAL_SCOPE_UNRESOLVED]: 'scope_unresolved', [WITHHELD_CONSTRAINT_VERDICT]: 'constraint_infeasible',
-      [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'constraint_infeasible', [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'constraint_infeasible',
+      [WITHHELD_GOAL_SCOPE_UNRESOLVED]: 'scope_unresolved', [WITHHELD_CONSTRAINT_VERDICT]: 'constraint_withheld',
+      [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'constraint_infeasible', [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'limit_likely_breaks',
       [WITHHELD_RUN_IDENTITY_CONFLICT]: 'identity_conflict', [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'identity_conflict',
       [WITHHELD_UNREQUESTED_ANALYSIS]: 'not_requested', [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'sign_unproven',
       [WITHHELD_LEADER_CAUSE_UNRECORDED]: 'cause_unrecorded',
@@ -260,6 +308,15 @@ describe('A2 L1 verdict mapping (pure; SYNTHETIC inputs)', () => {
     }
   });
 
+  it('P1-1: the summary names a leader only when the headline was EMITTED and names one', async () => {
+    const { summaryNamesLeader } = await vi.importActual<typeof import('../../../compose/leader-licence-shadow.js')>(
+      '../../../compose/leader-licence-shadow.js');
+    expect(summaryNamesLeader('AI Reporting Module Sprint currently leads.', { has_leading_option: true })).toBe(true);
+    // Withheld headline (constraint unevaluated, identity, provisional): the template names nobody.
+    expect(summaryNamesLeader(null, { has_leading_option: true })).toBe(false);
+    expect(summaryNamesLeader('Ran analysis.', { has_leading_option: false })).toBe(false);
+  });
+
   it('fails closed: a fact that throws on read gives `withheld`, reason null, `failed_closed`, and never throws', async () => {
     // The ACTUAL shadow, not this file's L1-f wrapper (which stringifies the fact first).
     const { leaderLicenceShadow: actual } = await vi.importActual<typeof import('../../../compose/leader-licence-shadow.js')>(
@@ -267,5 +324,9 @@ describe('A2 L1 verdict mapping (pure; SYNTHETIC inputs)', () => {
     const fact = { fact_type: 'run_analysis', get result(): never { throw new Error('boom'); } };
     const out = actual({ fact: fact as never, graph: fa027Graph, scenarioId: FA027, summaryNamesLeader: true });
     expect(out).toMatchObject({ failed_closed: true, verdict: { verdict: 'withheld', reason: null, leader_option_id: null }, disagreements: [] });
+    // P2-5: a throwing field INSIDE the result is guarded on the fallback too.
+    const inner = { fact_type: 'run_analysis', result: { get run_id(): never { throw new Error('boom'); } } };
+    const out2 = actual({ fact: inner as never, graph: fa027Graph, scenarioId: FA027, summaryNamesLeader: false });
+    expect(out2).toMatchObject({ failed_closed: true, verdict: { verdict: 'withheld', basis: { run_id: '' } } });
   });
 });

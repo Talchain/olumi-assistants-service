@@ -10,6 +10,7 @@ import {
   LEADER_LICENCE_AUTHORITY_VERSION, leaderLicenceVerdict, type LeaderLicenceVerdictV1,
 } from './leader-licence-verdict.js';
 import { boundRunLeaderClaim } from '../model-management/version-result-binding.js';
+import { canonicalAnalysisReadyFrom } from '../../orchestrator/tools/analysis-ready-helper.js';
 
 /** The live sites L1 shadows (A2-LEADER-CLASS-CEE.md row ids in brackets). */
 export type LeaderLicenceShadowSite =
@@ -37,16 +38,28 @@ export interface LeaderLicenceShadow {
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : null);
 
+/** Read one string off the fact behind its own guard: the fact itself may be what threw. */
+function guardedString(read: () => unknown): string {
+  try { const v = read(); return typeof v === 'string' ? v : ''; } catch { return ''; }
+}
+
+/**
+ * Does the Run's stored summary name a leader? Only when the headline was EMITTED (the run's own leader permission is
+ * `headline !== null`) and its descriptor names one: on a withheld headline the summary is a fixed template naming no
+ * option, while the descriptor may still report the winner it resolved (Codex #2579 r1 P1).
+ */
+export function summaryNamesLeader(headline: string | null, descriptor: { readonly has_leading_option: boolean }): boolean {
+  return headline !== null && descriptor.has_leading_option;
+}
+
 function failedClosed(fact: unknown): LeaderLicenceShadow {
-  // The fact itself may be what threw: read it once more only behind its own guard.
-  let result: Rec | null = null;
-  try { result = rec(rec(fact)?.result); } catch { result = null; }
+  const result = (): Rec | null => rec(rec(fact)?.result);
   return {
     verdict: {
       verdict: 'withheld', leader_option_id: null, reason: null, caveats: [],
       basis: {
-        run_id: typeof result?.run_id === 'string' ? result.run_id : '',
-        graph_hash: typeof result?.graph_hash_at_run === 'string' ? result.graph_hash_at_run : '',
+        run_id: guardedString(() => result()?.run_id),
+        graph_hash: guardedString(() => result()?.graph_hash_at_run),
         admission_mode: 'absent', separation: 'unknown', robustness_level: null,
         constraint_state: 'not_entitled', claim_reason: null,
       },
@@ -63,8 +76,10 @@ export function leaderLicenceShadow(input: {
   /** The persisted graph this Run analysed (the one `graph_hash_at_run` was taken over). */
   readonly graph: unknown;
   readonly scenarioId: string;
-  /** Whether the Run's stored `summary` names a leader (the headline's own `has_leading_option`). */
+  /** Whether the Run's stored `summary` names a leader: the headline was EMITTED and its descriptor names one. */
   readonly summaryNamesLeader: boolean;
+  /** The admission this Run already resolved: readiness is built from it, never resolved a second time. */
+  readonly admission?: Parameters<typeof canonicalAnalysisReadyFrom>[0] | null;
 }): LeaderLicenceShadow {
   try {
     const fact = input.fact;
@@ -74,7 +89,8 @@ export function leaderLicenceShadow(input: {
     const runId = result.run_id;
     if (checked.status !== 'confirmed' || typeof runId !== 'string' || runId === '') return failedClosed(fact);
     const bound = boundRunLeaderClaim({ fact, identity: { ...checked.identity, run_id: runId } },
-      { graph: input.graph as never, scenario_id: input.scenarioId });
+      { graph: input.graph as never, scenario_id: input.scenarioId },
+      input.admission == null ? {} : { readiness: canonicalAnalysisReadyFrom(input.admission, input.graph) });
     const claim = bound.state?.leader_claim ?? { permitted: false };
     // CV is, by the A2 site table's definition, the STORED field. Read it as stored (this fact was built a line ago, so
     // the first-class field is present); the leaf reader keeps its one production caller (acceptance pin).
