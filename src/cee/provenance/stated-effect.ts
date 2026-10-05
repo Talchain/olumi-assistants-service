@@ -83,6 +83,24 @@ function oneMatchingAmount(
 }
 
 /**
+ * Every place in `text` that states this TARGET figure: the magnitude |amount| in the declared unit, read with the same
+ * currency-and-period reader the quote check uses ("£75,000 a year" is £/year, "£12,000 upfront" is £). A caller that
+ * has no quote uses this to find WHICH written figure an edge holds; more than one place means it cannot say.
+ */
+export function statedTargetAmountSpans(
+  text: string,
+  amount: number,
+  amountUnit: string,
+): { readonly start: number; readonly end: number }[] {
+  if (!Number.isFinite(amount) || amount === 0 || amountUnit.trim().length === 0) return [];
+  return locatedAmounts(text)
+    .filter((located) => located.implicitSource !== true
+      && magnitudeMatches(Math.abs(amount), located)
+      && located.units.some((candidate) => sameUnit(amountUnit, candidate)))
+    .map((located) => ({ start: located.index, end: located.index + located.matchedText.length }));
+}
+
+/**
  * Validate, rather than extract, a typed natural effect against its quoted span.
  * The quote supplies no endpoints, signs or target values to the model. It
  * validates the four typed fields using located numerals and units; a counting

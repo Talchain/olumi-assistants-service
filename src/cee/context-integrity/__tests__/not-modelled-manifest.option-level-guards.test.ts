@@ -64,6 +64,23 @@ describe("W2 — a stated limit is never anchored to an option's level", () => {
   });
 });
 
+describe("FALLBACK ONLY — an option level never moves a figure another carrier already matches (Codex r2 (b))", () => {
+  it("a served limit row with NO source_quote keeps its £120k on the limit's node", () => {
+    const brief = "Annual support spend must stay within £120k. The AI triage tool would use the whole of it each year.";
+    const item = itemsAt(brief, {
+      nodes: [
+        factor("fac_support_spend", "Annual support spend"),
+        factor("fac_tool_cost", "AI triage tool cost"),
+        { id: "opt_buy_tool", kind: "option", label: "Buy the AI triage tool", interventions: { fac_tool_cost: level("fac_tool_cost", 120_000, "£") } },
+      ],
+      // The constructor's real row: no source_quote, so no constraint span and W2 cannot classify the literal.
+      goal_constraints: [{ node_id: "fac_support_spend", operator: "<=", value: 120_000, unit: "£" }],
+    })("£120k", 0);
+    expect(item.verdict).toBe("in_model");
+    expect(item.matched_node_id).toBe("fac_support_spend");
+  });
+});
+
 describe("W3 — a figure matching levels on two different factors names neither", () => {
   it("10% set on price AND on staff hours is credited to neither", () => {
     // ONE written 10%, so both levels bind to it by own span: only W3 stops it naming one factor.

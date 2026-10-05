@@ -1,0 +1,394 @@
+{
+ "_provenance": {
+  "source": "AIE coaching lab served capture output/aie-coaching-lab-20261005/capture-b43bb79e/c1/graph-read.json (programme-docs aie/lab-packet-20261005 @11a0e538; CEE staging b43bb79e)",
+  "sha256_of_capture": "9e7cacd69bfcac7d9065de80e10628a11b2ef9c53f3076d8edb1671edecd7973",
+  "why": "SERVED false absence (#87 5996437122): the not-modelled manifest called £75,000 and £12,000 `absent` while two brief_extraction/user_stated edges hold them in natural_effect with no provenance.quote"
+ },
+ "brief_text": "We run a regional electrical wholesaler and deliver directly to trade customers. Our goal is to cut the delivery bill by £60,000 over the coming year while keeping customers confident about when their orders will arrive. We currently spend £420,000 a year on delivery and achieve 96% on-time arrivals. Our options are Keep separate routes and Merge routes. Merge routes combines the quieter afternoon rounds, reducing delivery spending by about £75,000 a year. It needs £12,000 upfront for scheduling work and driver training. We expect on-time arrivals to fall by about one percentage point because longer rounds leave less room for delays. Keep separate routes should maintain current costs and performance. Customers often need parts for jobs already in progress, so a late van can hold up their work. The team thinks the quieter rounds are an obvious place to save, but branch managers worry about complaints and extra chasing.",
+ "graph": {
+  "edges": [
+   {
+    "to": "keep_separate_routes",
+    "from": "decision_delivery_bill",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "merge_routes",
+    "from": "decision_delivery_bill",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "partial_route_merge",
+    "from": "decision_delivery_bill",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "route_consolidation",
+    "from": "merge_routes",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "route_consolidation",
+    "from": "partial_route_merge",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "route_consolidation",
+    "from": "keep_separate_routes",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_operating_delivery_spending",
+    "from": "route_consolidation",
+    "strength": {
+     "std": 0.0375,
+     "mean": -0.075
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": -75000,
+      "amount_unit": "GBP/year",
+      "strength_mean": -0.075,
+      "per_source_change": 100,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "scheduling_and_training_cost",
+    "from": "route_consolidation",
+    "strength": {
+     "std": 0.06,
+     "mean": 0.12
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 12000,
+      "amount_unit": "GBP",
+      "strength_mean": 0.12,
+      "per_source_change": 100,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "on_time_arrivals",
+    "from": "route_consolidation",
+    "strength": {
+     "std": 0.005,
+     "mean": -0.01
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": -1,
+      "amount_unit": "percentage points",
+      "strength_mean": -0.01,
+      "per_source_change": 100,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "customer_confidence_in_arrival_times",
+    "from": "on_time_arrivals",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "customer_complaints_and_extra_chasing",
+    "from": "customer_confidence_in_arrival_times",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "annual_operating_delivery_spending",
+    "from": "customer_complaints_and_extra_chasing",
+    "strength": {
+     "std": 0.0525,
+     "mean": 0.105
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "delivery_bill",
+    "from": "annual_operating_delivery_spending",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "delivery_bill",
+    "from": "scheduling_and_training_cost",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   }
+  ],
+  "nodes": [
+   {
+    "id": "decision_delivery_bill",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "Decision: delivery bill",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "delivery_bill",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "delivery bill",
+    "provenance": "from_brief",
+    "unit_reading": {
+     "unit": "GBP",
+     "source": "olumi_reading",
+     "source_quote": "Our goal is to cut the delivery bill by £60,000 over the coming year while keeping customers confident about when their orders will arrive"
+    },
+    "goal_direction": "<=",
+    "threshold_source": "brief_extraction",
+    "goal_threshold_raw": -60000,
+    "goal_horizon_months": 12,
+    "goal_threshold_unit": "GBP/year",
+    "goal_threshold_frame": "change_abs"
+   },
+   {
+    "id": "keep_separate_routes",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Keep separate routes",
+    "provenance": "from_brief",
+    "is_baseline": true
+   },
+   {
+    "id": "merge_routes",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Merge routes",
+    "provenance": "from_brief",
+    "interventions": {
+     "route_consolidation": {
+      "unit": "%",
+      "value": 1,
+      "source": "brief_extraction",
+      "raw_value": 100,
+      "target_match": {
+       "node_id": "route_consolidation",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "partial_route_merge",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Partial route merge",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "interventions": {
+     "route_consolidation": {
+      "unit": "%",
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "raw_value": 50,
+      "target_match": {
+       "node_id": "route_consolidation",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "route_consolidation",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Route consolidation",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 100,
+     "unit": "%",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "annual_operating_delivery_spending",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Annual operating delivery spending",
+    "category": "observable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 1000000,
+     "unit": "GBP/year",
+     "value": 0.42,
+     "source": "brief_extraction",
+     "raw_value": 420000,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "scheduling_and_training_cost",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Scheduling and training cost",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 100000,
+     "unit": "GBP",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "on_time_arrivals",
+    "ref": "F4",
+    "kind": "factor",
+    "label": "On-time arrivals",
+    "category": "observable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 100,
+     "unit": "%",
+     "value": 0.96,
+     "source": "brief_extraction",
+     "raw_value": 96,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "customer_complaints_and_extra_chasing",
+    "ref": "R1",
+    "kind": "risk",
+    "label": "Customer complaints and extra chasing",
+    "provenance": "from_brief"
+   },
+   {
+    "id": "customer_confidence_in_arrival_times",
+    "ref": "OC1",
+    "kind": "outcome",
+    "label": "Customer confidence in arrival times",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "ref_high_water": {
+   "D": 1,
+   "F": 4,
+   "G": 1,
+   "O": 3,
+   "R": 1,
+   "OC": 1
+  }
+ }
+}

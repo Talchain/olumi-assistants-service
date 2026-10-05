@@ -35,6 +35,8 @@ interface ServedDraft {
     readonly verdicts: Readonly<Record<string, string>>;
     /** literal@offset → the node the served build anchored it to (in_model items only). */
     readonly anchors: Readonly<Record<string, string>>;
+    /** The factors the served build listed as figures Olumi supplied (`inferred_factors`), in order. */
+    readonly inferred_factors: readonly string[];
   };
   readonly draft_graph: Record<string, unknown>;
 }
@@ -179,6 +181,38 @@ describe("RT-4 class A — a stated option figure the model carries is credited"
       expect(anchored).toBe(Object.keys(d.served.anchors).length);
     },
   );
+
+  it.each(FIXTURE.drafts.map((d) => [d.capture] as const))(
+    "%s: every item the served build had in the model keeps exactly its served anchor (or none)",
+    (capture) => {
+      const d = draft(capture);
+      const items = manifestFor(capture).items;
+      let checked = 0;
+      for (const [key, verdict] of Object.entries(d.served.verdicts)) {
+        if (verdict !== "in_model") continue;
+        const item = items.find((i) => `${i.literal}@${i.char_offset}` === key);
+        expect(item?.verdict, `${capture} ${key}`).toBe("in_model");
+        expect(item?.matched_node_id ?? null, `${capture} ${key}`).toBe(d.served.anchors[key] ?? null);
+        checked += 1;
+      }
+      expect(checked).toBe(Object.values(d.served.verdicts).filter((v) => v === "in_model").length);
+    },
+  );
+
+  it.each(FIXTURE.drafts.map((d) => [d.capture] as const))(
+    "%s: crediting an option's level never removes its factor from the figures Olumi supplied",
+    (capture) => {
+      // The level is a figure ON the factor; the factor's own baseline and cap (e.g. £0 today, a £500k cap) stay Olumi's.
+      const d = draft(capture);
+      const fresh = deriveNotModelledManifest(FIXTURE.briefs[d.brief]!, structuredClone(d.draft_graph));
+      expect((fresh.inferred_factors?.items ?? []).map((i) => i.node_id)).toEqual(d.served.inferred_factors);
+    },
+  );
+
+  it("the inferred-factor rows see something: credited factors are on the served list", () => {
+    expect(draft("b1r3").served.inferred_factors).toContain("central_kitchen_fit_out_cost");
+    expect(draft("prod-b2").served.inferred_factors).toContain("annual_intervention_cost");
+  });
 
   it("the anchored-match rows see something: the corpus has served anchors", () => {
     expect(FIXTURE.drafts.reduce((n, d) => n + Object.keys(d.served.anchors).length, 0)).toBeGreaterThan(0);

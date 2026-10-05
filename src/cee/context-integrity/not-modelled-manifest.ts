@@ -49,7 +49,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
-import { statedEffectQuoteMatches } from "../provenance/stated-effect.js";
+import { statedEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -1274,6 +1274,10 @@ interface Candidate {
   /** The unit string the model declared, verbatim. A count can only match a
    *  carrier that declares the same unit family. */
   readonly declaredUnit: string | null;
+  /** An edge's `natural_effect` figure, not a node's own value: it never certifies the NODE's figure as the user's. */
+  readonly carrier?: "edge_effect";
+  /** The one place in the brief this figure may match. Absent means anywhere. */
+  readonly boundSpan?: { readonly start: number; readonly end: number };
   /** An option's level on this factor (`collectSourceBoundInterventionCandidates`).
    *  Admitted only under Science's W2/W3, see {@link admissibleCandidates}. */
   readonly optionLevel?: true;
@@ -1499,27 +1503,45 @@ function collectBriefNaturalEffectCandidates(
     const sourceLabel = labels.get(from);
     const targetLabel = labels.get(to);
     if (sourceLabel === undefined || targetLabel === undefined) continue;
-    const quote = p.quote;
-    if (typeof quote !== "string" || quote.length === 0 || !briefText.includes(quote)) continue;
+    // ⭐⭐ A FIGURE HELD IN AN EDGE'S natural_effect IS NEVER `absent` (served false absence, #87 5996437122;
+    // AIE capture-b43bb79e/c1). The served agent route admits a stated size WITHOUT a `provenance.quote`
+    // (`admit-candidate.ts:116` has no such field), so requiring one made this whole route dead on the default path:
+    // "£75,000 a year" and "£12,000 upfront" read `absent` while two edges held them, and the coach told the user
+    // they "aren't represented". The warrant without a quote is the writer's own rule: `magnitude: 'user_stated'`
+    // is written ONLY on the user's own size (`value-warrant-guard.ts:810`), and the figure binds to the one place the
+    // brief states it (below). A quote that IS present must still be the user's words verbatim and must still match
+    // the whole effect.
+    const quote = typeof p.quote === "string" && p.quote.length > 0 ? p.quote : null;
+    if (quote !== null && !briefText.includes(quote)) continue;
 
     const amount = natural.amount;
     const amountUnit = natural.amount_unit;
     const perSourceChange = natural.per_source_change;
     const perSourceChangeUnit = natural.per_source_change_unit;
-    if (
-      typeof amount !== "number" ||
-      typeof amountUnit !== "string" ||
-      typeof perSourceChange !== "number" ||
-      typeof perSourceChangeUnit !== "string" ||
-      !statedEffectQuoteMatches(quote, {
+    if (typeof amount !== "number" || typeof amountUnit !== "string") continue;
+    // ⛔ Without a quote, nothing says WHICH written figure the edge holds (Codex r1 on #2601: "Pension contributions are
+    // £75,000 a month" was credited to the spending edge too). So the edge binds to the ONE place the brief states its
+    // amount in its declared currency AND period, read by the quote check's own reader: "£75,000 a month" is not
+    // GBP/year. Two such places, or none, and it is not credited — the figure stays visibly unmatched, never guessed.
+    let boundSpan: { start: number; end: number } | undefined;
+    if (quote === null) {
+      const spans = statedTargetAmountSpans(briefText, amount, amountUnit);
+      if (spans.length !== 1) continue;
+      boundSpan = spans[0];
+    }
+    const quoteVerified =
+      quote !== null &&
+      typeof perSourceChange === "number" &&
+      typeof perSourceChangeUnit === "string" &&
+      statedEffectQuoteMatches(quote, {
         amount,
         amount_unit: amountUnit,
         per_source_change: perSourceChange,
         per_source_change_unit: perSourceChangeUnit,
-      })
-    ) continue;
+      });
+    if (quote !== null && !quoteVerified) continue;
     const effectDirection = edge.effect_direction;
-    const signedEffect = Math.sign(amount) * Math.sign(perSourceChange);
+    const signedEffect = Math.sign(amount) * Math.sign(typeof perSourceChange === "number" ? perSourceChange : 1);
     if (
       (effectDirection === "positive" && signedEffect < 0) ||
       (effectDirection === "negative" && signedEffect >= 0)
@@ -1529,14 +1551,20 @@ function collectBriefNaturalEffectCandidates(
       out.push({
         nodeId: to,
         label: targetLabel,
+        // Held SIGNED, as the edge holds it; `matchCandidate` also accepts the magnitude when the user wrote no sign.
         value: amount * multiplier,
         unitKind: kind,
         currencyCode: currencyCode ?? null,
         declaredUnit: amountUnit,
+        carrier: "edge_effect",
+        ...(boundSpan !== undefined ? { boundSpan } : {}),
       });
     }
 
+    // The SOURCE-side figure is a stated figure only when the quote proved the user wrote it. Without a quote it is
+    // the producer's encoding (an option's on/off is `100 %`), never something the user said — so it is not offered.
     if (
+      quoteVerified &&
       typeof perSourceChange === "number" && Number.isFinite(perSourceChange) &&
       typeof perSourceChangeUnit === "string" && perSourceChangeUnit.trim().length > 0
     ) {
@@ -1548,6 +1576,7 @@ function collectBriefNaturalEffectCandidates(
         unitKind: kind,
         currencyCode: currencyCode ?? null,
         declaredUnit: perSourceChangeUnit,
+        carrier: "edge_effect",
       });
     }
   }
@@ -1764,8 +1793,12 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
 function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidate | null {
   if (q.value === null) return null;
   for (const c of candidates) {
+    if (c.boundSpan !== undefined && !(q.at < c.boundSpan.end && q.at + q.literal.length > c.boundSpan.start)) continue;
     if (!unitCompatible(q, c)) continue;
     if (numbersEqual(c.value, q.value)) return c;
+    // An edge holds its effect SIGNED (−75000 = "reducing … by £75,000"). A figure written WITHOUT a sign is a
+    // magnitude whose direction lives in the verb, so it matches |amount|; a written sign is compared as written.
+    if (c.carrier === "edge_effect" && q.value > 0 && numbersEqual(Math.abs(c.value), q.value)) return c;
   }
   return null;
 }
@@ -1787,6 +1820,13 @@ function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidat
 function admissibleCandidates(q: Quantity, s: Surfaces): readonly Candidate[] {
   if (!s.candidates.some((c) => c.optionLevel === true)) return s.candidates;
   const withoutOptionLevels = (): readonly Candidate[] => s.candidates.filter((c) => c.optionLevel !== true);
+  // ⛔ FALLBACK ONLY (Codex r2 (b) on #2603): an option level may turn an unmatched figure into a credit, never move
+  // one the model already accounts for. A served limit row carries no `source_quote`, so W2 alone could not see it:
+  // the £120k limit's anchor moved from the limit's node to the tool's cost. Any other carrier, or the model text,
+  // keeps the figure, exactly as before this route existed.
+  if (matchCandidate(q, withoutOptionLevels()) !== null || appearsInStrings(q, s.modelStrings)) {
+    return withoutOptionLevels();
+  }
   if (classifyStatedKind(q, s.limitSpans) === "constraint") return withoutOptionLevels();
   // Own span: an option level is offered only to the one literal it was bound to (`bindOptionLevels`).
   const offered = s.candidates.filter((c) => c.optionLevel !== true || c.boundAt === q.at);
@@ -2036,7 +2076,12 @@ export function deriveNotModelledManifest(
 
   for (const q of quantities) {
     const { verdict, matched } = classify(q, surfaces);
-    if (matched !== null) matchedNodeIds.add(matched.nodeId);
+    // An edge's figure is the user's EFFECT size, not the node's own value: crediting it must never hide Olumi's own
+    // estimate on that node from `inferred_factors` (Codex r1 on #2601).
+    // An option's level, like an edge's effect, is a figure ON the factor, not the factor's own: crediting it never
+    // certifies the factor's baseline or cap as the user's (RT-4 class A, #2603: the £250k fit-out level would have
+    // hidden that Olumi set that factor's £0 today and £500k cap).
+    if (matched !== null && matched.carrier !== "edge_effect" && matched.optionLevel !== true) matchedNodeIds.add(matched.nodeId);
     if (verdict === "in_model") {
       inModel += 1;
       if (matched !== null) inModelAnchored += 1;
