@@ -97,7 +97,7 @@ export interface DispatchStructuralChallengeParams {
 
 export type StructuralChallengeDispatchResult =
   | { readonly kind: 'no_run' }
-  | { readonly kind: 'result'; readonly result: StructuralChallengeResultV1; readonly labels: ReadonlyMap<string, string>; readonly certainty?: StructuralChallengeCertainty; readonly finalRead?: StructuralChallengeFinalRead; readonly candidateLeaderLicence?: LeaderLicence; readonly baselineRunIdentity?: SelectedRunIdentity; readonly identicalArms?: boolean };
+  | { readonly kind: 'result'; readonly result: StructuralChallengeResultV1; readonly labels: ReadonlyMap<string, string>; readonly certainty?: StructuralChallengeCertainty; readonly finalRead?: StructuralChallengeFinalRead; readonly candidateLeaderLicence?: LeaderLicence; readonly baselineRunIdentity?: SelectedRunIdentity; readonly identicalArms?: boolean; readonly identicalGroups?: readonly (readonly string[])[]; readonly leaderSameAs?: readonly string[] };
 
 function currentFacts(context: Awaited<ReturnType<typeof buildTurnContext>>): readonly HandlerFact[] {
   const history = seedHistoryFacts({ scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set }) ?? [];
@@ -438,5 +438,5 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   });
   if (!parsed.success) return refuse('failed', 'candidate_unparseable', labels);
   log.info({ event: 'structural_challenge.result', request_id: requestId, status: 'completed', claims: parsed.data.claims.length }, 'structural challenge');
-  return { kind: 'result', labels, result: parsed.data, certainty: compared.certainty, finalRead: finalFreshness.finalRead, candidateLeaderLicence, baselineRunIdentity, identicalArms: compared.identical_arms };
+  return { kind: 'result', labels, result: parsed.data, certainty: compared.certainty, finalRead: finalFreshness.finalRead, candidateLeaderLicence, baselineRunIdentity, identicalArms: compared.identical_arms, identicalGroups: compared.identical_groups, leaderSameAs: compared.leader_same_as };
 }

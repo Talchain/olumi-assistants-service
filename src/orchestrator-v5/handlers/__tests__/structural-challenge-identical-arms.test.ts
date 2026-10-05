@@ -81,13 +81,36 @@ const DISTINCT: Record<string, Stats> = {
 const hasLink = (g: Rec, l: { from_id: string; to_id: string }) => (g.edges as Rec[]).some((e) => e.from === l.from_id && e.to === l.to_id);
 
 /** same_unequal: identical outcomes but the served (unequal) win shares. served_no_nvalid: no valid-draw counts. */
-type Shape = 'served' | 'same' | 'distinct' | 'near_same' | 'same_unequal' | 'served_no_nvalid';
+type Shape = 'served' | 'same' | 'distinct' | 'near_same' | 'same_unequal' | 'served_no_nvalid' | 'pair_same' | 'distinct_change' | 'served_pair';
+/** SYNTHETIC pair_same (revenue-lost link removed): Integration ≡ Carry On — both leave AI capacity at today's 0% —
+ *  so their wins split; AI Reporting Module Sprint distinct with the larger single share. */
+const PAIR: Record<string, Stats> = {
+  ai_reporting_module_sprint: { w: 0.4, mean: 0.016, std: 0.05, p10: -0.045, p50: 0.014, p90: 0.085 },
+  integration_bug_fix_sprint: { w: 0.3, mean: 0.012, std: 0.05, p10: -0.05, p50: 0.01, p90: 0.08 },
+  continue_current_plan: { w: 0.3, mean: 0.012, std: 0.05, p10: -0.05, p50: 0.01, p90: 0.08 },
+};
+/** SYNTHETIC served_pair (the served beat-4 link removed): AI Reporting Module Sprint ≡ Carry On — both leave
+ *  integration capacity at today's 0% — while Integration Bug Fix Sprint still differs through the other path. */
+const SERVED_PAIR: Record<string, Stats> = {
+  ai_reporting_module_sprint: { w: 0.3, ...SAME },
+  continue_current_plan: { w: 0.3, ...SAME },
+  integration_bug_fix_sprint: { w: 0.4, mean: -0.0012, std: 0.0415, p10: -0.054, p50: -0.002, p90: 0.051 },
+};
+/** SYNTHETIC distinct_change: every arm distinct; Integration Bug Fix Sprint clearly leads. */
+const CHANGE: Record<string, Stats> = {
+  ai_reporting_module_sprint: { w: 0.25, mean: 0.012, std: 0.05, p10: -0.05, p50: 0.01, p90: 0.08 },
+  integration_bug_fix_sprint: { w: 0.6, mean: 0.02, std: 0.05, p10: -0.04, p50: 0.018, p90: 0.09 },
+  continue_current_plan: { w: 0.15, mean: 0.009, std: 0.05, p10: -0.052, p50: 0.006, p90: 0.075 },
+};
 function rowsOf(shape: Shape, options: Rec[]): Rec[] {
   const ids = options.map((o) => String(o.option_id ?? o.id));
   return options.map((o, i) => {
     const id = ids[i];
     const s: Stats = shape === 'served' || shape === 'served_no_nvalid' ? SERVED[id] ?? { w: 0, mean: 0.01, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
       : shape === 'same_unequal' ? { ...SAME, w: SERVED[id]?.w ?? 0 }
+      : shape === 'pair_same' ? PAIR[id] ?? { w: 0, mean: 0.009, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
+      : shape === 'served_pair' ? SERVED_PAIR[id] ?? { w: 0, mean: 0.0005, std: 0.04, p10: -0.05, p50: 0.0001, p90: 0.05 }
+      : shape === 'distinct_change' ? CHANGE[id] ?? { w: 0, mean: 0.008, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
       : shape === 'distinct' ? DISTINCT[id] ?? { w: 0, mean: 0.009, std: 0.05, p10: -0.05, p50: 0.001, p90: 0.08 }
         // near_same: one arm differs by 1e-9 relative in its mean only (a contrast for the 1e-12 tolerance).
         : { ...SAME, w: 1 / ids.length, ...(shape === 'near_same' && i === 0 ? { mean: SAME.mean * (1 + 1e-9) } : {}) };
@@ -222,8 +245,10 @@ describe('SCI-DEEP: the candidate is licensed on the baseline admission and its 
   it('R3: arms identical in BOTH versions never say the lead rests on the link', async () => {
     const h = await harness(LEAD_LINK, 'same', 'same');
     expect(h.turn.reply).not.toContain('rests entirely');
-    expect(h.turn.reply).not.toContain('come out the same');
+    expect(h.turn.reply).not.toContain('your options all come out the same');
     expect(h.turn.identicalArms).toBe(false);
+    // Still true and disclosed: without the link they come out the same, so no candidate leader is compared.
+    expect(h.turn.reply).toContain('come out the same, so which option leads isn\'t compared for that version.');
   });
 
   it('R4: arms that differ by 1e-9 relative are not identical (tolerance contrast)', async () => {
@@ -301,6 +326,43 @@ describe('SCI-DEEP: Codex review 1 findings (a690458b)', () => {
     expect(reply.match(/isn't available in at least one version/g)).toHaveLength(1);
     expect(reply).toContain('- How often each option reaches the target isn\'t available in at least one version, so it isn\'t compared.');
     for (const [i, id] of ids.entries()) expect(reply).toContain(`- ${h.turn.labels.get(id)} — baseline: Stored sentence ${i + 1}.`);
+  });
+});
+
+describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candidate leader', () => {
+  it('R0 (served beat 4, RED-first): AI Reporting Module Sprint ≡ Carry On without the link → its edge over Carry On rests on the link', async () => {
+    const h = await harness(LEAD_LINK, 'served_pair');
+    expect(h.turn.result?.status).toBe('completed');
+    expect(h.turn.identicalArms).toBe(false);
+    expect(h.turn.identicalGroups).toEqual([['ai_reporting_module_sprint', 'continue_current_plan']]);
+    expect(h.turn.leaderSameAs).toEqual(['continue_current_plan']);
+    expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
+    expect(h.turn.reply.split('\n')[0]).toBe('Without the link from Enterprise prospect signing likelihood to Quarterly revenue, AI Reporting Module Sprint comes out the same as Continue Current Plan, so its edge over it rests entirely on this link.');
+    expect(h.turn.reply).toContain('- Without the link, AI Reporting Module Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
+    expect(h.turn.reply).not.toContain('Which option leads cannot be compared');
+    expect(h.turn.reply).not.toContain('your options all come out the same');
+  });
+
+  it('D1 (RED before the fix): a pair WITHOUT the leader identical → no candidate leader, the pair disclosed, no "edge" claim', async () => {
+    const h = await harness(OTHER_LINK, 'pair_same');
+    expect(h.turn.result?.status).toBe('completed');
+    expect(h.turn.identicalArms).toBe(false);
+    expect(h.turn.identicalGroups).toEqual([['integration_bug_fix_sprint', 'continue_current_plan']]);
+    expect(h.turn.leaderSameAs).toEqual([]);
+    expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
+    expect(h.turn.reply).not.toContain('leads in both versions');
+    expect(h.turn.reply).not.toContain('leads in the version without the link');
+    expect(h.turn.reply).not.toContain('rests entirely');
+    expect(h.turn.reply).toContain('- Without the link, Integration Bug Fix Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
+    expect(h.turn.reply).not.toContain('Which option leads cannot be compared');
+  });
+
+  it('D2 (contrast): every arm distinct → a clear leader change is still stated, and nothing is disclosed as the same', async () => {
+    const h = await harness(OTHER_LINK, 'distinct_change');
+    expect(h.turn.identicalGroups).toEqual([]);
+    expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: 'integration_bug_fix_sprint', verdict: 'changes', basis: 'leader_changed' });
+    expect(h.turn.reply).toContain('In the version without the link from Revenue lost to trial abandonment to Quarterly revenue, Integration Bug Fix Sprint leads');
+    expect(h.turn.reply).not.toContain('come out the same');
   });
 });
 

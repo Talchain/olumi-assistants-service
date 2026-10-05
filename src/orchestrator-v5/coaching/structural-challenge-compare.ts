@@ -220,6 +220,11 @@ export type CompareStructuralChallengeOutput =
       /** Every arm of the candidate RESULT is identical, and the baseline's arms are not: the difference between the
        *  options rests entirely on the removed link. CEE-local rendering carrier; never on the published result. */
       readonly identical_arms: boolean;
+      /** Otherwise, the candidate's groups of identical arms (each blocks the candidate leader). CEE-local. */
+      readonly identical_groups: readonly (readonly string[])[];
+      /** The other members of the group holding the ENTITLED baseline leader, when the baseline separates them from
+       *  it: the leader's edge over them rests entirely on the removed link. Empty otherwise. CEE-local. */
+      readonly leader_same_as: readonly string[];
     }
   | { readonly ok: false; readonly reason: 'baseline_unreadable' | 'candidate_unparseable' };
 
@@ -231,7 +236,7 @@ const ARM_STATS = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
  * Every submitted arm's outcome, or null when ANY arm is unusable: a missing row, a non-computed status (the same
  * gate `optionRows` applies), no positive valid-draw count, or a non-finite mean/std.
  */
-function usableArmOutcomes(fact: HandlerFact): Rec[] | null {
+function usableArmOutcomes(fact: HandlerFact): { readonly id: string; readonly outcome: Rec }[] | null {
   const result = (fact as { result?: Rec }).result;
   const enrichment = isRec(result?.enrichment) ? result.enrichment : null;
   if (enrichment === null) return null;
@@ -242,13 +247,13 @@ function usableArmOutcomes(fact: HandlerFact): Rec[] | null {
   const source = Array.isArray(current) ? current : readOptionResultSources(enrichment)[0] ?? [];
   const rows = new Map<string, Rec>();
   for (const o of source) if (isRec(o) && typeof o.option_id === 'string') rows.set(o.option_id, o);
-  const arms: Rec[] = [];
+  const arms: { readonly id: string; readonly outcome: Rec }[] = [];
   for (const id of submitted.options) {
     const row = rows.get(id);
     if (row === undefined || !isRecommendableOption(row) || !isRec(row.outcome)) return null;
     const n = num(row.outcome.n_valid_samples);
     if (n === null || !Number.isSafeInteger(n) || n <= 0 || num(row.outcome.mean) === null || num(row.outcome.std) === null) return null;
-    arms.push(row.outcome);
+    arms.push({ id, outcome: row.outcome });
   }
   return arms;
 }
@@ -263,20 +268,56 @@ const sameStat = (x: unknown, y: unknown): boolean => {
  * and the same valid-draw count. Read from the RESULT, never from graph structure: with no option reaching the goal,
  * ISL evaluates every arm on the same draws, so the arms come out identical.
  */
+const sameArm = (a: Rec, b: Rec): boolean => num(a.n_valid_samples) === num(b.n_valid_samples)
+  && ARM_STATS.every((k) => (a[k] === undefined && b[k] === undefined) || sameStat(a[k], b[k]));
+
 export function runArmsIdentical(fact: HandlerFact): boolean {
   const arms = usableArmOutcomes(fact);
-  if (arms === null) return false;
-  const first = arms[0];
-  return arms.every((arm) => num(arm.n_valid_samples) === num(first.n_valid_samples)
-    && ARM_STATS.every((k) => (first[k] === undefined && arm[k] === undefined) || sameStat(first[k], arm[k])));
+  return arms !== null && arms.every((arm) => sameArm(arms[0].outcome, arm.outcome));
+}
+
+/**
+ * Groups (two or more, submitted order) of usable arms that come out identical. An identical pair splits its wins
+ * (ISL shares ties), so ANY such group means the Run's win shares cannot name a leader (DL ruling, #2575).
+ */
+export function runIdenticalArmGroups(fact: HandlerFact): string[][] {
+  const arms = usableArmOutcomes(fact);
+  if (arms === null) return [];
+  const groups: string[][] = [];
+  const grouped = new Set<number>();
+  for (let i = 0; i < arms.length; i++) {
+    if (grouped.has(i)) continue;
+    const group = [arms[i].id];
+    for (let j = i + 1; j < arms.length; j++) {
+      if (!grouped.has(j) && sameArm(arms[i].outcome, arms[j].outcome)) { group.push(arms[j].id); grouped.add(j); }
+    }
+    if (group.length > 1) groups.push(group);
+  }
+  return groups;
 }
 
 /** Affirmatively distinct: every arm usable, and some arm's mean or std differs beyond the tolerance. */
 export function runArmsDistinct(fact: HandlerFact): boolean {
   const arms = usableArmOutcomes(fact);
   if (arms === null) return false;
-  return arms.some((arm) => !sameStat(arms[0].mean, arm.mean) || !sameStat(arms[0].std, arm.std));
+  return arms.some((arm) => !sameStat(arms[0].outcome.mean, arm.outcome.mean) || !sameStat(arms[0].outcome.std, arm.outcome.std));
 }
+
+/** The entitled baseline leader's identical companions in the candidate, each affirmatively distinct in the baseline. */
+function leaderSameAs(baselineFact: HandlerFact, claims: readonly StructuralChallengeClaimV1[], groups: readonly (readonly string[])[]): string[] {
+  const leader = claims.find((c) => c.kind === 'leader');
+  const named = leader?.kind === 'leader' ? leader.baseline_option_id : null;
+  const group = named === null ? undefined : groups.find((g) => g.includes(named));
+  const arms = usableArmOutcomes(baselineFact);
+  if (group === undefined || arms === null) return [];
+  const outcome = new Map(arms.map((a) => [a.id, a.outcome]));
+  const mine = outcome.get(named as string);
+  const others = group.filter((id) => id !== named);
+  return mine !== undefined && others.every((id) => { const o = outcome.get(id); return o !== undefined && !sameArm(mine, o); }) ? others : [];
+}
+
+const identicalCarriers = (identicalArms: boolean, groups: readonly (readonly string[])[]) =>
+  ({ identical_arms: identicalArms, identical_groups: identicalArms ? [] : groups });
 
 function deltaOnlyBasis(noise: RunDeltaNoiseVerdictLiteral): StructuralChallengeClaimV1['basis'] {
   return noise === 'within_noise' ? 'within_noise' : noise === 'not_noise_qualified' ? 'not_noise_qualified' : 'no_licensed_boundary';
@@ -315,14 +356,16 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   const identityChanged = identityStatus(a.enrichment) !== identityStatus(b.enrichment);
   const claims: StructuralChallengeClaimV1[] = [];
   const candidateArmsIdentical = runArmsIdentical(input.candidateFact);
+  const candidateGroups = runIdenticalArmGroups(input.candidateFact);
 
   // ── Leader ─────────────────────────────────────────────────────────────────────────────────────────────────────
   {
     const entitledA = mayPresentComparedRunLeader(input.turnMayNameLeader, input.baselineFact);
     const entitledB = mayPresentComparedRunLeader(input.candidateMayNameLeader ?? input.turnMayNameLeader, input.candidateFact);
     const idA = entitledA ? leaderOf(input.baselineFact) : null;
-    // Identical arms have no leader, whatever win shares the Run carries: never name one (DL condition 1).
-    const idB = idA !== null && entitledB && !candidateArmsIdentical ? leaderOf(input.candidateFact) : null;
+    // Identical arms split their wins, whatever shares the Run carries: ANY identical group means no candidate leader
+    // is named (DL condition 1; DL ruling on partial disconnection, #2575).
+    const idB = idA !== null && entitledB && candidateGroups.length === 0 ? leaderOf(input.candidateFact) : null;
     const base = { kind: 'leader' as const, baseline_option_id: idA, alternative_option_id: idB };
     if (idA === null || idB === null) {
       claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side', invariant_by_construction: false });
@@ -453,5 +496,6 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   return { ok: true, pair_provenance, claims, certainty: {
     baseline: readStoredGoalCertainty((input.baselineFact as { result?: Rec }).result?.goal_certainty),
     alternative: readStoredGoalCertainty((input.candidateFact as { result?: Rec }).result?.goal_certainty),
-  }, identical_arms: candidateArmsIdentical && runArmsDistinct(input.baselineFact) };
+  }, ...identicalCarriers(candidateArmsIdentical && runArmsDistinct(input.baselineFact), candidateGroups),
+  leader_same_as: leaderSameAs(input.baselineFact, claims, candidateGroups) };
 }

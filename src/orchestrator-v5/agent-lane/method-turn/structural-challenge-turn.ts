@@ -35,6 +35,10 @@ export interface StructuralChallengeReplyInput {
   readonly claimPermissions?: ClaimPermissions;
   /** Every arm of the version without the link came out identical (its RESULT), while the baseline's did not. */
   readonly identicalArms?: boolean;
+  /** Otherwise, groups of arms that came out identical without the link: no leader is compared for that version. */
+  readonly identicalGroups?: readonly (readonly string[])[];
+  /** The baseline leader's identical companions without the link (distinct in the baseline). */
+  readonly leaderSameAs?: readonly string[];
 }
 
 function chance(p: number): string {
@@ -155,8 +159,14 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
   const leader = result.claims.find((c) => c.kind === 'leader');
   const named = leader?.kind === 'leader' && leader.baseline_option_id !== null ? leader.baseline_option_id : null;
 
+  const listOf = (names: readonly string[]) => names.length <= 1 ? names.join('')
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  const sameAs = input.identicalArms === true || named === null ? [] : input.leaderSameAs ?? [];
   let headline: string;
-  if (input.identicalArms === true) {
+  if (sameAs.length > 0 && named !== null) {
+    // The licensed baseline leader comes out the same as these options without the link (the candidate RESULT).
+    headline = `Without ${link}, ${label(named)} comes out the same as ${listOf(sameAs.map(label))}, so its edge over ${sameAs.length === 1 ? 'it' : 'them'}${caveat ? `${caveat},` : ''} rests entirely on this link.`;
+  } else if (input.identicalArms === true) {
     // The candidate RESULT has no leader to name: every arm is the same. The baseline's licensed leader may be named.
     headline = named !== null
       ? `Without ${link}, your options all come out the same in this model, so ${label(named)}’s lead${caveat ? `${caveat},` : ''} rests entirely on this link.`
@@ -182,6 +192,8 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
   }
   lines.push('What I tested: the same model and inputs, recomputed with only this link removed. The two Runs are separately sampled (unpaired). It compares these two model versions; it doesn\'t say which version of the model is right.');
   const bullet = (cs: readonly StructuralChallengeClaimV1[]) => cs.map((c) => `- ${claimLine(c, label, input.certainty, caveat)}`);
+  const groupLines = (input.identicalArms === true ? [] : input.identicalGroups ?? []).map((g) =>
+    `- Without the link, ${listOf(g.map(label))} come out the same, so which option leads isn't compared for that version.`);
   const identicalLine = input.identicalArms === true
     ? ['- Without the link, no option leads: every option comes out the same, so the choice between them makes no difference in that version.'] : [];
   if (changes.length > 0 || identicalLine.length > 0) lines.push('', 'What changes:', ...identicalLine, ...bullet(changes));
@@ -196,12 +208,14 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
     return generic.baseline || generic.alternative ? { optionId: c.option_id, baseline, alternative, generic } : null;
   };
   const aggregated = open.map(nullSides).filter((x): x is NonNullable<ReturnType<typeof nullSides>> => x !== null);
-  const uncertain = bullet(open.filter((c) => nullSides(c) === null && !(input.identicalArms === true && c.kind === 'leader')));
+  const uncertain = bullet(open.filter((c) => nullSides(c) === null
+    && !((input.identicalArms === true || groupLines.length > 0) && c.kind === 'leader')));
+  uncertain.unshift(...groupLines);
   if (aggregated.length > 0) {
     const names = aggregated.map((x) => label(x.optionId));
     const roster = result.claims.filter((c) => c.kind === 'goal_probability').length;
     const whom = aggregated.length === roster && roster > 1 ? 'each option reaches'
-      : names.length === 1 ? `${names[0]} reaches` : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} reach`;
+      : names.length === 1 ? `${names[0]} reaches` : `${listOf(names)} reach`;
     const where = aggregated.every((x) => x.generic.baseline && x.generic.alternative) ? 'either version' : 'at least one version';
     const stored = aggregated.filter((x) => !x.generic.baseline || !x.generic.alternative).map((x) => `- ${label(x.optionId)} — ${
       x.generic.baseline ? `Without the link: ${x.alternative}` : `baseline: ${x.baseline}`}`);
@@ -218,7 +232,9 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
 
   const from = label(result.alternative.from_id);
   const to = label(result.alternative.to_id);
-  lines.push('', input.identicalArms === true
+  lines.push('', sameAs.length > 0 && named !== null
+    ? `Next step: ${label(named)}’s edge over ${listOf(sameAs.map(label))} flows only through this link. Check the evidence for how ${from} affects ${to} before relying on it.`
+    : input.identicalArms === true
     ? `Next step: this link carries the whole difference between your options. Check the evidence for how ${from} affects ${to} before relying on ${named !== null ? `${label(named)}’s lead` : 'the comparison'}.`
     : changes.length > 0
     ? `Next step: the two model versions differed in ${changes.map((c) => c.kind === 'leader' ? 'which option leads' : c.kind === 'goal_probability' ? `${label(c.option_id)}’s target certainty` : c.kind === 'outcome_level' ? `${label(c.option_id)}’s position relative to the target` : `${label(c.option_id)}’s frequency within ${label(c.constraint_id ?? '')}`).join('; ')}. What evidence do you have for the link from ${from} to ${to}? Review that evidence before deciding whether to keep the link.`
@@ -281,6 +297,8 @@ export interface StructuralChallengeTurn {
   readonly presentedProvisionalFigures?: boolean;
   readonly baselineRunIdentity?: SelectedRunIdentity;
   readonly identicalArms?: boolean;
+  readonly identicalGroups?: readonly (readonly string[])[];
+  readonly leaderSameAs?: readonly string[];
 }
 
 /** Each receipt (dispatch, final, replay) applies this adapter with SAME-read baseline authority.
@@ -319,7 +337,7 @@ export function structuralChallengeTurnUnderLicence(
   };
   return { ...turn, result, presentedLicence: licence, presentedProvisionalFigures: provisionalFigures,
     reply: composeStructuralChallengeReply({ result, labels: turn.labels,
-      certainty: turn.certainty, leaderLicence: licence, claimPermissions, identicalArms: turn.identicalArms }) };
+      certainty: turn.certainty, leaderLicence: licence, claimPermissions, identicalArms: turn.identicalArms, identicalGroups: turn.identicalGroups, leaderSameAs: turn.leaderSameAs }) };
 }
 
 export const STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY =
@@ -388,7 +406,7 @@ export async function structuralChallengeTurnFor(
   const dispatched = await ask(link);
   if (dispatched.kind === 'no_run') return { reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, outcome: 'no_run', result: null, labels: new Map(), actions };
   const turn: StructuralChallengeTurn = {
-    reply: composeStructuralChallengeReply({ result: dispatched.result, labels: dispatched.labels, certainty: dispatched.certainty, identicalArms: dispatched.identicalArms }),
+    reply: composeStructuralChallengeReply({ result: dispatched.result, labels: dispatched.labels, certainty: dispatched.certainty, identicalArms: dispatched.identicalArms, identicalGroups: dispatched.identicalGroups, leaderSameAs: dispatched.leaderSameAs }),
     outcome: dispatched.result.status,
     result: dispatched.result,
     labels: dispatched.labels,
@@ -396,6 +414,8 @@ export async function structuralChallengeTurnFor(
     candidateLeaderLicence: dispatched.candidateLeaderLicence,
     baselineRunIdentity: dispatched.baselineRunIdentity,
     identicalArms: dispatched.identicalArms,
+    identicalGroups: dispatched.identicalGroups,
+    leaderSameAs: dispatched.leaderSameAs,
     actions,
   };
   return structuralChallengeTurnUnderLicence(turn, dispatched.finalRead);
