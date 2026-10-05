@@ -214,6 +214,20 @@ describe('ceilingTheUserWroteFor: a ceiling is the USER\'S only where the brief 
     expect(ceilingTheUserWroteFor(4, '%', SERVED.brief)).toBe(false);
   });
 
+  it('⭐ SCOPE (Codex P1-a round 2): "Churn target 2%; tax below 2%" never lends tax\'s ceiling to churn; the churn clause still can', () => {
+    const scope = { target: ['Monthly churn'], others: ['Tax rate', 'Monthly support tickets'] };
+    expect(ceilingTheUserWroteFor(2, '%', 'Churn target 2%; tax below 2%.', scope)).toBe(false);
+    expect(ceilingTheUserWroteFor(2, '%', 'Churn target 2%; tax below 2%.'), 'unscoped, the borrow is what scope exists to stop').toBe(true);
+    expect(ceilingTheUserWroteFor(2, '%', 'Keep churn below 2%; tax is 2%.', scope)).toBe(true);
+  });
+
+  it('⭐ the SERVED B2 brief, scoped with the SERVED graph\'s own labels → the 2% ceiling is churn\'s', () => {
+    const graph = SERVED.captures.staging_a4977d9d!.graph as { nodes: { kind: string; label: string }[] };
+    const others = graph.nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision' && n.label !== 'monthly churn').map((n) => n.label);
+    expect(others.length, 'the served graph names other quantities').toBeGreaterThan(3);
+    expect(ceilingTheUserWroteFor(2, '%', SERVED.brief, { target: ['monthly churn'], others })).toBe(true);
+  });
+
   it.each([
     ['below, before the figure', 'Keep patient falls below 2 per month.', 2, 'falls per month', true],
     ['at most, money', 'We want to cut it to at most £36k a month.', 36000, 'GBP/month', true],
@@ -227,6 +241,20 @@ describe('ceilingTheUserWroteFor: a ceiling is the USER\'S only where the brief 
     ['negated: "don\'t let it fall below"', "Don't let margin fall below 2%.", 2, '%', false],
     ['a FLOOR', 'Get conversion above 5%.', 5, '%', false],
     ['the words on ANOTHER figure', 'Get churn to 2% with no more than 3 new hires.', 2, '%', false],
+    // Codex buddy round 2 on df3cbd84:
+    ['"by … or less": a change, the after-figure words too', 'Reduce churn by 2% or less.', 2, '%', false],
+    ['"by a maximum of": a change', 'Reduce churn by a maximum of 2%.', 2, '%', false],
+    ['"no less than": a FLOOR', 'Keep margin no less than 2%.', 2, '%', false],
+    ['"below or equal to"', 'Keep churn below or equal to 2%.', 2, '%', true],
+    ['"under the 2% target"', 'Keep churn under the 2% target.', 2, '%', true],
+
+    // MC's served-brief NEGATIVES (#87 RT-10, MC frozen corpus): a horizon, an option that keeps things as they are, a
+    // qualitative limit with no figure. None is ever the user's ceiling.
+    ['MC: a horizon, "within 9 months"', 'Our goal is to get monthly churn below 2% within 9 months.', 9, 'months', false],
+    ['MC: a horizon, "within the next 6 months"', 'We want to reach £240,000 within the next 6 months.', 6, 'months', false],
+    ['MC: an option, "keep pricing as it is"', 'We could keep pricing as it is at £49 a month.', 49, 'GBP per month', false],
+    ['MC: an option, "keep the present timetable"', 'Or we keep the present timetable of 12 weeks.', 12, 'weeks', false],
+    ['MC: a qualitative limit, no figure', 'Returns and packing capacity could limit how much of the extra output actually sells.', 1, 'units', false],
   ] as const)('%s → %s', (_n, text, value, unit, expected) => {
     expect(ceilingTheUserWroteFor(value, unit, text)).toBe(expected);
   });

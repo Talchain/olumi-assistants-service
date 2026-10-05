@@ -60,23 +60,39 @@ export function timesTheUserWrote(value: number, unit: unknown, userText: string
 }
 
 /**
- * ⛔ RT-10 (Codex buddy P1 on #2585; Science 5 Oct (1): the comparator must be the USER'S, "never a drafter default").
- * Whether `userText` writes `value`, in `unit`, as a CEILING on a level: a ceiling word right before that very figure
- * ("below 2%", "at most £36k", "under about £40k", "down to 2%") or right after it ("2% or less", "£36k max"). The
- * drafter must type a comparator (the schema's enum is required), so "Monthly churn target 2%" carries one the user never
- * wrote. NOT a ceiling on a level: the word after "by" ("reduce costs by at most 10%" is a change, R1 S1), or within
- * three words of "not" / "never" / "-n't" ("must not go below 2%" is a FLOOR). Tied to the figure, unlike `comparatorTheUserWrote` (which reads both ways on a brief that
- * also says "more than a day"). Every miss under-claims: the comparator is not held and the goal reads as base.
+ * ⛔ RT-10 (Codex buddy P1 on #2585, rounds 1-2; Science 5 Oct (1): the comparator must be the USER'S, "never a drafter
+ * default"). Whether `userText` writes `value`, in `unit`, as a CEILING ON A LEVEL of the goal: a ceiling phrase right
+ * before that very figure ("below 2%", "at most £36k", "under the 2% target", "below or equal to 2%") or right after it
+ * ("2% or less", "£36k max"). The drafter must type a comparator (the schema's enum is required), so "Monthly churn
+ * target 2%" carries one the user never wrote.
+ *
+ * Read in the figure's own clause (ends at . ! ? ; , : a dash or a new line, as `figureTheUserWroteFor`), and NOT the
+ * user's ceiling on a level when, before the figure in that clause:
+ *   - "by" is written: a change ("reduce costs by at most 10%", "by a maximum of 2%", "by 2% or less"; R1 S1);
+ *   - "not" / "never" / "-n't" is written: a denial, and often a FLOOR ("must not go below 2%");
+ *   - the phrase is "no less / lower / fewer than": a FLOOR.
+ * With `scope`, the figure must also be written ABOUT the goal (`figureTheUserWroteFor` at that very amount): "Churn
+ * target 2%; tax below 2%" never lends tax's ceiling to churn. Every miss under-claims: no comparator is held and the
+ * goal reads as base.
  */
-const CEILING_BEFORE_FIGURE = /(?<!\bby\s+)(?<!(?:\bnot|\bnever|n't)\s+(?:\w+\s+){0,3})\b(?:below|under|beneath|less\s+than|lower\s+than|fewer\s+than|at\s+most|no\s+more\s+than|not\s+more\s+than|no\s+higher\s+than|up\s+to|(?:a\s+)?maximum\s+of|max(?:imum)?|down\s+to|capped\s+at)\s+(?:(?:about|around|roughly|approximately|just)\s+)?$/i;
+const CEILING_BEFORE_FIGURE = /(?<!\bno\s+)\b(?:(?:below|under|less\s+than)\s+or\s+equal\s+to|below|under|beneath|less\s+than|lower\s+than|fewer\s+than|at\s+most|no\s+more\s+than|no\s+higher\s+than|up\s+to|(?:a\s+)?maximum\s+of|max(?:imum)?|down\s+to|capped\s+at)\s+(?:(?:the|about|around|roughly|approximately|just)\s+)?$/i;
 const CEILING_AFTER_FIGURE = /^[^\S\n]*(?:or\s+(?:less|lower|below|under|fewer)|at\s+most|max(?:imum)?)\b/i;
+/** Before the figure in its clause: a change ("by") or a denial (not / never / -n't) — never the user's ceiling on a level. */
+const CHANGE_OR_DENIAL_BEFORE = /\bby\b|\bnot\b|\bnever\b|n['\u2019]t\b/i;
 
-export function ceilingTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined): boolean {
+export function ceilingTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope?: EntityScope): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).some((a) => amountIs(a, value, unit, family, userText)
-    && (CEILING_BEFORE_FIGURE.test(userText.slice(Math.max(0, a.index - 48), a.index))
-      || CEILING_AFTER_FIGURE.test(userText.slice(a.index + a.matchedText.length, a.index + a.matchedText.length + 24))));
+  return findStatedAmounts(userText).some((a) => {
+    if (!amountIs(a, value, unit, family, userText)) return false;
+    const before = userText.slice(0, a.index);
+    const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
+    const clauseBefore = before.slice(clauseStart);
+    if (CHANGE_OR_DENIAL_BEFORE.test(clauseBefore)) return false;
+    const end = a.index + a.matchedText.length;
+    const ceiling = CEILING_BEFORE_FIGURE.test(clauseBefore) || CEILING_AFTER_FIGURE.test(userText.slice(end, end + 24));
+    return ceiling && (scope === undefined || figureTheUserWroteFor(value, unit, userText, { ...scope, at: a.index }));
+  });
 }
 
 /**
@@ -340,7 +356,8 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // (`ceilingTheUserWroteFor`): the drafter must type some comparator, and one it chose is not the user's. A change
   // target keeps its verb's sign as before; a floor is held exactly as before.
   const ceilingOnALevel = !isChange && (typed === '<' || typed === '<=');
-  const operator = ceilingOnALevel && !ceilingTheUserWroteFor(Math.round((written.figure as number) * 1e9) / 1e9, written.unit, brief)
+  const operator = ceilingOnALevel && !ceilingTheUserWroteFor(Math.round((written.figure as number) * 1e9) / 1e9, written.unit, brief,
+    quantityScope(nodes, (node as { readonly label?: unknown }).label))
     ? undefined
     : typed;
   const direction = operator !== undefined;
