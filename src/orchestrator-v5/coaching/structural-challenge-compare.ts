@@ -260,7 +260,7 @@ function usableArmOutcomes(fact: HandlerFact): ArmOutcome[] | null {
 }
 
 /** Each submitted arm of this fact usable ON ITS OWN (`usableArmsFromRows`): an unusable arm never hides a pair. */
-function individuallyUsableArms(fact: HandlerFact): ArmOutcome[] {
+function individuallyUsableArms(fact: HandlerFact, trustedDrawsOnly = false): ArmOutcome[] {
   const result = (fact as { result?: Rec }).result;
   const enrichment = isRec(result?.enrichment) ? result.enrichment : null;
   const submitted = enrichment === null ? null : submittedIdentities(enrichment, fact);
@@ -268,7 +268,7 @@ function individuallyUsableArms(fact: HandlerFact): ArmOutcome[] {
   const nested = isRec(enrichment.results) ? enrichment.results : {};
   const current = Array.isArray(enrichment.option_comparison) ? enrichment.option_comparison : nested.option_comparison;
   const source = Array.isArray(current) ? current : readOptionResultSources(enrichment)[0] ?? [];
-  return usableArmsFromRows(source, [...submitted.options]);
+  return usableArmsFromRows(source, [...submitted.options], { trustedDrawsOnly });
 }
 
 /**
@@ -489,5 +489,6 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     baseline: readStoredGoalCertainty((input.baselineFact as { result?: Rec }).result?.goal_certainty),
     alternative: readStoredGoalCertainty((input.candidateFact as { result?: Rec }).result?.goal_certainty),
   }, ...identicalCarriers(candidateArmsIdentical && runArmsDistinct(input.baselineFact), candidateGroups),
-  leader_same_as: leaderSameAs(input.baselineFact, claims, candidateGroups) };
+  // Attribution is AFFIRMATIVE: only groups whose arms carry their valid-draw counts (Codex #2574 r3 P1).
+  leader_same_as: leaderSameAs(input.baselineFact, claims, identicalArmGroups(individuallyUsableArms(input.candidateFact, true))) };
 }

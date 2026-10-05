@@ -37,7 +37,12 @@ export interface ArmOutcome { readonly id: string; readonly outcome: Rec }
  * trusted draw count, finite mean and std. An unusable arm never hides a pair among the others: this reader only BLOCKS
  * a comparison, so it must see every pair a ranking could read.
  */
-export function usableArmsFromRows(rows: readonly unknown[], submittedIds: readonly string[]): ArmOutcome[] {
+export function usableArmsFromRows(
+  rows: readonly unknown[], submittedIds: readonly string[],
+  /** For an AFFIRMATIVE claim ("its edge rests entirely on this link"): the valid-draw count must be present, never
+   *  the `n_samples` fallback. Blocking keeps the fallback (Codex #2574 r3 P1). */
+  opts: { readonly trustedDrawsOnly?: boolean } = {},
+): ArmOutcome[] {
   const byId = new Map<string, Rec[]>();
   for (const row of rows) {
     if (!isRec(row)) continue;
@@ -51,6 +56,7 @@ export function usableArmsFromRows(rows: readonly unknown[], submittedIds: reado
     const row = found[0];
     if (!isRecommendableOption(row) || !isRec(row.outcome)) continue;
     if (drawCount(row.outcome) === null || num(row.outcome.mean) === null || num(row.outcome.std) === null) continue;
+    if (opts.trustedDrawsOnly === true && drawCount({ n_valid_samples: row.outcome.n_valid_samples }) === null) continue;
     arms.push({ id, outcome: row.outcome });
   }
   return arms;

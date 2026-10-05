@@ -253,6 +253,16 @@ describe('gate 1 v2 — run_analysis path', () => {
     expect(outcome.assistant_text).not.toMatch(/currently leads|scored highest/);
   });
 
+  it('Codex r3 P1: every robustness carrier goes with the comparison (synthesis + per-row); a distinct Run keeps them', async () => {
+    const withRobustness = (b: Rec): Rec => ({ ...b, robustness_synthesis: { overall_assessment: 'high' },
+      option_comparison: (b.option_comparison as Rec[]).map((r) => ({ ...r, robustness: { overall_robustness: 'high' } })) });
+    const { enrichment } = await runHandler(graphOf(OPTIONS), OPTIONS, withRobustness(threeArm()));
+    expect(enrichment.robustness_synthesis).toBeUndefined();
+    expect(readOptionResultSources(enrichment)[0]!.every((r) => r.robustness === undefined)).toBe(true);
+    const contrast = await runHandler(graphOf(OPTIONS), OPTIONS, withRobustness(threeArm(nudged('mean', 1e-6))));
+    expect(contrast.enrichment.robustness_synthesis).toEqual({ overall_assessment: 'high' });
+  });
+
   it('DL contrast on the run path: a distinct arm (relative 1e-6) keeps every share and the leader', async () => {
     const { outcome, fact, enrichment } = await runHandler(graphOf(OPTIONS), OPTIONS, threeArm(nudged('mean', 1e-6)));
     const rows = readOptionResultSources(enrichment)[0]!;

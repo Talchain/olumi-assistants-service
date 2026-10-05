@@ -239,7 +239,9 @@ export const OUTCOME_KEPT_CLAIMS: readonly WithheldGoalClaim[] = ['goal_probabil
  * Leader and flip facts computed from the same comparison as the withheld figures (PLoT #416's list, R3 5888737291):
  * which option does best when, how close it is, and what would flip it. Withheld with them.
  */
-const COMPARISON_DERIVED_KEYS = ['flip_thresholds', 'conditional_winners', 'p_win_sensitivity', 'factor_evppi', 'decision_evpi'] as const;
+// `robustness_synthesis` is a robustness carrier `compactAnalysis` reads FIRST (Codex #2574 r3 P1): emptying `robustness`
+// alone left a withheld comparison still described as robust.
+const COMPARISON_DERIVED_KEYS = ['flip_thresholds', 'conditional_winners', 'p_win_sensitivity', 'factor_evppi', 'decision_evpi', 'robustness_synthesis'] as const;
 const BRIEF_LEADER_KEYS = ['headline', 'headline_banded', 'robustness', 'robustness_caveat', 'what_would_change'] as const;
 const SUMMARY_LEADER_KEYS = ['goal_fit', 'win_probability', 'leading_option', 'robustness_band'] as const;
 
@@ -265,6 +267,8 @@ export function withholdOptionGoalFigures<E>(
     const out: Record<string, unknown> = { ...r };
     delete out.win_probability;
     delete out.rank;
+    // A per-row robustness reading is the same comparison claim as the top-level one emptied below.
+    delete out.robustness;
     const id = optionIdOf(r);
     if (id !== undefined && withheld.has(id)) {
       delete out.probability_of_goal;
