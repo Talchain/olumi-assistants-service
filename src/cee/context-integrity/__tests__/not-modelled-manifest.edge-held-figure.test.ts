@@ -39,7 +39,7 @@ const manifestOf = (brief: string, graph: Graph) => {
   return m;
 };
 const rows = (brief: string, graph: Graph) => {
-  const items = (manifestOf(brief, graph).quantities?.items ?? []) as Item[];
+  const items: readonly Item[] = manifestOf(brief, graph).quantities?.items ?? [];
   // Addressed by WHERE the user wrote it (Codex r1 on #2601): one literal can occur twice and mean two things.
   return {
     at: (literal: string, offset: number): Item => {
