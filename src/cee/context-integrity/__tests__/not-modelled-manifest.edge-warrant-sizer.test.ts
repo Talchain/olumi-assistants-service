@@ -55,12 +55,28 @@ describe("PR-U2a: an edge figure is the user's when the USER sized it, whatever 
     expect(at(FIXTURE.brief_text, g, AT_1200, "£1,200").verdict).toBe("absent");
   });
 
-  // Review Desk class check: the chat-edit writer (`link-effect-edit.ts`, source `user_specified`) is a NEW candidate if
-  // the warrant were magnitude alone. A chat size can only COINCIDE with a brief figure, so it never credits one.
-  it("a size the user said in CHAT (`user_specified` + `user_stated`) never credits a coinciding brief figure", () => {
-    const g = fresh();
-    Object.assign(priceEdge(g).provenance, { source: "user_specified", magnitude: "user_stated" });
-    expect(at(FIXTURE.brief_text, g, AT_1200, "£1,200").verdict).toBe("absent");
+  // Review Desk class check + Science ruling (chat-sized edge CREDITED by the same one-span C3 rule): the chat-edit writer
+  // (`link-effect-edit.ts`, source `user_specified`) sizes a link with the figure the user repeats from their brief.
+  describe("a size the user said in CHAT (`user_specified` + `user_stated`)", () => {
+    const chatSized = (g: Graph) => {
+      const e = g.edges.find((x) => x.from === "customer_losses_from_price_rise" && x.to === MRR) as { provenance: Record<string, unknown> };
+      Object.assign(e.provenance, { source: "user_specified", magnitude: "user_stated" });
+      return g;
+    };
+    // The brief with ONE "£300 a month" (the price-per-customer clause dropped), so the effect's figure has one place.
+    const oneSpan = FIXTURE.brief_text.replace(" from 400 customers paying £300 a month", "");
+    const at300 = (brief: string) => brief.indexOf("£300");
+    it("credits the ONE brief span stating its amount in its currency and period", () => {
+      expect(oneSpan.indexOf("£300", at300(oneSpan) + 1)).toBe(-1);
+      expect(at(oneSpan, chatSized(fresh()), at300(oneSpan), "£300")).toEqual({ verdict: "in_model", matched: MRR });
+    });
+    it("CONTRAST: two brief £300 spans → neither", () => {
+      expect(at(FIXTURE.brief_text, chatSized(fresh()), 455, "£300").verdict).toBe("absent");
+    });
+    it("CONTRAST: a brief \"£300 a year\" conflicts with the chat size's £/month → not credited", () => {
+      const yearly = oneSpan.replace("removes £300 a month", "removes £300 a year");
+      expect(at(yearly, chatSized(fresh()), at300(yearly), "£300").verdict).toBe("absent");
+    });
   });
 
   // Two places, the same unit: nothing says which one the edge holds, so neither is credited (#2601 ruling; a

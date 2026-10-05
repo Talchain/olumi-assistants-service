@@ -1494,13 +1494,13 @@ function collectBriefNaturalEffectCandidates(
     const provenance = edge.provenance;
     if (provenance === null || typeof provenance !== "object" || Array.isArray(provenance)) continue;
     const p = provenance as Record<string, unknown>;
-    // ⭐ WHO SIZED IT, not where the link came from (MC P0 F5, PR-U2a): an inferred link (`cee_hypothesis`) the user's own
-    // BRIEF figure sizes carries `magnitude: 'user_stated'`, and "What I was given" must agree with the turn that says the
-    // figure is theirs. The writers of that stamp: construction (`cee/magnitude/link-effect.ts`, userSizeEarned), the
-    // records projector (quoted), and a size said back in CHAT (`link-effect-edit.ts`, source `user_specified`). The
-    // chat size is not the brief's figure — it can only COINCIDE with one — so it never credits a brief figure
-    // (Science ruling pending; the conservative default adds no new credit). An Olumi estimate never counts.
-    if (p.magnitude !== "user_stated" || p.source === "user_specified") continue;
+    // ⭐ WHO SIZED IT, not where the link came from (MC P0 F5, PR-U2a): `magnitude: 'user_stated'` is the user's own size
+    // — written by construction (`cee/magnitude/link-effect.ts`, userSizeEarned), the records projector (quoted) and a
+    // size said back in CHAT (`link-effect-edit.ts`, source `user_specified`). Science ruled the chat size is credited by
+    // the SAME one-span C3 binding as every other user_stated edge (#87 Science DM 5 Oct, citing RT-6 B4 5998132756):
+    // the user repeating their brief figure to size a link must not leave "What I was given" saying it is missing.
+    // An Olumi estimate never counts.
+    if (p.magnitude !== "user_stated") continue;
     const effect = p.natural_effect;
     if (effect === null || typeof effect !== "object" || Array.isArray(effect)) continue;
     const natural = effect as Record<string, unknown>;
