@@ -411,9 +411,9 @@ describe('§4 the statement is never re-emitted into composed prose (R-004 half)
 });
 
 // ============================================================================
-// ⭐ A5 — the Runs beyond the 20-row window feed the LENS REPLAY ONLY (Codex #2572 P2). The judgement signals take Run
-// boundaries from array position, so a ledger Run appended after the window — not proven older than it — would make an
-// answered objection "unanswered" again.
+// ⭐ A5 — the authoritative Run history feeds the LENS REPLAY ONLY (Codex #2572). The judgement signals take Run boundaries
+// from array position, so a newer Run outside the window must never reach them: it would make an answered objection
+// "unanswered" again.
 // ============================================================================
 
 describe('A5 — an answered objection stays answered when the lens replay reads Runs beyond the window', () => {
@@ -429,7 +429,7 @@ describe('A5 — an answered objection stays answered when the lens replay reads
       persistedGraph: GRAPH,
       persistedGraphHash: RUN_HASH,
       priorTurnFactsForLensHistory: window,
-      ...(beyond !== undefined ? { lensReplayRunsBeyondWindow: beyond } : {}),
+      ...(beyond !== undefined ? { lensReplayRuns: beyond } : {}),
     }).blocks);
   /** A ledger Run the window lacks, computed AFTER the window's own Run (a concurrent persist). */
   const newerLedgerRun = (): HandlerFact => {
@@ -443,9 +443,13 @@ describe('A5 — an answered objection stays answered when the lens replay reads
     expect(composeWith(FACTS_DISSENT_NEWER)).toContain('STATED_DISSENT_UNANSWERED');
   });
 
+  it('RED: an OPEN objection in the window still shows its card when the lens replay has its own history', () => {
+    expect(composeWith(FACTS_DISSENT_NEWER, [priorAnalysisFact()])).toContain('STATED_DISSENT_UNANSWERED');
+  });
+
   it('RED: the objection is older than the window\'s Run (answered) + a newer Run beyond the window → still no card', () => {
     const answered = [priorAnalysisFact(), dissentFact('strengthen:flip:edge_9', 'run_1770', STATEMENT)];
     expect(composeWith(answered)).not.toContain('STATED_DISSENT_UNANSWERED');
-    expect(composeWith(answered, [newerLedgerRun()])).not.toContain('STATED_DISSENT_UNANSWERED');
+    expect(composeWith(answered, [newerLedgerRun(), answered[0]!])).not.toContain('STATED_DISSENT_UNANSWERED');
   });
 });
