@@ -7,6 +7,7 @@ import { BUILD_INSTRUCTIONS, constructionOperationId, type CallStructuredModel }
 import { draftRecordsInstructionHash } from '../../../cee/draft/records/instruction.js';
 import { vNextDraftRecordsInstructionHash } from '../../../cee/draft/records/instruction-vnext.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
+import { userQuestionForAskItem } from '../../../cee/draft/records/user-asks.js';
 // RESTACK: the served wire is the V-NEXT strict schema, so the sealed records are the v-next hand-typed delta (same BRIEF).
 import { BRIEF, sealedRecordsVNext as sealedRecords, sealedRecordsVNextLinked } from '../../../cee/draft/records/__tests__/compile-spec/sealed-fixture-vnext.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -114,10 +115,12 @@ describe('records ToolResult adapter', () => {
       async () => ({ text: JSON.stringify(strictRecordsWire(records)) }), trace);
     expect(result.ok).toBe(true);
     // DL WIRING PORTS 3, port 1: the brief's deadline ("within 9 months") is asked FIRST, as on the legacy path; the
-    // compiler's own questions follow unchanged and in its order. (This row pinned the pre-port list, deadline absent.)
+    // compiler's own questions follow in its order. (This row pinned the pre-port list, deadline absent.)
+    // #2576 item 3 re-pin (reason): the compiler's questions reach the user in plain words (`userQuestionForAskItem`),
+    // never its model-facing `detail` (old: `...compiled.ask.items.map(item => item.detail)`).
     expect(result.open_questions).toEqual([
       'Does "Monthly recurring revenue" get there within 9 months? The model holds the deadline; no result answers that yet.',
-      ...compiled.ask.items.map(item => item.detail),
+      ...compiled.ask.items.map(item => userQuestionForAskItem(item)),
     ]);
     expect(result.not_represented).toEqual(compiled.projection.dropped);
     expect(trace.mock.calls).toEqual([[{ retried: false }]]);

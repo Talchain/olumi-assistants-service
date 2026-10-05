@@ -163,6 +163,23 @@ export interface CompletionAskItem {
    * (`BUCKET_C_CODES`), never restated here: see `isBlockingAskItem`.
    */
   readonly validatorCode: string | null;
+  /**
+   * ⭐ #2576 PRINCIPLE (DL audit, "no debugger words in user questions"): what the USER question for this item names,
+   * typed at the same push site as `detail`, so the two cannot drift. `detail` stays the completion turn's words (refs,
+   * reasons, field names); the user sentence is built from THESE by `userQuestionForAskItem` (`user-asks.ts`) and never
+   * from `detail`. Optional: an item built outside `enumerateCompletionAsk` (tests) says the kind's plain sentence alone.
+   */
+  readonly user?: AskItemUserWords;
+}
+
+/** The words a user question about an ask item may quote, and what it asks for. Never a ref, a reason code or an id. */
+export interface AskItemUserWords {
+  /** The item's own words: the user's quote or label (an Olumi claim's label for Olumi's own link), in order. */
+  readonly names: readonly string[];
+  /** `stated_link_unresolved`: what the brief left unstated, in plain words (`UNRESOLVED_LINK_ASKS`). */
+  readonly lacks?: readonly string[];
+  /** `constraint_target_unbindable`: whether the limit lacks what it applies to, or a level it can be applied at. */
+  readonly missing?: "target" | "threshold";
 }
 
 export interface CompletionAsk {
@@ -847,6 +864,7 @@ export function enumerateCompletionAsk(
       kind: "constraint_target_unbindable",
       detail: `"${limit.quote}" \u2014 this limit does not say what it bounds, so nothing is holding it; name the factor or outcome it applies to`,
       validatorCode: null,
+      user: { names: [limit.quote], missing: "target" },
     });
   }
 
@@ -863,6 +881,7 @@ export function enumerateCompletionAsk(
       kind: "stated_link_unresolved",
       detail: `"${quote}" \u2014 the brief does not state ${[...asks].join(", or ")}, so it was left open rather than assumed; please say`,
       validatorCode: null,
+      user: { names: [quote], lacks: [...asks] },
     });
   }
 
@@ -896,10 +915,12 @@ export function enumerateCompletionAsk(
                 kind: "constraint_target_unbindable",
                 detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} did not resolve (${d.reason}), so this limit is not attached to anything on the model`,
                 validatorCode: null,
+                user: { names: [d.label], missing: "target" },
               }
             : {
                 kind: "unresolved_reference",
                 detail: `"${d.label}" — ${d.from_ref ?? "(no from)"} → ${d.to_ref ?? "(no to)"} did not resolve (${d.reason})`,
+                user: { names: [d.label] },
                 // NON-BLOCKING BY CONSTRUCTION: this edge is in
                 // `projection.dropped`, which is disjoint from
                 // `projection.graph.edges`. The validator is handed the graph, so
@@ -941,6 +962,7 @@ export function enumerateCompletionAsk(
         push({
           kind: "constraint_target_unbindable",
           detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} is not a measured quantity, so it cannot carry a threshold; point this limit at the factor or outcome it bounds`,
+          user: { names: [d.label], missing: "target" },
           // NON-BLOCKING BY CONSTRUCTION, same as every reason above it: the
           // refusal withheld a BINDING, and the graph the validator is handed is
           // exactly the graph it would have been handed without the reference.
@@ -952,6 +974,7 @@ export function enumerateCompletionAsk(
           kind: "constraint_target_unbindable",
           detail: `"${d.label}" — this limit has no threshold we can apply, so it is not being enforced; if it states one, give its value, its direction and what it bounds`,
           validatorCode: null,
+          user: { names: [d.label], missing: "threshold" },
         });
         break;
       case "constraint_target_unit_mismatch":
@@ -959,6 +982,7 @@ export function enumerateCompletionAsk(
           kind: "constraint_target_unbindable",
           detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} measures a different quantity from this limit, so binding it would change what the limit means; point it at the node measured in the same unit`,
           validatorCode: null,
+          user: { names: [d.label], missing: "target" },
         });
         break;
       case "ref_kind_illegal":
@@ -968,6 +992,7 @@ export function enumerateCompletionAsk(
             d.refusal_rule === "option_controlled_target"
               ? `"${d.label}" — this points into a factor an option already sets, so it cannot also be driven by another factor; point it at what that factor AFFECTS instead`
               : `"${d.label}" — a link from a ${d.from_kind} to a ${d.to_kind} is not a shape this model can hold`,
+          user: { names: [d.label] },
           // NON-BLOCKING BY CONSTRUCTION, same reason: the projector's kind gate
           // refused this edge AT EMISSION. It is disclosed, not carried.
           validatorCode: null,
@@ -1084,6 +1109,7 @@ export function enumerateCompletionAsk(
         kind: "option_without_chain",
         detail: `the option "${node.label}" has no chain of causal_links that reaches the goal`,
         validatorCode: "NO_EFFECT_PATH",
+        user: { names: [node.label] },
       });
     }
   }
@@ -1104,6 +1130,8 @@ export function enumerateCompletionAsk(
   const goalStatedIndices = records.stated_items
     .map((s, i) => (s.kind === "goal" ? i : -1))
     .filter((i) => i >= 0);
+  // The user's own words for their goal, for the user question (never the `to_stated` index the model is shown).
+  const goalQuotes = goalStatedIndices.map((i) => records.stated_items[i]!.source_quote);
   const goalTargetPhrase =
     goalStatedIndices.length > 0
       ? goalStatedIndices.map((i) => `\`to_stated: ${i}\` (${JSON.stringify(records.stated_items[i]!.source_quote)})`).join(" or ")
@@ -1152,6 +1180,7 @@ export function enumerateCompletionAsk(
       detail:
         "this model has no goal, so nothing can be analysed against anything — file the objective the user stated as a `stated_items` entry of kind `goal`, quoting their own words, and link what you already emitted to it with `to_stated`",
       validatorCode: "MISSING_GOAL",
+      user: { names: [] },
     });
   }
 
@@ -1163,6 +1192,7 @@ export function enumerateCompletionAsk(
           ? "nothing you emitted terminates at the goal"
           : `nothing you emitted terminates at the goal — the goal is ${goalTargetPhrase}, and a link reaches it with that exact field, never with \`to_claim\``,
       validatorCode: "NO_PATH_TO_GOAL",
+      user: { names: goalQuotes },
     });
   }
 
@@ -1196,6 +1226,7 @@ export function enumerateCompletionAsk(
             ? "nothing in this model is an outcome or a risk — name the outcome the options produce as a factor claim, and link it to the goal"
             : `nothing in this model is an outcome or a risk, so there is nothing between the options and the goal — name the outcome(s) these options actually produce as your own \`factor\` claim, and link that factor to the goal with ${goalTargetPhrase}`,
         validatorCode: "MISSING_BRIDGE",
+        user: { names: goalQuotes },
       });
     }
   }
@@ -1233,6 +1264,7 @@ export function enumerateCompletionAsk(
         kind: "options_indistinguishable",
         detail: `${labels.map((l) => `"${l}"`).join(" and ")} change the same factors to the same levels, so nothing can tell them apart`,
         validatorCode: "OPTIONS_IDENTICAL",
+        user: { names: labels },
       });
     }
   }

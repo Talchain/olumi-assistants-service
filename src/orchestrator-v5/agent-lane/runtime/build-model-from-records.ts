@@ -19,6 +19,10 @@ import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { clampForPersist, refitFramesForStatedEffects } from '../refit-frames.js';
 import { holdStatedGoalAttributes } from '../stated-by-user.js';
+import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
+import { sizeLink } from '../../../cee/magnitude/link-effect.js';
+import { magnitudeNodes, percentLevelIds } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { userQuestionForAskItem } from '../../../cee/draft/records/user-asks.js';
 import { constructionOperationId, deadlineOpenQuestion, goalScopePendingAction, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import type { ToolResult } from './agent-tools.js';
@@ -305,6 +309,39 @@ function recordsGoalScope(scenarioId: string, records: DraftRecordSet, v1: V1Gra
   return { question: loss[0]!.reason, pending: goalScopePendingAction(scenarioId, held.goal.id, goal.metric, goal.scope, loss) };
 }
 
+/**
+ * ⭐ #2576 PORT (DL principle audit: "port the dropped served asks by CALLING the existing producers"): THE MAGNITUDE
+ * CONTRACT'S QUESTION FOR A USER'S OWN SIZE (D7), by calling its one producer, `sizeLink` (`cee/magnitude/link-effect.ts`),
+ * on the view the projector and the link-effect writer size on (`magnitudeNodes` + `percentLevelIds`). Each user-stated
+ * edge is re-read from what it carries (`provenance.natural_effect`: the user's amount, per-unit change and range end;
+ * `effect_direction`), on the graph AFTER `fitStatedEffects`: a size the refit made fit is no longer asked (legacy A4f,
+ * `build-model.ts`), a clamped one ("cut short in the analysis") and one that cannot hold across the options still are.
+ * Olumi's own sizes are not sized here: the records grammar carries Olumi's size as a bare `strength`, never an
+ * amount-per-change statement, so no set-aside estimate exists to ask about (STOP, reported).
+ */
+function recordsMagnitudeQuestions(v1: V1Graph, constraints: readonly GoalConstraintT[]): string[] {
+  type Natural = { amount?: unknown; per_source_change?: unknown; stated_range?: { low: number; high: number; text: string; end: 'low' | 'high' } };
+  const stated = v1.edges.filter((edge) => {
+    const p = (edge as { provenance?: { magnitude?: unknown; natural_effect?: Natural } }).provenance;
+    return p?.magnitude === 'user_stated' && p.natural_effect !== undefined;
+  });
+  if (stated.length === 0) return [];
+  const view = magnitudeNodes(v1.nodes.map((node) => ({ ...node, interventions: (node as { data?: { interventions?: unknown } }).data?.interventions })) as Record<string, unknown>[],
+    percentLevelIds({ goal_constraints: constraints }));
+  return stated.flatMap((edge) => {
+    const natural = (edge as { provenance?: { natural_effect?: Natural } }).provenance!.natural_effect!;
+    const source = view.get(edge.from);
+    const target = view.get(edge.to);
+    if (source === undefined || target === undefined || typeof natural.amount !== 'number' || typeof natural.per_source_change !== 'number') return [];
+    const sized = sizeLink({
+      direction: (edge as { effect_direction?: unknown }).effect_direction === 'negative' ? 'negative' : 'positive',
+      effect_amount: natural.amount, effect_per_source_change: natural.per_source_change, user_stated: true,
+      ...(natural.stated_range !== undefined ? { stated_range: natural.stated_range } : {}),
+    }, source, target);
+    return sized.question === undefined ? [] : [sized.question];
+  });
+}
+
 export async function buildModelFromRecords(
   scenarioId: string,
   brief: string,
@@ -438,6 +475,18 @@ export async function buildModelFromRecords(
   const deadline = recordsDeadlineQuestion(fitted, idOf, graph, brief);
   // PORT 2 (C46): the unstated goal scope, ahead of the deadline, exactly as the legacy constructor places it.
   const goalScope = recordsGoalScope(scenarioId, compiled.records, fitted, idOf, graph);
+  /**
+   * ⭐ #2576 PORT (DL ruling #72 5863840239 (ii) condition 2; 5865003207 §1): today's level of a quantity the user limits,
+   * and a limit on a quantity the options set at Olumi's figures, ASKED by CALLING their one producers
+   * (`limited-level-ask.ts`) on the graph this build registers — legacy's slot: behind the scope and deadline questions,
+   * ahead of the magnitude questions. Non-blocking, as on the legacy path.
+   */
+  const levelAsks = [
+    ...limitedLevelAsks({ nodes: graph.nodes, goal_constraints: graph.goal_constraints }),
+    ...optionSetLimitAsks({ nodes: graph.nodes, goal_constraints: graph.goal_constraints }),
+  ];
+  // The magnitude contract's own question for a user's size the model cannot hold as stated (legacy slot: after the level asks).
+  const magnitudeQuestions = recordsMagnitudeQuestions(fitted, limits.constraints.map((row) => ({ ...row, node_id: [...idOf].find(([, v3]) => v3 === row.node_id)?.[0] ?? row.node_id })));
   return {
     ok: true, mutated: true, ...(reg.json.replayed === true ? { replayed: true } : {}),
     ...(reg.json.model_version === undefined ? {} : { model_version: reg.json.model_version }),
@@ -450,7 +499,9 @@ export async function buildModelFromRecords(
     goal_constraints_carried: graph.goal_constraints?.length ?? 0,
     ...(limits.notCarried.length > 0 ? { goal_constraints_not_carried: limits.notCarried } : {}),
     open_questions: [...(goalScope.question !== undefined ? [goalScope.question] : []), ...(deadline !== undefined ? [deadline] : []),
-      ...compiled.ask.items.map(item => item.detail)],
+      ...levelAsks.map((ask) => ask.question), ...magnitudeQuestions,
+      // #2576: the compiler's asks in the user's words (`user-asks.ts`), never the completion turn's `detail`.
+      ...compiled.ask.items.map((item) => userQuestionForAskItem(item))],
     // Preserve the projector's typed identities and reasons; do not reconstruct them from labels.
     not_represented: compiled.projection.dropped,
   };
