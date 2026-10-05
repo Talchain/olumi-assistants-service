@@ -41,9 +41,19 @@ import {
   DRAFT_RECORD_STATED_KINDS,
   DRAFT_RECORD_VALUE_SCALES,
   type DraftRecordSet,
+  type DraftValueRange,
 } from "./grammar.js";
 import { projectRecordsToGraph, type RecordProjection } from "./projector.js";
 import { log } from "../../../utils/telemetry.js";
+
+/** Compatibility input only. The v-next schema never asks a model to repeat an effect. */
+export interface LegacyEffectDetail {
+  amount: number;
+  amount_unit: string;
+  per_source_change: number;
+  per_source_change_unit: string;
+  range?: DraftValueRange;
+}
 
 /**
  * The CEE-INTERNAL validator for what came back off the wire.
@@ -511,7 +521,7 @@ export function projectDraftRecords(
     "Draft record set accepted at the seam",
   );
 
-  return { ok: true, records, projection: projectRecordsToGraph(records, brief) };
+  return { ok: true, records, projection: projectRecordsToGraph(records, brief, undefined, rawJson as DraftRecordSet) };
 }
 
 /**
@@ -631,13 +641,21 @@ export function upgradeLegacyRecords(raw: unknown): unknown {
   const record = raw as Record<string, unknown>;
   if (!Array.isArray(record.stated_items)) return raw;
   const copy = structuredClone(record);
+  const clean=(owner:Record<string,unknown>,shape:Record<string,z.ZodTypeAny>)=>{for(const key of Object.keys(owner))if(owner[key]===null && shape[key]?.isOptional())delete owner[key];};
   copy.stated_items = (copy.stated_items as Record<string, unknown>[]).map(item => {
+    clean(item,StatedItemWire.shape);
+    if(item.range && typeof item.range==='object')clean(item.range as Record<string,unknown>,ValueRangeWire.shape);
+    if(item.relationship && typeof item.relationship==='object'){
+      clean(item.relationship as Record<string,unknown>,StatedRelationshipWire.shape);
+      const range=(item.relationship as Record<string,unknown>).range;
+      if(range && typeof range==='object')clean(range as Record<string,unknown>,ValueRangeWire.shape);
+    }
     const quote = typeof item.source_quote === "string" ? item.source_quote : "";
     const conflicts: string[] = [];
     let legacy = false;
     const convert = (owner: Record<string, unknown>, spanKey: string, literalKey: string, array = false) => {
       const span = owner[spanKey] as { start?: unknown; end?: unknown } | undefined;
-      if (span === undefined) return;
+      if (span === undefined || span === null) return;
       legacy = true;
       if (owner[literalKey] !== undefined) { conflicts.push("span_and_literal_both"); return; }
       if (typeof span.start === "number" && typeof span.end === "number" && Number.isInteger(span.start) && Number.isInteger(span.end)
@@ -655,5 +673,11 @@ export function upgradeLegacyRecords(raw: unknown): unknown {
     }
     return { ...item, ...(legacy ? { legacy_evidence: true } : {}), ...(conflicts.length ? { evidence_conflicts: conflicts } : {}) };
   });
+  if(Array.isArray(copy.claims))for(const claim of copy.claims as Record<string,unknown>[]){
+    clean(claim,InferenceClaimWire.shape);
+    if(claim.range && typeof claim.range==='object')clean(claim.range as Record<string,unknown>,ValueRangeWire.shape);
+    const detail=claim.effect_detail as Record<string,unknown> | undefined;
+    if(detail?.range===null)delete detail.range;
+  }
   return copy;
 }

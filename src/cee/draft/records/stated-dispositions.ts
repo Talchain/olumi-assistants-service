@@ -24,6 +24,12 @@ function field(value: unknown, path: readonly string[]): unknown {
   return value;
 }
 
+const FAILED_EVIDENCE = new Set<DroppedRecordRef['reason']>([
+  'literal_absent', 'literal_ambiguous', 'literal_not_whole_amount', 'literal_value_mismatch',
+  'span_and_literal_both', 'quantity_unit_undeclared', 'quantity_declaration_mismatch',
+  'unit_not_evidenced', 'unit_period_ambiguous', 'unit_literal_contradicts_unit',
+]);
+
 /** One receipt per input index, using only the projector's own identities and writes. */
 export function deriveStatedDispositions(
   records: DraftRecordSet,
@@ -37,6 +43,8 @@ export function deriveStatedDispositions(
     const origin = { stated_index, stated_item: originalRecords.stated_items[stated_index]! };
     const carry = (location: StatedCarrier, stored_value: unknown): StatedDisposition =>
       ({ ...origin, disposition: 'carried', location, stored_value });
+    const evidenceFailure = projection.dropped.find(d => d.stated_index === stated_index && FAILED_EVIDENCE.has(d.reason));
+    if (evidenceFailure !== undefined) return { ...origin, disposition: 'rejected', reason: evidenceFailure.reason };
     const nodeId = statedNodeIds.get(stated_index);
     const node = nodes.find(n => n.id === nodeId);
     // A typed relationship needs its executable bundle, never just its cause label.

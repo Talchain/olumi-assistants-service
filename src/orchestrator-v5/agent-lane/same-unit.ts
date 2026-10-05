@@ -4,6 +4,7 @@
  * the ONE Olumi-guess test DR row 4 and B6 share) can use `sameUnit` without importing admission (its import chain
  * reaches `placeholder-parts.ts` itself). `reconciling-product.ts` re-exports what it exported before.
  */
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 
 type Period = 'month' | 'year' | null;
@@ -117,6 +118,7 @@ export function evidencePeriod(parts: readonly string[]): Period | 'ambiguous' {
  * reads is compared word for word; no unit on either side is never the same.
  */
 export function sameUnit(a: unknown, b: unknown): boolean {
+  if(typeof a==='string' && typeof b==='string' && words(a).length===1 && words(b).length===1 && classifyUnitScaleClass(a)==='percent' && classifyUnitScaleClass(b)==='percent')return true;
   const ca = readCountRate(a); const cb = readCountRate(b);
   if (ca !== null || cb !== null) return ca !== null && cb !== null && ca.noun.join(' ') === cb.noun.join(' ') && ca.period === cb.period;
   const ma = readMoney(a, ''); const mb = readMoney(b, '');

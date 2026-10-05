@@ -495,6 +495,8 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/record-constraint-carrier.ts": 1,
   "cee/decision-review/shape-check.ts": 1,
   "cee/draft/records/projector.ts": 1,
+  // B7 centralises literal percent conventions in the typed-evidence helper.
+  "cee/draft/records/quantity-evidence.ts": 2,
   "cee/factor-extraction/display-value.ts": 7,
   "cee/factor-extraction/enricher.ts": 3,
   "cee/factor-extraction/index.ts": 4,

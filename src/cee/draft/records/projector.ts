@@ -1660,11 +1660,14 @@ function quotedEffectForEdge(args: {
   readonly nodes: readonly ProjectedNode[];
   readonly statedItems: readonly DraftStatedItem[];
   readonly brief: string;
+  readonly carrierForQuantity: (q:number)=>string|undefined;
 }): { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; authority: NonNullable<DraftStatedItem["relationship"]>; stated_range?: StatedRangeEnd; amount_range?: {low:number;high:number} } | undefined {
   const { edge, claim, nodes, statedItems, brief } = args;
   const source = nodes.find((node) => node.id === edge.from);
   const target = nodes.find((node) => node.id === edge.to);
   if (source === undefined || target === undefined) return undefined;
+  if(source.quantity_ref===undefined || target.quantity_ref===undefined
+    || args.carrierForQuantity(source.quantity_ref)!==source.id || args.carrierForQuantity(target.quantity_ref)!==target.id)return undefined;
   const entries = statedItems.filter(item => item.kind === "cause" && item.relationship?.from_quantity === source.quantity_ref
     && item.relationship?.to_quantity === target.quantity_ref && item.source_quote.length > 0 && brief.includes(item.source_quote));
   if(entries.length !== 1) return undefined;
@@ -2206,7 +2209,7 @@ function bindDirectStatedMagnitude(args: {
     };
   }
 
-  const ownedRange = admittedValueRange(claim.range ?? item.range, item.source_quote, claim.sets_to, item.unit);
+  const ownedRange = admittedValueRange(claim.range ?? item.range, item.source_quote, claim.sets_to, item.unit, item.legacy_evidence);
   return {
     stated_index: index,
     raw_value: claim.sets_to,
@@ -2704,7 +2707,7 @@ function projectOnce(
     // What it never knew is whether the brief SAYS this, and that is the thing
     // the user reads off the badge. Derived here, at the brief's bytes, by the
     // one authority the response transform also uses.
-    const briefBinding = statedValueIsBound(item, brief) ? "verified" : bindStatedItemToBrief({
+    const briefBinding = item.value_literal!==undefined ? (statedValueIsBound(item,brief) ? "verified" : "unverified") : bindStatedItemToBrief({
       quote: item.source_quote,
       value: item.value === undefined ? undefined : literalConventionValue(item.value,item.unit,item.value_scale),
       unit: item.unit,
@@ -3023,7 +3026,7 @@ function projectOnce(
       // a factor carrying constraint metadata matches NEITHER union branch and
       // 400s. Unit lives on `data`, never here.
       const statedRange = bindingEarnsBriefClaim(briefBinding)
-        ? admittedValueRange(item.range, item.source_quote, item.value, item.unit) : undefined;
+        ? admittedValueRange(item.range, item.source_quote, item.value, item.unit, item.legacy_evidence) : undefined;
       node.observed_state = {
         value: item.value,
         raw_value: item.value,
@@ -3494,6 +3497,7 @@ function projectOnce(
     if(item.kind!=="option" || item.value===undefined)return;
     const refuse=(reason:DroppedRecordRef["reason"])=>dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index:index,label:item.source_quote,reason});
     const q=item.quantity, declaration=q===undefined ? undefined : statedItems[q];
+    if(q===undefined && item.value_literal===undefined)return;
     if(q===undefined || declaration?.unit===undefined){refuse("option_lever_undeclared");return;}
     if(nodes.some(n=>n.kind==="goal" && n.quantity_ref===q)){refuse("option_lever_is_goal");return;}
     if(!statedValueIsBound(item,brief)){refuse("option_value_unbound");return;}
@@ -3865,13 +3869,20 @@ function projectOnce(
     const toKind=PROJECTED_KIND_AFTER_NORMALISATION[target.kind] ?? target.kind;
     if(source.id===target.id || UNRESCUABLE_EDGE_SHAPES.has(`${fromKind}->${toKind}`)
       || fromKind==="factor" && toKind==="factor" && isOptionControlledFactor(target.id,kindAtLinkTime,provisionalOptionTargets)) {refuse("relationship_endpoint_illegal");return;}
+    // Legacy claim-side repetition is a checked input, never a competing authority.
+    for(const c of claims){
+      if(c.effect_detail===undefined || !(c.basis ?? []).includes(stated_index))continue;
+      const fromId=c.from_claim===undefined ? statedIdByIndex.get(c.from_stated!) : claimIdByIndex.get(c.from_claim);
+      const toId=c.to_claim===undefined ? statedIdByIndex.get(c.to_stated!) : claimIdByIndex.get(c.to_claim);
+      if(nodes.find(n=>n.id===fromId)?.quantity_ref!==r.from_quantity || nodes.find(n=>n.id===toId)?.quantity_ref!==r.to_quantity){refuse("effect_detail_conflicts_with_relationship");return;}
+    }
     if(r.amount_unit===undefined || r.per_source_change_unit===undefined
       || !statedEffectQuoteMatches(item.source_quote,{amount:r.amount,amount_unit:r.amount_unit,per_source_change:r.per_source_change,per_source_change_unit:r.per_source_change_unit},r)) return;
     const direction=Math.sign(r.amount*r.per_source_change)<0 ? "negative" : "positive";
     const matches=edges.filter(e=>e.from===source.id && e.to===target.id);
     for(const e of matches){
       const origin=claimOriginByEdgeId.get(e.id), claim=origin===undefined ? undefined : claims[origin.index];
-      if(claim?.effect!==undefined && claim.effect!==direction){refuse("relationship_sign_conflicts_with_link");return;}
+      if(claim?.effect_detail!==undefined && claim.effect===undefined || claim?.effect!==undefined && claim.effect!==direction){refuse("relationship_sign_conflicts_with_link");return;}
       const d=claim?.effect_detail;
       if(d!==undefined && (d.amount!==r.amount || d.per_source_change!==r.per_source_change || !sameUnit(d.amount_unit,r.amount_unit) || !sameUnit(d.per_source_change_unit,r.per_source_change_unit))){refuse("effect_detail_conflicts_with_relationship");return;}
     }
@@ -4533,7 +4544,7 @@ function projectOnce(
       for (const edge of edges) {
         const origin = claimOriginByEdgeId.get(edge.id);
         const claim = origin === undefined ? undefined : claims[origin.index];
-        const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief });
+        const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief, carrierForQuantity:q=>carrier(q).node?.id });
         const target = nodes.find(node => node.id === edge.to);
         const source = current.get(edge.from);
         if (effect === undefined || target === undefined || source === undefined
@@ -4545,7 +4556,7 @@ function projectOnce(
         if (typeof sourceUnit !== "string" || !sameUnit(sourceUnit, effect.per_source_change_unit)) continue;
         const sourceFrame = resolveMagnitudeFrame(source);
         if (sourceFrame === undefined) continue;
-        const ownedRange = admittedValueRange(effect.authority.range ?? claim?.effect_detail?.range, effect.quote, Math.abs(effect.amount), effect.amount_unit);
+        const ownedRange = effect.authority.range ?? admittedValueRange(claim?.effect_detail?.range, effect.quote, Math.abs(effect.amount), effect.amount_unit);
         const amount = ownedRange === undefined ? Math.abs(effect.amount) : Math.max(Math.abs(ownedRange.low), Math.abs(ownedRange.high));
         const frame = amount / Math.abs(effect.per_source_change) * sourceFrame;
         if (!Number.isFinite(frame) || frame <= 1) continue;
@@ -4611,7 +4622,7 @@ function projectOnce(
       if (edge.origin !== "ai") continue;
       const origin = claimOriginByEdgeId.get(edge.id);
       const claim = origin === undefined ? undefined : claims[origin.index];
-      const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief });
+      const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief, carrierForQuantity:q=>carrier(q).node?.id });
       if (effect === undefined) continue;
       const key = JSON.stringify([effect.quote, effect.authority.from_quantity, effect.authority.to_quantity, effect.amount, effect.per_source_change]);
       const group = groups.get(key) ?? [];
@@ -5383,8 +5394,9 @@ export function projectRecordsToGraph(
   brief?: string,
   /** See `projectOnce`. Absent = byte-identical to the previous behaviour. */
   completionBoundary?: number,
+  /** Authored input before seam compatibility enrichment, for diagnostic receipts only. */
+  originalRecords: DraftRecordSet = records,
 ): RecordProjection {
-  const originalRecords = records;
   const located = locateRecordEvidence(records);
   const units = canonicalQuantityUnits(located.records);
   records = unifyGoalQuantityReferences(units.records);

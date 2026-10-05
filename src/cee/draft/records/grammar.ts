@@ -459,7 +459,7 @@ export type DraftRecordCategory = (typeof DRAFT_RECORD_CATEGORIES)[number];
 export const DRAFT_RECORD_EFFECTS = ["positive", "negative"] as const;
 export type DraftRecordEffect = (typeof DRAFT_RECORD_EFFECTS)[number];
 
-// ── The wire shapes (TS mirrors of the JSON Schema below) ───────────────────
+// ── Compiler shapes: v-next fields plus checked legacy inputs decoded by seam.ts ──
 
 /** What the user said. `id` is absent BY DESIGN — see design note 1. */
 /** UTF-16 offsets within the owning verbatim source_quote. */
@@ -616,14 +616,8 @@ export interface DraftInferenceClaim {
   range?: DraftValueRange;
   change_of?: number;
   effect?: DraftRecordEffect;
-  /** A user-quoted natural effect. All four fields are required when present. */
-  effect_detail?: {
-    amount: number;
-    amount_unit: string;
-    per_source_change: number;
-    per_source_change_unit: string;
-    range?: DraftValueRange;
-  };
+  /** Seam-only legacy checked input; absent from both v-next wire builders. */
+  effect_detail?: import('./seam.js').LegacyEffectDetail;
   strength?: number;
   category?: DraftRecordCategory;
   value?: number;
