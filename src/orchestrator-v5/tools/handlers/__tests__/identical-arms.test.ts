@@ -32,8 +32,8 @@ const SAME = { outcome: { p10: 10, p50: 20, p90: 30, mean: 20, std: 5, n_valid_s
   downside: { p05: 8, cvar_10: 6, expected_regret: 2 } };
 const OTHER = { outcome: { p10: 15, p50: 40, p90: 60, mean: 40, std: 9, n_valid_samples: 1000 },
   downside: { p05: 12, cvar_10: 10, expected_regret: 1 } };
-const BASELINE_LINE = " Hire Two came out identical to Carry On: in this model it doesn't change the outcome. The comparison is held back until it differs: edit its value, or remove it.";
-const PAIR_LINE = " Hire Two and Hire Three came out identical: in this model they lead to the same outcome. The comparison is held back until they differ: edit one of their values, or remove one.";
+const BASELINE_LINE = ' On your current model, Hire Two comes out the same as Carry On, so the comparison is held back. What would make them differ?';
+const PAIR_LINE = ' On your current model, Hire Two and Hire Three come out the same, so the comparison is held back. What would make them differ?';
 
 /** A PLoT-shaped body (golden envelope) whose rows carry `stats` per option id, shares as given. */
 function body(rows: Array<[string, string, Rec, number]>): Rec {
@@ -101,7 +101,7 @@ describe('gate 1 v2 — identical arms are detected on the Run\'s own result', (
     const all = body([['carry_on', 'Carry On', SAME, 1 / 3], ['hire_two', 'Hire Two', SAME, 1 / 3], ['tech_lead', 'Tech Lead', SAME, 1 / 3]]);
     const groups = detectIdenticalArms(all, OPTIONS);
     expect(groups.map((g) => g.option_ids)).toEqual([['carry_on', 'hire_two', 'tech_lead']]);
-    expect(buildIdenticalArmsDisclosure(groups)).toContain('Carry On, Hire Two and Tech Lead came out identical');
+    expect(buildIdenticalArmsDisclosure(groups)).toContain('On your current model, Carry On, Hire Two and Tech Lead come out the same');
   });
 
   it('(f) a missing outcome on either side is never identical', () => {
@@ -156,11 +156,24 @@ describe('gate 1 v2 — identical arms are detected on the Run\'s own result', (
     expect(TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.some((g) => g.name === 'IDENTICAL_ARMS_DISCLOSURE_RE_SRC')).toBe(true);
   });
 
+  it('PRODUCT TEST (DL, root CLAUDE.md §4): every identical-arms sentence is a model-relative finding, never advice', () => {
+    const ids = Array.from({ length: 7 }, (_, i) => `plan_${i}`);
+    const generic = buildIdenticalArmsDisclosure([{ option_ids: ids, labels: ids, baseline_option_id: null }]);
+    for (const line of [BASELINE_LINE, PAIR_LINE, generic]) {
+      expect(line.startsWith(' On your current model, ')).toBe(true);
+      expect(line).not.toMatch(/\b(edit|remove|delete|should|must|recommend|better|best|choose)\b/i);
+    }
+    // The question invites reasoning only where the options are NAMED.
+    for (const named of [BASELINE_LINE, PAIR_LINE]) expect(named.endsWith(' What would make them differ?')).toBe(true);
+  });
+
   it('Codex P2: past MAX_OPTIONS arms the disclosure is the ONE generic sentence, inside the grammar and the budget', () => {
     const ids = Array.from({ length: 7 }, (_, i) => `plan_${i}`);
     const labels = ids.map((_, i) => `Plan ${String.fromCharCode(65 + i)} ${'a'.repeat(193)}`);
     const said = buildIdenticalArmsDisclosure([{ option_ids: ids, labels, baseline_option_id: null }]);
-    expect(said).toBe(" Some options came out identical: in this model they lead to the same outcome. The comparison is held back until they differ: edit one of their values, or remove one.");
+    expect(said).toBe(' On your current model, some options come out the same, so the comparison is held back.');
+    // No unnamed question: the generic sentence names nobody, so it asks nothing.
+    expect(said).not.toContain('?');
     expect(said.length).toBeLessThanOrEqual(IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS);
     expect(new RegExp(`^(?:${IDENTICAL_ARMS_DISCLOSURE_RE_SRC})$`).test(said)).toBe(true);
     // Contrast: three pairs at the 200-character bound (six arms) are still named, and still inside the budget.
@@ -269,7 +282,8 @@ describe('gate 1 v2 — run_analysis path', () => {
     expect(rows.every((r) => typeof r.win_probability === 'number')).toBe(true);
     expect((enrichment.inference_warnings as Rec[] | undefined ?? []).some((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL)).toBe(false);
     expect(fact.result.leading_option_id).toBe('tech_lead');
-    expect(outcome.assistant_text).not.toContain('came out identical');
+    // The phrase every identical-arms sentence carries (BASELINE_LINE, PAIR_LINE, generic): absent on a distinct Run.
+    expect(outcome.assistant_text).not.toContain('so the comparison is held back');
   });
 
   it('DL placeholder ruling: an identical arm that MOVES a factor through an unsized link keeps that withhold too', async () => {

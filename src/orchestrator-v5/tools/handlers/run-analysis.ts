@@ -2026,7 +2026,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       const said = buildIdenticalArmsDisclosure(identicalArms).trim();
       response = withholdOptionGoalFigures(response, new Set(identicalArms.flatMap((g) => g.option_ids)), {
         code: GOAL_FIGURES_OPTIONS_IDENTICAL,
-        message: said.length > 0 && said.length <= 388 ? `Not shown. ${said}` : 'Not shown. Some options came out identical, so the comparison is held back until they differ.',
+        message: said.length > 0 && said.length <= 388 ? `Not shown. ${said}` : 'Not shown. On your current model, some options come out the same, so the comparison is held back.',
         severity: 'warning',
         option_ids: identicalArms.flatMap((g) => g.option_ids),
       }, { keepOutcome: true });

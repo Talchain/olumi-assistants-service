@@ -546,7 +546,7 @@ export function buildAnalysisSubmissionDisclosure(
   );
 }
 
-/** The arms ran: say which came out identical (DL wording, true whatever the cause) and what the user can do. */
+/** The arms ran: say, relative to the model, which come out the same (true whatever the cause), and ask what would make them differ. */
 export function buildIdenticalArmsDisclosure(groups: readonly IdenticalArmGroup[]): string {
   // ⛔ BOUNDED HERE, not by an upstream option cap (Codex #2574 P2: nothing on the run path enforces MAX_OPTIONS). Past
   // the grammar's bounds — more names than one list admits, more arms than MAX_OPTIONS, or more characters than the
@@ -559,11 +559,11 @@ export function buildIdenticalArmsDisclosure(groups: readonly IdenticalArmGroup[
     let sentence: string;
     if (ok && g.option_ids.length === 2 && baselineAt >= 0) {
       const arm = names[1 - baselineAt]!, baseline = names[baselineAt]!;
-      sentence = ` ${arm} came out identical to ${baseline}: in this model it doesn't change the outcome.${IDENTICAL_HOLD_BACK_ONE}`;
+      sentence = ` On your current model, ${arm} comes out the same as ${baseline}, so the comparison is held back.${IDENTICAL_ASK}`;
     } else if (ok) {
       const ordered = baselineAt >= 0 ? [names[baselineAt]!, ...names.filter((_, i) => i !== baselineAt)] : names as string[];
       const list = `${ordered.slice(0, -1).join(', ')} and ${ordered[ordered.length - 1]}`;
-      sentence = ` ${list} came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`;
+      sentence = ` On your current model, ${list} come out the same, so the comparison is held back.${IDENTICAL_ASK}`;
     } else {
       sentence = IDENTICAL_GENERIC_SENTENCE;
     }
@@ -573,18 +573,21 @@ export function buildIdenticalArmsDisclosure(groups: readonly IdenticalArmGroup[
   return out.length <= IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS ? out : IDENTICAL_GENERIC_SENTENCE;
 }
 
-/** What the user can do; the comparison is withheld (GOAL_FIGURES_OPTIONS_IDENTICAL) until the arms differ. */
-const IDENTICAL_HOLD_BACK_ONE = ' The comparison is held back until it differs: edit its value, or remove it.';
-const IDENTICAL_HOLD_BACK_MANY = ' The comparison is held back until they differ: edit one of their values, or remove one.';
-const IDENTICAL_GENERIC_SENTENCE = ` Some options came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`;
+/**
+ * PRODUCT TEST (DL 5 Oct, root CLAUDE.md §4): a MODEL-RELATIVE finding that invites the user's reasoning, never advice
+ * (no "edit" or "remove"). The comparison is withheld (GOAL_FIGURES_OPTIONS_IDENTICAL) while the arms are the same. The
+ * question is asked only where the options are NAMED; the generic sentence asks nothing (no unnamed question).
+ */
+const IDENTICAL_ASK = ' What would make them differ?';
+const IDENTICAL_GENERIC_SENTENCE = ' On your current model, some options come out the same, so the comparison is held back.';
 
 /** One sentence per identical group; names bounded at 200 characters each. */
 export const IDENTICAL_ARMS_DISCLOSURE_RE_SRC =
-  `(?: (?:[^\\r\\n]{1,200}? came out identical to [^\\r\\n]{1,200}?: in this model it doesn't change the outcome\\. The comparison is held back until it differs: edit its value, or remove it\\.|[^\\r\\n]{1,${(MAX_OPTIONS) * 204}}? came out identical: in this model they lead to the same outcome\\. The comparison is held back until they differ: edit one of their values, or remove one\\.)){1,${Math.floor(MAX_OPTIONS / 2)}}`;
+  `(?: On your current model, (?:[^\\r\\n]{1,200}? comes out the same as [^\\r\\n]{1,200}?|[^\\r\\n]{1,${(MAX_OPTIONS) * 204}}? come out the same), so the comparison is held back\\.(?: What would make them differ\\?)?){1,${Math.floor(MAX_OPTIONS / 2)}}`;
 
 // Worst case: every option in pairs, each name at the 200-character bound.
 export const IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS =
-  Math.floor(MAX_OPTIONS / 2) * (` ${'x'.repeat(200)} and ${'x'.repeat(200)} came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`).length
+  Math.floor(MAX_OPTIONS / 2) * (` On your current model, ${'x'.repeat(200)} comes out the same as ${'x'.repeat(200)}, so the comparison is held back.${IDENTICAL_ASK}`).length
   + MAX_OPTIONS * 2;
 
 /**
