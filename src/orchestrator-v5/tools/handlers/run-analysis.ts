@@ -3678,7 +3678,17 @@ export function goalDirectionCorrectableByTarget(graph: unknown, goalNodeId: unk
   if (typeof goalNodeId !== 'string' || graph === null || typeof graph !== 'object') return false;
   const nodes = (graph as { nodes?: unknown }).nodes;
   if (!Array.isArray(nodes)) return false;
-  const goal = nodes.find((n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === goalNodeId) as
-    { kind?: unknown; goal_threshold_frame?: unknown } | undefined;
-  return goal?.kind === 'goal' && !isChangeFrame(goal.goal_threshold_frame);
+  // The door resolves exactly one node (`goal_not_found` / `goal_ambiguous`), so the promise does too (Codex r2).
+  const matches = nodes.filter((n) => n !== null && typeof n === 'object' && (n as { id?: unknown }).id === goalNodeId) as
+    Array<{ kind?: unknown; goal_threshold_frame?: unknown; goal_threshold_raw?: unknown; threshold_source?: unknown; success_threshold?: unknown }>;
+  if (matches.length !== 1) return false;
+  const goal = matches[0]!;
+  if (goal.kind !== 'goal' || isChangeFrame(goal.goal_threshold_frame)) return false;
+  // ⛔ Codex r2 (#2600): the goal editor shows the user's stamp first (`success_threshold`, `threshold_source: 'user'`),
+  // and an "at most" at a figure that is not the HELD one clears the direction instead of holding it (add-constraint
+  // `ceilingMatchesHeldFigure`). Where the shown figure is not the held figure, no correction is promised.
+  const raw = goal.goal_threshold_raw;
+  const shown = goal.threshold_source === 'user' ? goal.success_threshold : undefined;
+  const finiteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  return !(finiteNumber(raw) && finiteNumber(shown) && shown !== raw);
 }

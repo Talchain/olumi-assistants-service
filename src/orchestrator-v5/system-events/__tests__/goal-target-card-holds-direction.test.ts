@@ -14,6 +14,7 @@ import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixture
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { heldGoalPointsUp, readHeldGoalComparator, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
+import { goalDirectionCorrectableByTarget } from '../../tools/handlers/run-analysis.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
 
 type Json = Record<string, any>;
@@ -165,6 +166,25 @@ describe('DR row 1: the approved card holds the goal\'s direction on the goal no
     expect(out.goal_constraints).toEqual(expect.arrayContaining([expect.objectContaining({ node_id: GOAL, operator: '<=', value: 2 })]));
     expect(resolveGoalDirection(out, GOAL)).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
     expect(heldGoalPointsUp(out, GOAL)).toBe(false);
+  });
+
+  // ⛔ RT-10 B′ (Codex r1 + r2 #2600): THE PROMISE IS THE DOOR. The headline says "set the goal’s target to ‘at most’ and
+  // re-run" exactly when `goalDirectionCorrectableByTarget` is true, so for every goal shape the door must then re-order:
+  // an "at most" at the figure the user SEES (the UI shows the user stamp first, `success_threshold`) → minimise. Where
+  // the shown figure is not the held one, the card clears the direction instead, so nothing may be promised.
+  const level = (raw: number, stamp: number | null): Json => ({ label: 'Monthly churn', goal_threshold_frame: 'level',
+    goal_threshold_raw: raw, goal_threshold_unit: '%', goal_threshold_cap: 100, goal_threshold: raw / 100,
+    ...(stamp === null ? {} : { threshold_source: 'user', success_threshold: stamp }) });
+  it.each([
+    ['no target figure', { label: 'Monthly churn' }, 2, true],
+    ['a level 2% target, shown as 2%', level(2, 2), 2, true],
+    ['a level 2% target with no user stamp, shown as 2%', level(2, null), 2, true],
+    ['a level 2% target SHOWN as 3% (the user stamp diverged)', level(2, 3), 3, false],
+  ] as const)('RT-10 B′ promise ⟺ door: %s', async (_name, goal, shown, promised) => {
+    const before = graphWith(goal);
+    expect(goalDirectionCorrectableByTarget(before, GOAL)).toBe(promised);
+    const out = await card(before, 'at_most', shown, '%');
+    expect(resolveGoalDirection(out, GOAL)?.direction === 'minimise').toBe(promised);
   });
 
   it('RT-10 B′ CONTRAST: a limit on ANOTHER node (not the card) never sets the goal\'s sense', async () => {

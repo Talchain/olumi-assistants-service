@@ -56,11 +56,17 @@ describe('goalDirectionCorrectableByTarget — the door\'s own refusal (goal_tar
     ['change_rel', { goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.2 }, false],
     ['change_abs', { goal_threshold_frame: 'change_abs', goal_threshold_raw: -5 }, false],
     ['delta', { goal_threshold_frame: 'delta', goal_threshold_raw: -5 }, false],
+    ['a level target whose user stamp agrees', { goal_threshold_frame: 'level', goal_threshold_raw: 2, threshold_source: 'user', success_threshold: 2 }, true],
+    ['a level target SHOWN at another figure (user stamp 3, held 2)', { goal_threshold_frame: 'level', goal_threshold_raw: 2, threshold_source: 'user', success_threshold: 3 }, false],
+    ['a stamp with no held figure (the card holds whatever is set)', { threshold_source: 'user', success_threshold: 3 }, true],
   ])('%s → %s', (_name, fields, expected) => {
     expect(goalDirectionCorrectableByTarget(g(fields), 'goal')).toBe(expected);
   });
-  it('not a goal, or no such node → false', () => {
+  it('not a goal, no such node, or an AMBIGUOUS id (the door refuses goal_ambiguous) → false', () => {
     expect(goalDirectionCorrectableByTarget(g({}, 'factor'), 'goal')).toBe(false);
     expect(goalDirectionCorrectableByTarget(g({}), 'missing')).toBe(false);
+    const twice = g({});
+    twice.nodes.push({ id: 'goal', kind: 'goal', label: 'Goal again' });
+    expect(goalDirectionCorrectableByTarget(twice, 'goal')).toBe(false);
   });
 });
