@@ -579,16 +579,20 @@ export function tryShortConfirmResume(
   ) {
     return { matched: false, skip_reason: 'no_short_confirm' };
   }
-  if (input.pendingActions.length === 0) {
+  // RT-6 S4-A phase 2 (DL e8, P3): a held link-unit question is answered by a UNIT ("Percentage points."), never by
+  // "yes". It is neither a live offer a bare confirm could mean nor an expired one to recover, so it is not seen here:
+  // an expired question never turns "yes" into "that offer expired", and nothing here revives it.
+  const confirmable = input.pendingActions.filter((pa) => pa.action.kind !== 'agent_link_effect_question');
+  if (confirmable.length === 0) {
     return { matched: false, skip_reason: 'no_pending' };
   }
 
   // Split into expired and live so we can surface focused recovery copy
   // when the only thing the user could have been saying yes to is gone.
-  const expired = input.pendingActions.filter((pa) =>
+  const expired = confirmable.filter((pa) =>
     isExpired(pa, input.nowMs, input.currentTurnIndex),
   );
-  const live = input.pendingActions.filter(
+  const live = confirmable.filter(
     (pa) => !isExpired(pa, input.nowMs, input.currentTurnIndex),
   );
   if (live.length === 0) {

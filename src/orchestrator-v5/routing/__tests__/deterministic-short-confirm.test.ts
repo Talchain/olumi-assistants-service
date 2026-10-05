@@ -18,6 +18,7 @@ import {
   tryShortConfirmResume,
 } from '../deterministic-short-confirm.js';
 import type { PendingAction } from '../../session/pending-action.js';
+import { computeSurvivingPriorPendingsDetailed } from '../../commit.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const NOW_MS = Date.parse('2026-05-05T12:00:00.000Z');
@@ -567,5 +568,39 @@ describe('scopePendingsToChipClickIntent — chip-click intent-vs-kind guard (F-
       nowMs: NOW_MS,
     });
     expect(r).toEqual({ matched: false, skip_reason: 'no_pending' });
+  });
+});
+
+// ⭐ RT-6 S4-A phase 2 (DL e8 5 Oct, P3 ACCEPTED): a held link-unit question is answered by a unit, never by "yes".
+describe('tryShortConfirmResume — a held link-unit question is never a "yes" target (P3)', () => {
+  const question = (overrides: Partial<PendingAction> = {}): PendingAction => ({
+    id: 'leq_00000000-0000-4000-8000-000000000001', scenario_id: SCENARIO_ID, chip_id: 'leq_00000000-0000-4000-8000-000000000001',
+    action: { kind: 'agent_link_effect_question', question: 'What unit is the 1 change in \u201cOnboarding drag\u201d stated in?',
+      from_node_id: 'developer_headcount', to_node_id: 'onboarding_drag', from_label: 'Developer headcount', to_label: 'Onboarding drag',
+      quote: 'Every 2 extra developers add about 1 point of onboarding drag.',
+      effect: { amount: 1, amount_unit: 'points', per_source_change: 2, per_source_change_unit: 'developers' }, asked_ends: ['target'] },
+    preconditions: { graph_hash: 'h-asked' }, expires_at_turn_count: 2,
+    expires_at_iso: '2026-05-05T12:10:00.000Z', emitted_at_iso: '2026-05-05T12:00:00.000Z', ...overrides,
+  } as PendingAction);
+  const EXPIRED = { expires_at_iso: '2026-05-05T11:50:00.000Z' };
+  const yes = (pendingActions: PendingAction[]) => tryShortConfirmResume({ message: 'yes', pendingActions, currentTurnIndex: 1, nowMs: NOW_MS });
+
+  it('an EXPIRED question + "yes" → not claimed (no "that expired" recovery), so nothing is written or revived here', () => {
+    expect(yes([question(EXPIRED)])).toEqual({ matched: false, skip_reason: 'no_pending' });
+  });
+  it('a LIVE question + "yes" → not claimed either', () => {
+    expect(yes([question()])).toEqual({ matched: false, skip_reason: 'no_pending' });
+  });
+  it('CONTROL: an expired OFFER beside it still recovers, counting only the offer', () => {
+    expect(yes([makeRunAnalysisPending(EXPIRED), question(EXPIRED)])).toEqual({ matched: true, dispatch: 'recovery_expired', expired_count: 1 });
+  });
+  it('CONTROL: a live offer beside it still resumes the offer', () => {
+    expect(yes([makeRunAnalysisPending(), question()])).toMatchObject({ matched: true });
+  });
+  it('carry-forward never revives an expired question; a live one rides one more turn on its own model', () => {
+    expect(computeSurvivingPriorPendingsDetailed([question(EXPIRED)], [], [], 'h-asked', NOW_MS).survivors).toEqual([]);
+    const live = computeSurvivingPriorPendingsDetailed([question()], [], [], 'h-asked', NOW_MS).survivors;
+    expect(live.map((p) => [p.action.kind, p.expires_at_turn_count])).toEqual([['agent_link_effect_question', 1]]);
+    expect(computeSurvivingPriorPendingsDetailed([question()], [], [], 'h-moved', NOW_MS).survivors, 'a moved model drops it').toEqual([]);
   });
 });
