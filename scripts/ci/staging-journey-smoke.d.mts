@@ -115,6 +115,8 @@ export declare function assertHealthyJourney(frameBody: unknown, followUpBody: u
 
 export declare function extractDiagnostics(body: unknown): {
   build_sha: string | null;
+  /** `cee_build` of every allowed Agent-aliased `_provider_calls` row, in order; null where a row carries none. */
+  agent_builds: Array<string | null>;
   exit_path: string | null;
   prompt_identity_count: number;
   prompt_identity: string[];
@@ -142,11 +144,17 @@ export declare function assertPromptProvenance(
 ): string[];
 
 /**
- * Each turn's stamped build must be the commit under test (`expectSha`); a turn
- * with no stamped build is not failed. Blank `expectSha` checks nothing.
+ * Every Agent model call's stamped build must be the commit under test
+ * (`expectSha`); a call with no valid stamp fails. A turn with no Agent call
+ * falls back to the trace build and is not failed when that is absent. Blank
+ * `expectSha` checks nothing.
  */
 export declare function assertServedBuild(
-  diagnostics: Array<Pick<ReturnType<typeof extractDiagnostics>, "build_sha"> | null>,
+  diagnostics: Array<
+    | (Pick<ReturnType<typeof extractDiagnostics>, "build_sha">
+      & Partial<Pick<ReturnType<typeof extractDiagnostics>, "agent_builds">>)
+    | null
+  >,
   expectSha: string,
 ): string[];
 

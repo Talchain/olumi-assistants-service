@@ -778,26 +778,51 @@ export function assertPromptProvenance(diagnostics, bodies = []) {
 
 /**
  * Every turn must be served by the commit under test. Phase 1 confirms the
- * build ONCE; this confirms it PER TURN, off the build each served model call
- * stamped (see the build_sha note in `runJourneySample`). A turn with no
- * stamped build is reported, not failed: a turn that made no model call has
- * nothing to stamp.
+ * build ONCE; this confirms it PER TURN, and per MODEL CALL: every Agent call
+ * stamps `cee_build` on its own `_provider_calls` row (`agentRequestIdentity`),
+ * so EVERY such row must carry a valid build equal to the expected commit — a
+ * missing or malformed stamp on a real call is "cannot confirm", a red, and one
+ * conflicting row is not masked by a matching one. A turn with no Agent call
+ * has nothing to stamp: it falls back to the trace's `environment.build_sha`
+ * (the orchestrator path), and is reported, not failed, when that is absent.
  *
- * @param {Array<{build_sha: string|null}|null>} diagnostics
+ * @param {Array<{build_sha: string|null, agent_builds?: Array<string|null>}|null>} diagnostics
  * @param {string} expectSha the commit Phase 1 waited for; blank = not checked
  * @returns {string[]} failure messages; empty means healthy.
  */
 export function assertServedBuild(diagnostics, expectSha) {
   const want = String(expectSha ?? "").trim().toLowerCase();
   if (want.length < 7) return [];
+  const matches = (b) => {
+    const got = typeof b === "string" && BUILD_RE.test(b) ? b.toLowerCase() : "";
+    if (got.length === 0) return null;
+    const n = Math.min(got.length, want.length);
+    return got.slice(0, n) === want.slice(0, n);
+  };
   const f = [];
   diagnostics.forEach((d, i) => {
-    const got = typeof d?.build_sha === "string" ? d.build_sha.toLowerCase() : "";
-    if (got.length < 7) return;
-    const n = Math.min(got.length, want.length);
-    if (got.slice(0, n) !== want.slice(0, n)) {
+    if (!d) return;
+    const builds = Array.isArray(d.agent_builds) ? d.agent_builds : [];
+    if (builds.length > 0) {
+      const unstamped = builds.filter((b) => matches(b) === null).length;
+      const other = [...new Set(builds.filter((b) => matches(b) === false))];
+      if (unstamped > 0) {
+        f.push(
+          `turn ${i + 1}: ${unstamped} of ${builds.length} Agent model call(s) carried no valid cee_build — ` +
+            `cannot confirm this turn was served by the commit under test ${want.slice(0, 8)}.`,
+        );
+      }
+      if (other.length > 0) {
+        f.push(
+          `turn ${i + 1}: served by build ${other.map((b) => b.slice(0, 8)).join(", ")}, not the commit under test ` +
+            `${want.slice(0, 8)} — this sample measured a different build from the one Phase 1 confirmed.`,
+        );
+      }
+      return;
+    }
+    if (matches(d.build_sha) === false) {
       f.push(
-        `turn ${i + 1}: served by build ${got.slice(0, 8)}, not the commit under test ${want.slice(0, 8)} — ` +
+        `turn ${i + 1}: served by build ${String(d.build_sha).slice(0, 8)}, not the commit under test ${want.slice(0, 8)} — ` +
           "this sample measured a different build from the one Phase 1 confirmed.",
       );
     }
@@ -820,6 +845,7 @@ export function assertServedBuild(diagnostics, expectSha) {
 export const AGENT_CONSTRUCT_ALIAS = "agent.construct";
 const AGENT_ALIAS_RE = /^agent\.[a-z_]+$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
+const BUILD_RE = /^[0-9a-f]{7,40}$/i;
 /** sha256 of '' — what `promptSha256` records for absent instructions: "no prompt", never an identity. */
 const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
@@ -849,9 +875,14 @@ export function extractDiagnostics(body) {
   const t = body?._diagnostic_trace ?? {};
   const identity = Array.isArray(t.prompt_identity) ? t.prompt_identity : [];
   const ledger = agentLedgerIdentity(body);
-  const ledgerBuild = ledger.map((r) => r.cee_build).find((b) => typeof b === "string" && /^[0-9a-f]{7,40}$/.test(b));
+  // EVERY allowed Agent-aliased call, identified or not: each one stamps its build.
+  const rows = Array.isArray(body?._provider_calls) ? body._provider_calls : [];
+  const agentBuilds = rows
+    .filter((r) => r !== null && typeof r === "object" && r.outcome === "allowed" && typeof r.prompt_alias === "string" && AGENT_ALIAS_RE.test(r.prompt_alias))
+    .map((r) => (typeof r.cee_build === "string" ? r.cee_build : null));
   return {
-    build_sha: t?.environment?.build_sha ?? ledgerBuild ?? null,
+    build_sha: t?.environment?.build_sha ?? agentBuilds.find((b) => b !== null && BUILD_RE.test(b)) ?? null,
+    agent_builds: agentBuilds,
     exit_path: t?.exit_path ?? null,
     prompt_identity_count: identity.length + ledger.length,
     prompt_identity: [

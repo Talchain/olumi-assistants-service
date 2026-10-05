@@ -1992,22 +1992,46 @@ describe("staging journey smoke — the Agent route's served prompt/provider ide
 describe("staging journey smoke — every turn is served by the commit under test", () => {
   const T1 = readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-agent-turn1-5e79d2d.json"));
   const T2 = readJson(resolve(REPO_ROOT, "tests/unit/ci/fixtures/live-journey-agent-turn2-5e79d2d.json"));
-  const ds = () => [extractDiagnostics(T1), extractDiagnostics(T2)];
+  const FULL = "5e79d2dccce581023f5e5f79b56a873979499eda";
+  const OTHER = "af1f094edb83200dc6998b51f16fb6ad82aa3418";
+  const ds = (b1: any = T1, b2: any = T2) => [extractDiagnostics(b1), extractDiagnostics(b2)];
 
-  it("PASSES when each turn's stamped build is the expected commit (full or short)", () => {
-    expect(assertServedBuild(ds(), "5e79d2dccce581023f5e5f79b56a873979499eda")).toEqual([]);
+  it("PASSES when every Agent call's stamped build is the expected commit (full or short)", () => {
+    expect(extractDiagnostics(T1).agent_builds).toEqual([FULL, FULL]);
+    expect(extractDiagnostics(T2).agent_builds).toEqual([FULL]);
+    expect(assertServedBuild(ds(), FULL)).toEqual([]);
     expect(assertServedBuild(ds(), "5e79d2d")).toEqual([]);
   });
 
   it("FAILS each turn served by a different build", () => {
-    const f = assertServedBuild(ds(), "af1f094edb83200dc6998b51f16fb6ad82aa3418");
+    const f = assertServedBuild(ds(), OTHER);
     expect(f).toHaveLength(2);
     expect(f[0]).toContain("turn 1: served by build 5e79d2dc");
   });
 
-  it("checks nothing when no commit is expected, and does not fail a turn that stamped no build", () => {
+  it.each([
+    ["removed", (r: any) => { delete r.cee_build; }],
+    ["malformed", (r: any) => { r.cee_build = "unknown"; }],
+  ])("FAILS a real call whose cee_build is %s (cannot confirm), not skips it", (_label, mutate) => {
+    const b2 = structuredClone(T2);
+    mutate(b2._provider_calls[0]);
+    const f = assertServedBuild(ds(T1, b2), FULL);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toContain("turn 2: 1 of 1 Agent model call(s) carried no valid cee_build");
+  });
+
+  it("FAILS one conflicting call even when another call on the same turn matches", () => {
+    const b1 = structuredClone(T1);
+    b1._provider_calls.find((r: any) => r.prompt_alias === AGENT_CONSTRUCT_ALIAS).cee_build = OTHER;
+    const f = assertServedBuild(ds(b1, T2), FULL);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toContain("turn 1: served by build af1f094e");
+  });
+
+  it("checks nothing when no commit is expected; a turn with no Agent call falls back to the trace build", () => {
     expect(assertServedBuild(ds(), "")).toEqual([]);
-    expect(assertServedBuild([{ build_sha: null }], "5e79d2d")).toEqual([]);
+    expect(assertServedBuild([{ build_sha: null, agent_builds: [] }], "5e79d2d")).toEqual([]);
+    expect(assertServedBuild([{ build_sha: OTHER, agent_builds: [] }], "5e79d2d")[0]).toContain("turn 1: served by build af1f094e");
   });
 });
 
