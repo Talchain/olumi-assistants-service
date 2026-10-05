@@ -3099,6 +3099,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
+    // RT-6 S4-A phase 2: the LAST unit question this turn asked, held by the server so the next reply's one-word answer
+    // completes it by its id. Carried only by the row of the turn that asked it (the next Agent row rebuilds this list).
+    const freshLinkQuestion = [...result.tool_results].reverse().map(r => parsePendingAction(r.pending_action))
+      .find((p): p is PendingAction => p !== null && p.scenario_id === scenarioId && p.action.kind === 'agent_link_effect_question');
     const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
     let liveHolds: readonly PendingAction[] = [];
     let liveScopeIssues: readonly PendingAction[] = [];
@@ -3364,6 +3368,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const pendingCandidates = [
       ...retainedScopeIssues,
       ...liveHolds,
+      // Its graph_hash is checked when it is ANSWERED (a moved model refuses it there), not here.
+      ...(freshLinkQuestion !== undefined ? [freshLinkQuestion] : []),
       ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
       ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
     ];
