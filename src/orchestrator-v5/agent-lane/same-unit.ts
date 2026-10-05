@@ -115,9 +115,18 @@ export function readCount(unit: unknown): string[] | null {
  * reads is compared word for word; no unit on either side is never the same.
  */
 export function sameUnit(a: unknown, b: unknown): boolean {
-  // C1 never contradicts the full reader (Science PR-U1 condition 2; Codex r1 on #2604): a %/pp spelling on ONE side
-  // only ("percent" vs "percents") is not the same unit, whatever the word fallback below would say.
-  if (typeof a === 'string' && typeof b === 'string' && (shareKind(a) === null) !== (shareKind(b) === null)) return false;
+  // ⛔ C1 NEVER CONTRADICTS THE FULL READER, BY CONSTRUCTION (Science PR-U1 condition 2; Codex r1 + r2 on #2604): it
+  // may abstain where `readUnitParts` would equate, but where the full reader reads the two differently — or reads only
+  // one of them ("year GBP" | "GBP/year", "£/min" | "£/mins", "percent increase" | "percents increase") — C1 says no.
+  if (!c1SameUnit(a, b)) return false;
+  const pa = readUnitParts(a);
+  const pb = readUnitParts(b);
+  if (pa === null && pb === null) return true;
+  return pa !== null && pb !== null && JSON.stringify(pa) === JSON.stringify(pb);
+}
+
+/** C1's own reading, before the full reader's veto: counts, money (currency, period, denominator), else words. */
+function c1SameUnit(a: unknown, b: unknown): boolean {
   const ca = readCount(a); const cb = readCount(b);
   if (ca !== null || cb !== null) return ca !== null && cb !== null && ca.join(' ') === cb.join(' ');
   const ma = readMoney(a, ''); const mb = readMoney(b, '');
@@ -254,7 +263,8 @@ export function carrierCompatible(stated: UnitParts, declared: UnitParts): boole
   if (stated.per !== null && declared.per !== null && stated.per.length > 0 && declared.per.length > 0
     && !containsWords(stated.per, declared.per) && !containsWords(declared.per, stated.per)) return false;
   if (conflicts(stated.base, declared.base)) return false;
-  if (conflicts(stated.qualifiers, declared.qualifiers)) return false;
+  if (stated.qualifiers !== null && declared.qualifiers !== null && stated.qualifiers.length > 0 && declared.qualifiers.length > 0
+    && !containsWords(stated.qualifiers, declared.qualifiers) && !containsWords(declared.qualifiers, stated.qualifiers)) return false;
   return true;
 }
 
@@ -295,15 +305,23 @@ export function nounUnitsAt(tail: string): readonly string[] {
  * that is none of these. Null when the literal names no unit at all.
  */
 export function statedTailParts(text: string, literal: { index: number; matchedText: string; kind: string }): UnitParts | null {
-  const tail = text.slice(literal.index + literal.matchedText.length);
-  const toks = (tail.match(/^[\s/]*((?:(?:p\.a\.|[A-Za-z%][A-Za-z%'-]*|\/)[\s]*){1,6})/u)?.[1] ?? '')
-    .replace(/\//g, ' / ').trim().toLowerCase().split(/\s+/u).filter((w) => w !== '').slice(0, 6);
-  if (tail.match(/^\s*\//u) !== null) toks.unshift('/');
+  // The clause after the figure, to the first punctuation or digit; "/" and "-" are their own breaks ("client-month").
+  const clause = text.slice(literal.index + literal.matchedText.length).replace(/p\.a\./giu, ' pa ').split(/[.,;:!?()\n]/u)[0] ?? '';
+  const toks = clause.replace(/\//g, ' / ').replace(/-/g, ' ').trim().toLowerCase().split(/\s+/u)
+    .filter((w) => w !== '');
+  const digit = toks.findIndex((w) => /\d/.test(w));
+  if (digit >= 0) toks.length = digit;
+  const isWord = (w: string | undefined): boolean => w !== undefined && /^[a-z][a-z']*$/.test(w);
   let k = 0;
   let period: UnitPeriod | null = null;
   let per: string[] | null = null;
   const conflictFree = (p: UnitPeriod): boolean => (period === null || period === p ? ((period = p), true) : false);
-  // A period or a denominator, repeatedly: "per client per year", "a month each", "/year".
+  const setPer = (nouns: string[]): boolean => {
+    if (per !== null && per.length > 0 && nouns.length > 0) return false;
+    per = nouns.map(singular);
+    return true;
+  };
+  // A period or a denominator, repeatedly: "per client per year", "each client a month", "per billable working day".
   const readRateParts = (): boolean => {
     while (k < toks.length) {
       const w = toks[k]!;
@@ -312,18 +330,22 @@ export function statedTailParts(text: string, literal: { index: number; matchedT
       if (isPeriodConnector(w) && k + 1 < toks.length && isLeafPeriodNoun(toks[k + 1]!)) {
         if (!conflictFree(periodNoun(toks[k + 1]!)!)) return false; k += 2; continue;
       }
-      if ((w === 'per' || w === '/') && k + 1 < toks.length && /^[a-z]+$/.test(toks[k + 1]!) && !isPeriodConnector(toks[k + 1]!)) {
+      if (w === 'per' || w === '/' || w === 'each' || w === 'every' || w === 'apiece') {
+        // Up to three words; when the last is a period noun it is the period ("per billable working day").
         const nouns: string[] = [];
         let j = k + 1;
-        while (j < toks.length && nouns.length < 2 && /^[a-z]+$/.test(toks[j]!) && !isPeriodConnector(toks[j]!) && periodAdverb(toks[j]!) === null) {
+        while (j < toks.length && nouns.length < 3 && isWord(toks[j]) && !isPeriodConnector(toks[j]!) && periodAdverb(toks[j]!) === null) {
           nouns.push(toks[j]!); j += 1;
+          if (isLeafPeriodNoun(nouns[nouns.length - 1]!)) break;
         }
-        const last = nouns[nouns.length - 1]!;
-        if (nouns.length > 1 && isLeafPeriodNoun(last)) { if (!conflictFree(periodNoun(last)!)) return false; nouns.pop(); }
-        if (per !== null && per.length > 0) return false;
-        per = nouns.map(singular); k = j; continue;
+        if (nouns.length > 0 && isLeafPeriodNoun(nouns[nouns.length - 1]!)) {
+          if (!conflictFree(periodNoun(nouns.pop()!)!)) return false;
+        }
+        if (nouns.length === 0 && (w === 'per' || w === '/')) break;
+        if (!setPer(nouns)) return false;
+        k = j;
+        continue;
       }
-      if (w === 'each' || w === 'apiece') { per = per ?? []; k += 1; continue; }
       break;
     }
     return true;
@@ -346,13 +368,18 @@ export function statedTailParts(text: string, literal: { index: number; matchedT
     }
   }
   if (share !== null) {
-    const base = toks[k] === 'of' && k + 1 < toks.length && /^[a-z]+$/.test(toks[k + 1]!) ? [singular(toks[k + 1]!)] : null;
-    return { kind: share, code: null, scale: 1, noun: null, per: null, base, qualifiers: null, period: null };
+    // "of <noun>" is the base; otherwise the words straight after are qualifiers ("18% increase from prior year").
+    if (toks[k] === 'of' && isWord(toks[k + 1])) {
+      return { kind: share, code: null, scale: 1, noun: null, per: null, base: [singular(toks[k + 1]!)], qualifiers: null, period: null };
+    }
+    const qualifiers: string[] = [];
+    while (k < toks.length && qualifiers.length < 4 && isWord(toks[k])) { qualifiers.push(singular(toks[k]!)); k += 1; }
+    return { kind: share, code: null, scale: 1, noun: null, per: null, base: null, qualifiers: qualifiers.length > 0 ? qualifiers : null, period: null };
   }
   // A count: the noun phrase (up to three words, to a connector or a period word), then its rate parts.
   const noun: string[] = [];
-  while (k < toks.length && noun.length < 3 && /^[a-z][a-z'-]*$/.test(toks[k]!) && !isPeriodConnector(toks[k]!)
-    && periodAdverb(toks[k]!) === null && toks[k] !== 'each') {
+  while (k < toks.length && noun.length < 3 && isWord(toks[k]) && !isPeriodConnector(toks[k]!)
+    && periodAdverb(toks[k]!) === null && toks[k] !== 'each' && toks[k] !== 'every') {
     noun.push(singular(toks[k]!)); k += 1;
   }
   if (noun.length === 0) return null;
@@ -373,7 +400,9 @@ export function unitsAt(text: string, literal: { index: number; matchedText: str
     if (currency === undefined) return [];
     // Rendered from the STATED parts, so a denominator is never dropped ("£75,000 per client per year" → £/client/year).
     const parts = statedTailParts(text, literal);
-    if (parts === null) return [currency];
+    // ⛔ Codex r2: a tail that names conflicting parts ("a month per year") or cannot be read ABSTAINS — never a bare
+    // currency that would evidence a periodless unit.
+    if (parts === null) return [];
     const per = parts.per !== null && parts.per.length > 0 ? `/${parts.per.join(' ')}` : '';
     return [`${currency}${per}${parts.period !== null ? `/${parts.period}` : ''}`];
   }

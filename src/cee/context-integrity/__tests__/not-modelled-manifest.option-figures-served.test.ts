@@ -76,6 +76,15 @@ const CREDITED: readonly (readonly [string, string, number, string])[] = [
 ];
 
 /**
+ * ⭐ CREDITED BY AN EDGE, NOT AN OPTION LEVEL (PR-U1 #2604; Science U-GRAMMAR ruling 5999661911 (ii)): "£95k each" is
+ * the ONE span a `user_stated` "£/year" edge binds — "each" is a denominator only the brief states, the year a part only
+ * the edge states, so C3 finds no conflict. Its served verdict was a false absent.
+ */
+const EDGE_CREDITED: readonly (readonly [string, string, number, string])[] = [
+  ["j1", "£95k", 143, "senior_consultant_salaries"],
+];
+
+/**
  * OWN SPAN (DL ruling on #2603): the bakery writes its 8% price rise TWICE. Value and unit cannot say which written
  * figure the level holds, so neither is credited by the option route. A known, deliberate cost in the safe direction.
  */
@@ -117,6 +126,11 @@ describe("RT-4 class A — a stated option figure the model carries is credited"
     expect(levels).toBeGreaterThan(0);
   });
 
+  it.each(EDGE_CREDITED)("%s: %s@%i is in_model on %s (an edge's figure, PR-U1)", (capture, literal, offset, nodeId) => {
+    expect(draft(capture).served.verdicts[`${literal}@${offset}`]).toBe("absent");
+    expect(itemAt(capture, literal, offset)).toMatchObject({ verdict: "in_model", matched_node_id: nodeId });
+  });
+
   it.each(CREDITED)("%s: %s@%i is in_model on %s", (capture, literal, offset, nodeId) => {
     const item = itemAt(capture, literal, offset);
     expect(item.verdict).toBe("in_model");
@@ -151,7 +165,7 @@ describe("RT-4 class A — a stated option figure the model carries is credited"
     "%s: every item outside the credited set keeps its served verdict",
     (capture) => {
       const d = draft(capture);
-      const credited = new Set(CREDITED.filter(([c]) => c === capture).map(([, l, o]) => `${l}@${o}`));
+      const credited = new Set([...CREDITED, ...EDGE_CREDITED].filter(([c]) => c === capture).map(([, l, o]) => `${l}@${o}`));
       const items = manifestFor(capture).items;
       expect(items.length).toBe(Object.keys(d.served.verdicts).length);
       for (const item of items) {
@@ -231,7 +245,7 @@ describe("RT-4 class A — a stated option figure the model carries is credited"
     ["b2", 8, 2],
     ["b2r2", 8, 2],
     ["prod-b2", 7, 3],
-    ["j1", 7, 2],
+    ["j1", 6, 3], // PR-U1: "£95k each" is credited by its edge (EDGE_CREDITED)
     ["b3", 1, 0],
   ] as const)("%s: outside class B, absent %i and in_model %i", (capture, absent, inModel) => {
     const items = manifestFor(capture).items.filter((i) => !isClassB(capture, `${i.literal}@${i.char_offset}`));

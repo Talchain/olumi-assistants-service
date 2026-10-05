@@ -49,7 +49,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
-import { statedEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
+import { statedEffectQuoteMatches, statedEffectSpansInText, statedTargetAmountSpans } from "../provenance/stated-effect.js";
 import { readUnitParts } from "../../orchestrator-v5/agent-lane/same-unit.js";
 import {
   classifyValueSource,
@@ -1541,6 +1541,20 @@ function collectBriefNaturalEffectCandidates(
         per_source_change_unit: perSourceChangeUnit,
       });
     if (quote !== null && !quoteVerified) continue;
+    // ⛔ FA-R3 (Codex r2 on #2604): a VERIFIED quote binds its candidates to the numerals inside the quote's ONE place in
+    // the brief. Once "annually" verifies, an unbound quoted edge would also credit "Pension contributions are £75,000".
+    let sourceSpan: { start: number; end: number } | undefined;
+    if (quoteVerified) {
+      const spans = statedEffectSpansInText(briefText, quote!, {
+        amount,
+        amount_unit: amountUnit,
+        per_source_change: perSourceChange as number,
+        per_source_change_unit: perSourceChangeUnit as string,
+      });
+      if (spans === null) continue;
+      boundSpan = spans.target;
+      sourceSpan = spans.source ?? undefined;
+    }
     const effectDirection = edge.effect_direction;
     const signedEffect = Math.sign(amount) * Math.sign(typeof perSourceChange === "number" ? perSourceChange : 1);
     if (
@@ -1570,7 +1584,7 @@ function collectBriefNaturalEffectCandidates(
     // The SOURCE-side figure is a stated figure only when the quote proved the user wrote it. Without a quote it is
     // the producer's encoding (an option's on/off is `100 %`), never something the user said — so it is not offered.
     if (
-      quoteVerified &&
+      quoteVerified && sourceSpan !== undefined &&
       typeof perSourceChange === "number" && Number.isFinite(perSourceChange) &&
       typeof perSourceChangeUnit === "string" && perSourceChangeUnit.trim().length > 0
     ) {
@@ -1583,6 +1597,7 @@ function collectBriefNaturalEffectCandidates(
         currencyCode: currencyCode ?? null,
         declaredUnit: perSourceChangeUnit,
         carrier: "edge_effect",
+        boundSpan: sourceSpan,
       });
     }
   }

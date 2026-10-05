@@ -8,6 +8,24 @@ import {
   unitsAt,
 } from "../../orchestrator-v5/agent-lane/same-unit.js";
 
+/**
+ * A money TARGET may state the effect's own SOURCE as its denominator — "£49 a month per subscriber" for £/month per 1
+ * subscriber — and that is the same effect, not a different unit. Any other stated denominator ("per client") still
+ * refuses (Codex r1 on #2604), and a target that names none is compared as it was.
+ */
+function targetUnitMatches(quote: string, amount: LocatedAmount, unit: string, sourceUnit: string | undefined): boolean {
+  if (amount.units.some((candidate) => sameUnit(unit, candidate))) return true;
+  if (amount.kind !== "currency" || sourceUnit === undefined) return false;
+  const parts = statedTailParts(quote, amount);
+  const source = readUnitParts(sourceUnit);
+  if (parts === null || parts.per === null || parts.per.length === 0 || source?.noun == null) return false;
+  const per = ` ${parts.per.join(" ")} `;
+  const noun = ` ${source.noun.join(" ")} `;
+  if (!per.includes(noun) && !noun.includes(per)) return false;
+  const currency = amount.matchedText.match(/(?:A\$|C\$|NZ\$|[£$€¥₹]|CHF|kr)/iu)?.[0];
+  return currency !== undefined && sameUnit(unit, `${currency}${parts.period !== null ? `/${parts.period}` : ""}`);
+}
+
 export interface StatedEffectDetail {
   readonly amount: number;
   readonly amount_unit: string;
@@ -51,9 +69,11 @@ function oneMatchingAmount(
   value: number,
   unit: string,
   source: boolean,
+  quote = "",
+  sourceUnit?: string,
 ): LocatedAmount | undefined {
   const matches = amounts.filter((amount) => (amount.implicitSource === true ? source && value === 1 : magnitudeMatches(Math.abs(value), amount))
-    && amount.units.some((candidate) => sameUnit(unit, candidate)));
+    && (source ? amount.units.some((candidate) => sameUnit(unit, candidate)) : targetUnitMatches(quote, amount, unit, sourceUnit)));
   return matches.length === 1 ? matches[0] : undefined;
 }
 
@@ -85,6 +105,26 @@ export function statedTargetAmountSpans(
 }
 
 /**
+ * FA-R3 (Codex r2 on #2604): where in `text` a VERIFIED quote's target and source numerals sit — only when the quote
+ * occurs exactly ONCE in the text. A quote written twice, or whose numerals cannot each be located singly, binds
+ * nothing, so a quoted edge never credits the same amount written elsewhere ("pension contributions are £75,000").
+ */
+export function statedEffectSpansInText(
+  text: string,
+  quote: string,
+  detail: StatedEffectDetail,
+): { target: { start: number; end: number }; source: { start: number; end: number } | null } | null {
+  const at = text.indexOf(quote);
+  if (at < 0 || text.indexOf(quote, at + 1) >= 0) return null;
+  const amounts = locatedAmounts(quote);
+  const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false, quote, detail.per_source_change_unit);
+  if (target === undefined) return null;
+  const source = oneMatchingAmount(amounts, detail.per_source_change, detail.per_source_change_unit, true);
+  const span = (a: LocatedAmount) => ({ start: at + a.index, end: at + a.index + a.matchedText.length });
+  return { target: span(target), source: source === undefined || source.implicitSource === true ? null : span(source) };
+}
+
+/**
  * Validate, rather than extract, a typed natural effect against its quoted span.
  * The quote supplies no endpoints, signs or target values to the model. It
  * validates the four typed fields using located numerals and units; a counting
@@ -98,7 +138,7 @@ export function statedEffectQuoteMatches(
   if (![detail.amount, detail.per_source_change].every((value) => Number.isFinite(value) && value !== 0)) return false;
   if (![detail.amount_unit, detail.per_source_change_unit].every((unit) => typeof unit === "string" && unit.trim().length > 0)) return false;
   const amounts = locatedAmounts(quote);
-  const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false);
+  const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false, quote, detail.per_source_change_unit);
   const source = oneMatchingAmount(amounts, detail.per_source_change, detail.per_source_change_unit, true);
   return target !== undefined && source !== undefined && target.index !== source.index;
 }

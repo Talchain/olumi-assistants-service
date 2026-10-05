@@ -121,6 +121,7 @@ describe("PR-U1 condition 2: C1 may abstain but never contradicts the full reade
     "£", "GBP", "£k/year", "£k/month", "£/subscriber/month", "£ per subscriber-month", "subscribers", "subscriber",
     "%", "percent", "pp", "percentage points", "% of output", "hours", "weeks", "GBP recurring revenue", "£ each",
     "percents", "percent increase", "percent increases", "£ year", "£ month", "GBP year",
+    "£/min", "£/mins", "percents increase", "year GBP", "£ per subscriber-month", "£/subscriber/month", "GBP per subscriber per month",
   ];
   it("over every leaf spelling in every unit shape: sameUnit(a, b) ⇒ readUnitParts(a) ≡ readUnitParts(b)", () => {
     let checked = 0;
@@ -182,6 +183,46 @@ describe("Codex r1 on #2604, P2: the full reader reaches the manifest's edge can
   it("C1 abstains where only one side is a share spelling, and share qualifiers compare singular", () => {
     expect(sameUnit("percent", "percents")).toBe(false);
     expect(readUnitParts("percent increase")).toEqual(readUnitParts("percent increases"));
+  });
+});
+
+describe("Codex r2 on #2604: no stated part is dropped, no failed read admits, no quoted edge credits elsewhere", () => {
+  it("(1) a named \"each\" denominator, a hyphenated rate, a long noun phrase and a share qualifier all reach C3", () => {
+    expect(statedTargetAmountSpans("It saves £75,000 each client per year.", 75000, "GBP/customer/month")).toHaveLength(0);
+    expect(statedTargetAmountSpans("It saves £75,000 each client per year.", 75000, "GBP/client/year")).toHaveLength(1);
+    expect(statedTargetAmountSpans("It saves £75,000 per client-month.", 75000, "GBP/customer/year")).toHaveLength(0);
+    expect(statedTargetAmountSpans("It saves £75,000 per client-month.", 75000, "GBP/client/month")).toHaveLength(1);
+    expect(statedTargetAmountSpans("We add 500 new billable hours per client per week.", 500, "hours/month")).toHaveLength(0);
+    expect(statedTargetAmountSpans("We add 500 new billable hours per client per week.", 500, "hours per client per week")).toHaveLength(1);
+    expect(statedTargetAmountSpans("We charge £900 per billable working day.", 900, "£/year")).toHaveLength(0);
+    expect(statedTargetAmountSpans("Sales grew by an 18% increase.", 18, "% decrease")).toHaveLength(0);
+    expect(statedTargetAmountSpans("Sales grew by an 18% increase.", 18, "% increase")).toHaveLength(1);
+  });
+  it("(2) a tail that names conflicting periods abstains: it never evidences a periodless GBP", () => {
+    const effect = { amount: -75000, per_source_change: 1, per_source_change_unit: "%" };
+    expect(statedEffectQuoteMatches("Merging saves £75,000 a month per year for each 1% of rounds merged", { ...effect, amount_unit: "GBP" })).toBe(false);
+  });
+  it("(3) a verified quote binds ONLY its own numeral: the monthly pension is never the annual edge's figure", () => {
+    const quote = "Each 1% of rounds merged saves £75,000 annually.";
+    const brief = `${quote} Pension contributions are £75,000 a month.`;
+    const g = graph();
+    const e = g.edges.find((x) => x.from === "route_consolidation" && x.to === SPENDING) as { provenance: Record<string, unknown> };
+    e.provenance.quote = quote;
+    Object.assign(spendingEffect(g), { amount: -75000, amount_unit: "GBP/year", per_source_change: 1, per_source_change_unit: "%" });
+    const items = deriveNotModelledManifest(brief, g).quantities?.items ?? [];
+    const at = (offset: number) => items.find((i) => i.char_offset === offset);
+    expect(at(quote.indexOf("£"))).toMatchObject({ literal: "£75,000", verdict: "in_model", matched_node_id: SPENDING });
+    expect(at(brief.lastIndexOf("£"))).toMatchObject({ literal: "£75,000", verdict: "absent" });
+    // The same quote written TWICE: nothing says which one the edge holds, so neither is credited.
+    const twice = deriveNotModelledManifest(`${quote} ${quote}`, g).quantities?.items ?? [];
+    expect(twice.filter((i) => i.literal === "£75,000").map((i) => i.verdict)).toEqual(["absent", "absent"]);
+  });
+  it("(4) C1 abstains where the full reader disagrees or reads one side only", () => {
+    expect(sameUnit("£/min", "£/mins")).toBe(false);
+    expect(sameUnit("percent increase", "percents increase")).toBe(false);
+    expect(sameUnit("year GBP", "GBP/year")).toBe(false);
+    expect(sameUnit("GBP recurring revenue", "GBP recurring revenue")).toBe(true);
+    expect(sameUnit("£ per subscriber-month", "£ per subscriber-month")).toBe(true);
   });
 });
 
