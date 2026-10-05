@@ -78,16 +78,28 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   const beforePreposition = rawLabel.split(/\s+(?:from|of|in|for|to|on|per|with|after|by)\s+/i)[0] ?? rawLabel;
   const head = wordsOf(beforePreposition).at(-1);
   const countNoun = typeof node.count_noun === 'string' ? wordsOf(node.count_noun) : [];
-  const countIsHead = head !== undefined && countNoun.some(w => sameWord(w, head));
   if (head === undefined) return undefined;
+  // The head matches exactly or as a simple plural, never by stem ("marginal" is not "margin"; buddy r4 HIGH).
+  const isHead = (w: string): boolean => { const x = w.toLowerCase(), h = head.toLowerCase(); return x === h || x === `${h}s` || `${x}s` === h; };
+  const countIsHead = countNoun.some(isHead);
+  const PREPOSITION = /^(?:from|of|in|for|to|on|per|with|after|by)$/i;
   const inLabel = (w: string): boolean => labelWords.some(o => sameWord(o, w.toLowerCase()))
     || (countIsHead && countNoun.some(o => sameWord(o, w.toLowerCase())));
   const namesThisEnd = (run: readonly string[]): boolean => {
-    const has = (word: string): boolean => run.some(w => sameWord(word, w.toLowerCase()));
-    const headHit = has(head) || (countIsHead && countNoun.some(has));
+    // The head TOKEN itself must be in the run (a count noun's other words never stand in; buddy r4 P2).
+    const headHit = run.some(isHead);
     const distinguishing = run.some(w => !otherWords.some(o => sameWord(o, w.toLowerCase())));
     return headHit && distinguishing;
   };
+  // A COMPLETE phrase: the run ends where the noun phrase ends, at punctuation, the end, or a word that cannot continue a
+  // noun phrase ("£3 of revenue tax" names a tax, not Revenue; buddy r4 HIGH). Unknown → no adoption → the end is asked.
+  const ENDS_PHRASE = /^(?:would|will|could|should|might|may|can|costs?|costing|brings?|bringing|adds?|adding|raises?|lowers?|lifts?|cuts?|reduces?|increases?|decreases?|rises?|falls?|drops?|grows?|means?|gives?|makes?|knocks?|pushes?|is|are|was|were|be|and|but|so|then|each|every|per|a|an|which|that|to|in|on|at|by|from|with|over|this|next|for|if|when|as|or)$/i;
+  const completeAfter = (text: string): boolean => {
+    const m = /^(\s*)([\p{L}]+)/u.exec(text);
+    return m === null || ENDS_PHRASE.test(m[2]!);
+  };
+  // …and on its left (backward): only a sentence start, punctuation, a determiner or a clause word may precede it.
+  const STARTS_PHRASE = /^(?:the|our|your|its|their|when|if|as|and|each|every|while|because|so|then|once|after|before|that|sees?|saw|makes?|keeps?|gets?|has|have|had|leaves?|puts?|sends?|drives?|watch(?:es)?)$/i;
   // "per 12 months", "/ 3 years": a numbered period the unit grammar cannot carry → no adoption, so the end is ASKED
   // (buddy r3 P2), never silently stored without its period.
   const numberedPeriodAt = (from: number): boolean => /^\s*(?:per\s+|\/\s*)\d/i.test(quote.slice(from));
@@ -115,7 +127,12 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
     named = m.index! + m[0].length;
     run.push(m[0]);
   }
-  if (named > 0 && namesThisEnd(run)) {
+  // A run never ends on a preposition ("revenue per | 12 months"): drop it, so the period guard sees what follows.
+  while (run.length > 0 && PREPOSITION.test(run[run.length - 1]!)) {
+    const last = run.pop()!;
+    named = tail.slice(0, tail.lastIndexOf(last, named)).trimEnd().length;
+  }
+  if (named > 0 && namesThisEnd(run) && completeAfter(rest.slice(at + named).replace(/^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)*/iu, ''))) {
     const after = at + named;
     const period = PERIOD.exec(rest.slice(after))![0];
     if (numberedPeriodAt(figureEnd + unitTail.length) || numberedPeriodAt(figureEnd + after + period.length)) return undefined;
@@ -135,7 +152,7 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   let first = -1;
   const back: string[] = [];
   while (k >= 0 && inLabel(words[k]![0]) && gapOk(k)) { first = k; back.push(words[k]![0]); k--; }
-  if (first < 0 || !namesThisEnd(back)) return undefined;
+  if (first < 0 || !namesThisEnd(back) || (k >= 0 && gapOk(k) && !STARTS_PHRASE.test(words[k]![0]))) return undefined;
   const suffix = UNIT_WORDS.exec(rest)![0];
   const period = PERIOD.exec(rest.slice(suffix.length))![0];
   if (numberedPeriodAt(figureEnd + suffix.length + period.length)) return undefined;
