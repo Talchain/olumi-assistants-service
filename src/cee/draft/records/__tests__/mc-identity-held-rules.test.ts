@@ -23,13 +23,17 @@ function cascade(stated = false, retainedCause = false) {
   if (retainedCause) r.claims.push({ claim_kind: 'causal_link', label: 'customers also cause strain', from_claim: 2, ...middle, effect: 'positive' });
   return project(r, `${BRIEF} ${quote}`);
 }
-// STOP R1: vnext B5, B6(3), and P2-A6 require rulings beyond the authorized assertion changes.
-describe.skip('MC R1 goal quantity authority (stopped; candidate evidence in round2 report)', () => {
+// Science 5 Oct Round 4: conditional e1 disclosure is authorised.
+describe('MC R1 goal quantity authority', () => {
   it('RED R1: claim on goal quantity is set aside and disclosed', () => {
     const r = sealedRecordsVNext(); const p = project(r); const claim = r.claims.find(c => c.quantity === 0)!;
     expect(p.graph.nodes.some(n => n.label === claim.label)).toBe(false);
     expect(p.dropped).toContainEqual(expect.objectContaining({ label: claim.label, reason: 'goal_quantity_projection_set_aside' }));
-    expect(p.graph.edges.some(e => e.provenance?.natural_effect?.amount === -300 && p.graph.nodes.find(n => n.id === e.to)?.quantity_ref === 0)).toBe(true);
+    const outcome = p.graph.nodes.find(n => n.id === '8a21277c')!;
+    expect(outcome).toMatchObject({kind:'outcome',quantity_ref:0,provenance:{provenance_class:'stated'}});
+    const cause = p.graph.edges.find(e => e.provenance?.source_quote === r.stated_items[10]!.source_quote && e.provenance?.natural_effect?.amount === -300)!;
+    expect(cause.to).toBe(outcome.id);
+    expect(p.dropped).toContainEqual(expect.objectContaining({node_id:'f171bf57',reason:'goal_quantity_projection_set_aside'}));
   });
   it('CONTRAST R1: a non-goal claim remains the endpoint carrier', () => {
     const r = sealedRecordsVNext(); const p = project(r); const claim = r.claims.find(c => c.quantity === 9)!;
