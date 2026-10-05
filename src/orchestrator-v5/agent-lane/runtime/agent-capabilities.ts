@@ -3414,7 +3414,7 @@ export function createAgentCapabilities(
           }
           // RT-6 row 1b (Science #87 6005615422): an end stated by its node's own LABEL is read as that node's unit, a
           // reading the card shows for approval (never a silent credit).
-          const labelled = withLabelCountUnits(working, from.id, to.id, stated);
+          const labelled = withLabelCountUnits(working, from.id, to.id, stated, said);
           const labelReadings = labelled.label_readings.length > 0 ? { label_readings: labelled.label_readings } : {};
           const consent = { ...linkEffectConsent(working, from.id, to.id, labelled.effect),
             ...(linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {}) };
@@ -3524,7 +3524,7 @@ export function createAgentCapabilities(
       }
       // RT-6 row 1b (Science #87 6005615422): an end stated by its node's own LABEL is read as that node's unit, a reading
       // the card shows for approval (never a silent credit).
-      const labelled = withLabelCountUnits(g.raw, from.id, to.id, { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit });
+      const labelled = withLabelCountUnits(g.raw, from.id, to.id, { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit }, said);
       const stated = labelled.effect;
       const labelReadings = labelled.label_readings.length > 0 ? { label_readings: labelled.label_readings } : {};
       const consent = { ...linkEffectConsent(g.raw, from.id, to.id, stated),

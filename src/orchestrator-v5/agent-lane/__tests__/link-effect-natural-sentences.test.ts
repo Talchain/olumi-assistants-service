@@ -107,6 +107,11 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
     quote: 'Every 10 more café subscribers adds about 1 percentage point of wholesale subscription revenue.',
     effect: effect(1, 'percentage points', 10, 'café subscribers'),
     card: 'Record: +10 cafés on "Café subscribers" → +1 percentage point in "Wholesale subscription revenue": raising "Café subscribers" by 10 cafés raises "Wholesale subscription revenue" by 1 percentage point. From your words: "Every 10 more café subscribers adds about 1 percentage point of wholesale subscription revenue." I\'ve taken "Wholesale subscription revenue" to be in %, from your words. I\'ve read that as +1 percentage point per 10 cafés (the unit of "Café subscribers").' + TAIL },
+  // Codex r1: a NEGATIVE source change keeps its sign in the reading ("per −10 cafés"), never a reversed ratio.
+  { id: 'RT1b-neg', fixture: 'b8143909', from: 'caf_subscribers', to: 'wholesale_subscription_revenue', selection: 'link',
+    quote: 'Every 10 fewer café subscribers costs about 1 percentage point of wholesale subscription revenue.',
+    effect: effect(-1, 'percentage points', -10, 'café subscribers'),
+    card: 'Record: −10 cafés on "Café subscribers" → −1 percentage point in "Wholesale subscription revenue": lowering "Café subscribers" by 10 cafés lowers "Wholesale subscription revenue" by 1 percentage point. From your words: "Every 10 fewer café subscribers costs about 1 percentage point of wholesale subscription revenue." I\'ve taken "Wholesale subscription revenue" to be in %, from your words. I\'ve read that as −1 percentage point per −10 cafés (the unit of "Café subscribers").' + TAIL },
   { id: 'RT1b-pp', fixture: 'b8143909', from: 'caf_subscribers', to: 'wholesale_subscription_revenue', selection: 'link',
     quote: 'Every 10 more café subscribers adds about 1 pp of wholesale subscription revenue.',
     effect: effect(1, 'pp', 10, 'café subscribers'),
@@ -559,6 +564,16 @@ describe('RT-6 row 1 (red team #87 6004429045): a unit the sentence WROTE is nev
 
 describe('RT-6 row 1b (Science #87 6005615422): only the node\'s own LABEL stands for its unit', () => {
   const rt1b = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'RT1b')!;
+  // Codex r1: the Agent passes the full LABEL but the user said only the head noun. The sentence does not count the
+  // label, so it is not read as "cafés", and there is no card.
+  it('CONTRAST (Codex r1 bypass): the Agent\'s "café subscribers" for the user\'s "subscribers" gets no card', async () => {
+    const quote = 'Every 10 more subscribers adds about 1 percentage point of wholesale subscription revenue.';
+    const w = world(rt1b); const before = w.graph();
+    const result = await propose(w, { ...rt1b, quote, effect: effect(1, 'percentage points', 10, 'café subscribers') });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false });
+    expect(cardsFor(w, result)).toEqual([]);
+    noWrite(w, rt1b, before);
+  });
   // Rule (b) refused: the label's head noun alone is not the label. Refused at the writer's comparator, never carded.
   it('CONTRAST: the head noun alone ("subscribers") gets no card', async () => {
     const quote = 'Every 10 more subscribers adds about 1 percentage point of wholesale subscription revenue.';
