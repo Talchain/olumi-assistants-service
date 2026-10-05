@@ -211,6 +211,7 @@ describe('dial A — the recorded-ask window', () => {
       (k) => !PENDING_KIND_IS_RECORDED_ASK[k],
     );
     expect(offerKinds.sort()).toEqual([
+      'agent_link_effect_question', // RT-6 S4-A: the Agent lane stamps its own 2-turn / 10-minute lifetime (DL e8)
       'apply_proposed_change',
       'clarify_v2_round',
       'draft_graph',

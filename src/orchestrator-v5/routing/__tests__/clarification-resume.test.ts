@@ -484,6 +484,9 @@ describe('tryClarificationResume — kind classification regression', () => {
   > = {
     // Graph-mutating today.
     set_factor_value: 'mutating',
+    // RT-6 S4-A (phase 1, reader only): answering the Agent's typed unit question prepares a link-size card on the
+    // graph it was asked on. Not resumed by this module; mutating so it fails closed if ever wired.
+    agent_link_effect_question: 'mutating',
     // GO(A) — answering "what does <option> cost, in <unit>?" WRITES a native
     // quantity onto an option->factor cell, so it fails closed as mutating for
     // the same reason its model-unit sibling does.

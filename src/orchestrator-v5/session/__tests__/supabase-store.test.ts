@@ -1929,3 +1929,68 @@ describe('readonly existing-scenario snapshot', () => {
     await expect(new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 }).readExistingScenario(SCENARIO)).rejects.toBeInstanceOf(SessionReadError);
   });
 });
+
+// ⭐ RT-6 S4-A PHASE 1 (DL e8, 5 Oct): the Agent lane's typed unit question is PARSED before any writer emits it, so no
+// rollback target can be wedged by a row that holds it. Strictness for every other kind is unchanged.
+describe('SupabaseSessionStore.readMostRecentPendingActions — RT-6 S4-A agent_link_effect_question (reader only)', () => {
+  // Acceptance's served d39c05ba row C1 ("What unit is the 1 change in “Onboarding drag” stated in?").
+  const QUESTION: PendingAction = {
+    id: 'pa-s4a-1',
+    scenario_id: SCENARIO,
+    chip_id: 'leq_0b6f2c3e-7d1a-4f1e-9a51-2a4d1c7e9f10',
+    action: {
+      kind: 'agent_link_effect_question',
+      question: 'What unit is the 1 change in “Onboarding drag” stated in?',
+      from_node_id: 'developer_headcount', to_node_id: 'onboarding_drag',
+      from_label: 'Developer headcount', to_label: 'Onboarding drag',
+      quote: 'Every 2 extra developers add about 1 point of onboarding drag.',
+      effect: { amount: 1, amount_unit: 'points', per_source_change: 2, per_source_change_unit: 'developers' },
+      asked_ends: ['target'],
+    },
+    preconditions: { graph_hash: '3fe4a430fb6b8cf7' },
+    expires_at_turn_count: 2,
+    expires_at_iso: '2099-12-31T23:59:59.000Z',
+    emitted_at_iso: '2026-10-05T20:00:00.000Z',
+  };
+  const storeFor = (raw: unknown): SupabaseSessionStore => new SupabaseSessionStore(
+    makeClient({ selectResult: { data: [{ id: 'turn-row-s4a-1', pending_actions: raw }], error: null } }).client,
+    new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+  const strict = (raw: unknown) => storeFor(raw).readMostRecentPendingActions(SCENARIO, { validation: 'strict' });
+  const action = QUESTION.action as unknown as Record<string, unknown>;
+  const withAction = (patch: Record<string, unknown>) => ({ ...QUESTION, action: { ...action, ...patch } });
+
+  it('RED on base (unknown kind → pending_actions_corrupt): a newest row holding the question parses in STRICT mode, losslessly, beside another kind', async () => {
+    await expect(strict([QUESTION, VALID_PENDING])).resolves.toEqual([QUESTION, VALID_PENDING]);
+  });
+
+  it('CONTROL: an unknown FUTURE kind still throws in strict mode (strictness unchanged)', async () => {
+    await expect(strict([withAction({ kind: 'agent_link_effect_question_v2' })])).rejects.toMatchObject({
+      name: 'SessionReadError', code: 'pending_actions_corrupt' });
+  });
+
+  it('a later writer may add an optional field: it is kept, not refused', async () => {
+    const extra = withAction({ answer_hint: 'percentage points' });
+    await expect(strict([extra])).resolves.toEqual([extra]);
+  });
+
+  it.each([
+    ['question missing', { question: undefined }], ['question blank', { question: '  ' }],
+    ['quote missing', { quote: undefined }], ['from_node_id missing', { from_node_id: undefined }],
+    ['to_node_id missing', { to_node_id: undefined }], ['the two ends are one node', { to_node_id: 'developer_headcount' }],
+    ['from_label missing', { from_label: undefined }], ['to_label missing', { to_label: undefined }],
+    ['effect missing', { effect: undefined }], ['effect an array', { effect: [] }],
+    ['amount zero', { effect: { amount: 0, amount_unit: 'points', per_source_change: 2, per_source_change_unit: 'developers' } }],
+    ['amount not finite', { effect: { amount: Number.NaN, amount_unit: 'points', per_source_change: 2, per_source_change_unit: 'developers' } }],
+    ['per_source_change zero', { effect: { amount: 1, amount_unit: 'points', per_source_change: 0, per_source_change_unit: 'developers' } }],
+    ['amount_unit blank', { effect: { amount: 1, amount_unit: '', per_source_change: 2, per_source_change_unit: 'developers' } }],
+    ['per_source_change_unit missing', { effect: { amount: 1, amount_unit: 'points', per_source_change: 2 } }],
+    ['asked_ends empty', { asked_ends: [] }], ['asked_ends names neither end', { asked_ends: ['both'] }],
+    ['asked_ends repeats an end', { asked_ends: ['target', 'target'] }],
+  ] as const)('a malformed question (%s) is refused in strict mode, never returned unchecked', async (_n, patch) => {
+    await expect(strict([withAction(patch as Record<string, unknown>)])).rejects.toMatchObject({ code: 'pending_actions_corrupt' });
+  });
+
+  it('a question with no emit-time graph_hash is refused (it is answered only against the graph it was asked on)', async () => {
+    await expect(strict([{ ...QUESTION, preconditions: {} }])).rejects.toMatchObject({ code: 'pending_actions_corrupt' });
+  });
+});

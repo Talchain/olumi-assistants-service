@@ -270,6 +270,9 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // Graph-mutating: applying the persisted operator/value changes
   // the graph. Hash divergence between emit and resume is unsafe.
   set_factor_value: 'mutating',
+  // RT-6 S4-A (phase 1, reader only): answering it prepares a link-size card. Not resumed by this module; MUTATING so
+  // it fails closed if a resumer is ever wired, exactly as the elicit_* cells below.
+  agent_link_effect_question: 'mutating',
   // This carrier records an issue; its answers prepare a separate, consented canonical proposal.
   reconcile_goal_scope: 'non_mutating',
   // Reserved-but-not-emitted graph-mutating kinds. Classified as

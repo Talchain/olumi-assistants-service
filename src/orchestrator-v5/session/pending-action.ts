@@ -587,7 +587,32 @@ export type PendingActionAction =
       /** Stable public copy captured at emit time. */
       readonly public_label: string;
       readonly public_message: string;
-    };
+    }
+  | ({
+      /**
+       * RT-6 step 4 S4-A (DL e8, 5 Oct): the Agent lane's typed unit question about a link the user sized in chat
+       * ("What unit is the 1 change in “Onboarding drag” stated in?"), held by the SERVER so that a one-word answer
+       * ("Percentage points.") completes it by this pending's id, never by re-reading earlier turns.
+       *
+       * ⛔ PHASE 1 = READER ONLY. Nothing emits this kind yet. Every append strict-reads the latest row and an unknown
+       * kind throws `pending_actions_corrupt`, so a writer may ship only once every rollback target already parses
+       * it (DL: after a published prod release carries this block). Not a recorded ask, never claims a bare number,
+       * never chip-derived, never confirmation-expecting; classified MUTATING (fail-closed) for the resumer.
+       */
+      readonly kind: 'agent_link_effect_question';
+    } & AgentLinkEffectQuestionFields);
+
+/** The stored question's own fields (S4-A). `effect` is the figures the user wrote, read from `quote`. */
+export interface AgentLinkEffectQuestionFields {
+  readonly question: string;
+  readonly from_node_id: string;
+  readonly to_node_id: string;
+  readonly from_label: string;
+  readonly to_label: string;
+  readonly quote: string;
+  readonly effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
+  readonly asked_ends: readonly ('source' | 'target')[];
+}
 
 export type PendingActionKind = PendingActionAction['kind'];
 
@@ -604,6 +629,8 @@ export type PendingActionKind = PendingActionAction['kind'];
  */
 export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   'reconcile_goal_scope',
+  // RT-6 S4-A phase 1: admitted so a row carrying it PARSES (a strict read would otherwise throw); no resumer claims it.
+  'agent_link_effect_question',
   'set_factor_value',
   'run_analysis',
   'what_would_flip',
@@ -924,6 +951,8 @@ export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = 
   clarify_v2_round: false,
   set_factor_value: false,
   edit_graph_add_risk: false,
+  // RT-6 S4-A: the Agent lane stamps its own 2-turn / 10-minute lifetime at emission (DL e8); never widened.
+  agent_link_effect_question: false,
 };
 
 /**
@@ -1283,6 +1312,7 @@ export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean>
   draft_graph: false,
   apply_proposed_change: false,
   edit_graph_add_risk: false,
+  agent_link_effect_question: false, // a unit answer ("Percentage points."), never a bare number
 };
 
 /**
@@ -1720,8 +1750,29 @@ export function parsePendingAction(input: unknown): PendingAction | null {
       if (typeof a.public_message !== 'string' || a.public_message.length === 0) return null;
     }
   }
+  if (a.kind === 'agent_link_effect_question') {
+    // RT-6 S4-A. Every field REQUIRED (the same non-optional block as the elicit_* kinds: a flat `if` chain returns an
+    // unchecked kind by CAST). Extra fields are kept, as for every kind, so a later writer can add optional ones.
+    const text = (v: unknown, max: number): boolean => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+    if (!text(a.question, 1600) || !text(a.quote, 2000)) return null;
+    if (!text(a.from_node_id, 200) || !text(a.to_node_id, 200) || a.from_node_id === a.to_node_id) return null;
+    if (!text(a.from_label, 300) || !text(a.to_label, 300)) return null;
+    const e = a.effect as Record<string, unknown> | null | undefined;
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return null;
+    if (typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0) return null;
+    if (typeof e.per_source_change !== 'number' || !Number.isFinite(e.per_source_change) || e.per_source_change === 0) return null;
+    if (!text(e.amount_unit, 100) || !text(e.per_source_change_unit, 100)) return null;
+    const ends = a.asked_ends;
+    if (!Array.isArray(ends) || ends.length === 0 || ends.length > 2 || new Set(ends).size !== ends.length
+      || !ends.every((x) => x === 'source' || x === 'target')) return null;
+  }
   const preconditions = o.preconditions;
   if (!preconditions || typeof preconditions !== 'object' || Array.isArray(preconditions)) return null;
+  if (a.kind === 'agent_link_effect_question') {
+    // Answered only against the graph it was asked on: a moved model invalidates the question.
+    const p = preconditions as Record<string, unknown>;
+    if (typeof p.graph_hash !== 'string' || p.graph_hash.length === 0) return null;
+  }
   if (a.kind === 'apply_proposed_change') {
     // Graph-mutating proposals MUST carry the emit-time graph hash so
     // the resumer can detect divergence and emit recovery_superseded.
