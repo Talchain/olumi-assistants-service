@@ -67,7 +67,10 @@ function sizedInGoalUnit(e: Rec, goalUnit: string | undefined, graph?: unknown):
   // WRITER's own comparator over the goal end's own units. A % goal not so marked keeps the pre-existing comparison
   // (follow-up for Science). A count goal's units hold no "points": unchanged.
   const ends = graph !== undefined && typeof e.from === 'string' && typeof e.to === 'string' ? linkEffectEndUnits(graph, e.from, e.to) : null;
-  return ends !== null && ends.target.own.every(u => statedInOneOf(u, ['percentage points', 'pp', 'points'])) && statedInOneOf(ne.amount_unit, ends.target.own);
+  // Points spelled any way ("pp", "percentage point(s)", "point(s)") by the writer's own comparator; never "basis points"
+  // (1 bp = 0.01 pp), which the old /point/ regex wrongly admitted. A plain "%" target unit is unchanged (not admitted).
+  const isPoints = (u: string): boolean => statedInOneOf(u, ['percentage points', 'pp', 'points']) || /^(?:percentage\s+)?points?$/i.test(u.trim());
+  return ends !== null && ends.target.own.every(isPoints) && statedInOneOf(ne.amount_unit, ends.target.own);
 }
 
 type Rec = Record<string, unknown>;

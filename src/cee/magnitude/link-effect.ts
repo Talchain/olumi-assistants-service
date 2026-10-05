@@ -128,8 +128,7 @@ export function levelDomain(unit: string | undefined, frame: number, percentLeve
   const cls = classifyUnitScaleClass(unit);
   if (cls === 'percentage_points' || cls === 'basis_points') return null;
   if (cls === 'percent') {
-    return unit !== undefined && (isPercentWithPeriod(unit) || isPercentOfPopulation(unit) || percentLevel)
-      && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
+    return unit !== undefined && (isPercentWithPeriod(unit) || percentLevel) && (frame === 100 || frame === 1) ? UNIT_INTERVAL : null;
   }
   if (unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency') return { lo: 0, hi: Infinity };
   return frame === 1 ? UNIT_INTERVAL : null;
@@ -323,14 +322,19 @@ export function switchStateWords(level: number): 'on' | 'off' | undefined {
   return level === 1 ? 'on' : level === 0 ? 'off' : undefined;
 }
 
-/** A pinned percentage level moves in points: 1 point is 1 raw unit, including "% of output". */
+/**
+ * RT-6 link-effect path ONLY (writer + unit reader; Science U2): a pinned percentage level, including "% of output",
+ * moves in points (1 point = 1 raw unit). The shared magnitude readers (`isPercentLevel`, `levelDomain`, reached by
+ * admit-model, frame-defaulted links and target testability) keep today's "% with a period" rule: widening them is a
+ * Model Construction + Science call, not this lane's.
+ */
 export function isPercentageLevelUnit(unit: string | undefined, frame: number | undefined): boolean {
   return frame === 100 && unit !== undefined && (isPercentWithPeriod(unit) || isPercentOfPopulation(unit));
 }
 
-export const isPercentLevel = (node: MagnitudeNode, frame: number | undefined): boolean => {
+const isPercentLevel = (node: MagnitudeNode, frame: number | undefined): boolean => {
   const unit = unitOf(node);
-  return isPercentageLevelUnit(unit, frame);
+  return frame === 100 && unit !== undefined && isPercentWithPeriod(unit);
 };
 
 /**
