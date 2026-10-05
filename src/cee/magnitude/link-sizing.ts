@@ -124,4 +124,17 @@ export function optionsRestingOnAcceptedOlumiSizes(graph: unknown, optionIds: re
 }
 
 /** R8 writer guard: the carrier is outside the analysis hash; an unchanged size cannot change it on re-register. */
-export { keepMeanProjectionWhenSizeUnchanged } from '../../schemas/required-nested-merge.js';
+export function keepMeanProjectionWhenSizeUnchanged<E extends object>(before: unknown, after: E): E {
+  if (!isRec(before) || !isRec(after)) return after;
+  const oldSize = isRec(before.strength) ? before.strength : {};
+  const newSize = isRec(after.strength) ? after.strength : {};
+  const oldProvenance = isRec(before.provenance) ? before.provenance : {};
+  const newProvenance = isRec(after.provenance) ? after.provenance : {};
+  if (!Object.hasOwn(oldProvenance, 'mean_projected') && !Object.hasOwn(newProvenance, 'mean_projected')) return after;
+  if (oldSize.mean !== newSize.mean || oldProvenance.magnitude !== newProvenance.magnitude) return after;
+  // Copy the old carrier opaquely at this write boundary; only the licence interprets its value.
+  const { mean_projected: _proposed, ...kept } = newProvenance;
+  const carrier = Object.fromEntries(Object.entries(oldProvenance).filter(([key]) => key === 'mean_projected'));
+  if (!isRec(before.provenance) && !isRec(after.provenance)) return after;
+  return { ...after, provenance: { ...kept, ...carrier } };
+}

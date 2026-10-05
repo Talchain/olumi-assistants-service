@@ -1651,10 +1651,12 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const withheldReason = claimPermissionsFrom((response as { analysis_state?: unknown }).analysis_state, opts.analysisReady).withheld_reason
         ?? opts.leaderClaimWithheldReason;
       const noResult = runStateSaysNoResult((response as { analysis_state?: unknown }).analysis_state) && admissionClause(opts.analysisReady) === undefined;
+      const closingFor = (goalFigureCoHold: GoalFigureCoHold | undefined): string => agentNoLeaderSentence(withheldReason, opts.analysisReady,
+        limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
+        separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHold);
       const closing = noResult
         ? sentence(REASON_NOT_RECORDED)
-        : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
-          separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph));
+        : closingFor(goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph));
       // A second wire pass must not parse a deterministic closing as fresh model prose. Node labels can contain
       // punctuation and ranking words, so splitting that closing into sentences can otherwise drop half and append it twice.
       const trimmed = text.trimEnd();
@@ -1693,9 +1695,14 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         const body = lostTypedSay
           ? [withoutTypedFragments.trimEnd(), typedSay].filter((part) => part !== '').join('\n\n')
           : withoutTypedFragments.trimEnd();
+        // #2613 buddy r5 P1: when the reply already says the typed goal reason and the closing repeats it, the closing
+        // drops ONLY that reason. Any other cause it carried (the admission's) is still said; nothing else is invented.
+        const typedReasonSaid = typedSay !== null && sameWordsIn(body, typedSay) && sameWordsIn(closing, typedSay);
+        const closingToAdd = !typedReasonSaid ? closing
+          : admissionClause(opts.analysisReady) === undefined ? '' : closingFor(undefined);
         const alreadySaid = (closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph))
-          || (typedSay !== null && sameWordsIn(body, typedSay) && sameWordsIn(closing, typedSay));
-        next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
+          || closingToAdd === '' || sameWordsIn(body, closingToAdd);
+        next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closingToAdd}` } as OlumiResponse;
         log.info(
           {
             event: 'agent_lane.withheld_leader_ranking_dropped',

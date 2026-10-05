@@ -24,7 +24,7 @@ import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
 import { textNamesLeadingOption } from '../../../compose/leading-option-egress-guard.js';
-import { notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, untestableTargetTail } from '../../../admission/target-testability.js';
+import { notTargetTestableSentence, targetNotTestableWarning, targetTestabilityOf, targetWarningSentence, untestableTargetTail } from '../../../admission/target-testability.js';
 import { goalChanceWithheldForAgent } from '../../../agent-lane/goal-chance-withheld.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
 
@@ -130,10 +130,12 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
   it('row 1 (DL e8 condition 1): after the Run the target sentence reaches the user — the panel warning and the chat tail', async () => {
     const { result } = await runOn(F.graph_with_target);
     const verdict = targetTestabilityOf(F.graph_with_target);
-    const sentence = notTargetTestableSentence(F.graph_with_target, verdict)!;
+    // #2613 (DL): the warning's ONE source is now the capped B′ composer; the readiness sentence keeps three names.
+    const sentence = targetWarningSentence(F.graph_with_target, verdict)!;
     expect(sentence).toMatch(/^Olumi can compare your options, but can't yet test them against your target \(at most 400 cancellations \/ month\), because it needs today's level of monthly cancellations/);
     const warning = (result.enrichment.inference_warnings as Json[]).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
     expect(warning.message).toBe(`Not shown. ${sentence}`);
+    expect(notTargetTestableSentence(F.graph_with_target, verdict)).toContain('and from Late-delivery cancellations to monthly cancellations and 3 more.');
     const tail = untestableTargetTail(F.graph_with_target, verdict)!;
     expect(warning.say).toBe(tail);
     expect(goalChanceWithheldForAgent(result)?.say).toBe(tail);

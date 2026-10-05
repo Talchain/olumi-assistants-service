@@ -370,19 +370,26 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
  */
 const TARGET_TESTABLE_SENTENCE_CAP = 388;
 
-export function notTargetTestableSentence(graph: unknown, verdict: TargetTestability): string | null {
-  // Keep the target, every failing reason and the question before giving up the warning's long form.
-  // The P5 list first names fewer links, keeping the full missing-link count in "and N more".
-  for (let count = 3; count > 0; count--) {
-    const parts = untestableTargetParts(graph, verdict, count);
-    if (parts === null) return null;
-    // Consecutive needs share one "it needs" ("it needs today's level of X and a size for the link from L to X").
-    const clauses = parts.clauses.map((c, i) => (i > 0 && c.startsWith('it needs ') && parts.clauses[i - 1]!.startsWith('it needs ') ? c.slice('it needs '.length) : c));
-    const because = clauses.length === 1 ? clauses[0] : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
-    const said = `Olumi can compare your options, but can't yet test them against your target (${parts.target}), because ${because}.${parts.question !== null ? ` ${parts.question}` : ''}`;
-    if (said.length <= TARGET_TESTABLE_SENTENCE_CAP || count === 1) return said;
+export function notTargetTestableSentence(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): string | null {
+  const parts = untestableTargetParts(graph, verdict, namedLinkCount);
+  if (parts === null) return null;
+  // Consecutive needs share one "it needs" ("it needs today's level of X and a size for the link from L to X").
+  const clauses = parts.clauses.map((c, i) => (i > 0 && c.startsWith('it needs ') && parts.clauses[i - 1]!.startsWith('it needs ') ? c.slice('it needs '.length) : c));
+  const because = clauses.length === 1 ? clauses[0] : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
+  return `Olumi can compare your options, but can't yet test them against your target (${parts.target}), because ${because}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+}
+
+/**
+ * The B′ WARNING's long form (#2613, DL): only this capped carrier shortens the P5 list (3, 2, then 1 named link +
+ * "and N more", the total kept) before it would give up the target, reasons and question. The readiness view keeps
+ * {@link notTargetTestableSentence}'s three names unchanged.
+ */
+export function targetWarningSentence(graph: unknown, verdict: TargetTestability): string | null {
+  for (let count = 3; count > 1; count--) {
+    const said = notTargetTestableSentence(graph, verdict, count);
+    if (said === null || said.length <= TARGET_TESTABLE_SENTENCE_CAP) return said;
   }
-  return null;
+  return notTargetTestableSentence(graph, verdict, 1);
 }
 
 /**
@@ -419,7 +426,7 @@ export function targetNotTestableWarning(
   graph: unknown, verdict: TargetTestability, optionIds: readonly string[], code: string,
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string } | null {
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable') return null;
-  const said = notTargetTestableSentence(graph, verdict);
+  const said = targetWarningSentence(graph, verdict);
   const message = said !== null && said.length <= TARGET_TESTABLE_SENTENCE_CAP ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
   // RT-10 B′ R2: what the reply says about the target, from the same parts (`untestableTargetTail`).
   const tail = untestableTargetTail(graph, verdict);
