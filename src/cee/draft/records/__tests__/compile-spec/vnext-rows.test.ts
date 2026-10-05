@@ -333,3 +333,27 @@ describe('pass 2 P2-A3: records-path readiness is read from the stored graph, so
     expect(resolveAnalysisAdmission(graph).permitted_analysis_mode).toBe(before);
   });
 });
+
+// ── PR #2573 Codex round 1 (5d35e906): each row reproduces the reviewer's counterexample. EXTRACTION-UNPROVEN fixtures. ──
+function vanEffect(quote: string): DraftRecordSet {
+  const r = vans();
+  r.stated_items[5] = { kind: 'cause', source_quote: quote, relationship: { from_quantity: 0, to_quantity: 1, amount: 18, amount_literal: '18', per_source_change: 1, per_source_literal: 'Each' } };
+  return r;
+}
+describe('Codex R1 F2: a count-unit contradiction is refused, never user_stated', () => {
+  for (const quote of ['Each van adds 18 deliveries per year.', 'Each van we lease adds 18 elephants.', 'Each van adds 18 deliveries every week.']) {
+    it(`F2 "${quote}" against deliveries/month is a typed unit refusal`, () => {
+      const r = vanEffect(quote); const p = project(r, VANS + ' ' + quote);
+      expect(p.dropped).toContainEqual(expect.objectContaining({ stated_index: 5, reason: 'unit_literal_contradicts_unit' }));
+      expect(edgeFor(p, 5, r)?.provenance?.natural_effect).toBeUndefined();
+      expect(p.graph.edges.some(e => e.provenance?.magnitude === 'user_stated' && e.provenance?.natural_effect?.amount === 18)).toBe(false);
+    });
+  }
+  it('F2 CONTRAST the same noun with the same period, or no local unit word, still earns user_stated', () => {
+    for (const quote of ['Each van adds 18 deliveries a month.', 'Each van adds 18 to monthly deliveries.', 'Each van we lease adds 18 deliveries.']) {
+      const r = vanEffect(quote); const p = project(r, VANS + ' ' + quote);
+      expect(p.dropped.filter(d => d.stated_index === 5 && d.reason !== 'unconnected_to_goal'), quote).toEqual([]);
+      expect(edgeFor(p, 5, r)?.provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: 18, amount_unit: 'deliveries/month' } });
+    }
+  });
+});

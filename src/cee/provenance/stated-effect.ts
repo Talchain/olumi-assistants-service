@@ -85,15 +85,55 @@ function oneMatchingAmount(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-/** Missing local unit words are not contradictions to the owning quantity declaration. */
-function unitAgrees(amount: LocatedAmount, expected: string, other: string): boolean {
+// Unit words written directly at a plain numeral. Calendar words outside the shared month/year vocabulary are kept as
+// their own periods so "per week" can never read as a monthly rate.
+const LOCAL_PERIOD: Readonly<Record<string, string>> = {
+  day: "day", days: "day", daily: "day", week: "week", weeks: "week", weekly: "week",
+  month: "month", months: "month", mo: "month", monthly: "month", quarter: "quarter", quarters: "quarter", quarterly: "quarter",
+  year: "year", years: "year", yr: "year", yearly: "year", annual: "year", annually: "year",
+};
+const PERIOD_ADJECTIVE = /^(?:daily|weekly|monthly|quarterly|yearly|annual|annually)$/u;
+const PERIOD_CONNECTOR = new Set(["a", "an", "per", "every", "each"]);
+const LOCAL_QUALIFIER = new Set(["more", "extra", "additional", "new", "newly", "fewer", "less", "further", "net", "lost", "added", "existing"]);
+const LOCAL_FUNCTION_WORD = new Set(["a", "an", "the", "and", "or", "to", "of", "in", "on", "at", "by", "for", "from", "with", "than",
+  "per", "each", "every", "into", "over", "under", "across", "between", "about", "around", "roughly", "approximately", "up", "down",
+  "is", "are", "was", "were", "be", "would", "will", "could", "should", "if", "when", "while", "but"]);
+
+/** The noun phrase (at most two words) and the period written at a plain numeral. Nothing here supplies a unit. */
+function localCountUnit(quote: string, amount: LocatedAmount): { readonly nouns: readonly string[]; readonly period: string | null } {
+  const words = quote.slice(amount.index + amount.matchedText.length).match(/^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,6})/u)?.[1]
+    .trim().split(/\s+/u).map(word => word.toLowerCase()) ?? [];
+  let i = 0, period: string | null = null;
+  while (i < words.length && (LOCAL_QUALIFIER.has(words[i]!) || PERIOD_ADJECTIVE.test(words[i]!))) {
+    if (PERIOD_ADJECTIVE.test(words[i]!)) period = LOCAL_PERIOD[words[i]!]!;
+    i++;
+  }
+  const nouns: string[] = [];
+  while (i < words.length && nouns.length < 2 && !LOCAL_FUNCTION_WORD.has(words[i]!) && LOCAL_PERIOD[words[i]!] === undefined) nouns.push(words[i++]!);
+  if (PERIOD_ADJECTIVE.test(words[i] ?? "")) period = LOCAL_PERIOD[words[i]!]!;
+  else if (PERIOD_CONNECTOR.has(words[i] ?? "") && LOCAL_PERIOD[words[i + 1] ?? ""] !== undefined) period = LOCAL_PERIOD[words[i + 1]!]!;
+  return { nouns, period };
+}
+
+/**
+ * Missing local unit words are not contradictions to the owning quantity declaration; written ones are checked whole.
+ * A count is its noun WITH its period: "18 deliveries per year" contradicts deliveries/month, and a noun written at the
+ * numeral that is not the declared noun ("18 elephants") contradicts it whatever the opposite endpoint is called.
+ */
+function unitAgrees(amount: LocatedAmount, expected: string, other: string, quote: string): boolean {
   const money=readMoney(expected,'');
   if(amount.kind==='currency')return money!==null && money.code===amount.currencyCode
     && amount.units.every(u=>{const m=readMoney(u,'');return m===null || m.period===null || m.period===money.period;});
   if(amount.kind==='percent')return sameUnit(expected,'%');
   const count=readCountRate(expected),otherCount=readCountRate(other);
   if(count===null)return true;
-  const sameNoun=(unit:string,noun:string[])=>readCountRate(unit)?.noun.join(' ')===noun.join(' ');
+  const sameNoun=(unit:string,noun:readonly string[])=>readCountRate(unit)?.noun.join(' ')===noun.join(' ');
+  if(amount.implicitSource!==true){
+    const local=localCountUnit(quote,amount);
+    const runs=local.nouns.flatMap((_,start)=>local.nouns.slice(start).map((__,end)=>local.nouns.slice(start,start+end+1).join(' ')));
+    if(local.nouns.length>0 && !runs.some(run=>sameNoun(run,count.noun)))return false;
+    if(local.period!==null && local.period!==count.period)return false;
+  }
   if(amount.units.some(u=>sameNoun(u,count.noun)))return true;
   return otherCount===null || !amount.units.some(u=>sameNoun(u,otherCount.noun));
 }
@@ -123,7 +163,7 @@ export function statedEffectUnitsMatch(quote: string, detail: StatedEffectDetail
   const agrees = (span: DraftQuoteSpan | undefined, unit: string, other: string, source = false): boolean => {
     if (span === undefined) return true; // Missing evidence is refused by the evidence guard, not guessed here.
     const amount = amounts.find(a => atSpan(a, span, quote) && (source || !a.implicitSource));
-    return amount === undefined || unitAgrees(amount, unit, other) && (!source || implicitSourceAgrees(amount, unit));
+    return amount === undefined || unitAgrees(amount, unit, other, quote) && (!source || implicitSourceAgrees(amount, unit));
   };
   return agrees(authority.amount_span, detail.amount_unit, detail.per_source_change_unit)
     && agrees(authority.range?.low_span, detail.amount_unit, detail.per_source_change_unit)
@@ -180,8 +220,8 @@ export function statedEffectQuoteMatches(
     const amounts=locatedAmounts(quote);
     const target=amounts.find(a=>!a.implicitSource && atSpan(a,authority.amount_span!,quote));
     const source=amounts.find(a=>atSpan(a,authority.source_span!,quote) && (a.implicitSource ? Math.abs(detail.per_source_change)===1 : magnitudeMatches(Math.abs(detail.per_source_change),a)));
-    if(target===undefined || source===undefined || target.index===source.index || !statedEffectUnitsMatch(quote,detail,authority) || !unitAgrees(target,detail.amount_unit,detail.per_source_change_unit)
-      || !unitAgrees(source,detail.per_source_change_unit,detail.amount_unit))return false;
+    if(target===undefined || source===undefined || target.index===source.index || !statedEffectUnitsMatch(quote,detail,authority) || !unitAgrees(target,detail.amount_unit,detail.per_source_change_unit,quote)
+      || !unitAgrees(source,detail.per_source_change_unit,detail.amount_unit,quote))return false;
     const left=Math.min(authority.amount_span.end,authority.source_span.end),right=Math.max(authority.amount_span.start,authority.source_span.start);
     return !['.','!','?',';'].some(d=>quote.slice(left,right).includes(d));
   }
