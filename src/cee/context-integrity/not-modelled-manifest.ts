@@ -1339,6 +1339,18 @@ const CANDIDATE_COLLECTIONS = ["nodes", "options"] as const;
  * The provenance tuple below is the fail-closed source-binding contract emitted
  * by the draft projector. A hypothesis — even one that happens to repeat the
  * same number — is not evidence that the amount was carried from the brief.
+ *
+ * ⚠ `value_confidence` IS NOT THE AUTHORITY; `source` IS (RT-4 class A, #87
+ * 5998705341). The served agent-lane producer (`admit-model` `ConstructedLevel`)
+ * writes `{ value, source, target_match, raw_value, unit }` and has no
+ * `value_confidence` field at all, so requiring "high" made every stated option
+ * figure read "absent". Seven served drafts replayed: 37/37 levels carried none,
+ * and £250k, £120k, 15%, 8% and 6% were all reported as missing from a model
+ * that held them. An ABSENT confidence is therefore no evidence either way. A
+ * producer that does write one and says less than "high" still withholds the
+ * credit (the extractor co-writes "low" with `cee_hypothesis`). `cee_hypothesis`
+ * is never credited, whatever it claims: £300, £8k and a 15% the brief states
+ * stay absent where the producer marked the level as Olumi's own.
  */
 function collectSourceBoundInterventionCandidates(
   option: Record<string, unknown>,
@@ -1360,7 +1372,9 @@ function collectSourceBoundInterventionCandidates(
     const target = targetMatch as Record<string, unknown>;
     if (
       intervention.source !== "brief_extraction" ||
-      intervention.value_confidence !== "high" ||
+      (intervention.value_confidence !== undefined &&
+        intervention.value_confidence !== null &&
+        intervention.value_confidence !== "high") ||
       target.node_id !== factorId ||
       target.confidence !== "high" ||
       target.match_type !== "exact_id"

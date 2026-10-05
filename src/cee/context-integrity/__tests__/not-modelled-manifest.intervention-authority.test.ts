@@ -20,7 +20,8 @@ interface InterventionFixture {
   readonly raw_value: number;
   readonly unit?: string;
   readonly source: "brief_extraction" | "cee_hypothesis";
-  readonly value_confidence: "high" | "low";
+  /** Absent on the served agent-lane level (`admit-model` `ConstructedLevel` has no such field). */
+  readonly value_confidence?: "high" | "medium" | "low";
 }
 
 function graphWithIntervention(intervention: InterventionFixture): Record<string, unknown> {
@@ -101,6 +102,57 @@ describe("canonical InterventionV3 quantity authority", () => {
     expect(item.verdict).not.toBe("in_model");
     expect(item.matched_node_id).toBeNull();
   });
+
+  // RT-4 class A (#87 5998705341): the served producer writes no value_confidence, so its absence must not
+  // withhold the credit. The SOURCE is the authority: a producer's explicit doubt still withholds it, and
+  // Olumi's own level never earns it, whatever confidence it claims.
+  it("credits a source-bound level that carries no value_confidence (the served agent-lane shape)", () => {
+    const item = itemFor(
+      "£25,000",
+      graphWithIntervention({ value: 0.5, raw_value: 25_000, unit: "£", source: "brief_extraction" }),
+    );
+
+    expect(item.verdict).toBe("in_model");
+    expect(item.matched_node_id).toBe(FACTOR_ID);
+  });
+
+  it.each(["low", "medium"] as const)(
+    "a producer's explicit %s value_confidence still withholds the credit from a brief_extraction level",
+    (valueConfidence) => {
+      const item = itemFor(
+        "£25,000",
+        graphWithIntervention({
+          value: 0.5,
+          raw_value: 25_000,
+          unit: "£",
+          source: "brief_extraction",
+          value_confidence: valueConfidence,
+        }),
+      );
+
+      expect(item.verdict).not.toBe("in_model");
+      expect(item.matched_node_id).toBeNull();
+    },
+  );
+
+  it.each([["high"], [undefined]] as const)(
+    "CONTRAST: a cee_hypothesis level is never credited (value_confidence %s)",
+    (valueConfidence) => {
+      const item = itemFor(
+        "£25,000",
+        graphWithIntervention({
+          value: 0.5,
+          raw_value: 25_000,
+          unit: "£",
+          source: "cee_hypothesis",
+          ...(valueConfidence !== undefined ? { value_confidence: valueConfidence } : {}),
+        }),
+      );
+
+      expect(item.verdict).not.toBe("in_model");
+      expect(item.matched_node_id).toBeNull();
+    },
+  );
 
   it("does not let a low-confidence hypothesis self-certify by supplying a unit", () => {
     const item = itemFor(
