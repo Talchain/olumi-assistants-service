@@ -196,6 +196,12 @@ describe('SERVED BYTES (DL Review Desk on #2588): the served rerun capture (CEE 
   });
 
   it('CONTROL: the served summary in the retired words is no longer in the grammar, so the probe sees the change', () => {
-    expect(forward(SERVED_SUMMARY)).toBe(FALLBACK);
+    // The headline is replaced by the locked template; the registry's salvage may keep the scaffold disclosure after
+    // it (Codex round 4), so bind the replacement, not the salvage.
+    const out = forward(SERVED_SUMMARY);
+    expect(out).not.toBe(SERVED_SUMMARY);
+    expect(out.startsWith(FALLBACK)).toBe(true);
+    expect(out).not.toContain('is fragile');
+    expect(out).not.toContain('Raise Price to £50');
   });
 });
