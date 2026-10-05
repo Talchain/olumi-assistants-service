@@ -8,7 +8,7 @@ import { replayRecordSet } from '../../src/cee/draft/records/replay.js';
 import { buildSentenceInventory } from '../../src/cee/draft/records/sentence-pass.js';
 import { SYN, synMain, synPass } from '../../src/cee/draft/records/__tests__/fixtures/sentence-pass-syn.js';
 import type { CallStructuredModel } from '../../src/orchestrator-v5/agent-lane/runtime/build-model.js';
-import { parseCeilingPass, statedFirstCalls, statedFirstRecords, type CeilingRecord } from './stated-first.js';
+import { extendPassRequest, parseCeilingPass, PASS_EXT_INSTRUCTION, statedFirstCalls, statedFirstRecords, type CeilingRecord } from './stated-first.js';
 
 const scenario = '22222222-2222-4222-8222-222222222222';
 const call = (data: unknown, delayed = false): CallStructuredModel => async () => {
@@ -90,6 +90,58 @@ describe('CEILING (self-authored) stated-first harness rows', () => {
     if (!c.ok) throw new Error(c.detail);
     expect(c.projection.stated_dispositions).toContainEqual(expect.objectContaining({ stated_index: 4, disposition: 'rejected' }));
     expect(c.projection.graph.nodes.filter(n => n.kind === 'option').every(n => !Object.values(n.data?.raw_interventions ?? {}).includes(201))).toBe(true);
+  });
+  it('LIVE ordering: a main answer that lands BEFORE a started pass still gets the pass-only stated set', async () => {
+    const claims = [{ claim_kind: 'factor' as const, label: 'Kept claim', quantity: 0, basis: [0] }];
+    const old = { stated_items: [{ kind: 'figure' as const, source_quote: 'MAIN ONLY SENTINEL' }], claims };
+    const slowPass: CallStructuredModel = async () => {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      return { text: JSON.stringify({ records: typed() }), status: 'completed' };
+    };
+    const c = statedFirstCalls(true, brief, call(old), slowPass, 'LIVE (harness-only)');
+    const passing = c.sentencePass({} as never);          // the builder starts the pass first, in parallel
+    const text = (await c.main({} as never)).text;        // the main answer resolves first (no delay)
+    await passing;
+    expect(text).not.toContain('MAIN ONLY SENTINEL');
+    expect(JSON.parse(text).stated_items).toEqual(statedFirstRecords(brief, old, typed()).stated_items);
+    expect(c.receipt()).toMatchObject({ kind: 'LIVE (harness-only)', mode: 'stated-first' });
+  });
+  it('a pass that does not parse is disclosed as not_applied and leaves the main bytes unchanged', async () => {
+    const old = synMain(), main = call(old), c = statedFirstCalls(true, SYN, main, call('{"records": "nope"}'));
+    await c.sentencePass({} as never);
+    expect(await c.main({} as never)).toEqual(await main({} as never));
+    expect(c.receipt()).toMatchObject({ status: 'not_applied' });
+  });
+  it('LIVE-EXT adds exactly source_literal, a figureless option role and is_baseline; lifts the budget; leaves the rest', () => {
+    const req = { model: 'm', instructions: 'SERVED', input: 'IN', max_output_tokens: 4000, schema: { served: true }, schema_name: 'sentence_links' };
+    const ext = extendPassRequest(req);
+    const item = (ext.schema as any).properties.records.items;
+    const roles = JSON.stringify(item.properties.role);
+    expect(roles).toContain('"option"'); expect(roles).toContain('"option_setting"');
+    for (const k of ['source_literal', 'is_baseline']) expect(JSON.stringify(item.properties[k])).toContain('"null"');
+    expect(item.required).toEqual(expect.arrayContaining(['source_literal', 'is_baseline', 'sentence', 'role']));
+    expect(ext.instructions).toBe(`SERVED\n${PASS_EXT_INSTRUCTION}`);
+    expect(ext.max_output_tokens).toBe(8000);
+    expect({ ...ext, instructions: undefined, schema: undefined, max_output_tokens: undefined })
+      .toEqual({ ...req, instructions: undefined, schema: undefined, max_output_tokens: undefined });
+    expect(req.max_output_tokens).toBe(4000);
+  });
+  it('LIVE-EXT off passes the served pass request through untouched', async () => {
+    const seen: unknown[] = [];
+    const spy: CallStructuredModel = async (r) => { seen.push(r); return { text: '', status: 'completed' }; };
+    const req = { instructions: 'SERVED', max_output_tokens: 4000 };
+    await statedFirstCalls(true, SYN, call(synMain()), spy).sentencePass(req as never);
+    expect(seen[0]).toBe(req);
+    await statedFirstCalls(true, SYN, call(synMain()), spy, 'LIVE (harness-only)', true).sentencePass(req as never);
+    expect((seen[1] as any).max_output_tokens).toBe(8000);
+  });
+  it('a pass record the adapter cannot place is disclosed not_applied and the main bytes are served unchanged', async () => {
+    const bad = typed().map(r => r.role === 'option' ? { ...r, source_literal: 'e' } : r);
+    const old = synMain(), main = call(old);
+    const c = statedFirstCalls(true, brief, main, call({ records: bad }));
+    await c.sentencePass({} as never);
+    expect(await c.main({} as never)).toEqual(await main({} as never));
+    expect(c.receipt()).toMatchObject({ status: 'not_applied', reason: 'ceiling_source_literal_not_unique' });
   });
   it('an absent pass leaves mode-on main bytes unchanged', async () => {
     const old = synMain(), main = call(old), c = statedFirstCalls(true, SYN, main, call(''));

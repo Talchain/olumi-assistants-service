@@ -9,7 +9,31 @@
 import type { DraftRecordSet, DraftStatedItem, DraftValueRange } from '../../src/cee/draft/records/grammar.js';
 import { createHash } from 'node:crypto';
 import { buildSentenceInventory, parseSentencePassOutput, type SentencePassRecord } from '../../src/cee/draft/records/sentence-pass.js';
-import type { CallStructuredModel } from '../../src/orchestrator-v5/agent-lane/runtime/build-model.js';
+import { strictForTheDrafter, type CallStructuredModel } from '../../src/orchestrator-v5/agent-lane/runtime/build-model.js';
+import { buildSentencePassBaseSchema, strictSentencePassSchema } from '../../src/cee/draft/records/sentence-pass.js';
+
+/**
+ * LIVE-EXT (harness only; DL amendment 5 Oct): the served pass has no sub-sentence quote and no figureless option, so
+ * live, two options in one sentence collapse into one and "keep things as they are" cannot be typed. This adds exactly
+ * the ceiling fixtures' three extensions, one general rule each in the served instruction's style (no example, no brief
+ * text), and lifts the pass's output budget (4,000 truncated 4/15 live draws). Never served.
+ */
+export const PASS_EXT_INSTRUCTION = `
+EXTENSION (three more fields)
+Also write one record for every option the brief names, whether or not it states a figure.
+role option: an option the brief names that states no figure of its own; its figure is "unresolved". An option that names its own figure stays option_setting.
+source_literal: when the sentence holds more than one record, the shortest characters of that sentence that contain every literal this record copies (its value_literal, unit_literals, direction_literal and any relationship or option_effect literal) together with the words naming what it measures (for an option or option_setting, the words that select that option), copied exactly and occurring once in that sentence; null when the sentence holds only this record.
+is_baseline: true only on the option that keeps things as they are today; otherwise null.`;
+export const PASS_EXT_MAX_OUTPUT_TOKENS = 8000;
+export function extendPassRequest<T extends { instructions?: unknown; schema?: unknown; max_output_tokens?: unknown }>(req: T): T {
+  const base = buildSentencePassBaseSchema() as { properties: { records: { items: { properties: Record<string, unknown> } } } };
+  const items = base.properties.records.items;
+  const role = items.properties.role as { enum: string[] };
+  items.properties = { ...items.properties, role: { ...role, enum: [...role.enum, 'option'] },
+    source_literal: { type: 'string' }, is_baseline: { type: 'boolean' } };
+  return { ...req, instructions: `${String(req.instructions ?? '')}\n${PASS_EXT_INSTRUCTION}`,
+    schema: strictForTheDrafter(strictSentencePassSchema(base as Record<string, unknown>)), max_output_tokens: PASS_EXT_MAX_OUTPUT_TOKENS };
+}
 
 type Ref = number | 'unresolved' | { sentence: number; literal: string };
 export type CeilingRecord = Omit<SentencePassRecord, 'role' | 'quantity_of' | 'relationship'> & {
@@ -154,24 +178,40 @@ export function statedFirstRecords(brief: string, main: DraftRecordSet, pass: re
 }
 
 /** Mode off returns the identical call objects. Mode on captures the pass but suppresses the old merge. */
-export function statedFirstCalls(enabled: boolean, brief: string, main: CallStructuredModel, sentencePass: CallStructuredModel) {
+export function statedFirstCalls(enabled: boolean, brief: string, main: CallStructuredModel, sentencePass: CallStructuredModel,
+  kind: 'CEILING (self-authored)' | 'LIVE (harness-only)' = 'CEILING (self-authored)', passExt = false) {
   if (!enabled) return { main, sentencePass, receipt: () => undefined };
   let pass: CeilingRecord[] | undefined;
+  let passError: string | undefined;
   let receipt: Record<string, unknown> | undefined;
+  // The builder starts the pass BEFORE the main call and runs them in parallel. Live, the main answer can land first, so
+  // the main wrapper awaits a started pass; set synchronously on entry, so "no pass started" never waits (pass absent).
+  let passDone: Promise<void> | undefined;
   return {
     sentencePass: (async req => {
-      const out = await sentencePass(req);
-      if (out.status !== 'incomplete' && out.text.length > 0) pass = parseCeilingPass(out.text);
+      const call = sentencePass(passExt ? extendPassRequest(req as never) : req);
+      passDone = call.then(() => undefined, () => undefined);
+      const out = await call;
+      if (out.status !== 'incomplete' && out.text.length > 0) {
+        try { pass = parseCeilingPass(out.text); } catch (e) { passError = e instanceof Error ? e.message : String(e); }
+      }
       // Empty text is the existing builder's pass-absent arm: the original merge cannot run twice.
       return { ...out, text: '' };
     }) as CallStructuredModel,
     main: (async req => {
       const out = await main(req);
+      if (passDone !== undefined) await passDone;
+      if (passError !== undefined) receipt = { kind, mode: 'stated-first', status: 'not_applied', reason: passError };
       if (out.status === 'incomplete' || out.text.length === 0 || pass === undefined) return out;
       const raw = JSON.parse(out.text) as DraftRecordSet;
-      const records = statedFirstRecords(brief, raw, pass);
+      let records: DraftRecordSet;
+      // A record the adapter cannot place (e.g. a non-unique source_literal) is disclosed, never a crashed draw.
+      try { records = statedFirstRecords(brief, raw, pass); } catch (e) {
+        receipt = { kind, mode: 'stated-first', status: 'not_applied', reason: e instanceof Error ? e.message : String(e) };
+        return out;
+      }
       const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-      receipt = { kind: 'CEILING (self-authored)', mode: 'stated-first', main_stated_dropped: raw.stated_items.length,
+      receipt = { kind, mode: 'stated-first', ...(passExt ? { pass_ext: true, pass_max_output_tokens: PASS_EXT_MAX_OUTPUT_TOKENS } : {}), main_stated_dropped: raw.stated_items.length,
         pass_records: pass.length, stated_items: records.stated_items.length, claims_kept: records.claims.length,
         claims_byte_identical: JSON.stringify(records.claims) === JSON.stringify(raw.claims),
         original_records_sha256: digest(raw), pass_records_sha256: digest(pass), compiled_input_sha256: digest(records),
