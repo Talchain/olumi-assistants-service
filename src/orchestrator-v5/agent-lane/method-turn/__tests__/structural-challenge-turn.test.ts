@@ -77,7 +77,9 @@ describe('SCI-DEEP reply', () => {
     const reply = composeStructuralChallengeReply({ result: changed, labels: LABELS, certainty: { baseline: [], alternative: [{ option_id: 'raise_pro_price_to_59', probability_of_goal: 1, earned: true }] } });
     expect(reply.split('\n')[0]).toBe('Without the link from Monthly churn to Paying subscribers, Raise Pro price to £59 still leads — but part of the result changes.');
     expect(reply).toContain('baseline: Reaches the target in about 53% of model runs. Without the link: Reaches the target in 100% of model runs.');
-    expect(reply).toContain('83,434 now and 90,306 without the link (your target is 85,000)');
+    // DL beat-4 audit: no unitless amount; the direction and the target crossing the claim's own side test proves.
+    expect(reply).toContain('Raise Pro price to £59\'s expected result is higher without the link, and moves from below your target to above it.');
+    expect(reply).not.toMatch(/83,434|90,306|85,000/);
     expect(reply).toContain('doesn\'t say which version of the model is right');
     expect(reply).toContain('This test isn\'t saved.');
     expect(reply).toContain('What evidence do you have for the link from Monthly churn to Paying subscribers?');
@@ -415,7 +417,40 @@ describe('review closure: final presentation is bound to its baseline execution 
     expect(output.result?.baseline.run_id).toBe(BASE.baseline.run_id);
     expect(output.reply).toContain('The figures are provisional estimates from these two model versions.');
     expect(output.reply).not.toContain('still leads');
-    expect(output.reply).toContain('83,434');
+    // The outcome line is present, as a direction (never a unitless amount).
+    expect(output.reply).toContain('expected result is higher without the link');
+  });
+
+  it.each([
+    // [name, baseline, alternative, target, verdict, basis, noise, expected words] — every claim parsed against the contract.
+    ['the same', 85500, 85500, 85000, 'holds', 'same_side_of_target', 'within_noise', 'is the same without the link, and stays above your target.'],
+    ['stays above', 90000, 87000, 85000, 'holds', 'same_side_of_target', 'signal', 'is lower without the link, and stays above your target.'],
+    ['no target (the served beat-4 shape)', 0.0213, -0.0031, null, 'delta_only', 'no_licensed_boundary', 'signal', 'is lower without the link.'],
+    ['unavailable without the link', 0.0213, null, null, 'not_comparable', 'missing_on_one_side', 'not_noise_qualified', 'is unavailable without the link.'],
+    ['not comparable (Codex P1)', 100, 1, null, 'not_comparable', 'identity_status_changed', 'not_noise_qualified', 'can\'t be compared between the two versions.'],
+    // Codex r3: an unlicensed basis never narrates the target; a within-noise delta never states a direction.
+    ['unlicensed + within noise (Codex r3)', 100, 101, 100.5, 'delta_only', 'no_licensed_boundary', 'within_noise', 'is about the same without the link (the difference is within sampling noise).'],
+    ['producer within_noise basis (once)', 100, 101, 100.5, 'delta_only', 'within_noise', 'within_noise', 'is about the same without the link (the difference is within sampling noise).'],
+    ['not noise-qualified', 0.0213, -0.0031, null, 'delta_only', 'not_noise_qualified', 'not_noise_qualified', 'is lower without the link (a difference that couldn\'t be checked against sampling noise).'],
+  ] as const)('DL beat-4 audit: an outcome level reads as a direction only when comparable (%s), never a number', (_name, baseline, alternative, target, verdict, basis, noise_verdict, words) => {
+    const claim = { ...changed.claims.find((c) => c.kind === 'outcome_level')!, baseline, alternative, target, verdict, basis, noise_verdict };
+    const result = StructuralChallengeResultV1Schema.parse({ ...changed, claims: [changed.claims[0]!, claim] });
+    const reply = composeStructuralChallengeReply({ result, labels: LABELS });
+    expect(reply).toContain(`Raise Pro price to £59's expected result ${words}`);
+    expect(reply).not.toMatch(/expected result is -?\d/);
+    if (verdict === 'not_comparable') expect(reply).not.toMatch(/expected result is (higher|lower|the same)/);
+    if (!(['target_crossed', 'same_side_of_target'] as readonly string[]).includes(basis)) expect(reply).not.toMatch(/your target/);
+    expect(reply.match(/within sampling noise/g)?.length ?? 0).toBeLessThanOrEqual(1);
+  });
+
+  it('Codex #2582 r2: a construction-invariant outcome never narrates sampling noise as movement', () => {
+    // Codex's exact contract-valid claim: 100 → 101 across a target of 100.5, within noise, unaffected by construction.
+    const claim = { ...changed.claims.find((c) => c.kind === 'outcome_level')!, baseline: 100, alternative: 101, target: 100.5,
+      noise_verdict: 'within_noise', verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true };
+    const result = StructuralChallengeResultV1Schema.parse({ ...changed, claims: [changed.claims[0]!, claim] });
+    const reply = composeStructuralChallengeReply({ result, labels: LABELS });
+    expect(reply).toContain('Raise Pro price to £59\'s expected result can\'t be affected by this link.');
+    expect(reply).not.toMatch(/expected result is (higher|lower|the same)|moves from|stays (above|below)/);
   });
   it.each(['leader', 'goal_probability', 'outcome_level', 'constraint_probability'] as const)(
     'P1-4 / prior #4: %s change names its observed claim and discloses unpaired sampling without dependency prose', async (kind) => {

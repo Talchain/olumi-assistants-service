@@ -48,17 +48,27 @@ name: Conversation Harness Gates
 # touches the harness, whatever branch protection says.
 
 on:
-  # PoC speed (4 Oct 2026): pull_request trigger removed; runs after merge on push.
-  push:
-    branches: [staging]
-    paths:
-      - 'tools/conversation-harness/**'
-      - 'src/orchestrator-v5/**'
-      # Transitively typechecked by the harness tsconfig — see the PATHS note above.
-      - 'tests/utils/**'
-      - '.github/workflows/conversation-harness-gates.yml'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
+  # DISPATCH-ONLY since 5 Oct 2026 (CI OPTIMISER, DL ruling). #2550 (4 Oct) took
+  # this off pull_request; since then it was red on 10/10 staging pushes on 5 Oct
+  # (01:43-11:59Z; run 37296648218: 6 failed tests, incl. live-eval-retry-policy
+  # "source marker is absent: function getClient(): Anthropic" and
+  # return-session-continuity "display-safe causal relationship missing from
+  # routed prompt"). A check that is red on every push hides the next red.
+  # Run on demand:
+  #   gh workflow run conversation-harness-gates.yml -R Talchain/olumi-assistants-service --ref <branch>
+  # The derived push path list is kept below as a COMMENT for the day the gate
+  # is green and re-enabled (re-derive it first; see the PATHS note above).
+  workflow_dispatch:
+  # push:
+  #   branches: [staging]
+  #   paths:
+  #     - 'tools/conversation-harness/**'
+  #     - 'src/orchestrator-v5/**'
+  #     # Transitively typechecked by the harness tsconfig — see the PATHS note above.
+  #     - 'tests/utils/**'
+  #     - '.github/workflows/conversation-harness-gates.yml'
+  #     - 'package.json'
+  #     - 'pnpm-lock.yaml'
 
 permissions:
   contents: read

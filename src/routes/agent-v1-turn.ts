@@ -61,6 +61,8 @@ import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
+import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, withNonlinearIdentity, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { goalCertaintyForAgent } from '../orchestrator-v5/agent-lane/goal-certainty-for-agent.js';
@@ -125,9 +127,10 @@ import {
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
-import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
+import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
+import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn } from '../orchestrator-v5/agent-lane/decision-review-press.js';
 import { guidanceRequestOf, turnGuidanceFor, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -614,8 +617,24 @@ export const NEXT_STEP_CHIPS = [
 ] as const satisfies readonly OfferedAction[];
 
 const NEXT_STEP_CHIP_IDS: ReadonlySet<string> = new Set(NEXT_STEP_CHIPS.map((c) => c.id));
+
+/**
+ * ⭐ A4 slice 1: each review item's next step is an EXISTING press, offered as the chip that press already answers: the
+ * next steps' own chips (no `action_type`, so What would change keeps its measured operation) and the UI's own
+ * "Test without this link" press for the item's link (`TestWithoutLinkButton.tsx`). Nothing new is answerable.
+ */
+const DECISION_REVIEW_CHIP_OPERATION = chipOperationOf({ chip: { id: DECISION_REVIEW_PRESS_ID } });
+function decisionReviewChips(turn: DecisionReviewTurn): OfferedAction[] {
+  return turn.steps.flatMap((step): OfferedAction[] => {
+    if (step.kind === 'test_without_link') {
+      return [{ id: structuralChallengePressId({ from_id: step.from_id, to_id: step.to_id }), label: 'Test without this link', message: 'Test without this link' }];
+    }
+    const id = step.kind === 'what_would_change' ? TIPPING_POINT_PRESS_ID : STRENGTHEN_PRESS_CHIP_ID;
+    return NEXT_STEP_CHIPS.filter((c) => c.id === id).map((c) => ({ ...c }));
+  });
+}
 /** Every press that runs a reasoning method (the selector withholds its rows on one): the next steps and Widen. */
-const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID]);
+const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID, DECISION_REVIEW_PRESS_ID]);
 
 /**
  * The next steps are offered only on a result that is current and that the canonical state lets chips build on
@@ -1635,6 +1654,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
     const message = typeof body.message === 'string' ? body.message : '';
+    /** RT-1: what the user had selected on the canvas (`selection-context.ts`); resolved below against the turn's state. */
+    const selectedElements = parseSelectedElements(body['selected_elements']);
     const sessionId = typeof body.agent_session_id === 'string' && body.agent_session_id.length > 0
       ? body.agent_session_id
       : `sess_${scenarioId}`;
@@ -1884,7 +1905,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const boundControl: OfferedAction[] = [];
       const whatChangesReplay = approvedProposal === undefined && (explanationId === TIPPING_POINT_PRESS_ID
         || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, WHAT_CHANGES_CHIP_OPERATION)));
-      if (whatChangesReplay) {
+      // The review is ONE operation, live and replayed: the id-only press (Codex #2581 r2 P2). Any other chip carrying its
+      // id (an action_type) is not the review, so a retry of it never recomposes one.
+      const decisionReviewReplay = approvedProposal === undefined && (chipOperationOf(body) === DECISION_REVIEW_CHIP_OPERATION
+        || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, DECISION_REVIEW_CHIP_OPERATION)));
+      if (decisionReviewReplay) {
+        // Deterministic on the readback: today's bound Run gives the same review; a Run that moved gives today's (or the
+        // unavailable reply). The SAME owner as the live turn, never a model call.
+        const review = decisionReviewFor(scenarioId, state);
+        replayText = review.reply;
+        boundControl.push(...decisionReviewChips(review));
+      } else if (whatChangesReplay) {
         // This unbound question asks about today's result: retry/cold read reconstructs today's answer, never Run A's
         // words. The SAME owner as the live turn (`whatWouldChangeAnswer`): this turn's measured answer while its Run is
         // still the bound one, else today's coaching. Never measured again here.
@@ -1970,7 +2001,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...remembered,
         ...(durableRun && !remembered.some((a) => a.id === RUN_OFFER_CHIP.id) ? [RUN_OFFER_CHIP] : []),
       ];
-      const stillValid = stillValidOffers(offered, {
+      // A review replay offers ONLY its recomposed presses (Codex #2581 P2): a remembered offer from another Run is not one.
+      const stillValid = decisionReviewReplay ? [] : stillValidOffers(offered, {
           outstandingProposalIds: new Set([
             ...((id) => (id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
             ...(await liveHeldRefs(scenarioId)),
@@ -2644,6 +2676,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let measuredRunKey: string | null = null;
     let whatChangesRead: Awaited<ReturnType<typeof readBackState>> | undefined;
     let measuredCandidate: MeasuredWhatChanges | null = null;
+    // ⭐ A4 slice 1: "Review this decision" — typed facts on the bound Run, no model call (`decision-review-press.ts`).
+    let decisionReviewRequested = false;
+    let decisionReviewTurn: DecisionReviewTurn | null = null;
     if (result === undefined && approvedProposal === undefined && pressedChipId === TIPPING_POINT_PRESS_ID) {
       const rb = await readBackState(readingDispatch, scenarioId);
       whatChangesRead = rb;
@@ -2663,6 +2698,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       // Selection and cache insertion wait for the final pending read and canonical scope composition below.
       measuredRunKey = measuredCandidate?.runKey ?? null;
+      fastPath = 'method';
+      result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false,
+        hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+    }
+    if (result === undefined && approvedProposal === undefined && chipOperationOf(body) === DECISION_REVIEW_CHIP_OPERATION) {
+      // Composed at assembly from the final, scope-composed read below (the one the response is built from).
+      decisionReviewRequested = true;
       fastPath = 'method';
       result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false,
         hops: 0, stopped_reason: 'answered',
@@ -2773,6 +2816,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
     let briefReadingOpen = false;
+    /** RT-1: set only on the path that runs the Agent with the selection; absent ⇒ no `_grounded_selection`. */
+    let selectionContext: AgentSelectionContext | null | undefined;
     if (result === undefined) try {
       /**
        * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
@@ -2782,8 +2827,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       let canonicalContext: Parameters<typeof runAgentTurn>[0]['canonicalContext'];
       let hostFirstCall: Parameters<typeof runAgentTurn>[0]['hostFirstCall'];
+      // RT-1: a failed state read leaves the selection unchecked (`could_not_check`), never silently dropped.
+      selectionContext = agentSelectionContext(selectedElements, undefined);
       try {
         const st = await capabilities.getCanonicalState(toolCtx);
+        selectionContext = agentSelectionContext(selectedElements, st);
         // Select once from the initial host read; registration later in this turn cannot switch the model.
         budget = conversationBudgetFor(st.ok === true && (st as { empty?: unknown }).empty === true);
         const revision = (st as { graph_revision?: unknown }).graph_revision;
@@ -2871,6 +2919,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
+          ...(selectionContext !== null && selectionContext !== undefined ? { selectionNote: selectionContext.note } : {}),
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
           composeReply: (tool, args, toolResult) => {
             const firstResult = tool === 'build_model_from_brief'
@@ -3047,7 +3096,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (runStillCurrent !== undefined) dispatchLedger.push({ path: 'store:run-currentness', ms: Date.now() - runCheckStarted, status: runStillCurrent ? 200 : 409 });
     /** A successful bound narration check reuses its read; recomputed methods must see other writers after the wait. */
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
-      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null
+      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
     const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
@@ -3091,6 +3140,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       whatChangesTurn = answer.measured?.turn ?? null;
       measuredRunKey = answer.measured?.runKey ?? null;
       if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
+    }
+    if (decisionReviewRequested) {
+      decisionReviewTurn = decisionReviewFor(scenarioId, composedRead);
+      text = decisionReviewTurn.reply;
+      result = { ...result, assistant_text: text };
     }
     /** The final pending read may narrow dispatch's licence: presentation uses this graph and retained scope afresh. */
     if (structuralChallengeTurn !== null) {
@@ -3250,6 +3304,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? firstOfEachId([...approvals, ...whatChangesTurn.actions])
       : fastPath === 'method' && structuralChallengeTurn !== null
       ? firstOfEachId([...approvals, ...structuralChallengeTurn.actions])
+      // Review this decision, terminal: each item's existing press, nothing else.
+      : fastPath === 'method' && decisionReviewTurn !== null
+      ? firstOfEachId(decisionReviewChips(decisionReviewTurn))
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
@@ -3274,7 +3331,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     ]);
     // ⭐ Nothing specific to press, on a result that is current: the product's own next steps (NEXT_STEP_CHIPS). Never
     // beside another control, and never while a proposal that would still execute waits for its yes (that is the step).
-    const offeredNow: OfferedAction[] = offeredSpecific.length === 0 && offersNextSteps(analysisState)
+    const offeredNow: OfferedAction[] = offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash) === undefined
       // Widen takes the plain "What would change the result?" place when the selector's RC-WIDEN holds on options.
       ? nextStepsWithWiden(NEXT_STEP_CHIPS, widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }))
@@ -3518,7 +3575,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         protectedGoalChanceSay: goalChanceSayFromThisTurn(result.tool_results),
         // The host's own typed line from this readback (gate 2): a node label can hold ". " and a ranking word, and a
         // fragment of the sentence must never be dropped or left behind (Codex #2577 P2).
-        protectedHostLines: rootLine !== null ? [rootLine] : [],
+        protectedHostLines: [...(rootLine !== null ? [rootLine] : []), ...(decisionReviewTurn?.lines ?? [])],
         // AX2: the build turn's automatic first pass was not asked to rank anything — drop a ranking, add no "why".
         // Nor was a research answer (served `5668902`: a public source's ranking was dropped, and the closing about the
         // user's model followed a reply about public evidence).
@@ -3770,6 +3827,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * (DGAI `src/v5/responseParser.ts`) moves an undeclared root key into `__additive__` — no schemas release.
        */
       ...(notModelledCarrier !== undefined ? { _not_modelled: notModelledCarrier } : {}),
+      /**
+       * ⭐ RT-1: which selected elements this answer was given, route-v2's `_grounded_selection` shape (DGAI
+       * `GroundedOnNotice` reads it). A sidecar like `_not_modelled`; absent when nothing was selected or the turn never
+       * reached the Agent with it.
+       */
+      ...(selectionContext !== null && selectionContext !== undefined ? { _grounded_selection: selectionContext.grounded } : {}),
       /**
        * ⭐ B5 (DL 5859845823): the run's per-limit verdicts, `{per_limit, joint}`, as a SIDECAR root key, the A7 pattern
        * above: spread after the finalised body, undeclared in 0.60, moved into `__additive__` by the UI parser (DGAI
