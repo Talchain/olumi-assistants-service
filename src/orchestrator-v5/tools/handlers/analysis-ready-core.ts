@@ -706,7 +706,7 @@ function resolveRunAdmissionTerms(
     // Individually valid values can still be today's levels. Ready graphs
     // must expose the same reason-bearing submission plan as the Run.
     const plan = computeScaffoldPlan({
-      options: (assessment.analysisReady?.options ?? []) as unknown as ReadonlyArray<Record<string, unknown>>,
+      options: (assessment.analysisReady?.options ?? []).map((option) => ({ ...option })),
       graph: rawGraph, rawPersistedGraph: rawGraph, scaleNetEnabled: true,
     });
     // ⭐ THE IDENTICAL_OPTIONS FLOOR APPLIES HERE TOO. Strictly ready means "every

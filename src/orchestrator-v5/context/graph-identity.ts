@@ -113,7 +113,7 @@ export function matchesHistoricalRunAnalysisIdentity(
   // rather than requiring a present-day, nonempty exhaustive sent population.
   // With gaps, every admission state must be recorded as well as hash-bound.
   const gateExcluded = new Set(gateAnalysableOptions({
-    options: ready.options as unknown as ReadonlyArray<Record<string, unknown>>,
+    options: ready.options.map((option) => ({ ...option })),
     graph, rawPersistedGraph: graph, scaleNetEnabled: true,
   }).excluded.map(option => option.option_id));
   return ready.options.every(option => {

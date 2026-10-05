@@ -100,6 +100,16 @@ describe('absolute option levels compared with today (a994c38a replica)', () => 
     expect(g).toEqual(before);
   });
 
+  it('N7: an option linked to a lever it gives no level is incomplete, not no-change (served bf-054503 "£49 AI Release")', () => {
+    const g = replica(6);
+    // Hire Two also links to Tech leads but sets no level for it: its change exists in the model, unquantified.
+    g.edges.push(edge(DEVS, 'tech_leads'));
+    expect(gateOf(g).excluded.map((e) => e.option_id)).not.toContain(DEVS);
+    expect(ids(gateOf(g).options)).toContain(DEVS);
+    // Contrast (N1): without that link the same option is a disclosed no-change exclusion.
+    expect(gateOf(replica(6)).excluded).toMatchObject([{ option_id: DEVS, reason: 'no_change_from_today' }]);
+  });
+
   it('N1-contrast: Developers 4 keeps the build-time intervention at 6/30', () => {
     const g = replica(4);
     expect(ids(gateOf(g).options)).toEqual([TECH, DEVS, BASE]);

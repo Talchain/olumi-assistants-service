@@ -1079,7 +1079,7 @@ function runProjectionAllowsFreshness(fact: HandlerFact, _storedHash: string, gr
     const ready = buildCanonicalAnalysisReadyFromGraph(raw);
     if (ready === undefined) return false;
     const gateExcluded = new Set(gateAnalysableOptions({
-      options: ready.options as unknown as ReadonlyArray<Record<string, unknown>>,
+      options: ready.options.map((option) => ({ ...option })),
       graph: raw, rawPersistedGraph: raw, scaleNetEnabled: true,
     }).excluded.map(option => option.option_id));
     if (notAnalysable.some(excluded => ready.options.some(option =>

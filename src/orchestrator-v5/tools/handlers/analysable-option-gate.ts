@@ -456,13 +456,20 @@ function collectInterventionIntentOptionIds(graph: unknown): Set<string> {
 /**
  * Absolute intervention LEVELS equal today's holdable LEVELS. Never compare
  * raw magnitudes with levels, or infer a missing target's value. Pure / typed.
+ *
+ * ⛔ AN OPTION LINKED TO A LEVER IT GIVES NO LEVEL IS INCOMPLETE, NOT "NO CHANGE" (served `bf-20260926T054503Z`:
+ * "£49 AI Release" keeps today's price AND links to "AI feature adoption" with no level). Its change exists in the
+ * model, unquantified; calling it a no-op would misstate it. `ownEdgeTargets` = the factors the option has edges to.
  */
 export function isNoChangeFromToday(
   option: Readonly<Record<string, unknown>>,
   holdValues: ReadonlyMap<string, unknown>,
+  ownEdgeTargets: readonly string[] = [],
 ): boolean {
   if (isBaselineOption(option)) return false;
-  const entries = Object.entries(interventionsOf(option));
+  const levels = interventionsOf(option);
+  if (ownEdgeTargets.some((id) => extractNumericInterventionValue(levels[id]) === null)) return false;
+  const entries = Object.entries(levels);
   return entries.length > 0 && entries.every(([id, intervention]) => {
     const hold = extractNumericInterventionValue(holdValues.get(id));
     const value = extractNumericInterventionValue(intervention);
@@ -562,7 +569,7 @@ export function gateAnalysableOptions(
     const noChangeExcluded = new Set<Dict>();
     const labels = new Map(nodesOf(input.graph).map((n) => [n.id, n.label] as const));
     for (const opt of submitted) {
-      if (!isNoChangeFromToday(opt, holdValues)) continue;
+      if (!isNoChangeFromToday(opt, holdValues, edgeTargets.get(optionIdOf(opt) ?? '') ?? [])) continue;
       if (!todayRepresented) {
         todayRepresented = true;
         continue;
