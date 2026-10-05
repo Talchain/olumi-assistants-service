@@ -108,7 +108,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
 import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/placeholder-parts.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
-import { framedFields, statedRangeFrame } from "../../../orchestrator-v5/agent-lane/frame-rule.js";
+import { defaultFrameFor, framedFields, statedRangeFrame } from "../../../orchestrator-v5/agent-lane/frame-rule.js";
 // The readiness validator's own exemptions from NO_PATH_TO_GOAL, read here so the prune and readiness share one rule.
 import { limitSinkBranch } from "../../../graph/limit-sink-branch.js";
 import { inertRiskBranch } from "../../../graph/inert-risk.js";
@@ -1749,6 +1749,31 @@ export function deriveFactorScaleFrame(
   const pinned = unitPinnedScaleFrame(unit, max);
   if (pinned !== undefined) return pinned;
   return nextNiceNumberAbove(max);
+}
+
+/**
+ * ⭐ P2-FRAME FALLBACK (Science ruling 2026-10-05 P2-FRAME): the frame the records compile writes for a quantity whose
+ * model declares NO `plausible_max`. Called from pass 3d ONLY; `deriveFactorScaleFrame` above is unchanged and keeps
+ * its other readers.
+ *   · % and bp stay unit-pinned through the ONE authority, `unitPinnedScaleFrame` (% → 100, so "3% is level 0.03";
+ *     bp → 10,000), inside the bounds that make those constants true.
+ *   · Everything else — `unknown`, `percentage_points`, and a %/bp magnitude above its pinned bound, which the
+ *     authority abstains on — takes the served `defaultFrameFor` (`frame-rule.ts`): the smallest power of ten STRICTLY
+ *     above the largest magnitude. Not the {1,2,5} ladder, so the same quantity lands on the same frame whichever
+ *     builder made the model (400 → 1,000, level 0.4, on both; the ladder said 500, 0.8).
+ * `deriveFactorScaleFrame`'s refusals are kept EXACTLY (`undefined` ⇒ the factor stays unframed and raw): no magnitude,
+ * a negative, a max ≤ 1, a non-finite magnitude, and a frame that is not finite (`defaultFrameFor(1e308)` is
+ * `Infinity`; the ladder refuses the same inputs). Exported for its differential row only.
+ */
+export function undeclaredQuantityFrame(magnitudes: readonly number[], unit: string | undefined): number | undefined {
+  if (magnitudes.length === 0) return undefined;
+  if (magnitudes.some((m) => !Number.isFinite(m) || m < 0)) return undefined;
+  const max = Math.max(...magnitudes);
+  if (max <= 1) return undefined;
+  const pinned = unitPinnedScaleFrame(unit, max);
+  if (pinned !== undefined) return pinned;
+  const frame = defaultFrameFor(max);
+  return Number.isFinite(frame) ? frame : undefined;
 }
 
 // ── The projector ───────────────────────────────────────────────────────────
@@ -4541,13 +4566,14 @@ function projectOnce(
       if (magnitudes.length === 0) continue;
       const unit = (factor.data as { unit?: unknown } | undefined)?.unit;
       // ⭐ P2-FRAME (DL ruling): a quantity's declared `plausible_max` IS its frame, through the legacy construct's own
-      // rule (`statedRangeFrame`: the stated range, widened only when a level exceeds it). Without one, the records
-      // ladder below still applies (the legacy fallback switch is measured and STOPPED in the pass-2 report).
+      // rule (`statedRangeFrame`: the stated range, widened only when a level exceeds it). Without one (Science ruling
+      // 2026-10-05 P2-FRAME): %/bp stay unit-pinned and everything else takes the legacy `defaultFrameFor`, never the
+      // {1,2,5} ladder (`undeclaredQuantityFrame`; its refusals are `deriveFactorScaleFrame`'s, exactly).
       const declaredMax = factor.quantity_ref === undefined ? undefined : statedItems[factor.quantity_ref]?.plausible_max;
       const declared = typeof declaredMax === "number" && Number.isFinite(declaredMax) && declaredMax > 1 && !magnitudes.some((m) => m < 0);
       const frame = declared
         ? statedRangeFrame(declaredMax, magnitudes)
-        : deriveFactorScaleFrame(magnitudes, typeof unit === "string" ? unit : undefined);
+        : undeclaredQuantityFrame(magnitudes, typeof unit === "string" ? unit : undefined);
       if (frame === undefined) continue;
       // ⭐⭐ PERSIST THE DIVISOR. Everything below divides by `frame` and, until
       // this line existed, then discarded it — so the ONLY surviving trace of

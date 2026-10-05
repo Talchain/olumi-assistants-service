@@ -8,7 +8,7 @@ import { buildDraftRecordsSchema, buildVNextDraftRecordsSchema, measureDraftReco
 import { projectDraftRecords, findGrammarFieldsDroppedBySeam } from '../../seam.js';
 import { buildStrictDraftRecordsSchema, omitOptionalRecordNulls, buildModelFromRecords } from '../../../../../orchestrator-v5/agent-lane/runtime/build-model-from-records.js';
 import { V_NEXT_DRAFT_RECORDS_INSTRUCTION } from '../../instruction-vnext.js';
-import { projectionFingerprint } from '../../projector.js';
+import { projectionFingerprint, projectRecordsToGraph, deriveFactorScaleFrame, undeclaredQuantityFrame, unitPinnedScaleFrame, classifyUnitScaleClass } from '../../projector.js';
 import { reconcileStatedDispositions } from '../../stated-dispositions.js';
 import { sameUnit } from '../../../../../orchestrator-v5/agent-lane/same-unit.js';
 import { sizeLink } from '../../../../magnitude/link-effect.js';
@@ -120,7 +120,8 @@ describe('v-next inert flip ladder', () => {
   });
   it('B6(1) change_of writes the Science definitional carrier',async()=>{const r=sealedRecordsVNext();/* The option reaches q9→q10→goal: this proves P5, not the unreached contrast. */r.stated_items[10]!.quantity=10;r.stated_items[10]!.unit='£/month';r.stated_items[10]!.unit_literals=['a month'];r.stated_items[10]!.horizon_ref=7;r.stated_items[10]!.relationship!.to_quantity=10;r.stated_items[10]!.relationship!.amount=300;r.claims[4]={claim_kind:'risk',label:'Revenue lost over the goal horizon',quantity:10,value:0,change_of:0};r.claims.push({claim_kind:'causal_link',label:'loss into goal',from_claim:4,to_stated:6,effect:'negative'});const b=await registered(r);const n=b.graph.nodes.find((n:any)=>n.label==='Revenue lost over the goal horizon');const e=b.graph.edges.find((e:any)=>e.from===n?.id);expect(e?.provenance?.definitional).toBe(true);expect(e?.provenance?.natural_effect).toMatchObject({amount:-1,amount_unit:'£/month',per_source_change:1,per_source_change_unit:'£/month'});expect(holdsByDefinition(e,nodeUnitOf(b.graph.nodes))).toBe(true);expect(targetTestabilityOf(b.graph).kind).toBe('testable');const goal=b.graph.nodes.find((n:any)=>n.kind==='goal');expect(goal.goal_threshold_unit).toBe(goal.observed_state.unit);});
   it('B6(1) negative rate cannot become an own-horizon identity',async()=>{const r=sealedRecordsVNext();r.claims[4]={claim_kind:'risk',label:'Rate of revenue loss',unit:'£/month/month',change_of:0};r.claims.push({claim_kind:'causal_link',label:'loss into goal',from_claim:4,to_stated:6,effect:'negative'},{claim_kind:'causal_link',label:'price reaches rate risk',from_claim:0,to_claim:4,effect:'positive'});expect(project(r).dropped).toContainEqual(expect.objectContaining({reason:'change_of_unit_mismatch'}));const b=await registered(r);expect(targetTestabilityOf(b.graph)).toMatchObject({kind:'not_testable',failures:[expect.objectContaining({code:'goal_path_unsized'})]});});
-  it('B6(2) EXTRACTION-UNPROVEN stated no-effect is withheld with an A1 receipt',()=>{const r=vansWithRoutes();r.stated_items[5]={kind:'cause',source_quote:'Repainting 5 vans will not change deliveries.',relationship:{from_quantity:0,to_quantity:1,no_effect_literal:'will not change'}};r.claims.push({claim_kind:'causal_link',label:'repainting effect',from_claim:0,to_stated:3,effect:'positive'});const p=project(r,VANS_WITH_ROUTES);expect(p.stated_dispositions).toContainEqual(expect.objectContaining({stated_index:5,disposition:'rejected',reason:'user_stated_no_effect'}));expect(p.graph.edges.filter(e=>e.from===p.graph.nodes.find(n=>n.label==='Vans')?.id&&e.to===p.graph.nodes.find(n=>n.kind==='goal')!.id)).toHaveLength(0);expect(p.graph.edges.some(e=>e.provenance?.natural_effect?.amount===0)).toBe(false);expect(targetTestabilityOf(p.graph).kind,JSON.stringify(targetTestabilityOf(p.graph))).toBe('testable');expect(p.stated_dispositions?.find(d=>d.stated_index===5)?.stated_item.source_quote).toBe('Repainting 5 vans will not change deliveries.');});
+  it('B6(2) EXTRACTION-UNPROVEN stated no-effect is withheld with an A1 receipt',()=>{const r=vansWithRoutes();r.stated_items[5]={kind:'cause',source_quote:'Repainting 5 vans will not change deliveries.',relationship:{from_quantity:0,to_quantity:1,no_effect_literal:'will not change'}};r.claims.push({claim_kind:'causal_link',label:'repainting effect',from_claim:0,to_stated:3,effect:'positive'});const p=project(r,VANS_WITH_ROUTES);expect(p.stated_dispositions).toContainEqual(expect.objectContaining({stated_index:5,disposition:'rejected',reason:'user_stated_no_effect'}));expect(p.graph.edges.filter(e=>e.from===p.graph.nodes.find(n=>n.label==='Vans')?.id&&e.to===p.graph.nodes.find(n=>n.kind==='goal')!.id)).toHaveLength(0);expect(p.graph.edges.some(e=>e.provenance?.natural_effect?.amount===0)).toBe(false);/* Science ruling 2026-10-05 P2-FRAME accepted change: 'testable' → not_testable P5 goal_path_unsized on Routes. The 17-route control now frames at defaultFrameFor(17)=100 (ladder: 20), so 55 deliveries/route sizes to β=55×100/1125≈4.89>1 (was 0.978) and the records sizer leaves it unsized. The withheld no-effect assertions above are unchanged; the representable control is the row below. */expect(targetTestabilityOf(p.graph)).toEqual({kind:'not_testable',goal_id:p.graph.nodes.find(n=>n.kind==='goal')!.id,failures:[{precondition:'P5',case:'c',code:'goal_path_unsized',lever:'Routes'}]});expect(p.graph.nodes.find(n=>n.label==='Routes')?.scale_frame).toBe(100);expect(p.stated_dispositions?.find(d=>d.stated_index===5)?.stated_item.source_quote).toBe('Repainting 5 vans will not change deliveries.');});
+  it('B6(2) Science ruling 2026-10-05 P2-FRAME: with a route effect representable on the ruled frame (10/route, β≈0.89), the withheld no-effect still leaves P5 testable',()=>{const r=vansWithRoutes();const route=r.stated_items[8]!;route.source_quote='Each extra route increases deliveries by 10 every month.';route.relationship!.amount=10;route.relationship!.amount_literal='10';const brief=VANS_WITH_ROUTES.replace('by 55 every month','by 10 every month');expect(brief).toContain(route.source_quote);r.stated_items[5]={kind:'cause',source_quote:'Repainting 5 vans will not change deliveries.',relationship:{from_quantity:0,to_quantity:1,no_effect_literal:'will not change'}};r.claims.push({claim_kind:'causal_link',label:'repainting effect',from_claim:0,to_stated:3,effect:'positive'});const p=project(r,brief);expect(p.stated_dispositions).toContainEqual(expect.objectContaining({stated_index:5,disposition:'rejected',reason:'user_stated_no_effect'}));expect(p.graph.nodes.find(n=>n.label==='Routes')?.scale_frame).toBe(100);expect(edgeFor(p,8,r)?.provenance).toMatchObject({magnitude:'user_stated',natural_effect:{amount:10,per_source_change:1}});expect(targetTestabilityOf(p.graph).kind,JSON.stringify(targetTestabilityOf(p.graph))).toBe('testable');});
   it('B1a EXTRACTION-UNPROVEN silence never means zero and blocks P5 (B6 contrast)',()=>{const r=vansWithRoutes();r.stated_items[5]={kind:'cause',source_quote:'Repainting 5 vans will not change deliveries.',relationship:{from_quantity:0,to_quantity:1}};r.claims.push({claim_kind:'causal_link',label:'unmeasured effect',from_claim:0,to_stated:3,effect:'positive'});const p=project(r,VANS_WITH_ROUTES);expect(p.dropped).toContainEqual(expect.objectContaining({stated_index:5,reason:'relationship_unsized'}));expect(targetTestabilityOf(p.graph)).toMatchObject({kind:'not_testable',failures:[expect.objectContaining({code:'goal_path_unsized'})]});});
   it('B6(3) CONTRAST passes today for an unreached unsized link',()=>{const p=project(sealedRecords());const graph:any={...p.graph,nodes:[...p.graph.nodes,{id:'unreached',kind:'risk',label:'Unreached risk'}],edges:[...p.graph.edges,{from:'unreached',to:p.graph.nodes.find(n=>n.kind==='goal')!.id,strength_mean:0.5,strength_std:0.125}]};expect(targetTestabilityOf(graph).kind).toBe('testable');});
   it('B7 A1 receipt retains the stored literal-convention intervention by identity',()=>{const r=sealedRecordsVNext();const p=project(r);const option=p.graph.nodes.find(n=>n.provenance?.source_quote===r.stated_items[3]!.source_quote)!;const lever=p.graph.nodes.find(n=>n.kind==='factor'&&n.quantity_ref===3)!;expect(p.stated_dispositions?.find(d=>d.stated_index===3)).toMatchObject({disposition:'carried',stored_value:10,location:{kind:'node',node_id:option.id,path:['data','intervention_details',lever.id,'raw_value']}});});
@@ -568,5 +569,115 @@ describe('Codex R2 F4: the cold reader re-sizes a stated range by the compiler\'
     // 0.25 = |β| / 2, the default spread the reader computed when it dropped the stated range.
     if (edge.strength !== undefined) edge.strength.std = 0.25; else edge.strength_std = 0.25;
     expect(twoCustomers(graph).map(i => i.verdict)).not.toContain('in_model');
+  });
+});
+
+// ── Science ruling 2026-10-05 P2-FRAME: a RECORDS quantity whose model declares NO plausible_max ──
+// %/bp are unit-pinned by `unitPinnedScaleFrame`; everything else takes the served `defaultFrameFor` (the legacy
+// construct's rule: smallest power of ten STRICTLY above the largest magnitude). Each row binds the factor by its exact
+// label and contrasts the old records ladder (`deriveFactorScaleFrame`, body unchanged) where the frames differ.
+describe('Science ruling 2026-10-05 P2-FRAME: an undeclared quantity takes the legacy frame; %/bp stay unit-pinned', () => {
+  function undeclared(unit: string | undefined, baseline: number, sets: readonly [number, number]) {
+    const figure = `the measured level is ${baseline}`;
+    const { graph } = projectRecordsToGraph({
+      stated_items: [
+        { kind: 'goal', source_quote: 'reach the goal' },
+        { kind: 'option', source_quote: 'option one' },
+        { kind: 'option', source_quote: 'option two' },
+        { kind: 'figure', source_quote: figure, value: baseline, ...(unit === undefined ? {} : { unit }) },
+      ],
+      claims: [
+        { claim_kind: 'causal_link', label: 'option one moves it', from_stated: 1, to_stated: 3, effect: 'positive', sets_to: sets[0] },
+        { claim_kind: 'causal_link', label: 'option two moves it', from_stated: 2, to_stated: 3, effect: 'negative', sets_to: sets[1] },
+        { claim_kind: 'causal_link', label: 'it bears on the goal', from_stated: 3, to_stated: 0, effect: 'positive' },
+      ],
+    });
+    const one = (label: string) => { const hits = graph.nodes.filter(n => n.label === label); expect(hits, `identity: "${label}"`).toHaveLength(1); return hits[0]! as any; };
+    const factor = one(figure);
+    return { frame: factor.scale_frame, observed: factor.observed_state, data: factor.data,
+      one: one('option one').data.interventions[factor.id], two: one('option two').data.interventions[factor.id] };
+  }
+  it('P2-FRAME unknown unit: 400 frames to defaultFrameFor = 1,000 (level 0.4), never the ladder 500 (0.8)', () => {
+    expect(classifyUnitScaleClass('vans')).toBe('unknown');
+    expect(deriveFactorScaleFrame([400, 300, 250], 'vans'), 'the old records ladder, body unchanged').toBe(500);
+    const p = undeclared('vans', 400, [300, 250]);
+    expect(p.frame).toBe(defaultFrameFor(400)); expect(p.frame).toBe(1000);
+    expect(p.observed).toMatchObject({ value: 0.4, raw_value: 400 }); expect(p.data).toMatchObject({ value: 0.4, raw_value: 400 });
+    expect([p.one, p.two]).toEqual([0.3, 0.25]);
+  });
+  it('P2-FRAME no unit at all is the unknown class: 20,000 frames to 100,000 (the ladder said 50,000)', () => {
+    expect(deriveFactorScaleFrame([20000, 20000, 0], undefined)).toBe(50000);
+    const p = undeclared(undefined, 20000, [20000, 0]);
+    expect(p.frame).toBe(defaultFrameFor(20000)); expect(p.frame).toBe(100000);
+    expect(p.observed).toMatchObject({ value: 0.2, raw_value: 20000 }); expect([p.one, p.two]).toEqual([0.2, 0]);
+  });
+  it('P2-FRAME percentage_points pins no frame: "pp" 4.5 frames to 10 (level 0.3 for 3pp), never the ladder 5 (0.6)', () => {
+    expect(classifyUnitScaleClass('pp')).toBe('percentage_points');
+    expect(unitPinnedScaleFrame('pp', 4.5)).toBeUndefined();
+    expect(deriveFactorScaleFrame([3, 2, 4.5], 'pp')).toBe(5);
+    const p = undeclared('pp', 3, [2, 4.5]);
+    expect(p.frame).toBe(defaultFrameFor(4.5)); expect(p.frame).toBe(10);
+    expect(p.observed).toMatchObject({ value: 0.3, raw_value: 3 }); expect([p.one, p.two]).toEqual([0.2, 0.45]);
+  });
+  it('P2-FRAME % above 100: unitPinnedScaleFrame abstains, so 180 frames to defaultFrameFor = 1,000 (the ladder said 200)', () => {
+    expect(classifyUnitScaleClass('% YoY growth')).toBe('percent');
+    expect(unitPinnedScaleFrame('% YoY growth', 180)).toBeUndefined();
+    expect(deriveFactorScaleFrame([150, 180, 110], '% YoY growth')).toBe(200);
+    const p = undeclared('% YoY growth', 150, [180, 110]);
+    expect(p.frame).toBe(defaultFrameFor(180)); expect(p.frame).toBe(1000);
+    expect(p.observed).toMatchObject({ value: 0.15, raw_value: 150 }); expect([p.one, p.two]).toEqual([0.18, 0.11]);
+  });
+  it('P2-FRAME bps above 10,000: unitPinnedScaleFrame abstains, so 18,000 frames to 100,000 (the ladder said 20,000)', () => {
+    expect(unitPinnedScaleFrame('bps', 18000)).toBeUndefined();
+    expect(deriveFactorScaleFrame([15000, 12000, 18000], 'bps')).toBe(20000);
+    const p = undeclared('bps', 15000, [12000, 18000]);
+    expect(p.frame).toBe(defaultFrameFor(18000)); expect(p.frame).toBe(100000);
+    expect(p.observed).toMatchObject({ value: 0.15, raw_value: 15000 }); expect([p.one, p.two]).toEqual([0.12, 0.18]);
+  });
+  it('P2-FRAME MUST-STAY-GREEN %/bp within bound are unit-pinned: 3% is level 0.03, 30 bps is 0.003, spelled-out percentage points stays percent', () => {
+    for (const [unit, baseline, sets, frame, level] of [
+      ['%', 3, [2, 4.5], 100, 0.03], ['per cent', 3, [2, 4.5], 100, 0.03], ['% NRR', 95, [99, 91], 100, 0.95],
+      ['percentage points', 3, [2, 4.5], 100, 0.03], ['bps', 30, [15, 60], 10000, 0.003],
+    ] as const) {
+      const p = undeclared(unit, baseline, sets);
+      expect(p.frame, unit).toBe(unitPinnedScaleFrame(unit, Math.max(baseline, ...sets)));
+      expect(p.frame, unit).toBe(frame);
+      expect(p.observed, unit).toMatchObject({ value: level, raw_value: baseline });
+    }
+  });
+  it('P2-FRAME refusal kept at the call site: a negative magnitude leaves the factor unframed and raw', () => {
+    const p = undeclared('£', 20000, [-5000, 10000]);
+    expect(p.frame).toBeUndefined();
+    expect(p.observed).toMatchObject({ value: 20000 }); expect([p.one, p.two]).toEqual([-5000, 10000]);
+  });
+  it('P2-FRAME refusal kept at the call site: max <= 1 is already a level, so no frame is written (including max exactly 1)', () => {
+    for (const [baseline, sets] of [[0.5, [1, 0.25]], [1, [0.4, 0]]] as const) {
+      const p = undeclared('vans', baseline, sets);
+      expect(p.frame, String(baseline)).toBeUndefined();
+      expect(p.observed).toMatchObject({ value: baseline }); expect([p.one, p.two]).toEqual([...sets]);
+    }
+  });
+  it('P2-FRAME refusal kept at the call site: a magnitude whose frame is not finite (1e308, 1.7e308) stays raw, never level 0', () => {
+    expect(defaultFrameFor(1e308), 'the served rule overflows here; the call site must refuse it').toBe(Infinity);
+    for (const big of [1e308, 1.7e308]) {
+      const p = undeclared('vans', big, [big, 0]);
+      expect(p.frame, String(big)).toBeUndefined();
+      expect(p.observed).toMatchObject({ value: big }); expect(p.one).toBe(big);
+    }
+  });
+  it('P2-FRAME refusal set equals deriveFactorScaleFrame\'s exactly: no magnitude, negatives, max <= 1, non-finite', () => {
+    const sets: number[][] = [[], [-1], [-5000, 20000], [0], [0.5, 1], [1], [NaN], [NaN, 5], [Infinity], [5, Infinity], [-Infinity, 5],
+      [1e308], [1.7e308], [5e307], [1.0000001], [3], [150], [400, 300], [18000]];
+    for (const unit of [undefined, '%', 'per cent', 'bps', 'pp', 'percentage points', '£', 'vans', '']) {
+      for (const ms of sets) {
+        const label = `${JSON.stringify(unit)} ${JSON.stringify(ms.map(String))}`;
+        const was = deriveFactorScaleFrame(ms, unit);
+        const now = undeclaredQuantityFrame(ms, unit);
+        expect(now === undefined, label).toBe(was === undefined);
+        if (now === undefined) continue;
+        const max = Math.max(...ms);
+        expect(now, label).toBe(unitPinnedScaleFrame(unit, max) ?? defaultFrameFor(max));
+      }
+    }
   });
 });
