@@ -44,8 +44,9 @@ export const LINK_COPY = {
   // the direction-NEUTRAL form, true whichever way the Run ranked, because this turn cannot see the Run's sent direction.
   // A PLURALITY, never a majority (Codex r1 #2609): `no_change` attests an unchanged ORDERING, and .40/.35/.25 keeps
   // the ordering without a majority, so "the most runs", never "most runs".
-  quoted: "{other} would be supported by the most runs if {from}'s effect on {to} fell below about {fraction} of what it is now.",
-  below_a_tenth: "{other} would be supported by the most runs only if {from}'s effect on {to} all but disappeared.",
+  // Codex r2: ISL certifies the NEAREST crossing only (another option may take over further below), so "the first".
+  quoted: "{other} would be the first to be supported by the most runs if {from}'s effect on {to} fell below about {fraction} of what it is now.",
+  below_a_tenth: "{other} would be the first to be supported by the most runs only if {from}'s effect on {to} all but disappeared.",
   no_change: "{leader} would still be supported by the most runs even if {from}'s average effect on {to} fell to zero.",
 } as const;
 

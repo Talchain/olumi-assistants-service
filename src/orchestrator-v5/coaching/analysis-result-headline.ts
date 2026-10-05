@@ -1386,7 +1386,8 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       rawGap <= MARGINAL_RAW_ODDS_GAP_PP / 100 + RAW_ODDS_GAP_FLOAT_EPSILON
     ) {
       const disambig =
-        `${winnerLabel} was supported by the most runs of this model, though ${winner.runnerUpLabel} has marginally better raw probability.${suffix}`;
+        // Codex r2 #2609: on this branch the RUNNER-UP has more runs, so the declared option is named for what it is.
+        `${winnerLabel} is the option this analysis names, though ${winner.runnerUpLabel} was supported by marginally more runs of this model.${suffix}`;
       if (disambig.length <= lengthCap) {
         return {
           text: disambig,
@@ -3028,7 +3029,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // banned vocabulary, so the ordinary forbidden-vocab / ID / decimal defences
   // (applied after the grammar match) still bite on a leaky slot.
   new RegExp(
-    `^.+? was supported by the most runs of this model, though .+? has marginally better raw probability\\.${TAIL_PATTERN}$`,
+    `^.+? is the option this analysis names, though .+? was supported by marginally more runs of this model\\.${TAIL_PATTERN}$`,
   ),
   // Case E (link-safe floor): minimal "{label} currently leads.{suffix}".
   // MUST stay last — the trailing `\\.${TAIL_PATTERN}$` anchor is

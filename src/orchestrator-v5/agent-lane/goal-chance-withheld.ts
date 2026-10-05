@@ -50,7 +50,7 @@ export const GOAL_CHANCE_WITHHELD_NOTE =
  */
 export const PLACEHOLDER_PATH_NOTE =
   'This run withheld the chance of reaching the goal for the options in `option_ids`, and for EVERY option the share of runs '
-  + 'in which it did best: they move with a link Olumi has not sized. Never state, estimate, rank or compare those figures, never '
+  + 'that supported it: they move with a link Olumi has not sized. Never state, estimate, rank or compare those figures, never '
   + 'quote those options’ estimated value for the goal itself, and never name a leading option. Say `say` once, as written, when '
   + 'you describe the run: it names the link, and asks for its size only where it does. Never ask the user to size a link `say` '
   + 'calls a guess. Other results of this run may be described as they are.';

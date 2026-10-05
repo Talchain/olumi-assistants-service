@@ -163,7 +163,7 @@ describe('findLeaderClaims — the scan surface, field by field', () => {
     ['blocks[1].body, live', 'The MacBook Pro leads by a margin of about 52 percentage points, but this result relies on assumptions.'],
     ['blocks[2].body, live', 'The current result is not robust, as the lead depends on assumptions about onboarding friction.'],
     ['blocks[13].body, live', 'No single factor is decisive here, but the right combination of factors could tip which option leads.'],
-    ['lens WIN_PROB_MODERATE', 'One option was supported by the most runs, but not by a wide margin.'],
+    ['lens WIN_PROB_MODERATE', 'One option was supported by the most runs, but by fewer than 70% of them.'],
     ['lens DOMINANT_DRIVER', 'A sensitivity check shows how far it can move before the leading option changes.'],
     ['terminology-rewrite output', 'Follow the leading option for now.'],
     ['recommendation', 'Our recommendation is to proceed.'],

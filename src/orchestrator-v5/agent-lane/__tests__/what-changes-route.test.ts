@@ -71,9 +71,9 @@ const RUN_NOT_CURRENT = 'I can’t explain that result as current. Check the cur
 // Each of RC's three measured sentence kinds, from ISL's real D3 links.
 const [savings, overspend] = ISL_D3_BLOCK.links;
 const STATUSES: Record<string, { block: Rec; said: RegExp }> = {
-  quoted: { block: { ...ISL_D3_BLOCK, links: [savings] }, said: /‘[^’]+’ would be supported by the most runs if monthly cloud savings's effect on monthly spend fell below about a quarter/ },
+  quoted: { block: { ...ISL_D3_BLOCK, links: [savings] }, said: /‘[^’]+’ would be the first to be supported by the most runs if monthly cloud savings's effect on monthly spend fell below about a quarter/ },
   below_a_tenth: { block: { ...ISL_D3_BLOCK, links: [{ ...savings, threshold: -0.02, replicate_thresholds: [-0.02, -0.02, -0.02, -0.02], replicate_range: 0 }] },
-    said: /‘[^’]+’ would be supported by the most runs only if monthly cloud savings's effect on monthly spend all but disappeared/ },
+    said: /‘[^’]+’ would be the first to be supported by the most runs only if monthly cloud savings's effect on monthly spend all but disappeared/ },
   no_change: { block: { ...ISL_D3_BLOCK, links: [overspend] }, said: /‘[^’]+’ would still be supported by the most runs even if monthly cloud overspend during migration's average effect/ },
 };
 const canonical = buildCanonicalAnalysisReadyFromGraph(D3.body.draft_graph) as Rec;
@@ -142,7 +142,7 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(modelCalls).toBe(0);
     expect(dispatch.calls).toHaveLength(1);
     expect(dispatch.calls[0].payload.scenario_id).toBe(SCENARIO);
-    const answer = "In this model, ‘Stay on AWS’ would be supported by the most runs if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
+    const answer = "In this model, ‘Stay on AWS’ would be the first to be supported by the most runs if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
       + "‘Switch to GCP’ would still be supported by the most runs even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
     // The turn's answer is the reply's last paragraph, intact. This served Run is quantified-provisional (the user's
     // own estimates are off the deciding path), so the leader wire gate puts its caveat first: the governing egress

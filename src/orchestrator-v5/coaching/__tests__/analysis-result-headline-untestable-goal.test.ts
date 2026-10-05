@@ -922,7 +922,7 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
         ],
       },
       'LT',
-      'Option A was supported by the most runs of this model, though Option B has marginally better raw probability.',
+      'Option A is the option this analysis names, though Option B was supported by marginally more runs of this model.',
     ],
   ];
 
