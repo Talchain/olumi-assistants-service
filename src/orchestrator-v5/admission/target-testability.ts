@@ -31,8 +31,13 @@ export interface TargetTestabilityFailure {
   readonly case: TargetCase;
   readonly code: 'missing_goal_baseline' | 'threshold_off_scale' | 'comparator_unscorable' | 'threshold_unit_mismatch'
     | 'goal_path_placeholder' | 'goal_path_unsized' | 'identity_unconfirmed';
-  /** For P5: the label of the first node whose link into the goal nobody sized (the lever case (c) names). */
+  /** For P5: the label of the FAILING link's source node (the lever case (c) names). */
   readonly lever?: string;
+  /**
+   * For P5: the label of the FAILING link's target node. A guessed link upstream of the goal is not a link into it
+   * (Science d5, #2606: d3's `Starter monthly price → Starter-tier monthly recurring revenue`), so (c) names this end.
+   */
+  readonly link_to?: string;
 }
 
 export type TargetTestability =
@@ -182,7 +187,7 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
       const placeholderLink = failing !== undefined && isPlaceholderLink(failing);
       failures.push({ precondition: 'P5', case: 'c',
         code: identity !== undefined && !identityForwarded ? 'identity_unconfirmed' : placeholderLink ? 'goal_path_placeholder' : 'goal_path_unsized',
-        ...(failing !== undefined ? { lever: labelOf.get(failing.from) ?? String(failing.from) } : {}) });
+        ...(failing !== undefined ? { lever: labelOf.get(failing.from) ?? String(failing.from), link_to: labelOf.get(failing.to) ?? String(failing.to) } : {}) });
     }
   }
   // P4 — the target's unit is the goal level's own (currency AND period).
@@ -206,8 +211,9 @@ const TAIL_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '<=': 'at or b
  * cannot test — the pre-Run readiness, the "Not shown." withhold and the B′ tail — is composed from these parts.
  * AIQ's rules (#75 5913502854): the reasons name EVERY case measured failing; the one question is the first failing
  * case, in R3's order, that has one ((b) is a capability gap: named, never asked). Science's edits: (c) names the canvas
- * object ("a size for the link from {lever} to {goal}", no verb, so a plural label agrees), and the level question is
- * "What's today's level of {goal}?" (never "What is {plural} today?").
+ * object, the FAILING link by its own two ends ("a size for the link from {failing.from} to {failing.to}", no verb, so a
+ * plural label agrees; Science d5 #2606: never "{lever} to {goal}" for a link that is not into the goal), and the level
+ * question is "What's today's level of {goal}?" (never "What is {plural} today?").
  */
 export interface UntestableTargetParts {
   readonly name: string;
@@ -239,9 +245,10 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const figure = unit !== '' ? sayFigure(raw, unit) : raw.toLocaleString('en-GB');
   const target = [typeof comparator === 'string' ? COMPARATOR_WORDS[comparator] : undefined, figure].filter(Boolean).join(' ');
   const tailWords = typeof comparator === 'string' ? TAIL_COMPARATOR_WORDS[comparator] : undefined;
-  const lever = verdict.failures.find((f) => f.case === 'c')?.lever;
+  const failingLink = verdict.failures.find((f) => f.case === 'c');
+  const lever = failingLink?.lever;
   const identityCase = verdict.failures.some((f) => f.code === 'identity_unconfirmed');
-  const link = `a size for the link from ${lever ?? 'what the options change'} to ${name}`;
+  const link = `a size for the link from ${lever ?? 'what the options change'} to ${lever === undefined ? name : failingLink?.link_to ?? name}`;
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
     ? [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
