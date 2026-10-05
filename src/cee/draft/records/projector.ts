@@ -2598,6 +2598,40 @@ interface StatedConstraintBinding {
   readonly appliesToClaim: number | undefined;
 }
 
+/**
+ * The brief's verdict on a stated item's OWN value: the literal bound to its quote, else the shared binding authority.
+ * ONE derivation for the stated-items pass and for a claim that restates a stated figure (#2576 RT-2), so the two
+ * badges cannot disagree about one figure.
+ */
+function statedItemBriefBinding(item: DraftStatedItem, brief: string | undefined): BriefBinding {
+  return item.value_literal!==undefined ? (statedValueIsBound(item,brief) ? "verified" : "unverified") : bindStatedItemToBrief({
+    quote: item.source_quote,
+    value: item.value === undefined ? undefined : literalConventionValue(item.value,item.unit,item.value_scale),
+    unit: item.unit,
+    brief,
+  });
+}
+
+/**
+ * ⭐ #2576 RT-2 (DL; red-team #87 5992417601): A CLAIM THAT RESTATES THE USER'S OWN CURRENT FIGURE IS THE USER'S.
+ * Served: the brief's "£120,000 monthly recurring revenue" reached the graph on Olumi's outcome claim (same quantity,
+ * same value) as `extractionType: "inferred"` → `cee_inference`, shown as "Olumi estimate — not yet confirmed".
+ * The claim earns the brief's attribution only where EXACTLY ONE stated figure declares the claim's own quantity, in
+ * the current-level role (`baseline`), with the SAME value, and the brief bears that figure (the stated-items pass's
+ * own verdict, `statedItemBriefBinding`). Anything else (a target, a context figure, a different number, two
+ * candidates, an unbound quote) stays Olumi's: a matching number alone never attests whose level it is.
+ */
+function claimRestatesBoundFigure(
+  claim: { readonly quantity?: number; readonly value?: number },
+  statedItems: readonly DraftStatedItem[],
+  brief: string | undefined,
+): boolean {
+  if (claim.quantity === undefined || typeof claim.value !== "number") return false;
+  const restated = statedItems.filter((item, index) => item.kind === "figure" && item.role === "baseline"
+    && (index === claim.quantity || item.quantity === claim.quantity) && item.value === claim.value);
+  return restated.length === 1 && bindingEarnsBriefClaim(statedItemBriefBinding(restated[0]!, brief));
+}
+
 function projectOnce(
   records: DraftRecordSet,
   demoted: ReadonlyMap<number, DemoteDecision>,
@@ -2748,12 +2782,7 @@ function projectOnce(
     // What it never knew is whether the brief SAYS this, and that is the thing
     // the user reads off the badge. Derived here, at the brief's bytes, by the
     // one authority the response transform also uses.
-    const briefBinding = item.value_literal!==undefined ? (statedValueIsBound(item,brief) ? "verified" : "unverified") : bindStatedItemToBrief({
-      quote: item.source_quote,
-      value: item.value === undefined ? undefined : literalConventionValue(item.value,item.unit,item.value_scale),
-      unit: item.unit,
-      brief,
-    });
+    const briefBinding = statedItemBriefBinding(item, brief);
     // ⭐⭐ THE GOAL'S DISPLAY LABEL IS AN AUTHORED OBJECTIVE (quality bar §8 A1).
     //
     // ── THE ARGUMENT THIS REPLACES, AND WHY IT IS ANSWERED RATHER THAN IGNORED
@@ -3449,6 +3478,9 @@ function projectOnce(
       if (typeof claim.value === "number") {
         // Claim values remain Olumi estimates. A citation or matching number
         // alone does not attest the subject, measurement or current-value role.
+        // The one exception (#2576 RT-2, `claimRestatesBoundFigure`) needs all
+        // three typed: the claim's own quantity, a baseline-role figure, and the
+        // brief's binding of that figure — not the number alone.
         // raw_value is the display magnitude, not a second calculation value.
         // Derive it only from the producer's declared convention, never size.
         const rawValue = unit === "%" && (claim.value_scale === "unit_interval" || claim.value_scale === "ratio")
@@ -3457,7 +3489,8 @@ function projectOnce(
         node.data = {
           value: claim.value,
           ...(rawValue !== undefined ? { raw_value: rawValue } : {}),
-          extractionType: "inferred",
+          // #2576 RT-2: the user's own bound current figure, restated by the claim, keeps the user's attribution.
+          extractionType: claimRestatesBoundFigure(claim, statedItems, brief) ? "explicit" : "inferred",
           ...(unit !== undefined ? { unit } : {}),
         };
         node.observed_state = {
