@@ -369,6 +369,15 @@ export interface ComposeToolCallInput {
   readonly priorTurnFactsForLensHistory?: readonly HandlerFact[];
 
   /**
+   * ⭐ A5 (lease `output/rc-00351a/A5-LEASE.md`, reader 3): the scenario's authoritative Run history, newest first in
+   * persisted order (`run-ledger.ts` `lensReplayRunsFor`). When present the LENS REPLAY reads it INSTEAD of
+   * `priorTurnFactsForLensHistory`, so a Run after 20 quiet rows still knows the lens shown last time. Never merged:
+   * `deriveJudgementSignals` takes Run boundaries from array position and keeps `priorTurnFactsForLensHistory` alone
+   * (Codex #2572). Ignored without `priorTurnFactsForLensHistory` (the fresh-branch scoping rule above).
+   */
+  readonly lensReplayRuns?: readonly HandlerFact[];
+
+  /**
    * §2.1 row 4 — the factor id this turn's `what_would_flip` proposal targets
    * ("Test <factor> at <N>"), as selected by `selectFlipProposal` in the turn
    * executor and surfaced by `buildFlipProposalEmit`.
@@ -405,6 +414,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.analysisReadyStatus,
     input.analysisReady,
     input.freshness,
+    input.lensReplayRuns,
   );
 
   return {
@@ -469,6 +479,7 @@ function buildBlocksFromFacts(
   analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
   analysisReady?: unknown,
   freshness?: FreshnessDerivation,
+  lensReplayRuns?: readonly HandlerFact[],
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
@@ -488,7 +499,7 @@ function buildBlocksFromFacts(
     priorTurnFactsForLensHistory === undefined
       ? null
       : derivePreviousAnalysisLens(
-          priorTurnFactsForLensHistory,
+          lensReplayRuns ?? priorTurnFactsForLensHistory,
           liveLensExecutorAvailability(),
         );
 

@@ -311,6 +311,13 @@ export const AnalysisReadyPayload = z.object({
    * Optional so every pre-`may_run` dispatch path still validates.
    */
   may_run: z.boolean().optional(),
+  /** Non-factor roots the engine treats as zero until a figure is supplied. */
+  unvalued_roots: z.array(z.object({
+    node_id: z.string(),
+    label: z.string(),
+    kind: z.string(),
+    treated_as: z.literal('zero'),
+  })).optional(),
   /**
    * ⭐⭐ THE ONE ANALYSIS-ADMISSION RESULT — see
    * `orchestrator-v5/admission/analysis-admission.ts` for the full contract and

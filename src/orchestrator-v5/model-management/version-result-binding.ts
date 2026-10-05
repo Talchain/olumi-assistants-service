@@ -84,14 +84,21 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
   return duplicate === undefined ? selected : { reason: 'unconfirmed_identity' };
 }
 
-/** Compose the canonical claim and licence for this Run on the version it analysed. */
-export function boundRunLeaderLicence(run: Pick<BoundRun, 'fact' | 'identity'>, version: Pick<ModelVersionRecord, 'graph' | 'scenario_id'>): LeaderLicence {
+/**
+ * Compose the canonical claim and licence for this Run on the version it analysed. `readiness` overrides the version's
+ * own readiness for a hypothetical version that is never the user's model (SCI-DEEP's one-link-removed candidate):
+ * its admission is the baseline's, and only its RESULT (separation, withholds, limits) is its own.
+ */
+export function boundRunLeaderLicence(
+  run: Pick<BoundRun, 'fact' | 'identity'>, version: Pick<ModelVersionRecord, 'graph' | 'scenario_id'>,
+  opts: { readonly readiness?: ReturnType<typeof buildCanonicalAnalysisReadyFromGraph> } = {},
+): LeaderLicence {
   const fact = run.fact;
   if (fact.fact_type !== 'run_analysis') return 'withheld';
   const facts = [fact];
   const graph = version.graph;
   const graphHash = run.identity.graph_hash_at_run;
-  const readiness = buildCanonicalAnalysisReadyFromGraph(graph);
+  const readiness = opts.readiness ?? buildCanonicalAnalysisReadyFromGraph(graph);
   const identityCause = nonlinearIdentityLeaderClaimCause({ graph, graphHash,
     result: fact.result, requested: wasAnalysisRequestedByUser(fact) });
   const distrusted = nodesUnderANonlinearIdentity(graph);

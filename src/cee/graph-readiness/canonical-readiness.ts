@@ -223,6 +223,8 @@ export interface RouteAdmissionVerdict {
   readonly may_run: MayRun;
   readonly blocker_reason?: string;
   readonly readiness_issues: RouteReadinessBlocker[];
+  /** Non-factor roots disclosed separately from refusal and repair issues. */
+  readonly unvalued_roots?: readonly { node_id: string; label: string; kind: string }[];
   readonly issues: string[];
   readonly options_ready: number;
   readonly options_total: number;
@@ -432,6 +434,9 @@ export function assessRouteAdmission(graph: unknown): RouteAdmissionVerdict {
               : "This model can't be analysed yet. The values involved are Olumi's own suggestions, not yours — ask Olumi to work them through, or set them yourself."),
         }),
     readiness_issues: readinessIssues,
+    ...(assessment.analysisReady?.unvalued_roots !== undefined
+      ? { unvalued_roots: assessment.analysisReady.unvalued_roots }
+      : {}),
     issues: readinessIssues.map((issue) => issue.message),
     options_ready: optionsReady,
     options_total: optionsTotal,

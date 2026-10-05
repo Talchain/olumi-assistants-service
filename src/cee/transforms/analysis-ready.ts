@@ -504,6 +504,12 @@ function isOlumisLevel(factorNode: NodeV3T): boolean {
   return owner === "ai_drafted" || owner === "system_repaired";
 }
 
+/** A raw figure the record itself carries: a finite number, or a string that is one. */
+function hasOwnFigure(raw: unknown): boolean {
+  if (typeof raw === "number") return Number.isFinite(raw);
+  return typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw));
+}
+
 function renderFactorCurrentLevel(
   factorNode: NodeV3T,
   currentLevel: number,
@@ -536,7 +542,9 @@ function renderFactorCurrentLevel(
     unit: os?.unit,
     factor_type: factorNode.factor_type ?? os?.factor_type,
   });
-  if (synthesised && !isLabelEcho(factorLabel, synthesised)) return synthesised;
+  // A reading synthesised from the record's own raw figure states a quantity ("4 developers"); only a reading with no
+  // figure behind it can be the label handed back as its own value (CEE-ECHO-F1).
+  if (synthesised && (hasOwnFigure(os?.raw_value) || !isLabelEcho(factorLabel, synthesised))) return synthesised;
 
   // Rung 3, terminal: say the level plainly.
   return bareLevel;
@@ -747,9 +755,11 @@ function buildInterventionDetail(
 
   const displayValue = synthesised ?? String(parseFloat(normalisedValue.toFixed(2)));
 
-  // CEE-6 echo check on the synthesised value — same single rule.
+  // CEE-6 echo check on the synthesised value — same single rule, ONLY where no figure of this option's own stands
+  // behind it (CEE-ECHO-F1, 5 Oct; Science: "raw, not level"). "6 developers" on a factor labelled "Developers" is a
+  // quantity whose unit is the factor's noun, not the label handed back: replacing it with the level printed "0.2".
   const factorLabel = (factorNode?.label ?? "").toLowerCase().trim();
-  const finalDisplay = isLabelEcho(factorLabel, displayValue)
+  const finalDisplay = ownRawValue === null && isLabelEcho(factorLabel, displayValue)
     ? String(parseFloat(normalisedValue.toFixed(2)))
     : displayValue;
 

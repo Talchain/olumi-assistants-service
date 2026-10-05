@@ -30,6 +30,7 @@ import { deriveJudgementSignals } from '../judgement-signals.js';
 import { selectLens } from '../lens-selector.js';
 import { buildLensSurface, type BlockBuildCtx } from '../phase3-blocks.js';
 import { setTestSink } from '../../../utils/telemetry.js';
+import { composeToolCallResponse } from '../../compose.js';
 
 type Enrichment = Record<string, unknown>;
 
@@ -407,4 +408,48 @@ describe('§4 the statement is never re-emitted into composed prose (R-004 half)
       expect(userFacing).not.toContain(longest);
     });
   }
+});
+
+// ============================================================================
+// ⭐ A5 — the authoritative Run history feeds the LENS REPLAY ONLY (Codex #2572). The judgement signals take Run boundaries
+// from array position, so a newer Run outside the window must never reach them: it would make an answered objection
+// "unanswered" again.
+// ============================================================================
+
+describe('A5 — an answered objection stays answered when the lens replay reads Runs beyond the window', () => {
+  const RUN_HASH = 'gh_dissent0000000001';
+  const composeWith = (window: readonly HandlerFact[], beyond?: readonly HandlerFact[]) =>
+    JSON.stringify(composeToolCallResponse({
+      answerKind: 'functional',
+      orientation: 'Done.',
+      confirmation: 'Applied.',
+      coaching: null,
+      stage: 'analyse',
+      handlerFacts: [makeFact({ confidence_tier: 'strong' })],
+      persistedGraph: GRAPH,
+      persistedGraphHash: RUN_HASH,
+      priorTurnFactsForLensHistory: window,
+      ...(beyond !== undefined ? { lensReplayRuns: beyond } : {}),
+    }).blocks);
+  /** A ledger Run the window lacks, computed AFTER the window's own Run (a concurrent persist). */
+  const newerLedgerRun = (): HandlerFact => {
+    const f = clone(priorAnalysisFact()) as unknown as { result: Record<string, unknown> };
+    f.result.computed_at = '2026-09-17T12:00:00.000Z';
+    f.result.graph_hash_at_run = 'gh_dissent0000000002';
+    return f as unknown as HandlerFact;
+  };
+
+  it('POSITIVE CONTROL: an OPEN objection (newer than the window\'s Run) shows its card through compose', () => {
+    expect(composeWith(FACTS_DISSENT_NEWER)).toContain('STATED_DISSENT_UNANSWERED');
+  });
+
+  it('RED: an OPEN objection in the window still shows its card when the lens replay has its own history', () => {
+    expect(composeWith(FACTS_DISSENT_NEWER, [priorAnalysisFact()])).toContain('STATED_DISSENT_UNANSWERED');
+  });
+
+  it('RED: the objection is older than the window\'s Run (answered) + a newer Run beyond the window → still no card', () => {
+    const answered = [priorAnalysisFact(), dissentFact('strengthen:flip:edge_9', 'run_1770', STATEMENT)];
+    expect(composeWith(answered)).not.toContain('STATED_DISSENT_UNANSWERED');
+    expect(composeWith(answered, [newerLedgerRun(), answered[0]!])).not.toContain('STATED_DISSENT_UNANSWERED');
+  });
 });

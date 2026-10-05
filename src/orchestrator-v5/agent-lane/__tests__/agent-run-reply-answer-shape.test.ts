@@ -37,6 +37,8 @@ const SERVED_RUN = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fix
   turns: { t2: { analysis_result: { type: string; computed_against_hash: string } & Record<string, unknown> } };
 };
 const RESULT_BLOCK = SERVED_RUN.turns.t2.analysis_result;
+const ROBUSTNESS_CAVEAT = 'The result is not yet robust — small changes could flip it.';
+let readbackResult = RESULT_BLOCK;
 const GRAPH_HASH = RESULT_BLOCK.computed_against_hash;
 
 const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { ...(FX.state.analysis_state.run_state as Record<string, unknown>), computed_at: '2026-10-01T12:00:00.000Z' } };
@@ -127,19 +129,19 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     app = Fastify({ logger: false });
     // The Run itself: the product's own turn route, as the `run_analysis` capability dispatches it.
     app.post('/orchestrate/v2/turn', async () => ({
-      response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: GRAPH_HASH, blocks: [RESULT_BLOCK],
+      response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: GRAPH_HASH, blocks: [readbackResult],
       analysis_ready: readbackReady, analysis_state: readbackState,
     }));
     // The final readback — the ONLY source of the response's `analysis_result` block.
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState, analysis_ready: readbackReady,
-      ...(readbackCarriesResult ? { analysis_result: RESULT_BLOCK } : {}),
+      ...(readbackCarriesResult ? { analysis_result: readbackResult } : {}),
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); });
+  beforeEach(() => { rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); readbackResult = RESULT_BLOCK; });
 
   let turnSeq = 0;
   const nextTurnId = () => { turnSeq += 1; return `5d4c3b2a-1f0e-4d9c-8b7a-${String(turnSeq).padStart(12, '0')}`; };
@@ -175,7 +177,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   };
   const carriesResult = (b: Body) => (b.blocks ?? []).some((x) => x.type === 'analysis_result');
 
-  it('1. RUN: a bulleted served reply → `_answer_shape`; the text IS its derivation; headline = first sentence; bullets = first three, in order; nothing lost', async () => {
+  it('1. RUN: a bulleted served reply → `_answer_shape`; the text IS its derivation; headline = first sentence; caveat + first two bullets, in order; nothing lost', async () => {
     const { b, turnId } = await typedRun(FOUR_BULLETS.text);
     expect(carriesResult(b), 'the control: the response carries the readback’s analysis_result').toBe(true);
     const shape = b._answer_shape;
@@ -187,7 +189,11 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(bulletLines, 'the control: the served reply has four bullets').toHaveLength(4);
     expect(shape!.headline).toBe('The model cannot yet support a yes/no on the £59 increase because it could not test your **monthly churn under 4%** requirement.');
     expect(FOUR_BULLETS.text.startsWith(shape!.headline), 'the headline is the reply’s own first sentence').toBe(true);
-    expect(shape!.bullets).toEqual(bulletLines.slice(0, 3));
+    // The fragile served Run adds caveat bullet 1, leaving two narrator bullets on the face.
+    expect(shape!.bullets).toEqual([ROBUSTNESS_CAVEAT, ...bulletLines.slice(0, 2)]);
+    // The caveat displaces narrator bullet 3 to the start of detail; the original fourth bullet still follows.
+    expect(shape!.detail.startsWith(bulletLines[2]!)).toBe(true);
+    expect(b.assistant_text.split(ROBUSTNESS_CAVEAT)).toHaveLength(2);
     for (const line of lines) expect(b.assistant_text, `kept: ${line.slice(0, 60)}…`).toContain(unmarked(line));
     expect(shape!.detail, 'the fourth bullet goes behind "Show more", verbatim').toContain(lines.find((l) => l.includes(bulletLines[3]!))!.trim());
     expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the SAME text').toBe(b.assistant_text);
@@ -218,7 +224,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   it.each([
     ['one paragraph of two sentences', ONE_PARAGRAPH],
     ['four paragraphs', PARAGRAPHS_NO_BULLETS],
-  ])('3. RUN: a reply with NO bullets (%s), below the floor → no `_answer_shape`, text byte-identical', async (_what, text) => {
+  ])('3. RUN: a reply with NO bullets (%s), below the floor → no `_answer_shape`, caveat follows the narrator', async (_what, text) => {
     const synth = synthesiseAnswerShapeFromText(text);
     expect(synth, 'the control: the synthesiser WOULD shape it, so only the bullet guard declines').not.toBeNull();
     expect(synth!.bullets).toHaveLength(0);
@@ -227,7 +233,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     const { b } = await typedRun(text);
     expect(carriesResult(b), 'the control: an analysis-bearing turn').toBe(true);
     expect('_answer_shape' in b).toBe(false);
-    expect(b.assistant_text).toBe(text);
+    // The fragile served Run still ships whole below the floor, with its caveat after the narrator.
+    expect(b.assistant_text).toBe(`${text} ${ROBUSTNESS_CAVEAT}`);
   });
 
   it('4. NO analysis_result: the same bulleted reply → no `_answer_shape`, text byte-identical; CONTRAST: with the block, shaped', async () => {
@@ -251,6 +258,10 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(synth!.bullets, 'the control: no bullet, so only the floor can license it').toHaveLength(0);
     expect(deriveAnswerTextFromShape(synth!).length, 'the control: above the floor').toBeGreaterThan(ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS);
 
+    // This row isolates the no-bullet floor branch, so only its Run is robust; all other rows retain the served block.
+    readbackResult = { ...RESULT_BLOCK, enrichment: {
+      ...(RESULT_BLOCK.enrichment as Record<string, unknown>), robustness: { level: 'high', is_robust: true },
+    } };
     const { b } = await typedRun(LONG_NO_BULLETS);
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.bullets).toHaveLength(0);
@@ -296,7 +307,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(proposed.assistant_text).toBe(PROPOSAL_REPLY);
   });
 
-  it('7b. CONSENT: a Run with a bulleted reply that carries a waiting proposal’s approve chip → NOT shaped; text byte-identical', async () => {
+  it('7b. CONSENT: a Run with a bulleted reply that carries a waiting proposal’s approve chip → NOT shaped; caveat follows narrator', async () => {
     const SID = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a13';
     // Setup: the proposal the Run will carry (its own shape is test 7a's business, not asserted here).
     const proposed = await askedTurn(PROPOSAL_REPLY, SID, [proposeLink('Price-release alignment', 'Pro conversion rate')], PROPOSING) as Offered;
@@ -307,7 +318,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(carriesResult(run), 'the control: the Run carries the result').toBe(true);
     expect(await offersApprove(run), 'the control: the Run carries the waiting proposal’s chip').toBe(true);
     expect('_answer_shape' in run, 'a Run that offers an approval is not shaped').toBe(false);
-    expect(run.assistant_text).toBe(FOUR_BULLETS.text);
+    // Approval still prevents shaping; the fragile Run's caveat remains immediately after narrator words.
+    expect(run.assistant_text).toBe(`${FOUR_BULLETS.text} ${ROBUSTNESS_CAVEAT}`);
   });
 
   it('8. CONTROL: the SAME Run with no proposal waiting → shaped (the existing behaviour)', async () => {
@@ -320,7 +332,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   it('B3-8: the original capture names non-factor IDs, so its unavailable basis remains on the face', async () => {
     readbackReady = FX.state.analysis_ready;
     const { b, turnId } = await typedRun(CLEAN_BULLETS.text);
-    expect(b.assistant_text).toBe(`${CLEAN_BULLETS.text}\n\n${BASIS_UNAVAILABLE}`);
+    // The fragile Run's caveat precedes the independent basis obligation; that obligation still prevents shaping.
+    expect(b.assistant_text).toBe(`${CLEAN_BULLETS.text} ${ROBUSTNESS_CAVEAT}\n\n${BASIS_UNAVAILABLE}`);
     expect('_answer_shape' in b).toBe(false);
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
@@ -329,9 +342,11 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     readbackReady = FX.state.analysis_ready;
     const narrated = `${CLEAN_BULLETS.text}\n\n${BASIS_UNAVAILABLE}`;
     const { b, turnId } = await typedRun(narrated);
-    expect(b.assistant_text).toBe(narrated);
+    // A narrator copy of the basis does not waive the host obligation; the caveat follows all narrator words.
+    expect(b.assistant_text).toBe(`${narrated} ${ROBUSTNESS_CAVEAT}`);
     expect('_answer_shape' in b).toBe(false);
-    expect(rows.get(turnId)?.assistant_message).toBe(narrated);
+    // Replay stores the same whole answer, including the appended fragile-Run caveat.
+    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
 
   it.each([[true, true], [false, true], [true, false], [false, false]])('B3-8 RED: question-tail basis is visible once (present=%s punctuated=%s)', async (present, punctuated) => {

@@ -13,7 +13,9 @@ import {
   AnswerShapeSchema,
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
+  withoutSentenceCopies,
 } from '../answer-shape.js';
+import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE } from '../../coaching/analysis-result-headline.js';
 
 describe('synthesiseAnswerShapeFromText', () => {
   it('HARD CASE — single paragraph, no blank lines: headline = first sentence, detail = remainder, bullets = []', () => {
@@ -82,5 +84,46 @@ describe('synthesiseAnswerShapeFromText', () => {
   it('lead-in sentence + bullets with NO trailing prose → null (schema needs non-blank detail; fail-closed, ship as-is)', () => {
     const shape = synthesiseAnswerShapeFromText('The biggest drivers are:\n- Team size.\n- Budget.');
     expect(shape).toBeNull();
+  });
+});
+
+describe.each([
+  ['ordinary', NOT_ROBUST_SENTENCE.trim()],
+  ['no-flip', NOT_ROBUST_NO_FLIP_SENTENCE.trim()],
+])('withoutSentenceCopies (%s)', (_label, sentence) => {
+  it('removes an exact copy using the trimmed sentence', () => {
+    expect(withoutSentenceCopies(sentence, ` ${sentence} `)).toBe('');
+  });
+  it('removes a copy with two spaces before the dash', () => {
+    expect(withoutSentenceCopies(sentence.replace('robust —', 'robust  —'), sentence)).toBe('');
+  });
+  it('removes a copy with NBSP whitespace', () => {
+    expect(withoutSentenceCopies(sentence.replace(/ /g, '\u00a0'), sentence)).toBe('');
+  });
+  it('drops a caveat-only bullet including its marker', () => {
+    for (const marker of ['-', '*', '•']) {
+      expect(withoutSentenceCopies(`Before.\n${marker} ${sentence.replace('robust —', 'robust  —')}\nAfter.`, sentence))
+        .toBe('Before.\nAfter.');
+    }
+  });
+  it('removes a copy inside a longer line and keeps the remaining words', () => {
+    expect(withoutSentenceCopies(`Before.  ${sentence}  After.  `, sentence)).toBe('Before. After.');
+  });
+  it('removes a nested copy that collapses into a new copy', () => {
+    const nested = sentence.replace('robust —', `robust ${sentence} —`);
+    expect(withoutSentenceCopies(`Before. ${nested} After.`, sentence)).toBe('Before. After.');
+  });
+  it('keeps an unmatched line with double spaces byte-identical', () => {
+    const untouched = 'Keep  these  words.  ';
+    expect(withoutSentenceCopies(`Before.\n${untouched}\n${sentence}\nAfter.`, sentence))
+      .toBe(`Before.\n${untouched}\nAfter.`);
+  });
+  it('keeps the lowercase paraphrase because matching is case-sensitive', () => {
+    const lowercase = sentence.replace(/^The/, 'the');
+    expect(withoutSentenceCopies(lowercase, sentence)).toBe(lowercase);
+  });
+  it('does not match across a line break', () => {
+    const split = sentence.replace('robust —', 'robust\n—');
+    expect(withoutSentenceCopies(split, sentence)).toBe(split);
   });
 });

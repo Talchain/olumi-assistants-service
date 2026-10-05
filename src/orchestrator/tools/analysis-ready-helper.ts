@@ -182,6 +182,13 @@ export interface CanonicalReadinessRepairProposal {
 }
 
 export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']> & {
+  /** Non-factor sampled roots disclosed as zero; never Run blockers. */
+  readonly unvalued_roots?: Array<{
+    node_id: string;
+    label: string;
+    kind: string;
+    treated_as: 'zero';
+  }>;
   /** Exhaustive structural + semantic issues from the canonical assessment. */
   readonly readiness_issues?: CanonicalReadinessIssue[];
   /** Present only for two-or-more blocking issues. */
@@ -1208,14 +1215,14 @@ function relationshipAsk(option: unknown): string | undefined {
  *     not stop at an everywhere-pinned node for the same reason.
  *   · A switch (`isSwitch`, levels only 0/1) is exempt, because 0 is a real
  *     status-quo level for it ("not done"), not a placeholder.
- * Risks and other non-factor kinds are out of scope here: their missing input
- * is a likelihood, a different ask.
+ * Every sampled root kind is covered; risks carry a likelihood/magnitude ask.
+ * Goal, option, decision and constraint (limit) nodes are not sampled roots.
  */
 function goalRootsWithoutStatusQuoLevel(
   graph: GraphV3T,
   payload: AnalysisReadyPayload,
   rawGraph: unknown,
-): Array<{ id: string; label: string }> {
+): Array<{ id: string; label: string; kind: GraphV3T['nodes'][number]['kind'] }> {
   // The V1 `data.value` level lives on the RAW node: GraphV3 does not keep `data`.
   const rawNodes = isPlainObject(rawGraph) && Array.isArray(rawGraph.nodes) ? rawGraph.nodes : [];
   const legacyLevel = new Map<string, unknown>(
@@ -1263,9 +1270,9 @@ function goalRootsWithoutStatusQuoLevel(
       .filter((blocker) => readNonEmptyString(blocker.option_id) === null)
       .map((blocker) => readNonEmptyString(blocker.factor_id)),
   );
-  const gaps: Array<{ id: string; label: string }> = [];
+  const gaps: Array<{ id: string; label: string; kind: GraphV3T['nodes'][number]['kind'] }> = [];
   for (const node of graph.nodes) {
-    if (node.kind !== 'factor' || node.id === payload.goal_node_id) continue;
+    if (node.kind === 'goal' || nonCausal(node.id) || node.id === payload.goal_node_id) continue;
     if (alreadyFactorBlocked.has(node.id)) continue;
     if ((parents.get(node.id) ?? 0) > 0) continue;
     const observed = (node as { observed_state?: { value?: unknown } }).observed_state;
@@ -1287,7 +1294,7 @@ function goalRootsWithoutStatusQuoLevel(
     };
     if (isSwitch(magnitudeNode, resolveMagnitudeFrame(magnitudeNode))) continue;
     if (!reachesGoal(node.id)) continue;
-    gaps.push({ id: node.id, label: node.label ?? node.id });
+    gaps.push({ id: node.id, label: node.label ?? node.id, kind: node.kind });
   }
   return gaps;
 }
@@ -1552,11 +1559,13 @@ export function assessCanonicalAnalysisReadiness(
       blockingIssues,
       repairWiredFactorCountByOption(parsed.data),
     );
-    // PLACEHOLDER-ZERO: factor-scoped, so neither admission waiver (both need an
+    // PLACEHOLDER-ZERO: node-scoped, so neither admission waiver (both need an
     // option id) can answer it — excluding options does not give the remaining
     // arms a status-quo level.
     const levelGaps = semantic ? goalRootsWithoutStatusQuoLevel(parsed.data, semantic, graph) : [];
-    levelGaps.forEach((gap, index) => {
+    const factorLevelGaps = levelGaps.filter((gap) => gap.kind === 'factor');
+    const nonFactorLevelGaps = levelGaps.filter((gap) => gap.kind !== 'factor');
+    factorLevelGaps.forEach((gap, index) => {
       blockingIssues.push({
         issue_id: `level_${index + 1}`,
         code: 'MISSING_FACTOR_LEVEL',
@@ -1635,12 +1644,17 @@ export function assessCanonicalAnalysisReadiness(
     const analysisReady = semantic
       ? {
           ...semantic,
-          ...(levelGaps.length > 0
+          ...(nonFactorLevelGaps.length > 0
+            ? { unvalued_roots: nonFactorLevelGaps.map((gap) => ({
+                node_id: gap.id, label: gap.label, kind: gap.kind, treated_as: 'zero' as const,
+              })) }
+            : {}),
+          ...(factorLevelGaps.length > 0
             ? {
                 status: 'needs_user_input',
                 blockers: [
                   ...(semantic.blockers ?? []),
-                  ...levelGaps.map((gap) => ({
+                  ...factorLevelGaps.map((gap) => ({
                     factor_id: gap.id,
                     factor_label: gap.label,
                     blocker_type: 'missing_value' as const,
@@ -1784,7 +1798,7 @@ export function canonicalAnalysisReadyFrom(
  * CARRY the CANONICAL-ONLY fields onto a payload that was built by some OTHER
  * projection of the same graph. A carry, never a second derivation.
  *
- * The canonical-only set is `may_run`, `readiness_issues`, `repair_proposal` and
+ * The canonical-only set includes `may_run`, `readiness_issues`, `unvalued_roots`, `repair_proposal` and
  * `analysis_admission` — the fields the canonical authority computes that no
  * other producer does. It was named `carryCanonicalRunAdmission` when `may_run` was the only
  * member; the name is now the general one, because a function that carries an
@@ -1893,6 +1907,11 @@ export function carryCanonicalOnlyFields(
   const issues = canonical.readiness_issues;
   if (issues !== undefined && payload.readiness_issues !== issues) {
     patch.readiness_issues = issues;
+  }
+
+  const roots = canonical.unvalued_roots;
+  if (roots !== undefined && (payload as AnalysisReadyPayload).unvalued_roots !== roots) {
+    patch.unvalued_roots = roots;
   }
 
   const proposal = canonical.repair_proposal;

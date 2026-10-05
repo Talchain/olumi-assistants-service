@@ -37,6 +37,8 @@ export interface ReadinessView {
   readonly olumi_can_offer: readonly ReadinessItem[];
   /** Options a run would leave out until they are complete, by label. */
   readonly will_run_without: readonly string[];
+  /** Non-factor roots the admitted analysis treats as zero, by label. */
+  readonly treated_as_zero?: readonly string[];
   /**
    * Option levels no one has set (`MISSING_OPTION_VALUE`, not waived by leaving the option out), by label — whether
    * the verdict demands them or only offers help: either way the figure is the user's to give. A run can still be
@@ -80,6 +82,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
   const needs: ReadinessItem[] = [];
   const offers: ReadinessItem[] = [];
   const levelsNotSet: { option: string; factor: string }[] = [];
+  const treatedAsZero = (verdict.unvalued_roots ?? []).map((root) => root.label);
   for (const issue of verdict.readiness_issues) {
     const item = itemOf(issue);
     if (item === undefined) continue;
@@ -117,6 +120,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
     olumi_can_offer: dedupe(offers),
     will_run_without: excluded,
     levels_not_set: levelsNotSet,
+    ...(treatedAsZero.length > 0 ? { treated_as_zero: treatedAsZero } : {}),
     ...(reason !== undefined ? { reason } : {}),
     ...(target !== null ? { target_not_testable: target } : {}),
   };
@@ -141,11 +145,37 @@ const listOf = (xs: readonly string[]): string =>
  * from the verdict's own labels — never a code. Only while a run is admitted: a refusal already names what it needs.
  */
 export function stillNeededLine(view: ReadinessView): string | null {
-  if (!view.checked || view.may_run !== true || view.levels_not_set.length === 0) return null;
+  if (!view.checked || view.may_run !== true) return null;
+  const lines: string[] = [];
   const n = view.levels_not_set.length;
-  const asks = view.levels_not_set.slice(0, 2).map((l) => `what does "${l.option}" set ${l.factor} to`).join(', and ');
-  if (n === 1) return `One level is not set yet: ${asks}?`;
-  return n === 2 ? `Two levels are not set yet: ${asks}?` : `${n} levels are not set yet, including: ${asks}?`;
+  if (n > 0) {
+    const asks = view.levels_not_set.slice(0, 2).map((l) => `what does "${l.option}" set ${l.factor} to`).join(', and ');
+    lines.push(n === 1 ? `One level is not set yet: ${asks}?`
+      : n === 2 ? `Two levels are not set yet: ${asks}?` : `${n} levels are not set yet, including: ${asks}?`);
+  }
+  const roots = treatedAsZeroLine(view);
+  if (roots !== null) lines.push(roots);
+  return lines.length > 0 ? lines.join(' ') : null;
+}
+
+/**
+ * DL gate 2 (5 Oct): a non-factor root with no figure runs at zero (as ISL does) and is SAID, never a block — with the
+ * ask for its figure. One sentence for both readers: the post-write ask above, and the Run turn and its replay
+ * (`agent-v1-turn.ts`), which said neither (Acceptance #87 5987804248, scenario 9b9a4b81). Science (5 Oct): `treated_as`
+ * is only `'zero'`, and the ask does not branch on `kind` ("risk" here is not a probability).
+ */
+export function treatedAsZeroLine(view: ReadinessView): string | null {
+  if (!view.checked || view.may_run !== true) return null;
+  // One line, whatever the label holds: a line break inside a quoted label would split the sentence in two.
+  const roots = (view.treated_as_zero ?? []).map((label) => label.replace(/\s+/g, ' ').trim());
+  if (roots.length === 1) {
+    return `No figure is set for "${roots[0]}" yet, so the analysis treats it as zero. How likely or how large is it today?`;
+  }
+  if (roots.length > 1) {
+    const labels = `"${roots[0]}" and "${roots[1]}"${roots.length > 2 ? ` and ${roots.length - 2} more` : ''}`;
+    return `No figures are set for ${labels} yet, so the analysis treats them as zero. How likely or how large is each today?`;
+  }
+  return null;
 }
 
 /**
