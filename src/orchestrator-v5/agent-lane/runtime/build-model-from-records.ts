@@ -84,7 +84,8 @@ export async function buildModelFromRecords(
     return { ok: false, mutated: false, refusal: 'model_already_exists' };
   }
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
-    // Registration diagnostic only: GraphV3 has no declared persisted receipt carrier.
+    // The compiler's receipt, as the register SIDECAR: the route reconciles it against the bytes it stores and is the
+    // only writer of `graph.stated_dispositions` (`schemas/graph-stated-dispositions.ts`).
     stated_dispositions: reconcileStatedDispositions(compiled.projection.stated_dispositions ?? [], graph),
     graph, brief_text: brief, operation_id: constructionOperationId(scenarioId, brief), expected_graph_identity_hash: null,
   });

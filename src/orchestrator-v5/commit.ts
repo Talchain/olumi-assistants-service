@@ -45,6 +45,7 @@ import type {
 } from './session/store.js';
 import { StateCommitFailedError } from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
+import { omitStatedDispositions } from '../schemas/graph-stated-dispositions.js';
 import { assignEntityRefs } from './graph/entity-refs.js';
 import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
 import { appendCheckedGraphWrite } from './persist-graph-write.js';
@@ -1269,7 +1270,10 @@ export async function commitDirectAnswer(
       : metadata.priorPendingActions ?? [];
     assertNoPendingScopeAmendment(metadata.graph, baseForWrite, priorForScope);
   }
-  const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(metadata.graph, {
+  // ⛔ `graph.stated_dispositions` has ONE writer, the register route (DL ruling 5 Oct 2026): a turn never carries the
+  // records compiler's receipt forward onto an edited graph, so it is dropped BEFORE anything hashes or versions the
+  // bytes. A graph without the key passes through by reference (`omitStatedDispositions`).
+  const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(omitStatedDispositions(metadata.graph), {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
