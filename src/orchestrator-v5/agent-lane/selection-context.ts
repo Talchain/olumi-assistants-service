@@ -40,6 +40,7 @@ const COULD_NOT_CHECK = ' What was selected could not be checked against the mod
   + 'guess which element they mean.';
 
 type Rec = Record<string, unknown>;
+type Json = Rec;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /** `from→to` (or ASCII `from->to`), the canvas's own link reference; anything else cannot be read. */
@@ -83,14 +84,16 @@ export function agentSelectionContext(
     selected.push(entity);
     elementIds.push(id);
   }
+  // The state's own link list (`projectModelContext`): a selected link is named ONLY when that exact directed pair is in
+  // it (Codex buddy P2 on #2584: two present ends do not make a deleted or reversed link real). No list ⇒ unchecked.
+  const links = isRec(state) && Array.isArray(state.links) ? (state.links as unknown[]).filter(isRec) : null;
   for (const ref of linkRefs.slice(0, Math.max(0, SELECTION_MAX_ELEMENTS - selected.length))) {
     const ends = linkEndsOf(ref);
-    if (ends === null) { unreadable += 1; continue; }
-    const from = byId.get(ends.from);
-    const to = byId.get(ends.to);
-    if (from === undefined || to === undefined) { missing += 1; continue; }
-    // The state carries no link list, so a link is named by its two ends, as the user sees it on the canvas.
-    selected.push({ kind: 'link', from: { id: from.id, label: from.label }, to: { id: to.id, label: to.label } });
+    if (ends === null || links === null) { unreadable += 1; continue; }
+    const link = links.find((l) => l.from === ends.from && l.to === ends.to);
+    if (link === undefined) { missing += 1; continue; }
+    const end = (id: string): Json => ({ id, ...(typeof byId.get(id)?.label === 'string' ? { label: byId.get(id)!.label } : {}) });
+    selected.push({ kind: 'link', ...link, from: end(ends.from), to: end(ends.to) });
   }
 
   const unresolved: SelectionUnresolved = unreadable > 0 ? 'could_not_check' : missing > 0 ? 'not_in_model' : 'none';

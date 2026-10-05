@@ -68,11 +68,22 @@ describe('RT-1 selection context (pure)', () => {
     }
   });
 
-  it('S4 a link is named by its two ends; an unreadable link reference is could_not_check', () => {
-    const link = agentSelectionContext({ node_ids: [], edge_ids: [`${PRICE.id}→${CHURN.id}`] }, state)!;
-    expect(noteEntries(link.note)).toEqual([{ kind: 'link', from: PRICE, to: CHURN }]);
-    expect(link.grounded).toEqual({ element_ids: [], unresolved: 'none' });
-    expect(agentSelectionContext({ node_ids: [], edge_ids: ['e5'] }, state)!.grounded.unresolved).toBe('could_not_check');
+  it('S4 a link is named only when that exact directed pair is in the state\'s link list (Codex P2 on #2584)', () => {
+    const ref = `${PRICE.id}→${CHURN.id}`;
+    const withLink = { ...state, links: [{ from: PRICE.id, to: CHURN.id, source: 'cee_hypothesis', band: 'moderate' }] };
+    const present = agentSelectionContext({ node_ids: [], edge_ids: [ref] }, withLink)!;
+    expect(noteEntries(present.note)).toEqual([{ kind: 'link', from: PRICE, to: CHURN, source: 'cee_hypothesis', band: 'moderate' }]);
+    expect(present.grounded).toEqual({ element_ids: [], unresolved: 'none' });
+    // Negative twin: both ends present, the link absent (deleted) → not_in_model, and no link is named.
+    const absent = agentSelectionContext({ node_ids: [], edge_ids: [ref] }, { ...state, links: [] })!;
+    expect(absent.grounded.unresolved).toBe('not_in_model');
+    expect(noteEntries(absent.note)).toEqual([]);
+    // Reversed: B→A is not A→B.
+    const reversed = agentSelectionContext({ node_ids: [], edge_ids: [`${CHURN.id}→${PRICE.id}`] }, withLink)!;
+    expect(reversed.grounded.unresolved).toBe('not_in_model');
+    // No link list to check against, or an unreadable reference → could_not_check.
+    expect(agentSelectionContext({ node_ids: [], edge_ids: [ref] }, state)!.grounded.unresolved).toBe('could_not_check');
+    expect(agentSelectionContext({ node_ids: [], edge_ids: ['e5'] }, withLink)!.grounded.unresolved).toBe('could_not_check');
   });
 
   it(`S5 at most ${SELECTION_MAX_ELEMENTS} elements reach the note`, () => {
@@ -176,6 +187,18 @@ describe('RT-1 live in-process /agent/v1/turn with a stubbed model', () => {
     expect(requests.length).toBeGreaterThan(0);
     const all = (requests[0]!.input as Json[]).flatMap((i) => i.content ?? []).map((p: Json) => String(p.text ?? ''));
     expect(all.some((t) => t.startsWith(SELECTION_NOTE_PREFIX))).toBe(false);
+  });
+
+  it('R8 a served link is named with its own projection; the same pair reversed is not_in_model', async () => {
+    const edge = (SERVED.graph.edges as Json[]).find((e) => e.from === PRICE.id)!;
+    const res = await send({ turn_id: randomUUID(), selected_elements: [{ id: `${edge.from}→${edge.to}`, kind: 'edge' }] });
+    const entries = noteEntries(selectionNotes()[0]!);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ kind: 'link', from: { id: edge.from }, to: { id: edge.to } });
+    expect(res.json()._grounded_selection).toEqual({ element_ids: [], unresolved: 'none' });
+    requests.length = 0;
+    const back = await send({ turn_id: randomUUID(), selected_elements: [{ id: `${edge.to}→${edge.from}`, kind: 'edge' }] });
+    expect(back.json()._grounded_selection).toEqual({ element_ids: [], unresolved: 'not_in_model' });
   });
 
   it('R6 retry after selecting elsewhere (same turn id, live selection changed) replays the recorded answer: no 409, no second model call', async () => {
