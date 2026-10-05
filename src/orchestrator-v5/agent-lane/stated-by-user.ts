@@ -1194,11 +1194,8 @@ export function linkEffectFigureNotAChange(
     const amounts = findLinkEffectAmounts(q);
     const literal = (value: number, unit: string) => amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), q)
       && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
-    // A distributive "each extra café" or a written "from 8% to 4%" is itself the source change: only the target is checked.
-    const levels = linkEffectSourceLevels(q, namesSourceOf(ends));
-    const writtenChange = levels !== undefined && /^(?:percentage points?|pp|points?)$/i.test(effect.per_source_change_unit)
-      && Math.abs(levels.change) === Math.abs(effect.per_source_change);
-    const per = writtenChange ? [] : literal(effect.per_source_change, effect.per_source_change_unit);
+    // A written "from 8% to 4%" never reads as a level here ("from"/"to" are not level words), and these checks only stop a card.
+    const per = literal(effect.per_source_change, effect.per_source_change_unit);
     const amount = literal(effect.amount, effect.amount_unit);
     if (per.length > 0 && per.every(f => wordFigureCountsAnotherUnit(q, f, ends, effect.per_source_change_unit))) {
       return { miss: 'figure_counts_another_unit', question: `What change in “${ends.source}” does “${per[0]!.matchedText.trim()}” stand for?` };
