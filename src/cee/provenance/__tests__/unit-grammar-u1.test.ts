@@ -143,4 +143,19 @@ describe("PR-U1 condition 4: the quote check reads the same tail (a writer flip,
     expect(statedEffectQuoteMatches(quote, { ...effect, amount_unit: "GBP/year" })).toBe(true);
     expect(statedEffectQuoteMatches(quote, { ...effect, amount_unit: "GBP/month" })).toBe(false);
   });
+  // ⛔ LISTED LOSSES vs base, pinned on purpose (Science ruling on #2604's writer, 5 Oct). The writer stays C1: base
+  // admitted "£50,000 annually" for a periodless "GBP" only because its reader could not see "annually" (it already
+  // refused "a year"). Admitting a period only the quote states needs the TARGET node's period checked first, or an
+  // "annually" figure lands on a monthly target as the user's own 12× size — that guard is the follow-up row.
+  it("LISTED LOSS: a period only the quote states is not admitted against a periodless GBP (end-context guard = follow-up)", () => {
+    const effect = { amount: -75000, per_source_change: 1, per_source_change_unit: "%" };
+    expect(statedEffectQuoteMatches(quote, { ...effect, amount_unit: "GBP" })).toBe(false);
+    expect(statedEffectQuoteMatches("Merging saves £75,000 p.a. for each 1% of rounds merged", { ...effect, amount_unit: "GBP" })).toBe(false);
+  });
+  it("LISTED LOSS: \"3 percentage points\" no longer evidences a bare \"points\" (with no % target it is not pp, G1)", () => {
+    const q = "Delays fall by 3 percentage points for each 1% of rounds merged";
+    const effect = { amount: -3, per_source_change: 1, per_source_change_unit: "%" };
+    expect(statedEffectQuoteMatches(q, { ...effect, amount_unit: "points" })).toBe(false);
+    expect(statedEffectQuoteMatches(q, { ...effect, amount_unit: "percentage points" })).toBe(true);
+  });
 });
