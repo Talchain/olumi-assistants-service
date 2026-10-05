@@ -1,5 +1,11 @@
 import { findStatedAmounts, readUnit, type StatedAmount } from "./stated-amounts.js";
-import { sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
+import {
+  carrierCompatible,
+  nounUnitsAt,
+  readUnitParts,
+  sameUnit,
+  unitsAt,
+} from "../../orchestrator-v5/agent-lane/same-unit.js";
 
 export interface StatedEffectDetail {
   readonly amount: number;
@@ -13,41 +19,9 @@ interface LocatedAmount extends StatedAmount {
   readonly implicitSource?: true;
 }
 
-const PERIOD_WORDS: Readonly<Record<string, string>> = {
-  month: "month",
-  months: "month",
-  mo: "month",
-  monthly: "month",
-  year: "year",
-  years: "year",
-  yr: "year",
-  yearly: "year",
-};
-
-function currencyToken(matchedText: string): string | undefined {
-  const token = matchedText.match(/(?:A\$|C\$|NZ\$|[£$€¥₹]|CHF|kr)/iu)?.[0];
-  return token;
-}
-
-function nounUnitsAt(tail: string): readonly string[] {
-  const words = tail.match(/^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,3})/u)?.[1]
-    .trim()
-    .split(/\s+/u)
-    .map((word) => word.toLowerCase()) ?? [];
-  return words.flatMap((_, start) => words.slice(start).map((__, end) => words.slice(start, end + 1).join(" ")));
-}
-
-function unitsAt(quote: string, amount: StatedAmount): readonly string[] {
-  if (amount.kind === "percent") return ["%"];
-  if (amount.kind === "currency") {
-    const currency = currencyToken(amount.matchedText);
-    if (currency === undefined) return [];
-    const tail = quote.slice(amount.index + amount.matchedText.length);
-    const period = /^\s*(?:(?:a|per)\s+)?(month|months|mo|monthly|year|years|yr|yearly)\b/iu.exec(tail)?.[1];
-    return [period === undefined ? currency : `${currency}/${PERIOD_WORDS[period.toLowerCase()]!}`];
-  }
-  return nounUnitsAt(quote.slice(amount.index + amount.matchedText.length));
-}
+// ⭐ The tail reader that used to live here (`unitsAt`, `nounUnitsAt`, a private month/year `PERIOD_WORDS`) moved into
+// `same-unit.ts` (Science U-GRAMMAR G0, PR-U1): ONE source-located reader over the ONE vocabulary leaf, so "£75,000
+// annually", "/year", "per annum" and "p.a." read as a year here exactly as a declared unit does.
 
 function locatedAmounts(quote: string): LocatedAmount[] {
   const amounts: LocatedAmount[] = findStatedAmounts(quote).flatMap((amount) => {
@@ -83,9 +57,11 @@ function oneMatchingAmount(
 }
 
 /**
- * Every place in `text` that states this TARGET figure: the magnitude |amount| in the declared unit, read with the same
- * currency-and-period reader the quote check uses ("£75,000 a year" is £/year, "£12,000 upfront" is £). A caller that
- * has no quote uses this to find WHICH written figure an edge holds; more than one place means it cannot say.
+ * Every place in `text` that states this TARGET figure, by C3 (carrier-compatible, Science U-GRAMMAR G2): the written
+ * figure equals |amount| × the declared unit's SCALE ("£k/year" holding −75 is £75,000: FA-R1), the kinds and currency
+ * agree, and no part both sides state conflicts ("£75,000 a month" never binds a GBP/year edge; a part only one side
+ * states is no conflict). A caller with no quote uses this to find WHICH written figure an edge holds; more than one
+ * place means it cannot say.
  */
 export function statedTargetAmountSpans(
   text: string,
@@ -93,10 +69,16 @@ export function statedTargetAmountSpans(
   amountUnit: string,
 ): { readonly start: number; readonly end: number }[] {
   if (!Number.isFinite(amount) || amount === 0 || amountUnit.trim().length === 0) return [];
+  const declared = readUnitParts(amountUnit);
+  if (declared === null) return [];
+  const expected = Math.abs(amount) * declared.scale;
   return locatedAmounts(text)
     .filter((located) => located.implicitSource !== true
-      && magnitudeMatches(Math.abs(amount), located)
-      && located.units.some((candidate) => sameUnit(amountUnit, candidate)))
+      && magnitudeMatches(expected, located)
+      && located.units.some((candidate) => {
+        const stated = readUnitParts(candidate);
+        return stated !== null && carrierCompatible(stated, declared);
+      }))
     .map((located) => ({ start: located.index, end: located.index + located.matchedText.length }));
 }
 
