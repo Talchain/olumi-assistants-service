@@ -1,7 +1,7 @@
 import type { DraftQuoteSpan, DraftStatedRelationship } from "../draft/records/grammar.js";
 import { findStatedAmounts, readUnit, type StatedAmount } from "./stated-amounts.js";
 import { boundLiteral } from "../draft/records/quantity-evidence.js";
-import { sameUnit, readCountRate, readMoney } from "../../orchestrator-v5/agent-lane/same-unit.js";
+import { sameUnit, readCountRate, readMoney, periodIn } from "../../orchestrator-v5/agent-lane/same-unit.js";
 
 export interface StatedEffectDetail {
   readonly amount: number;
@@ -85,15 +85,17 @@ function oneMatchingAmount(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-// Unit words written directly at a plain numeral. Calendar words outside the shared month/year vocabulary are kept as
-// their own periods so "per week" can never read as a monthly rate.
-const LOCAL_PERIOD: Readonly<Record<string, string>> = {
+// Unit words written directly at a plain numeral. Month and year are read by the SHARED unit reader (`periodIn`, the
+// vocabulary `sameUnit` uses: "annum", "pa", "pcm" included). Only calendar words it does not read stay local, as their
+// own periods, so "per week" can never read as a monthly rate (Codex R2 F1).
+const OTHER_PERIOD: Readonly<Record<string, string>> = {
   day: "day", days: "day", daily: "day", week: "week", weeks: "week", weekly: "week",
-  month: "month", months: "month", mo: "month", monthly: "month", quarter: "quarter", quarters: "quarter", quarterly: "quarter",
-  year: "year", years: "year", yr: "year", yearly: "year", annual: "year", annually: "year",
+  quarter: "quarter", quarters: "quarter", quarterly: "quarter", yearly: "year",
 };
+const localPeriod = (word: string | undefined): string | undefined =>
+  word === undefined || word === "/" ? undefined : periodIn(word) ?? OTHER_PERIOD[word];
 const PERIOD_ADJECTIVE = /^(?:daily|weekly|monthly|quarterly|yearly|annual|annually)$/u;
-const PERIOD_CONNECTOR = new Set(["a", "an", "per", "every", "each"]);
+const PERIOD_CONNECTOR = new Set(["a", "an", "per", "every", "each", "/"]);
 const LOCAL_QUALIFIER = new Set(["more", "extra", "additional", "new", "newly", "fewer", "less", "further", "net", "lost", "added", "existing"]);
 const LOCAL_FUNCTION_WORD = new Set(["a", "an", "the", "and", "or", "to", "of", "in", "on", "at", "by", "for", "from", "with", "than",
   "per", "each", "every", "into", "over", "under", "across", "between", "about", "around", "roughly", "approximately", "up", "down",
@@ -101,17 +103,18 @@ const LOCAL_FUNCTION_WORD = new Set(["a", "an", "the", "and", "or", "to", "of", 
 
 /** The noun phrase (at most two words) and the period written at a plain numeral. Nothing here supplies a unit. */
 function localCountUnit(quote: string, amount: LocatedAmount): { readonly nouns: readonly string[]; readonly period: string | null } {
-  const words = quote.slice(amount.index + amount.matchedText.length).match(/^\s+((?:[A-Za-z][A-Za-z-]*\s*){1,6})/u)?.[1]
-    .trim().split(/\s+/u).map(word => word.toLowerCase()) ?? [];
+  // "/" is its own word, so "deliveries/year" reads its period like "deliveries per year".
+  const words = quote.slice(amount.index + amount.matchedText.length).match(/^\s+((?:(?:[A-Za-z][A-Za-z-]*|\/)\s*){1,6})/u)?.[1]
+    .replace(/\//gu, " / ").trim().split(/\s+/u).map(word => word.toLowerCase()) ?? [];
   let i = 0, period: string | null = null;
   while (i < words.length && (LOCAL_QUALIFIER.has(words[i]!) || PERIOD_ADJECTIVE.test(words[i]!))) {
-    if (PERIOD_ADJECTIVE.test(words[i]!)) period = LOCAL_PERIOD[words[i]!]!;
+    if (PERIOD_ADJECTIVE.test(words[i]!)) period = localPeriod(words[i])!;
     i++;
   }
   const nouns: string[] = [];
-  while (i < words.length && nouns.length < 2 && !LOCAL_FUNCTION_WORD.has(words[i]!) && LOCAL_PERIOD[words[i]!] === undefined) nouns.push(words[i++]!);
-  if (PERIOD_ADJECTIVE.test(words[i] ?? "")) period = LOCAL_PERIOD[words[i]!]!;
-  else if (PERIOD_CONNECTOR.has(words[i] ?? "") && LOCAL_PERIOD[words[i + 1] ?? ""] !== undefined) period = LOCAL_PERIOD[words[i + 1]!]!;
+  while (i < words.length && nouns.length < 2 && !LOCAL_FUNCTION_WORD.has(words[i]!) && words[i] !== "/" && localPeriod(words[i]) === undefined) nouns.push(words[i++]!);
+  if (PERIOD_ADJECTIVE.test(words[i] ?? "")) period = localPeriod(words[i])!;
+  else if (PERIOD_CONNECTOR.has(words[i] ?? "") && localPeriod(words[i + 1]) !== undefined) period = localPeriod(words[i + 1])!;
   return { nouns, period };
 }
 

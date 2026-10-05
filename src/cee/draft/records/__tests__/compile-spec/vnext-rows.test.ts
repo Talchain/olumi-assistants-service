@@ -495,3 +495,22 @@ describe('F9 P2-FRAME: a declared plausible_max writes the legacy frame fields, 
     expect({ stored_cap: factor.observed_state.cap, cap, emitted, level }).toEqual({ stored_cap: 1000, cap: legacy.cap, emitted: legacy.emitted, level: 0.15 });
   });
 });
+
+// ── PR #2573 Codex round 2 (b0c29848): each row reproduces the reviewer's counterexample. EXTRACTION-UNPROVEN fixtures. ──
+describe('Codex R2 F1: the period written at the numeral is read across "/" and in the shared unit reader\'s vocabulary', () => {
+  for (const quote of ['Each van adds 18 deliveries/year.', 'Each van adds 18 deliveries per annum.']) {
+    it(`R3-1 "${quote}" against deliveries/month is a typed unit refusal, never user_stated`, () => {
+      const r = vanEffect(quote); const p = project(r, VANS + ' ' + quote);
+      expect(p.dropped).toContainEqual(expect.objectContaining({ stated_index: 5, reason: 'unit_literal_contradicts_unit' }));
+      expect(edgeFor(p, 5, r)?.provenance?.natural_effect).toBeUndefined();
+      expect(p.graph.edges.some(e => e.provenance?.magnitude === 'user_stated' && e.provenance?.natural_effect?.amount === 18)).toBe(false);
+    });
+  }
+  it('R3-1 CONTRAST "18 deliveries a month" and "18 deliveries/month" still earn user_stated against deliveries/month', () => {
+    for (const quote of ['Each van adds 18 deliveries a month.', 'Each van adds 18 deliveries/month.']) {
+      const r = vanEffect(quote); const p = project(r, VANS + ' ' + quote);
+      expect(p.dropped.filter(d => d.stated_index === 5 && d.reason !== 'unconnected_to_goal'), quote).toEqual([]);
+      expect(edgeFor(p, 5, r)?.provenance, quote).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: 18, amount_unit: 'deliveries/month' } });
+    }
+  });
+});
