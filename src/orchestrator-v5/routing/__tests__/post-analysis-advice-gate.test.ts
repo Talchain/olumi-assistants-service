@@ -976,7 +976,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain("In this model, 'Hire two senior engineers locally' scored highest");
-      expect(out.assistant_text).toContain('with a probability of 62%');
+      expect(out.assistant_text).toContain('scored highest in 62% of runs');
       // ROADMAP 2.1067 — this pin previously required
       // "That sits ahead of 'Hire one senior engineer overseas' by 24
       // percentage points". That is the retired runner-up GAP statistic: the
@@ -1025,7 +1025,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       const text = out.assistant_text;
       // Clear-lead opener — quoted label, no "favoured option"/"best".
       expect(text).toContain("In this model, 'Hire two senior engineers locally' scored highest");
-      expect(text).toContain('with a probability of 62%');
+      expect(text).toContain('scored highest in 62% of runs');
       // ROADMAP 2.1067 — was "For 'Hire one senior engineer overseas' to
       // overtake it, the lead of 24 percentage points would need to close",
       // which quantified the gap between two win frequencies as a distance to
@@ -1055,7 +1055,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain('Hire two senior engineers locally');
-      expect(out.assistant_text).toContain('with a probability of 62%');
+      expect(out.assistant_text).toContain('scored highest in 62% of runs');
       // ROADMAP 2.1067 — was "It sits ahead of 'Hire one senior engineer
       // overseas' by 24 percentage points".
       expect(out.assistant_text).toContain("'Hire one senior engineer overseas' scored highest in 38% of runs");
@@ -1082,7 +1082,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain("In this model, 'Hire two senior engineers locally' scored highest");
-      expect(out.assistant_text).toContain('with a probability of 62%');
+      expect(out.assistant_text).toContain('scored highest in 62% of runs');
       // ROADMAP 2.1067 — was "It sits ahead of Hire one senior engineer
       // overseas by 24 percentage points".
       // ⚠ This comment previously read "`advice` quotes no labels, which is its
@@ -1187,7 +1187,7 @@ describe('tryPostAnalysisAdviceGate — validation-priority beat (what to valida
       const text = out.assistant_text;
       // 1/2 — leader + confidence
       expect(text).toContain("In this model, 'Hire a senior engineer' scored highest");
-      expect(text).toContain('with a probability of 62%');
+      expect(text).toContain('scored highest in 62% of runs');
       // 3 — why it leads (drivers)
       expect(text).toContain('Engineering capacity');
       // 4 — what is fragile (the named link)
@@ -1399,6 +1399,8 @@ describe('tryPostAnalysisAdviceGate — degrade-gracefully (partial data)', () =
       expect(out.assistant_text).toContain('Hire two senior engineers locally');
       // Probability fragment is omitted entirely
       expect(out.assistant_text).not.toContain('probability of');
+      // ...and in today's words: the leader's share is omitted, never invented (union, never replace).
+      expect(out.assistant_text).not.toMatch(/'Hire two senior engineers locally' scored highest in \d/);
       expect(out.assistant_text).not.toContain('Not available');
     }
   });
