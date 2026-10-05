@@ -1551,8 +1551,16 @@ function collectBriefNaturalEffectCandidates(
         || typeof amount !== "number" || typeof perSourceChange !== "number"
         || typeof amountUnit !== "string" || typeof perSourceChangeUnit !== "string"
         || !sameUnit(amountUnit, unitOf(target) ?? "") || !sameUnit(perSourceChangeUnit, unitOf(source) ?? "")) continue;
+      // Codex R2 F4: a stated range is re-sized by the compiler's own contract (sizeLink's `amount_range`, the B1 rule),
+      // never by the default spread. A range that is present but unreadable earns nothing.
+      const storedRange = (p.stated_relationship as { range?: unknown }).range;
+      const range = storedRange as { low?: unknown; high?: unknown } | null | undefined;
+      const amountRange = range !== null && typeof range === "object" && typeof range.low === "number" && Number.isFinite(range.low)
+        && typeof range.high === "number" && Number.isFinite(range.high) ? { low: range.low, high: range.high } : undefined;
+      if (storedRange !== undefined && amountRange === undefined) continue;
       const sized = sizeLink({ direction: amount * perSourceChange < 0 ? "negative" : "positive",
-        effect_amount: amount, effect_per_source_change: perSourceChange, user_stated: true }, source, target);
+        effect_amount: amount, effect_per_source_change: perSourceChange, user_stated: true,
+        ...(amountRange !== undefined ? { amount_range: amountRange } : {}) }, source, target);
       const std = (edge.strength as { std?: unknown } | undefined)?.std ?? edge.strength_std;
       if (sized.problem !== undefined || sized.outcome !== "user_stated" || mean !== sized.mean
         || std !== sized.std || natural.strength_mean !== mean) continue;

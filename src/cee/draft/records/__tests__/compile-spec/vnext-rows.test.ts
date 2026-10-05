@@ -19,6 +19,7 @@ import { projectGraphForPersistence } from '../../../../../orchestrator-v5/persi
 import { assignEntityRefs } from '../../../../../orchestrator-v5/graph/entity-refs.js';
 import { buildFactorScaleMap, projectRequestInterventionsToWireScale, resolveRawInterventionValue, decideAnalysisScaleBlock } from '../../../../../orchestrator-v5/tools/plot-intervention-scale.js';
 import { defaultFrameFor, framedObservedState } from '../../../../../orchestrator-v5/agent-lane/admit-model.js';
+import { deriveNotModelledManifest } from '../../../../context-integrity/not-modelled-manifest.js';
 
 function project(records: DraftRecordSet, brief = BRIEF) {
   const r = projectDraftRecords(records, brief); expect(r.ok).toBe(true);
@@ -546,5 +547,26 @@ describe('Codex R2 F2: a noun the scanner cannot place is no contradiction; only
       expect(p.dropped, quote).toContainEqual(expect.objectContaining({ stated_index: 5, reason: 'unit_literal_contradicts_unit' }));
       expect(edgeFor(p, 5, r)?.provenance?.natural_effect, quote).toBeUndefined();
     }
+  });
+});
+
+describe('Codex R2 F4: the cold reader re-sizes a stated range by the compiler\'s own sizing contract', () => {
+  const churn = (graph: any) => graph.edges.find((e: any) => e.provenance?.natural_effect?.amount_unit === 'customers' && e.provenance?.stated_relationship?.range !== undefined);
+  const twoCustomers = (graph: any) => deriveNotModelledManifest(BRIEF, graph).quantities!.items.filter(i => /^(about )?2( customers)?$/u.test(i.literal));
+  it('R3-4 the sealed churn effect (mean 0.5, std 0.303951367781155) reads in_model; "2 customers" is not prose_only', async () => {
+    const graph: any = stored((await registered()).graph);
+    const edge = churn(graph);
+    expect(edge, 'positive control: the registered churn carrier with its stated range').toBeDefined();
+    expect({ mean: edge.strength?.mean ?? edge.strength_mean, std: edge.strength?.std ?? edge.strength_std }).toEqual({ mean: 0.5, std: 0.303951367781155 });
+    const rows = twoCustomers(graph);
+    expect(rows.length, JSON.stringify(deriveNotModelledManifest(BRIEF, graph).quantities!.items.map(i => [i.literal, i.verdict]))).toBeGreaterThan(0);
+    expect(rows.map(i => i.verdict)).toEqual(rows.map(() => 'in_model'));
+  });
+  it('R3-4 CONTRAST the same carrier with the default (rangeless) spread no longer reads in_model', async () => {
+    const graph: any = stored((await registered()).graph);
+    const edge = churn(graph);
+    // 0.25 = |β| / 2, the default spread the reader computed when it dropped the stated range.
+    if (edge.strength !== undefined) edge.strength.std = 0.25; else edge.strength_std = 0.25;
+    expect(twoCustomers(graph).map(i => i.verdict)).not.toContain('in_model');
   });
 });
