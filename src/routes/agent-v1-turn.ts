@@ -541,11 +541,21 @@ export const REPLY_LENGTH_INSTRUCTION =
  * `agent.interpret`, whose instructions begin with AGENT_INSTRUCTIONS. It grants nothing: whether a leader may be named
  * is still #34's `claim_permissions.leader_may_be_named`, and the wire gates still drop a ranking on a withheld turn.
  * N is the option's share of runs in which it scored highest, never `probability_of_goal` (#35's "reaches the target").
+ * ⛔ POSITIVE MEANING, NO "RECOMMEND" (DL 0df0e1, Acceptance rehearsal 2): the interpret narration glossed N as "…not a
+ * recommendation or a 54% chance of meeting your target". The recommend stem is HARD even negated (J1 ruling), so the rule
+ * gives N's meaning in positive words and bans the stem outright. Codex r1 #2614: "scored highest" is false for a
+ * minimise Run (it came out lowest) and inexact when tied runs split their credit, and the agent cannot rely on knowing
+ * the Run's direction, so the rule names an option in Part B's neutral form (DL 6002469285): "N% of runs supported X".
+ * Codex r2 #2614: a single option can be named with NO share (run-analysis selectLeadingOptionId accepts a lone row
+ * without win_probability), so with no share the rule makes no claim about how runs fell at all.
  */
 export const MODEL_RELATIVE_NAMING_INSTRUCTION =
-  'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, \u2018X\u2019 scored highest in N% of runs\u201d, '
-  + 'with X its display label and N the share of model runs in which it scored highest, taken from the result; N is never its chance of reaching the goal. '
-  + 'If the result gives no such share, say \u201cIn this model, \u2018X\u2019 scored highest\u201d. Keep any provisional or limit condition the rules above require in that same sentence. '
+  'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d, '
+  + 'with X its display label and N the share of model runs credited to it, taken from the result; N is never its chance of reaching the goal. '
+  + 'That form holds whichever way the goal points and when runs tie, so use it rather than saying the option scored highest or came out lowest. '
+  + 'When you say what N means, say it as what it is: \u201cThat share is the part of this model\u2019s runs that supported it, not its chance of meeting your target.\u201d '
+  + 'Never write recommend or recommendation in any form, not even to deny it. '
+  + 'If the result gives no such share, make no claim about how runs fell: say what the result rests on instead. Keep any provisional or limit condition the rules above require in that same sentence. '
   + 'Never name an option as leading, ahead, favoured, on top or winning in other words, and never without \u201cin this model\u201d. '
   + 'Never call a result, finding, option or link \u201cfragile\u201d: say what the result rests on instead, in the result\u2019s own terms, '
   + 'such as the assumption its decision_sensitivity names when measured, and whose figure it is.';
