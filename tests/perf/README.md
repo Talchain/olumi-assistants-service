@@ -222,7 +222,7 @@ scenarios:
 
 Run with:
 ```bash
-artillery run tests/perf/stress-test.yml
+npx --yes artillery@2 run tests/perf/stress-test.yml
 ```
 
 ### CI Integration
