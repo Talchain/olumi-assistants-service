@@ -115,6 +115,7 @@ import {
   HandlerResultInvalidError,
 } from '../handler-errors.js';
 import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
+import { leaderLicenceShadow, summaryNamesLeader } from '../../compose/leader-licence-shadow.js';
 import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/turn-timings.js';
 import { config } from '../../../config/index.js';
 import { hasReducedSamplesDisclosure, withoutDirectionUnattestedOnHeldFloor } from '../../compose/claim-safety-cage.js';
@@ -2343,8 +2344,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // than the silence it exists to fix. Same house rule the defaulted-value
     // egress states at its own chokepoint: never throw at a disclosure seam.
     let unsetOptionEffects: readonly UnsetOptionEffect[] = [];
+    // A2 L1: the shadow reuses THIS admission (step 7b), so it never resolves readiness a second time.
+    let runAdmission: ReturnType<typeof resolveRunAdmission> | null = null;
     try {
       const admission = resolveRunAdmission(snapshot.rawPersistedGraph ?? snapshot.graph);
+      runAdmission = admission;
       unsetOptionEffects = collectUnsetOptionEffects(
         admission.assessment.blockingIssues,
         analysedOptionIds,
@@ -2914,6 +2918,40 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       typeof analysisStatus === 'string' ? analysisStatus : null,
     );
     emitPlotTimings(plotTimings);
+
+    // --- 7b. A2 L1 SHADOW (Science 0df0e1) --------------------------------
+    // The ONE leader-licence verdict for this Run, compared with the live predicates L2 will replace. LOG-ONLY: it is
+    // not stored (the result schema is strict) and nothing reads it, so the Run, its fact and its reply are unchanged.
+    // Ids and codes only, never labels or prose. AFTER the timings are taken, so `handler_total_ms` is unchanged.
+    try {
+      const shadow = leaderLicenceShadow({
+        fact: parsed.data,
+        graph: snapshot.rawPersistedGraph,
+        scenarioId: args.scenario_id,
+        summaryNamesLeader: summaryNamesLeader(headline, headlineDescriptor),
+        admission: runAdmission,
+      });
+      log.info(
+        {
+          event: 'cee.leader_licence.shadow',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          run_id: shadow.verdict.basis.run_id,
+          verdict: shadow.verdict.verdict,
+          leader_option_id: shadow.verdict.leader_option_id,
+          reason: shadow.verdict.reason,
+          caveats: shadow.verdict.caveats,
+          admission_mode: shadow.verdict.basis.admission_mode,
+          claim_reason: shadow.verdict.basis.claim_reason,
+          failed_closed: shadow.failed_closed,
+          disagreements: shadow.disagreements,
+        },
+        'A2 L1 leader-licence shadow verdict (no behaviour change)',
+      );
+    } catch {
+      // Shadow only: a failure here must never reach the Run.
+    }
+
     // When timingsEnabled=false, `plotTimings` is the empty object and we
     // omit `__plot_timings` entirely so HandlerOutcome carries no debug
     // surface in default-OFF production.

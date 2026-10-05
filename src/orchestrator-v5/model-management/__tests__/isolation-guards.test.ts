@@ -267,6 +267,9 @@ const SANCTIONED_INBOUND_CALL_SITES = new Set(
     // "Test without this link" re-licenses its reply on the final canonical read with the SAME complete per-Run
     // licence (boundRunLeaderLicence), rather than a second boolean rule. Read-only: no version write, flag or schema.
     '../handlers/structural-challenge-dispatch.ts',
+    // A2 L1 (Science 0df0e1): the Run-time leader-licence SHADOW reads the SAME complete per-Run licence
+    // (boundRunLeaderClaim) to log where the live predicates disagree. Pure, log-only: no version write, flag or schema.
+    '../compose/leader-licence-shadow.ts',
   ].map((s) => resolve(moduleDir, s)),
 );
 

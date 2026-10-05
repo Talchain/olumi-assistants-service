@@ -93,8 +93,20 @@ export function boundRunLeaderLicence(
   run: Pick<BoundRun, 'fact' | 'identity'>, version: Pick<ModelVersionRecord, 'graph' | 'scenario_id'>,
   opts: { readonly readiness?: ReturnType<typeof buildCanonicalAnalysisReadyFromGraph> } = {},
 ): LeaderLicence {
+  return boundRunLeaderClaim(run, version, opts).licence;
+}
+
+/** {@link boundRunLeaderLicence} with the composition it read: A2 L1's verdict names its reason from the SAME state. */
+export function boundRunLeaderClaim(
+  run: Pick<BoundRun, 'fact' | 'identity'>, version: Pick<ModelVersionRecord, 'graph' | 'scenario_id'>,
+  opts: { readonly readiness?: ReturnType<typeof buildCanonicalAnalysisReadyFromGraph> } = {},
+): {
+  readonly licence: LeaderLicence;
+  readonly state: ReturnType<typeof composeAnalysisStateV1> | null;
+  readonly readiness: ReturnType<typeof buildCanonicalAnalysisReadyFromGraph> | null;
+} {
   const fact = run.fact;
-  if (fact.fact_type !== 'run_analysis') return 'withheld';
+  if (fact.fact_type !== 'run_analysis') return { licence: 'withheld', state: null, readiness: null };
   const facts = [fact];
   const graph = version.graph;
   const graphHash = run.identity.graph_hash_at_run;
@@ -117,7 +129,7 @@ export function boundRunLeaderLicence(
     ...(limit === null ? {} : { everyOptionLimit: limit.kind }),
     rawRobustness: pickLatestRawRobustness(facts),
   });
-  return leaderLicenceFromState(state, readiness);
+  return { licence: leaderLicenceFromState(state, readiness), state: state ?? null, readiness };
 }
 
 /** Pure binding only; the compare route calls the existing delta builder for this pair. */
