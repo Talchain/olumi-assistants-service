@@ -2,6 +2,7 @@ import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defau
 /** Literal, per-end unit readings for an unsized link (RT-6 U1–U4). No graph writes. */
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
+import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
 import { namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
@@ -53,8 +54,8 @@ function pointsOrShareAsk(label: string, value: number, level: number | undefine
 /** The reading the card shows and the writer stores: a typed-zero end's change is said in points (B3). */
 export function withPointsAtZero<E extends LinkEffectStatement>(effect: E, zero: readonly string[] | undefined, from: string, to: string): E {
   if (zero === undefined || zero.length === 0) return effect;
-  return { ...effect, ...(zero.includes(from) ? { per_source_change_unit: 'percentage points' } : {}),
-    ...(zero.includes(to) ? { amount_unit: 'percentage points' } : {}) };
+  return { ...effect, ...(zero.includes(from) ? { per_source_change_unit: POINTS_UNIT } : {}),
+    ...(zero.includes(to) ? { amount_unit: POINTS_UNIT } : {}) };
 }
 
 const unitOf = (n: Rec): string | undefined => text(n.unit)

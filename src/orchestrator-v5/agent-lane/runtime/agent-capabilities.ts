@@ -15,6 +15,7 @@
  */
 
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
+import { POINTS_SPELLINGS } from '../../../utils/unit-alphabet.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
@@ -1475,7 +1476,7 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
           + 'or Very strong. That records how strong you judge the link, not your figure."';
       }
       // A % LEVEL target takes its change in points only: say THAT (Science 5993238492), never "measured in %".
-      if (ends !== null && effect !== undefined && targetFails && !sourceFails && ends.target.own.length > 0 && ends.target.own.every(u => statedInOneOf(u, ['percentage points', 'pp', 'points']))) {
+      if (ends !== null && effect !== undefined && targetFails && !sourceFails && ends.target.own.length > 0 && ends.target.own.every(u => statedInOneOf(u, [...POINTS_SPELLINGS, 'points']))) {
         return `Nothing was prepared: a change in "${to.label}" is recorded in percentage points. Ask the user whether they mean `
           + 'points (62% → 60% is 2 points) and for their figure in points; never convert a relative % yourself.';
       }

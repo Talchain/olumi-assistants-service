@@ -51,6 +51,9 @@ export const POINTS_SPELLINGS: readonly string[] = [
   "pp", "ppt", "pps", "percentage point", "percentage points", "percent point", "percent points", "% point", "% points",
 ];
 
+/** The one points spelling a stored RT-6 link change is written in (the card's words and the writer's unit). */
+export const POINTS_UNIT = "percentage points";
+
 const norm = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, " ");
 
 const NOUN = new Map<string, UnitPeriod>();
