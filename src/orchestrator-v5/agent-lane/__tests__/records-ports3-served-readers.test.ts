@@ -24,6 +24,15 @@ import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { assignEntityRefs } from '../../graph/entity-refs.js';
 import { constructionRecords, strictRecordsWire } from './records-wire-fixture.js';
+import { createHash } from 'node:crypto';
+import { censusConfidenceParameters, comparisonSubstrate } from '../../admission/analysis-admission.js';
+import { earnsAuthorshipCredit, edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
+import { nodesUnderANonlinearIdentity } from '../admit-model.js';
+import { GOAL_QUANTITY_IDENTITY_QUOTE } from '../../../cee/draft/records/projector.js';
+import { computeAnalysisAffectingGraphHashSha256 } from '../../context/graph-hash.js';
+import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
+import { omitOptionalRecordNulls } from '../runtime/build-model-from-records.js';
 
 async function build(records: DraftRecordSet, brief: string): Promise<{ result: ToolResult; writes: Record<string, unknown>[] }> {
   const writes: Record<string, unknown>[] = [];
@@ -216,46 +225,292 @@ describe('PORT 3: a stated size no refit can fit is stored at ±1 with its full 
   });
 });
 
-/**
- * Science (3): the vans B6(2) case — 17 routes, "55 deliveries per route", Routes frame 100, β 4.89 before refit — through
- * buildModelFromRecords. Routes' frame 100 is CONSTRUCTED here (plausible_max 100): #2573's P2-FRAME fallback
- * (mc/records-frame-fallback @84b90641) is not in this head.
- *
- * ⛔ BLOCKED, NOT BY PORT 3 (measured at base 2bc3e53a and at this head, identical): the compile's deterministic sweep
- * (`deterministic-sweep.ts` factor_goal_split, :1558/:1566) replaces the user's Routes→goal edge with Routes→"Routes Impact"
- * (provenance `synthetic`, the user_stated bundle gone, β 4.89) + "Routes Impact"→goal (0.5 placeholder), BEFORE
- * `fitStatedEffects` sees it; testability fails P5 goal_path_unsized on "Routes Impact". `it.fails`: it turns RED the day
- * the split carries the user's sizing, so this cannot go stale silently.
- */
+// ── Science (3) and the Science ruling's binding rows (option A, 5 Oct 2026) ──────────────────────────────────────────
+// The vans B6(2) case — 17 routes, "55 deliveries per route", Routes frame 100 (CONSTRUCTED here: plausible_max 100),
+// β 4.89 before refit — through buildModelFromRecords. It was BLOCKED (an `it.fails` here): the user's cause targets the
+// GOAL's own quantity, so the projector drew Routes→goal and the served sweep's factor_goal_split (`deterministic-sweep.ts`)
+// replaced it with a synthetic "Routes Impact" + a 0.5 placeholder before any refit (P5 goal_path_unsized). Option A
+// (records-only, `projector.ts` "VANS OUTCOME CARRIER"): the cause lands on the goal quantity's OUTCOME node and the goal
+// is reached by the same-quantity identity the sealed brief's outcome claim gets, sized by the ONE writer (pass 3e
+// `writeDefinition`). No sweep change; `records-v25/` untouched.
+const VANS = 'We have 8 vans. We make 640 deliveries every month. Lease 5 vans. Adding 5 vans changes deliveries by 18 to 36 every month. Repainting 5 vans will not change deliveries. Goal: at least 900 deliveries every month within 7 months.';
+const VANS_WITH_ROUTES = `${VANS} We have 17 routes. Add 11 routes. Each extra route increases deliveries by 55 every month.`;
+const ROUTE_QUOTE = 'Each extra route increases deliveries by 55 every month.';
+const SCENARIO = '11111111-1111-4111-8111-111111111111';
+/** B6(2): the stated no-effect on vans, the stated Routes cause on the goal's quantity (q1). */
+function vansB62Records(): DraftRecordSet {
+  return { stated_items: [
+    { kind: 'figure', source_quote: 'We have 8 vans.', quantity: 0, value: 8, value_literal: '8', unit: 'vans', unit_literals: ['vans'], role: 'baseline' },
+    { kind: 'figure', source_quote: 'We make 640 deliveries every month.', quantity: 1, value: 640, value_literal: '640', unit: 'deliveries/month', unit_literals: ['deliveries', 'every month'], role: 'baseline' },
+    { kind: 'option', source_quote: 'Lease 5 vans.', quantity: 0, value: 5, value_literal: '5', is_baseline: false },
+    { kind: 'goal', source_quote: 'Goal: at least 900 deliveries every month within 7 months.', quantity: 1, role: 'target', value: 900, value_literal: '900', direction: 'floor', direction_literal: 'at least', baseline_ref: 1, horizon_ref: 4, horizon_months: 7 },
+    { kind: 'figure', source_quote: 'within 7 months', value: 7, value_literal: '7', unit: 'months', unit_literals: ['months'] },
+    { kind: 'cause', source_quote: 'Repainting 5 vans will not change deliveries.', relationship: { from_quantity: 0, to_quantity: 1, no_effect_literal: 'will not change' } },
+    { kind: 'figure', source_quote: 'We have 17 routes.', quantity: 6, value: 17, value_literal: '17', unit: 'routes', unit_literals: ['routes'], role: 'baseline', plausible_max: 100 },
+    { kind: 'option', source_quote: 'Add 11 routes.', quantity: 6, value: 11, value_literal: '11' },
+    { kind: 'cause', source_quote: ROUTE_QUOTE, relationship: { from_quantity: 6, to_quantity: 1, amount: 55, amount_literal: '55', per_source_change: 1, per_source_literal: 'Each' } },
+  ], claims: [
+    { claim_kind: 'factor', label: 'Vans', quantity: 0, value: 8 },
+    { claim_kind: 'causal_link', label: 'lease setting', from_stated: 2, to_claim: 0, effect: 'positive' },
+    { claim_kind: 'factor', label: 'Routes', quantity: 6, value: 17 },
+    { claim_kind: 'causal_link', label: 'repainting effect', from_claim: 0, to_stated: 3, effect: 'positive' },
+  ] };
+}
+/** The Run variant (probe default): the vans cause SIZED (18 to 36 per 5 vans), so both options reach the goal and run. */
+function vansSizedRecords(): DraftRecordSet {
+  const records = vansB62Records();
+  records.stated_items[5] = { kind: 'cause', source_quote: 'Adding 5 vans changes deliveries by 18 to 36 every month.',
+    relationship: { from_quantity: 0, to_quantity: 1, per_source_change: 5, per_source_literal: '5', range: { low: 18, high: 36, low_literal: '18', high_literal: '36' } } };
+  records.claims = records.claims.slice(0, 3);
+  return records;
+}
+type Built = { result: ToolResult; graph: Rec; stored: Rec; projected: Rec; goal: Rec; outcome: Rec; routes: Rec };
+/** One records build, its registered and stored graphs, and the goal / goal-quantity outcome / Routes by identity. */
+async function vansBuild(records: DraftRecordSet, brief = VANS_WITH_ROUTES): Promise<Built> {
+  const replay = await replayRecordSet(structuredClone(records), { brief });
+  if (!replay.ok) throw new Error(replay.detail);
+  const projected = replay.projection.graph as Rec;
+  const goal = (projected.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+  const outcomes = (projected.nodes as Rec[]).filter((n) => n.kind === 'outcome' && n.quantity_ref === goal.quantity_ref);
+  const routes = (projected.nodes as Rec[]).find((n) => n.kind === 'factor' && n.quantity_ref === 6)!;
+  const { result, writes } = await build(records, brief);
+  expect(result.ok).toBe(true);
+  const graph = writes[0]!.graph as Rec;
+  const stored = assignEntityRefs(projectGraphForPersistence(graph as never, { scenarioId: SCENARIO, turnClass: 'direct_answer', source: 'graph_registration' }), null).graph as Rec;
+  return { result, graph, stored, projected, goal, outcome: outcomes[0]!, routes };
+}
+/** The served run_analysis handler on a registered graph: the PLoT request it sends and its recorded `input_snapshot`. */
+async function plotRequest(graph: Rec): Promise<{ sent: Rec; snapshot: Rec | undefined }> {
+  const minimal = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/plot/v2-run-golden-minimal.json', import.meta.url), 'utf8'));
+  const goal = (graph.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+  const options = (graph.nodes as Rec[]).filter((n) => n.kind === 'option')
+    .map((n) => ({ id: n.id, option_id: n.id, label: n.label, interventions: n.interventions ?? {} }));
+  const snapshot = { graph: structuredClone(graph), options, goal_node_id: goal.id, rawPersistedGraph: structuredClone(graph) };
+  const runMock = vi.fn(async () => structuredClone(minimal));
+  const handler = createRunAnalysisHandler({ plotClient: { run: runMock, validatePatch: vi.fn().mockResolvedValue({}) }, scenarioReader: async () => snapshot } as never);
+  const out = await handler({ payload: { scenario_id: SCENARIO }, requestId: 'req-vans-outcome', signal: new AbortController().signal, context: {}, orientationText: '' } as never).catch((x: unknown) => x);
+  expect(runMock, JSON.stringify(out).slice(0, 400)).toHaveBeenCalledTimes(1);
+  return { sent: ((runMock.mock.calls as unknown[][])[0]![0] as { graph: Rec }).graph,
+    snapshot: (out as { handler_facts?: Array<{ result?: { input_snapshot?: Rec } }> }).handler_facts?.[0]?.result?.input_snapshot };
+}
+/** The sweep's split shape, by its own minted identity: an `out_<factor>_impact` node, or its 0.5 placeholder limb. */
+const splitNodes = (g: Rec): Rec[] => (g.nodes as Rec[]).filter((n) => /^out_.*_impact$/.test(n.id) || / Impact$/.test(String(n.label)));
+const splitLimbs = (g: Rec): Rec[] => (g.edges as Rec[]).filter((e) => e.provenance?.quote === 'Split factor→goal into factor→outcome→goal');
+
 describe('Science (3): the vans B6(2) Routes case through buildModelFromRecords', () => {
-  it.fails('ends targetTestability testable (BLOCKED by the sweep\'s factor→goal split; see the note above)', async () => {
-    const VANS = 'We have 8 vans. We make 640 deliveries every month. Lease 5 vans. Adding 5 vans changes deliveries by 18 to 36 every month. Repainting 5 vans will not change deliveries. Goal: at least 900 deliveries every month within 7 months.';
-    const VANS_WITH_ROUTES = `${VANS} We have 17 routes. Add 11 routes. Each extra route increases deliveries by 55 every month.`;
-    const records: DraftRecordSet = { stated_items: [
-      { kind: 'figure', source_quote: 'We have 8 vans.', quantity: 0, value: 8, value_literal: '8', unit: 'vans', unit_literals: ['vans'], role: 'baseline' },
-      { kind: 'figure', source_quote: 'We make 640 deliveries every month.', quantity: 1, value: 640, value_literal: '640', unit: 'deliveries/month', unit_literals: ['deliveries', 'every month'], role: 'baseline' },
-      { kind: 'option', source_quote: 'Lease 5 vans.', quantity: 0, value: 5, value_literal: '5', is_baseline: false },
-      { kind: 'goal', source_quote: 'Goal: at least 900 deliveries every month within 7 months.', quantity: 1, role: 'target', value: 900, value_literal: '900', direction: 'floor', direction_literal: 'at least', baseline_ref: 1, horizon_ref: 4, horizon_months: 7 },
-      { kind: 'figure', source_quote: 'within 7 months', value: 7, value_literal: '7', unit: 'months', unit_literals: ['months'] },
-      { kind: 'cause', source_quote: 'Repainting 5 vans will not change deliveries.', relationship: { from_quantity: 0, to_quantity: 1, no_effect_literal: 'will not change' } },
-      { kind: 'figure', source_quote: 'We have 17 routes.', quantity: 6, value: 17, value_literal: '17', unit: 'routes', unit_literals: ['routes'], role: 'baseline', plausible_max: 100 },
-      { kind: 'option', source_quote: 'Add 11 routes.', quantity: 6, value: 11, value_literal: '11' },
-      { kind: 'cause', source_quote: 'Each extra route increases deliveries by 55 every month.', relationship: { from_quantity: 6, to_quantity: 1, amount: 55, amount_literal: '55', per_source_change: 1, per_source_literal: 'Each' } },
-    ], claims: [
-      { claim_kind: 'factor', label: 'Vans', quantity: 0, value: 8 },
-      { claim_kind: 'causal_link', label: 'lease setting', from_stated: 2, to_claim: 0, effect: 'positive' },
-      { claim_kind: 'factor', label: 'Routes', quantity: 6, value: 17 },
-      { claim_kind: 'causal_link', label: 'repainting effect', from_claim: 0, to_stated: 3, effect: 'positive' },
-    ] };
-    // Precondition (identity): the projector sizes Routes→goal at β 4.89 on Routes' frame 100 before any refit.
-    const projected = await replayRecordSet(records, { brief: VANS_WITH_ROUTES });
-    if (!projected.ok) throw new Error(projected.detail);
-    const routes = projected.projection.graph.nodes.find((n) => n.kind === 'factor' && n.quantity_ref === 6)!;
+  it('ends targetTestability testable, the user\'s 55/route carried on Routes→outcome (refit to the frames, so no clamp to disclose)', async () => {
+    const records = vansB62Records();
+    const { stored, projected, goal, outcome, routes } = await vansBuild(records);
+    // Precondition (identity): Routes' frame 100; the projector sizes the user's cause at β 4.89 before any refit.
     expect(routes.scale_frame).toBe(100);
-    expect(projected.projection.graph.edges.find((e) => e.provenance?.source_quote === records.stated_items[8]!.source_quote)?.strength_mean).toBeCloseTo(4.89, 2);
-    const { result, writes } = await build(records, VANS_WITH_ROUTES);
+    expect(outcome, 'the goal quantity\'s outcome carrier').toBeDefined();
+    const projectedEdge = (projected.edges as Rec[]).find((e) => e.provenance?.source_quote === ROUTE_QUOTE)!;
+    expect([projectedEdge.from, projectedEdge.to]).toEqual([routes.id, outcome.id]);
+    expect(projectedEdge.strength_mean).toBeCloseTo(4.89, 2);
+    expect((projected.edges as Rec[]).filter((e) => e.from === routes.id && e.to === goal.id)).toHaveLength(0);
+    // P5 holds: the goal path is sized.
+    expect(targetTestabilityOf(stored as never)).toEqual({ kind: 'testable', goal_id: goal.id });
+    // The user's 55 deliveries per route, carried. MEASURED: port 3's refit widens the outcome (and, by A4f's cascade, the
+    // goal) 1125 → 10,000, so the size FITS at 0.55 (55 × 100 / 10,000) — no clamp, so no clamp disclosure is owed.
+    const edge = (stored.edges as Rec[]).find((e) => e.from === routes.id && e.to === outcome.id)!;
+    expect(edge.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: ROUTE_QUOTE,
+      natural_effect: { amount: 55, amount_unit: 'deliveries/month', per_source_change: 1, per_source_change_unit: 'routes' } });
+    expect(edge.provenance.natural_effect.strength_mean).toBe(edge.strength.mean);
+    expect(edge.strength.mean).toBeCloseTo(0.55, 12);
+    expect(edge.provenance).not.toHaveProperty('clamped_from');
+    expect((stored.nodes as Rec[]).find((n) => n.id === outcome.id)!.scale_frame).toBe(10000);
+  });
+
+  it('a model link that drew the stated cause into the goal MOVES onto the outcome: one Routes link, the user\'s, none left for the sweep', async () => {
+    const records = vansB62Records();
+    records.claims.push({ claim_kind: 'causal_link', label: 'routes help', from_claim: 2, to_stated: 3, effect: 'positive' });
+    const { stored, projected, goal, outcome, routes } = await vansBuild(records);
+    const fromRoutes = (projected.edges as Rec[]).filter((e) => e.from === routes.id);
+    expect(fromRoutes.map((e) => e.to)).toEqual([outcome.id]);
+    expect(fromRoutes[0]!.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: ROUTE_QUOTE });
+    expect((stored.edges as Rec[]).filter((e) => e.from === routes.id && e.to === goal.id)).toEqual([]);
+    expect(splitNodes(stored)).toEqual([]);
+    expect(targetTestabilityOf(stored as never)).toEqual({ kind: 'testable', goal_id: goal.id });
+  });
+
+  it('Science row 1: outcome→goal is a LINEAR identity — β 1 per 1 in the goal\'s unit, definitional, positive; nothing nonlinear', async () => {
+    const { graph, stored, goal, outcome } = await vansBuild(vansB62Records());
+    // The outcome measures the goal's quantity in the goal's unit (the projector's carrier; V3 stores a unit only beside a level).
+    expect(outcome).toMatchObject({ kind: 'outcome', quantity_ref: goal.quantity_ref, data: { unit: goal.goal_threshold_unit } });
+    const into = (stored.edges as Rec[]).filter((e) => e.from === outcome.id && e.to === goal.id);
+    expect(into).toHaveLength(1);
+    const identity = into[0]!;
+    expect(identity.strength.mean).toBe(1);
+    expect(identity.effect_direction).toBe('positive');
+    expect(identity.provenance).toMatchObject({ definitional: true, quote: GOAL_QUANTITY_IDENTITY_QUOTE,
+      natural_effect: { amount: 1, per_source_change: 1, amount_unit: goal.goal_threshold_unit, per_source_change_unit: goal.goal_threshold_unit, strength_mean: 1 } });
+    expect(holdsByDefinition(identity, nodeUnitOf(stored.nodes as unknown[]))).toBe(true);
+    // Linear: no product/sum carrier anywhere, so nothing is under a nonlinear identity (registered and stored).
+    expect((graph.nodes as Rec[]).filter((n) => n.nonlinear_identity !== undefined)).toEqual([]);
+    expect(nodesUnderANonlinearIdentity(graph).size).toBe(0);
+    expect(nodesUnderANonlinearIdentity(stored).size).toBe(0);
+    // The ONE writer: the sealed brief's model-drawn identity (its outcome claim → goal) stores the same numbers.
+    const sealed = (await build(sealedRecords(), BRIEF)).writes[0]!.graph as Rec;
+    const sealedGoal = (sealed.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    const sealedIdentity = (sealed.edges as Rec[]).filter((e) => e.to === sealedGoal.id && e.provenance?.definitional === true);
+    expect(sealedIdentity).toHaveLength(1);
+    const numbers = (e: Rec) => ({ strength: e.strength, exists_probability: e.exists_probability, effect_direction: e.effect_direction, source: e.provenance.source });
+    expect(numbers(identity)).toEqual(numbers(sealedIdentity[0]!));
+  });
+
+  // ⛔ UNMET, recorded (report: Science row 1 "no noise" vs the brief's "same writer, sealed unchanged"): the ONE identity
+  // writer (`writeDefinition` → `sizeLink`) stores std 0.5·β and V3 gives a causal link exists_probability 0.8 — on the
+  // sealed brief's identity too. Making it noise-free changes sealed's identity bytes and its analysis hash (row 4).
+  // `it.fails` so it turns RED the day the writer becomes noise-free.
+  it.fails('Science row 1 "no noise": the identity is sent with std 0 and exists_probability 1', async () => {
+    const { stored, goal, outcome } = await vansBuild(vansB62Records());
+    const identity = (stored.edges as Rec[]).find((e) => e.from === outcome.id && e.to === goal.id)!;
+    expect({ std: identity.strength.std, exists_probability: identity.exists_probability }).toEqual({ std: 0, exists_probability: 1 });
+  });
+
+  it('Science row 1 NEGATIVE TWIN: a stated cause on a DIFFERENT quantity (another unit) mints no outcome and no identity edge', async () => {
+    const records = vansB62Records();
+    const brief = `${VANS} We have 17 routes. Add 11 routes. Fuel costs £2,000 a month. Each extra route adds £120 a month in fuel.`;
+    records.stated_items[8] = { kind: 'cause', source_quote: 'Each extra route adds £120 a month in fuel.',
+      relationship: { from_quantity: 6, to_quantity: 9, amount: 120, amount_literal: '£120', per_source_change: 1, per_source_literal: 'Each' } };
+    records.stated_items[9] = { kind: 'figure', source_quote: 'Fuel costs £2,000 a month.', quantity: 9, value: 2000, value_literal: '£2,000', unit: '£/month', unit_literals: ['a month'], role: 'baseline' };
+    records.claims.push({ claim_kind: 'outcome', label: 'Fuel cost', quantity: 9 }, { claim_kind: 'causal_link', label: 'fuel spend', from_claim: 4, to_stated: 3, effect: 'negative' });
+    const replay = await replayRecordSet(records, { brief });
+    if (!replay.ok) throw new Error(replay.detail);
+    const g = replay.projection.graph as Rec;
+    const goal = (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+    const fuel = (g.nodes as Rec[]).find((n) => n.label === 'Fuel cost')!;
+    const routes = (g.nodes as Rec[]).find((n) => n.kind === 'factor' && n.quantity_ref === 6)!;
+    // The cause is carried on its OWN quantity's carrier, never re-pointed at the goal…
+    expect((g.edges as Rec[]).find((e) => e.provenance?.source_quote === 'Each extra route adds £120 a month in fuel.')).toMatchObject({ from: routes.id, to: fuel.id });
+    // …and nothing is minted for the goal's quantity: no outcome on q1, no identity edge, no definitional link into the goal.
+    expect((g.nodes as Rec[]).filter((n) => n.kind === 'outcome' && n.quantity_ref === goal.quantity_ref)).toEqual([]);
+    expect((g.edges as Rec[]).filter((e) => e.provenance?.quote === GOAL_QUANTITY_IDENTITY_QUOTE || (e.to === goal.id && e.provenance?.definitional === true))).toEqual([]);
+    // Control (same run): the goal-quantity cause DOES mint exactly one (the probe sees the class).
+    const control = await replayRecordSet(vansB62Records(), { brief: VANS_WITH_ROUTES });
+    if (!control.ok) throw new Error(control.detail);
+    expect(control.projection.graph.edges.filter((e) => e.provenance?.quote === GOAL_QUANTITY_IDENTITY_QUOTE)).toHaveLength(1);
+  });
+
+  it('a goal-quantity cause REFUSED after the mint leaves no outcome and no identity: the goal carries the quantity as before', async () => {
+    const records = vansB62Records();
+    const quote = 'Each extra route changes deliveries by -10 to 55 every month.';
+    records.stated_items[8] = { kind: 'cause', source_quote: quote, relationship: { from_quantity: 6, to_quantity: 1, per_source_change: 1, per_source_literal: 'Each',
+      range: { low: -10, high: 55, low_literal: '-10', high_literal: '55' } } };
+    const replay = await replayRecordSet(records, { brief: `${VANS} We have 17 routes. Add 11 routes. ${quote}` });
+    if (!replay.ok) throw new Error(replay.detail);
+    const g = replay.projection.graph;
+    const goal = g.nodes.find((n) => n.kind === 'goal')!;
+    expect(replay.projection.dropped).toContainEqual(expect.objectContaining({ stated_index: 8, reason: 'range_straddles_zero' }));
+    expect(g.nodes.filter((n) => n.kind === 'outcome' && n.quantity_ref === goal.quantity_ref)).toEqual([]);
+    expect(g.edges.filter((e) => e.provenance?.quote === GOAL_QUANTITY_IDENTITY_QUOTE)).toEqual([]);
+  });
+
+  it('SCOPE: an INFERRED link into the goal (no stated cause) stays factor→goal, byte-identical to the build without option A\'s mint', async () => {
+    const withInferred = (records: DraftRecordSet): DraftRecordSet => {
+      records.claims.push({ claim_kind: 'factor', label: 'Driver hours' }, { claim_kind: 'causal_link', label: 'driver hours help', from_claim: records.claims.length, to_stated: 3, effect: 'positive' });
+      return records;
+    };
+    const minted = await replayRecordSet(withInferred(vansB62Records()), { brief: VANS_WITH_ROUTES });
+    // Contrast: the same records without the stated goal-quantity cause, so option A mints nothing.
+    const unminted = vansB62Records();
+    unminted.stated_items[8] = { kind: 'figure', source_quote: 'We have 17 routes.', value: 17, value_literal: '17', unit: 'routes', unit_literals: ['routes'] };
+    const plain = await replayRecordSet(withInferred(unminted), { brief: VANS_WITH_ROUTES });
+    if (!minted.ok || !plain.ok) throw new Error('replay refused');
+    const inferredOf = (g: Rec) => {
+      const goal = (g.nodes as Rec[]).find((n) => n.kind === 'goal')!;
+      const driver = (g.nodes as Rec[]).find((n) => n.label === 'Driver hours')!;
+      return (g.edges as Rec[]).filter((e) => e.from === driver.id && (e.to === goal.id || (g.nodes as Rec[]).some((n) => n.id === e.to && n.kind === 'outcome')));
+    };
+    expect(minted.projection.graph.edges.filter((e) => e.provenance?.quote === GOAL_QUANTITY_IDENTITY_QUOTE)).toHaveLength(1);
+    expect(plain.projection.graph.edges.filter((e) => e.provenance?.quote === GOAL_QUANTITY_IDENTITY_QUOTE)).toHaveLength(0);
+    const a = inferredOf(minted.projection.graph as Rec);
+    expect(a).toHaveLength(1);
+    expect(a[0]!.to).toBe((minted.projection.graph.nodes as Rec[]).find((n) => n.kind === 'goal')!.id);
+    expect(a[0]!.provenance).not.toHaveProperty('magnitude');
+    expect(stableStringify(a)).toBe(stableStringify(inferredOf(plain.projection.graph as Rec)));
+  });
+
+  it('Science row 2: the PLoT request carries the user\'s β and bundle on Routes→outcome; no placeholder, no synthetic Impact on the goal path', async () => {
+    const { graph, goal, outcome, routes } = await vansBuild(vansSizedRecords());
+    const { sent, snapshot } = await plotRequest(graph);
+    const wire = (sent.edges as Rec[]).find((e) => e.from === routes.id && e.to === outcome.id)!;
+    expect(wire.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: ROUTE_QUOTE,
+      natural_effect: { amount: 55, amount_unit: 'deliveries/month', per_source_change: 1, per_source_change_unit: 'routes' } });
+    // The β sent IS the user's size in the Run's frames (refit, so ≤ 1 and nothing for PLoT to clamp).
+    expect(wire.strength.mean).toBe(wire.provenance.natural_effect.strength_mean);
+    expect(wire.strength.mean).toBeCloseTo(0.55, 12);
+    expect(wire.provenance).not.toHaveProperty('clamped_from');
+    // Every link into the goal is a definitional identity from a goal-quantity outcome; none is Olumi's placeholder.
+    const intoGoal = (sent.edges as Rec[]).filter((e) => e.to === goal.id);
+    expect(intoGoal.map((e) => [e.from, e.strength.mean, e.provenance.definitional])).toEqual([[outcome.id, 1, true]]);
+    expect(splitNodes(sent)).toEqual([]);
+    expect(splitLimbs(sent)).toEqual([]);
+    // input_snapshot (what the Run was SENT, SC-24): the same link, sized by the user.
+    expect(snapshot, 'input_snapshot recorded').toBeDefined();
+    expect((snapshot!.links as Rec[]).find((l) => l.from === routes.id && l.to === outcome.id)).toMatchObject({ mean: wire.strength.mean, sizing: 'user' });
+    expect((snapshot!.links as Rec[]).filter((l) => /^out_.*_impact$/.test(l.from) || /^out_.*_impact$/.test(l.to))).toEqual([]);
+  });
+
+  it('Science row 2 CONTRAST (same run): an inferred factor→goal link still gets the sweep\'s Impact + 0.5 placeholder — the probe sees the class', async () => {
+    const records = vansSizedRecords();
+    records.claims.push({ claim_kind: 'factor', label: 'Driver hours' }, { claim_kind: 'causal_link', label: 'driver hours help', from_claim: 3, to_stated: 3, effect: 'positive' });
+    const { graph, goal, outcome, routes } = await vansBuild(records);
+    const { sent } = await plotRequest(graph);
+    expect(splitNodes(sent).map((n) => n.label)).toEqual(['Driver hours Impact']);
+    expect(splitLimbs(sent).find((e) => e.to === goal.id)?.strength.mean).toBe(0.5);
+    // …while the user's stated cause is untouched beside it.
+    expect((sent.edges as Rec[]).find((e) => e.from === routes.id && e.to === outcome.id)?.provenance?.magnitude).toBe('user_stated');
+  });
+
+  it('Science row 3: the vans Run is testable and admission counts the stated Routes→outcome size as user-stated MATERIAL', async () => {
+    const { stored, goal, outcome, routes } = await vansBuild(vansB62Records());
+    expect(targetTestabilityOf(stored as never)).toEqual({ kind: 'testable', goal_id: goal.id });
+    const edge = (stored.edges as Rec[]).find((e) => e.from === routes.id && e.to === outcome.id)!;
+    expect(earnsAuthorshipCredit(edgeStrengthProvenance(edge))).toBe(true);
+    const { materialNodeIds } = comparisonSubstrate(stored);
+    expect(materialNodeIds.has(routes.id) && materialNodeIds.has(outcome.id)).toBe(true);
+    const census = censusConfidenceParameters(stored);
+    expect(census.material_parameters_user_stated).toBeGreaterThan(0);
+    // By identity: THIS link is the user-stated material parameter (strip its authorship and the count drops by one).
+    const stripped = structuredClone(stored);
+    const twin = (stripped.edges as Rec[]).find((e) => e.from === routes.id && e.to === outcome.id)!;
+    twin.provenance = { source: 'cee_hypothesis' };
+    expect(censusConfidenceParameters(stripped).material_parameters_user_stated).toBe(census.material_parameters_user_stated - 1);
+  });
+});
+
+/** sha256 of a canonical serialisation: the byte identity row 4 pins. */
+const fingerprint = (value: unknown): string => createHash('sha256').update(stableStringify(value ?? null)).digest('hex');
+
+describe('Science row 4: the sealed brief is byte-identical and its analysis hash unchanged (pinned at base a6617c31a)', () => {
+  // Pinned at base a6617c31a432b80234a55b626656b6a7615a9d3f (before option A) and asserted here, unchanged.
+  it('sealed v-next: projection, registration body and analysis-affecting hash', async () => {
+    const replay = await replayRecordSet(sealedRecords(), { brief: BRIEF });
+    if (!replay.ok) throw new Error(replay.detail);
+    expect(fingerprint({ graph: replay.projection.graph, dropped: replay.projection.dropped })).toBe('a645a1660fce5691f2a9510ad8ec6b06c2488f640c644271afc7ff4adb7fc25d');
+    const { writes } = await build(sealedRecords(), BRIEF);
+    expect(fingerprint(writes[0])).toBe('f04d5fe29645c0d8c5f32010a9371ce35192e4a7df56c5d130a99067b2f27541');
+    expect(computeAnalysisAffectingGraphHashSha256(writes[0]!.graph as never)).toBe('a47b8f90834ce3256543b79e8fd96e5750e86c76a5e2b24395d9f7229d0571fa');
+  });
+
+  const A16 = [
+    { draw: 1, projection: '45d222f19e1eca98aa4cd14a7d123293dc7b36a5a247b3e74fef8233eda1cea6', analysis: 'd00c20f5747052c6b465de55e1c7acab8ac0f085998157f1c82be9159fa35485' },
+    { draw: 2, projection: '655393ed6db19142f56a9bac6eafe717d57b692d74c125f60d4c46ca296cded9', analysis: '1bb2f36004be925787896de2ad55e097c1f361b8b7f373196947fde7a0c0e8d6' },
+    { draw: 3, projection: 'f33c319bac44b5ba57dadef746db31951373189d805893ada499018a5b8988ea', analysis: '1789a5e80d25f5fcfc9bedfa09626e9200f95ceeb09e89713c6d18c2e33c3ce2' },
+  ];
+  for (const pin of A16) it(`banked sealed draw ${pin.draw}: projection and analysis-affecting hash`, async () => {
+    const raw = JSON.parse(readFileSync(new URL(`../../../cee/draft/records/__tests__/compile-spec/fixtures/s2-sealed-d${pin.draw}.records.json`, import.meta.url), 'utf8')) as unknown;
+    const replay = await replayRecordSet(omitOptionalRecordNulls(raw) as DraftRecordSet, { brief: BRIEF });
+    if (!replay.ok) throw new Error(replay.detail);
+    expect(fingerprint({ graph: replay.projection.graph, dropped: replay.projection.dropped })).toBe(pin.projection);
+    let registered: Rec | undefined;
+    const dispatch: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph/register')) { registered = body as Rec; return { status: 200, json: { model_version: { version_number: 1 } } }; }
+      return { status: 200, json: { graph: { nodes: [], edges: [] } } };
+    };
+    const result = await buildModelFromRecords(SCENARIO, BRIEF, dispatch, async () => ({ text: JSON.stringify(raw), status: 'completed' }));
     expect(result.ok).toBe(true);
-    const stored = assignEntityRefs(projectGraphForPersistence(writes[0]!.graph as never, { scenarioId: '11111111-1111-4111-8111-111111111111', turnClass: 'direct_answer', source: 'graph_registration' }), null).graph;
-    expect(targetTestabilityOf(stored)).toMatchObject({ kind: 'testable' });
+    expect(computeAnalysisAffectingGraphHashSha256(registered!.graph as never)).toBe(pin.analysis);
   });
 });
