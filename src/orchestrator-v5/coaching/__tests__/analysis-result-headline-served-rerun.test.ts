@@ -69,6 +69,13 @@ const ROOT_DEFAULT = 'ROOT_NODE_DEFAULT_VALUE';
 const SERVED_HEADLINE =
   'Raise Price to £50 scored highest against your goal in 84% of runs of this model,' +
   ' but treat this as provisional: the link between Price per seat and Monthly revenue is fragile.';
+/**
+ * The same goal-framed headline as TODAY's builder words it. The only difference from the served capture is the link
+ * caution (principle audit, 5 Oct: "fragile" retired from user copy); the capture above stays byte-for-byte as served.
+ */
+const CURRENT_GOAL_FRAMED_HEADLINE =
+  'Raise Price to £50 scored highest against your goal in 84% of runs of this model,' +
+  ' but treat this as provisional: it rests heavily on how much Price per seat changes Monthly revenue.';
 /** The served summary's scaffold sentence, which run-analysis.ts appends after the headline. */
 const SCAFFOLD_SENTENCE = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
 
@@ -122,9 +129,14 @@ describe('the served rerun capture (positive controls)', () => {
     expect(LEADER_CLAIM).toEqual({ permitted: true, separation: 'separated' });
   });
 
-  it('⭐ REPRODUCTION: without the DIRECTION code, today\'s builder on the trimmed envelope gives the served headline byte for byte', () => {
+  it('⭐ REPRODUCTION: without the DIRECTION code, today\'s builder on the trimmed envelope gives the served headline, differing only in the caution wording', () => {
     const withoutDirection = withCodes(codes(ENRICHMENT).filter((c) => c !== DIRECTION));
-    expect(buildAnalysisResultHeadline(input(withoutDirection))).toBe(SERVED_HEADLINE);
+    expect(buildAnalysisResultHeadline(input(withoutDirection))).toBe(CURRENT_GOAL_FRAMED_HEADLINE);
+    // The ONLY difference from the served bytes is the reworded caution reason.
+    expect(SERVED_HEADLINE.replace(
+      'the link between Price per seat and Monthly revenue is fragile',
+      'it rests heavily on how much Price per seat changes Monthly revenue',
+    )).toBe(CURRENT_GOAL_FRAMED_HEADLINE);
   });
 });
 
@@ -152,7 +164,7 @@ describe('⭐ R3-5 — the served rerun shape makes no goal claim and discloses 
     // CONTRAST: the served summary with the disclosure appended contradicts itself and is rejected.
     expect(
       isAllowedRunAnalysisAssistantText(
-        `${SERVED_HEADLINE} The analysis was not told which way your goal points, so it assumed a higher value is better,` +
+        `${CURRENT_GOAL_FRAMED_HEADLINE} The analysis was not told which way your goal points, so it assumed a higher value is better,` +
           ` and it could not test whether any option reaches your goal.${SCAFFOLD_SENTENCE}`,
       ),
     ).toBe(false);
@@ -178,10 +190,10 @@ describe('⭐ R3-5 — GOAL_ANCESTOR_DATA_GAP and ROOT_NODE_DEFAULT_VALUE alone 
   ];
 
   for (const [name, keep] of CASES) {
-    it(`${name}: the served headline, byte for byte, goal frame intact`, () => {
+    it(`${name}: the served headline (today's caution wording), goal frame intact`, () => {
       const e = withCodes(keep);
       expect(codes(e)).toEqual(keep.length === 2 ? [ROOT_DEFAULT, ANCESTOR] : keep);
-      expect(buildAnalysisResultHeadline(input(e))).toBe(SERVED_HEADLINE);
+      expect(buildAnalysisResultHeadline(input(e))).toBe(CURRENT_GOAL_FRAMED_HEADLINE);
       expect(describeGoalFrame(input(e))).toBe('goal_framed');
     });
   }
