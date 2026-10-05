@@ -1990,6 +1990,13 @@ describe('SupabaseSessionStore.readMostRecentPendingActions — RT-6 S4-A agent_
     await expect(strict([withAction(patch as Record<string, unknown>)])).rejects.toMatchObject({ code: 'pending_actions_corrupt' });
   });
 
+  it('generous bounds (NodeV3 ids/labels are unbounded): a 500-char id and a 1000-char label parse; one more is refused', async () => {
+    const long = withAction({ from_node_id: 'd'.repeat(500), from_label: 'D'.repeat(1000) });
+    await expect(strict([long])).resolves.toEqual([long]);
+    await expect(strict([withAction({ from_node_id: 'd'.repeat(501) })])).rejects.toMatchObject({ code: 'pending_actions_corrupt' });
+    await expect(strict([withAction({ from_label: 'D'.repeat(1001) })])).rejects.toMatchObject({ code: 'pending_actions_corrupt' });
+  });
+
   it('a question with no emit-time graph_hash is refused (it is answered only against the graph it was asked on)', async () => {
     await expect(strict([{ ...QUESTION, preconditions: {} }])).rejects.toMatchObject({ code: 'pending_actions_corrupt' });
   });

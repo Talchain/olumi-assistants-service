@@ -1753,10 +1753,13 @@ export function parsePendingAction(input: unknown): PendingAction | null {
   if (a.kind === 'agent_link_effect_question') {
     // RT-6 S4-A. Every field REQUIRED (the same non-optional block as the elicit_* kinds: a flat `if` chain returns an
     // unchecked kind by CAST). Extra fields are kept, as for every kind, so a later writer can add optional ones.
+    // ⛔ PHASE 2's WRITER runs this parser on the carrier BEFORE persisting it and emits nothing when it returns null: a
+    // carrier this block refuses would throw on every strict read (Codex step-4 r1). Node ids and labels are unbounded in
+    // NodeV3, so the bounds below are generous sanity limits, not a schema.
     const text = (v: unknown, max: number): boolean => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
     if (!text(a.question, 1600) || !text(a.quote, 2000)) return null;
-    if (!text(a.from_node_id, 200) || !text(a.to_node_id, 200) || a.from_node_id === a.to_node_id) return null;
-    if (!text(a.from_label, 300) || !text(a.to_label, 300)) return null;
+    if (!text(a.from_node_id, 500) || !text(a.to_node_id, 500) || a.from_node_id === a.to_node_id) return null;
+    if (!text(a.from_label, 1000) || !text(a.to_label, 1000)) return null;
     const e = a.effect as Record<string, unknown> | null | undefined;
     if (!e || typeof e !== 'object' || Array.isArray(e)) return null;
     if (typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0) return null;
