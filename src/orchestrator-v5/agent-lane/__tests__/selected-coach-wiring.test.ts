@@ -25,8 +25,10 @@ const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f6
 // + none_measurable makes no claim (AI HARNESS, RC 5950124321): 28,043 → 28,026 bytes.
 // + MODEL_RELATIVE_NAMING_INSTRUCTION appended after the reply-length sentence (WORDING BATCH, DL 0df0e1 lease, 5 Oct):
 //   28,026 → 28,835 bytes (+1 space +808). Rebuilt from the source literals, it reproduced the old pin b2653d0e… exactly first.
-const RENDERED_SHA = '2bc25cbaeafcca10580afc201b5c7e82cd223a877fe4a440aa5dfe4000ac629a';
-const RENDERED_BYTES = 28_835;
+// + the naming rule glosses N in positive words and bans the recommend stem even negated (WORDING, DL 0df0e1 cut 3,
+//   Acceptance rehearsal 2): 28,835 → 29,072 bytes (+237). Same rebuild, which reproduced 2bc25cba… exactly first.
+const RENDERED_SHA = '3ef18fda91540f01c2229027cfe28f6bfd528f7b3949a35739199c4d66e1b54a';
+const RENDERED_BYTES = 29_072;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, \u2018X\u2019 scored highest in N% of runs\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';

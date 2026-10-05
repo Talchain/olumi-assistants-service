@@ -541,10 +541,15 @@ export const REPLY_LENGTH_INSTRUCTION =
  * `agent.interpret`, whose instructions begin with AGENT_INSTRUCTIONS. It grants nothing: whether a leader may be named
  * is still #34's `claim_permissions.leader_may_be_named`, and the wire gates still drop a ranking on a withheld turn.
  * N is the option's share of runs in which it scored highest, never `probability_of_goal` (#35's "reaches the target").
+ * ⛔ POSITIVE MEANING, NO "RECOMMEND" (DL 0df0e1, Acceptance rehearsal 2): the interpret narration glossed N as "…not a
+ * recommendation or a 54% chance of meeting your target". The recommend stem is HARD even negated (J1 ruling), so the rule
+ * gives N's meaning in positive words and bans the stem outright.
  */
 export const MODEL_RELATIVE_NAMING_INSTRUCTION =
   'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, \u2018X\u2019 scored highest in N% of runs\u201d, '
   + 'with X its display label and N the share of model runs in which it scored highest, taken from the result; N is never its chance of reaching the goal. '
+  + 'When you say what N means, say it as what it is: \u201cThat share is how often it scored highest across runs of this model, not its chance of meeting your target.\u201d '
+  + 'Never write recommend or recommendation in any form, not even to deny it. '
   + 'If the result gives no such share, say \u201cIn this model, \u2018X\u2019 scored highest\u201d. Keep any provisional or limit condition the rules above require in that same sentence. '
   + 'Never name an option as leading, ahead, favoured, on top or winning in other words, and never without \u201cin this model\u201d. '
   + 'Never call a result, finding, option or link \u201cfragile\u201d: say what the result rests on instead, in the result\u2019s own terms, '

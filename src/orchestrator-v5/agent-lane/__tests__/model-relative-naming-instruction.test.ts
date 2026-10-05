@@ -19,6 +19,13 @@ describe('the model-relative naming rule', () => {
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never name an option as leading, ahead, favoured, on top or winning in other words, and never without “in this model”.');
   });
 
+  it('N is glossed in positive words, and the recommend stem is banned even negated (DL 0df0e1, Acceptance rehearsal 2)', () => {
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('When you say what N means, say it as what it is: \u201cThat share is how often it scored highest across runs of this model, not its chance of meeting your target.\u201d');
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('Never write recommend or recommendation in any form, not even to deny it.');
+    // The served gloss this replaces must not be modelled by the rule itself.
+    expect(MODEL_RELATIVE_NAMING_INSTRUCTION).not.toContain('not a recommendation');
+  });
+
   it('N is the share of runs it scored highest in, never its chance of reaching the goal (#35 keeps that meaning)', () => {
     expect(MODEL_RELATIVE_NAMING_INSTRUCTION).toContain('N the share of model runs in which it scored highest, taken from the result; N is never its chance of reaching the goal.');
     expect(HOST_TOOL_CONTRACT).toContain('reaches the target in about N% of model runs');
