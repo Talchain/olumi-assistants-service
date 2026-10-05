@@ -104,6 +104,62 @@ export type LinkEffectEditResult =
 const QUOTE_MAX = 400;
 
 /**
+ * ⭐ THE UNITS EACH END OF ONE LINK MAY BE STATED IN (RT-6, #87 5992873873). Its own: the end's stored unit, or the words
+ * the sizer says its change in. ⭐ An end with NONE (a risk or outcome with no unit or scale, which the drafter still
+ * sizes links out of on its 0–`scale_frame` frame) takes the unit THIS link's stored size is already said in for that
+ * end: endpoint-specific (`per_source_change_unit` for the source, `amount_unit` for the target) and version-bound (the
+ * prepared `edge_token` holds every stored byte of the link, so a link that changed since is `superseded` first).
+ * Restating a link in the very unit Olumi already sized it in converts nothing. No stored size ⇒ nothing to adopt, and
+ * the end stays unstateable (`unit_mismatch`, said as "no unit or scale").
+ * One rule for the check, for what is stored, and for the refusal's words (`linkEffectRefusalWords`).
+ */
+/** The writer's ONE unit comparator (`same` below): `stated` names one of `own`. Shared with P5 (`target-testability.ts`). */
+export function statedInOneOf(stated: unknown, own: readonly (string | undefined)[]): boolean {
+  return typeof stated === 'string' && unitComparisonKey(stated) !== undefined
+    && own.some((u) => u !== undefined && u !== '' && unitComparisonKey(stated) === unitComparisonKey(u));
+}
+
+export interface LinkEndUnits {
+  readonly own: readonly string[];
+  readonly adopted?: string;
+  /** A % LEVEL target whose goal names no unit: its points fallback is stored as the user stated it. */
+  readonly storeAsStated?: boolean;
+}
+export function linkEffectEndUnits(graph: unknown, from: string, to: string): { readonly source: LinkEndUnits; readonly target: LinkEndUnits } | null {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return null;
+  const found = linkEffectTargetOf(graph, from, to);
+  if (found.kind === 'refused') return null;
+  const view = magnitudeNodes(graph.nodes.filter(isRec), percentLevelIds(graph));
+  const sourceNode = view.get(from);
+  const targetNode = view.get(to);
+  if (sourceNode === undefined || targetNode === undefined) return null;
+  const present = (...u: (string | undefined)[]): string[] => u.filter((x): x is string => typeof x === 'string' && x.trim() !== '');
+  const sourceOwn = present(unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
+    targetUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)));
+  // ⛔ The points-only rule applies to a % LEVEL target the graph marks `percent_level` from `goal_constraints`
+  // (Science, #87 5993238492): "gross margin falls 2%" may mean 2 points or 2% of today's level, so a bare "%" for that
+  // target is refused and the user is asked for points. A % goal not so marked keeps the pre-existing comparison
+  // (follow-up for Science).
+  // A % LEVEL target's unit is fixed (points), so it is never adopted from the link: a stored "%" must not let a
+  // relative % size it (Codex buddy #2586 @b278c84d, P2: a marked level with no `goal_threshold_unit`).
+  const levelPoints = targetNode.percent_level === true ? present(targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode))) : [];
+  const targetOwn = targetNode.percent_level === true
+    ? (levelPoints.length > 0 ? levelPoints : ['percentage points'])
+    : present(unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)));
+  const provenance = isRec(found.edge.provenance) ? found.edge.provenance : {};
+  const stored = isRec(provenance.natural_effect) ? provenance.natural_effect : undefined;
+  const storedUnit = (key: 'amount_unit' | 'per_source_change_unit'): string | undefined =>
+    typeof stored?.[key] === 'string' && (stored[key] as string).trim() !== '' ? stored[key] as string : undefined;
+  const sourceAdopted = sourceOwn.length === 0 ? storedUnit('per_source_change_unit') : undefined;
+  const targetAdopted = targetOwn.length === 0 && targetNode.percent_level !== true ? storedUnit('amount_unit') : undefined;
+  return {
+    source: { own: sourceOwn, ...(sourceAdopted !== undefined ? { adopted: sourceAdopted } : {}) },
+    target: { own: targetOwn, ...(targetAdopted !== undefined ? { adopted: targetAdopted } : {}),
+      ...(targetNode.percent_level === true && levelPoints.length === 0 ? { storeAsStated: true } : {}) },
+  };
+}
+
+/**
  * Every stored byte of one link (key-order independent), as a short digest — the prepared-edge half of `expected`.
  * `null` when there is no such link. The Agent computes it on the read it proposes from and stores it on the proposal.
  */
@@ -185,19 +241,19 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
   const sourceNode = view.get(from)!;
   const targetNode = view.get(to)!;
+  const endUnits = linkEffectEndUnits(params.persistedGraph, from, to);
   // Either the end's stored unit or the words the ask itself is phrased in (Runtime 5882802252: a % level is asked in
   // "percentage points", a yes/no source as "switch") — the same key `sizeLink` says the natural effect back in.
-  const same = (stated: string, ...own: (string | undefined)[]) => unitComparisonKey(stated) !== undefined
-    && own.some((u) => u !== undefined && u !== '' && unitComparisonKey(stated) === unitComparisonKey(u));
+  const same = (stated: string, ...own: (string | undefined)[]) => statedInOneOf(stated, own);
   // ⛔ A PERCENTAGE LEVEL'S CHANGE IS SAID IN POINTS AT EITHER END (served on 074de08, 29 Sep, Canonical's #2283 witness):
   // the sizer says a % level's change in points whether it is the target or the SOURCE (`statementWords` →
   // `amountWords`), so the ask reads "raising "Monthly churn rate" by 1 point …", and the writer refused exactly those
   // words for the source ("requires the churn change in its stored unit, %"). The Agent then asked for "rises by 1%",
   // which on a rate reads as a RELATIVE change. Accepted here: the stored natural effect is still `naturalEffectOf`'s
   // own unit, and one point is one raw unit of a % level, so the conversion is unchanged.
-  if (!same(effect.amount_unit, unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))
-    || !same(effect.per_source_change_unit, unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
-      targetUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)))) {
+  if (endUnits === null
+    || !same(effect.amount_unit, ...endUnits.target.own, endUnits.target.adopted)
+    || !same(effect.per_source_change_unit, ...endUnits.source.own, endUnits.source.adopted)) {
     return refuse('unit_mismatch');
   }
   if (!finite(effect.amount) || !finite(effect.per_source_change) || effect.per_source_change === 0 || effect.amount === 0) {
@@ -230,7 +286,14 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
-  edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: sizing.natural_effect };
+  // RT-6: an end that took this link's stored unit is stored in the unit as STATED (checked equal to it above), so the
+  // read-back (`sameUnit` against the card) holds and the link stays stateable in that unit next time.
+  const naturalEffect = {
+    ...sizing.natural_effect,
+    ...(endUnits.source.adopted !== undefined ? { per_source_change_unit: effect.per_source_change_unit } : {}),
+    ...(endUnits.target.adopted !== undefined || endUnits.target.storeAsStated === true ? { amount_unit: effect.amount_unit } : {}),
+  };
+  edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect };
   edge.provenance_display = 'user_set';
   // A6e: `defaulted` is whole-edge; the statement sizes the strength only, so existence stays Olumi's per field.
   if (edge.defaulted === true) edge.exists_defaulted = true;

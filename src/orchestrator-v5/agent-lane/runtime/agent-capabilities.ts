@@ -38,7 +38,7 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, linkEffectTargetOf, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
@@ -1419,15 +1419,36 @@ function startingPointNoteFor(usersCount: number): string {
 }
 
 /** Canonical's link-effect refusal, said to the Agent in words it can relay truthfully (never a code). */
-function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string }): string {
+function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string },
+  /** RT-6: the stated effect, when known, so a unit refusal names the END that failed. */
+  effect?: { readonly amount_unit: string; readonly per_source_change_unit: string }): string {
   const unitOfNode = (id: string): string => {
     const n = ((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as { observed_state?: { unit?: unknown } } | undefined;
     return typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit : 'its own unit';
   };
   switch (reason) {
-    case 'unit_mismatch':
+    case 'unit_mismatch': {
+      // RT-6: an end with no unit (and no size already said for this link) has nothing to state a figure in. Say THAT,
+      // never "in its own unit": the user cannot answer in a unit the model does not have.
+      const ends = linkEffectEndUnits(raw, from.id, to.id);
+      const fails = (stated: string | undefined, u: { own: readonly string[]; adopted?: string }): boolean =>
+        stated === undefined || !statedInOneOf(stated, [...u.own, u.adopted]);
+      const sourceFails = ends !== null && fails(effect?.per_source_change_unit, ends.source);
+      const targetFails = ends !== null && fails(effect?.amount_unit, ends.target);
+      const unitless = ends === null ? [] : ([[from, ends.source, sourceFails], [to, ends.target, targetFails]] as const)
+        .filter(([, u, failed]) => failed && u.own.length === 0 && u.adopted === undefined).map(([end]) => end);
+      if (unitless.length > 0) {
+        return `Nothing was prepared: ${unitless.map((end) => `"${end.label}"`).join(' and ')} ${unitless.length > 1 ? 'have' : 'has'} no unit or `
+          + 'scale in this model yet, so a figure for this link cannot be recorded. The user\u2019s wording is not the problem: tell them so.';
+      }
+      // A % LEVEL target takes its change in points only: say THAT (Science 5993238492), never "measured in %".
+      if (ends !== null && effect !== undefined && targetFails && !sourceFails && ends.target.own.length > 0 && ends.target.own.every((u) => /point/i.test(u))) {
+        return `Nothing was prepared: a change in "${to.label}" is recorded in percentage points. Ask the user whether they mean `
+          + 'points (62% → 60% is 2 points) and for their figure in points; never convert a relative % yourself.';
+      }
       return `Nothing was prepared: "${to.label}" is measured in ${unitOfNode(to.id)} and "${from.label}" in ${unitOfNode(from.id)}. `
         + 'Ask the user for their figure in those units; never convert it yourself.';
+    }
     case 'sign_conflict':
       return `Nothing was prepared: the user's figure says "${from.label}" moves "${to.label}" the OTHER way from the link Olumi has. `
         + 'Tell them so plainly, and offer to reverse the link\u2019s direction with propose_link_strength (their words on one link).';
@@ -3291,7 +3312,7 @@ export function createAgentCapabilities(
           if (dry.kind === 'refused') {
             const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(working, from.id, to.id, g.identity_run_use ?? null) : null;
             fail(dry.reason, definition !== null ? `${definitionalLinkRefusalText(working, definition)} Tell the user exactly this.`
-              : linkEffectRefusalWords(dry.reason, working, from, to));
+              : linkEffectRefusalWords(dry.reason, working, from, to, effect));
             continue;
           }
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
@@ -3383,7 +3404,7 @@ export function createAgentCapabilities(
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,
-          detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to) };
+          detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to, effect) };
       }
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
