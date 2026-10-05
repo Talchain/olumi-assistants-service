@@ -244,6 +244,9 @@ const UNRESOLVED_LINK_ASKS: Readonly<Record<import("./grammar.js").DraftRecordLi
   relationship: "which quantities it links, and by how much",
 };
 
+/** CHANGE-WORDED TARGET (DL 5 Oct): what a goal target in a unit not its quantity's asks the user. Generic. */
+const GOAL_TARGET_FRAME_ASK = "whether its target is a change from today or a level";
+
 /**
  * ⭐⭐ THE TWO VERBS, NAMED APART — this set used to hold both, and that was
  * trap 21 in miniature (its own comment said "SAME GATE, SAME REASON, DIFFERENT
@@ -851,11 +854,14 @@ export function enumerateCompletionAsk(
   }
 
   // Fix (a): ONE question per stated item, naming the item by its own quote and every link it left unresolved.
+  // CHANGE-WORDED TARGET (DL 5 Oct): a goal target in a unit that is not its quantity's joins the same question.
   const unresolvedByItem = new Map<number, { quote: string; asks: Set<string> }>();
   for (const d of projection.dropped) {
-    if (d.reason !== "link_unresolved" || d.stated_index === undefined || d.unresolved_field === undefined) continue;
+    const ask = d.reason === "link_unresolved" && d.unresolved_field !== undefined ? UNRESOLVED_LINK_ASKS[d.unresolved_field]
+      : d.reason === "goal_target_frame_unresolved" ? GOAL_TARGET_FRAME_ASK : undefined;
+    if (ask === undefined || d.stated_index === undefined) continue;
     const entry = unresolvedByItem.get(d.stated_index) ?? { quote: d.label, asks: new Set<string>() };
-    entry.asks.add(UNRESOLVED_LINK_ASKS[d.unresolved_field]);
+    entry.asks.add(ask);
     unresolvedByItem.set(d.stated_index, entry);
   }
   for (const { quote, asks } of unresolvedByItem.values()) {

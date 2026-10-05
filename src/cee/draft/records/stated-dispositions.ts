@@ -11,7 +11,7 @@ export type StatedCarrier = (
 export type StatedDisposition = { readonly stated_index: number; readonly stated_item: DraftStatedItem } & (
   | { readonly disposition: 'carried'; readonly location: StatedCarrier; readonly stored_value: unknown }
   | { readonly disposition: 'rejected'; readonly reason: DroppedRecordRef['reason'] | 'stated_value_not_carried' | 'stated_relationship_not_carried' | 'carrier_removed' }
-  | { readonly disposition: 'asked'; readonly reason?: 'goal_quantity_missing' | 'link_unresolved' }
+  | { readonly disposition: 'asked'; readonly reason?: 'goal_quantity_missing' | 'link_unresolved' | 'goal_target_frame_unresolved' }
 );
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -52,6 +52,10 @@ export function deriveStatedDispositions(
     // precedence. The rows naming each link stay in `projection.dropped`; the decoded item names them too.
     if (projection.dropped.some(d => d.stated_index === stated_index && d.reason === 'link_unresolved')) {
       return { ...origin, disposition: 'asked', reason: 'link_unresolved' };
+    }
+    // CHANGE-WORDED TARGET (DL 5 Oct): a goal target whose unit is not its quantity's is asked about, never carried.
+    if (projection.dropped.some(d => d.stated_index === stated_index && d.reason === 'goal_target_frame_unresolved')) {
+      return { ...origin, disposition: 'asked', reason: 'goal_target_frame_unresolved' };
     }
     const evidenceFailure = projection.dropped.find(d => d.stated_index === stated_index && FAILED_EVIDENCE.has(d.reason));
     if (evidenceFailure !== undefined) return { ...origin, disposition: 'rejected', reason: evidenceFailure.reason };

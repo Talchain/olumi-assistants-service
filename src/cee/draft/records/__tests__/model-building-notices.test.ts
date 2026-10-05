@@ -55,6 +55,8 @@ const PRODUCER_REASONS = [
   "goal_quantity_missing",
   // Fix (a): the typed ask for a required link the drafter typed "unresolved".
   "link_unresolved",
+  // CHANGE-WORDED TARGET (DL 5 Oct): the typed ask for a goal target in a unit that is not its quantity's.
+  "goal_target_frame_unresolved",
   "range_bounds_inverted",
   "range_excludes_point",
   "range_straddles_zero",

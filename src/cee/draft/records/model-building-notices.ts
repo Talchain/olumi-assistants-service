@@ -120,6 +120,8 @@ export const NOTICE_KIND_BY_REASON: Record<
   goal_quantity_missing: "conflict_resolved_conservatively",
   // Fix (a): a required link the drafter typed "unresolved" — asked about by type; nothing was guessed.
   link_unresolved: "conflict_resolved_conservatively",
+  // CHANGE-WORDED TARGET (DL 5 Oct): a goal target in a unit not its quantity's — asked (change or level?); nothing written.
+  goal_target_frame_unresolved: "conflict_resolved_conservatively",
   // ── A RELATIONSHIP THE MODEL ASSERTED WAS NOT USED ────────────────────────
   // Each of these is a LINK that did not make it onto the graph. The reference
   // was malformed, unresolvable, ambiguous, self-referential, an illegal kind

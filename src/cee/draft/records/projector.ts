@@ -504,6 +504,9 @@ export interface DroppedRecordRef {
     | "goal_quantity_missing"
     // Fix (a): the drafter typed a REQUIRED link "unresolved" (`unresolved_field` names it). An ASK, never a guess.
     | "link_unresolved"
+    // CHANGE-WORDED TARGET (DL, 5 Oct): a goal target in a unit that is not its own quantity's ("10%" on a £ quantity):
+    // a change from today or a level is not typed, so no target, comparator or sense is written. An ASK, never a guess.
+    | "goal_target_frame_unresolved"
     | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
     | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
     | import("./quantity-evidence.js").UnitRefusal
@@ -1594,6 +1597,42 @@ export function statedMagnitudeOf(node: ProjectedNode): { value?: number; unit?:
 
 export function goalValueIsATarget(role: DraftRecordRole | undefined): boolean {
   return role === undefined || role === "target";
+}
+
+/**
+ * ⛔ CHANGE-WORDED TARGET (DL, 5 Oct 2026; R1 S1). A v-next goal item cannot type a change (`setting: "change_by"` is
+ * option-only), and the compile wrote every goal target as a LEVEL (`goal_threshold_frame` is the code constant
+ * `'level'`), so "reduce costs by at most 10%" was stored as a held `<=` level of 10% — and, once
+ * `canonicalQuantityUnits` re-units the item to its quantity's unit, as "at most £10 a month" of cost. A reader that
+ * minimises a held ceiling on a level frame then minimises cost against a figure the user never gave (R1 S1).
+ *
+ * The typed evidence that the figure is NOT a level of the goal's quantity: the goal item's own `unit` is not
+ * `sameUnit` with the unit its quantity's declaring item states. Then the compile writes NO target, NO comparator and
+ * NO sense, and asks (`goal_target_frame_unresolved`): a change from today, or a level? No words are read. A goal that
+ * declares its own quantity, or states no unit on either side, is not this class. Read on the AUTHORED records,
+ * before `canonicalQuantityUnits` re-units the item and hides the mismatch.
+ */
+export function changeWordedGoalTargets(records: DraftRecordSet): ReadonlySet<number> {
+  const out = new Set<number>();
+  records.stated_items.forEach((item, index) => {
+    if (item.kind !== "goal" || typeof item.value !== "number" || !goalValueIsATarget(item.role)) return;
+    if (item.quantity === undefined || item.quantity === index) return;
+    const declared = records.stated_items[item.quantity]?.unit;
+    if (item.unit === undefined || declared === undefined) return;
+    if (!sameUnit(item.unit, declared)) out.add(index);
+  });
+  return out;
+}
+
+/** The goal items in `asked` without the figure's target, unit, comparator and range: nothing below can write them. */
+function withoutChangeWordedTargets(records: DraftRecordSet, asked: ReadonlySet<number>): DraftRecordSet {
+  if (asked.size === 0) return records;
+  return { ...records, stated_items: records.stated_items.map((item, index) => {
+    if (!asked.has(index)) return item;
+    const { value: _v, value_literal: _vl, value_span: _vs, value_scale: _sc, range: _r, unit: _u, unit_literals: _ul,
+      unit_span: _us, direction: _d, direction_literal: _dl, direction_span: _ds, baseline: _b, ...kept } = item;
+    return kept;
+  }) };
 }
 
 /**
@@ -5543,6 +5582,12 @@ export function projectRecordsToGraph(
   const unresolvedLinks: DroppedRecordRef[] = records.stated_items.flatMap((item, stated_index) =>
     (item.unresolved ?? []).map((field) => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: item.source_quote,
       stated_index, reason: "link_unresolved" as const, unresolved_field: field, source_quote: item.source_quote })));
+  // ⛔ CHANGE-WORDED TARGET: read on the authored records, before any re-uniting; asked, and its figure never projected.
+  const changeWorded = changeWordedGoalTargets(records);
+  const frameAsks: DroppedRecordRef[] = [...changeWorded].map((stated_index) => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND,
+    label: records.stated_items[stated_index]!.source_quote, stated_index, reason: "goal_target_frame_unresolved" as const,
+    source_quote: records.stated_items[stated_index]!.source_quote }));
+  records = withoutChangeWordedTargets(records, changeWorded);
   const located = locateRecordEvidence(records);
   const units = canonicalQuantityUnits(located.records);
   records = unifyGoalQuantityReferences(units.records);
@@ -5559,6 +5604,7 @@ export function projectRecordsToGraph(
   }
   projection = { ...projection, dropped: [
     ...unresolvedLinks,
+    ...frameAsks,
     ...[...located.refusals, ...units.refusals].filter(r => records.stated_items[r.stated_index] !== undefined).map(r => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: records.stated_items[r.stated_index]!.source_quote,
       stated_index: r.stated_index, reason: r.reason, source_quote: records.stated_items[r.stated_index]!.source_quote })), ...projection.dropped,
   ] };
