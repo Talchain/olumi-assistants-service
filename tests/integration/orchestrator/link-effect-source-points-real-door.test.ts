@@ -118,8 +118,10 @@ describe('a % source answered in points, through the real door: recorded, said a
   const PRICE = { from_label: 'Pro plan price', to_label: 'Pro plan paying subscribers', amount: -50, amount_unit: 'subscribers',
     per_source_change: 1, per_source_change_unit: 'GBP per month', quote: PRICE_QUOTE };
 
+  // RT-6 step 3 (Science U3/F1): a BARE % on a % level is asked, so the "percent per month" control left this row; it is
+  // pinned below as ONE question with nothing committed. Was: also committed.
   it.each([
-    ['percentage points', 'RED', CHURN_QUOTE], ['percent per month', 'control', CHURN_PERCENT_QUOTE],
+    ['percentage points', 'RED', CHURN_QUOTE],
   ] as const)('single, source said in "%s" (%s): ONE commit, applied: true, and a retry is already_applied with no second write', async (perUnit, _row, quote) => {
     const a = agent(`Honestly: ${quote}.`);
     const p = await a.caps.proposeLinkEffect!(a.ctx, { ...CHURN, per_source_change_unit: perUnit, quote }) as Record<string, any>;
@@ -134,6 +136,14 @@ describe('a % source answered in points, through the real door: recorded, said a
     expect(retry, JSON.stringify(retry)).toEqual(expect.objectContaining({ ok: true, mutated: false, already_applied: true }));
     expect(rows.size, 'the retry writes nothing').toBe(1);
     expect(JSON.stringify(persisted)).toBe(stored);
+  });
+
+  it('RT-6 step 3: "Every 1% monthly churn…" (a bare % on a % level, Olumi\'s level) asks U3 once; nothing is committed', async () => {
+    const a = agent(`Honestly: ${CHURN_PERCENT_QUOTE}.`);
+    const p = await a.caps.proposeLinkEffect!(a.ctx, { ...CHURN, per_source_change_unit: 'percent per month', quote: CHURN_PERCENT_QUOTE }) as Record<string, any>;
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'unit_mismatch',
+      question: 'Is that a 1-point rise in \u201cMonthly churn\u201d (say 10% \u2192 11%), or 1% of today\u2019s level?' }));
+    expect(rows.size, 'nothing committed').toBe(0);
   });
 
   it('RED grouped: a points source beside a £ source → ONE commit, applied: true; a retry is already_applied with no second write', async () => {
@@ -160,8 +170,9 @@ describe('a % source answered in points, through the real door: recorded, said a
     const confounder = { ...structuredClone(directed), edge_type: 'bidirected', provenance: { source: 'cee_hypothesis' } };
     g.edges = first ? [confounder, ...g.edges] : [...g.edges, confounder];
     const before = structuredClone(confounder);
-    const a = agent(`Honestly: ${CHURN_PERCENT_QUOTE}.`);
-    const p = await a.caps.proposeLinkEffect!(a.ctx, { ...CHURN, per_source_change_unit: 'percent per month', quote: CHURN_PERCENT_QUOTE }) as Record<string, any>;
+    // The confounder mechanics in the points wording (a bare % on this % level is asked since RT-6 step 3; see above).
+    const a = agent(`Honestly: ${CHURN_QUOTE}.`);
+    const p = await a.caps.proposeLinkEffect!(a.ctx, CHURN) as Record<string, any>;
     expect(p.ok, JSON.stringify(p)).toBe(true);
     const out = await a.caps.authoriseChange(pressing(a, p), { proposal_id: String(p.proposal_id) }) as Record<string, any>;
     expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));

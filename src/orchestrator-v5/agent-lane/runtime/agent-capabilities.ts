@@ -183,7 +183,7 @@ import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-ru
 import { selectedRunDeltaForModel } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectQuoteContextMiss, linkEffectTheUserStated, quoteOfFigure, quoteSpansIn, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, quoteOfFigure, quoteSpansIn, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -1436,7 +1436,9 @@ function linkEffectConsent(raw: unknown, from: string, to: string, effect: { amo
   const wanted = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? 'negative' as const : 'positive' as const;
   return stored !== undefined && stored !== wanted ? { reversal: { from: stored, to: wanted } } : {};
 }
-function linkEffectStatementAsk(miss: string, from: string, to: string): string {
+function linkEffectStatementAsk(miss: string, from: string, to: string, figureAsk?: string): string {
+  // A figure written as a level, or counting another unit: ask about THAT figure (PR Review's CRs, restored as one question).
+  if (figureAsk !== undefined && (miss === 'source_figure_a_level' || miss === 'target_figure_a_level' || miss === 'figure_counts_another_unit' || miss === 'figure_of_another_quantity')) return figureAsk;
   if (miss === 'end_not_named') return `Which link do you mean: “${from}” → “${to}”?`;
   if (miss === 'unclear_figure') return `What single change in “${to}” do you mean, rather than a range?`;
   return `How much does “${from}” move “${to}”, using the figures you wrote?`;
@@ -3357,7 +3359,8 @@ export function createAgentCapabilities(
             continue;
           }
           if (miss !== null) {
-            fail('not_the_users_statement', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label), from, to));
+            fail('not_the_users_statement', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label,
+              linkEffectFigureNotAChange(entryQuote, stated, { source: from.label, target: to.label })?.question), from, to));
             continue;
           }
           const said = statingSentenceOf(entryQuote, stated, { source: from.label, target: to.label },
@@ -3465,7 +3468,7 @@ export function createAgentCapabilities(
           detail: 'Nothing was prepared: the statement quoted does not write both figures. Ask the user how much the one moves the other, in numbers.' };
       }
       if (miss !== null) {
-        const ask = linkEffectStatementAsk(miss, from.label, to.label);
+        const ask = linkEffectStatementAsk(miss, from.label, to.label, linkEffectFigureNotAChange(quote, statedEffect, statedEnds)?.question);
         return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss, question: ask,
           detail: linkEffectUnitAskWords(ask, from, to) };
       }

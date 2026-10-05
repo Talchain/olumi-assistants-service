@@ -30,7 +30,7 @@
  * `readCurrencyUnitWithQualifiers`, the reading `isAmountStatedInBrief` gives the same unit; a unit with no letter, or
  * one that is not money, is ×1 as before. So a scaled unit never reads the UNSCALED figure: 49 in £k is never "£49".
  */
-import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { findLinkEffectAmounts, hasLinkEffectRange, linkEffectSourceLevels } from './link-effect-figures.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
@@ -989,7 +989,8 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
  * The typed approval card is the consent to the reading; no movement vocabulary is required here.
  */
 export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
-  | 'not_one_statement' | 'unclear_figure';
+  | 'not_one_statement' | 'unclear_figure' | 'source_figure_a_level' | 'target_figure_a_level' | 'no_change_stated'
+  | 'figure_counts_another_unit' | 'figure_of_another_quantity';
 type LinkEffectScope = { readonly quantities: readonly string[]; readonly link_selected?: boolean };
 /** Keep the exact sentence, including its terminal punctuation, for the approval and provenance quote. */
 const sentencesOf = (q: string): string[] => (q.match(/(?:[^.!?;:\n]|(?<=\d)\.(?=\d))+[.!?;:]?/g) ?? [])
@@ -1095,6 +1096,98 @@ function distributiveOneAt(q: string, ends: { readonly source: string; readonly 
   return -1;
 }
 
+/**
+ * ⛔ PR REVIEW'S FIVE CRs, RESTORED AS ONE QUESTION (DL e8, 5 Oct ~18:5xZ, #2605). Option B retired the direction and verb
+ * vocabulary, but a figure the user wrote as a LEVEL, or for another quantity, still sizes no change: "With Pro price £1,
+ * raising it loses 50", "At a Pro price of £1", "Our budget is £1 … we currently have 50 paying subscribers", "One more
+ * ROUND of conversations". Offering "+£1 → −50" there manufactures a reading; Olumi asks instead. Negative evidence only:
+ * these words can stop a card, never make one.
+ */
+const HEDGE = /^(?:about|around|roughly|approximately|nearly|almost|only|just|some|maybe|perhaps|probably)$/i;
+/** The word right before a figure (hedges skipped) that makes it a change: "every £1", "by £1", "a £10 rise". */
+const CHANGE_BEFORE = /^(?:every|each|per|by|a|an|another|extra|additional|one)$/i;
+/** Right after a figure: it is a change ("£1 rise", "50 fewer", "4 points off"). */
+const CHANGE_AFTER = /^\s*(?:(?:percentage\s+)?points?\s+)?(?:rises?|increases?|cuts?|drops?|falls?|jumps?|hikes?|reductions?|decreases?|gains?|loss|more|fewer|less|extra|additional|higher|lower|up|down|off|changes?|swings?)\b/i;
+/** Right before a figure, within its clause: it is a level ("At £1", "Pro price is £1", "we have 50", "With Pro price £1"). */
+const LEVEL_WORD = /^(?:at|is|was|are|were|currently|have|has|had|budget)$/i;
+const CHANGE_NOUN_OF = /^(?:rise|increase|cut|drop|fall|jump|change|reduction|decrease|gain|growth|loss|hike|swing)s?$/i;
+/** Anywhere in the sentence: SOMETHING changes (presence only; the Agent's args carry the direction, B2). */
+const CHANGE_STATED = /\b(?:ris(?:e|es|ing)|rose|rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|decreas(?:e|es|ed|ing)|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|cut(?:s|ting)?|los(?:e|es|ing|t)|loss|gain(?:s|ed|ing)?|wins?|winning|won|add(?:s|ed|ing)?|cost(?:s|ing)?|bring(?:s|ing)?|brought|knocks?|knocked|push(?:es|ed|ing)?|lift(?:s|ed|ing)?|lower(?:s|ed|ing)?|reduc(?:e|es|ed|ing)|boost(?:s|ed|ing)?|grow(?:s|ing|n)?|grew|shrink(?:s|ing)?|halv(?:e|es|ed|ing)|doubl(?:e|es|ed|ing)|clos(?:e|es|ed|ing)|shut(?:s|ting)?|spend(?:s|ing)?|spent|trim(?:s|med|ming)?|sav(?:e|es|ed|ing)|worth|up|down|off|more|less|fewer|extra|additional|every|each|per|by|jumps?|chang(?:e|es|ed|ing)|mov(?:e|es|ed|ing)|means?|shed(?:s|ding)?|put(?:s|ting)?)\b/i;
+
+function figureIsALevel(q: string, figure: StatedAmount, endLabel: string): boolean {
+  const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
+  if (CHANGE_AFTER.test(q.slice(figure.index + figure.matchedText.length))) return false;
+  const clause = q.slice(0, start).split(/[,;:.!?]/).pop() ?? '';
+  const words = [...clause.matchAll(/[\p{L}]+/gu)].map(m => m[0]);
+  while (words.length > 0 && HEDGE.test(words[words.length - 1]!)) words.pop();
+  const last = words[words.length - 1];
+  if (last === undefined || CHANGE_BEFORE.test(last)) return false;
+  if (LEVEL_WORD.test(last)) return true;
+  // "a price OF £1", never "an increase of £1".
+  if (/^of$/i.test(last)) return words.length >= 2 && !CHANGE_NOUN_OF.test(words[words.length - 2]!);
+  // "With Pro price £1": the end's own name, opened by "with", straight before its figure.
+  const withAt = words.map(w => w.toLowerCase()).lastIndexOf('with');
+  return withAt >= 0 && words.slice(withAt + 1).length > 0
+    && words.slice(withAt + 1).every(w => /^(?:the|our|its|a)$/i.test(w) || wordsOf(endLabel).some(x => sameWord(x, w.toLowerCase())));
+}
+
+/** A number WORD that counts something else: "One more ROUND of conversations" is one round, not one conversation. */
+function wordFigureCountsAnotherUnit(q: string, figure: StatedAmount, ends: { readonly source: string }, unit: string): boolean {
+  if (/\d/.test(figure.matchedText)) return false;
+  const m = /^(?:\s+(?:more|extra|additional|new|another|single))?\s+([\p{L}]+)\s+of\b/iu.exec(q.slice(figure.index + figure.matchedText.length));
+  if (m === null) return false;
+  const own = [...wordsOf(ends.source), ...wordsOf(unit)];
+  return !own.some(w => sameWord(w, m[1]!.toLowerCase()));
+}
+
+/**
+ * The phrase a target figure is OF ("2 percentage points of net margin"), when its words are not all the target's own:
+ * that figure sizes another quantity (PR Review's figure_not_bound, restored without direction words).
+ */
+function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: string): string | undefined {
+  const after = q.slice(figure.index + figure.matchedText.length);
+  const m = /^(?:\s*(?:percentage\s+points?|pp|points?|percent|per\s+cent))?\s+(?:of|in)\s+((?:(?!(?:while|and|but|which|that|when|if|as|so|for|than|to)\b)[\p{L}-]+\s*){1,5})/iu.exec(after);
+  if (m === null) return undefined;
+  const run = m[1]!.trim();
+  const content = [...run.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase()).filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
+  if (content.length === 0 || content.every(w => wordsOf(target).some(t => sameWord(t, w)))) return undefined;
+  return run;
+}
+
+/**
+ * Which written figure states no change of its end, if one does, with the typed question to ask about it. Used by the
+ * binder (as its miss) and by the proposer (for the question's words).
+ */
+export function linkEffectFigureNotAChange(
+  quote: string,
+  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  ends: { readonly source: string; readonly target: string },
+): { readonly miss: 'source_figure_a_level' | 'target_figure_a_level' | 'figure_counts_another_unit' | 'figure_of_another_quantity'; readonly question: string } | undefined {
+  for (const q of sentencesOf(quote.trim())) {
+    const amounts = findLinkEffectAmounts(q);
+    const literal = (value: number, unit: string) => amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), q)
+      && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
+    const per = literal(effect.per_source_change, effect.per_source_change_unit);
+    const amount = literal(effect.amount, effect.amount_unit);
+    if (per.length > 0 && per.every(f => wordFigureCountsAnotherUnit(q, f, ends, effect.per_source_change_unit))) {
+      return { miss: 'figure_counts_another_unit', question: `What change in “${ends.source}” does “${per[0]!.matchedText.trim()}” stand for?` };
+    }
+    if (per.length > 0 && per.every(f => figureIsALevel(q, f, ends.source))) {
+      return { miss: 'source_figure_a_level', question: `Is ${per[0]!.matchedText.trim()} a change in “${ends.source}”, or its level today?` };
+    }
+    const otherOwner = amount.length > 0 ? targetFigureOfAnotherQuantity(q, amount[0]!, ends.target) : undefined;
+    if (otherOwner !== undefined && amount.every(f => targetFigureOfAnotherQuantity(q, f, ends.target) !== undefined)) {
+      const said = q.slice(amount[0]!.index, amount[0]!.index + amount[0]!.matchedText.length).trim();
+      const unit = /^\s*(?:percentage\s+points?|pp|points?|percent|per\s+cent)/i.exec(q.slice(amount[0]!.index + amount[0]!.matchedText.length))?.[0] ?? '';
+      return { miss: 'figure_of_another_quantity', question: `Is ${said}${unit} of ${otherOwner} a change in \u201c${ends.target}\u201d?` };
+    }
+    if (amount.length > 0 && amount.every(f => figureIsALevel(q, f, ends.target))) {
+      return { miss: 'target_figure_a_level', question: `Is ${amount[0]!.matchedText.trim()} a change in “${ends.target}”, or its level today?` };
+    }
+  }
+  return undefined;
+}
+
 function linkEffectInOneSentence(
   q: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
@@ -1119,6 +1212,11 @@ function linkEffectInOneSentence(
     ? amount.index < levels!.from_index || amount.index >= levels!.end_index
     : oneAt >= 0 || perFigures.some(per => per.index !== amount.index));
   if (!bothWritten) return 'figures_not_in_statement';
+  // A distributive "each extra conversation" or a written "from 8% to 4%" is itself the change; literal figures are checked.
+  const notAChange = writtenChange || oneAt >= 0 ? undefined
+    : linkEffectFigureNotAChange(q, effect, ends);
+  if (notAChange !== undefined) return notAChange.miss;
+  if (!CHANGE_STATED.test(q)) return 'no_change_stated';
   if (scope.link_selected === true) return null;
   const quoteWords = wordsOf(q);
   const named = (end: string, other: string): boolean => wordsOf(end).some(w => quoteWords.some(t => sameWord(w, t))

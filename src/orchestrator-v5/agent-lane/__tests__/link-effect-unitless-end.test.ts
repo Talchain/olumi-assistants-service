@@ -201,13 +201,8 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
   it.each([
     ['SAID_FALL', SAID_FALL],
     ['SAID_UP', SAID_UP],
-    ['a budget', 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.'],
-    ["today's level", 'Footfall lost from price rise is 5% today and gross margin falls by about 2 percentage points.'],
     ['a budget that goes up', 'Our budget for footfall goes up by 5%, gross margin falls by about 2 percentage points.'],
-    ['a target level', 'When footfall goes up by 5%, gross margin of 2 percentage points is our target.'],
-    ["a target's current level", "When footfall goes up by 5%, gross margin of 2 percentage points is today's level."],
     ['a budget that falls', 'Our budget for footfall falls by 5% and costs us about 2 percentage points of gross margin.'],
-    ['net margin while gross margin stays steady', 'A 5% fall in footfall would cost us about 2 percentage points of net margin while gross margin stays steady.'],
     ['"rises by 5%"', 'When footfall lost from price rise rises by 5%, gross margin falls by about 2 percentage points.'],
   ] as const)('B2 %s → the exact Agent reading is offered for approval, nothing stored', async (_name, said) => {
     const { caps, store, graph, commits } = world();
@@ -218,6 +213,31 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     expect(r).not.toHaveProperty('why');
     expect(cardFor(store, r).detail).toBe(expectedRisingCard(said));
     expect(store.outstanding(SCENARIO, null).map(p => p.proposal_id)).toEqual([String(r.proposal_id)]);
+    expect(commits).toEqual([]);
+    expect(linkOf(graph).provenance).toEqual(before);
+  });
+
+  // DL e8 (#2605, 5 Oct ~18:5xZ): a figure written as a LEVEL, or the size of ANOTHER quantity, states no change of this
+  // link's end. The step-3 build had moved these staging refusals to "card offered"; a card there offers a wrong reading,
+  // so each is ONE typed question naming the figure (PR Review's guards restored without the direction vocabulary).
+  it.each([
+    ['a budget', 'Our budget is 5% for footfall and gross margin varies by 2 percentage points.', 'source_figure_a_level',
+      'Is 5% a change in \u201cFootfall lost from price rise\u201d, or its level today?'],
+    ["today's level", 'Footfall lost from price rise is 5% today and gross margin falls by about 2 percentage points.', 'source_figure_a_level',
+      'Is 5% a change in \u201cFootfall lost from price rise\u201d, or its level today?'],
+    ['a target level', 'When footfall goes up by 5%, gross margin of 2 percentage points is our target.', 'target_figure_a_level',
+      'Is 2 a change in \u201cGross margin\u201d, or its level today?'],
+    ["a target's current level", "When footfall goes up by 5%, gross margin of 2 percentage points is today's level.", 'target_figure_a_level',
+      'Is 2 a change in \u201cGross margin\u201d, or its level today?'],
+    ['net margin while gross margin stays steady', 'A 5% fall in footfall would cost us about 2 percentage points of net margin while gross margin stays steady.',
+      'figure_of_another_quantity', 'Is 2 percentage points of net margin a change in \u201cGross margin\u201d?'],
+  ] as const)('B2-level %s → ONE typed question about that figure, never a card, nothing stored', async (_name, said, why, question) => {
+    const { caps, store, graph, commits } = world();
+    const before = structuredClone(linkOf(graph).provenance);
+    const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...LINK, quote: said }) as Json;
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'not_the_users_statement', why, question });
+    expect(r).not.toHaveProperty('proposal_id');
+    expect(store.outstanding(SCENARIO, null)).toEqual([]);
     expect(commits).toEqual([]);
     expect(linkOf(graph).provenance).toEqual(before);
   });
