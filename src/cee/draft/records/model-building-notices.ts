@@ -79,6 +79,28 @@ export const NOTICE_KIND_BY_REASON: Record<
   DroppedRecordRef["reason"],
   ModelBuildingNoticeKind
 > = {
+  // v-next evidence and endpoint refusals retain the existing notice channel.
+  literal_absent: "relationship_not_used",
+  literal_ambiguous: "relationship_not_used",
+  literal_not_whole_amount: "relationship_not_used",
+  literal_value_mismatch: "relationship_not_used",
+  span_and_literal_both: "relationship_not_used",
+  quantity_unit_undeclared: "relationship_not_used",
+  quantity_declaration_mismatch: "relationship_not_used",
+  unit_not_evidenced: "relationship_not_used",
+  unit_period_ambiguous: "relationship_not_used",
+  unit_literal_contradicts_unit: "relationship_not_used",
+  unit_restated_conflict: "relationship_not_used",
+  relationship_endpoint_missing: "relationship_not_used",
+  relationship_endpoint_ambiguous: "relationship_not_used",
+  relationship_endpoint_illegal: "relationship_not_used",
+  relationship_sign_conflicts_with_link: "relationship_not_used",
+  effect_detail_conflicts_with_relationship: "relationship_not_used",
+  option_lever_undeclared: "relationship_not_used",
+  option_lever_is_goal: "relationship_not_used",
+  option_value_unbound: "relationship_not_used",
+  option_lever_link_conflict: "relationship_not_used",
+  lever_endpoint_ambiguous: "relationship_not_used",
   // ── A RELATIONSHIP THE MODEL ASSERTED WAS NOT USED ────────────────────────
   // Each of these is a LINK that did not make it onto the graph. The reference
   // was malformed, unresolvable, ambiguous, self-referential, an illegal kind

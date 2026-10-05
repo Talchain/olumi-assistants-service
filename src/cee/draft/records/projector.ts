@@ -484,6 +484,7 @@ export interface DroppedRecordRef {
   /** The unit the user stated, alongside `value`. Same conditions, same source. */
   readonly unit?: string;
   readonly reason:
+    | "option_lever_undeclared" | "option_lever_is_goal" | "option_value_unbound" | "option_lever_link_conflict" | "lever_endpoint_ambiguous"
     | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
     | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
     | import("./quantity-evidence.js").UnitRefusal
@@ -3096,7 +3097,7 @@ function projectOnce(
     // explicit `false` is carried as faithfully as a `true`, because "the model
     // considered this and said no" and "the model never spoke" are different
     // facts and the consumer distinguishes them (`analysis-ready-helper.ts:276`).
-    if (item.quantity !== undefined) node.quantity_ref = item.quantity;
+    if (kind !== "option" && item.quantity !== undefined) node.quantity_ref = item.quantity;
     if (kind === "option" && typeof item.is_baseline === "boolean") {
       node.is_baseline = item.is_baseline;
     }
@@ -3476,6 +3477,39 @@ function projectOnce(
     nodes.push(node);
   });
 
+  const leverByQuantity = new Map<number,ProjectedNode>();
+  const ownOptionSettings = new Map<string,{index:number;lever:ProjectedNode;binding:ProjectedInterventionBinding}>();
+  const carrier = (q: number): { node?: ProjectedNode; reason?: DroppedRecordRef["reason"] } => {
+    const claimIds=new Set(claimIdByIndex.values());
+    const own=nodes.filter(n=>n.kind !== "goal" && n.kind !== "option" && claimIds.has(n.id) && n.quantity_ref===q);
+    if(own.length>1)return {reason:"relationship_endpoint_ambiguous"};
+    if(own.length===1)return {node:own[0]};
+    const lever=leverByQuantity.get(q);
+    if(lever!==undefined)return {node:lever};
+    const goals=nodes.filter(n=>n.kind==="goal" && n.quantity_ref===q);
+    return goals.length>1 ? {reason:"relationship_endpoint_ambiguous"} : goals.length===1 ? {node:goals[0]} : {reason:"relationship_endpoint_missing"};
+  };
+  statedItems.forEach((item,index)=>{
+    if(item.kind!=="option" || item.value===undefined)return;
+    const refuse=(reason:DroppedRecordRef["reason"])=>dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index:index,label:item.source_quote,reason});
+    const q=item.quantity, declaration=q===undefined ? undefined : statedItems[q];
+    if(q===undefined || declaration?.unit===undefined){refuse("option_lever_undeclared");return;}
+    if(nodes.some(n=>n.kind==="goal" && n.quantity_ref===q)){refuse("option_lever_is_goal");return;}
+    if(!statedValueIsBound(item,brief)){refuse("option_value_unbound");return;}
+    const resolved=carrier(q);
+    if(resolved.reason==="relationship_endpoint_ambiguous"){refuse("lever_endpoint_ambiguous");return;}
+    let lever=resolved.node;
+    if(lever!==undefined && lever.kind!=="factor"){refuse("lever_endpoint_ambiguous");return;}
+    if(lever===undefined){
+      const id=mintUnique(sha8("factor","quantity-lever",String(q)),usedIds);
+      const prov:RecordProvenance={provenance_class:"stated",source_quote:declaration.source_quote};
+      lever={id,kind:"factor",label:declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
+      nodes.push(lever);provenance[id]=prov;leverByQuantity.set(q,lever);
+    }
+    ownOptionSettings.set(statedIdByIndex.get(index)!,{index,lever,binding:{stated_index:index,raw_value:item.value,unit:declaration.unit,source:"brief_extraction",
+      reasoning:`Stated option value bound to stated_items[${index}]: ${item.source_quote}`}});
+  });
+
   // ── Pass 3: causal_link claims → edges. Runs AFTER both node passes so a
   // link may reference a claim declared later in the array.
   const nodeIds = new Set(nodes.map((n) => n.id));
@@ -3775,15 +3809,22 @@ function projectOnce(
     });
   });
 
+  // Option settings reuse the model's pair or add the one structural binding edge.
+  for(const [optionId,setting] of ownOptionSettings){
+    const pair=edges.filter(e=>e.from===optionId && e.to===setting.lever.id);
+    if(pair.length===0){
+      const id=mintUnique(sha8("edge","option-lever",optionId,setting.lever.id),usedIds);
+      const prov=scaffoldingProvenance(EDGE_ATTRIBUTION.projector_structural.quote);
+      edges.push({id,from:optionId,to:setting.lever.id,effect_direction:"positive",origin:"default",provenance_source:"structural",provenance:prov});provenance[id]=prov;
+    }
+    for(const e of edges.filter(e=>e.from===optionId && e.to===setting.lever.id)){
+      const model=setsToByEdgeId.get(e.id);
+      if(model!==undefined && model!==setting.binding.raw_value)dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index:setting.index,label:statedItems[setting.index]!.source_quote,reason:"option_lever_link_conflict"});
+      setsToByEdgeId.set(e.id,setting.binding.raw_value);
+    }
+  }
+
   // Relationship endpoints are resolved solely by quantity identity, before connectivity pruning.
-  const carrier = (q: number): { node?: ProjectedNode; reason?: DroppedRecordRef["reason"] } => {
-    const claimIds=new Set(claimIdByIndex.values());
-    const own=nodes.filter(n=>n.kind !== "goal" && n.kind !== "option" && claimIds.has(n.id) && n.quantity_ref===q);
-    if(own.length>1)return {reason:"relationship_endpoint_ambiguous"};
-    if(own.length===1)return {node:own[0]};
-    const goals=nodes.filter(n=>n.kind==="goal" && n.quantity_ref===q);
-    return goals.length>1 ? {reason:"relationship_endpoint_ambiguous"} : goals.length===1 ? {node:goals[0]} : {reason:"relationship_endpoint_missing"};
-  };
   statedItems.forEach((item,stated_index)=>{
     const r=item.relationship;
     if(item.kind!=="cause" || r===undefined || r.amount===undefined || r.per_source_change===undefined) return;
@@ -4052,7 +4093,8 @@ function projectOnce(
         const claim = origin === undefined ? undefined : claims[origin.index];
         const isDirectStatedOption =
           claim?.from_stated !== undefined && statedItems[claim.from_stated]?.kind === "option";
-        const directBinding =
+        const ownSetting=ownOptionSettings.get(edge.from);
+        const directBinding = ownSetting?.lever.id === edge.to ? ownSetting.binding :
           claim === undefined
             ? undefined
             : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief });
@@ -4119,7 +4161,7 @@ function projectOnce(
         candidate = {
           edgeId: edge.id,
           setsTo,
-          authority: isDirectStatedOption ? "direct_stated_option" : "ai_claim",
+          authority: directBinding?.source === "brief_extraction" || isDirectStatedOption ? "direct_stated_option" : "ai_claim",
           ...(binding !== undefined ? { binding } : {}),
         };
       } else {
