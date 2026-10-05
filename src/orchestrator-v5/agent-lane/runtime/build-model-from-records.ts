@@ -24,6 +24,7 @@ import { sizeLink } from '../../../cee/magnitude/link-effect.js';
 import { magnitudeNodes, percentLevelIds } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { userQuestionForAskItem } from '../../../cee/draft/records/user-asks.js';
 import { buildModelBuildingNotices } from '../../../cee/draft/records/model-building-notices.js';
+import { statedRelationshipQuestions } from '../../../cee/draft/records/stated-relationship-asks.js';
 import { ModelBuildingNoticesSchema } from '@talchain/schemas/boundary';
 import { constructionOperationId, deadlineOpenQuestion, goalScopePendingAction, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import type { InternalDispatch } from './agent-capabilities.js';
@@ -510,7 +511,9 @@ export async function buildModelFromRecords(
     open_questions: [...(goalScope.question !== undefined ? [goalScope.question] : []), ...(deadline !== undefined ? [deadline] : []),
       ...levelAsks.map((ask) => ask.question), ...magnitudeQuestions,
       // #2576: the compiler's asks in the user's words (`user-asks.ts`), never the completion turn's `detail`.
-      ...compiled.ask.items.map((item) => userQuestionForAskItem(item))],
+      ...compiled.ask.items.map((item) => userQuestionForAskItem(item)),
+      // #2576 item E: the user's own relationships the notices no longer count as Olumi's (item A), asked, never dropped.
+      ...statedRelationshipQuestions(compiled.projection.dropped)],
     // Preserve the projector's typed identities and reasons; do not reconstruct them from labels.
     not_represented: compiled.projection.dropped,
     ...(validNotices !== undefined ? { model_building_notices: validNotices } : {}),
