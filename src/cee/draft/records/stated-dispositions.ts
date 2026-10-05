@@ -1,3 +1,4 @@
+import { literalConventionValue } from './quantity-evidence.js';
 import type { DraftRecordSet, DraftStatedItem } from './grammar.js';
 import type { DroppedRecordRef, RecordProjection } from './projector.js';
 
@@ -62,8 +63,8 @@ export function deriveStatedDispositions(
         if (!object(details)) continue;
         for (const [factorId, detail] of Object.entries(details)) {
           if (object(detail) && detail.source === 'brief_extraction' && detail.stated_index === stated_index
-            && detail.raw_value === item.value) {
-            return carry({ kind: 'node', node_id: option.id, path: ['data', 'intervention_details', factorId, 'raw_value'] }, item.value);
+            && detail.raw_value === literalConventionValue(item.value, item.unit, item.value_scale)) {
+            return carry({ kind: 'node', node_id: option.id, path: ['data', 'intervention_details', factorId, 'raw_value'] }, detail.raw_value);
           }
         }
       }

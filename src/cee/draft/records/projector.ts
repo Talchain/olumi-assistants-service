@@ -108,7 +108,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
 import { admitGoalBaseline } from "../../factor-extraction/goal-baseline-admissibility.js";
-import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits } from "./quantity-evidence.js";
+import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits, literalConventionValue } from "./quantity-evidence.js";
 import { statedEffectQuoteMatches } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
 import { sizeLink, resolveMagnitudeFrame, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
@@ -2153,7 +2153,7 @@ function bindDirectStatedMagnitude(args: {
     bindingEarnsBriefClaim(
       bindStatedItemToBrief({
         quote: item.source_quote,
-        value: item.value,
+        value: item.value === undefined ? undefined : literalConventionValue(item.value,item.unit,item.value_scale),
         unit: item.unit,
         brief,
       }),
@@ -2702,7 +2702,7 @@ function projectOnce(
     // one authority the response transform also uses.
     const briefBinding = statedValueIsBound(item, brief) ? "verified" : bindStatedItemToBrief({
       quote: item.source_quote,
-      value: item.value,
+      value: item.value === undefined ? undefined : literalConventionValue(item.value,item.unit,item.value_scale),
       unit: item.unit,
       brief,
     });
@@ -3403,12 +3403,9 @@ function projectOnce(
         // alone does not attest the subject, measurement or current-value role.
         // raw_value is the display magnitude, not a second calculation value.
         // Derive it only from the producer's declared convention, never size.
-        const rawValue = unit === "%" &&
-          (claim.value_scale === "unit_interval" || claim.value_scale === "ratio")
-          ? claim.value * 100
-          : claim.value_scale === "raw_count" || claim.value_scale === "ratio"
-            ? claim.value
-            : undefined;
+        const rawValue = unit === "%" && (claim.value_scale === "unit_interval" || claim.value_scale === "ratio")
+          || claim.value_scale === "raw_count" || claim.value_scale === "ratio"
+          ? literalConventionValue(claim.value,unit,claim.value_scale) : undefined;
         node.data = {
           value: claim.value,
           ...(rawValue !== undefined ? { raw_value: rawValue } : {}),
@@ -3506,7 +3503,7 @@ function projectOnce(
       lever={id,kind:"factor",label:declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
       nodes.push(lever);provenance[id]=prov;leverByQuantity.set(q,lever);
     }
-    ownOptionSettings.set(statedIdByIndex.get(index)!,{index,lever,binding:{stated_index:index,raw_value:item.value,unit:declaration.unit,source:"brief_extraction",
+    ownOptionSettings.set(statedIdByIndex.get(index)!,{index,lever,binding:{stated_index:index,raw_value:literalConventionValue(item.value,declaration.unit,declaration.value_scale),unit:declaration.unit,source:"brief_extraction",
       reasoning:`Stated option value bound to stated_items[${index}]: ${item.source_quote}`}});
   });
 

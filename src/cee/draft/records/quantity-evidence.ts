@@ -30,7 +30,7 @@ export function statedValueIsBound(item: DraftStatedItem, brief: string | undefi
   if (item.evidence_conflicts?.includes('span_and_literal_both')) return false;
   if (typeof brief !== 'string' || !brief.includes(quote) || quote.length === 0 || value === undefined || unit === undefined) return false;
   if (item.value_literal !== undefined) {
-    if (boundLiteral(quote, item.value_literal, value).reason !== undefined) return false;
+    if (boundLiteral(quote, item.value_literal, value, item.value_scale).reason !== undefined) return false;
     // Referenced quantities inherit the declaration, never require unit words in every clause.
     if (item.unit_literals === undefined) return true;
     return unitEvidenceReason(item, unit) === undefined;
@@ -42,7 +42,7 @@ export function statedValueIsBound(item: DraftStatedItem, brief: string | undefi
   return readCurrencyUnitWithQualifiers(unit).kind === 'currency' ? periodIn(unit) === periodIn(unitText) : sameUnit(unit,unitText);
 }
 
-export type UnitRefusal = 'quantity_unit_undeclared' | 'quantity_declaration_mismatch' | 'unit_not_evidenced' | 'unit_period_ambiguous' | 'unit_literal_contradicts_unit' | 'unit_restated_conflict';
+export type UnitRefusal = 'value_scale_restated_conflict' | 'quantity_unit_undeclared' | 'quantity_declaration_mismatch' | 'unit_not_evidenced' | 'unit_period_ambiguous' | 'unit_literal_contradicts_unit' | 'unit_restated_conflict';
 /** Unit parts validate one authored declaration; they never supply a unit. */
 export function unitEvidenceReason(item: DraftStatedItem, unit: string): UnitRefusal | undefined {
   const parts = item.unit_literals ?? [];
@@ -83,6 +83,9 @@ export function canonicalQuantityUnits(records: import('./grammar.js').DraftReco
       if(item.unit !== undefined && !sameUnit(item.unit,unit))refusals.push({stated_index:index,reason:'unit_restated_conflict'});
       // Legacy independently evidenced units retain R1 semantics; v-next has one declaration.
       if(!item.legacy_evidence || !statedValueIsBound(item,item.source_quote))item.unit=unit;
+      const scale=records.stated_items[item.quantity]?.value_scale;
+      if(item.value_scale!==undefined && scale!==undefined && item.value_scale!==scale)refusals.push({stated_index:index,reason:'value_scale_restated_conflict'});
+      if(scale!==undefined)item.value_scale=scale;
     }}
     const r=item.relationship;
     if(r !== undefined){const from=unitOf(r.from_quantity),to=unitOf(r.to_quantity);
@@ -93,7 +96,11 @@ export function canonicalQuantityUnits(records: import('./grammar.js').DraftReco
     }
     if(item.range !== undefined)item.range.unit=item.unit;
   });
-  copy.claims.forEach(c=>{if(c.quantity !== undefined){const unit=unitOf(c.quantity);if(c.unit !== undefined && unit !== undefined && !sameUnit(c.unit,unit))refusals.push({stated_index:c.quantity,reason:'unit_restated_conflict'});c.unit=unit;}});
+  copy.claims.forEach(c=>{if(c.quantity !== undefined){const unit=unitOf(c.quantity);if(c.unit !== undefined && unit !== undefined && !sameUnit(c.unit,unit))refusals.push({stated_index:c.quantity,reason:'unit_restated_conflict'});c.unit=unit;
+    const scale=records.stated_items[c.quantity]?.value_scale;
+    if(c.value_scale!==undefined && scale!==undefined && c.value_scale!==scale)refusals.push({stated_index:c.quantity,reason:'value_scale_restated_conflict'});
+    if(scale!==undefined)c.value_scale=scale;
+  }});
   return {records:copy,refusals:[...new Map(refusals.map(r=>[JSON.stringify(r),r])).values()]};
 }
 
@@ -107,7 +114,7 @@ export function locateLiteral(quote: string, literal: string): LiteralLocation {
   return { span: { start, end: start + literal.length } };
 }
 /** Validate a typed magnitude; the collector never supplies a value to the record. */
-export function boundLiteral(quote: string, literal: string, value: number): LiteralLocation {
+export function boundLiteral(quote: string, literal: string, value: number, scale?: import("./grammar.js").DraftRecordValueScale): LiteralLocation {
   const located = locateLiteral(quote, literal);
   if (located.reason !== undefined) return located;
   const parts = findStatedAmounts(literal);
@@ -116,7 +123,8 @@ export function boundLiteral(quote: string, literal: string, value: number): Lit
   const whole = findStatedAmounts(quote).find(a => a.index === located.span.start + part.index && a.matchedText === part.matchedText);
   if (whole === undefined) return { reason: 'literal_not_whole_amount' };
   const magnitude = part.magnitude * readUnit(part.matchedText).multiplier;
-  if (Math.abs(Math.abs(value) - magnitude) > Math.max(Math.abs(value), magnitude, 1) * 1e-9) return { reason: 'literal_value_mismatch' };
+  const expected=part.kind === 'percent' ? literalConventionValue(value,'%',scale) : value;
+  if (Math.abs(Math.abs(expected) - magnitude) > Math.max(Math.abs(expected), magnitude, 1) * 1e-9) return { reason: 'literal_value_mismatch' };
   return located;
 }
 
@@ -127,27 +135,38 @@ export function locateRecordEvidence(records: import('./grammar.js').DraftRecord
   copy.stated_items.forEach((item, stated_index) => {
     const refuse = (reason: LiteralRefusal) => { if (!refusals.some(r => r.stated_index === stated_index)) refusals.push({ stated_index, reason }); };
     if (item.evidence_conflicts?.includes('span_and_literal_both')) refuse('span_and_literal_both');
-    const bind = (literal: string | undefined, value?: number, determiner = false): DraftQuoteSpan | undefined => {
+    const bind = (literal: string | undefined, value?: number, determiner = false, scale?: import("./grammar.js").DraftRecordValueScale): DraftQuoteSpan | undefined => {
       if (literal === undefined) return undefined;
       const result = determiner && Math.abs(value ?? 0) === 1 && ['each', 'every', 'per'].includes(literal.toLowerCase())
         ? locateLiteral(item.source_quote, literal)
-        : value === undefined ? locateLiteral(item.source_quote, literal) : boundLiteral(item.source_quote, literal, value);
+        : value === undefined ? locateLiteral(item.source_quote, literal) : boundLiteral(item.source_quote, literal, value, scale);
       if (result.reason !== undefined) { refuse(result.reason); return undefined; }
       return result.span;
     };
-    if (item.value_literal !== undefined) item.value_span = bind(item.value_literal, item.value);
+    if (item.value_literal !== undefined) item.value_span = bind(item.value_literal, item.value, false, records.stated_items[item.quantity ?? stated_index]?.value_scale);
     if (item.unit_literals?.length === 1) item.unit_span = bind(item.unit_literals[0]);
     if (item.direction_literal !== undefined) item.direction_span = bind(item.direction_literal);
-    const range = (r: DraftValueRange | undefined) => { if (r === undefined) return; if(r.low_literal !== undefined) r.low_span=bind(r.low_literal,r.low); if(r.high_literal !== undefined) r.high_span=bind(r.high_literal,r.high); };
-    range(item.range);
+    const range = (r: DraftValueRange | undefined, q=stated_index) => { if (r === undefined) return; if(r.low_literal !== undefined) r.low_span=bind(r.low_literal,r.low,false,records.stated_items[q]?.value_scale); if(r.high_literal !== undefined) r.high_span=bind(r.high_literal,r.high,false,records.stated_items[q]?.value_scale); };
+    range(item.range,item.quantity ?? stated_index);
     if (item.relationship !== undefined) {
       const r = item.relationship;
-      if(r.amount_literal !== undefined) r.amount_span=bind(r.amount_literal,r.amount);
-      if(r.per_source_literal !== undefined) r.source_span=bind(r.per_source_literal,r.per_source_change,true);
+      if(r.amount_literal !== undefined) r.amount_span=bind(r.amount_literal,r.amount,false,records.stated_items[r.to_quantity]?.value_scale);
+      if(r.per_source_literal !== undefined) r.source_span=bind(r.per_source_literal,r.per_source_change,true,records.stated_items[r.from_quantity]?.value_scale);
       if(r.no_effect_literal !== undefined) bind(r.no_effect_literal);
-      range(r.range);
+      range(r.range,r.to_quantity);
+      // The sizer's natural percent unit is points. Preserve the typed convention at input,
+      // and use one raw-value helper for the checked compiler/persisted arithmetic.
+      const from=records.stated_items[r.from_quantity],to=records.stated_items[r.to_quantity];
+      if(r.amount!==undefined)r.amount=literalConventionValue(r.amount,to?.unit,to?.value_scale);
+      if(r.per_source_change!==undefined)r.per_source_change=literalConventionValue(r.per_source_change,from?.unit,from?.value_scale);
+      if(r.range!==undefined){r.range.low=literalConventionValue(r.range.low,to?.unit,to?.value_scale);r.range.high=literalConventionValue(r.range.high,to?.unit,to?.value_scale);}
       if (refusals.some(r => r.stated_index === stated_index)) { delete r.amount_span; delete r.source_span; }
     }
   });
   return { records: copy, refusals };
+}
+
+/** Shared natural/literal convention, never inferred from the magnitude. */
+export function literalConventionValue(value: number, unit: string | undefined, scale: import('./grammar.js').DraftRecordValueScale | undefined): number {
+  return unit === '%' && (scale === 'unit_interval' || scale === 'ratio') ? value * 100 : value;
 }
