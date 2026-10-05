@@ -1438,15 +1438,15 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
       const unitless = ends === null ? [] : ([[from, ends.source, sourceFails], [to, ends.target, targetFails]] as const)
         .filter(([, u, failed]) => failed && u.own.length === 0 && u.adopted === undefined).map(([end]) => end);
       if (unitless.length > 0) {
-        // RT-6 step 1 (DL ruling on red-team #87 5996558645): never a dead end, and never the Agent's own paraphrase ("with
+        // RT-6 step 1 (DL ruling on red-team #87 5996558645; words: Science #87 check): never a dead end, and never the Agent's own paraphrase ("with
         // the available tools"). One fixed sentence names the route that works today — the link panel's own control by
         // its visible label (inspectorStrings `strengthQuestion`, StrengthBandButtons) — by both ends of THIS link.
         const names = unitless.map((end) => `\u201c${end.label}\u201d`).join(' and ');
         return 'Nothing was prepared. Tell the user exactly this: '
           + `"${names} ${unitless.length > 1 ? 'have' : 'has'} no unit or scale in this model yet, so I can\u2019t record your figure from `
-          + 'chat. Your wording is fine. You can set how strong this link is now: on the canvas, click the link from '
+          + 'chat, and nothing was recorded. You can set how strong this link is now: on the canvas, click the link from '
           + `\u201c${from.label}\u201d to \u201c${to.label}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong `
-          + 'or Very strong. That records how strong you judge the link, not the figure itself."';
+          + 'or Very strong. That records how strong you judge the link, not your figure."';
       }
       // A % LEVEL target takes its change in points only: say THAT (Science 5993238492), never "measured in %".
       if (ends !== null && effect !== undefined && targetFails && !sourceFails && ends.target.own.length > 0 && ends.target.own.every((u) => /point/i.test(u))) {

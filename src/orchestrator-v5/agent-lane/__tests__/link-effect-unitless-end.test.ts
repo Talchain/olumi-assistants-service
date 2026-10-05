@@ -138,10 +138,11 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     // RT-6 step 1: never a dead end — the route that works, by THIS link's two ends and the link panel's own words.
     // The ONE sentence the Agent is told to say verbatim (Science wording check), by THIS link's two ends.
     expect(String(r.detail)).toBe('Nothing was prepared. Tell the user exactly this: "'
-      + `\u201c${FOOTFALL}\u201d has no unit or scale in this model yet, so I can\u2019t record your figure from chat. Your wording is fine. `
+      + `\u201c${FOOTFALL}\u201d has no unit or scale in this model yet, so I can\u2019t record your figure from chat, and nothing was recorded. `
       + `You can set how strong this link is now: on the canvas, click the link from \u201c${FOOTFALL}\u201d to \u201c${MARGIN}\u201d, and under `
       + '\u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, '
-      + 'not the figure itself."');
+      + 'not your figure."');
+    expect(String(r.detail), 'Science: no reassurance without content').not.toContain('Your wording is fine');
     expect(String(r.detail)).not.toMatch(/available tools/i);
   });
 
