@@ -153,6 +153,18 @@ const STATED_AMOUNT_PATTERN = new RegExp(
     `(?<pct>\\s*%)?`,
   "gi",
 );
+/**
+ * The same scan with a literal ISO code accepted where a symbol may stand ("GBP 1,000"). OPT-IN ONLY: the link-effect
+ * path asks for it (RT-6 step 2, Science U2 "a currency symbol/code"). Every other reader keeps the symbol-only scan.
+ */
+const STATED_AMOUNT_PATTERN_WITH_CODES = new RegExp(
+  `(?<![\\w.])(?<currency>${CURRENCY_ALTERNATION}|${ISO_CURRENCY_ALTERNATION})?\\s*` +
+    `(?<digits>${AMOUNT_DIGITS})` +
+    magnitudeSuffixPattern("mag") +
+    MAGNITUDE_AMBIGUOUS_TRAILER_GUARD +
+    `(?<pct>\\s*%)?`,
+  "gi",
+);
 
 /**
  * Every amount stated in `text`, in source order.
@@ -160,13 +172,14 @@ const STATED_AMOUNT_PATTERN = new RegExp(
  * Pure. Never throws. An empty / non-string input yields an empty array, which
  * makes every value un-locatable — the fail-closed direction.
  */
-export function findStatedAmounts(text: string | null | undefined): readonly StatedAmount[] {
+export function findStatedAmounts(text: string | null | undefined, options?: { readonly isoCurrencyCodes?: boolean }): readonly StatedAmount[] {
   if (typeof text !== "string" || text.length === 0) return [];
   const out: StatedAmount[] = [];
   // A fresh RegExp per call: `lastIndex` on a shared /g instance is
   // cross-call state, and a shared one would make this function's answer
   // depend on who called it last.
-  const pattern = new RegExp(STATED_AMOUNT_PATTERN.source, STATED_AMOUNT_PATTERN.flags);
+  const scan = options?.isoCurrencyCodes === true ? STATED_AMOUNT_PATTERN_WITH_CODES : STATED_AMOUNT_PATTERN;
+  const pattern = new RegExp(scan.source, scan.flags);
   // The digits and the written magnitude suffix of each amount, for the range reading below.
   const parts: { digits: number; mag: string }[] = [];
   for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {

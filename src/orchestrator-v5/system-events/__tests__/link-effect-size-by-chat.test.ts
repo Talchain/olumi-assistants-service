@@ -20,6 +20,7 @@ import { commitOptionLevelsInProcess, type CommitOptionLevelsInput, type CommitO
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
 import { executeOptionInterventionBatch, linkStrengthsPostimageIsScoped, type ApprovedLinkEffect } from '../option-intervention-edit.js';
 import { prepareLinkEffectUnitReadings } from '../link-effect-unit-reading.js';
+import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 
 type Json = Record<string, any>;
 const SCENARIO = '0c6dcb3d-de66-4b46-8860-4b7dce0bb107';
@@ -171,7 +172,7 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'unit_mismatch' });
     // ONE well-formed quoted sentence: the ask FIRST, then the canvas alternative (order is the string), never "can't record".
     expect(String(r.detail)).toBe(`Nothing was prepared. Tell the user exactly this: "${ask} Nothing is recorded until you answer. `
-      + `If you\u2019d rather not give a figure, you can set how strong this link is on the canvas: click the link from \u201c${FOOTFALL}\u201d `
+      + `If you\u2019d rather not answer, you can set how strong this link is on the canvas: click the link from \u201c${FOOTFALL}\u201d `
       + `to \u201c${MARGIN}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. `
       + 'That records how strong you judge the link, not your figure."');
     expect(String(r.detail)).not.toMatch(/can\u2019t record|can't record|available tools/);
@@ -280,6 +281,7 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
 
   it.each([
     ['no period', 'Each £1,000 of marketing spend brings about 3 more customers', 'GBP'],
+    ['explicit code', 'Each GBP 1,000 of marketing spend brings about 3 more customers', 'GBP'],
     ['explicit period', 'Each £1,000 of marketing spend per month brings about 3 more customers', 'GBP/month'],
   ])('R4 currency/count, %s: adopt GBP + matching count noun, period only when literally stated', async (_name, said, currency) => {
     const graph = unsizedGraph();
@@ -301,19 +303,41 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(w.attempts).toHaveLength(1);
   });
 
-  it('R4 a currency CODE is not read (the shared amount scanner is unchanged): asked, nothing written', async () => {
+  it('R4 a currency CODE is read ONLY on this path: the shared scanner stays symbol-only for every other reader', () => {
+    // Contrast for the opt-in: the default scan (13 other readers) is byte-for-byte today's.
+    expect(findStatedAmounts('GBP 1,000').map((a) => [a.kind, a.currencyCode])).toEqual([['plain', undefined]]);
+    expect(findStatedAmounts('GBP 1,000', { isoCurrencyCodes: true }).map((a) => [a.kind, a.currencyCode])).toEqual([['currency', 'GBP']]);
+    expect(findStatedAmounts('£1,000').map((a) => [a.kind, a.currencyCode])).toEqual([['currency', 'GBP']]);
+  });
+
+  // Codex buddy HIGH (5 Oct): an end may never take another quantity's unit-bearing span.
+  it.each([
+    ['backward borrow', 'Each £1,000 of marketing spend on sales brings in £3 of profit', 'Sales revenue', { amount: 3, amount_unit: 'GBP', per_source_change: 1000, per_source_change_unit: 'GBP' }],
+    ['forward borrow', 'Each 5 percentage points of footfall loss costs us 2 percentage points of market share for gross margin', MARGIN, { ...EFFECT }],
+  ] as const)('H %s: the target is NOT adopted from another quantity\'s phrase', (_n, said, targetLabel, effect) => {
+    const graph = unsizedGraph();
+    if (targetLabel === 'Sales revenue') {
+      Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2', scale_frame: 10000 });
+      Object.assign(nodeOf(graph, TARGET), { label: 'Sales revenue' });
+      graph.ref_high_water.F = 2;
+    }
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET, effect, said);
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+    expect(prepared.ask, 'the unread end is asked about, never sized').toBeDefined();
+  });
+
+  it('H control: the same figure written as "£3 of sales revenue" IS the target\'s own span', () => {
     const graph = unsizedGraph();
     Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2', scale_frame: 10000 });
-    Object.assign(nodeOf(graph, TARGET), { label: 'Customers', count_noun: 'customers', goal_threshold_cap: 100 });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Sales revenue' });
     graph.ref_high_water.F = 2;
-    const w = world(projectGraphForPersistence(graph) as Json);
-    const before = w.graph();
-    const r = await propose(w, 'Each GBP 1,000 of marketing spend brings about 3 more customers',
-      { amount: 3, amount_unit: 'customers', per_source_change: 1000, per_source_change_unit: 'GBP' });
-    expect(r).toMatchObject({ ok: false, mutated: false });
-    expect(r).not.toHaveProperty('proposal_id');
-    expect(w.commits).toEqual([]);
-    expect(w.graph()).toEqual(before);
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: 3, amount_unit: 'GBP', per_source_change: 1000, per_source_change_unit: 'GBP' }, 'Each £1,000 of marketing spend brings in £3 of sales revenue');
+    expect(prepared.unit_readings).toEqual([
+      { node_id: SOURCE, unit_reading: reading('GBP', '£1,000 of marketing spend') },
+      { node_id: TARGET, unit_reading: reading('GBP', '£3 of sales revenue') },
+    ]);
+    expect(prepared.ask).toBeUndefined();
   });
 
   it('R4 own-clause negative: a multiword count noun cannot be adopted from a different counted thing', () => {

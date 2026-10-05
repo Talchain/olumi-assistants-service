@@ -1495,7 +1495,7 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
  */
 function linkEffectUnitAskWords(ask: string, from: { label: string }, to: { label: string }): string {
   return 'Nothing was prepared. Tell the user exactly this: "'
-    + `${ask} Nothing is recorded until you answer. If you\u2019d rather not give a figure, you can set how strong this link is `
+    + `${ask} Nothing is recorded until you answer. If you\u2019d rather not answer, you can set how strong this link is `
     + `on the canvas: click the link from \u201c${from.label}\u201d to \u201c${to.label}\u201d, and under \u201cHow strong is this effect?\u201d `
     + 'choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, not your figure."';
 }

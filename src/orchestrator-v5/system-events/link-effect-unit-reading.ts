@@ -50,43 +50,68 @@ function periodOf(clause: string): string | null | undefined {
   return new Set(periods).size > 1 ? null : periods[0];
 }
 
+/** Words that may sit between an end's name and its figure ("waste rate rises by about 1 point"); nothing else may. */
+const LINKING = /^(?:rises?|rising|rose|falls?|falling|fell|increases?|increasing|increased|decreases?|decreasing|decreased|grows?|growing|grew|drops?|dropping|dropped|goes|going|went|up|down|by|about|around|roughly|approximately|nearly|almost|some)$/i;
+
 /**
- * The figure's own phrase, ending at the last word naming its end (plus a literal period immediately after it).
- * Numeric positions partition the two ends: target points never lend points to a source's bare %.
- * We retain an exact substring, never a truncated or reconstructed quote that the schema might silently drop.
+ * The figure's own phrase: an exact substring of the quote, bounded so it can never be silently dropped (≤500).
+ * A figure belongs to THIS end only by adjacency (Codex buddy HIGH, 5 Oct):
+ *  - forward: right after the figure (its unit words and a literal period), "of" / a determiner / "more|extra|additional",
+ *    then the end's own words FIRST ("£3 of sales revenue", "3 more customers"); "£3 of profit" never names Sales revenue,
+ *    and "2 points of market share for gross margin" never names Gross margin;
+ *  - backward: the end's own words, then only movement / linking words, then the figure ("waste rate rises by 1 point");
+ *    "on sales brings in £3" never names Sales revenue.
  */
 function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, node: Rec, other: Rec): string | undefined {
   const a = amounts[i]!;
   const figureStart = a.index + (a.matchedText.length - a.matchedText.trimStart().length);
   const figureEnd = a.index + a.matchedText.length;
   const next = amounts[i + 1]?.index ?? quote.length;
-  const following = quote.slice(figureEnd, next).split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)/)[0] ?? '';
   const own = wordsOf(String(node.label ?? node.id)).filter(w => !wordsOf(String(other.label ?? other.id)).some(o => sameWord(w, o)));
   if (typeof node.count_noun === 'string') own.push(...wordsOf(node.count_noun));
-  const tokens = [...following.matchAll(/[\p{L}]+/gu)];
-  // Cross only a short local phrase. A remote mention is not evidence of this figure's unit.
-  const named = tokens.slice(0, 9).filter(t => own.some(w => sameWord(w, t[0].toLowerCase())));
-  if (named.length === 0) {
-    // The label may precede its figure: "footfall loss rises by 5 percentage points". Keep that same local clause.
-    const previousEnd = i === 0 ? 0 : amounts[i - 1]!.index + amounts[i - 1]!.matchedText.length;
-    const before = quote.slice(previousEnd, figureStart);
-    const parts = [...before.matchAll(/[!?;:,\n]|(?<!\d)\.|\.(?!\d)/g)];
-    const boundary = parts.length === 0 ? 0 : parts[parts.length - 1]!.index! + 1;
-    const local = before.slice(boundary);
-    const preceding = [...local.matchAll(/[\p{L}]+/gu)].slice(-9);
-    const precedingNames = preceding.filter(t => own.some(w => sameWord(w, t[0].toLowerCase())));
-    if (precedingNames.length === 0) return undefined;
-    const suffix = /^\s*(?:percentage\s+points?\b|pp\b|points?\b)?(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)*/iu.exec(following)?.[0] ?? '';
-    const start = previousEnd + boundary + precedingNames[0]!.index!;
-    const clause = quote.slice(start, figureEnd + suffix.trimEnd().length);
+  if (own.length === 0) return undefined;
+  const isOwn = (w: string): boolean => own.some(o => sameWord(o, w.toLowerCase()));
+  const bounded = (from: number, to: number): string | undefined => {
+    const clause = quote.slice(from, to).trimEnd();
     return clause.length >= 1 && clause.length <= 500 ? clause : undefined;
+  };
+  const PERIOD = /^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)*/iu;
+  // Forward.
+  const rest = quote.slice(figureEnd, next);
+  const unitTail = /^\s*(?:percentage\s+points?\b|pp\b|points?\b)?/iu.exec(rest)![0];
+  const periodTail = PERIOD.exec(rest.slice(unitTail.length))![0];
+  let at = unitTail.length + periodTail.length;
+  const lead = /^\s*(?:of\s+)?(?:(?:the|our|your|its|their)\s+)?(?:(?:more|extra|additional)\s+)?/iu.exec(rest.slice(at))![0];
+  at += lead.length;
+  const tail = rest.slice(at);
+  let named = 0;
+  for (const m of tail.matchAll(/[\p{L}]+/gu)) {
+    // The end's own words come FIRST and run contiguously (whitespace only between them).
+    if ((named === 0 && m.index !== 0) || !/^\s*$/.test(tail.slice(named, m.index)) || !isOwn(m[0])) break;
+    named = m.index! + m[0].length;
   }
-  const last = named[named.length - 1]!;
-  let end = figureEnd + last.index! + last[0].length;
-  const period = /^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)+/iu.exec(quote.slice(end, next));
-  if (period !== null) end += period[0].length;
-  const clause = quote.slice(figureStart, end);
-  return clause.length >= 1 && clause.length <= 500 ? clause : undefined;
+  if (named > 0) {
+    const after = at + named;
+    const period = PERIOD.exec(rest.slice(after))![0];
+    return bounded(figureStart, figureEnd + after + period.length);
+  }
+  // Backward, within this local clause only.
+  const previousEnd = i === 0 ? 0 : amounts[i - 1]!.index + amounts[i - 1]!.matchedText.length;
+  const before = quote.slice(previousEnd, figureStart);
+  const cuts = [...before.matchAll(/[!?;:,\n]|(?<!\d)\.|\.(?!\d)/g)];
+  const boundary = cuts.length === 0 ? 0 : cuts[cuts.length - 1]!.index! + 1;
+  const words = [...before.slice(boundary).matchAll(/[\p{L}]+/gu)];
+  // The text between words must be whitespace only, so a symbol or stray figure never bridges two phrases.
+  const gapOk = (k: number): boolean => /^\s*$/.test(before.slice(boundary + words[k]!.index! + words[k]![0].length,
+    k + 1 < words.length ? boundary + words[k + 1]!.index! : figureStart));
+  let k = words.length - 1;
+  while (k >= 0 && LINKING.test(words[k]![0]) && gapOk(k)) k--;
+  let first = -1;
+  while (k >= 0 && isOwn(words[k]![0]) && gapOk(k)) { first = k; k--; }
+  if (first < 0) return undefined;
+  const suffix = /^\s*(?:percentage\s+points?\b|pp\b|points?\b)?/iu.exec(rest)![0];
+  const period = PERIOD.exec(rest.slice(suffix.length))![0];
+  return bounded(previousEnd + boundary + words[first]!.index!, figureEnd + suffix.length + period.length);
 }
 
 function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: string; barePercent?: true } {
@@ -125,7 +150,7 @@ export function prepareLinkEffectUnitReadings(
   if (source === undefined || target === undefined) return { unit_readings: [] };
   const edges = graph.edges.filter(isRec);
   const current = edges.find(e => e.from === from && e.to === to);
-  const amounts = findStatedAmounts(quote);
+  const amounts = findStatedAmounts(quote, { isoCurrencyCodes: true });
   const unit_readings: LinkEffectUnitReading[] = [];
   const asks: string[] = [];
   for (const [node, other, value, statedUnit] of [[source, target, effect.per_source_change, effect.per_source_change_unit],

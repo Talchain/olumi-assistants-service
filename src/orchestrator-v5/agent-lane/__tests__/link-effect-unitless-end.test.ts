@@ -142,7 +142,7 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     // Step 2 U3: an eligible unsized bare-% end is clarified before the same canvas alternative.
     expect(String(r.detail)).toBe('Nothing was prepared. Tell the user exactly this: "'
       + `Is that a 5-point rise in \u201c${FOOTFALL}\u201d (say 10% → 15%), or 5% of today\u2019s level? Nothing is recorded until you answer. `
-      + `If you\u2019d rather not give a figure, you can set how strong this link is on the canvas: click the link from \u201c${FOOTFALL}\u201d `
+      + `If you\u2019d rather not answer, you can set how strong this link is on the canvas: click the link from \u201c${FOOTFALL}\u201d `
       + `to \u201c${MARGIN}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. `
       + 'That records how strong you judge the link, not your figure."');
     expect(String(r.detail), 'Science: no reassurance without content').not.toContain('Your wording is fine');

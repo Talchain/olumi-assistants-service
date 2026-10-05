@@ -1112,8 +1112,9 @@ function linkEffectInOneSentence(
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
 ): LinkEffectStatementMiss | null {
-  const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
-  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
+  // A link's size may be written with an ISO code ("GBP 1,000"): opt-in for this reader only (Science U2).
+  const amountFigure = findStatedAmounts(q, { isoCurrencyCodes: true }).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
+  const perFigure = findStatedAmounts(q, { isoCurrencyCodes: true }).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
     unitPhraseFamily(effect.per_source_change_unit), q));
   // ⭐ R3 #75 5925568501: "each / every / per / one more / an extra / a single" + a word of the SOURCE, one phrase with no
   // punctuation between, is the user writing a change of ONE ("Each extra conversation brings in about £20,000"). A
