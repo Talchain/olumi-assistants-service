@@ -763,7 +763,7 @@ export default async function route(app: FastifyInstance) {
         not_modelled: deriveNotModelledManifest(
           briefText,
           graphPresent ? graph : null,
-          // P1: the compiler's receipt counts ONLY while it is bound to THIS graph (identity, receipt omitted).
+          // P1/R2: the compiler's receipt counts ONLY while it is bound to THIS graph (full-content hash, receipt omitted).
           { statedDispositionRows: graphPresent ? currentStatedDispositionRows(graph) : undefined },
         ),
         // ROADMAP 2.1271 — see §5 above. `null` on either means "this leg did

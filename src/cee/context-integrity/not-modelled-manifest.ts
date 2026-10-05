@@ -318,6 +318,8 @@ export interface StatedDispositionsBlock {
   readonly carried: number;
   /** Receipts whose sentence is not in this brief — counted, never placed at a guessed offset. */
   readonly unlocated: number;
+  /** Read-time `quantities.items` rows NOT reported because a typed row here holds the same `char_offset`. */
+  readonly superseded: number;
   readonly items: readonly StatedDispositionRow[];
 }
 
@@ -1995,7 +1997,7 @@ function spanIn(quote: string, span: unknown): { start: number; end: number } | 
 /**
  * The compiler's TYPED dispositions. The rows arrive ALREADY BOUND by the caller: the cold read passes
  * `currentStatedDispositionRows(graph)` (`orchestrator-v5/graph/stated-dispositions-binding.ts`), which yields them only
- * while the graph's identity, receipt omitted, equals the receipt's `reconciled_against` (P1). The binding is not
+ * while the graph's full-content hash, receipt omitted, equals the receipt's `reconciled_against` (P1/R2). The binding is not
  * computed here: this pure module is shared with the draft pipeline (boundary stage, enricher, narrative), none of
  * which reads a stored graph, and keeping the identity hash's module graph out of it leaves this module's imports as
  * they were. `undefined` — no bound rows passed, or a stale/unbound/malformed receipt — is absence, never a guess:
@@ -2004,7 +2006,7 @@ function spanIn(quote: string, span: unknown): { start: number; end: number } | 
 function readStatedDispositions(
   briefText: string,
   rows: readonly StatedDispositionV3T[] | undefined,
-): StatedDispositionsBlock | undefined {
+): Omit<StatedDispositionsBlock, "superseded"> | undefined {
   if (rows === undefined) return undefined;
   let carried = 0;
   let unlocated = 0;
@@ -2059,6 +2061,8 @@ export function deriveNotModelledManifest(
 
   const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
   const typedDispositions = readStatedDispositions(briefText, options.statedDispositionRows);
+  const typedOffsets = new Set(typedDispositions?.items.map((row) => row.char_offset) ?? []);
+  let superseded = 0;
   const quantities = extractStatedQuantities(briefText);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 
@@ -2086,7 +2090,12 @@ export function deriveNotModelledManifest(
       else inModelUnanchored += 1;
     } else if (verdict === "prose_only") proseOnly += 1;
     else absent += 1;
-    if (items.length < MAX_ITEMS) {
+    // ONE AUTHORITATIVE DISPOSITION PER SPAN (R2, Codex P2): where the compiler TYPED this figure, its typed row
+    // (`stated_dispositions.items`, same `char_offset`) is the disposition, and the read-time row is not also
+    // reported. Tallies above still count every quantity found; `superseded` says how many rows were replaced.
+    if (typedOffsets.has(q.at)) {
+      superseded += 1;
+    } else if (items.length < MAX_ITEMS) {
       const statedKind = classifyStatedKind(q, spans);
       tally[statedKind] += 1;
       items.push({
@@ -2116,7 +2125,7 @@ export function deriveNotModelledManifest(
       in_model_unanchored: inModelUnanchored,
       prose_only: proseOnly,
       absent,
-      truncated: quantities.length > items.length,
+      truncated: quantities.length > items.length + superseded,
       items,
     },
     stated_kinds: {
@@ -2133,7 +2142,7 @@ export function deriveNotModelledManifest(
       numericTokensIn(briefText),
     ),
     not_tracked: NOT_TRACKED_CLASSES,
-    ...(typedDispositions === undefined ? {} : { stated_dispositions: typedDispositions }),
+    ...(typedDispositions === undefined ? {} : { stated_dispositions: { ...typedDispositions, superseded } }),
   };
 }
 

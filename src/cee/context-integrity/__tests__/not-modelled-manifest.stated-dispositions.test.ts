@@ -12,13 +12,12 @@
 import { describe, expect, it } from "vitest";
 
 import { deriveNotModelledManifest as deriveUnbound } from "../not-modelled-manifest.js";
-import { currentStatedDispositionRows } from "../../../orchestrator-v5/graph/stated-dispositions-binding.js";
+import { currentStatedDispositionRows, statedDispositionsBindingHash } from "../../../orchestrator-v5/graph/stated-dispositions-binding.js";
 
 /** Exactly what the cold read does (`assist.v1.scenario-graph.ts`): the receipt's rows only while bound to this graph. */
 const deriveNotModelledManifest = (brief: string, graph: unknown) =>
   deriveUnbound(brief, graph, { statedDispositionRows: currentStatedDispositionRows(graph) });
 import { GraphV3 } from "../../../schemas/cee-v3.js";
-import { computeGraphIdentityHash } from "../../../orchestrator-v5/context/graph-identity.js";
 
 type Rec = Record<string, unknown>;
 
@@ -43,8 +42,8 @@ const RECEIPT = [
   { stated_index: 2, stated_item: { kind: "figure", source_quote: Q_CHURN, value: 3, value_span: span(Q_CHURN, "3%") },
     disposition: "asked" },
 ];
-/** P1: the receipt names the graph it was reconciled against — that graph's identity with the receipt omitted. */
-const BOUND_TO = computeGraphIdentityHash(structuredClone(GRAPH) as never)!.value;
+/** P1/R2: the receipt names the graph it was reconciled against — that graph's full-content hash, receipt omitted. */
+const BOUND_TO = statedDispositionsBindingHash(structuredClone(GRAPH))!;
 const withReceipt = (rows: unknown = RECEIPT, reconciledAgainst: unknown = BOUND_TO): Rec => ({
   ...structuredClone(GRAPH), stated_dispositions: { reconciled_against: reconciledAgainst, rows: structuredClone(rows) },
 });
@@ -85,6 +84,7 @@ describe("deriveNotModelledManifest — typed rows from the persisted receipt", 
       status: "recorded",
       carried: 1,
       unlocated: 0,
+      superseded: 2,
       items: [
         { stated_index: 1, stated_item_kind: "cause", literal: "5%", char_offset: BRIEF.indexOf(Q_LOSS) + Q_LOSS.indexOf("5%"),
           disposition: "rejected", reason: "stated_relationship_not_carried", typed: true },
@@ -98,12 +98,13 @@ describe("deriveNotModelledManifest — typed rows from the persisted receipt", 
     const receipt = [{ stated_index: 0, stated_item: { kind: "figure", source_quote: "not in this brief" },
       disposition: "rejected", reason: "stated_value_not_carried" }];
     const block = (deriveNotModelledManifest(BRIEF, withReceipt(receipt)) as unknown as Rec).stated_dispositions as Rec;
-    expect(block).toEqual({ status: "recorded", carried: 0, unlocated: 1, items: [] });
+    expect(block).toEqual({ status: "recorded", carried: 0, unlocated: 1, superseded: 0, items: [] });
   });
 
   it("⭐ RED: the receipt is NOT a search surface — every quantity row is identical with and without it", () => {
     const without = deriveNotModelledManifest(BRIEF, structuredClone(GRAPH));
-    const withIt = deriveNotModelledManifest(BRIEF, withReceipt());
+    // Unbound on purpose: this row isolates the SEARCH SURFACE (typed rows would supersede these spans — R2 P2b).
+    const withIt = deriveUnbound(BRIEF, withReceipt());
     // contrast: the receipt quotes "5%" and "3%"; the model holds neither, so both must stay `absent`
     const verdictOf = (m: typeof without, literal: string) => m.quantities!.items.find((i) => i.literal === literal)?.verdict;
     expect(verdictOf(without, "5%")).toBe("absent");
@@ -139,6 +140,37 @@ describe("deriveNotModelledManifest — typed rows from the persisted receipt", 
   it("CONTROL: a caller that passes no bound rows gets no typed rows, even for a bound receipt (the safe default)", () => {
     expect(deriveUnbound(BRIEF, withReceipt()) as unknown as Rec).not.toHaveProperty("stated_dispositions");
     expect(deriveUnbound(BRIEF, withReceipt())).toEqual(deriveUnbound(BRIEF, structuredClone(GRAPH)));
+  });
+
+  it("⭐ RED (R2 P2b): a typed row SUPERSEDES the read-time row at its span; every tally and invariant still holds", () => {
+    const plain = deriveNotModelledManifest(BRIEF, structuredClone(GRAPH));
+    const typed = deriveNotModelledManifest(BRIEF, withReceipt()) as unknown as Rec & typeof plain;
+    const block = typed.stated_dispositions as unknown as Rec;
+    const typedOffsets = (block.items as Rec[]).map((r) => r.char_offset);
+    // exactly one row per span: no read-time row shares a typed row's offset…
+    expect(typed.quantities!.items.filter((i) => typedOffsets.includes(i.char_offset))).toEqual([]);
+    // …and the read-time rows it replaced are the ones the plain manifest reported there
+    expect(plain.quantities!.items.filter((i) => typedOffsets.includes(i.char_offset)).map((i) => i.literal)).toEqual(["5%", "3%"]);
+    expect(block.superseded).toBe(2);
+    // tallies still count EVERY quantity found; the reported slice is honest about what it left out
+    const { items: _a, truncated: _t1, ...plainCounts } = plain.quantities!;
+    const { items: _b, truncated: _t2, ...typedCounts } = typed.quantities!;
+    expect(typedCounts).toEqual(plainCounts);
+    expect(typed.quantities!.truncated).toBe(false);
+    const tallySum = Object.values(typed.stated_kinds.tally).reduce((a, b) => a + b, 0);
+    expect(tallySum).toBe(typed.quantities!.items.length);
+    // contrast: an unbound caller keeps both read-time rows
+    expect(deriveUnbound(BRIEF, withReceipt()).quantities!.items.map((i) => i.literal)).toEqual(plain.quantities!.items.map((i) => i.literal));
+  });
+
+  it("⭐ RED (R2 P1): the binding sees content the identity projection drops (a `ui` key at depth)", () => {
+    const graph = { ...structuredClone(GRAPH), nodes: [...structuredClone(GRAPH.nodes),
+      { id: "opt_invest", kind: "option", label: "Invest", interventions: { ui: { value: 0, raw_value: 0 } } }] };
+    const bound = { ...graph, stated_dispositions: { reconciled_against: statedDispositionsBindingHash(graph), rows: structuredClone(RECEIPT) } };
+    expect(currentStatedDispositionRows(bound)).toEqual(RECEIPT); // contrast: bound as written
+    const edited = structuredClone(bound);
+    ((edited.nodes[2] as Rec).interventions as Rec).ui = { value: 300, raw_value: 300 };
+    expect(currentStatedDispositionRows(edited)).toBeUndefined();
   });
 
   it("CONTROL: a graph without the key yields a manifest with no new key, byte-identical to before", () => {

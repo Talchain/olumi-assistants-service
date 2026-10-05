@@ -60,9 +60,10 @@ export const StatedDispositionsV3 = z.array(StatedDispositionV3).max(500);
  * Production CEE `abed3b51` edit lanes copy the stored graph's top-level keys forward
  * (`apply-graph-mutation.ts:228-236`, `edit-graph-dispatch.ts:2170-2174` @abed3b51) and its commit does not drop
  * this key, so a receipt CAN outlive the model it was reconciled against. `reconciled_against` is that model's
- * `graph_identity_hash` value computed with the receipt itself OMITTED; a reader uses the rows ONLY while the current
- * graph (receipt omitted) still has that identity (`orchestrator-v5/graph/stated-dispositions-binding.ts`). A bare
- * array — the shape before this binding — names no graph and reads as absent.
+ * full-content hash (sha256 of its stable serialisation minus the receipt and `ref_high_water` — never
+ * `graph_identity_hash`, which drops transient-UI keys at every depth); a reader uses the rows ONLY while the current
+ * graph still hashes to it (`orchestrator-v5/graph/stated-dispositions-binding.ts`). A bare array — the shape before
+ * this binding — names no graph and reads as absent.
  */
 export const StatedDispositionsReceiptV3 = z.object({
   reconciled_against: z.string().regex(/^[0-9a-f]{64}$/),

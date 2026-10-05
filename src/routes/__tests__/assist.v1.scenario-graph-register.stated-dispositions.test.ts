@@ -16,6 +16,7 @@
  * The NO-FIELD CONTROL compares against a capture taken by running the SAME row on the base commit
  * (`__fixtures__/stated-dispositions.no-field-control.base.json`, written with `CAPTURE_BASE=1` at 9e0750dd).
  */
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
@@ -155,9 +156,12 @@ describe("graph.stated_dispositions — register write → stored row → cold r
     expect(res.statusCode, res.body).toBe(200);
     const row = storedRow();
     const receipt = row.graph.stated_dispositions as Rec;
-    // P1: the receipt names the graph it was reconciled against — the stored bytes' identity WITHOUT the receipt.
-    const { stated_dispositions: _receipt, ...bare } = row.graph;
-    expect(receipt.reconciled_against).toBe(computeGraphIdentityHash(bare as never)!.value);
+    // P1/R2: the receipt names the graph it was reconciled against — the stored bytes' FULL-CONTENT hash without the
+    // receipt and `ref_high_water` (derived independently here: keys sorted at every depth, array order kept).
+    const { stated_dispositions: _receipt, ref_high_water: _counter, ...content } = row.graph;
+    const canonical = (v: unknown): unknown => (Array.isArray(v) ? v.map(canonical)
+      : v !== null && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical((v as Rec)[k])])) : v);
+    expect(receipt.reconciled_against).toBe(createHash("sha256").update(JSON.stringify(canonical(content))).digest("hex"));
     const stored = receipt.rows as Rec[];
     expect(stored.map((r) => [r.stated_index, r.disposition, r.reason])).toEqual([
       [0, "carried", undefined],
@@ -323,6 +327,83 @@ describe("P1 — the receipt binds to the graph it was reconciled against", () =
     expect(body.graph_identity_hash).toEqual(computeGraphIdentityHash(row.graph as never));
     expect(body.graph_identity_hash).toEqual(ack.graph_identity_hash);
     expect(body.graph_hash).toBe(ack.graph_hash);
+  });
+});
+
+/**
+ * R2 (Codex buddy review @7d2dc3cf). Each row reproduces the reviewer's counterexample first.
+ */
+describe("R2 — content binding, order-independent reconciliation, one disposition per span", () => {
+  const readOf = async (graph: Rec, brief: string = BRIEF) => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: JSON.parse(JSON.stringify(graph)), briefText: brief });
+    const res = await read();
+    expect(res.statusCode, res.body).toBe(200);
+    return res.json() as Rec;
+  };
+
+  it("⭐ RED (P1, Codex counterexample): a factor whose id is \"ui\" changes 0 → 300 inside an intervention map — the receipt is STALE", async () => {
+    // `graph-identity.ts` drops the transient UI key `ui` at EVERY depth, so the identity hash cannot see this edit.
+    const Q_UI = "Upfront investment would be £300";
+    const brief = `${BRIEF} ${Q_UI}.`;
+    const graph = structuredClone(GRAPH) as Rec;
+    (graph.nodes as Rec[]).push(
+      { id: "ui", kind: "factor", label: "Upfront investment", category: "controllable", observed_state: { value: 0 } },
+      { id: "opt_invest", kind: "option", label: "Invest up front", interventions: { ui: { value: 0, raw_value: 0 } } },
+    );
+    (graph.edges as Rec[]).push(
+      { from: "dec_price", to: "opt_invest", strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: "positive" },
+      { from: "opt_invest", to: "ui", strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: "positive" },
+      { from: "ui", to: "g_mrr", strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: "positive" },
+    );
+    const sidecar = [{ stated_index: 0, stated_item: { kind: "option", source_quote: Q_UI, value: 300, value_span: span(Q_UI, "£300") },
+      disposition: "rejected", reason: "stated_value_not_carried" }];
+    const ack = await register({ graph, brief_text: brief, stated_dispositions: sidecar });
+    expect(ack.statusCode, ack.body).toBe(200);
+    const stored = storedRow().graph;
+    // contrast: as stored, the rejection is read
+    expect(typedItems(await readOf(stored, brief)).map((r) => r.reason)).toEqual(["stated_value_not_carried"]);
+    // abed3b51-style edit: the £300 is now modelled on `ui`, and the root keys (receipt included) ride forward
+    const edited: Rec = { ...stored, nodes: (structuredClone(stored.nodes) as Rec[]).map((n) => (n.id === "opt_invest"
+      ? { ...n, interventions: { ...(n.interventions as Rec), ui: { ...((n.interventions as Rec).ui as Rec), value: 300, raw_value: 300 } } } : n)) };
+    expect(edited.stated_dispositions).toEqual(stored.stated_dispositions);
+    const body = await readOf(edited, brief);
+    expect(typedItems(body)).toEqual([]);
+  });
+
+  it("⭐ RED (P2a): a carrier equal up to object KEY ORDER stays carried", async () => {
+    const sidecar = [{ stated_index: 0, stated_item: { kind: "cause", source_quote: Q_PRICE },
+      disposition: "carried", location: { kind: "edge", from: "fac_price", to: "g_mrr", path: ["strength"] },
+      // the graph holds { mean: 0.5, std: 0.1 }; a GraphV3 parse can hand the writer the other order
+      stored_value: { std: 0.1, mean: 0.5 } }];
+    const res = await register({ graph: structuredClone(GRAPH), brief_text: BRIEF, stated_dispositions: sidecar });
+    expect(res.statusCode, res.body).toBe(200);
+    const rows = ((storedRow().graph.stated_dispositions as Rec).rows ?? storedRow().graph.stated_dispositions) as Rec[];
+    expect(rows.map((r) => [r.disposition, r.reason])).toEqual([["carried", undefined]]);
+  });
+
+  it("CONTROL (P2a): a carrier whose VALUE differs is still withdrawn", async () => {
+    const sidecar = [{ stated_index: 0, stated_item: { kind: "cause", source_quote: Q_PRICE },
+      disposition: "carried", location: { kind: "edge", from: "fac_price", to: "g_mrr", path: ["strength"] },
+      stored_value: { std: 0.1, mean: 0.6 } }];
+    await register({ graph: structuredClone(GRAPH), brief_text: BRIEF, stated_dispositions: sidecar });
+    const rows = ((storedRow().graph.stated_dispositions as Rec).rows ?? storedRow().graph.stated_dispositions) as Rec[];
+    expect(rows.map((r) => [r.disposition, r.reason])).toEqual([["rejected", "carrier_removed"]]);
+  });
+
+  it("⭐ RED (P2b): \"Monthly churn is 3% today\" yields exactly ONE row — the typed one wins its span", async () => {
+    await register({ graph: structuredClone(GRAPH), brief_text: BRIEF, stated_dispositions: structuredClone(SIDECAR) });
+    const body = await readOf(storedRow().graph);
+    const nm = body.not_modelled as Rec;
+    const allRows = [...(((nm.quantities as Rec).items as Rec[]) ?? []), ...typedItems(body)];
+    for (const literal of ["3%", "5%"]) {
+      const quote = literal === "3%" ? Q_CHURN : Q_LOSS;
+      const at = BRIEF.indexOf(quote) + quote.indexOf(literal);
+      const atSpan = allRows.filter((r) => r.char_offset === at);
+      expect(atSpan, literal).toHaveLength(1);
+      expect(atSpan[0]!.typed, literal).toBe(true);
+    }
+    // contrast: a figure with no typed row keeps its untyped row (£49 is carried, so it has no typed row)
+    expect(((nm.quantities as Rec).items as Rec[]).some((r) => r.literal === "£49")).toBe(true);
   });
 });
 

@@ -155,7 +155,7 @@ import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from
 import { assignEntityRefs } from "../orchestrator-v5/graph/entity-refs.js";
 import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
 import { StatedDispositionsV3, omitStatedDispositions, STATED_DISPOSITIONS_KEY } from "../schemas/graph-stated-dispositions.js";
-import { statedDispositionsBindingIdentity } from "../orchestrator-v5/graph/stated-dispositions-binding.js";
+import { statedDispositionsBindingHash } from "../orchestrator-v5/graph/stated-dispositions-binding.js";
 import { reconcileStatedDispositions, type StatedDisposition } from "../cee/draft/records/stated-dispositions.js";
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
@@ -383,15 +383,15 @@ function withStoredEdgeFactsWhenUnstated<T extends { edges: ReadonlyArray<EdgeRe
  * so the stored receipt can never advertise a write the stored graph lacks. No sidecar → no key (the graph is
  * returned by reference, byte-identical to before this carrier existed).
  *
- * ⛔ P1: the stored receipt is `{ reconciled_against, rows }` — `reconciled_against` is the identity of exactly these
- * bytes WITHOUT the receipt, so a reader can tell when a later writer (production CEE copies root keys forward on
+ * ⛔ P1: the stored receipt is `{ reconciled_against, rows }` — `reconciled_against` is the full-content hash of exactly
+ * these bytes WITHOUT the receipt (R2: never `graph_identity_hash`, which drops transient-UI keys at every depth), so a reader can tell when a later writer (production CEE copies root keys forward on
  * edit) has carried it onto a different model (`orchestrator-v5/graph/stated-dispositions-binding.ts`). Bytes that
  * cannot be hashed cannot be bound, so they get no receipt.
  */
 function withRegisteredStatedDispositions<G>(graph: G, receipt: readonly StatedDisposition[] | undefined): G {
   const bare = omitStatedDispositions(graph);
   if (receipt === undefined || receipt.length === 0) return bare;
-  const reconciledAgainst = statedDispositionsBindingIdentity(bare);
+  const reconciledAgainst = statedDispositionsBindingHash(bare);
   if (reconciledAgainst === null) return bare;
   return Object.assign({}, bare, {
     [STATED_DISPOSITIONS_KEY]: { reconciled_against: reconciledAgainst, rows: reconcileStatedDispositions(receipt, bare) },
