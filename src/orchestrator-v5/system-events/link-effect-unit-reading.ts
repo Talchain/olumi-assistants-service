@@ -24,6 +24,11 @@ export interface PreparedLinkEffectUnitReadings {
   readonly points_at_zero?: readonly string[];
   /** One question, including every unresolved eligible end. Nothing is written until it is answered. */
   readonly ask?: string;
+  /**
+   * RT-6 S4-A phase 2: the ends `ask` asks for a UNIT ("What unit is the 1 change in … stated in?"), as typed data — the
+   * question a one-word answer can complete. A points-or-share or a currency-vs-% question is not a unit question.
+   */
+  readonly asked_unit?: readonly { readonly end: 'source' | 'target'; readonly node_id: string; readonly value: number }[];
 }
 
 /**
@@ -278,8 +283,9 @@ export function prepareLinkEffectUnitReadings(
   const unit_readings: LinkEffectUnitReading[] = [];
   const points_at_zero: string[] = [];
   const asks: string[] = [];
-  for (const [node, other, value, statedUnit] of [[source, target, effect.per_source_change, effect.per_source_change_unit],
-    [target, source, effect.amount, effect.amount_unit]] as const) {
+  const asked_unit: { end: 'source' | 'target'; node_id: string; value: number }[] = [];
+  for (const [node, other, value, statedUnit, end] of [[source, target, effect.per_source_change, effect.per_source_change_unit, 'source'],
+    [target, source, effect.amount, effect.amount_unit, 'target']] as const) {
     const label = String(node.label ?? node.id);
     const establishedUnit = unitOf(node) ?? (current === undefined ? undefined : endpointUnit(current, String(node.id)));
     const literalPercent = amounts.find(a => a.magnitude === Math.abs(value) && a.kind === 'percent');
@@ -320,10 +326,11 @@ export function prepareLinkEffectUnitReadings(
       asks.push(pointsOrShareAsk(label, value, undefined, undefined));
     } else if (unit === undefined || unit.length > 40) {
       asks.push(`What unit is the ${Math.abs(value)} change in \u201c${label}\u201d stated in?`);
+      asked_unit.push({ end, node_id: String(node.id), value });
     } else {
       unit_readings.push({ node_id: String(node.id), unit_reading: { unit, source: 'user_stated', source_quote: one!.clause } });
     }
   }
   // One question even when both ends need clarification.
-  return { unit_readings, ...(points_at_zero.length > 0 ? { points_at_zero } : {}), ...(asks.length > 0 ? { ask: asks.map((ask, i) => { const lead = i === 0 ? ask : ask[0]!.toLowerCase() + ask.slice(1); return i < asks.length - 1 ? lead.replace(/\?$/, ';') : lead; }).join(' ') } : {}) };
+  return { unit_readings, ...(points_at_zero.length > 0 ? { points_at_zero } : {}), ...(asked_unit.length > 0 ? { asked_unit } : {}), ...(asks.length > 0 ? { ask: asks.map((ask, i) => { const lead = i === 0 ? ask : ask[0]!.toLowerCase() + ask.slice(1); return i < asks.length - 1 ? lead.replace(/\?$/, ';') : lead; }).join(' ') } : {}) };
 }

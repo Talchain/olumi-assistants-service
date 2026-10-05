@@ -705,3 +705,26 @@ describe('RT-6: figures the recorder cannot read → ONE fixed question + the ca
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
   });
 });
+
+// ⭐ RT-6 S4-A PHASE 2 (design pd output/harness-github11/S4A-PHASE2-DESIGN.md): the question a one-word answer completes.
+describe('RT-6 S4-A phase 2: the unit reader says WHICH end it asked about, as typed data', () => {
+  const read = (fixtureId: CorpusRow['fixture'], from: string, to: string, e: LinkEffectStatement, quote: string) =>
+    prepareLinkEffectUnitReadings(fixture({ fixture: fixtureId } as CorpusRow), from, to, e, quote);
+  it('Acceptance C1 ("1 point of onboarding drag", unitless target) → asked_unit names the TARGET and its figure', () => {
+    const r = read('d39c05ba', 'developer_headcount', 'onboarding_drag', effect(1, 'points', 2, 'developers'),
+      'Every 2 extra developers add about 1 point of onboarding drag.');
+    expect(r.ask).toBe('What unit is the 1 change in “Onboarding drag” stated in?');
+    expect(r.asked_unit).toEqual([{ end: 'target', node_id: 'onboarding_drag', value: 1 }]);
+  });
+  it('CONTROL: a unit written in the sentence asks nothing, so nothing is asked about', () => {
+    const r = read('d39c05ba', 'developer_headcount', 'onboarding_drag', effect(1, 'percentage points', 2, 'developers'),
+      'Every 2 extra developers add about 1 percentage point of onboarding drag.');
+    expect(r.ask).toBeUndefined(); expect(r.asked_unit).toBeUndefined();
+  });
+  it('a points-or-share question is NOT a unit question (its answer is not a unit)', () => {
+    const r = read('96ea7439', 'team_coordination_overhead', 'feature_launch_delay_risk', effect(1, '%', 5, '%'),
+      'Each 5% rise in team coordination overhead adds about 1% to feature-launch delay risk.');
+    expect(r.ask).toMatch(/^Is that a 5-point rise in “Team coordination overhead”/);
+    expect(r.asked_unit ?? []).not.toContainEqual(expect.objectContaining({ end: 'source' }));
+  });
+});
