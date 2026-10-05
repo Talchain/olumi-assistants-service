@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { parsePendingAction } from '../../session/pending-action.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 const SCENARIO = 'd39c05ba-0000-4000-8000-0000000000aa';
 const GRAPH = JSON.parse(readFileSync(new URL('./fixtures/rt6-graph-d39c05ba.json', import.meta.url), 'utf8')) as Record<string, unknown>;
@@ -23,8 +24,15 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 
-let graphHash = 'h-d39-asked';
+// The served hash is the REAL analysis hash: the writer's dry run recomputes it and refuses a mismatch (`superseded`).
+const ASKED_HASH = computeAnalysisAffectingGraphHash(GRAPH as never)!;
+let graphHash = ASKED_HASH;
 let agentCalls = 0;
+/** The NEXT turn: the user's reply is the unit, and the Agent passes only `unit_answer` (the tool's own guidance). */
+let answerTurn = false;
+const POINTS_CARD = 'Record: +2 developers on "Developer headcount" → +1 percentage point in "Onboarding drag": raising "Developer headcount" by 2 developers raises "Onboarding drag" by 1 percentage point.'
+  + ' From your words: "Every 2 extra developers add about 1 point of onboarding drag."'
+  + ' I\'ve taken "Onboarding drag" to be a percentage, and your "1 point" to mean 1 percentage point, from your answer "Percentage points". Approve, or correct.';
 
 describe('RT-6 S4-A phase 2: the asked question rides the answer row', () => {
   let app: FastifyInstance;
@@ -37,8 +45,8 @@ describe('RT-6 S4-A phase 2: the asked question rides the answer row', () => {
       agentCalls += 1;
       if (agentCalls % 2 === 1) {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'propose_link_effect', call_id: `c${agentCalls}`,
-          arguments: JSON.stringify({ from_label: 'Developer headcount', to_label: 'Onboarding drag', amount: 1, amount_unit: 'points',
-            per_source_change: 2, per_source_change_unit: 'developers', quote: C1 }) }] }), { status: 200 });
+          arguments: JSON.stringify(answerTurn ? { unit_answer: 'Percentage points' } : { from_label: 'Developer headcount', to_label: 'Onboarding drag',
+            amount: 1, amount_unit: 'points', per_source_change: 2, per_source_change_unit: 'developers', quote: C1 }) }] }), { status: 200 });
       }
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'What unit is the 1 change in “Onboarding drag” stated in?' }] }] }), { status: 200 });
     }));
@@ -53,7 +61,8 @@ describe('RT-6 S4-A phase 2: the asked question rides the answer row', () => {
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { appended.length = 0; agentCalls = 0; graphHash = 'h-d39-asked'; });
+  beforeEach(() => { appended.length = 0; agentCalls = 0; graphHash = ASKED_HASH; answerTurn = false;
+    store.readMostRecentPendingActions.mockImplementation(async () => []); });
 
   const say = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: C1 } });
 
@@ -66,8 +75,35 @@ describe('RT-6 S4-A phase 2: the asked question rides the answer row', () => {
     const questions = rows.flatMap((w) => w.pending_actions as unknown[]).map((p) => parsePendingAction(p))
       .filter((p) => p?.action.kind === 'agent_link_effect_question');
     expect(questions).toHaveLength(1);
-    expect(questions[0]).toMatchObject({ scenario_id: SCENARIO, preconditions: { graph_hash: 'h-d39-asked' },
+    expect(questions[0]).toMatchObject({ scenario_id: SCENARIO, preconditions: { graph_hash: ASKED_HASH },
       action: { question: 'What unit is the 1 change in “Onboarding drag” stated in?', quote: C1, asked_ends: ['target'] } });
   });
 
+
+  type Body = { suggested_actions: { id: string; detail?: string }[]; _agent: { tool_calls: { name: string; ok: boolean; proposal_id?: string; refusal?: string }[] } };
+  const reply = async (held: readonly unknown[]) => {
+    store.readMostRecentPendingActions.mockImplementation(async () => held as never);
+    answerTurn = true;
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Percentage points.' } });
+    expect(r.statusCode, r.body).toBe(200);
+    return r.json() as Body;
+  };
+
+  it('the NEXT reply "Percentage points." completes the held question → the approval chip shows Science\'s card words', async () => {
+    await say();
+    const held = appended.flatMap((w) => (w.pending_actions ?? []) as unknown[]).map((p) => parsePendingAction(p))
+      .filter((p) => p?.action.kind === 'agent_link_effect_question');
+    expect(held).toHaveLength(1);
+    const b = await reply(held);
+    const call = b._agent.tool_calls.find((c) => c.name === 'propose_link_effect');
+    expect(call, JSON.stringify(b._agent.tool_calls)).toMatchObject({ ok: true });
+    expect(b.suggested_actions.find((c) => c.id === `agent-approve-proposal:${call!.proposal_id}`)?.detail).toBe(POINTS_CARD);
+  });
+
+  it('CONTROL: the same reply with NO held question prepares nothing (no chip; refused as no_unit_question)', async () => {
+    const b = await reply([]);
+    expect(b._agent.tool_calls.find((c) => c.name === 'propose_link_effect'), JSON.stringify(b._agent.tool_calls))
+      .toMatchObject({ ok: false, refusal: 'no_unit_question' });
+    expect(b.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:'))).toEqual([]);
+  });
 });
