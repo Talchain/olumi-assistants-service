@@ -3144,7 +3144,7 @@ describe('tryPostAnalysisAdviceGate — what_would_flip richer evidence + honest
     if (out.matched) {
       const t = out.assistant_text;
       expect(t).toContain(
-        "This is a close call: 'Hire One Tech Lead' is narrowly ahead of 'Hire One Tech Lead and One Developer' by about 5 percentage points",
+        "This is a close call: in this model, 'Hire One Tech Lead' was supported by about 5 percentage points more of the runs than 'Hire One Tech Lead and One Developer'",
       );
       expect(t).not.toMatch(/effectively tied/i);
       expect(t).not.toMatch(/favoured option|performing best|\bbest\b/i);

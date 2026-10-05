@@ -11,6 +11,7 @@
  * and the host's own at-rest asks (#2420's full-toggle context ask, the levels ask) — CODEX 5923981385.
  */
 
+import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch } from '../../graph/inert-risk.js';
@@ -27,9 +28,14 @@ function goalOf(graph: unknown): Rec | undefined {
   return goals.length === 1 ? goals[0] : undefined;
 }
 
-/** Whether the goal carries a target the user stated (any of the fields the goal-target writer sets). */
-export function goalHasStatedTarget(goal: Rec): boolean {
-  return finite(goal.goal_threshold_raw) || finite(goal.success_threshold) || finite(goal.goal_threshold);
+/**
+ * Whether the goal carries a target the user stated: any of the fields the goal-target writer sets, or (RT-10 B′ R3) the
+ * goal's own limit row, read by the ONE target reader — "at most 400" is a target, so it is never asked for again.
+ */
+export function goalHasStatedTarget(goal: Rec, graph?: unknown): boolean {
+  const g = recordOf(graph);
+  return finite(goal.goal_threshold_raw) || finite(goal.success_threshold) || finite(goal.goal_threshold)
+    || (g !== undefined && statedGoalTargetOf(g, goal) !== null);
 }
 
 export interface DecisionInputAskContext {
@@ -187,7 +193,7 @@ function rawDecisionInputAsk(graph: unknown): string | null {
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return null;
   return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
-    : !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
+    : !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
 }
 
 /** Normalise only exact narrator copies of this graph's host ask before placement. */

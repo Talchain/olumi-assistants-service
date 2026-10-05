@@ -7,6 +7,11 @@
  * Admissions are the PRODUCER's (`buildCanonicalAnalysisReadyFromGraph`) over served / fixture graphs wherever the
  * producer mints the cell from a graph in this repo; M4 (refused-but-safe `exploratory`) is the one `deriveMode` cell
  * no fixture graph reaches, so it is written as `analysisAdmissionFrom` mints it.
+ *
+ * RE-PINNED, RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): M3's served cold graph was `exploratory` ONLY through
+ * the untestable-target cap, which R2 retired; the producer now mints it `quantified_provisional` (the target withholds
+ * only the claims against it, in the Run). No producer path mints an analysable `exploratory` any more (`deriveMode`:
+ * proceed → comparative_leader | quantified_provisional), so that cell's rule stays pinned on `M3_projection`.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -54,7 +59,7 @@ describe('PRECONDITION: each cell is the admission it is named for', () => {
   it.each([
     ['M1', true, 'comparative_leader'],
     ['M2', true, 'quantified_provisional'],
-    ['M3', true, 'exploratory'],
+    ['M3', true, 'quantified_provisional'],
     ['M4', false, 'exploratory'],
     ['M5', false, 'none'],
   ] as const)('%s → structurally_analysable %s, mode %s', (cell, analysable, mode) => {
@@ -65,7 +70,7 @@ describe('PRECONDITION: each cell is the admission it is named for', () => {
 const EXPECTED_WHEN_A_TRUE: Record<keyof typeof CELLS, LeaderLicence> = {
   M1: 'permitted',
   M2: 'permitted_with_caveat',
-  M3: 'withheld',
+  M3: 'permitted_with_caveat',
   M4: 'withheld',
   M5: 'withheld',
   M6_absent: 'withheld',

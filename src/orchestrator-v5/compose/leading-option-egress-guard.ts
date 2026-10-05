@@ -292,6 +292,21 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * leading option just as surely without scoring anything.
    */
   { code: 'scored_highest', re: /\bscor(?:e|es|ed|ing)\s+highest\b/i },
+  /**
+   * ⭐ RT-10 B′ (DL e8 condition 1): the deterministic headline of a Run that SENT minimise leads with "{option} came out
+   * lowest for {goal} in N% of runs of this model" (`analysis-result-headline.ts`, `MINIMISED_LEAD_PREFIX`). Added WITH
+   * that template and pinned by its derived control (`coaching/__tests__/bprime-minimise-lead.test.ts` drives the real
+   * builder and asserts `textNamesLeadingOption` sees every leader-naming output), so a withheld leader cannot leave
+   * through the new verb.
+   */
+  { code: 'came_out_lowest', re: /\bcame\s+out\s+lowest\b/i },
+  /**
+   * ⭐ THE DIRECTION-NEUTRAL FORM (DL 0df0e1 #87 6002469285, Part B): where a composer cannot see the Run's sent
+   * direction, it names an option as "{N}% of runs supported {X}", "{X} would be supported by the most runs if …", "the
+   * option the most runs supported" or "{X} was supported by … runs" (a plurality, never "most runs" bare). Added WITH those composers, for the same reason as `scored_highest` above: a new leader verb the
+   * alarm cannot read would switch redaction off for it.
+   */
+  { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?|could\s+|still\s+)?support(?:s|ed|ing)?\b|\bsupported\s+by\s+[^.;!?]{0,48}?\b(?:runs?|simulations?|draws?)\b/i },
   { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
 ];
 

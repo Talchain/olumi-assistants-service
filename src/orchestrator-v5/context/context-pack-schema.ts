@@ -771,6 +771,8 @@ export const ContextPackGoalTargetSchema = z.discriminatedUnion('status', [
       status: z.literal('set'),
       value: z.number(),
       unit: z.string().optional(),
+      /** RT-10 B′ R3: the held comparator ("at most 400" = `<=`); absent where none is held. */
+      operator: z.enum(['<=', '<', '>=', '>']).optional(),
     })
     .strict(),
   z.object({ status: z.literal('unset') }).strict(),

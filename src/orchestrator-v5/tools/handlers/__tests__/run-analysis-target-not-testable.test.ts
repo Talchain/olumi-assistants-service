@@ -199,14 +199,20 @@ describe('F1b [R1]: an off-scale target withholds the claims against it, not the
     const o = outcomeOf(after, '59_price')!;
     expect(o).toMatchObject({ mean: outcomeOf(M1.plot_body, '59_price')!.mean, p10: expect.any(Number), p90: expect.any(Number) });
     const w = warningsOf(after).find((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
-    expect(w.withheld_claims).toEqual(['goal_probability', 'joint_probability', 'downside', 'win_share']);
-    expect(((after.option_comparison as Json[])[0]!).win_probability).toBeUndefined();
+    // RE-PINNED, RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): the shares are no longer a claim against the
+    // target (`win_share` left the list; the share stays, by option). `downside` still goes.
+    expect(w.withheld_claims).toEqual(['goal_probability', 'joint_probability', 'downside']);
+    const first = (M1.plot_body.option_comparison as Json[])[0]!;
+    expect(((after.option_comparison as Json[])[0]!).win_probability).toBe(first.win_probability);
   });
 
   it('CONTROL: P5 (m1 as served: a path resting on Olumi\'s guess) still withholds the outcome, and records every claim', () => {
     const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), M1.graph) as Json;
     expect(outcomeOf(after, '59_price')?.mean).toBeUndefined();
-    expect(warningsOf(after).find((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).not.toHaveProperty('withheld_claims');
+    // RE-PINNED, RT-10 B′ R2: the record now names every claim it withheld (it used to omit the list, meaning "every
+    // class"); the shares are kept, so `win_share` is not among them.
+    expect(warningsOf(after).find((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)?.withheld_claims)
+      .toEqual(['goal_probability', 'joint_probability', 'outcome', 'downside']);
   });
 });
 
@@ -216,7 +222,7 @@ describe('F1b [R1]: an off-scale target withholds the claims against it, not the
  */
 describe('F1b [R1] condition (1): the Agent may describe a kept outcome, never rank by it', () => {
   it('RED: P2 → the Agent\'s note is the outcome-kept licence (no rank, no leader, no better/worse)', async () => {
-    const { goalChanceWithheldForAgent, OUTCOME_KEPT_NOTE } = await import('../../../agent-lane/goal-chance-withheld.js');
+    const { goalChanceWithheldForAgent, TARGET_ONLY_OUTCOME_KEPT_NOTE } = await import('../../../agent-lane/goal-chance-withheld.js');
     const g = clone(M1.graph);
     for (const e of g.edges as Json[]) {
       if ((e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months') && (e.defaulted === true || String(e.provenance?.magnitude ?? '').startsWith('olumi_'))) {
@@ -226,15 +232,20 @@ describe('F1b [R1] condition (1): the Agent may describe a kept outcome, never r
     (g.nodes as Json[]).find((n) => n.kind === 'goal')!.goal_threshold = 1.5;
     const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), g) as Json;
     const agent = goalChanceWithheldForAgent({ enrichment: after })!;
-    expect(agent.note).toBe(OUTCOME_KEPT_NOTE);
-    expect(agent.note).toMatch(/you are not given those figures\. Never quote or estimate an option’s outcome, never rank or order the options by their outcomes, never name a leading or best option/);
+    // RE-PINNED, RT-10 B′ R2: the target-only licence (the shares and the leader are this run's findings); every
+    // comparative use of the KEPT outcomes is still forbidden (DL #2448 condition (1)).
+    expect(agent.note).toBe(TARGET_ONLY_OUTCOME_KEPT_NOTE);
+    expect(agent.note).toMatch(/you are not given those figures, so never quote or estimate one, never rank or order the options by those outcomes/);
     expect(agent.note).toMatch(/never say one option is better or worse/);
   });
 
   it('CONTROL: P5 (outcome withheld) keeps the ban on quoting any option\'s value', async () => {
-    const { goalChanceWithheldForAgent, GOAL_CHANCE_WITHHELD_NOTE } = await import('../../../agent-lane/goal-chance-withheld.js');
+    const { goalChanceWithheldForAgent, TARGET_ONLY_NOTE } = await import('../../../agent-lane/goal-chance-withheld.js');
     const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), M1.graph) as Json;
-    expect(goalChanceWithheldForAgent({ enrichment: after })!.note).toBe(GOAL_CHANCE_WITHHELD_NOTE);
+    // RE-PINNED, RT-10 B′ R2: the target-only licence, which keeps the ban on quoting or estimating any option's outcome.
+    const note = goalChanceWithheldForAgent({ enrichment: after })!.note;
+    expect(note).toBe(TARGET_ONLY_NOTE);
+    expect(note).toMatch(/never quote or estimate an option’s outcome/);
   });
 });
 
