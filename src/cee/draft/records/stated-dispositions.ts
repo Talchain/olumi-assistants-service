@@ -179,3 +179,117 @@ export function reconcileStatedDispositions(rows: readonly StatedDisposition[], 
     return { stated_index: row.stated_index, stated_item: row.stated_item, disposition: 'rejected', reason: 'carrier_removed' };
   });
 }
+
+/** RT-6 B4 input hook. No recorder or persisted reading carrier exists in this tree. */
+export interface StatedUserReading {
+  readonly stated_index: number;
+  readonly reading: 'user_set_aside' | 'agent_proposed_user_confirmed';
+}
+export interface StatedRuleDisclosure {
+  readonly stated_index: number;
+  readonly quote: string;
+  readonly code: string;
+  readonly reason: string;
+  readonly on_option_path: boolean;
+  readonly actions?: readonly ['Add it', 'Leave it out'];
+  readonly ask?: string;
+  readonly increment_index?: number;
+  readonly incoming_index?: number;
+}
+export const SIGN_CONFIRMATION_ASK = "I read 'loses about 2 customers' with 'each lost customer removes £300' as raising prices ADDING £6,000. Right, or does it take £6,000 away?";
+type RuleRow = { readonly stated_index: number; readonly stated_item: unknown; readonly disposition: string; readonly location?: unknown; readonly reason?: string };
+interface StatedPathEdge { from: string; to: string; index: number; amount?: number; per?: number; literal?: string }
+
+/**
+ * ONE compile / persisted Run / evaluation predicate (DROP-1 D1–D3, SIGN-1 S2).
+ * Reachability is exclusively over the stated records, including refused / never-minted quantities.
+ * A positive, reconciled receipt is the carried authority. Missing drops never supply it.
+ */
+export function assessStatedRules(rows: readonly RuleRow[], readings: readonly StatedUserReading[] = []) {
+  const items = new Map<number, DraftStatedItem>();
+  for (const row of rows) {
+    if (!object(row.stated_item) || typeof row.stated_item.kind !== 'string' || typeof row.stated_item.source_quote !== 'string') continue;
+    // The receipt's item is passthrough. Test every reference at use; malformed fields supply no identity.
+    items.set(row.stated_index, row.stated_item as unknown as DraftStatedItem);
+  }
+  const integer = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+  const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+  const canonical = goalQuantityCanonicaliser(new Map([...items].map(([index, item]) => [index, {
+    ...item, baseline_ref: integer(item.baseline_ref) ? item.baseline_ref : undefined,
+    quantity: integer(item.quantity) ? item.quantity : undefined,
+  }])));
+  const q = (n: number): string => `q:${canonical(n)}`;
+  const edges: StatedPathEdge[] = [];
+  const options: string[] = [];
+  const goals = new Set<string>();
+  for (const [index, item] of items) {
+    if (item.kind === 'goal') goals.add(q(integer(item.quantity) ? item.quantity : index));
+    if (item.kind === 'option') {
+      const option = `o:${index}`; options.push(option);
+      // A relationship can name the option's own stated index (including Keep with no numeric setting).
+      // This supplies reachability, never a setting value.
+      edges.push({from:option,to:q(integer(item.quantity)?item.quantity:index),index,amount:finite(item.value)?item.value:undefined,per:1});
+    }
+    const e = item.option_effect;
+    if (object(e) && integer(e.option) && integer(e.quantity)) edges.push({from:`o:${e.option}`,to:q(e.quantity),index,
+      amount:finite(e.change_by)?e.change_by:finite(e.sets_to)?e.sets_to:undefined,per:1});
+    const r = item.relationship;
+    if (object(r) && integer(r.from_quantity) && integer(r.to_quantity)) edges.push({from:q(r.from_quantity),to:q(r.to_quantity),index,
+      amount:finite(r.amount)?r.amount:undefined,per:finite(r.per_source_change)?r.per_source_change:undefined,
+      literal:typeof r.per_source_literal==='string'?r.per_source_literal:undefined});
+  }
+  const closure = (seeds: Iterable<string>, reverse=false): Set<string> => {
+    const reached = new Set(seeds);
+    for (let changed=true; changed;) {
+      changed=false;
+      for (const e of edges) {
+        const from=reverse?e.to:e.from,to=reverse?e.from:e.to;
+        if (reached.has(from) && !reached.has(to)) {reached.add(to);changed=true;}
+      }
+    }
+    return reached;
+  };
+  const fromOptions=closure(options), toGoals=closure(goals,true);
+  const onPath=(e:StatedPathEdge):boolean=>fromOptions.has(e.from) && toGoals.has(e.to);
+  const aside = new Set(readings.filter(r=>r.reading==='user_set_aside').map(r=>r.stated_index));
+  const confirmed = new Set(readings.filter(r=>r.reading==='agent_proposed_user_confirmed').map(r=>r.stated_index));
+  const dropped: StatedRuleDisclosure[] = [];
+  for (const row of rows) {
+    const item=items.get(row.stated_index);
+    if (item === undefined || item.kind !== 'cause' && item.kind !== 'option_effect' && item.relationship === undefined) continue;
+    // D2: the server reconciles and binds carried locations before these rows are read.
+    const carried = row.disposition === 'carried' && object(row.location) || row.reason === 'user_stated_no_effect';
+    if (carried || aside.has(row.stated_index)) continue;
+    const on_option_path=edges.some(e=>e.index===row.stated_index && onPath(e));
+    const code=row.reason ?? (row.disposition==='asked'?'link_unresolved':'stated_relationship_not_carried');
+    const reason=code==='literal_ambiguous'?'that figure appears twice in your sentence'
+      : code==='relationship_unsized'?'the relationship has no usable size'
+      : code==='unit_not_evidenced'?'the unit is not evidenced in that quote'
+      : code==='carrier_removed'?'the recorded relationship is no longer in the model'
+      : 'the analysis does not carry this stated cause';
+    dropped.push({stated_index:row.stated_index,quote:item.source_quote,code,reason,on_option_path,actions:['Add it','Leave it out']});
+  }
+  const sign_unconfirmed: StatedRuleDisclosure[] = [];
+  const non_increment_negative_pairs: {increment_index:number;incoming_index:number;outgoing_index:number}[] = [];
+  const coefficient = (e:StatedPathEdge):number|undefined => e.amount===undefined || e.per===undefined || e.per===0 ? undefined : e.amount/e.per;
+  const seenQuantities = new Set<string>();
+  for (const [itemIndex,alias] of items) {
+    const index=canonical(integer(alias.quantity)?alias.quantity:itemIndex);
+    const item=items.get(index) ?? alias;
+    const identity=q(index);
+    if (seenQuantities.has(identity)) continue;
+    seenQuantities.add(identity);
+    for (const incoming of edges.filter(e=>e.to===identity && onPath(e))) for (const outgoing of edges.filter(e=>e.from===identity && onPath(e))) {
+      const si=coefficient(incoming),so=coefficient(outgoing);
+      const doubleNegative=si!==undefined && so!==undefined && si<0 && so<0;
+      if (doubleNegative && item.kind!=='change_quantity') non_increment_negative_pairs.push({increment_index:index,incoming_index:incoming.index,outgoing_index:outgoing.index});
+      const mirror=outgoing.per!==undefined && outgoing.per<0 && /^(?:each|every|per)\b/i.test(outgoing.literal?.trim() ?? '');
+      if (item.kind!=='change_quantity' || !(doubleNegative || mirror) || confirmed.has(outgoing.index) || aside.has(outgoing.index)) continue;
+      if (sign_unconfirmed.some(s=>s.increment_index===index)) continue; // S4 one ask per increment.
+      sign_unconfirmed.push({stated_index:outgoing.index,increment_index:index,incoming_index:incoming.index,
+        quote:items.get(outgoing.index)!.source_quote,code:'sign_unconfirmed',reason:'sign_unconfirmed',on_option_path:true,ask:SIGN_CONFIRMATION_ASK});
+    }
+  }
+  return {dropped,sign_unconfirmed,non_increment_negative_pairs,
+    block_leader:dropped.some(d=>d.on_option_path) || sign_unconfirmed.length>0};
+}

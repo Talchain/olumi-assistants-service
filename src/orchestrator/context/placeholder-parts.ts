@@ -96,8 +96,14 @@ export function nodeUnitOf(nodes: readonly unknown[]): (id: unknown) => string |
  * a link that holds by definition. One test, so the two gates cannot disagree on the same link (AIQ 5917939324; P0
  * PARTNER 5918016361). Read it over {@link asAnalysed}'s graph: a link out of the calculation is on no path.
  */
-export function olumiGuessedLink(e: Rec, unitOf: (id: unknown) => string | undefined): boolean {
-  return olumiSizedLink(e) && !holdsByDefinition(e, unitOf);
+/** SIGN-1's lift hook is parameter-only until MC supplies the persisted RT-6 B4 recorder. */
+function unconfirmedSign(e: Rec, readings: readonly import('../../cee/draft/records/stated-dispositions.js').StatedUserReading[]): boolean {
+  if (!isRec(e.provenance) || e.provenance.sign_unconfirmed !== true) return false;
+  const index = e.provenance.sign_unconfirmed_stated_index;
+  return !readings.some(r => r.stated_index === index && (r.reading === 'agent_proposed_user_confirmed' || r.reading === 'user_set_aside'));
+}
+export function olumiGuessedLink(e: Rec, unitOf: (id: unknown) => string | undefined, readings: readonly import('../../cee/draft/records/stated-dispositions.js').StatedUserReading[] = []): boolean {
+  return unconfirmedSign(e, readings) || olumiSizedLink(e) && !holdsByDefinition(e, unitOf);
 }
 
 /**
@@ -105,8 +111,8 @@ export function olumiGuessedLink(e: Rec, unitOf: (id: unknown) => string | undef
  * there: Olumi's estimate the user ACCEPTED sizes a link for goal figures. A limit keeps {@link olumiGuessedLink} whole —
  * (ii): no Olumi size, accepted or not, scores a parts limit (CODEX CR #2446 5930402198).
  */
-export function olumiGuessedGoalLink(e: Rec, unitOf: (id: unknown) => string | undefined): boolean {
-  return olumiGuessedLink(e, unitOf) && !isAcceptedOlumiSize(e);
+export function olumiGuessedGoalLink(e: Rec, unitOf: (id: unknown) => string | undefined, readings: readonly import('../../cee/draft/records/stated-dispositions.js').StatedUserReading[] = []): boolean {
+  return unconfirmedSign(e, readings) || olumiGuessedLink(e, unitOf, readings) && !isAcceptedOlumiSize(e);
 }
 
 /**

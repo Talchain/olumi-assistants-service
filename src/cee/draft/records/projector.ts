@@ -56,7 +56,7 @@ import { goalQuantityCanonicaliser } from './goal-quantity-identity.js';
  * `from_brief` badge for a node that has not earned one.
  */
 
-import { deriveStatedDispositions, type StatedDisposition } from "./stated-dispositions.js";
+import { assessStatedRules, deriveStatedDispositions, type StatedDisposition } from "./stated-dispositions.js";
 import { createHash } from "node:crypto";
 // ⭐ DERIVED, NEVER MIRRORED. The bound the projector honours is the validator's own
 // constant, imported. A hand-copied `6` here would be a second authority for one
@@ -108,7 +108,7 @@ import { classifyUnitScaleClass } from "./unit-scale-class.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
 import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/placeholder-parts.js";
-import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
+import { canonicalUnitSpelling, sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
 import { LLM_STRENGTH_STD_FLOOR } from "../../constants.js";
 import { defaultFrameFor, framedFields, statedRangeFrame } from "../../../orchestrator-v5/agent-lane/frame-rule.js";
 // The readiness validator's own exemptions from NO_PATH_TO_GOAL, read here so the prune and readiness share one rule.
@@ -268,6 +268,9 @@ const EDGE_ATTRIBUTION = {
 export const GOAL_QUANTITY_IDENTITY_QUOTE = "Same-quantity identity minted by the projector";
 
 export interface RecordProvenance {
+  /** SIGN-1 S3, retained by EdgeProvenanceV3.passthrough; never deletes the link. */
+  sign_unconfirmed?: true;
+  sign_unconfirmed_stated_index?: number;
   readonly provenance_class: RecordProvenanceClass;
   /**
    * REQUIRED by `StructuredProvenance` on any object that reaches an edge.
@@ -919,6 +922,7 @@ export interface RecordConstraintCandidate {
 }
 
 export interface RecordProjection {
+  readonly stated_rule_disclosures?: readonly import('./stated-dispositions.js').StatedRuleDisclosure[];
   /** Typed input-index receipts; not yet a declared persisted GraphV3 field. */
   readonly stated_dispositions?: readonly StatedDisposition[];
   /** GraphV3, ready for the parse stage's post-LLM seam. */
@@ -3480,7 +3484,8 @@ function projectOnce(
         // alone does not attest the subject, measurement or current-value role.
         // raw_value is the display magnitude, not a second calculation value.
         // Derive it only from the producer's declared convention, never size.
-        const rawValue = unit === "%" && (claim.value_scale === "unit_interval" || claim.value_scale === "ratio")
+        const scaleUnit = typeof unit === "string" ? canonicalUnitSpelling(unit) : unit;
+        const rawValue = scaleUnit === "%" && (claim.value_scale === "unit_interval" || claim.value_scale === "ratio")
           || claim.value_scale === "raw_count" || claim.value_scale === "ratio"
           ? literalConventionValue(claim.value,unit,claim.value_scale) : undefined;
         node.data = {
@@ -5872,13 +5877,24 @@ export function projectRecordsToGraph(
     ...[...located.refusals, ...units.refusals].filter(r => records.stated_items[r.stated_index] !== undefined).map(r => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: records.stated_items[r.stated_index]!.source_quote,
       stated_index: r.stated_index, reason: r.reason, source_quote: records.stated_items[r.stated_index]!.source_quote })), ...projection.dropped,
   ] };
+  const statedDispositions = deriveStatedDispositions(records, projection, projection.statedNodeIds, originalRecords);
+  const statedRules = assessStatedRules(statedDispositions);
+  // SIGN-1 S3: retain the link and its number; the existing placeholder reader withholds its claim.
+  for (const finding of statedRules.sign_unconfirmed) {
+    const row = statedDispositions.find(r => r.stated_index === finding.stated_index);
+    if (row?.disposition !== 'carried' || row.location.kind !== 'edge') continue;
+    const location = row.location;
+    const edge = projection.graph.edges.find(e => e.from === location.from && e.to === location.to);
+    if (edge?.provenance !== undefined) { edge.provenance.sign_unconfirmed = true; edge.provenance.sign_unconfirmed_stated_index = finding.stated_index; }
+  }
   // The internal binding is not part of the contract: consumers get the same
   // graph/provenance/disclosures and the explicitly declared constraint carriers.
   return boundEveryNodeLabel(
     discloseNodesNamedWithASentence({
       graph: projection.graph,
       provenance: projection.provenance,
-      stated_dispositions: deriveStatedDispositions(records, projection, projection.statedNodeIds, originalRecords),
+      stated_dispositions: statedDispositions,
+      stated_rule_disclosures: [...statedRules.dropped, ...statedRules.sign_unconfirmed],
       dropped: projection.dropped,
       goalConstraints: projection.goalConstraints,
       constraintCandidates: projection.constraintCandidates,
@@ -6063,5 +6079,6 @@ export function projectionFingerprint(projection: RecordProjection): string {
     provenance: projection.provenance,
     dropped: projection.dropped,
     stated_dispositions: projection.stated_dispositions,
+    stated_rule_disclosures: projection.stated_rule_disclosures,
   });
 }

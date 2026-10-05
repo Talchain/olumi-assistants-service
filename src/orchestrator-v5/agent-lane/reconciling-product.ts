@@ -158,7 +158,7 @@ export function withReconcilingProductIdentity(candidate: CandidateModel, brief:
 
 /** Olumi's own money parent of the goal that only made the goal's stated level add up: dropped, and said. */
 export interface GapResidual {
-  readonly goal: string; readonly label: string; readonly value: number; readonly code: string; readonly period: 'month' | 'year';
+  readonly goal: string; readonly label: string; readonly value: number; readonly code: string; readonly period: import('./same-unit.js').UnitPeriod;
   readonly o: number; readonly parts: readonly [string, string]; readonly levels: readonly [number, number];
 }
 

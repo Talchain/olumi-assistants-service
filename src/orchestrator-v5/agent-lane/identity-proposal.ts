@@ -63,7 +63,7 @@ function usersLevel(node: Rec): { value: number; unit: string } | null {
  * ⛔ PR Review 5894085840 / AIQ 5894306110 (B): "£1,500 per year" beside a monthly MRR is the same £ and a different
  * quantity. Money NOT in the goal's terms refuses the card (`proposeOnCarrier`), with a figure or without one.
  */
-function otherParent(node: Rec | undefined, goal: { code: string; period: 'month' | 'year' } | null): { figure: number | null; money: boolean; inGoalTerms: boolean; users: boolean } {
+function otherParent(node: Rec | undefined, goal: { code: string; period: import('./same-unit.js').UnitPeriod } | null): { figure: number | null; money: boolean; inGoalTerms: boolean; users: boolean } {
   const os = isRec(node?.observed_state) ? node!.observed_state as Rec : undefined;
   const unit = text(os?.unit);
   const money = unit !== undefined && readCurrencyUnitWithQualifiers(unit).kind === 'currency';
@@ -273,7 +273,7 @@ function proposeOnGoal(graph: unknown): IdentityProposal | null {
  * the goal's own terms that is NOT the user's, sized to the gap within 0.5% of the goal's level, with no cause of its own
  * and its only link into the goal.
  */
-function gapPlugBeside(id: string, byId: Map<string, Rec>, edges: readonly Rec[], goalMoney: { code: string; period: 'month' | 'year' } | null, gap: number, o: number): boolean {
+function gapPlugBeside(id: string, byId: Map<string, Rec>, edges: readonly Rec[], goalMoney: { code: string; period: import('./same-unit.js').UnitPeriod } | null, gap: number, o: number): boolean {
   const p = otherParent(byId.get(id), goalMoney);
   if (!p.inGoalTerms || p.users || p.figure === null) return false;
   if (Math.abs(p.figure - gap) > GAP_ROUNDING * Math.abs(o)) return false;
@@ -288,7 +288,7 @@ function gapPlugBeside(id: string, byId: Map<string, Rec>, edges: readonly Rec[]
  * any other terms never reaches here (the card is refused, AIQ 5894306110 (B)); a non-money parent (a count, a %, no
  * unit) is named by whose it is alone, as something the goal depends on, and no sum is claimed.
  */
-function besideTheCarrier(others: readonly string[], byId: Map<string, Rec>, goalMoney: { code: string; period: 'month' | 'year' } | null, code: string, product: number, goal: number, goalLabel: string): string {
+function besideTheCarrier(others: readonly string[], byId: Map<string, Rec>, goalMoney: { code: string; period: import('./same-unit.js').UnitPeriod } | null, code: string, product: number, goal: number, goalLabel: string): string {
   const money = (v: number): string => sayFigure(v, code);
   const first = others[0];
   if (first === undefined) return `, close to your ${money(goal)} “${goalLabel}”.`;

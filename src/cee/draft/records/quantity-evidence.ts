@@ -1,4 +1,4 @@
-import { periodIn, sameUnit, readCountRate, readMoney, evidencePeriod, words } from '../../../orchestrator-v5/agent-lane/same-unit.js';
+import { periodIn, sameUnit, readCountRate, readMoney, evidencePeriod, words, canonicalUnitSpelling } from '../../../orchestrator-v5/agent-lane/same-unit.js';
 import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../provenance/stated-amounts.js';
 import type { DraftQuoteSpan, DraftValueRange, DraftStatedItem } from './grammar.js';
 
@@ -56,7 +56,10 @@ export function statedValueIsBound(item: DraftStatedItem, brief: string | undefi
 export type UnitRefusal = 'value_scale_restated_conflict' | 'quantity_unit_undeclared' | 'quantity_declaration_mismatch' | 'unit_not_evidenced' | 'unit_period_ambiguous' | 'unit_literal_contradicts_unit' | 'unit_restated_conflict';
 /** Unit parts validate one authored declaration; they never supply a unit. */
 export function unitEvidenceReason(item: DraftStatedItem, unit: string): UnitRefusal | undefined {
+  unit = canonicalUnitSpelling(unit);
   const parts = item.unit_literals ?? [];
+  const currency = readCurrencyUnitWithQualifiers(unit);
+  if (currency.kind === 'currency' && (currency.multiplier ?? 1) !== 1) return 'unit_not_evidenced';
   if (parts.some(p => locateLiteral(item.source_quote,p).reason !== undefined)) return 'unit_not_evidenced';
   const valueLiteral=item.value_literal ?? item.relationship?.amount_literal ?? '';
   const amount=findStatedAmounts(valueLiteral)[0];
@@ -64,12 +67,13 @@ export function unitEvidenceReason(item: DraftStatedItem, unit: string): UnitRef
   const period=evidencePeriod(parts);
   if(period === 'ambiguous') return 'unit_period_ambiguous';
   if(money !== null) {
-    const code=amount?.currencyCode ?? parts.map(p=>readCurrencyUnitWithQualifiers(p)).find(p=>p.kind==='currency')?.currencyCode;
+    const code=amount?.currencyCode ?? parts.map(p=>readMoney(p,'')?.code ?? readCurrencyUnitWithQualifiers(canonicalUnitSpelling(p)).currencyCode).find(c=>c!==undefined);
     if(code !== undefined && code !== money.code || period !== null && period !== money.period) return 'unit_literal_contradicts_unit';
     if(code !== money.code || period !== money.period) return 'unit_not_evidenced';
+    if (money.per !== null && !parts.some(p=>readCountRate(p)?.noun.join(' ')===money.per!.join(' ') || readMoney(p,'')?.per?.join(' ')===money.per!.join(' '))) return 'unit_not_evidenced';
     return undefined;
   }
-  if(unit === '%') return amount?.kind === 'percent' || parts.includes('%') ? undefined : 'unit_not_evidenced';
+  if(unit === '%') return amount?.kind === 'percent' || parts.some(p=>sameUnit(unit,p)) ? undefined : 'unit_not_evidenced';
   const count=readCountRate(unit);
   if(count !== null) {
     const noun=count.noun.join(' ');
@@ -195,5 +199,6 @@ export function locateRecordEvidence(records: import('./grammar.js').DraftRecord
 
 /** Shared natural/literal convention, never inferred from the magnitude. */
 export function literalConventionValue(value: number, unit: string | undefined, scale: import('./grammar.js').DraftRecordValueScale | undefined): number {
+  unit = typeof unit === 'string' ? canonicalUnitSpelling(unit) : unit;
   return unit === '%' && (scale === 'unit_interval' || scale === 'ratio') ? value * 100 : value;
 }

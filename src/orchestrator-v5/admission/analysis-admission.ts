@@ -1,3 +1,5 @@
+import { assessStatedRules, type StatedRuleDisclosure } from '../../cee/draft/records/stated-dispositions.js';
+import { currentStatedDispositionRows } from '../graph/stated-dispositions-binding.js';
 /**
  * ⭐⭐ THE ONE ANALYSIS-ADMISSION RESULT — computed once, consumed unchanged.
  *
@@ -459,6 +461,7 @@ export type AdmissionField =
  * process narration. `code` is for consumers and telemetry.
  */
 export interface AnalysisAdmissionReason {
+  readonly stated_rule?: StatedRuleDisclosure;
   readonly field: AdmissionField;
   readonly code: AdmissionReasonCode;
   readonly message: string;
@@ -473,7 +476,9 @@ export type AdmissionReasonCode =
   | 'USER_STATED_PARAMETERS_NOT_MATERIAL'
   | 'CONFIDENCE_PARAMETERS_PARTLY_USER_STATED'
   | 'READY_TO_COMPARE'
-  | 'TARGET_NOT_TESTABLE';
+  | 'TARGET_NOT_TESTABLE'
+  | 'STATED_CAUSE_DROPPED'
+  | 'SIGN_UNCONFIRMED';
 
 /**
  * ONE input the model is missing, with WHY IT MATTERS rather than only what it is.
@@ -1267,7 +1272,9 @@ export function analysisAdmissionFrom(
   const target = targetTestabilityOf(graph);
   const derived = deriveMode(admission, semanticSufficient);
   const targetCapped = admission.willProceed && targetVerdictCapsOrdering(target) && modePermitsAtLeast(derived, 'quantified_provisional');
-  const mode: PermittedAnalysisMode = targetCapped ? 'exploratory' : derived;
+  const statedRules = assessStatedRules(currentStatedDispositionRows(graph) ?? []);
+  const uncapped = targetCapped ? 'exploratory' : derived;
+  const mode: PermittedAnalysisMode = statedRules.block_leader && modePermitsAtLeast(uncapped, 'quantified_provisional') ? 'exploratory' : uncapped;
 
   // ⚠ `assessment.blockingIssues`, NOT `strict.issues`. `strict.issues` is the
   // EXHAUSTIVE record (carrier + blocking); this field is what is MISSING. And
@@ -1332,10 +1339,19 @@ export function analysisAdmissionFrom(
     message: SEMANTIC_REASON[cause].message,
   });
 
+  for (const disclosure of [...statedRules.dropped, ...statedRules.sign_unconfirmed]) reasons.push({
+    field: 'permitted_analysis_mode', code: disclosure.code === 'sign_unconfirmed' ? 'SIGN_UNCONFIRMED' : 'STATED_CAUSE_DROPPED',
+    message: disclosure.ask ?? `I couldn't use your point: “${disclosure.quote}” because ${disclosure.reason}. Add it, or leave it out?`,
+    stated_rule: disclosure,
+  });
+
   // ── permitted_analysis_mode ────────────────────────────────────────────────
   reasons.push({
     field: 'permitted_analysis_mode',
-    ...(targetCapped
+    ...(statedRules.block_leader
+      ? { code: statedRules.sign_unconfirmed.length > 0 ? 'SIGN_UNCONFIRMED' as const : 'STATED_CAUSE_DROPPED' as const,
+        message: 'Analysis can run, but a leading option is withheld until you resolve the disclosed stated cause or sign.' }
+      : targetCapped
       ? { code: 'TARGET_NOT_TESTABLE' as const, message: notTargetTestableSentence(graph, target) ?? TARGET_NOT_TESTABLE_FALLBACK }
       : modeReason(mode, cause)),
   });

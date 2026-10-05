@@ -4,28 +4,50 @@
  * the ONE Olumi-guess test DR row 4 and B6 share) can use `sameUnit` without importing admission (its import chain
  * reaches `placeholder-parts.ts` itself). `reconciling-product.ts` re-exports what it exported before.
  */
-import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 
-type Period = 'month' | 'year' | null;
-const MONTH = new Set(['month', 'months', 'mo', 'monthly', 'pcm', 'mrr']);
-const YEAR = new Set(['year', 'years', 'yr', 'annum', 'annual', 'annually', 'pa', 'arr']);
+/** U-CANON v1: spelling equivalence only. The table never changes a value or scale. */
+export const UNIT_CANON = [
+  ['%', ['%', 'percent', 'per cent', 'pct']],
+  ['pp', ['percentage point', 'percentage points', 'pp']],
+  ['GBP', ['£', 'GBP', 'pound', 'pounds', 'sterling']],
+  ['USD', ['$', 'USD', 'dollar', 'dollars']],
+  ['EUR', ['€', 'EUR', 'euro', 'euros']],
+  ['day', ['day', 'days']], ['/day', ['daily']],
+  ['week', ['week', 'weeks']], ['/week', ['weekly']],
+  ['month', ['month', 'months', 'mo']], ['/month', ['monthly', 'pcm', 'mrr']],
+  ['quarter', ['quarter', 'quarters']], ['/quarter', ['quarterly']],
+  ['year', ['year', 'years', 'yr', 'annum']], ['/year', ['yearly', 'annual', 'annually', 'per annum', 'pa', 'arr']],
+  ['hour', ['hour', 'hours', 'hr', 'hrs']], ['minute', ['minute', 'minutes', 'min', 'mins']],
+] as const;
+export type UnitPeriod = 'day' | 'week' | 'month' | 'quarter' | 'year';
+type Period = UnitPeriod | null;
+const aliases = UNIT_CANON.flatMap(([canonical, forms]) => forms.map(form => ({canonical, form})))
+  .sort((a,b) => b.form.length - a.form.length);
+const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const aliasPattern = new RegExp(`(?<![\\w])(?:${aliases.map(a=>escape(a.form)).join('|')})(?![\\w])`, 'gi');
+/** Only unit text is normalised; quote literals and numbers are never rewritten. */
+export function canonicalUnitSpelling(unit: string): string {
+  return unit.replace(aliasPattern, form => aliases.find(a=>a.form.toLowerCase()===form.toLowerCase())!.canonical)
+    .replace(/\b(?:per|a|an|each|every)\s+(day|week|month|quarter|year)\b/gi, '/$1')
+    .replace(/\s*\/\s*/g, '/');
+}
+const unitWords = (s: string): string[] => words(canonicalUnitSpelling(s));
+const PERIODS = new Set<string>(['day', 'week', 'month', 'quarter', 'year']);
 export const words = (s: string): string[] => s.toLowerCase().replace(/[()]/g, ' ').replace(/\//g, ' / ').split(/[\s-]+/).filter((w) => w !== '');
 export const singular = (w: string): string => (w.length > 4 && w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w);
 
 function periodOf(ws: readonly string[]): Period | 'both' {
-  const m = ws.some((w) => MONTH.has(w));
-  const y = ws.some((w) => YEAR.has(w));
-  return m && y ? 'both' : m ? 'month' : y ? 'year' : null;
+  const ps = new Set(ws.filter(w => PERIODS.has(w)));
+  return ps.size > 1 ? 'both' : ps.size === 1 ? [...ps][0] as UnitPeriod : null;
 }
 
-/** The ONE period a piece of text names ("Monthly spend", "£540k a year"), or null when it names none or both. */
-export function periodIn(text: string): 'month' | 'year' | null {
-  const p = periodOf(words(text));
+/** The one period named by the table, with no calendar conversion. */
+export function periodIn(text: string): Period {
+  const p = periodOf(unitWords(text));
   return p === 'both' ? null : p;
 }
-
-const isPeriod = (w: string): boolean => MONTH.has(w) || YEAR.has(w);
+const isPeriod = (w: string): boolean => PERIODS.has(w);
 const isCurrency = (w: string): boolean => readCurrencyUnitWithQualifiers(w).kind === 'currency';
 /** The words `readCurrencyUnitWithQualifiers` lets stand beside the currency itself ("GBP recurring revenue", "£ a month"). */
 const MONEY_WORDS = new Set(['revenue', 'recurring', 'a']);
@@ -39,9 +61,10 @@ const MONEY_WORDS = new Set(['revenue', 'recurring', 'a']);
  */
 export function readMoney(unit: unknown, label: string): { code: string; period: Period; per: string[] | null; mixed?: true } | null {
   if (typeof unit !== 'string') return null;
-  const r = readCurrencyUnitWithQualifiers(unit);
+  const ws = unitWords(unit);
+  const currencies = ws.filter(isCurrency);
+  const r = readCurrencyUnitWithQualifiers(currencies.length === 1 ? currencies[0] : undefined);
   if (r.kind !== 'currency' || r.currencyCode === undefined || (r.multiplier ?? 1) !== 1) return null;
-  const ws = words(unit);
   const segments: string[][] = [[]];
   for (const w of ws) {
     if (w === '/' || w === 'per') segments.push([]);
@@ -73,7 +96,7 @@ export function readMoney(unit: unknown, label: string): { code: string; period:
   if (ws.filter(isPeriod).length > 1) return null;
   // The goal's own name can carry its period ("MRR", "Monthly recurring revenue") when its unit does not.
   const own = periodOf(ws);
-  const period = own !== null ? own : periodOf(words(label));
+  const period = own !== null ? own : periodOf(unitWords(label));
   if (period === 'both') return null;
   return { code: r.currencyCode, period, per: denominators.length === 1 ? denominators[0]!.map(singular) : null };
 }
@@ -83,7 +106,7 @@ export function readMoney(unit: unknown, label: string): { code: string; period:
  * no per-item denominator, and a period — the unit's own, else the node's name's ("Other-plan MRR"). Null when any part
  * is unreadable: "£1,500 per year" is never added into a monthly MRR.
  */
-export function readMoneyTotal(unit: unknown, label: string): { code: string; period: 'month' | 'year' } | null {
+export function readMoneyTotal(unit: unknown, label: string): { code: string; period: UnitPeriod } | null {
   const m = readMoney(unit, label);
   return m === null || m.mixed === true || m.per !== null || m.period === null ? null : { code: m.code, period: m.period };
 }
@@ -91,13 +114,13 @@ export function readMoneyTotal(unit: unknown, label: string): { code: string; pe
 /** A count with at most one monthly/yearly period. Reuses the money period vocabulary. */
 export function readCountRate(unit: unknown): { noun: string[]; period: Period } | null {
   if (typeof unit !== 'string' || !/^[a-z][a-z\s/-]*$/i.test(unit.trim())) return null;
-  const ws = words(unit);
-  if (ws.length === 0 || readCurrencyUnitWithQualifiers(unit).kind === 'currency') return null;
+  const ws = unitWords(unit);
+  if (ws.length === 0 || ws.some(isCurrency) || ['%', 'pp'].includes(canonicalUnitSpelling(unit))) return null;
   const periods = ws.filter(isPeriod);
   if (periods.length > 1) return null;
   const period = periodOf(ws);
   if (period === 'both') return null;
-  const noun = ws.filter(w => !isPeriod(w) && w !== '/' && w !== 'per' && w !== 'a');
+  const noun = ws.filter(w => !isPeriod(w) && w !== '/' && w !== 'per' && w !== 'a' && w !== 'an' && w !== 'each' && w !== 'every');
   if (noun.length === 0 || (ws.includes('/') || ws.includes('per')) && period === null) return null;
   return { noun: noun.map(singular), period };
 }
@@ -108,7 +131,7 @@ export function readCount(unit: unknown): string[] | null {
 }
 /** Evidence periods use the same vocabulary and reject duplicates or competing periods. */
 export function evidencePeriod(parts: readonly string[]): Period | 'ambiguous' {
-  const ps = parts.flatMap(words).filter(isPeriod);
+  const ps = parts.flatMap(unitWords).filter(isPeriod);
   return ps.length > 1 ? 'ambiguous' : periodOf(ps) as Period;
 }
 
@@ -118,15 +141,16 @@ export function evidencePeriod(parts: readonly string[]): Period | 'ambiguous' {
  * reads is compared word for word; no unit on either side is never the same.
  */
 export function sameUnit(a: unknown, b: unknown): boolean {
-  if(typeof a==='string' && typeof b==='string' && words(a).length===1 && words(b).length===1 && classifyUnitScaleClass(a)==='percent' && classifyUnitScaleClass(b)==='percent')return true;
+  if (typeof a === 'string' && typeof b === 'string' && ['%', 'pp'].includes(canonicalUnitSpelling(a))) return canonicalUnitSpelling(a) === canonicalUnitSpelling(b);
   const ca = readCountRate(a); const cb = readCountRate(b);
   if (ca !== null || cb !== null) return ca !== null && cb !== null && ca.noun.join(' ') === cb.noun.join(' ') && ca.period === cb.period;
   const ma = readMoney(a, ''); const mb = readMoney(b, '');
   if (ma !== null || mb !== null) {
-    return ma !== null && mb !== null && ma.code === mb.code && ma.period === mb.period && ma.mixed === mb.mixed
+    return ma !== null && mb !== null && ma.code === mb.code && ma.period === mb.period
       && (ma.per ?? []).join(' ') === (mb.per ?? []).join(' ');
   }
   if (typeof a !== 'string' || typeof b !== 'string') return false;
-  const wa = words(a).join(' ');
-  return wa !== '' && wa === words(b).join(' ');
+  const pa = periodOf(unitWords(a)); const pb = periodOf(unitWords(b));
+  return pa !== null && pa !== 'both' && pa === pb
+    && unitWords(a).filter(w=>w!=='/').every(isPeriod) && unitWords(b).filter(w=>w!=='/').every(isPeriod);
 }

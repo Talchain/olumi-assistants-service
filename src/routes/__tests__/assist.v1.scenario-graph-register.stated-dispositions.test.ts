@@ -60,6 +60,7 @@ vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
   return { ...actual, resolveUserIdentity };
 });
 
+import { resolveAnalysisAdmission } from "../../orchestrator-v5/admission/analysis-admission.js";
 import registerRoute from "../assist.v1.scenario-graph-register.js";
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
@@ -444,5 +445,40 @@ describe("NO-FIELD CONTROL — a register without the key stores and serves exac
     expect(capture.write).toEqual(base.write);
     expect(capture.register_response).toEqual(base.register_response);
     expect(capture.read_response_bytes).toBe(base.read_response_bytes);
+  });
+});
+
+
+describe("DROP-1 D5 real register → stored jsonb → cold read → Run admission", () => {
+  it("a never-minted stated quantity still withholds the Run leader after reload", async () => {
+    const graph = structuredClone(GRAPH) as Rec;
+    const price = (graph.nodes as Rec[]).find(n => n.id === 'fac_price')!;
+    price.observed_state = { value: 0.245, source: 'brief_extraction' };
+    const control = resolveAnalysisAdmission(graph);
+    expect(control.permitted_analysis_mode).toBe('comparative_leader');
+    const rows = [
+      { stated_index: 0, stated_item: { kind: 'goal', source_quote: 'MRR', quantity: 0 }, disposition: 'carried',
+        location: { kind: 'node', node_id: 'g_mrr', path: [] }, stored_value: { id: 'g_mrr' } },
+      { stated_index: 1, stated_item: { kind: 'option', source_quote: Q_OPTION, quantity: 42 }, disposition: 'carried',
+        location: { kind: 'node', node_id: 'opt_59', path: [] }, stored_value: { id: 'opt_59' } },
+      { stated_index: 2, stated_item: { kind: 'cause', source_quote: Q_LOSS, relationship: { from_quantity: 42, to_quantity: 43, amount: -2, per_source_change: 1 } },
+        disposition: 'rejected', reason: 'literal_ambiguous' },
+      { stated_index: 3, stated_item: { kind: 'cause', source_quote: 'Each lost customer removes £300', relationship: { from_quantity: 43, to_quantity: 0 } },
+        disposition: 'rejected', reason: 'relationship_unsized' },
+    ];
+    const response = await register({ graph, brief_text: BRIEF, stated_dispositions: rows });
+    expect(response.statusCode, response.body).toBe(200);
+    readBackStored();
+    const res = await read(); expect(res.statusCode, res.body).toBe(200);
+    const body = res.json() as Rec;
+    const admission = body.analysis_admission as Rec;
+    expect(admission.admitted).toBe(control.structurally_analysable);
+    expect(admission.permitted_analysis_mode).not.toBe('comparative_leader');
+    expect(admission.reason_codes).toContain('STATED_CAUSE_DROPPED');
+    const run = resolveAnalysisAdmission(storedRow().graph);
+    expect(run.permitted_analysis_mode).not.toBe('comparative_leader');
+    expect(run.reasons).toContainEqual(expect.objectContaining({code:'STATED_CAUSE_DROPPED',stated_rule:expect.objectContaining({stated_index:2,quote:Q_LOSS,reason:'that figure appears twice in your sentence'})}));
+    expect(((body.graph as Rec).nodes as Rec[]).filter(n=>n.kind==='option').map(n=>n.interventions))
+      .toEqual((graph.nodes as Rec[]).filter(n=>n.kind==='option').map(n=>n.interventions));
   });
 });
