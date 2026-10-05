@@ -1112,8 +1112,9 @@ function linkEffectInOneSentence(
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
 ): LinkEffectStatementMiss | null {
-  const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
-  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
+  // A link's size may be written with an ISO code ("GBP 1,000"): opt-in for this reader only (Science U2).
+  const amountFigure = findStatedAmounts(q, { isoCurrencyCodes: true }).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
+  const perFigure = findStatedAmounts(q, { isoCurrencyCodes: true }).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
     unitPhraseFamily(effect.per_source_change_unit), q));
   // ⭐ R3 #75 5925568501: "each / every / per / one more / an extra / a single" + a word of the SOURCE, one phrase with no
   // punctuation between, is the user writing a change of ONE ("Each extra conversation brings in about £20,000"). A
@@ -1130,17 +1131,28 @@ function linkEffectInOneSentence(
   if (!named(ends.source, ends.target) || !named(ends.target, ends.source)) return 'end_not_named';
   const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
   const sourceOwn = wordsOf(ends.source).filter((w) => !wordsOf(ends.target).some((s) => sameWord(w, s)));
+  const targetOwn = wordsOf(ends.target).filter((w) => !wordsOf(ends.source).some((s) => sameWord(w, s)));
   const sourceAt = tokens.flatMap((t, i) => (sourceOwn.some((w) => sameWord(w, t.w)) ? [i] : []));
   const tokenAt = (index: number | undefined): number => tokens.findIndex((t) => t.at >= (index ?? 0));
   const perAt = perFigure === undefined ? oneAt : tokenAt(perFigure.index);
   const amountAt = tokenAt(amountFigure.index);
+  // The source's literal points unit belongs to its figure, never to words linking a remote number to the source.
+  const sourceFigureEnd = perFigure === undefined ? undefined : perFigure.index + perFigure.matchedText.length;
+  const pointsAfterSource = sourceFigureEnd === undefined ? undefined
+    : /^\s*(?:percentage\s+points?\b|pp\b|points?\b)/i.exec(q.slice(sourceFigureEnd));
+  const sourceUnitEnd = sourceFigureEnd === undefined ? undefined : sourceFigureEnd + (pointsAfterSource?.[0].length ?? 0);
   // A figure's own digits ("0.5" → 0, 5) are never words standing between it and what it sizes.
   const inFigure = (i: number): boolean => [perFigure, amountFigure].some((f) => f !== undefined && tokens[i]!.at >= (f.index ?? 0)
-    && tokens[i]!.at < (f.index ?? 0) + f.matchedText.length);
+    && tokens[i]!.at < (f.index ?? 0) + f.matchedText.length)
+    || (perFigure !== undefined && sourceUnitEnd !== undefined && tokens[i]!.at >= perFigure.index && tokens[i]!.at < sourceUnitEnd);
   // Punctuation ends a phrase (PR Review's fifth CR: "£1, raising it"): a comma, dash or bracket between two words breaks them.
   const unbroken = (a: number, b: number): boolean => {
     const [x, y] = a < b ? [a, b] : [b, a];
-    return !/[,;:()\u2013\u2014]/.test(q.slice(tokens[x]!.at + tokens[x]!.w.length, tokens[y]!.at));
+    const start = tokens[x]!.at + tokens[x]!.w.length; const end = tokens[y]!.at;
+    // A thousands separator inside the scanned figure ("£1,000 of marketing spend") is not a clause boundary.
+    const between = q.slice(start, end).split('').map((c, i) => [perFigure, amountFigure].some(f => f !== undefined
+      && start + i >= f.index && start + i < f.index + f.matchedText.length) ? ' ' : c).join('');
+    return !/[,;:()\u2013\u2014]/.test(between);
   };
   const joined = (a: number, b: number, reach: number, link: (w: string) => boolean): boolean => a >= 0 && b >= 0
     && Math.abs(a - b) <= reach && unbroken(a, b)
@@ -1158,6 +1170,9 @@ function linkEffectInOneSentence(
   tokens.forEach((t, i) => {
     // "brings in £20,000" is money coming in (R3 5925568501's served step 2); a bare "brings" ("brings down") says no way.
     if (/^(?:bring|brings|bringing|brought)$/.test(t.w) && tokens[i + 1]?.w === 'in') say('target', 1, i + 1);
+    // "3 more customers" states a positive target change. Only the target figure's own following phrase qualifies;
+    // "each 3 more …" on the source must not supply the target's direction.
+    else if (t.w === 'more' && i === amountAt + 1 && targetOwn.some(w => sameWord(w, tokens[i + 1]?.w ?? ''))) say('target', 1, i);
     else if (TARGET_DOWN.test(t.w)) say('target', -1, i);
     else if (TARGET_UP.test(t.w)) say('target', 1, i);
     else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1, i);

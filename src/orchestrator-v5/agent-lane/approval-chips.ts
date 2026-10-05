@@ -336,13 +336,31 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
  */
 export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
-    { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown } : undefined;
+    { from?: unknown; to?: unknown; effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown };
+      quote?: unknown; unit_readings?: unknown } : undefined;
   const e = op?.effect;
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
     || typeof e.amount !== 'number' || typeof e.per_source_change !== 'number' || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') return undefined;
   const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`}`;
-  return `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}" `
-    + `\u2014 from your words: "${op.quote}"`;
+  const head = `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}"`;
+  if (op.unit_readings === undefined) return `${head} \u2014 from your words: "${op.quote}"`;
+  if (!Array.isArray(op.unit_readings) || op.unit_readings.length > 2) return undefined;
+  const disclosures: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of op.unit_readings) {
+    const item = raw as { node_id?: unknown; unit_reading?: { unit?: unknown; source?: unknown; source_quote?: unknown } } | null;
+    const reading = item?.unit_reading;
+    if (item === null || typeof item !== 'object' || Object.keys(item).length !== 2 || typeof item.node_id !== 'string'
+      || (item.node_id !== op.from && item.node_id !== op.to) || seen.has(item.node_id)
+      || reading === undefined || reading === null || typeof reading !== 'object' || Object.keys(reading).length !== 3
+      || typeof reading.unit !== 'string' || reading.unit.length < 1 || reading.unit.length > 40 || reading.source !== 'user_stated'
+      || typeof reading.source_quote !== 'string' || reading.source_quote.length < 1 || reading.source_quote.length > 500
+      || !op.quote.includes(reading.source_quote)) return undefined;
+    seen.add(item.node_id);
+    disclosures.push(`I've taken "${item.node_id === op.from ? labels.from : labels.to}" to be in ${reading.unit}, from your words.`);
+  }
+  return disclosures.length === 0 ? `${head} \u2014 from your words: "${op.quote}"`
+    : `${head}, from your words: "${op.quote}". ${disclosures.join(' ')}`;
 }
 
 /** The same card reading for one stored operation; kept separate so the single-link wording remains byte-for-byte. */

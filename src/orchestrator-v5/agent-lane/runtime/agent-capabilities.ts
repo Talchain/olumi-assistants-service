@@ -39,6 +39,7 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js'
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
+import { prepareLinkEffectUnitReadings, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
@@ -1488,6 +1489,33 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
   }
 }
 
+/**
+ * RT-6 step 2 (Science U3): ONE question first, then the canvas control as the alternative, in one quoted sentence.
+ * Nothing is recorded until the user answers, so it never says the figure "can't" be recorded from chat.
+ */
+function linkEffectUnitAskWords(ask: string, from: { label: string }, to: { label: string }): string {
+  return 'Nothing was prepared. Tell the user exactly this: "'
+    + `${ask} Nothing is recorded until you answer. If you\u2019d rather not answer, you can set how strong this link is `
+    + `on the canvas: click the link from \u201c${from.label}\u201d to \u201c${to.label}\u201d, and under \u201cHow strong is this effect?\u201d `
+    + 'choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, not your figure."';
+}
+
+/** A stored card can carry only the strict, bounded NodeV3 unit reading of one of its own ends. */
+function isLinkEffectUnitReadings(value: unknown, from: string, to: string): value is readonly LinkEffectUnitReading[] | undefined {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > 2) return false;
+  const seen = new Set<string>();
+  return value.every((entry) => {
+    if (!isPlainRecord(entry) || Object.keys(entry).length !== 2 || typeof entry.node_id !== 'string'
+      || (entry.node_id !== from && entry.node_id !== to) || seen.has(entry.node_id) || !isPlainRecord(entry.unit_reading)) return false;
+    const reading = entry.unit_reading;
+    if (Object.keys(reading).length !== 3 || typeof reading.unit !== 'string' || reading.unit.length < 1 || reading.unit.length > 40
+      || reading.source !== 'user_stated' || typeof reading.source_quote !== 'string' || reading.source_quote.length < 1 || reading.source_quote.length > 500) return false;
+    seen.add(entry.node_id);
+    return true;
+  });
+}
+
 const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> =>
@@ -2605,12 +2633,13 @@ export function createAgentCapabilities(
       ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied', reason, detail, receipts: [],
     });
     const effectValues = parent.operations.map((operation) => operation.op === 'set_link_effect' ? operation.value as {
-      from?: unknown; to?: unknown; effect?: Record<string, unknown>; quote?: unknown; edge_token?: unknown;
+      from?: unknown; to?: unknown; effect?: Record<string, unknown>; quote?: unknown; edge_token?: unknown; unit_readings?: readonly LinkEffectUnitReading[];
     } : undefined);
     const validEffect = (v: typeof effectValues[number]): v is NonNullable<typeof v> => v !== undefined
       && typeof v.from === 'string' && typeof v.to === 'string' && typeof v.quote === 'string'
       && typeof v.edge_token === 'string' && typeof v.effect?.amount === 'number' && typeof v.effect?.per_source_change === 'number'
-      && typeof v.effect?.amount_unit === 'string' && typeof v.effect?.per_source_change_unit === 'string';
+      && typeof v.effect?.amount_unit === 'string' && typeof v.effect?.per_source_change_unit === 'string'
+      && isLinkEffectUnitReadings(v.unit_readings, v.from, v.to);
     if (effectValues.length === 0 || effectValues.some((v) => !validEffect(v))) {
       return notApplied('unreadable_proposal', 'This link\u2019s size could not be read from the stored proposal, so nothing was recorded. Offer to prepare it again.');
     }
@@ -2649,9 +2678,11 @@ export function createAgentCapabilities(
       effect: { amount: v.effect!.amount as number, amount_unit: v.effect!.amount_unit as string,
         per_source_change: v.effect!.per_source_change as number, per_source_change_unit: v.effect!.per_source_change_unit as string },
       edge_token: v.edge_token as string, quote: v.quote as string,
+      ...(v.unit_readings !== undefined ? { unit_readings: v.unit_readings } : {}),
       reading_token: linkEffectReadingToken({ from: v.from as string, to: v.to as string,
         effect: { amount: v.effect!.amount as number, amount_unit: v.effect!.amount_unit as string,
-          per_source_change: v.effect!.per_source_change as number, per_source_change_unit: v.effect!.per_source_change_unit as string }, quote: v.quote as string }) }));
+          per_source_change: v.effect!.per_source_change as number, per_source_change_unit: v.effect!.per_source_change_unit as string }, quote: v.quote as string,
+        ...(v.unit_readings !== undefined ? { unit_readings: v.unit_readings } : {}) }) }));
     for (const item of approvedEffects) {
       const currentEdgeToken = linkEffectEdgeToken(working, item.from, item.to);
       if (currentEdgeToken !== item.edge_token) {
@@ -2663,6 +2694,7 @@ export function createAgentCapabilities(
       if (expectedHash === null) return notApplied('model_changed_since_approval', 'The model could not be read in the form this approval was prepared against, so nothing was recorded. Read it again and propose afresh.');
       const dry = applyLinkEffectEdit({ persistedGraph: working, from: item.from, to: item.to, effect: item.effect,
         expected: { graph_hash: expectedHash, edge_token: item.edge_token }, quote: item.quote, reading_token: item.reading_token,
+        ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}),
         lastRunIdentityUse: approvedRead.identity_run_use ?? null });
       if (dry.kind === 'refused') {
         const from = { id: item.from, label: approvedRead.nodes.find((n) => n.id === item.from)?.label ?? item.from };
@@ -2714,7 +2746,11 @@ export function createAgentCapabilities(
         && typeof want.amount === 'number' && prov.natural_effect?.amount === want.amount
         && typeof want.per_source_change === 'number' && prov.natural_effect?.per_source_change === want.per_source_change
         && sameUnit(prov.natural_effect?.amount_unit, want.amount_unit) && sameUnit(prov.natural_effect?.per_source_change_unit, want.per_source_change_unit);
-    });
+    }) && approvedEffects.every((item) => (item.unit_readings ?? []).every((adoption) => {
+      const nodes = isPlainRecord(check.raw) && Array.isArray(check.raw.nodes)
+        ? check.raw.nodes.filter((node): node is Record<string, unknown> => isPlainRecord(node) && node.id === adoption.node_id) : [];
+      return nodes.length === 1 && isDeepStrictEqual(nodes[0]!.unit_reading, adoption.unit_reading);
+    }));
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         detail: 'These link sizes were sent, but reading the model back did not show all of them as recorded. Say exactly that; never say they were recorded or not recorded.' };
@@ -3251,7 +3287,7 @@ export function createAgentCapabilities(
         if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
         let working: unknown = g.raw;
         const prepared: { from: string; to: string; effect: { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string };
-          quote: string; edge_token: string; said: string; from_label: string; to_label: string }[] = [];
+          quote: string; edge_token: string; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[] }[] = [];
         const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string }[] = [];
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
@@ -3313,9 +3349,18 @@ export function createAgentCapabilities(
             fail('unreadable_model', 'Nothing was prepared: the model could not be read in the form needed to size this link. Read the state again and try once more.');
             continue;
           }
+          const unitReading = prepareLinkEffectUnitReadings(working, from.id, to.id, effect, said);
+          const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
+            ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
+          if (unitAsk !== undefined) {
+            fail('unit_mismatch', linkEffectUnitAskWords(unitAsk, from, to));
+            continue;
+          }
+          const unitReadings = unitReading.unit_readings.length > 0 ? { unit_readings: unitReading.unit_readings } : {};
           const dry = applyLinkEffectEdit({ persistedGraph: working, from: from.id, to: to.id, effect,
             expected: { graph_hash: expectedHash, edge_token: edgeToken }, quote: said,
-            reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said }), lastRunIdentityUse: g.identity_run_use ?? null });
+            ...unitReadings,
+            reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings }), lastRunIdentityUse: g.identity_run_use ?? null });
           if (dry.kind === 'refused') {
             const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(working, from.id, to.id, g.identity_run_use ?? null) : null;
             fail(dry.reason, definition !== null ? `${definitionalLinkRefusalText(working, definition)} Tell the user exactly this.`
@@ -3323,6 +3368,7 @@ export function createAgentCapabilities(
             continue;
           }
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
+            ...unitReadings,
             from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
           working = dry.mutatedGraph;
         }
@@ -3333,7 +3379,8 @@ export function createAgentCapabilities(
             : { ok: false, mutated: false, refusal: first.refusal, detail: first.detail, not_prepared: notPrepared };
         }
         const operations = prepared.map((item) => ({ op: 'set_link_effect' as const, path: `${item.from}::${item.to}`,
-          value: { from: item.from, to: item.to, effect: item.effect, quote: item.said, edge_token: item.edge_token } }));
+          value: { from: item.from, to: item.to, effect: item.effect, quote: item.said, edge_token: item.edge_token,
+            ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}) } }));
         const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
           operations, provenance: { authored_by: 'user_stated', basis: prepared.map((item) => item.said).join('\n') },
           validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: `Record your figures for ${prepared.length} links` });
@@ -3404,10 +3451,18 @@ export function createAgentCapabilities(
           detail: `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.` };
       }
       const effect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
+      const unitReading = prepareLinkEffectUnitReadings(g.raw, from.id, to.id, effect, said);
+      const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
+        ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
+      if (unitAsk !== undefined) {
+        return { ok: false, mutated: false, refusal: 'unit_mismatch', detail: linkEffectUnitAskWords(unitAsk, from, to) };
+      }
+      const unitReadings = unitReading.unit_readings.length > 0 ? { unit_readings: unitReading.unit_readings } : {};
       const dry = applyLinkEffectEdit({ persistedGraph: g.raw, from: from.id, to: to.id, effect,
         expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said,
+        ...unitReadings,
         // A dry run of the reading the card will show: its own token, so every refusal it returns is about the write.
-        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said }), lastRunIdentityUse: g.identity_run_use ?? null });
+        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings }), lastRunIdentityUse: g.identity_run_use ?? null });
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,
@@ -3418,7 +3473,7 @@ export function createAgentCapabilities(
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_link_effect', path: `${from.id}::${to.id}`,
-          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken } }],
+          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, ...unitReadings } }],
         provenance: { authored_by: 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`,

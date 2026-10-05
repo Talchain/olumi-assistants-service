@@ -22,10 +22,11 @@
  * receipt is the existing `adjust_edge_strength` fact.
  */
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
-import { resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitOf, type LinkSizeProblem } from '../../cee/magnitude/link-effect.js';
+import { resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitOf, type LinkSizeProblem, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import { createHash } from 'node:crypto';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -34,6 +35,7 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { prepareLinkEffectUnitReadings, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -56,6 +58,8 @@ export interface ApplyLinkEffectEditParams {
   readonly from: string;
   readonly to: string;
   readonly effect: LinkEffectStatement;
+  /** End units inferred from the displayed, literal user statement; approval binds each exact reading. */
+  readonly unit_readings?: readonly LinkEffectUnitReading[];
   /**
    * What the ask was prepared against (DL 5882808387). Either one moved ⇒ `superseded`, nothing written.
    *  · `graph_hash` — the wire `graph_hash` (`computeAnalysisAffectingGraphHash`), which every Agent proposal carries as
@@ -68,7 +72,7 @@ export interface ApplyLinkEffectEditParams {
   /** The user's verbatim words (1..400), carried on the receipt for the approval card and audit. */
   readonly quote: string;
   /**
-   * `linkEffectReadingToken` of the reading the user APPROVED — the card's {from, to, effect, quote}. The writer
+   * `linkEffectReadingToken` of the reading the user APPROVED — the card's {from, to, effect, quote, unit_readings}. The writer
    * recomputes it over what it is asked to write; absent or different ⇒ `reading_not_confirmed`, nothing written.
    */
   readonly reading_token: string;
@@ -125,17 +129,40 @@ export interface LinkEndUnits {
   /** A % LEVEL target whose goal names no unit: its points fallback is stored as the user stated it. */
   readonly storeAsStated?: boolean;
 }
+
+function hasAdoptedPercentUnit(node: Rec | undefined, magnitude: MagnitudeNode): boolean {
+  const candidate = node?.unit_reading;
+  const reading = isRec(candidate) ? candidate : undefined;
+  // The shared percent classifier, never an inline equality (unit-scale-class KNOWN-UNMIGRATED guard). An adopted reading
+  // exists only on an end with no own unit (U1), and the reader writes "%" for points, so this is the bare-% case.
+  return reading?.source === 'user_stated' && typeof reading.unit === 'string'
+    && classifyUnitScaleClass(reading.unit) === 'percent' && classifyUnitScaleClass(unitOf(magnitude)) === 'percent';
+}
+
+/** U2's adopted points unit is a % level: one point is one raw unit on 100, even when no scale was stored. */
+function withAdoptedPercentFrame(node: Rec | undefined, magnitude: MagnitudeNode): MagnitudeNode {
+  return hasAdoptedPercentUnit(node, magnitude) && resolveMagnitudeFrame(magnitude) === undefined
+    ? { ...magnitude, scale_frame: 100 } // Sizing view only; no scale_frame is added to the persisted node.
+    : magnitude;
+}
 export function linkEffectEndUnits(graph: unknown, from: string, to: string): { readonly source: LinkEndUnits; readonly target: LinkEndUnits } | null {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return null;
   const found = linkEffectTargetOf(graph, from, to);
   if (found.kind === 'refused') return null;
   const view = magnitudeNodes(graph.nodes.filter(isRec), percentLevelIds(graph));
-  const sourceNode = view.get(from);
-  const targetNode = view.get(to);
-  if (sourceNode === undefined || targetNode === undefined) return null;
+  const sourceView = view.get(from);
+  const targetView = view.get(to);
+  if (sourceView === undefined || targetView === undefined) return null;
+  const sourceEnd = graph.nodes.filter(isRec).find(n => n.id === from);
+  const targetEnd = graph.nodes.filter(isRec).find(n => n.id === to);
+  const sourceNode = withAdoptedPercentFrame(sourceEnd, sourceView);
+  const targetNode = withAdoptedPercentFrame(targetEnd, targetView);
   const present = (...u: (string | undefined)[]): string[] => u.filter((x): x is string => typeof x === 'string' && x.trim() !== '');
+  // U2 permits these literal points spellings for a disclosed sentence reading. Keep the existing comparator and
+  // pre-existing node units unchanged: the aliases apply only while this end's governing reading is user-stated %.
   const sourceOwn = present(unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
-    targetUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)));
+    targetUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
+    ...(hasAdoptedPercentUnit(sourceEnd, sourceNode) ? ['pp', 'points'] : []));
   // ⛔ The points-only rule applies to a % LEVEL target the graph marks `percent_level` from `goal_constraints`
   // (Science, #87 5993238492): "gross margin falls 2%" may mean 2 points or 2% of today's level, so a bare "%" for that
   // target is refused and the user is asked for points. A % goal not so marked keeps the pre-existing comparison
@@ -143,9 +170,10 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   // A % LEVEL target's unit is fixed (points), so it is never adopted from the link: a stored "%" must not let a
   // relative % size it (Codex buddy #2586 @b278c84d, P2: a marked level with no `goal_threshold_unit`).
   const levelPoints = targetNode.percent_level === true ? present(targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode))) : [];
-  const targetOwn = targetNode.percent_level === true
+  const targetOwn = [...(targetNode.percent_level === true
     ? (levelPoints.length > 0 ? levelPoints : ['percentage points'])
-    : present(unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)));
+    : present(unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))),
+    ...(hasAdoptedPercentUnit(targetEnd, targetNode) ? ['pp', 'points'] : [])];
   const provenance = isRec(found.edge.provenance) ? found.edge.provenance : {};
   const stored = isRec(provenance.natural_effect) ? provenance.natural_effect : undefined;
   const storedUnit = (key: 'amount_unit' | 'per_source_change_unit'): string | undefined =>
@@ -194,7 +222,7 @@ export function linkEffectTargetOf(graph: unknown, from: string, to: string):
 
 /**
  * ⭐ `user_stated` IS WRITTEN ONLY ON THE APPROVAL OF A DISPLAYED READING (AIQ 5885290014, "proposer, not stamper";
- * DL 5884931550). The approval card shows exactly {from, to, effect, quote}; its caller passes this token of THAT
+ * DL 5884931550). The approval card shows exactly {from, to, effect, quote} and any end-unit readings; its caller passes this token of THAT
  * reading, and the writer recomputes it over what it is asked to write. A proposal with no reading shown has no token
  * to pass, and one whose shown reading differs from the write has the wrong one: either way nothing is written. It binds
  * the READING; the graph half is `expected` (analysis hash + edge token).
@@ -204,9 +232,11 @@ export function linkEffectReadingToken(reading: {
   readonly to: string;
   readonly effect: LinkEffectStatement;
   readonly quote: string;
+  readonly unit_readings?: readonly LinkEffectUnitReading[];
 }): string {
   const { amount, amount_unit, per_source_change, per_source_change_unit } = reading.effect;
-  const bound = { from: reading.from, to: reading.to, effect: { amount, amount_unit, per_source_change, per_source_change_unit }, quote: reading.quote };
+  const bound = { from: reading.from, to: reading.to, effect: { amount, amount_unit, per_source_change, per_source_change_unit }, quote: reading.quote,
+    ...(reading.unit_readings?.length ? { unit_readings: reading.unit_readings } : {}) };
   return `reading:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
 }
 const refuse = (reason: LinkEffectRefusal): LinkEffectEditResult => ({ kind: 'refused', reason });
@@ -216,7 +246,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const { from, to, effect, expected } = params;
   if (typeof params.quote !== 'string' || params.quote.trim() === '' || params.quote.length > QUOTE_MAX) return refuse('quote_invalid');
   if (typeof params.reading_token !== 'string'
-    || params.reading_token !== linkEffectReadingToken({ from, to, effect, quote: params.quote })) {
+    || params.reading_token !== linkEffectReadingToken({ from, to, effect, quote: params.quote, unit_readings: params.unit_readings })) {
     return refuse('reading_not_confirmed');
   }
   if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
@@ -237,11 +267,28 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const provenance = isRec(edge.provenance) ? edge.provenance : {};
   if (definitionalLinkInUse(graph, from, to, params.lastRunIdentityUse ?? null) !== null) return refuse('definitional_link');
 
+  // Unit readings are identity content, outside the analysis hash: independently re-check eligibility against the
+  // persisted node and its other sized links. A level or governing unit added since approval makes adoption stale.
+  const unitReadings = params.unit_readings ?? [];
+  if (unitReadings.length > 0) {
+    const prepared = prepareLinkEffectUnitReadings(params.persistedGraph, from, to, effect, params.quote);
+    if (prepared.ask !== undefined || stableStringify(prepared.unit_readings) !== stableStringify(unitReadings)) {
+      return refuse('unit_mismatch');
+    }
+    for (const reading of unitReadings) {
+      const node = nodes.find(n => n.id === reading.node_id);
+      if (node === undefined || (reading.node_id !== from && reading.node_id !== to)) return refuse('unit_mismatch');
+      // Emit exactly the strict NodeV3 carrier. Extra keys silently drop the whole reading on register/reload.
+      const { unit, source_quote } = reading.unit_reading;
+      node.unit_reading = { unit, source: 'user_stated', source_quote };
+    }
+  }
+
   // ── THE UNITS ARE THE ENDS' OWN — never converted by guess ─────────────────────────────────────────────────────────
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
-  const sourceNode = view.get(from)!;
-  const targetNode = view.get(to)!;
-  const endUnits = linkEffectEndUnits(params.persistedGraph, from, to);
+  const sourceNode = withAdoptedPercentFrame(nodes.find(n => n.id === from), view.get(from)!);
+  const targetNode = withAdoptedPercentFrame(nodes.find(n => n.id === to), view.get(to)!);
+  const endUnits = linkEffectEndUnits(graph, from, to);
   // Either the end's stored unit or the words the ask itself is phrased in (Runtime 5882802252: a % level is asked in
   // "percentage points", a yes/no source as "switch") — the same key `sizeLink` says the natural effect back in.
   const same = (stated: string, ...own: (string | undefined)[]) => statedInOneOf(stated, own);
@@ -286,12 +333,14 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
-  // RT-6: an end that took this link's stored unit is stored in the unit as STATED (checked equal to it above), so the
-  // read-back (`sameUnit` against the card) holds and the link stays stateable in that unit next time.
+  // RT-6: an end taking this link's stored unit, or a newly disclosed sentence unit, keeps its change in the words
+  // STATED (checked equal to that end above), so the card's read-back holds, including source percentage points.
   const naturalEffect = {
     ...sizing.natural_effect,
-    ...(endUnits.source.adopted !== undefined ? { per_source_change_unit: effect.per_source_change_unit } : {}),
-    ...(endUnits.target.adopted !== undefined || endUnits.target.storeAsStated === true ? { amount_unit: effect.amount_unit } : {}),
+    ...(endUnits.source.adopted !== undefined || unitReadings.some(r => r.node_id === from)
+      ? { per_source_change_unit: effect.per_source_change_unit } : {}),
+    ...(endUnits.target.adopted !== undefined || endUnits.target.storeAsStated === true || unitReadings.some(r => r.node_id === to)
+      ? { amount_unit: effect.amount_unit } : {}),
   };
   edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect };
   edge.provenance_display = 'user_set';
@@ -303,6 +352,10 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
 
   const parsed = GraphV3.safeParse(graph);
   if (!parsed.success) return refuse('invalid_graph');
+  // `.catch(undefined)` can make the graph parse succeed after dropping a malformed reading. Never report the card's
+  // disclosed unit as saved unless each named node still carries precisely that reading after the real reload parse.
+  if (unitReadings.some(reading => stableStringify(parsed.data.nodes.find(n => n.id === reading.node_id)?.unit_reading)
+    !== stableStringify(reading.unit_reading))) return refuse('unit_mismatch');
   const fact = AdjustEdgeStrengthHandlerFactSchema.parse({
     fact_type: 'adjust_edge_strength',
     fact_version: 1,
