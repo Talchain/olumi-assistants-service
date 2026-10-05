@@ -4747,7 +4747,9 @@ function projectOnce(
         ...(effect.amount_range !== undefined ? {amount_range:effect.amount_range} : {}),
         ...(effect.stated_range !== undefined ? { stated_range: effect.stated_range } : {}),
       }, source, target);
-      if (sizing.outcome !== "user_stated" || sizing.natural_effect === undefined || sizing.problem !== undefined) continue;
+      // PORTS 2+3 (legacy D7: a user's stated size is "kept exactly as stated"): kept whatever its `problem`; a size the
+      // frames cannot hold is fitted or stored clamped and marked by the records build (`build-model-from-records.ts`).
+      if (sizing.outcome !== "user_stated" || sizing.natural_effect === undefined) continue;
       const baseProvenance: RecordProvenance = edge.provenance ?? {
         provenance_class: "ai_inferred",
         ...EDGE_ATTRIBUTION.ai_inferred,

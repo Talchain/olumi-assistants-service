@@ -1215,8 +1215,15 @@ export function transformEdgeToV3(
   let provenance = extractProvenanceForV3(edge.provenance)
     ?? (edge.provenance_source ? { source: mapToV3ProvenanceSource(edge.provenance_source) } : undefined);
   // A boundary clamp/default cannot retain authorship of the original sizing bundle.
+  // PORTS 2+3 STRICT NARROWING (DL): a bundle stored clamped at persist (`clampForPersist`) with a CONSISTENT marker keeps
+  // its authorship: |mean| exactly 1, the sign of its natural β, `clamped_from` equal to that β, and |β| > 1. Its natural β
+  // then differs from the stored mean BY DESIGN. Every other case is withdrawn exactly as before.
+  const naturalMean = provenance?.natural_effect?.strength_mean;
+  const consistentClampMarker = typeof naturalMean === "number" && Number.isFinite(naturalMean) && Math.abs(naturalMean) > 1
+    && Math.abs(strengthMean) === 1 && Math.sign(strengthMean) === Math.sign(naturalMean)
+    && (provenance as { clamped_from?: unknown } | undefined)?.clamped_from === naturalMean;
   if (provenance?.magnitude === "user_stated" && (wasClamped
-    || provenance.natural_effect?.strength_mean !== strengthMean || edge.strength_std !== strengthStd)) {
+    || (naturalMean !== strengthMean && !consistentClampMarker) || edge.strength_std !== strengthStd)) {
     provenance = { ...provenance, source: "cee_hypothesis", magnitude: "olumi_placeholder",
       source_quote: provenance.source_quote ?? provenance.quote,
       quote: undefined, natural_effect: undefined, stated_relationship: undefined };

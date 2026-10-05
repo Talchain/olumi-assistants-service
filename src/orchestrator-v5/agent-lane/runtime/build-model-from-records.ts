@@ -17,6 +17,7 @@ import { goalScopeLoss, unstatedGoalScope, type InferenceClass } from '../admit-
 import { structuralFactorCategories } from '../../../validators/graph-validator.js';
 import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
+import { clampForPersist, refitFramesForStatedEffects } from '../refit-frames.js';
 import { holdStatedGoalAttributes } from '../stated-by-user.js';
 import { constructionOperationId, deadlineOpenQuestion, goalScopePendingAction, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import type { InternalDispatch } from './agent-capabilities.js';
@@ -180,6 +181,52 @@ function inferenceClassesOf(origins: ReadonlyMap<string, { cls: unknown; unbased
  * label when none does), and whether the goal holds the deadline's own words (`goal_deadline_as_stated`; nothing on the
  * records path writes it, so the question never claims the model keeps them). One goal, as legacy's `held` requires.
  */
+/**
+ * ⭐ PORT 3 (DL WIRING PORTS 2+3; Science: reuse the legacy authority exactly, refit THEN clamp): A USER'S STATED SIZE THE
+ * FRAMES CANNOT HOLD is fitted by widening its target (`refitFramesForStatedEffects`), else stored at ±1 with its full β
+ * marked (`clampForPersist`, `provenance.clamped_from`; `natural_effect` byte-exact), BEFORE the V3 boundary, so the
+ * boundary sees ±1 plus a consistent marker and keeps the bundle (`schema-v3.ts`). The same two calls as the legacy
+ * constructor (`build-model.ts`); never a second clamp. A small local adapter gives them the {strength:{mean,std}} view of
+ * the V1 edges (and an option's `data.interventions` as `interventions`, for the refit's set-by-option guard). The refit
+ * sees the whole graph, as legacy's does; the clamp is applied to the user-stated edges only. Nothing cut: unchanged.
+ */
+function fitStatedEffects(v1: V1Graph, constraints: readonly GoalConstraintT[]): V1Graph {
+  type ViewNode = V1Graph['nodes'][number] & { interventions?: unknown };
+  type ViewEdge = Omit<V1Graph['edges'][number], 'strength_mean' | 'strength_std'> & { strength: { mean?: number; std?: number } };
+  const userStated = (edge: { provenance?: unknown }): boolean =>
+    (edge.provenance as { magnitude?: unknown } | undefined)?.magnitude === 'user_stated';
+  const borrowed = new Set<string>();
+  const view = {
+    nodes: v1.nodes.map((node): ViewNode => {
+      const interventions = (node as { data?: { interventions?: unknown } }).data?.interventions;
+      if (node.kind !== 'option' || interventions === undefined || 'interventions' in node) return node;
+      borrowed.add(node.id);
+      return { ...node, interventions };
+    }),
+    edges: v1.edges.map(({ strength_mean, strength_std, ...edge }): ViewEdge => ({ ...edge, strength: { mean: strength_mean, std: strength_std } })),
+    ...(constraints.length > 0 ? { goal_constraints: constraints } : {}),
+  };
+  const refit = refitFramesForStatedEffects(view as unknown as Record<string, unknown>);
+  const fitted = refit.graph as unknown as { nodes: ViewNode[]; edges: ViewEdge[] };
+  const statedEdges = fitted.edges.filter(userStated);
+  const clamped = clampForPersist({ nodes: fitted.nodes, edges: statedEdges });
+  if (refit.refits.length === 0 && clamped.edges === statedEdges) return v1;
+  let next = 0;
+  return {
+    ...v1,
+    nodes: fitted.nodes.map((node) => {
+      if (!borrowed.has(node.id)) return node;
+      const { interventions: _borrowed, ...own } = node;
+      return own as V1Graph['nodes'][number];
+    }),
+    edges: fitted.edges.map((edge) => {
+      const { strength, ...own } = userStated(edge) ? clamped.edges[next++]! : edge;
+      return { ...own, ...(strength.mean !== undefined ? { strength_mean: strength.mean } : {}),
+        ...(strength.std !== undefined ? { strength_std: strength.std } : {}) } as V1Graph['edges'][number];
+    }),
+  };
+}
+
 type RegisteredNode = { readonly id: string; readonly kind?: unknown; readonly label?: unknown; readonly goal_horizon_months?: unknown; readonly goal_deadline_as_stated?: unknown };
 
 /**
@@ -283,11 +330,13 @@ export async function buildModelFromRecords(
   }) };
   const candidates = compiled.projection.constraintCandidates ?? [];
   const joined = joinRecordConstraints(typed, candidates, brief);
-  const projected = projectGraphAndOptionsToV3(joined.graph, { brief });
-  const idOf = projectedIdsOf(joined.graph);
+  // PORT 3: the user's stated sizes fitted, else clamped and marked, before the V3 boundary (`fitStatedEffects`).
+  const fitted = fitStatedEffects(joined.graph, joined.constraints);
+  const projected = projectGraphAndOptionsToV3(fitted, { brief });
+  const idOf = projectedIdsOf(fitted);
   const projectedNodes = projected.graph.nodes as Array<{ id: string; kind?: unknown; is_baseline?: unknown; interventions?: unknown }>;
   const limits = bindConstraintsToProjectedIds(idOf, new Set(projectedNodes.map((node) => node.id)), joined, candidates);
-  const origins = recordOriginsOf(joined.graph, idOf);
+  const origins = recordOriginsOf(fitted, idOf);
   const authored = { ...projected.graph, nodes: markRecordsOlumiOptions(projectedNodes, origins) };
   const dispositions = compiled.projection.stated_dispositions ?? [];
   stage({
@@ -356,9 +405,9 @@ export async function buildModelFromRecords(
   if (reg.status !== 200) return refuse('registered', { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) }, `http_${reg.status}`);
   stage({ stage: 'registered', status: 'ok', replayed: reg.json.replayed === true, model_version: reg.json.model_version ?? null });
   // PORT 1: the deadline question FIRST, ahead of the five-question cap, exactly as the legacy constructor places it.
-  const deadline = recordsDeadlineQuestion(joined.graph, idOf, graph, brief);
+  const deadline = recordsDeadlineQuestion(fitted, idOf, graph, brief);
   // PORT 2 (C46): the unstated goal scope, ahead of the deadline, exactly as the legacy constructor places it.
-  const goalScope = recordsGoalScope(scenarioId, compiled.records, joined.graph, idOf, graph);
+  const goalScope = recordsGoalScope(scenarioId, compiled.records, fitted, idOf, graph);
   return {
     ok: true, mutated: true, ...(reg.json.replayed === true ? { replayed: true } : {}),
     ...(reg.json.model_version === undefined ? {} : { model_version: reg.json.model_version }),
