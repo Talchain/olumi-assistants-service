@@ -286,16 +286,27 @@ describe('independent-review regressions: complete claim identities', () => {
     expect(leadNoise(0.1, 0.9, 10000)).toBe('not_noise_qualified');
   });
 
+  /** A competitor DISTINCT from the arm it is cloned from: an exact twin would itself block the leader (#2575's
+   *  identical-group rule, a different row's subject), not test the third-competitor noise rule. */
+  const distinctThird = (from: Rec): Rec => {
+    const third: Rec = { ...clone(from), option_id: 'third' };
+    const outcome = third.outcome;
+    if (outcome !== null && typeof outcome === 'object') {
+      const o = outcome as Rec;
+      third.outcome = { ...o, mean: (typeof o.mean === 'number' ? o.mean : 0) + 1 };
+    }
+    return third;
+  };
   it.each(['a', 'b'] as const)('1: a third competitor blocks a changed-leader verdict on %s', (side) => {
     const a = mutate(fact(A_BODY, 'a'), (r) => {
       r.input_snapshot.options.push({ option_id: 'third', settings: [] });
-      r.enrichment.option_comparison.push({ ...clone(r.enrichment.option_comparison[0]), option_id: 'third' });
+      r.enrichment.option_comparison.push(distinctThird(r.enrichment.option_comparison[0]));
       for (const o of r.enrichment.option_comparison) o.win_probability = o.option_id === P59 ? 0.8 : 0.1;
     });
     const b = mutate(fact(B_BODY, 'b'), (r) => {
       r.leading_option_id = SQ;
       r.input_snapshot.options.push({ option_id: 'third', settings: [] });
-      r.enrichment.option_comparison.push({ ...clone(r.enrichment.option_comparison[0]), option_id: 'third' });
+      r.enrichment.option_comparison.push(distinctThird(r.enrichment.option_comparison[0]));
       for (const o of r.enrichment.option_comparison) o.win_probability = o.option_id === SQ ? 0.8 : 0.1;
     });
     const bad = mutate(side === 'a' ? a : b, (r) => {
