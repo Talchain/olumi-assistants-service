@@ -131,6 +131,7 @@ describe("draft stated figures at the records seam", () => {
     expect(starter?.observed_state).toMatchObject({ value: 0.75, raw_value: 150, baseline: 150, range: { min: 80, max: 250 } });
     const manifest = deriveNotModelledManifest(BRIEF, graph);
     const manifestItems = manifest.quantities?.items ?? [];
+    expect(manifestItems.filter((item) => ["£1,200", "£49"].includes(item.literal)).length).toBeGreaterThan(0);
     expect(manifestItems.filter((item) => ["£1,200", "£49"].includes(item.literal)).every((item) => item.verdict === "in_model")).toBe(true);
     // ⛔ RE-PINNED ON PURPOSE (#2601, served false absence #87 5996437122). This row used to pin the signed-value
     // matcher's FALSE ABSENCE: "£6" was reported `absent` while the admitted −£6 edge held it. A figure the user wrote
