@@ -439,7 +439,7 @@ describe('review closure: final presentation is bound to its baseline execution 
     expect(reply).toContain(`Raise Pro price to £59's expected result ${words}`);
     expect(reply).not.toMatch(/expected result is -?\d/);
     if (verdict === 'not_comparable') expect(reply).not.toMatch(/expected result is (higher|lower|the same)/);
-    if (basis !== 'target_crossed' && basis !== 'same_side_of_target') expect(reply).not.toMatch(/your target/);
+    if (!(['target_crossed', 'same_side_of_target'] as readonly string[]).includes(basis)) expect(reply).not.toMatch(/your target/);
     expect(reply.match(/within sampling noise/g)?.length ?? 0).toBeLessThanOrEqual(1);
   });
 
