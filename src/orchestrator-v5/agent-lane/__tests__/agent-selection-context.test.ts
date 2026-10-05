@@ -159,7 +159,7 @@ describe('RT-1 live in-process /agent/v1/turn with a stubbed model', () => {
     const stateAt = input.findIndex((i) => i.role === 'developer' && textOf(i).startsWith(CURRENT_MODEL_STATE_PREFIX));
     const noteAt = input.findIndex((i) => i.role === 'developer' && textOf(i).startsWith(SELECTION_NOTE_PREFIX));
     // The LAST user item is this turn's (earlier turns in the session ask the same words).
-    const userAt = input.findLastIndex((i) => i.role === 'user' && textOf(i) === QUESTION);
+    const userAt = input.map((i) => i.role === 'user' && textOf(i) === QUESTION).lastIndexOf(true);
     expect(stateAt, 'control: the turn was given its model state').toBeGreaterThanOrEqual(0);
     expect(noteAt).toBe(stateAt + 1);
     expect(userAt).toBe(noteAt + 1);
