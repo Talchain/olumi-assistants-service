@@ -416,3 +416,25 @@ describe('Codex R1 F4: a valid delta is carried by its own change_by, never reje
     expect(p.stated_dispositions?.find(d => d.stated_index === 2)).toMatchObject({ disposition: 'carried', stored_value: 5, location: { path: expect.arrayContaining(['raw_value']) } });
   });
 });
+describe('Codex R1 F5: the K3 inert-risk exemption reads the downstream kind', () => {
+  const HAZARD = 'Van breakdowns could disrupt the schedule.';
+  function vansWithStatedHazard(): DraftRecordSet {
+    const r = vans();
+    r.stated_items.push({ kind: 'constraint', source_quote: HAZARD });
+    r.claims.push({ claim_kind: 'causal_link', label: 'more vans more breakdowns', from_claim: 0, to_stated: 6, effect: 'positive' });
+    return r;
+  }
+  it('F5 an exogenous cause → stated hazard (constraint here, risk downstream) is retained like the claim-kind risk', () => {
+    const p = project(vansWithStatedHazard(), VANS + ' ' + HAZARD);
+    const hazard = p.graph.nodes.find(n => n.provenance?.source_quote === HAZARD);
+    expect(hazard?.kind).toBe('constraint');
+    expect(p.graph.edges.some(e => e.to === hazard!.id)).toBe(true);
+    expect(p.dropped.some(d => d.node_id === hazard!.id)).toBe(false);
+  });
+  it('F5 CONTRAST the claim-kind risk with the same cause is retained (P2-0 K3)', () => {
+    const p = project(vansWithRisk(false), VANS);
+    const risk = p.graph.nodes.find(n => n.label === 'Van breakdowns');
+    expect(risk?.kind).toBe('risk');
+    expect(p.dropped.some(d => d.node_id === risk!.id)).toBe(false);
+  });
+});

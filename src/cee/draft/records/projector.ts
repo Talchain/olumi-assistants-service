@@ -4014,7 +4014,10 @@ function projectOnce(
     // (`limitSinkBranch`) and a K3 inert risk with the causes drawn only into it (`inertRiskBranch`).
     const limitIds = goalConstraints.map((row) => row.node_id);
     const limitSink = limitSinkBranch(nodes, edges, limitIds);
-    const inertRisk = inertRiskBranch(nodes, edges, limitIds);
+    // Readiness reads the DOWNSTREAM kind: a user-stated hazard is `constraint` here and `risk` after normalisation,
+    // so the K3 exemption is asked of the mapped kinds, exactly as readiness will see them (Codex R1 F5).
+    const inertRisk = inertRiskBranch(
+      nodes.map((n) => ({ ...n, kind: PROJECTED_KIND_AFTER_NORMALISATION[n.kind] ?? n.kind })), edges, limitIds);
     const unmodelled = nodes.filter(
       (n) => (n.kind === "factor" || n.kind === "constraint" || n.kind === "outcome" || n.kind === "risk")
         && !reachesGoal.has(n.id) && !limitSink.has(n.id) && !inertRisk.has(n.id),
