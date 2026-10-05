@@ -123,6 +123,11 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
     emitted_at_iso: '2026-07-03T11:59:00.000Z',
   };
   switch (kind) {
+    case 'agent_link_effect_question':
+      return { ...base, preconditions: { graph_hash: 'h' }, action: { kind, question: 'What unit is the 1 change in \u201cOnboarding drag\u201d stated in?',
+        from_node_id: 'developer_headcount', to_node_id: 'onboarding_drag', from_label: 'Developer headcount', to_label: 'Onboarding drag',
+        quote: 'Every 2 extra developers add about 1 point of onboarding drag.',
+        effect: { amount: 1, amount_unit: 'points', per_source_change: 2, per_source_change_unit: 'developers' }, asked_ends: ['target'] } };
     case 'reconcile_goal_scope':
       return { ...base, action: { kind, goal_id: 'goal_revenue', goal_label: 'Revenue', expected: 'scope',
         question: 'Does revenue cover all plans?', operands: [], derivations: [] } };
@@ -289,6 +294,8 @@ describe('derivePendingActivity — single ORIENT-time pending tally, per kind',
     // Same reasoning again: a bare "yes" answers no "what value counts as
     // success?" question. An elicitation, never a proposal.
     ['elicit_goal_target', 0],
+    // RT-6 S4-A: the Agent's link-unit question is answered by a unit, never by "yes": live, never confirm-expecting.
+    ['agent_link_effect_question', 0],
     ['run_analysis', 0],
     ['what_would_flip', 0],
   ])('a single live %s → confirmationExpectingLiveCount %d, but always counted live', (kind, expected) => {
