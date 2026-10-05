@@ -2903,7 +2903,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (methodTurn?.kind === 'run') budget = interpretBudget();
       result = await runAgentTurn(
         {
-          ctx: toolCtx,
+          ctx: { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
+            ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) },
           history,
           message,
           instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}`

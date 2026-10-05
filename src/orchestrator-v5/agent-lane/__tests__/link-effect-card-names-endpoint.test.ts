@@ -4,7 +4,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { linkEffectEdgeToken } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken } from '../../system-events/link-effect-edit.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 
 type Json = Record<string, any>;
@@ -20,8 +20,9 @@ const ARGS = { ...EFFECT, from_label: COPY, to_label: 'Pro plan paying subscribe
 const ctx = (user_text = `Honestly, ${QUOTE}.`) => ({
   scenario_id: '550e8400-e29b-41d4-a716-4466554400a7', authenticated_user_id: null, request_id: 'card-names', user_text,
 });
+// B3 (RT-6 step 3): symbols AND words, then the user's sentence and the consent words; was `… — from your words: "…"`.
 const reading = (from: string, to = 'Pro plan paying subscribers') =>
-  `Record: +£1/month on "${from}" → −50 subscribers in "${to}" — from your words: "${QUOTE}"`;
+  `Record: +£1/month on "${from}" → −50 subscribers in "${to}": raising "${from}" by £1/month lowers "${to}" by 50 subscribers. From your words: "${QUOTE}". Approve, or correct.`;
 const operation = (graph: Json, from: string, to = TARGET) => ({
   op: 'set_link_effect', path: `${from}::${to}`, value: { from, to, effect: EFFECT, quote: QUOTE, edge_token: linkEffectEdgeToken(graph, from, to) },
 });
@@ -43,9 +44,15 @@ function world(graph = duplicatedGraph()) {
   // Same pressed-card harness as link-effect-answer.test.ts; this local door records only the exact ids sent.
   const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
     sent.push(input);
+    // The door stores the REAL writer's postimage of each approved reading, in order (RT-6 step 3, B4: the read-back
+    // checks each reloaded link IS that postimage). Was a hand-made provenance per link.
     for (const item of input.link_effect !== undefined ? [input.link_effect] : input.link_effects ?? []) {
-      const edge = graph.edges.find((e: Json) => e.from === item.from && e.to === item.to)!;
-      edge.provenance = { ...(edge.provenance ?? {}), source: 'user_specified', magnitude: 'user_stated', natural_effect: item.effect };
+      const out = applyLinkEffectEdit({ persistedGraph: structuredClone(graph), from: item.from, to: item.to, effect: item.effect, quote: item.quote,
+        expected: { graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, edge_token: item.edge_token }, reading_token: item.reading_token,
+        ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}) });
+      if (out.kind !== 'mutated') throw new Error(`writer refused in the stub door: ${JSON.stringify(out)}`);
+      const i = graph.edges.findIndex((e: Json) => e.from === item.from && e.to === item.to);
+      graph.edges[i] = (out.mutatedGraph as Json).edges.find((e: Json) => e.from === item.from && e.to === item.to);
     }
     return { status: 'committed', graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, receipt: null, already_applied: false, committed_levels: [] };
   };
@@ -132,7 +139,8 @@ describe('link-effect approval cards name the exact endpoint', () => {
       (grouped ? [COPY, ORIGINAL] : [COPY]).map((from) => ({ from, to: TARGET, effect: EFFECT })),
     );
     expect(w.graph.edges.find((e: Json) => e.from === COPY && e.to === TARGET).provenance).toEqual(expect.objectContaining({
-      source: 'user_specified', magnitude: 'user_stated', natural_effect: EFFECT,
+      // The real writer's natural effect also carries its strength fields (the stub door now stores its postimage).
+      source: 'user_specified', magnitude: 'user_stated', natural_effect: expect.objectContaining(EFFECT),
     }));
     if (!grouped) expect(w.graph.edges.find((e: Json) => e.from === ORIGINAL && e.to === TARGET).provenance.magnitude).toBeUndefined();
   });
@@ -143,8 +151,8 @@ describe('link-effect approval cards name the exact endpoint', () => {
     expect(result.ok).toBe(true);
     expect(w.store.get(String(result.proposal_id))?.operations).toEqual([operation(w.graph, ORIGINAL)]);
     expect(result.link).toEqual({ from: 'Pro plan price', to: 'Pro plan paying subscribers', effect: EFFECT, your_words: QUOTE });
-    expect(cardFor(w, result).detail).toBe(`Record: +£1/month on "Pro plan price" → −50 subscribers in "Pro plan paying subscribers" — from your words: "every £1 on the Pro price loses us about 50 paying subscribers"`);
-    expect(cardFor(w, result).message).toBe(`Yes — Record: +£1/month on "Pro plan price" → −50 subscribers in "Pro plan paying subscribers" — from your words: "every £1 on the Pro price loses us about 50 paying subscribers"`);
+    expect(cardFor(w, result).detail).toBe(`Record: +£1/month on "Pro plan price" → −50 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month lowers "Pro plan paying subscribers" by 50 subscribers. From your words: "every £1 on the Pro price loses us about 50 paying subscribers". Approve, or correct.`);
+    expect(cardFor(w, result).message).toBe(`Yes — Record: +£1/month on "Pro plan price" → −50 subscribers in "Pro plan paying subscribers": raising "Pro plan price" by £1/month lowers "Pro plan paying subscribers" by 50 subscribers. From your words: "every £1 on the Pro price loses us about 50 paying subscribers". Approve, or correct.`);
   });
 
   it('a unique nonempty description takes priority over distinct connections', async () => {

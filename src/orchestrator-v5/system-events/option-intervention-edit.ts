@@ -82,7 +82,7 @@ import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, type LinkEffectStatement } from './link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
 import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
@@ -563,6 +563,8 @@ export interface ApprovedLinkEffect {
   readonly reading_token: string;
   /** Each disclosed end-unit reading, bound into the approval token and written atomically with this link. */
   readonly unit_readings?: readonly LinkEffectUnitReading[];
+  readonly reversal?: LinkEffectReversal;
+  readonly link_selected?: true;
 }
 
 /**
@@ -715,6 +717,7 @@ async function applyApprovedLinkEffects(
     const written = applyLinkEffectEdit({ persistedGraph: working, from: link.from, to: link.to, effect: link.effect,
       expected: { graph_hash: graphHash, edge_token: link.edge_token }, quote: link.quote, reading_token: link.reading_token,
       unit_readings: link.unit_readings,
+      reversal: link.reversal, link_selected: link.link_selected,
       lastRunIdentityUse: ctx.lastRunIdentityUse });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: i };
     working = written.mutatedGraph;
@@ -934,6 +937,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     const written = applyLinkEffectEdit({ persistedGraph: before, from: linkEffect.from, to: linkEffect.to, effect: linkEffect.effect,
       expected: { graph_hash: input.expectedGraphHash, edge_token: linkEffect.edge_token }, quote: linkEffect.quote,
       reading_token: linkEffect.reading_token, unit_readings: linkEffect.unit_readings,
+      reversal: linkEffect.reversal, link_selected: linkEffect.link_selected,
       lastRunIdentityUse: input.lastRunIdentityUse ?? null });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: 0 };
     const graph = projectGraphForPersistence(written.mutatedGraph);

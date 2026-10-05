@@ -33,7 +33,7 @@ import type { EdgeProvenanceV3T } from '../../schemas/cee-v3.js';
 import { classifyUnitScaleClass, unitPinnedScaleFrame } from '../draft/records/unit-scale-class.js';
 import { readCurrencyUnitWithQualifiers } from '../provenance/stated-amounts.js';
 import { recoverScaleFrame } from '../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
-import { isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
+import { isPercentOfPopulation, isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
 import { sayFigure } from '../../orchestrator-v5/agent-lane/say-figure.js';
 
 /** Who sized a link (D9). Declared once, on `EdgeProvenanceV3.magnitude`. */
@@ -320,6 +320,16 @@ export function isSwitch(node: MagnitudeNode, frame: number | undefined): boolea
  */
 export function switchStateWords(level: number): 'on' | 'off' | undefined {
   return level === 1 ? 'on' : level === 0 ? 'off' : undefined;
+}
+
+/**
+ * RT-6 link-effect path ONLY (writer + unit reader; Science U2): a pinned percentage level, including "% of output",
+ * moves in points (1 point = 1 raw unit). The shared magnitude readers (`isPercentLevel`, `levelDomain`, reached by
+ * admit-model, frame-defaulted links and target testability) keep today's "% with a period" rule: widening them is a
+ * Model Construction + Science call, not this lane's.
+ */
+export function isPercentageLevelUnit(unit: string | undefined, frame: number | undefined): boolean {
+  return frame === 100 && unit !== undefined && (isPercentWithPeriod(unit) || isPercentOfPopulation(unit));
 }
 
 const isPercentLevel = (node: MagnitudeNode, frame: number | undefined): boolean => {
