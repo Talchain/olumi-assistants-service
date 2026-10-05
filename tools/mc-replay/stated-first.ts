@@ -22,7 +22,7 @@ export const PASS_EXT_INSTRUCTION = `
 EXTENSION (three more fields)
 Also write one record for every option the brief names, whether or not it states a figure.
 role option: an option the brief names that states no figure of its own; its figure is "unresolved". An option that names its own figure stays option_setting.
-source_literal: the shortest characters of the record's sentence that name this record's own subject (for an option or option_setting, the words that select that option), copied exactly and occurring once in that sentence; null when the record is the whole sentence.
+source_literal: when the sentence holds more than one record, the shortest characters of that sentence that contain every literal this record copies (its value_literal, unit_literals, direction_literal and any relationship or option_effect literal) together with the words naming what it measures (for an option or option_setting, the words that select that option), copied exactly and occurring once in that sentence; null when the sentence holds only this record.
 is_baseline: true only on the option that keeps things as they are today; otherwise null.`;
 export const PASS_EXT_MAX_OUTPUT_TOKENS = 8000;
 export function extendPassRequest<T extends { instructions?: unknown; schema?: unknown; max_output_tokens?: unknown }>(req: T): T {
