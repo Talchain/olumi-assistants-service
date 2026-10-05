@@ -41,10 +41,8 @@ describe.each([
     expect(text).not.toContain('at most');
     expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
   });
-  it('the flag never moves the case, leader or shed', () => {
-    const { text: _a, ...withFix } = describeAnalysisHeadline(input(e, true)) as Record<string, unknown>;
-    const { text: _b, ...without } = describeAnalysisHeadline(input(e, false)) as Record<string, unknown>;
-    expect(withFix).toEqual(without);
+  it('the flag never moves the case, leader or shed (the descriptor carries no text)', () => {
+    expect(describeAnalysisHeadline(input(e, true))).toEqual(describeAnalysisHeadline(input(e, false)));
   });
 });
 
