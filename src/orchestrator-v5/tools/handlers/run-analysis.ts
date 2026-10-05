@@ -46,7 +46,7 @@ import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js'
 import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
-import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
+import { unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
 import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
@@ -1955,21 +1955,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
 
     // ⛔ (S) THE GOAL'S CHANCE, PER OPTION (DL #75 5902570568; AIQ 5902548598): an option whose path into the goal runs
-    // through an `olumi_placeholder` has its goal figures withheld HERE, before any reader, and every win share and the
+    // through a link nobody sized has its goal figures withheld HERE (R4 shared P5 walk), before any reader, and every win share and the
     // leader with them (`withholdOptionGoalFigures`). A run PLoT already withheld (#416 / #422) says its own reason.
     const envelope = response as Record<string, unknown>;
     if (!runWithheldGoalFigures(envelope)) {
       const scoredIds = [...new Set(readOptionResultSources(envelope).flat().map((r) => (typeof r.option_id === 'string' ? r.option_id : r.id))
         .filter((id): id is string => typeof id === 'string' && id !== ''))];
       const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
-      const scored = new Map(finalWireOptions.flatMap((o) => {
-        const rec = o as Record<string, unknown>;
-        const id = typeof rec.option_id === 'string' ? rec.option_id : typeof rec.id === 'string' ? rec.id : undefined;
-        const iv = rec.interventions !== null && typeof rec.interventions === 'object' && !Array.isArray(rec.interventions)
-          ? rec.interventions as Record<string, unknown> : undefined;
-        return id !== undefined && iv !== undefined ? [[id, iv] as const] : [];
-      }));
-      const goalPaths = placeholderGoalPaths(graphForAnalysis, scoredIds, evaluations, scored);
+      const scoredInterventions = new Map(finalWireOptions.map(o => [String(o.option_id ?? o.id), o.interventions as Record<string, unknown>]));
+      const goalPaths = unsizedLeaderGoalPaths(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
       if (goalPaths.length > 0) {
         response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
           placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH));

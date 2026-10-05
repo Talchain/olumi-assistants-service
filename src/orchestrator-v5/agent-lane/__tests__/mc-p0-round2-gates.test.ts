@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import * as admission from '../admit-model.js';
 import { edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
-import { resolveAnalysisAdmission } from '../../admission/analysis-admission.js';
+import { runP0Graph } from '../../tools/handlers/__tests__/mc-p0-run-helper.js';
 const brief = readFileSync(new URL('../../admission/__tests__/fixtures/mc-p0/BRIEF.txt', import.meta.url), 'utf8');
 const draw1 = () => JSON.parse(readFileSync(new URL('../../admission/__tests__/fixtures/mc-p0/draw1.json', import.meta.url), 'utf8'));
 const priceSentence = 'Each 1% price rise adds £1,200 a month to monthly recurring revenue before churn.';
@@ -23,7 +23,7 @@ describe('MC P0 round 2 binding and DL gates', () => {
     expect(bind([wrong], wrongNodes('MRR'), brief).get(0)).toBe('Each starter subscriber adds £49 a month to monthly recurring revenue.');
   });
   it('R2-1 Price increase->monthly recurring revenue £1,200 remains promoted without target-label requirement', control);
-  it('R2-2 real stored draft 1 invented support chain has no credit and cannot license comparative_leader', () => {
+  it('R2-2 real stored draft 1 invented support chain has no credit and cannot license comparative_leader', async () => {
     control();
     const g = draw1();
     const realPath = '/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/a320bf52-a93a-43ab-ae80-d7d8e435a988/scratchpad/served-t1b/out/draw1/graph-read.json';
@@ -38,7 +38,12 @@ describe('MC P0 round 2 binding and DL gates', () => {
       expect(bindings.has(i), id).toBe(false);
       expect(edgeStrengthProvenance(projected.edges[i]), id).toBe('ai_drafted');
     }
-    expect(resolveAnalysisAdmission(projected).permitted_analysis_mode).not.toBe('comparative_leader');
+    const result = await runP0Graph(projected, brief);
+    expect(result.leading_option_id).toBeNull();
+    const warning = result.enrichment.inference_warnings.find((w: any) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
+    expect(warning.node_ids).toEqual(expect.arrayContaining(['starter_support_cost', 'mrr_lost_to_starter_support_burden']));
+    expect(warning.message).toContain('Starter support cost');
+    expect(warning.message).toContain('MRR lost to starter support burden');
   });
   it('R3-F4 supersedes R2-3 a: marked user_stated without natural_effect is not credited', () => {
     expect(edgeStrengthProvenance(user)).toBe('user_stated');

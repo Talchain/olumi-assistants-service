@@ -124,6 +124,55 @@ export function untestableGoalTargetRowId(input: unknown): string | null {
   return typeof row?.constraint_id === 'string' && row.constraint_id !== '' ? row.constraint_id : null;
 }
 
+/**
+ * The ONE target-independent option reach computation, shared by P5 and the Run's leader licence.
+ * `reached` preserves P5's reach set (including off-goal branches); `paths` selects only causal links on a compared
+ * option's path to the goal. Options/decisions are never traversed and option set-edges are excluded. Exact operand
+ * edges carry no causal size. Callers supply seeds: P5's option nodes, or the licence's actual moved factors.
+ * No target, unit, sizing or intervention-level judgement is made by this walk.
+ */
+export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], seeds: ReadonlyMap<string, readonly unknown[]>, identityEvaluations?: readonly unknown[]): {
+  reached: Set<unknown>;
+  paths: Array<{ option_id: string; links: Record<string, unknown>[] }>;
+  exactLinks: Set<Record<string, unknown>>;
+} {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const byId = new Map(nodes.map(n => [n.id, n] as const));
+  const goal = nodes.find(n => n.kind === 'goal');
+  const ids = optionIds;
+  const walkable = (id: unknown): boolean => byId.get(id)?.kind !== 'option' && byId.get(id)?.kind !== 'decision';
+  const toGoal = new Set<unknown>(goal === undefined ? [] : [goal.id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) if (toGoal.has(e.to) && walkable(e.from) && walkable(e.to) && !toGoal.has(e.from)) {
+      toGoal.add(e.from); grew = true;
+    }
+  }
+  const evaluated = new Set((identityEvaluations ?? []).filter(isRec).filter(e => e.evaluated === true).map(e => e.node_id));
+  const exactLinks = new Set(edges.filter(e => {
+    if (isRec(e.provenance) && e.provenance.definitional === true) return true;
+    const to = byId.get(e.to);
+    const identity = isRec(to?.nonlinear_identity) ? to.nonlinear_identity : undefined;
+    return identity !== undefined && (identity.stated_in_brief !== false || evaluated.has(to?.id))
+      && Array.isArray(identity.factor_ids) && identity.factor_ids.includes(e.from);
+  }));
+  const reached = new Set<unknown>();
+  const paths = ids.map(option_id => {
+    const seen = new Set<unknown>(seeds.get(option_id) ?? []);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const e of edges) if (seen.has(e.from) && !seen.has(e.to) && walkable(e.to)) {
+        seen.add(e.to); grew = true;
+      }
+    }
+    for (const id of seen) reached.add(id);
+    return { option_id, links: edges.filter(e => seen.has(e.from) && seen.has(e.to) && walkable(e.from)
+      && walkable(e.to) && toGoal.has(e.to)) };
+  });
+  return { reached, paths, exactLinks };
+}
+
 export function targetTestabilityOf(input: unknown): TargetTestability {
   if (!isRec(input) || !Array.isArray(input.nodes)) return { kind: 'no_goal' };
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
@@ -156,14 +205,8 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     const kindOf = new Map(nodes.map((n) => [n.id, n.kind] as const));
     const labelOf = new Map(nodes.map((n) => [n.id, typeof n.label === 'string' && n.label.trim() !== '' ? n.label.trim() : String(n.id)] as const));
     const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
-    // Every node an option moves, directly or downstream (options and the decision are never walked through).
-    const reached = new Set<unknown>(nodes.filter((n) => n.kind === 'option').map((n) => n.id));
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const e of edges) {
-        if (reached.has(e.from) && !reached.has(e.to) && kindOf.get(e.to) !== 'option' && kindOf.get(e.to) !== 'decision') { reached.add(e.to); grew = true; }
-      }
-    }
+    const optionIds = nodes.filter(n => n.kind === 'option' && typeof n.id === 'string').map(n => n.id as string);
+    const { reached } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])));
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).

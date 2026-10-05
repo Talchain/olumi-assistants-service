@@ -212,7 +212,14 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
   });
 
   it('RED: ONE typed warning says which options, which links, and asks for the size; the Agent is told what to say', async () => {
-    const r = await runOn(F.graph);
+    const g = clone(F.graph);
+    // R6 Science ruling: size the third link so this two-link warning keeps its original meaning.
+    const workloadSaving = g.edges.find((e: Json) => e.from === 'gcp_workload_share' && e.to === 'monthly_gcp_cost_saving');
+    workloadSaving.provenance = { ...workloadSaving.provenance, magnitude: 'olumi_estimate', natural_effect: {
+      amount: 1, amount_unit: 'GBP/month', per_source_change: 1, per_source_change_unit: '%',
+      strength_mean: workloadSaving.strength.mean, strength_mean_frame: 'edge_strength',
+    } };
+    const r = await runOn(g);
     const env = r.enrichment ?? r;
     const w = (env.inference_warnings as Json[]).filter((x) => x.code === GOAL_FIGURES_PLACEHOLDER_PATH);
     expect(w).toHaveLength(1);
@@ -236,6 +243,12 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
   it('CONTROL: with those two links sized by Olumi, nothing is withheld and the served figures stand', async () => {
     const g = clone(F.graph);
     for (const e of g.edges as Json[]) if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.magnitude = 'olumi_estimate';
+    // R5 Science ruling: this control sizes the unmarked defaulted causal link too.
+    const workloadSaving = g.edges.find((e: Json) => e.from === 'gcp_workload_share' && e.to === 'monthly_gcp_cost_saving');
+    workloadSaving.provenance = { ...workloadSaving.provenance, magnitude: 'olumi_estimate', natural_effect: {
+      amount: 1, amount_unit: 'GBP/month', per_source_change: 1, per_source_change_unit: '%',
+      strength_mean: workloadSaving.strength.mean, strength_mean_frame: 'edge_strength',
+    } };
     const r = await runOn(g);
     const env = r.enrichment ?? r;
     expect((env.option_comparison as Json[]).find((o) => o.option_id === SWITCH)).toMatchObject({ probability_of_goal: 0.0617 });

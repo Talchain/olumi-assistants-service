@@ -1,4 +1,3 @@
-import { figureTheUserWroteSpan, figureTheUserWroteForSpan } from './stated-by-user.js';
 import { statedEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
 /**
  * Agent lane — whole-candidate admission.
@@ -3749,24 +3748,9 @@ function admitOnce(
       ...(typeof own === 'string' ? { effect_unit: naturalAmountUnitOf(magnitudeNodeFor(n)),
         change_unit: sourceUnitWords(magnitudeNodeFor(n), resolveMagnitudeFrame(magnitudeNodeFor(n))) } : {}) };
   });
-  // Readers expose the first span they already located, never a value-wide exclusion.
-  const claimedLevelSpans: { start: number; end: number }[] = [];
-  const claim = (span: { start: number; end: number } | null | undefined): void => { if (span != null) claimedLevelSpans.push(span); };
-  if (typeof model.goal.value === 'number') claim(figureTheUserWroteSpan(model.goal.value, model.goal.unit, brief));
-  if (typeof model.goal.baseline_value === 'number' && goalLevelStated(model.goal.baseline_value, model.goal.unit)) {
-    claim(figureTheUserWroteForSpan(model.goal.baseline_value, model.goal.unit, brief,
-      { target: [model.goal.metric], others: quantityLabels.filter(q => q !== model.goal.metric), strict: true }));
-  }
-  if (levelReading.value?.kind === 'adopt') claim(levelReading.value.span);
-  for (const factor of model.factors) if (typeof factor.baseline_value === 'number') {
-    claim(figureTheUserWroteForSpan(factor.baseline_value, factor.unit, brief,
-      { target: [factor.label], others: quantityLabels.filter(q => q !== factor.label), strict: true }));
-  }
-  for (const option of model.options) for (const level of option.interventions ?? []) {
-    if (level.provenance !== 'explicit') continue;
-    claim(figureTheUserWroteForSpan(level.value, level.unit, brief,
-      { target: [level.factor_label, option.label], others: quantityLabels.filter(q => q !== level.factor_label), strict: true }));
-  }
+  // Only a role-aware reader's located level is claimed here. Target/current/setting
+  // occurrences are claimed by nonEffectQuantitySpans in the binding reader.
+  const claimedLevelSpans = levelReading.value?.kind === 'adopt' ? [levelReading.value.span] : [];
   const boundSizeSentences = bindStatedLinkSizes(resolvable.map((l, i) => ({
     from: l.from, to: l.to, effect_direction: l.direction, natural_effect: prospectiveEffects[i],
   })), bindingNodes, brief, claimedLevelSpans);
