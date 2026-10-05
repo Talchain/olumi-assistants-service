@@ -84,6 +84,16 @@ function projectVariant(mutate: (variant: DraftRecordSet) => void) {
   return result.projection.graph;
 }
 
+/**
+ * Pass 2 P2-0: an outcome with no directed path to the goal is now withdrawn by the connectivity prune (readiness
+ * refused the whole model on it). "Monthly support cost" is such an outcome in this fixture, so the probes below that
+ * use its sized edge as their SUBJECT connect it to the goal first; otherwise every fail-closed expectation would read
+ * `undefined` vacuously. Test-only topology, no brief text.
+ */
+function connectSupport(variant: DraftRecordSet): void {
+  variant.claims.push({ claim_kind: "causal_link", label: "support cost → goal (probe path)", from_claim: 3, to_stated: 0, effect: "negative" });
+}
+
 function naturalOn(graph: ReturnType<typeof projectVariant>, fromLabel: string, toLabel: string) {
   const from = graph.nodes.find((node) => node.label === fromLabel)?.id;
   const to = graph.nodes.find((node) => node.label === toLabel)?.id;
@@ -138,15 +148,18 @@ describe("draft stated figures at the records seam", () => {
       [49, "£/month", 1, "subscribers"],
 
       [-300, "£/month", 1, "customers"],
-      [-6, "£/month", 1, "subscribers"],
+      // P2-0: the -£6 support-cost effect is withdrawn with its outcome (no path to the goal); disclosed below.
       [-2, "customers", 1, "%"],
       // B6: the same revenue quantity now has an independently checked definition into the goal.
       [1, "£/month", 1, "£/month"],
     ]);
-    expect(graph.edges.filter((edge) => edge.provenance?.source === "brief_extraction")).toHaveLength(5);
+    expect(graph.edges.filter((edge) => edge.provenance?.source === "brief_extraction")).toHaveLength(4);
     expect(naturalOn(graph, "Price rise", "Monthly recurring revenue")?.amount).toBe(1200);
     expect(naturalOn(graph, "Starter tier subscribers", "Monthly recurring revenue")?.amount).toBe(49);
-    expect(naturalOn(graph, "Starter tier subscribers", "Monthly support cost")?.amount).toBe(-6);
+    expect(naturalOn(graph, "Starter tier subscribers", "Monthly support cost")).toBeUndefined();
+    expect(graph.nodes.some((node) => node.label === "Monthly support cost")).toBe(false);
+    expect(result.projection.dropped).toContainEqual(expect.objectContaining({ stated_index: 10, reason: "unconnected_to_goal", value: -6, unit: "£/month" }));
+    expect(naturalOn(projectVariant(connectSupport), "Starter tier subscribers", "Monthly support cost")?.amount).toBe(-6);
     expect(naturalOn(graph, "Customers lost to price rise", "Monthly recurring revenue")?.amount).toBe(-300);
     expect(naturalOn(graph, "Price rise", "Customers lost to price rise")?.amount).toBe(-2);
     expect(naturalOn(graph, "Price rise", records.stated_items[0].source_quote)).toBeUndefined();
@@ -160,8 +173,9 @@ describe("draft stated figures at the records seam", () => {
     const manifest = deriveNotModelledManifest(BRIEF, graph);
     const manifestItems = manifest.quantities?.items ?? [];
     expect(manifestItems.filter((item) => ["£1,200", "£49"].includes(item.literal)).every((item) => item.verdict === "in_model")).toBe(true);
-    // A1 now retains the unsigned literal as prose while the signed -£6 effect is asserted above.
-    expect(manifestItems.find((item) => item.literal === "£6")?.verdict).toBe("prose_only");
+    // P2-0: the support-cost outcome and its -£6 edge are withdrawn (disclosed in `dropped` above, with the value), so the
+    // graph-only manifest now reports the £6 literal absent from the model rather than as prose on a kept edge.
+    expect(manifestItems.find((item) => item.literal === "£6")?.verdict).toBe("absent");
   });
 
   it("reports the full original-brief fixture's remaining P5 goal_path_unsized failure", () => {
@@ -177,7 +191,7 @@ describe("draft stated figures at the records seam", () => {
   });
 
   it("fails closed for swapped identity, duplicate labels, unquoted spans and malformed ranges", () => {
-    expect(naturalOn(projectVariant((variant) => { variant.claims[4].to_claim = 3; }), "Price rise", "Monthly support cost")).toBeUndefined();
+    expect(naturalOn(projectVariant((variant) => { connectSupport(variant); variant.claims[4].to_claim = 3; }), "Price rise", "Monthly support cost")).toBeUndefined();
     expect(naturalOn(projectVariant((variant) => { variant.claims[1].label = "Monthly recurring revenue"; }), "Monthly recurring revenue", "Monthly recurring revenue")).toBeUndefined();
     expect(naturalOn(projectVariant((variant) => { variant.claims[1].label = "Monthly recurring revenue"; }), "Price rise", "Monthly recurring revenue")).toBeUndefined();
     expect(naturalOn(projectVariant((variant) => { variant.stated_items[6].source_quote = "each 1% price rise adds £1,200 a month to an unquoted metric."; }), "Price rise", "Monthly recurring revenue")).toBeUndefined();
@@ -186,6 +200,7 @@ describe("draft stated figures at the records seam", () => {
 
   it("sizes no competing edge when neither or both members name their endpoints uniquely", () => {
     const neither = projectVariant((variant) => {
+      connectSupport(variant);
       variant.claims.push({ ...variant.claims[13]!, label: "unrelated support claim", from_claim: 0, to_claim: 2 });
     });
     expect(naturalOn(neither, "Starter tier subscribers", "Monthly support cost")).toBeUndefined();
@@ -203,7 +218,7 @@ describe("draft stated figures at the records seam", () => {
   });
 
   it("keeps structural singleton identity, and fails closed on invalid fields, sign and basis", () => {
-    const projected = (mutate: (variant: DraftRecordSet) => void) => naturalOn(projectVariant(mutate), "Starter tier subscribers", "Monthly support cost");
+    const projected = (mutate: (variant: DraftRecordSet) => void) => naturalOn(projectVariant((variant) => { connectSupport(variant); mutate(variant); }), "Starter tier subscribers", "Monthly support cost");
     expect(projected(() => {})).toMatchObject({ amount: -6, per_source_change: 1 });
     expect(projected((variant) => { variant.claims[13]!.effect_detail!.per_source_change = 2; })).toBeUndefined();
     expect(projected((variant) => { variant.claims[13]!.effect_detail!.per_source_change_unit = "customer"; })).toBeUndefined();

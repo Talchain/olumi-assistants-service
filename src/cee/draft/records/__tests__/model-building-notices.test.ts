@@ -47,6 +47,8 @@ const PRODUCER_REASONS = [
   "option_value_unbound",
   "option_lever_link_conflict",
   "lever_endpoint_ambiguous",
+  // Pass 2 P2-A1: a change_by option whose lever states no current level (never a zero baseline).
+  "option_change_by_baseline_unknown",
   "range_bounds_inverted",
   "range_excludes_point",
   "range_straddles_zero",
