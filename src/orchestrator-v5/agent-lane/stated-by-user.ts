@@ -1166,26 +1166,38 @@ function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: 
     // Before the figure: "cuts NET margin by 0.5" names another margin when the word before the target's head is neither
     // the target's own, a determiner, nor a change word (Codex r2 HIGH). "cuts our gross margin by 0.5" stays the target's.
     const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
-    const words = [...(q.slice(0, start).split(/[,;:.!?]/).pop() ?? '').matchAll(/[\p{L}-]+/gu)].map(w => w[0]);
+    const clause = q.slice(0, start).split(/[,;:.!?]/).pop() ?? '';
+    // "increase revenue'S TAX by £100": the end's name owns the quantity the figure sizes (Codex step-4 buddy r2 HIGH).
+    const ownedBefore = /([\p{L}-]+)(['’])(s?)\s+((?:[\p{L}-]+\s+){0,3}?[\p{L}-]+)\s+(?:by\s+)?(?:(?:about|around|roughly|approximately|nearly|almost|only|just)\s+)?$/iu.exec(clause);
+    if (ownedBefore !== null && wordsOf(target).some(t => sameWord(t, ownedBefore[1]!.toLowerCase()))
+      && !ownedBefore[4]!.split(/\s+/).every(w => wordsOf(target).some(t => sameWord(t, w.toLowerCase())))) {
+      return `${ownedBefore[1]}${ownedBefore[2]}${ownedBefore[3]} ${ownedBefore[4]}`;
+    }
+    const words = [...clause.matchAll(/[\p{L}-]+/gu)].map(w => w[0]);
     while (words.length > 0 && (HEDGE.test(words[words.length - 1]!) || /^by$/i.test(words[words.length - 1]!))) words.pop();
     const label = wordsOf(target);
     const head = wordsOf(target.split(/\s+(?:from|of|in|for|to|on|per|with|after|by)\s+/i)[0] ?? target).at(-1);
     const last = words[words.length - 1]; const modifier = words[words.length - 2];
     if (head === undefined || last === undefined || modifier === undefined || !sameWord(head, last.toLowerCase())) return undefined;
-    // A change word is the VERB only when no change word stands before it: in "increase LIFT revenue" the verb is
-    // "increase" and "lift" names the other quantity (Codex step-4 buddy r1 HIGH). A particle or a comparative ("push UP
-    // revenue", "add MORE revenue") qualifies the change, never the quantity.
-    const beforeModifier = words[words.length - 3];
+    // Is a change word before the target's head THE VERB, or a word of another quantity's name (Codex step-4 buddy r1/r2)?
+    //  · a particle or comparative qualifies the change ("push UP revenue", "add MORE revenue"): the verb's;
+    //  · an inflected form is a finite verb ("a price increase RAISES revenue"): the verb;
+    //  · after a determiner it is inside the noun phrase ("increase our LIFT revenue"): another quantity;
+    //  · after another change word it is a modifier ("increase LIFT revenue"), unless that word is a relative clause's own
+    //    verb ("customers we ADD increase revenue"): another quantity, else the verb.
+    const beforeModifier = words[words.length - 3]; const beforeThat = words[words.length - 4];
     const modifierIsTheChange = CHANGE_STATED.test(modifier) && (/^(?:up|down|off|more|less|fewer|extra|additional)$/i.test(modifier)
-      || beforeModifier === undefined || !CHANGE_STATED.test(beforeModifier));
+      || /(?:s|ed|ing)$/i.test(modifier) || beforeModifier === undefined
+      || (!/^(?:our|the|their|its|your|my|a|an|this|that|these|those)$/i.test(beforeModifier)
+        && (!CHANGE_STATED.test(beforeModifier) || (beforeThat !== undefined && /^(?:i|we|you|they|he|she|it)$/i.test(beforeThat)))));
     if (label.some(t => sameWord(t, modifier.toLowerCase())) || /^(?:our|the|their|its|your|my|a|an)$/i.test(modifier) || modifierIsTheChange) return undefined;
     return `${modifier} ${last}`;
   }
   const run = m[1]!.trim();
-  // "1 point of onboarding drag'S SHARE of total delivery risk": a possessive makes the end's name the OWNER of another
-  // quantity, never that quantity (Codex step-4 buddy r1 HIGH).
-  const owned = /^(['’])s((?:\s+(?!(?:while|and|but|which|that|when|if|as|so|for|than|to)\b)[\p{L}-]+){1,6})/iu.exec(after.slice(m[0].length));
-  if (owned !== null) return `${run}${owned[1]}s${owned[2]}`;
+  // "1 point of onboarding drag'S SHARE of total delivery risk" / "…delay risks' SHARE…": a possessive (singular or plural)
+  // makes the end's name the OWNER of another quantity, never that quantity (Codex step-4 buddy r1/r2 HIGH).
+  const owned = /^(['’])(s?)((?:\s+(?!(?:while|and|but|which|that|when|if|as|so|for|than|to)\b)[\p{L}-]+){1,6})/iu.exec(after.slice(m[0].length));
+  if (owned !== null) return `${run}${owned[1]}${owned[2]}${owned[3]}`;
   const content = [...run.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase()).filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
   if (content.length === 0 || content.every(w => wordsOf(target).some(t => sameWord(t, w)))) return undefined;
   return run;
