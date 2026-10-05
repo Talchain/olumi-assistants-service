@@ -520,8 +520,19 @@ describe('Science row 4: the sealed brief is byte-identical under option A; re-p
     if (!replay.ok) throw new Error(replay.detail);
     expect(fingerprint({ graph: replay.projection.graph, dropped: replay.projection.dropped })).toBe('635ed976a38296691b609faf815dd6b36c8fb8e04873adad20a35d60b7271135');
     const { writes } = await build(sealedRecords(), BRIEF);
-    expect(fingerprint(writes[0])).toBe('81c789a43a9e9b1a3b2cfb73a410e2131fa2cf0db99fa134b511429bb7523afe');
+    // RE-PIN (register body ONLY) — "Science ruling 2026-10-05 row-4 re-pin" (S2). Old → new: 81c789a4…523afe →
+    // 29f50518…337268. Diffed against the vans tip 9787d21b, the body moves ONLY in its stated-item echo and receipt:
+    //   · stated_dispositions[6] stays CARRIED at goal_threshold_raw 150000; its decoded input echoes unresolved ['unit'];
+    //   · stated_dispositions[14] "Keeping pricing as it is adds nothing." is ASKED (link_unresolved, quantity): it states
+    //     a zero effect, not that the figure is context or irrelevant, so asking which quantity it measures is right.
+    // Condition (a): the GRAPH bytes and the analysis hash are pinned identical to the vans tip.
+    expect(fingerprint(writes[0])).toBe('29f5051842c2d64a9c2946c8953fb9f08644d2dcb7fec2303aff8731e9337268');
+    expect(fingerprint(writes[0]!.graph)).toBe('86b0de24055306ae91c138f1cfdced810888fb8cc2735d8377235996d36b0ed3');
     expect(computeAnalysisAffectingGraphHashSha256(writes[0]!.graph as never)).toBe('483e9d19708a92167d28808a92d794ec707fbc738035cbe126e5f1f65e284782');
+    const rows = (writes[0] as Rec).stated_dispositions as Rec[];
+    expect(rows.find(r => r.stated_index === 6)).toMatchObject({ disposition: 'carried', location: { path: ['goal_threshold_raw'] }, stored_value: 150000, stated_item: { unresolved: ['unit'] } });
+    expect(rows.find(r => r.stated_index === 14)).toMatchObject({ disposition: 'asked', reason: 'link_unresolved',
+      stated_item: { source_quote: 'Keeping pricing as it is adds nothing.', unresolved: ['quantity'] } });
   });
 
   const A16 = [
