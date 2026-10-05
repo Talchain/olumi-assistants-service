@@ -70,10 +70,7 @@ async function build(records: DraftRecordSet): Promise<{ result: Rec; body: Rec 
   expect(result.ok).toBe(true);
   return { result: result as Rec, body: body! };
 }
-const row = (body: Rec, stated_index: number): Rec | undefined => (body.stated_dispositions as Rec[]).find((d) => d.stated_index === stated_index);
 const nodeByLabel = (body: Rec, label: string): Rec | undefined => (body.graph.nodes as Rec[]).find((n) => n.label === label);
-const edgeOfCause = (body: Rec, quote: string): Rec | undefined => (body.graph.edges as Rec[]).find((e) =>
-  e.provenance?.stated_relationship !== undefined && e.provenance?.source_quote === quote);
 function project(records: DraftRecordSet) {
   const r = projectDraftRecords(records, BRIEF); expect(r.ok).toBe(true);
   if (!r.ok) throw new Error(r.detail); return r.projection;
