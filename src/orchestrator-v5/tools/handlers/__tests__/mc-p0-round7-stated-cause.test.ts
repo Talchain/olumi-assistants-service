@@ -51,8 +51,7 @@ const inputFor = (result: R): compose.AnalysisStateComposeInput => ({
 afterEach(() => { vi.restoreAllMocks(); reads.facts = []; });
 
 describe('MC P0 R7 stated unsized goal path cause', () => {
-  it.each([1, 2, 3].flatMap(d => [false, true].map(noTarget => [d, noTarget] as const)))
-  ('d%i post-Fi no-target=%s binds the SAME caller-stated ends into composer, finaliser and cold read', async (d, noTarget) => {
+  it.each([1, 2, 3].flatMap(d => [false, true].map(noTarget => [d, noTarget] as const)))('d%i post-Fi no-target=%s binds the SAME caller-stated ends into composer, finaliser and cold read', async (d, noTarget) => {
     const g = graph(d, noTarget), result = await runP0Graph(g, brief), fact = factOf(result);
     const cause = readUnsizedPathLeaderCause(result);
     // The constraint check retains its own permission; the independent Run licence withhold removes the overall claim.

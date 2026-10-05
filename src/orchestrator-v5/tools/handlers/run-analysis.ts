@@ -1973,7 +1973,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // ⛔ GATE 5 (DL #75 5904272507): the user's own levels make the goal rate × count within 5%, and this run did not
       // evaluate that product, so its goal figures come from a walk those figures contradict. Every option, the leader too.
       const unread = unreadGoalProduct(graphForAnalysis);
+      let productGateWithholds = false;
       if (unread !== null && scoredIds.length > 0) {
+        productGateWithholds = true;
         response = withholdOptionGoalFigures(response, new Set(scoredIds),
           unreadGoalProductWarning(unread, scoredIds, GOAL_FIGURES_PRODUCT_NOT_READ));
         log.info(
@@ -1994,9 +1996,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           const node = readGraphNodesForCostAsk(graphForAnalysis).find(n => n.id === id);
           return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label : id;
         };
-        withheldBecauseUnsizedPath = { ...first, from_label: label(first.from), to_label: label(first.to),
-          links: allLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })),
-        };
+        // ⛔ #2613 CR (b), DL 0df0e1 + e8: the stated cause follows the withhold's precedence. Gate 5 has already withheld
+        // every option, so sizing a link could not lift it: the product cause is said, and no link is asked for.
+        if (!productGateWithholds) {
+          withheldBecauseUnsizedPath = { ...first, from_label: label(first.from), to_label: label(first.to),
+            links: allLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })),
+          };
+        }
         response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
           placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH));
         log.info(

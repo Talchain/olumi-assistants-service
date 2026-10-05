@@ -71,6 +71,7 @@ it('R6 singular nobody-sized link without an estimate has no old tail', () => {
   expect(w.message).toContain('whose strength nobody has set yet. Set it to see how much it matters.');
   expect(w.message).not.toContain(oldTail);
   expect(w.message).not.toContain(pluralTail);
+  expect(w.message).not.toContain(singularTail);
   expect(w.message.length).toBeLessThanOrEqual(400);
 });
 

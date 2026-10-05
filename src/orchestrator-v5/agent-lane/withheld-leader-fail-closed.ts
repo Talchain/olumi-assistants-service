@@ -1068,8 +1068,8 @@ function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold |
   if (!Array.isArray(warnings)) return undefined;
   const codes = warnings.filter((w): w is { code: string; node_ids?: unknown; message?: unknown; links?: unknown } =>
     typeof (w as { code?: unknown } | null)?.code === 'string');
-  if (codes.some((w) => w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')
-    && !codes.some((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')) {
+  // #2613 CR (b): the product cause comes first whenever it holds; no link is asked for while it still blocks.
+  if (codes.some((w) => w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')) {
     return { why: 'Olumi has not read your goal as the product of your own figures, so its figures cannot yet support a comparison' };
   }
   const warning = codes.find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');

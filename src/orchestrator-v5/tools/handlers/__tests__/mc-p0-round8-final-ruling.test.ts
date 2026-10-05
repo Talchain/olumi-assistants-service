@@ -3,7 +3,7 @@ import { buildUpdateEdgeFieldCandidate } from '../../../graph-management/candida
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
-import { describe, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { GraphV3Schema } from '@talchain/schemas';
 import { HandlerFactSchema } from '@talchain/schemas/orchestrator';
 const reads = vi.hoisted(() => ({ facts: [] as any[] }));
@@ -344,7 +344,7 @@ it('RD-2 summary insertion precedes existing caution tails and survives reply gr
 });
 
 
-it('R7-3 incorporated in R8: unread whole-product gate AND projected-mean path both apply on the same Run', async () => {
+it('R7-3 (#2613 CR b, DL 0df0e1 + e8): unread whole-product gate AND projected-mean path → the product cause first, no link to size', async () => {
   const f = JSON.parse(readFileSync(new URL('./fixtures/served-gate5-mrr-m0-and-cut-costs-15f48f0b.json', import.meta.url), 'utf8')).mrr_m0;
   const g = structuredClone(f.graph);
   for (const n of g.nodes.filter((n: R) => n.kind === 'goal')) delete n.goal_threshold_raw;
@@ -354,15 +354,21 @@ it('R7-3 incorporated in R8: unread whole-product gate AND projected-mean path b
   projected.provenance = { ...projected.provenance, source: 'cee_hypothesis', mean_projected: true };
   const r = await runP0Graph(g, f._provenance.brief_text, f.plot_body);
   const codes = r.enrichment.inference_warnings.map((w: R) => w.code);
+  // Precondition: both gates fire on this Run, and the projected link is on a compared path.
   expect(codes).toContain('GOAL_FIGURES_PRODUCT_NOT_READ');
   expect(codes).toContain('GOAL_FIGURES_PLACEHOLDER_PATH');
+  const placeholder = r.enrichment.inference_warnings.find((w: R) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
+  expect(placeholder.links).toContainEqual(expect.objectContaining({ from: 'pro_plan_price', to: 'mrr' }));
   expect(r.leading_option_id).toBeNull();
-  expect(readUnsizedPathLeaderCause(r)?.links).toContainEqual(expect.objectContaining({ from: 'pro_plan_price', to: 'mrr' }));
-  const cause = readUnsizedPathLeaderCause(r)!;
-  const wire = enforceAgentLaneLeaderClaimsAtWire({ assistant_text: 'An option currently leads.',
-    blocks: [{ type: 'analysis_result', ...r }] } as never,
-    { requestId: 'r8-both-gates', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'goal_path_unsized', graph: g } as never);
-  expect(wire.response.assistant_text).toContain(unsizedLinkSentence(cause.links!));
+  // Gate 5 withholds every option, so sizing the link could not lift it: no unsized-path cause is stated for this Run.
+  expect(readUnsizedPathLeaderCause(r)).toBeUndefined();
+  for (const reason of [undefined, 'goal_path_unsized'] as const) {
+    const wire = enforceAgentLaneLeaderClaimsAtWire({ assistant_text: 'An option currently leads.',
+      blocks: [{ type: 'analysis_result', ...r }] } as never,
+      { requestId: 'r8-both-gates', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: reason, graph: g } as never);
+    expect(wire.response.assistant_text, String(reason)).toContain('Olumi has not read your goal as the product of your own figures');
+    expect(wire.response.assistant_text, String(reason)).not.toMatch(/nobody has set yet|Set (?:it|them) to see/);
+  }
 });
 
 
