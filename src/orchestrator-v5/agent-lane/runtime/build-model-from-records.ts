@@ -6,6 +6,7 @@ import { replayRecordSet } from '../../../cee/draft/records/replay.js';
 import { projectGraphAndOptionsToV3 } from '../../../cee/transforms/schema-v3.js';
 import type { V1Graph } from '../../../cee/transforms/schema-v2.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { structuralFactorCategories } from '../../../validators/graph-validator.js';
 import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { constructionOperationId, strictForTheDrafter, findConstructionVersion, type CallStructuredModel } from './build-model.js';
@@ -74,7 +75,16 @@ export async function buildModelFromRecords(
   // replayRecordSet owns the entire existing compile chain, including the seam's runtime validation.
   const compiled = await replayRecordSet(raw as DraftRecordSet, { brief });
   if (!compiled.ok) return { ok: false, mutated: false, refusal: 'construction_failed', detail: compiled.detail };
-  const projected = projectGraphAndOptionsToV3(compiled.graph as V1Graph, { brief });
+  // ⭐ P2-A6: each factor's driver role, typed from the compile on the EXISTING V3 `category` field: the lever an option
+  // sets is `controllable`; a stated or derived quantity no option sets is `observable` (it holds a level) or
+  // `external`. Stamped by the validator's own structural rule, so the stored type and readiness cannot disagree.
+  const compiledGraph = compiled.graph as V1Graph;
+  const categories = structuralFactorCategories(compiledGraph.nodes, compiledGraph.edges);
+  const typed: V1Graph = { ...compiledGraph, nodes: compiledGraph.nodes.map(node => {
+    const role = node.kind === 'factor' ? categories.get(node.id)?.category : undefined;
+    return role === undefined ? node : { ...node, category: role };
+  }) };
+  const projected = projectGraphAndOptionsToV3(typed, { brief });
   const parsed = GraphV3.safeParse(projected.graph);
   if (!parsed.success) return { ok: false, mutated: false, refusal: 'construction_failed', detail: parsed.error.message };
   const graph = parsed.data;

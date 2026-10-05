@@ -9,7 +9,7 @@
  */
 
 import { log } from "../utils/telemetry.js";
-import type { GraphT, NodeT, EdgeT, FactorDataT, OptionDataT } from "../schemas/graph.js";
+import type { GraphT, NodeT, EdgeT, EdgeTypeT, FactorDataT, OptionDataT } from "../schemas/graph.js";
 import { isDirectedEdge } from "../schemas/graph.js";
 import { validatorNodePath } from "./violation-paths.js";
 import { isDecisionFreeShape } from "./decision-free-shape.js";
@@ -78,6 +78,33 @@ function buildAdjacencyLists(edges: EdgeT[]): AdjacencyLists {
 }
 
 /**
+ * ⭐ P2-A6: THE ONE structural factor-category rule, over the minimal shape every graph writer holds. The validator's
+ * `inferFactorCategories` reads it, and a writer (the records compile) stamps it, so a stored category and readiness
+ * cannot disagree. controllable = a directed edge from an option; observable = no option edge but `data.value`;
+ * external = neither.
+ */
+export function structuralFactorCategories(
+  nodes: readonly { readonly id: string; readonly kind: string; readonly data?: unknown }[],
+  edges: readonly { readonly from: string; readonly to: string; readonly edge_type?: unknown }[],
+): Map<string, { readonly category: FactorCategory; readonly hasOptionEdge: boolean; readonly hasValue: boolean }> {
+  const optionIds = new Set(nodes.filter((n) => n.kind === "option").map((n) => n.id));
+  const factorsWithOptionEdge = new Set<string>();
+  for (const edge of edges) {
+    // Bidirected edges don't indicate controllability
+    if (!isDirectedEdge(edge as { readonly edge_type?: EdgeTypeT })) continue;
+    if (optionIds.has(edge.from)) factorsWithOptionEdge.add(edge.to);
+  }
+  const out = new Map<string, { readonly category: FactorCategory; readonly hasOptionEdge: boolean; readonly hasValue: boolean }>();
+  for (const node of nodes) {
+    if (node.kind !== "factor") continue;
+    const hasOptionEdge = factorsWithOptionEdge.has(node.id);
+    const hasValue = (node.data as { value?: unknown } | undefined)?.value !== undefined;
+    out.set(node.id, { category: hasOptionEdge ? "controllable" : hasValue ? "observable" : "external", hasOptionEdge, hasValue });
+  }
+  return out;
+}
+
+/**
  * Infer factor category from graph structure.
  * - controllable: Has incoming edge from option node
  * - observable: No option edge but has data.value
@@ -90,39 +117,16 @@ function inferFactorCategories(
 ): Map<string, FactorCategoryInfo> {
   const categories = new Map<string, FactorCategoryInfo>();
 
-  // Find option node IDs
-  const optionIds = new Set(
-    (nodeMap.byKind.get("option") ?? []).map((n) => n.id)
-  );
-
-  // Find factor IDs with incoming directed edges from options
-  const factorsWithOptionEdge = new Set<string>();
-  for (const edge of edges) {
-    if (!isDirectedEdge(edge)) continue; // Bidirected edges don't indicate controllability
-    if (optionIds.has(edge.from)) {
-      factorsWithOptionEdge.add(edge.to);
-    }
-  }
+  // P2-A6: the structural rule is `structuralFactorCategories` (exported for graph writers); unchanged behaviour.
+  const structural = structuralFactorCategories(nodes, edges);
 
   // Categorize each factor
   const factors = nodeMap.byKind.get("factor") ?? [];
   for (const node of factors) {
-    const hasOptionEdge = factorsWithOptionEdge.has(node.id);
-    const data = node.data as FactorDataT | undefined;
-    const hasValue = data?.value !== undefined;
+    const { category, hasOptionEdge, hasValue } = structural.get(node.id)!;
 
     // Read explicit category from node.category (V12.4+ schema field)
     const explicitCategory = node.category as FactorCategory | undefined;
-
-    // Infer category from structure
-    let category: FactorCategory;
-    if (hasOptionEdge) {
-      category = "controllable";
-    } else if (hasValue) {
-      category = "observable";
-    } else {
-      category = "external";
-    }
 
     categories.set(node.id, {
       nodeId: node.id,

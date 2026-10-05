@@ -238,3 +238,18 @@ describe('pass 2 P2-A1: a delta option is a change_by resolved at Run assembly',
     expect(Object.values(option?.data?.intervention_details ?? {}).some((d: any) => d?.stated_index === 2)).toBe(false);
   });
 });
+
+describe('pass 2 P2-A6: each factor carries its driver role from the compile', () => {
+  it('P2-A6 the price-rise lever is controllable; customers lost and MRR are not', async () => {
+    const r = sealedRecordsVNext(); const graph: any = stored((await registered(r)).graph);
+    const labelOf = (q: number) => r.claims.find(c => c.quantity === q && c.claim_kind !== 'causal_link')!.label!;
+    const node = (label: string) => graph.nodes.find((n: any) => n.label === label)!;
+    expect(node(labelOf(3))).toMatchObject({ kind: 'factor', category: 'controllable' });
+    expect(node(labelOf(9))).toMatchObject({ kind: 'factor' });
+    expect(['observable', 'external']).toContain(node(labelOf(9)).category);
+    expect(node(labelOf(0)).kind).toBe('outcome');
+    expect(node(labelOf(0)).category).not.toBe('controllable');
+    // Every stored factor is typed: none is left for a reader to guess.
+    expect(graph.nodes.filter((n: any) => n.kind === 'factor' && n.category === undefined)).toEqual([]);
+  });
+});
