@@ -370,6 +370,17 @@ describe("R2 — content binding, order-independent reconciliation, one disposit
     expect(typedItems(body)).toEqual([]);
   });
 
+  it("CONTROL (P1): the receipt stays bound when the stored row comes back with every object's keys REORDERED (jsonb)", async () => {
+    // Postgres `jsonb` does not keep object key order, so the content hash must not depend on it (MR2 turns this RED).
+    await register({ graph: structuredClone(GRAPH), brief_text: BRIEF, stated_dispositions: structuredClone(SIDECAR) });
+    const reversed = (v: unknown): unknown => (Array.isArray(v) ? v.map(reversed)
+      : v !== null && typeof v === "object" ? Object.fromEntries(Object.keys(v).reverse().map((k) => [k, reversed((v as Rec)[k])])) : v);
+    const stored = storedRow().graph;
+    const reordered = reversed(stored) as Rec;
+    expect(JSON.stringify(reordered)).not.toBe(JSON.stringify(stored)); // contrast: the bytes really differ in order
+    expect(typedItems(await readOf(reordered)).map((r) => r.stated_index)).toEqual([1, 2, 3]);
+  });
+
   it("⭐ RED (P2a): a carrier equal up to object KEY ORDER stays carried", async () => {
     const sidecar = [{ stated_index: 0, stated_item: { kind: "cause", source_quote: Q_PRICE },
       disposition: "carried", location: { kind: "edge", from: "fac_price", to: "g_mrr", path: ["strength"] },
