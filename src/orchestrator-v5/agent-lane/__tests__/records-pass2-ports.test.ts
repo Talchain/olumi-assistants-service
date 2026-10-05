@@ -208,61 +208,69 @@ describe('P2-ACCEPT: build-result keys a SERVED reader keys on are mapped to the
 
 /**
  * P2-FRAME-CHECK (DL ruling 5 Oct): the wiring must not change compute. 0-LLM: for the SAME compiled graph (the sealed
- * v-next records with a declared `plausible_max` on the starter-subscriber quantity), the scale the CEE→PLoT `/v2/run`
- * payload carries for that quantity — computed by the run handler's OWN wire-scale functions (`buildFactorScaleMap` +
- * `projectRequestInterventionsToWireScale`, `run-analysis.ts` :811/:837) over the STORED graph — equals what the legacy
- * construct's framing (`framedObservedState` / `defaultFrameFor`, `admit-model.ts`) declares for the same figure:
- * the same frame (cap) and the same option level on it. A difference is a STOP, reported field by field, never re-recorded.
- * SCOPE: the declared-frame quantity, not every factor of the graph (see REPORT-RESTACK.txt).
+ * v-next records with a declared `plausible_max` on the starter-subscriber quantity), built by the SERVED records builder,
+ * stored as the register route stores it, read by the run path's REAL loader (`loadScenarioSnapshotForRunAnalysis`) and
+ * scaled by the run handler's OWN wire step (`buildFactorScaleMap` + `projectRequestInterventionsToWireScale`,
+ * `run-analysis.ts` :811/:837), the cells PLoT computes on — (cap, the level sent, sent ÷ cap) — equal the legacy
+ * construct's cells for the same figures (`framedObservedState` + the same wire step over its `{value, raw_value}` level).
+ * Both paths send the RAW level; PLoT's gate divides a value above 1 by the factor's cap (CEE #2573 F9). Restack 1 found
+ * the records cap missing (STOP); #2573 F9 now writes the legacy `observed_state.cap`. A difference is a STOP.
  */
-describe('P2-FRAME-CHECK: the /v2/run scale for a declared plausible_max equals the legacy framing of the same graph', () => {
-  const wireFor = async (plausibleMax: number) => {
+describe('P2-FRAME-CHECK: (cap, sent level, sent ÷ cap) on /v2/run equal the legacy path for the same compiled graph', () => {
+  const recordsCells = async (plausibleMax: number) => {
     const { sealedRecordsVNext, BRIEF } = await import('../../../cee/draft/records/__tests__/compile-spec/sealed-fixture-vnext.js');
     const { projectGraphForPersistence } = await import('../../persisted-graph-projection.js');
     const { assignEntityRefs } = await import('../../graph/entity-refs.js');
     const { buildFactorScaleMap, projectRequestInterventionsToWireScale } = await import('../../tools/plot-intervention-scale.js');
+    const { loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
     const records = sealedRecordsVNext(); records.stated_items[11]!.plausible_max = plausibleMax;
     const { result, writes } = await build(records, BRIEF);
     expect(result.ok, JSON.stringify(result).slice(0, 300)).toBe(true);
     const storedGraph = assignEntityRefs(projectGraphForPersistence(writes[0]!.graph as never,
       { scenarioId: SID, turnClass: 'direct_answer', source: 'graph_registration' }), null).graph as unknown as {
-      nodes: Array<{ id: string; kind: string; label: string; source_quote?: string; scale_frame?: number;
-        observed_state?: { raw_value?: number; unit?: string }; interventions?: Record<string, { raw_value?: number; value?: number }> }>;
+      nodes: Array<{ id: string; kind: string; label: string; source_quote?: string;
+        observed_state?: { unit?: string }; interventions?: Record<string, { raw_value?: number }> }>;
     };
     const factorLabel = records.claims.find((c) => c.quantity === 11 && c.claim_kind === 'factor')!.label!;
     const factor = storedGraph.nodes.filter((n) => n.kind === 'factor' && n.label === factorLabel);
     const option = storedGraph.nodes.filter((n) => n.kind === 'option' && n.source_quote === records.stated_items[4]!.source_quote);
     expect(factor, 'identity: the starter-subscriber factor').toHaveLength(1);
     expect(option, 'identity: the starter option').toHaveLength(1);
-    // The run path's REAL loader (`loadScenarioSnapshotForRunAnalysis`) over the stored graph; only storage is a double.
-    const { loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'frame-check',
       { loadGraphAndBriefText: async () => ({ graph: storedGraph, briefText: BRIEF }), readMostRecentPendingActions: async () => [] } as never);
-    const snapNodes = (snapshot.graph as { nodes?: unknown[] }).nodes;
     const snapOption = (snapshot.options as Array<{ option_id?: string; id?: string; interventions?: Record<string, unknown> }>)
       .filter((o) => (o.option_id ?? o.id) === option[0]!.id);
     expect(snapOption, 'identity: the starter option in the run snapshot').toHaveLength(1);
-    // The handler's OWN wire-scale step (`run-analysis.ts` :811/:837), over the snapshot it would submit.
-    const scaleMap = buildFactorScaleMap(snapNodes);
-    const wire = projectRequestInterventionsToWireScale([snapOption[0]!.interventions ?? {}], scaleMap, [new Set()]);
-    return { factor: factor[0]!, option: option[0]!, scale: scaleMap.get(factor[0]!.id), wireLevel: wire.perOption[0]![factor[0]!.id] };
+    const scale = buildFactorScaleMap((snapshot.graph as { nodes?: unknown[] }).nodes);
+    const wire = projectRequestInterventionsToWireScale([snapOption[0]!.interventions ?? {}], scale, [new Set()]);
+    const cap = scale.get(factor[0]!.id)?.cap;
+    const sent = wire.perOption[0]![factor[0]!.id];
+    return { cells: { cap, sent, sent_over_cap: sent === undefined || cap === undefined ? undefined : sent / cap },
+      raw: option[0]!.interventions![factor[0]!.id]!.raw_value!, unit: factor[0]!.observed_state?.unit ?? null };
+  };
+  /** The legacy construct's cells for the same figures: its framed factor and its `{value, raw_value}` option level. */
+  const legacyCells = async (frame: number, raw: number, unit: string | null) => {
+    const { framedObservedState } = await import('../admit-model.js');
+    const { buildFactorScaleMap, projectRequestInterventionsToWireScale } = await import('../../tools/plot-intervention-scale.js');
+    const nodes = [{ id: 'f', kind: 'factor', observed_state: framedObservedState({ baseline_value: 0, unit, provenance: 'explicit', plausible_max: frame }) }];
+    const scale = buildFactorScaleMap(nodes);
+    const sent = projectRequestInterventionsToWireScale([{ f: { value: raw / frame, raw_value: raw, unit, source: 'brief_extraction' } }], scale, [new Set()]).perOption[0]!.f;
+    const cap = scale.get('f')?.cap;
+    return { cap, sent, sent_over_cap: sent === undefined || cap === undefined ? undefined : sent / cap };
   };
 
-  it('a declared range inside the levels: frame and the option level on /v2/run equal the legacy framing', async () => {
-    const { framedObservedState } = await import('../admit-model.js');
-    const { factor, option, scale, wireLevel } = await wireFor(300);
-    const legacy = framedObservedState({ baseline_value: factor.observed_state!.raw_value!, unit: factor.observed_state!.unit ?? null, provenance: 'explicit', plausible_max: 300 }) as { cap?: number };
-    const raw = option.interventions![factor.id]!.raw_value!;
-    expect({ frame: scale?.cap, stored_frame: factor.scale_frame, wire_level: wireLevel })
-      .toEqual({ frame: legacy.cap, stored_frame: legacy.cap, wire_level: raw / legacy.cap! });
+  it('a declared range above the level (300): records cells = legacy cells (cap 300, sent 150, 0.5)', async () => {
+    const { cells, raw, unit } = await recordsCells(300);
+    expect(raw, 'control: the starter option sets 150').toBe(150);
+    expect(cells).toEqual(await legacyCells(300, raw, unit));
+    expect(cells).toEqual({ cap: 300, sent: 150, sent_over_cap: 0.5 });
   });
 
-  it('a level above the declared range: the /v2/run frame is widened exactly as the legacy construct widens it', async () => {
+  it('a level above the declared range (100): records cells = legacy cells on the widened frame (cap 1000, sent 150, 0.15)', async () => {
     const { defaultFrameFor } = await import('../admit-model.js');
-    const { factor, option, scale, wireLevel } = await wireFor(100);
-    const raw = option.interventions![factor.id]!.raw_value!;
+    const { cells, raw, unit } = await recordsCells(100);
     expect(raw, 'control: the option level exceeds the declared range').toBeGreaterThan(100);
-    expect({ frame: scale?.cap, stored_frame: factor.scale_frame, wire_level: wireLevel })
-      .toEqual({ frame: defaultFrameFor(raw), stored_frame: defaultFrameFor(raw), wire_level: raw / defaultFrameFor(raw) });
+    expect(cells).toEqual(await legacyCells(defaultFrameFor(raw), raw, unit));
+    expect(cells).toEqual({ cap: 1000, sent: 150, sent_over_cap: 0.15 });
   });
 });
