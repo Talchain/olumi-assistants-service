@@ -16,6 +16,9 @@ import { buildDraftRecordsSchema, buildVNextDraftRecordsSchema, DRAFT_RECORD_STA
 import { decodeUnresolvedLinks, projectDraftRecords } from '../../seam.js';
 import { V_NEXT_DRAFT_RECORDS_INSTRUCTION } from '../../instruction-vnext.js';
 import { BRIEF, sealedRecordsVNext, sealedRecordsVNextLinked } from './sealed-fixture-vnext.js';
+import { targetTestabilityOf } from '../../../../../orchestrator-v5/admission/target-testability.js';
+import { projectGraphForPersistence } from '../../../../../orchestrator-v5/persisted-graph-projection.js';
+import { assignEntityRefs } from '../../../../../orchestrator-v5/graph/entity-refs.js';
 
 const SCENARIO = '11111111-1111-4111-8111-111111111111';
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
@@ -23,9 +26,9 @@ type Json = Record<string, any>;
 const validate = new Ajv({ strict: false, allErrors: true }).compile(buildStrictDraftRecordsSchema());
 
 /** The served constructor, offline: the model text is `text`; the register body is captured. */
-async function construct(text: string) {
+async function construct(text: string, brief = BRIEF) {
   let body: Json | undefined;
-  const result: Json = await buildModelFromRecords(SCENARIO, BRIEF,
+  const result: Json = await buildModelFromRecords(SCENARIO, brief,
     async (path, b) => { if (path.endsWith('/register')) { body = b as Json; return { status: 200, json: { model_version: 1 } }; } return { status: 200, json: { graph: { nodes: [], edges: [] } } }; },
     async () => ({ text, status: 'completed' }));
   return { result, body };
@@ -221,5 +224,71 @@ describe('fix (a) instruction: one general line, generic, and the goal direction
     expect(flat).toContain('Every figure sets quantity');
     expect(flat).toContain('Every cause sets relationship');
     expect(flat).toContain('sets baseline_ref to the quoted baseline item of the same quantity');
+  });
+});
+
+/**
+ * Lead, from fix (b)'s 0-LLM replay of the 12 live draws: M1 stayed 0/9 on P5 `goal_path_unsized`, from a NULL
+ * cause.relationship. Authored and generic (EXTRACTION-UNPROVEN): one point-sized cause ("each X adds N Y") from the
+ * lever's quantity to the goal's quantity, carried by an outcome claim of that quantity which the drafter links to the
+ * goal (the sealed ideal's shape). The relationship ALONE decides whether the lever's path into the goal is sized.
+ * Stored graph = the register route's persistence projection.
+ *
+ * Measured, and deliberately NOT pinned here (pre-existing, reported to the lead): (i) when NO outcome carries the
+ * goal's quantity, the sized edge lands lever → goal and the sweep's factor→goal bridge replaces it with an unsized
+ * "<lever> Impact" outcome (receipt `carrier_removed`), so P5 fails even with the relationship filled; (ii) an extra
+ * drafter-drawn lever → outcome link stays at the default 0.5 when the relationship is unresolved, and P5 does not
+ * fail on it (P5 fails only an Olumi-guessed link).
+ */
+const SIZED = 'We have 8 vans. We make 640 deliveries every month. Lease 5 more vans. Each extra van adds 30 deliveries every month. Goal: at least 900 deliveries every month within 7 months.';
+const CAUSE = 'Each extra van adds 30 deliveries every month.';
+function sizedCause(): DraftRecordSet {
+  return { stated_items: [
+    { kind: 'figure', source_quote: 'We have 8 vans.', quantity: 0, value: 8, value_literal: '8', unit: 'vans', unit_literals: ['vans'], role: 'baseline' },
+    { kind: 'figure', source_quote: 'We make 640 deliveries every month.', quantity: 1, value: 640, value_literal: '640', unit: 'deliveries/month', unit_literals: ['deliveries', 'every month'], role: 'baseline' },
+    { kind: 'option', source_quote: 'Lease 5 more vans.', quantity: 0, value: 5, value_literal: '5', setting: 'change_by', is_baseline: false },
+    { kind: 'goal', source_quote: 'Goal: at least 900 deliveries every month within 7 months.', quantity: 1, role: 'target', value: 900, value_literal: '900',
+      unit: 'deliveries/month', direction: 'floor', direction_literal: 'at least', baseline_ref: 1, horizon_ref: 4, horizon_months: 7 },
+    { kind: 'figure', source_quote: 'within 7 months', quantity: 4, value: 7, value_literal: '7', unit: 'months', unit_literals: ['months'] },
+    { kind: 'cause', source_quote: CAUSE,
+      relationship: { from_quantity: 0, to_quantity: 1, amount: 30, amount_literal: '30', per_source_change: 1, per_source_literal: 'Each' } },
+  ], claims: [
+    { claim_kind: 'factor', label: 'Vans', quantity: 0, value: 8 },
+    { claim_kind: 'causal_link', label: 'lease setting', from_stated: 2, to_claim: 0, effect: 'positive' },
+    { claim_kind: 'outcome', label: 'Deliveries', quantity: 1, value: 640 },
+    { claim_kind: 'causal_link', label: 'same deliveries quantity', from_claim: 2, to_stated: 3, effect: 'positive' },
+  ] };
+}
+const storedGraph = (graph: unknown): Json => assignEntityRefs(projectGraphForPersistence(graph as never, {
+  scenarioId: SCENARIO, turnClass: 'direct_answer', source: 'graph_registration' }), null).graph as Json;
+async function sizedRun(unresolved: boolean) {
+  const wire = structuredClone(strictRecordsWire(sizedCause())) as Json;
+  if (unresolved) wire.stated_items[5].relationship = 'unresolved';
+  expect(validate(wire), JSON.stringify(validate.errors)).toBe(true);
+  const { result, body } = await construct(JSON.stringify(wire), SIZED);
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  const graph = storedGraph(body!.graph);
+  return { result, body: body!, graph, goal: graph.nodes.find((n: Json) => n.kind === 'goal') as Json };
+}
+
+describe('fix (a) cause.relationship decides P5: a sized cause sizes the goal path; unresolved is asked, never sized', () => {
+  it('relationship FILLED from the user\'s own figures: the lever\'s link carries the user\'s size and P5 passes', async () => {
+    const { result, body, graph, goal } = await sizedRun(false);
+    const id = (label: string) => graph.nodes.find((n: Json) => n.label === label)?.id;
+    const edge = graph.edges.find((e: Json) => e.from === id('Vans') && e.to === id('Deliveries'));
+    expect(edge?.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: CAUSE,
+      natural_effect: { amount: 30, amount_unit: 'deliveries/month', per_source_change: 1, per_source_change_unit: 'vans' } });
+    expect((body.stated_dispositions as Json[]).find(d => d.stated_index === 5)).toMatchObject({ disposition: 'carried', location: { path: ['provenance', 'natural_effect'] } });
+    expect(targetTestabilityOf(graph)).toEqual({ kind: 'testable', goal_id: goal.id });
+    expect(result.not_represented.some((d: Json) => d.reason === 'link_unresolved')).toBe(false);
+  });
+  it('CONTRAST the same cause with relationship "unresolved": a typed ask on the cause, no size anywhere, P5 goal_path_unsized', async () => {
+    const { result, body, graph, goal } = await sizedRun(true);
+    expect(result.not_represented).toContainEqual(expect.objectContaining({ stated_index: 5, reason: 'link_unresolved', unresolved_field: 'relationship' }));
+    expect((body.stated_dispositions as Json[]).find(d => d.stated_index === 5)).toMatchObject({ disposition: 'asked', reason: 'link_unresolved' });
+    expect((result.open_questions as string[]).some(q => q.includes(`"${CAUSE}"`) && q.includes(ASK_WORDS.relationship!))).toBe(true);
+    expect(graph.edges.some((e: Json) => e.provenance?.magnitude === 'user_stated')).toBe(false);
+    expect(targetTestabilityOf(graph)).toEqual({ kind: 'not_testable', goal_id: goal.id,
+      failures: [{ precondition: 'P5', case: 'c', code: 'goal_path_unsized' }] });
   });
 });
