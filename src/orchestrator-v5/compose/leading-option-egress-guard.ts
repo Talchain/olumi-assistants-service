@@ -300,6 +300,13 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * through the new verb.
    */
   { code: 'came_out_lowest', re: /\bcame\s+out\s+lowest\b/i },
+  /**
+   * ⭐ THE DIRECTION-NEUTRAL FORM (DL 0df0e1 #87 6002469285, Part B): where a composer cannot see the Run's sent
+   * direction, it names an option as "{N}% of runs supported {X}", "more runs would support {X} if …" or "the option most
+   * runs supported". Added WITH those composers, for the same reason as `scored_highest` above: a new leader verb the
+   * alarm cannot read would switch redaction off for it.
+   */
+  { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?)?support(?:s|ed|ing)?\b/i },
   { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
 ];
 

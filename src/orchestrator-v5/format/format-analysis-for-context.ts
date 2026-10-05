@@ -658,12 +658,12 @@ export const NEAR_ZERO_WIN_PROBABILITY_THRESHOLD = 0.005;
  * display projection stays number-free outside the percent strings.
  */
 export const NEAR_ZERO_WIN_PROBABILITY_NOTE =
-  'near-zero win probability: this option almost never came out best across the sampled ' +
-  'simulation runs — at least one alternative scored better in almost every sampled run. ' +
-  'That can mean it is consistently outperformed (for example reliably mid-ranked, so ' +
-  'rarely the single best) rather than broken; a near-zero win probability is a real ' +
-  'result, not an error. Do not invent a specific reason it lost — the analysis only ' +
-  'establishes that other options scored better on the sampled runs.';
+  'near-zero win probability: in this model, almost no sampled simulation runs supported ' +
+  'this option — in almost every sampled run another option did better on the goal. ' +
+  'That can mean other options are consistently stronger on the goal (for example it is ' +
+  'reliably mid-ranked, so rarely the one a run supports) rather than broken; a near-zero ' +
+  'win probability is a real result, not an error. Do not invent a specific reason for ' +
+  'it — the analysis only establishes that runs supported other options.';
 
 /**
  * ROADMAP 2.54 (a) — true when the raw probability is valid and renders as

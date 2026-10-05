@@ -34,13 +34,18 @@ const measured = (block: unknown, links: FlipLinkRef[], run: { graph_hash_at_run
   ({ status: 'measured', block: block as never, links, run });
 
 describe('RC\'s contract, bound', () => {
-  it('the copy and the ladder are RC @a4992165 verbatim', () => {
-    expect(LINK_COPY.quoted).toBe(RC.quoted);
-    expect(RC.fraction_rule).toContain(`"${LINK_COPY.below_a_tenth}"`);
+  it('the copy and the ladder are RC @a4992165, with the neutral verb DL 6002469285 ruled (same slots, same claim)', () => {
+    // RC's own words stay the provenance; only "would come out ahead" / "would still lead" moved (Paul: never a winner).
+    const neutral = (rc: string) => rc.replace('{other} would come out ahead', 'More runs would support {other}');
+    expect(LINK_COPY.quoted).toBe(neutral(RC.quoted as string));
+    expect(LINK_COPY.quoted).toBe("More runs would support {other} if {from}'s effect on {to} fell below about {fraction} of what it is now.");
+    expect(RC.fraction_rule).toContain(`"${LINK_COPY.below_a_tenth.replace('More runs would support {other}', '{other} would come out ahead')}"`);
+    expect(LINK_COPY.below_a_tenth).toBe("More runs would support {other} only if {from}'s effect on {to} all but disappeared.");
+    for (const copy of Object.values(LINK_COPY)) expect(copy).not.toMatch(/\b(?:ahead|best|lead|leads|winner|wins?)\b/);
     // PTL #85/5972624659: RC's "had no effect" overclaims (#220 zeroes the link's mean, not its uncertainty). The ruled
     // wording keeps RC's slots and claim shape; only the over-claim moves.
     expect(RC.no_change).toBe('{leader} would still lead even if {from} had no effect on {to}.');
-    expect(LINK_COPY.no_change).toBe("{leader} would still lead even if {from}'s average effect on {to} fell to zero.");
+    expect(LINK_COPY.no_change).toBe("Most runs would still support {leader} even if {from}'s average effect on {to} fell to zero.");
     expect(LINK_COPY.no_change).not.toMatch(/had no effect/);
     const named = [...(RC.fraction_rule as string).matchAll(/([a-z]+(?: [a-z]+)?) (0\.\d+|1\/3|2\/3)/g)]
       .map(([, name, v]) => [v === '1/3' ? 1 / 3 : v === '2/3' ? 2 / 3 : Number(v), name.replace(/^(?:round DOWN, so the claim is always a sufficient condition and never false\): )/, '')] as const);
@@ -71,8 +76,8 @@ describe('the served D3 case + ISL\'s real D3 block', () => {
     expect(turn?.outcome).toBe('measured');
     // RT-14 (DL #87 5993111927): the answer names options only inside the model's frame, opened once.
     expect(turn?.reply).toBe(
-      "In this model, ‘Stay on AWS’ would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
-      + "‘Switch to GCP’ would still lead even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.",
+      "In this model, more runs would support ‘Stay on AWS’ if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
+      + "Most runs would still support ‘Switch to GCP’ even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.",
     );
     expect(turn?.reply).not.toMatch(/\d|%|no single (assumption|factor)|nothing would change/i);
   });
@@ -136,7 +141,7 @@ describe('renderLinkTippingPoints', () => {
     expect(renderLinkTippingPoints([link({ to_option_id: 'nobody' })], labels)).toEqual([]);
     expect(renderLinkTippingPoints([link({ from_id: 'zz' })], labels)).toEqual([]);
     expect(renderLinkTippingPoints([link({ threshold: 0.02 })], labels)).toEqual(
-      ["‘Bug fixes’ would come out ahead only if sprint capacity's effect on AI module availability all but disappeared."]);
+      ["More runs would support ‘Bug fixes’ only if sprint capacity's effect on AI module availability all but disappeared."]);
   });
   it('ids are data: `constructor`, `toString`, `__proto__` never read an inherited member as an option or a factor (Codex P2 #2542)', () => {
     for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
@@ -147,7 +152,7 @@ describe('renderLinkTippingPoints', () => {
     // A graph whose node id IS `__proto__` keeps it as a label, never as the map's prototype.
     const proto = { nodes: [{ id: '__proto__', label: 'Proto factor' }, { id: 'b', label: 'Outcome' }] };
     const turn = renderLinkTippingPoints([link({ from_id: '__proto__' })], { ...labels, node: Object.fromEntries(proto.nodes.map((n) => [n.id, n.label])) });
-    expect(turn).toEqual(["‘Bug fixes’ would come out ahead if proto factor's effect on outcome fell below about a quarter of what it is now."]);
+    expect(turn).toEqual(["More runs would support ‘Bug fixes’ if proto factor's effect on outcome fell below about a quarter of what it is now."]);
   });
 
   it('ISL\'s real D1 block: two quoted links, the spread absence silent', () => {
@@ -156,9 +161,9 @@ describe('renderLinkTippingPoints', () => {
       option: { ai_reporting_module_sprint: 'AI reporting module sprint', integration_bug_fix_sprint: 'Integration bug-fix sprint' },
       leaderId: 'ai_reporting_module_sprint' };
     expect(renderLinkTippingPoints(ISL_D1_BLOCK.links as never, d1)).toEqual([
-      "‘Integration bug-fix sprint’ would come out ahead if sprint capacity for AI reporting's effect on AI reporting module availability fell below about a quarter of what it is now.",
+      "More runs would support ‘Integration bug-fix sprint’ if sprint capacity for AI reporting's effect on AI reporting module availability fell below about a quarter of what it is now.",
       // 0.08875 / 0.5 = 0.1775: the largest rung at or below it is a tenth (rounded DOWN, never up to a fifth).
-      "‘Integration bug-fix sprint’ would come out ahead if enterprise prospect signing likelihood's effect on quarterly revenue fell below about a tenth of what it is now.",
+      "More runs would support ‘Integration bug-fix sprint’ if enterprise prospect signing likelihood's effect on quarterly revenue fell below about a tenth of what it is now.",
     ]);
   });
 });

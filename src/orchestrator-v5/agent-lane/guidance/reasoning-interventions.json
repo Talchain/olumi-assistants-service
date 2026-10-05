@@ -1355,7 +1355,7 @@
         "leader label (licensed only)",
         "other compared options: labels"
       ],
-      "body": "With a current tipping_point, begin with tipping_point.say verbatim. Optional short elaboration may add no figures, crossing assertions, probabilities or winner language. Otherwise retain the existing qualitative sensitivity method. One line on what the analysis varied ('Olumi varied {factor} within the range it assumed'). Then up to 3 bullets on what would have to be true about {factor} for a different option to come out ahead, said qualitatively. Then the question asking for the user's estimate.",
+      "body": "With a current tipping_point, begin with tipping_point.say verbatim. Optional short elaboration may add no figures, crossing assertions, probabilities or winner language. Otherwise retain the existing qualitative sensitivity method. One line on what the analysis varied ('Olumi varied {factor} within the range it assumed'). Then up to 3 bullets on what would have to be true about {factor} for more runs to support a different option, said qualitatively. Then the question asking for the user's estimate.",
       "action": "'Give your estimate' (edit_inline on the factor) when the range is Olumi's; else 'Talk it through'.",
       "post_checks": [
         {

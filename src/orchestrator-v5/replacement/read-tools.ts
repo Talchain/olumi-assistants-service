@@ -726,7 +726,7 @@ function fragileEdgeSection(enrichment: AnalysisEnrichment): string[] {
   if (rows.length === 0) {
     return [
       'FRAGILE LINKS: none. The producer found no causal link whose being wrong ' +
-        'would change which option comes out ahead.',
+        'would change how the options compare in this model.',
     ];
   }
 

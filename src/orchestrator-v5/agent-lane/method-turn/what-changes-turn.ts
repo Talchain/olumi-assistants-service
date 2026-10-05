@@ -40,10 +40,17 @@ export function isWhatChangesPress(chipId: unknown): boolean {
  * The RC contract update is owed by its owner (#87/5972845636 ii).
  */
 export const LINK_COPY = {
-  quoted: "{other} would come out ahead if {from}'s effect on {to} fell below about {fraction} of what it is now.",
-  below_a_tenth: "{other} would come out ahead only if {from}'s effect on {to} all but disappeared.",
-  no_change: "{leader} would still lead even if {from}'s average effect on {to} fell to zero.",
+  // DL 0df0e1 #87 6002469285 (Part B; Paul 20:2xZ "never a winner"): RC's "would come out ahead" / "would still lead" become
+  // the direction-NEUTRAL form, true whichever way the Run ranked, because this turn cannot see the Run's sent direction.
+  quoted: "More runs would support {other} if {from}'s effect on {to} fell below about {fraction} of what it is now.",
+  below_a_tenth: "More runs would support {other} only if {from}'s effect on {to} all but disappeared.",
+  no_change: "Most runs would still support {leader} even if {from}'s average effect on {to} fell to zero.",
 } as const;
+
+/** The frame opens the answer once ("In this model, "), so the first sentence reads on from it in lower case. */
+export function afterFrame(sentence: string): string {
+  return /^(?:More|Most) /.test(sentence) ? `${sentence[0]!.toLowerCase()}${sentence.slice(1)}` : sentence;
+}
 
 /** RT-14: the measured answer opens in the model's frame; it never names an option as a fact about the world. */
 export const IN_THIS_MODEL = 'In this model, ';
@@ -213,5 +220,6 @@ export async function whatChangesTurnFor(chipId: unknown, rb: MethodReadback, as
   });
   // RT-14 (DL #87 5993111927; principle 5992243567): an option is named only inside the model's frame. RC's per-link
   // sentences stay verbatim (the fixture row binds them); the frame opens the answer once.
-  return sentences.length === 0 ? honest() : { reply: `${IN_THIS_MODEL}${sentences.join(' ')}`, outcome: 'measured', actions };
+  return sentences.length === 0 ? honest()
+    : { reply: `${IN_THIS_MODEL}${[afterFrame(sentences[0]!), ...sentences.slice(1)].join(' ')}`, outcome: 'measured', actions };
 }
