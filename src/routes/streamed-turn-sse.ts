@@ -260,6 +260,8 @@ export async function streamTurnAsStagedSse(opts: StagedTurnStreamOptions): Prom
         writeStage("PROGRESS", {
           labels: event.labels,
           phase: event.phase,
+          // A8a: the agent lane's typed records compile stage (absent on every pipeline PROGRESS frame).
+          ...(event.compile !== undefined ? { compile: event.compile } : {}),
           elapsed_ms: event.elapsed_ms,
         });
         break;

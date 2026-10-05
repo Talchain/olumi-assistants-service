@@ -116,10 +116,33 @@ export interface PipelineProgressEvent {
   kind: "PROGRESS";
   /** Node labels seen in the partial draft so far, in stream order. */
   labels: string[];
-  /** Which region of the draft the accumulator has reached. */
-  phase: "nodes" | "edges";
+  /**
+   * Which region of the draft the accumulator has reached — or `compile` (A8a): a records construction stage on the
+   * agent lane, carried in `compile`. The UI parses `phase` as any string and keeps PROGRESS inert
+   * (DecisionGuideAI `streamedDraftFrames.ts` parseStageFrame, `consumeStreamedDraftTurn.ts` case 'PROGRESS'), so this
+   * reuses the existing frame class: an unknown STAGE would abandon the stream and re-send the turn buffered.
+   */
+  phase: "nodes" | "edges" | "compile";
+  /** A8a: present iff `phase === 'compile'`. Labels are then `[]`. */
+  compile?: CompileStageEvent;
   elapsed_ms: number;
 }
+
+/**
+ * ⭐ A8a: ONE TYPED EVENT PER RECORDS COMPILE STAGE, in order — `parsed` (the seam accepted the records) → `compiled`
+ * (projection done) → `validated` (GraphV3 and the size gate) → `registered` (`/graph/register`). A refusal emits the
+ * stage it happened at, `status: 'failed'`, and nothing after it. Counts and typed codes only: no labels, no user text.
+ */
+export type CompileStageName = "parsed" | "compiled" | "validated" | "registered";
+export type CompileStageEvent =
+  | { readonly stage: "parsed"; readonly status: "ok"; readonly stated_items: number; readonly claims: number }
+  | {
+    readonly stage: "compiled"; readonly status: "ok"; readonly nodes: number; readonly edges: number;
+    readonly dispositions: { readonly carried: number; readonly rejected: number; readonly asked: number; readonly dropped_refs: number };
+  }
+  | { readonly stage: "validated"; readonly status: "ok"; readonly within_compact_limits: boolean }
+  | { readonly stage: "registered"; readonly status: "ok"; readonly replayed: boolean; readonly model_version: unknown }
+  | { readonly stage: CompileStageName; readonly status: "failed"; readonly refusal: string; readonly reason?: string };
 
 /**
  * The validated graph, emitted the moment Stage 4 (Repair) + the validation

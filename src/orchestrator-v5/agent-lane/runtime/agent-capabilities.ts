@@ -197,6 +197,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
 import { constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
+import type { CompileStageEvent } from '../../../cee/unified-pipeline/types.js';
 import { buildModelFromRecords } from './build-model-from-records.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
@@ -1840,6 +1841,8 @@ export function createAgentCapabilities(
     readonly onModelRegistered?: (graph: Record<string, unknown>) => void;
     /** X5 (DESIGN Q3): why the one construction retry ran and its outcome — for `_diagnostic_trace`, never the model. */
     readonly onConstructionTrace?: (t: ConstructionTrace) => void;
+    /** A8a: the records build's typed compile stages, in order — for the stream's PROGRESS frames and the trace. */
+    readonly onCompileStage?: (event: CompileStageEvent) => void;
     /**
      * The pending actions on the scenario's LATEST answer row, as the session store returns them. The held
      * add-option proposal lives there (route-v2 minted it), so a `gmh_` approval is confirmed against what the
@@ -6531,7 +6534,7 @@ export function createAgentCapabilities(
             detail: 'The model already has entities. Propose a change instead of rebuilding it.',
           };
         }
-        built = await buildModelFromRecords(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace);
+        built = await buildModelFromRecords(ctx.scenario_id, brief, dispatch, callStructured, opts.onConstructionTrace, opts.onCompileStage);
         if (built.ok !== true) return built;
       }
 

@@ -10,6 +10,7 @@ import { projectGraphAndOptionsToV3, transformGraphToV3 } from '../../../cee/tra
 import type { V1Graph } from '../../../cee/transforms/schema-v2.js';
 import type { GoalConstraintT } from '../../../schemas/assist.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import type { CompileStageEvent, CompileStageName } from '../../../cee/unified-pipeline/types.js';
 import { PROPOSED_BY_OLUMI } from '../olumi-option-marker.js';
 import { assessConstructionSize } from '../construction-size-gate.js';
 import type { InferenceClass } from '../admit-model.js';
@@ -175,9 +176,17 @@ export async function buildModelFromRecords(
   dispatch: InternalDispatch,
   callStructured: CallStructuredModel,
   observeConstruction?: (trace: ConstructionTrace) => void,
+  /** A8a: one typed event per compile stage, in order (see `CompileStageEvent`). An observer never costs the build. */
+  observeStage?: (event: CompileStageEvent) => void,
 ): Promise<ToolResult> {
   // Records construction never makes a generative repair call. Observers cannot cost the build.
   try { observeConstruction?.({ retried: false }); } catch { /* diagnostic only */ }
+  const stage = (event: CompileStageEvent): void => { try { observeStage?.(event); } catch { /* diagnostic only */ } };
+  /** A refusal at a stage: that stage, failed, typed — and nothing after it. */
+  const refuse = (at: CompileStageName, result: ToolResult & { refusal: string }, reason?: string): ToolResult => {
+    stage({ stage: at, status: 'failed', refusal: result.refusal, ...(reason !== undefined ? { reason } : {}) });
+    return result;
+  };
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   let raw: unknown;
   try {
@@ -186,22 +195,25 @@ export async function buildModelFromRecords(
       max_output_tokens: budget.max_output_tokens, reasoning_effort: budget.reasoning_effort,
       schema: buildStrictDraftRecordsSchema(),
     });
-    if (out.text.length === 0) return {
+    // No usable answer: nothing reached the seam, so the parse stage is where it failed.
+    if (out.text.length === 0) return refuse('parsed', {
       ok: false, mutated: false, refusal: 'no_structured_output',
       ...(out.status === 'incomplete' ? { incomplete_reason: out.incomplete_reason ?? 'unspecified', detail: `incomplete: ${out.incomplete_reason ?? 'unspecified'}` } : {}),
-    };
-    if (out.status === 'incomplete') return {
+    }, out.status === 'incomplete' ? 'incomplete' : 'empty_output');
+    if (out.status === 'incomplete') return refuse('parsed', {
       ok: false, mutated: false, refusal: 'construction_failed',
       incomplete_reason: out.incomplete_reason ?? 'unspecified',
       detail: `incomplete: ${out.incomplete_reason ?? 'unspecified'}`,
-    };
+    }, 'incomplete');
     raw = omitOptionalRecordNulls(JSON.parse(out.text));
   } catch (err) {
-    return { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) };
+    return refuse('parsed', { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) }, 'unparsable_output');
   }
   // replayRecordSet owns the entire existing compile chain, including the seam's runtime validation.
   const compiled = await replayRecordSet(raw as DraftRecordSet, { brief });
-  if (!compiled.ok) return { ok: false, mutated: false, refusal: 'construction_failed', detail: compiled.detail };
+  // The seam's own reason, unchanged (`ReplayFailure.reason`), on the typed event.
+  if (!compiled.ok) return refuse('parsed', { ok: false, mutated: false, refusal: 'construction_failed', detail: compiled.detail }, compiled.reason);
+  stage({ stage: 'parsed', status: 'ok', stated_items: compiled.records.stated_items.length, claims: compiled.records.claims.length });
   const candidates = compiled.projection.constraintCandidates ?? [];
   const joined = joinRecordConstraints(compiled.graph, candidates, brief);
   const projected = projectGraphAndOptionsToV3(joined.graph, { brief });
@@ -210,14 +222,24 @@ export async function buildModelFromRecords(
   const limits = bindConstraintsToProjectedIds(idOf, new Set(projectedNodes.map((node) => node.id)), joined, candidates);
   const origins = recordOriginsOf(joined.graph, idOf);
   const authored = { ...projected.graph, nodes: markRecordsOlumiOptions(projectedNodes, origins) };
+  const dispositions = compiled.projection.stated_dispositions ?? [];
+  stage({
+    stage: 'compiled', status: 'ok', nodes: projectedNodes.length, edges: (projected.graph.edges as unknown[]).length,
+    dispositions: {
+      carried: dispositions.filter((d) => d.disposition === 'carried').length,
+      rejected: dispositions.filter((d) => d.disposition === 'rejected').length,
+      asked: dispositions.filter((d) => d.disposition === 'asked').length,
+      dropped_refs: compiled.projection.dropped.length,
+    },
+  });
   const parsed = GraphV3.safeParse(limits.constraints.length > 0
     ? { ...authored, goal_constraints: limits.constraints } : authored);
   // P2-ACCEPT (mapped): the legacy constructor's own code for a graph the product could not then read
   // (`write-outcome.ts` REFUSAL_WORDS.admitted_graph_invalid keys on it), with the same `issues` shape.
-  if (!parsed.success) return {
+  if (!parsed.success) return refuse('validated', {
     ok: false, mutated: false, refusal: 'admitted_graph_invalid',
     issues: parsed.error.issues.slice(0, 5).map((issue) => issue.path.join('.')),
-  };
+  });
   const graph = parsed.data;
   /**
    * ⭐ P2-P3: THE SAME SIZE GATE AND REFUSAL AS THE LEGACY CONSTRUCTOR, after compile and before any write. One limit
@@ -229,20 +251,21 @@ export async function buildModelFromRecords(
   const size = assessConstructionSize({ nodes: graph.nodes, edges: graph.edges, inference_classes: inferenceClassesOf(origins),
     ...(graph.goal_constraints !== undefined ? { goal_constraints: graph.goal_constraints } : {}) });
   if (!size.within && !size.user_material_exceeds_limit) {
-    return {
+    return refuse('validated', {
       ok: false, mutated: false, refusal: 'model_too_large', detail: size.detail,
       nodes: size.nodes, edges: size.edges, limits: size.limits, by_kind: size.by_kind,
       added_beyond_brief: size.sheddable_nodes, from_your_brief: size.brief_stated_nodes, retried: false,
-    };
+    });
   }
+  stage({ stage: 'validated', status: 'ok', within_compact_limits: size.within });
   const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
   const held = stillEmpty.json.graph;
   if (stillEmpty.status === 200 && object(held) && Array.isArray(held.nodes) && held.nodes.length > 0) {
-    return {
+    return refuse('registered', {
       ok: false, mutated: false, refusal: 'model_already_exists',
       detail: 'While that model was being built, something was added to this one — so nothing was written, and '
         + 'your own change is untouched. Ask me to propose a change to the model you now have.',
-    };
+    }, 'populated_before_write');
   }
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
     // Registration diagnostic only: GraphV3 has no declared persisted receipt carrier.
@@ -252,14 +275,18 @@ export async function buildModelFromRecords(
   const code = object(reg.json.details) ? reg.json.details.code : undefined;
   if (reg.status === 409 && (code === 'GRAPH_STALE' || code === 'OPERATION_ID_REUSED')) {
     const prior = await findConstructionVersion(dispatch, scenarioId, brief);
-    if (prior !== null) return { ok: true, mutated: false, replayed: true, model_version: prior };
-    if (code === 'GRAPH_STALE') return {
+    if (prior !== null) {
+      stage({ stage: 'registered', status: 'ok', replayed: true, model_version: prior });
+      return { ok: true, mutated: false, replayed: true, model_version: prior };
+    }
+    if (code === 'GRAPH_STALE') return refuse('registered', {
       ok: false, mutated: false, refusal: 'model_already_exists',
       detail: 'While that model was being built, something was added to this one — so nothing was written, and '
         + 'your own change is untouched. Ask me to propose a change to the model you now have.',
-    };
+    }, 'graph_stale');
   }
-  if (reg.status !== 200) return { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) };
+  if (reg.status !== 200) return refuse('registered', { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) }, `http_${reg.status}`);
+  stage({ stage: 'registered', status: 'ok', replayed: reg.json.replayed === true, model_version: reg.json.model_version ?? null });
   return {
     ok: true, mutated: true, ...(reg.json.replayed === true ? { replayed: true } : {}),
     ...(reg.json.model_version === undefined ? {} : { model_version: reg.json.model_version }),
