@@ -3,8 +3,12 @@ import { buildDraftRecordsSchema, type DraftRecordSet } from '../../../cee/draft
 import { DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction.js';
 import { reconcileStatedDispositions } from '../../../cee/draft/records/stated-dispositions.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
-import { projectGraphAndOptionsToV3 } from '../../../cee/transforms/schema-v3.js';
+import type { RecordConstraintCandidate } from '../../../cee/draft/records/projector.js';
+import { runCompoundGoals } from '../../../cee/unified-pipeline/stages/repair/compound-goals.js';
+import { sameRecordConstraintEvidence, type RecordConstraintDisposition } from '../../../cee/compound-goal/record-constraint-carrier.js';
+import { projectGraphAndOptionsToV3, transformGraphToV3 } from '../../../cee/transforms/schema-v3.js';
 import type { V1Graph } from '../../../cee/transforms/schema-v2.js';
+import type { GoalConstraintT } from '../../../schemas/assist.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
@@ -49,6 +53,71 @@ export function omitOptionalRecordNulls(value: unknown, schema: JsonSchema = bui
   }));
 }
 
+/** A records constraint the existing authority did not carry, by its own stated index and typed reason. */
+export interface RecordConstraintNotCarried {
+  readonly stated_index: number;
+  readonly reason: RecordConstraintDisposition['reason'] | 'record_constraint_target_absent_after_projection';
+}
+
+/**
+ * ⭐ P2-P1: THE USER'S STATED LIMITS PERSIST WITH THE MODEL. The projector keeps origin-bearing declarations
+ * (`constraintCandidates`) apart from the graph, and `replayRecordSet` compiles only the graph, so a records build
+ * registered no limit (carried 0 of 1). They are joined HERE, at the build's own join, through the EXISTING
+ * compound-goals authority (`runCompoundGoals`, the repair stage the drafting pipeline runs) — the one place that
+ * compiles a record declaration's value and frame from the brief. Raw `projection.goalConstraints` are never passed:
+ * they carry no attested frame.
+ *   · ONLY rows the authority ADMITTED FROM A RECORD are carried (its own disposition, matched by its own evidence
+ *     predicate). Its other producers (the regex extractor's label-matched remap, a construction-verdict mint) bind by
+ *     label, the identity the records path never inherits — so a limit the records did not locate is not carried.
+ *   · The authority runs on a COPY; the compiled graph itself is projected unchanged (no label-bound baseline relay).
+ */
+export function joinRecordConstraints(
+  compiledGraph: unknown,
+  candidates: readonly RecordConstraintCandidate[],
+  brief: string,
+): { graph: V1Graph; constraints: GoalConstraintT[]; notCarried: RecordConstraintNotCarried[] } {
+  const graph = compiledGraph as V1Graph;
+  if (candidates.length === 0) return { graph, constraints: [], notCarried: [] };
+  // The same minimal-context convention `replayRecordSet` uses for the repair substeps it runs (`ctx as any`).
+  const ctx: Record<string, unknown> = {
+    graph: structuredClone(compiledGraph), effectiveBrief: brief, requestId: 'records-construction',
+    recordConstraintCandidates: candidates,
+  };
+  runCompoundGoals(ctx as any);
+  const binding = Array.isArray(ctx.goalConstraints) ? (ctx.goalConstraints as GoalConstraintT[]) : [];
+  const dispositions = Array.isArray(ctx.recordConstraintDispositions)
+    ? (ctx.recordConstraintDispositions as RecordConstraintDisposition[]) : [];
+  const admitted = dispositions.filter((d) => d.reason === 'record_constraint_admitted' && d.canonical_constraint !== undefined);
+  const constraints = binding.filter((row) => admitted.some((d) => d.canonical_constraint!.node_id === row.node_id
+    && sameRecordConstraintEvidence(d.canonical_constraint!, row)));
+  const notCarried = dispositions
+    .filter((d) => d.reason !== 'record_constraint_admitted')
+    .map((d) => ({ stated_index: d.candidate.stated_index, reason: d.reason }));
+  return { graph, constraints, notCarried };
+}
+
+/**
+ * The compiled constraints name V1 node ids; the registered graph is in V3 ids. `transformGraphToV3` is the id
+ * authority `projectGraphAndOptionsToV3` itself calls, index-aligned with its input, so the map is read from it, never
+ * guessed from labels. A constraint whose target is not in the final graph is said, never dropped silently.
+ */
+function bindConstraintsToProjectedIds(
+  v1: V1Graph, projectedNodeIds: ReadonlySet<string>, compiled: { constraints: GoalConstraintT[]; notCarried: RecordConstraintNotCarried[] },
+  candidates: readonly RecordConstraintCandidate[],
+): { constraints: GoalConstraintT[]; notCarried: RecordConstraintNotCarried[] } {
+  const v3Nodes = transformGraphToV3(structuredClone(v1)).graph.nodes as Array<{ id: string }>;
+  const idOf = new Map(v1.nodes.map((node, index) => [node.id, v3Nodes[index]?.id ?? node.id]));
+  const constraints: GoalConstraintT[] = [];
+  const notCarried = [...compiled.notCarried];
+  for (const row of compiled.constraints) {
+    const id = idOf.get(row.node_id) ?? row.node_id;
+    if (projectedNodeIds.has(id)) { constraints.push({ ...row, node_id: id }); continue; }
+    const owner = candidates.find((c) => c.constraint.node_id === row.node_id);
+    if (owner !== undefined) notCarried.push({ stated_index: owner.stated_index, reason: 'record_constraint_target_absent_after_projection' });
+  }
+  return { constraints, notCarried };
+}
+
 export async function buildModelFromRecords(
   scenarioId: string,
   brief: string,
@@ -82,8 +151,13 @@ export async function buildModelFromRecords(
   // replayRecordSet owns the entire existing compile chain, including the seam's runtime validation.
   const compiled = await replayRecordSet(raw as DraftRecordSet, { brief });
   if (!compiled.ok) return { ok: false, mutated: false, refusal: 'construction_failed', detail: compiled.detail };
-  const projected = projectGraphAndOptionsToV3(compiled.graph as V1Graph, { brief });
-  const parsed = GraphV3.safeParse(projected.graph);
+  const candidates = compiled.projection.constraintCandidates ?? [];
+  const joined = joinRecordConstraints(compiled.graph, candidates, brief);
+  const projected = projectGraphAndOptionsToV3(joined.graph, { brief });
+  const limits = bindConstraintsToProjectedIds(joined.graph,
+    new Set((projected.graph.nodes as Array<{ id: string }>).map((node) => node.id)), joined, candidates);
+  const parsed = GraphV3.safeParse(limits.constraints.length > 0
+    ? { ...projected.graph, goal_constraints: limits.constraints } : projected.graph);
   if (!parsed.success) return { ok: false, mutated: false, refusal: 'construction_failed', detail: parsed.error.message };
   const graph = parsed.data;
   const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
@@ -117,6 +191,7 @@ export async function buildModelFromRecords(
     nodes: graph.nodes.length, edges: graph.edges.length, readiness: compiled.readiness,
     options: graph.nodes.filter(node => node.kind === 'option').length,
     goal_constraints_carried: graph.goal_constraints?.length ?? 0,
+    ...(limits.notCarried.length > 0 ? { goal_constraints_not_carried: limits.notCarried } : {}),
     open_questions: compiled.ask.items.map(item => item.detail),
     // Preserve the projector's typed identities and reasons; do not reconstruct them from labels.
     not_represented: compiled.projection.dropped,
