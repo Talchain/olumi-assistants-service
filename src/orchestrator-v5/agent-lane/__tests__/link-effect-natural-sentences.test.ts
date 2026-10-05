@@ -97,6 +97,11 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
     quote: 'Every 10% jump in flour prices knocks roughly 4 points off our gross margin.',
     effect: effect(-4, 'points', 10, '% increase from prior year'),
     card: 'Record: +10 % increase from prior year on "Wholesale flour cost increase" → −4 points in "gross margin": raising "Wholesale flour cost increase" by 10 % increase from prior year lowers "gross margin" by 4 points. From your words: "Every 10% jump in flour prices knocks roughly 4 points off our gross margin."' + TAIL },
+  // Acceptance's fresh corpus row 6 (#87 5999916809): staging @147c6630 cards it; step 3 must not regress it to a question.
+  { id: 'A6', fixture: 'f0eb03ac', from: 'wholesale_flour_cost_increase', to: 'gross_margin',
+    quote: 'A third of any flour price rise comes straight off our margin, so an 18% rise costs us about 6 points.',
+    effect: effect(-6, 'percentage points', 18, '% increase from prior year'),
+    card: 'Record: +18 % increase from prior year on "Wholesale flour cost increase" → −6 percentage points in "gross margin": raising "Wholesale flour cost increase" by 18 % increase from prior year lowers "gross margin" by 6 percentage points. From your words: "A third of any flour price rise comes straight off our margin, so an 18% rise costs us about 6 points."' + TAIL },
   { id: 'F8', fixture: 'f0eb03ac', from: 'central_kitchen_fit_out_cost', to: 'gross_margin',
     quote: 'Spending £250k on the central kitchen fit-out would cost us about 1.5 margin points this year.',
     effect: effect(-1.5, 'points', 250000, 'GBP'),
@@ -355,6 +360,9 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     ['unsupported fraction', 'Each two thirds of a point in production waste rate cuts gross margin by 0.5 points.', effect(-0.5, 'points', 2, 'points')],
     ['unsupported decimal words', 'Each one point five points of production waste rate cuts gross margin by 0.5 points.', effect(-0.5, 'points', 1, 'points')],
     ['transition endpoint reused as target figure', 'Halving waste from 8% to 4% lifts gross margin.', effect(4, 'points', -4, 'points')],
+    ['a fraction OF a written figure', 'Each 1 percentage point rise in production waste rate costs a third of 6 points of gross margin.', effect(-6, 'points', 1, 'percentage points')],
+    ['half OF a written figure', 'Each 1 percentage point rise in production waste rate costs half of 0.5 percentage points of gross margin.', effect(-0.5, 'percentage points', 1, 'percentage points')],
+    ['a fraction before a unit', 'Each 2 percentage point rise in production waste rate costs 1 and a quarter points of gross margin.', effect(-1, 'points', 2, 'percentage points')],
   ] as const)('%s never invents a user magnitude', async (_name, quote, proposed) => {
     const row = { ...NATURAL_SENTENCE_ROWS[0]!, quote, effect: proposed };
     const w = world(row); const before = w.graph(); const result = await propose(w, row);

@@ -57,9 +57,22 @@ export function linkEffectSourceLevels(quote: string): LinkEffectSourceLevels | 
   return transitions.length === 1 ? transitions[0] : undefined;
 }
 
+/**
+ * A fraction word is unclear only where it can change a written figure: right after a number ("two thirds"), right before
+ * a unit ("a quarter point"), or OF a figure ("a third of 6 points", "half of £300", "a third of a percentage point"). A
+ * ratio beside two written figures ("A third of any flour price rise comes off our margin, so an 18% rise costs us about
+ * 6 points") puts no fraction on the card; staging cards that sentence today (Acceptance corpus row 6, replay @147c6630).
+ */
+const FRACTION = '(?:thirds?|quarters?|halves)';
+const UNIT_WORD = '(?:percentage\\s+)?(?:points?|pp|percent|per\\s+cent)\\b';
+const fractionOfANumber = new RegExp(`\\b(?:${CARDINAL_AMOUNT_SOURCE}|\\d+(?:\\.\\d+)?)\\s+${FRACTION}\\b`, 'iu');
+const fractionOfAUnit = new RegExp(`\\b${FRACTION}\\s+${UNIT_WORD}`, 'iu');
+const fractionOfAFigure = new RegExp(`\\b(?:${FRACTION}|half)\\s+of\\s+(?:(?:a|an|the|our|your|its|their|that|this|those|these|each|every)\\s+)?`
+  + `(?:[£$€]|\\d|(?:${CARDINAL_AMOUNT_SOURCE})\\b|${UNIT_WORD})`, 'iu');
+
 /** Ranges cannot license either endpoint or a midpoint as a single user's figure. */
 export function hasLinkEffectRange(quote: string): boolean {
-  if (/\b(?:thirds?|quarters?|halves)\b/i.test(quote)
+  if (fractionOfANumber.test(quote) || fractionOfAUnit.test(quote) || fractionOfAFigure.test(quote)
     || new RegExp(`\\bpoint\\s+(?:${CARDINAL_AMOUNT_SOURCE}|\\d)\\b`, 'iu').test(quote)) return true;
   const amounts = findLinkEffectAmounts(quote);
   return amounts.some((a, i) => {
