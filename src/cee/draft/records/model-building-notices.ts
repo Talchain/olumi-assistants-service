@@ -65,7 +65,7 @@
  */
 
 import type { ModelBuildingNoticeKind, ModelBuildingNotices } from "@talchain/schemas/boundary";
-import type { DroppedRecordRef } from "./projector.js";
+import { STATED_ITEM_DROP_KIND, type DroppedRecordRef } from "./projector.js";
 
 /**
  * Producer reason → contract kind. Exhaustive over the projector's union by
@@ -305,7 +305,15 @@ export function buildModelBuildingNotices(
       // table makes this unreachable from the current producer; it stays
       // because this function's input is `unknown` and a wire value is not
       // bound by our types.
-      bump(NOTICE_KIND_BY_REASON[reason as DroppedRecordRef["reason"]] ?? "other");
+      const kind = NOTICE_KIND_BY_REASON[reason as DroppedRecordRef["reason"]] ?? "other";
+      // ⭐ #2576 item 1 INTERIM (DL ruling): THE USER'S OWN RELATIONSHIP IS NEVER COUNTED AS OLUMI'S. DGAI renders
+      // `relationship_not_used` as "Connections Olumi proposed but couldn't place in the model" (attribution
+      // `olumi_authored`), so a row the projector typed as the USER's (`claim_kind: "stated_item"`, its own field) is
+      // left out of that count. Only existing 0.76.0 kinds are emitted: the user-attributed kind
+      // (`stated_relationship_not_used`, schemas 0.77) is bound here only once DGAI 0.77 is served. A row with no
+      // `claim_kind` (the V3 rendering strips it) is counted exactly as before.
+      if (kind === "relationship_not_used" && (raw as { claim_kind?: unknown }).claim_kind === STATED_ITEM_DROP_KIND) continue;
+      bump(kind);
     }
   }
 
