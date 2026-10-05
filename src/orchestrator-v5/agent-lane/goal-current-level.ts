@@ -76,6 +76,7 @@ import { scopeOf, identityConflictsWithScope, scopeSourcesAreUserWords, goalScop
 import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWithdrawalReading } from '../system-events/identity-confirm-edit.js';
 import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -590,6 +591,10 @@ export async function proposeGoalCurrentLevel(
   const absent = (v: unknown): boolean => v === undefined || v === null;
   const noTargetYet = node.goal_threshold_frame === 'level' && absent(target) && absent(cap) &&
     absent((node as { goal_threshold?: unknown }).goal_threshold);
+  // ⭐ RT-10 B′ R3 (Science #87 5999608477): `noTargetYet` decides only the FRAME the level is read on (no target figure on
+  // the node). Whether the goal HAS a target is the one reader's answer: "at most 5%" set through the goal panel lives on
+  // the goal's own limit row, so the approval never tells the user that goal "has no target yet".
+  const targetStated = statedGoalTargetOf(g.raw, goal as unknown as Record<string, unknown>) !== null;
   if (!isChange && !noTargetYet && (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level')) {
     return refuse(
       'no_target',
@@ -748,7 +753,7 @@ export async function proposeGoalCurrentLevel(
           `the product gives their figure — say it stays Olumi's estimate, never the user's`
         : '') +
       (earlierHeld !== null ? earlierHeld.note : '') +
-      (noTargetYet
+      (noTargetYet && !targetStated
         ? `. "${goal.label}" has no target yet: say this records where it stands today, and that the chance of reaching a ` +
           'target appears once they set one; never name a target they have not given'
         : '') +

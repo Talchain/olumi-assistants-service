@@ -1,0 +1,454 @@
+{
+ "nodes": [
+  {
+   "id": "decision_no_shows",
+   "ref": "D1",
+   "kind": "decision",
+   "label": "Decision: No-shows",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "no_shows",
+   "ref": "G1",
+   "kind": "goal",
+   "label": "No-shows",
+   "provenance": "from_brief",
+   "goal_direction": "<=",
+   "goal_threshold_unit": "%",
+   "goal_threshold_frame": "level"
+  },
+  {
+   "id": "text_reminders",
+   "ref": "O1",
+   "kind": "option",
+   "label": "Text reminders",
+   "provenance": "from_brief",
+   "interventions": {
+    "text_reminder_coverage": {
+     "unit": "%",
+     "value": 1,
+     "source": "cee_hypothesis",
+     "raw_value": 100,
+     "target_match": {
+      "node_id": "text_reminder_coverage",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "missed_appointment_fee",
+   "ref": "O2",
+   "kind": "option",
+   "label": "Missed-appointment fee",
+   "provenance": "from_brief",
+   "interventions": {
+    "missed_appointment_fee_2": {
+     "unit": "GBP per missed appointment",
+     "value": 0.2,
+     "source": "cee_hypothesis",
+     "raw_value": 20,
+     "target_match": {
+      "node_id": "missed_appointment_fee_2",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "online_self_rescheduling",
+   "ref": "O3",
+   "kind": "option",
+   "label": "Online self-rescheduling",
+   "provenance": "from_brief",
+   "interventions": {
+    "online_self_rescheduling_coverage": {
+     "unit": "%",
+     "value": 1,
+     "source": "cee_hypothesis",
+     "raw_value": 100,
+     "target_match": {
+      "node_id": "online_self_rescheduling_coverage",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "carry_on_as_now",
+   "ref": "O4",
+   "kind": "option",
+   "label": "Carry on as now",
+   "provenance": "ai_inferred",
+   "is_baseline": true
+  },
+  {
+   "id": "text_reminder_coverage",
+   "ref": "F1",
+   "kind": "factor",
+   "label": "Text reminder coverage",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "%",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "missed_appointment_fee_2",
+   "ref": "F2",
+   "kind": "factor",
+   "label": "Missed appointment fee",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "GBP per missed appointment",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "online_self_rescheduling_coverage",
+   "ref": "F3",
+   "kind": "factor",
+   "label": "Online self-rescheduling coverage",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "%",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "patient_appointment_awareness",
+   "ref": "F4",
+   "kind": "factor",
+   "label": "Patient appointment awareness",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "%",
+    "value": 0.6,
+    "source": "cee_inference",
+    "raw_value": 60,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "completed_appointment_reschedules",
+   "ref": "F5",
+   "kind": "factor",
+   "label": "Completed appointment reschedules",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "%",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "fee_related_patient_disengagement",
+   "ref": "R1",
+   "kind": "risk",
+   "label": "Fee-related patient disengagement",
+   "provenance": "ai_inferred",
+   "scale_frame": 100
+  }
+ ],
+ "edges": [
+  {
+   "to": "text_reminders",
+   "from": "decision_no_shows",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "missed_appointment_fee",
+   "from": "decision_no_shows",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "online_self_rescheduling",
+   "from": "decision_no_shows",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "carry_on_as_now",
+   "from": "decision_no_shows",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "text_reminder_coverage",
+   "from": "text_reminders",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "missed_appointment_fee_2",
+   "from": "missed_appointment_fee",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "online_self_rescheduling_coverage",
+   "from": "online_self_rescheduling",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "text_reminder_coverage",
+   "from": "carry_on_as_now",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "missed_appointment_fee_2",
+   "from": "carry_on_as_now",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "online_self_rescheduling_coverage",
+   "from": "carry_on_as_now",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "patient_appointment_awareness",
+   "from": "text_reminder_coverage",
+   "strength": {
+    "std": 0.05,
+    "mean": 0.1
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_placeholder",
+    "natural_effect": {
+     "amount": 10,
+     "amount_unit": "percentage points",
+     "strength_mean": 0.1,
+     "per_source_change": 100,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "%"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "no_shows",
+   "from": "patient_appointment_awareness",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "no_shows",
+   "from": "missed_appointment_fee_2",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "fee_related_patient_disengagement",
+   "from": "missed_appointment_fee_2",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.25
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": 5,
+     "amount_unit": "percentage points",
+     "strength_mean": 0.25,
+     "per_source_change": 20,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "GBP per missed appointment"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "no_shows",
+   "from": "fee_related_patient_disengagement",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "completed_appointment_reschedules",
+   "from": "online_self_rescheduling_coverage",
+   "strength": {
+    "std": 0.25,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": 5,
+     "amount_unit": "percentage points",
+     "strength_mean": 0.5,
+     "per_source_change": 10,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "%"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "no_shows",
+   "from": "completed_appointment_reschedules",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  }
+ ],
+ "node_count": 12,
+ "edge_count": 17,
+ "goal_constraints": [
+  {
+   "unit": "%",
+   "label": "No-shows",
+   "value": 5,
+   "node_id": "no_shows",
+   "operator": "<=",
+   "provenance": "explicit",
+   "value_frame": "level",
+   "constraint_id": "gc-6e83b077-a2cf-40ec-b3b6-fac2998d16a5"
+  }
+ ]
+}
