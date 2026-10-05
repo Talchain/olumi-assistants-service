@@ -1867,8 +1867,8 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // headline, else a locked template", and this tail can only ever ride the
     // locked-template arm.
     // Gate 1 v2 adds only this final pattern; the existing pinned composition stays verbatim below.
-    expect(RUN_ANALYSIS).toContain('${separabilityDisclosure}${identicalToBaselineDisclosure}`;');
-    expect(RUN_ANALYSIS.replace(/\$\{identicalToBaselineDisclosure\}(?=`;)/g, '')).toContain(
+    expect(RUN_ANALYSIS).toContain('${separabilityDisclosure}${identicalArmsDisclosure}`;');
+    expect(RUN_ANALYSIS.replace(/\$\{identicalArmsDisclosure\}(?=`;)/g, '')).toContain(
       // D-ask-1 (2.11) applied to CEE-inferred FACTOR values adds an EIGHTH slot,
       // appended after the participation disclosure — the position its grammar
       // occupies in TAIL_PATTERN and in the egress registry. The `gated` stance

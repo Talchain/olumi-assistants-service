@@ -88,6 +88,14 @@ export const GOAL_FIGURES_PRODUCT_NOT_READ = 'GOAL_FIGURES_PRODUCT_NOT_READ';
  */
 export const GOAL_FIGURES_TARGET_NOT_TESTABLE = 'GOAL_FIGURES_TARGET_NOT_TESTABLE';
 
+/**
+ * ⛔ DL gate 1 v2 (Science 0df0e1, 5 Oct): an option whose RUN outcome is identical to the explicit baseline's
+ * (`identical-to-baseline.ts`). The duplicate splits the baseline's wins (ISL ties split 1/len(winners)), so every
+ * comparison claim this Run computed — shares, leader, robustness, flips — is distorted. Written by `run_analysis`
+ * for the identical arms; the leader and every share go with it. Outcome distributions stay (keepOutcome).
+ */
+export const OPTION_IDENTICAL_TO_BASELINE = 'OPTION_IDENTICAL_TO_BASELINE';
+
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
@@ -95,6 +103,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
+  OPTION_IDENTICAL_TO_BASELINE,
 ]);
 
 function readRecord(value: unknown): Record<string, unknown> | null {

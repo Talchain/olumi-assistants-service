@@ -235,7 +235,7 @@ const SLOT_FAMILY: ReadonlyArray<readonly [string, string, 'registered' | 'exclu
   // can and does emit (a run on inferred values may equally be withheld).
   ['inferredValueDisclosure', 'INFERRED_VALUE_DISCLOSURE_RE_SRC', 'registered'],
   ['separabilityDisclosure', 'SEPARABILITY_DISCLOSURE_RE_SRC', 'registered'],
-  ['identicalToBaselineDisclosure', 'IDENTICAL_TO_BASELINE_DISCLOSURE_RE_SRC', 'registered'],
+  ['identicalArmsDisclosure', 'IDENTICAL_ARMS_DISCLOSURE_RE_SRC', 'registered'],
 ];
 
 describe('the handler-source extractor can see (controls first — trap 13)', () => {

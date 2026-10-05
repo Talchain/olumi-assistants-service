@@ -46,7 +46,7 @@ import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 // local regex mirrors are exactly the drift class that silently swallowed
 // the disclosure for ID-shaped labels ("Plan E_2").
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
-import type { IdenticalToBaselineRecord } from '../tools/handlers/identical-to-baseline.js';
+import type { IdenticalArmGroup } from '../tools/handlers/identical-arms.js';
 import { MAX_OPTIONS } from '../../validators/graph-validator.types.js';
 
 /**
@@ -546,25 +546,40 @@ export function buildAnalysisSubmissionDisclosure(
   );
 }
 
-/** The arm ran: disclose result identity, without implying exclusion or diagnosing its cause. */
-export function buildIdenticalToBaselineDisclosure(records: readonly IdenticalToBaselineRecord[]): string {
-  return records.map((r) => {
-    const arm = sanitiseLabel(r.label, r.option_id) ?? 'This option';
-    const baseline = sanitiseLabel(r.baseline_label, r.baseline_option_id) ?? 'the baseline';
-    const sentence = ` ${arm} came out identical to ${baseline}: in this model it doesn't change the outcome.`;
-    return arm.length <= 200 && baseline.length <= 200
-      && passesAssistantTextContentDefences(sentence) && !/[\r\n]/.test(sentence)
-      ? sentence : " This option came out identical to the baseline: in this model it doesn't change the outcome.";
+/** The arms ran: say which came out identical (DL wording, true whatever the cause) and what the user can do. */
+export function buildIdenticalArmsDisclosure(groups: readonly IdenticalArmGroup[]): string {
+  return groups.map((g) => {
+    const names = g.option_ids.map((id, i) => sanitiseLabel(g.labels[i] ?? id, id));
+    const ok = names.every((n): n is string => n !== null && n.length <= 200);
+    const baselineAt = g.baseline_option_id === null ? -1 : g.option_ids.indexOf(g.baseline_option_id);
+    let sentence: string;
+    if (ok && g.option_ids.length === 2 && baselineAt >= 0) {
+      const arm = names[1 - baselineAt]!, baseline = names[baselineAt]!;
+      sentence = ` ${arm} came out identical to ${baseline}: in this model it doesn't change the outcome.${IDENTICAL_HOLD_BACK_ONE}`;
+    } else if (ok) {
+      const ordered = baselineAt >= 0 ? [names[baselineAt]!, ...names.filter((_, i) => i !== baselineAt)] : names as string[];
+      const list = `${ordered.slice(0, -1).join(', ')} and ${ordered[ordered.length - 1]}`;
+      sentence = ` ${list} came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`;
+    } else {
+      sentence = ` Some options came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`;
+    }
+    return passesAssistantTextContentDefences(sentence) && !/[\r\n]/.test(sentence)
+      ? sentence : ` Some options came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`;
   }).join('');
 }
 
-/** One sentence per returned arm; names are bounded by the existing assistant-text budget. */
-export const IDENTICAL_TO_BASELINE_DISCLOSURE_RE_SRC =
-  `(?: [^\\r\\n]{1,200}? came out identical to [^\\r\\n]{1,200}?: in this model it doesn't change the outcome\\.){1,${MAX_OPTIONS - 1}}`;
+/** What the user can do; the comparison is withheld (OPTION_IDENTICAL_TO_BASELINE) until the arms differ. */
+const IDENTICAL_HOLD_BACK_ONE = ' The comparison is held back until it differs: edit its value, or remove it.';
+const IDENTICAL_HOLD_BACK_MANY = ' The comparison is held back until they differ: edit one of their values, or remove one.';
 
-// One sentence for each possible non-baseline arm under CEE's existing graph option bound.
-export const IDENTICAL_TO_BASELINE_DISCLOSURE_MAX_CHARS =
-  (MAX_OPTIONS - 1) * (` ${'x'.repeat(200)} came out identical to ${'x'.repeat(200)}: in this model it doesn't change the outcome.`).length;
+/** One sentence per identical group; names bounded at 200 characters each. */
+export const IDENTICAL_ARMS_DISCLOSURE_RE_SRC =
+  `(?: (?:[^\\r\\n]{1,200}? came out identical to [^\\r\\n]{1,200}?: in this model it doesn't change the outcome\\. The comparison is held back until it differs: edit its value, or remove it\\.|[^\\r\\n]{1,${(MAX_OPTIONS) * 204}}? came out identical: in this model they lead to the same outcome\\. The comparison is held back until they differ: edit one of their values, or remove one\\.)){1,${Math.floor(MAX_OPTIONS / 2)}}`;
+
+// Worst case: every option in pairs, each name at the 200-character bound.
+export const IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS =
+  Math.floor(MAX_OPTIONS / 2) * (` ${'x'.repeat(200)} and ${'x'.repeat(200)} came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`).length
+  + MAX_OPTIONS * 2;
 
 /**
  * The configure chip a scaffolded run_analysis success turn offers — same

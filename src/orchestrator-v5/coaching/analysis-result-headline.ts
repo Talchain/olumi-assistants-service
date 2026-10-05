@@ -80,8 +80,8 @@ import { readFlipClaimPosture, readTopLevelFlipRows } from '../context/flip-thre
 import {
   SCAFFOLD_ANY_DISCLOSURE_RE_SRC,
   SCAFFOLD_DISCLOSURE_MAX_CHARS,
-  IDENTICAL_TO_BASELINE_DISCLOSURE_RE_SRC,
-  IDENTICAL_TO_BASELINE_DISCLOSURE_MAX_CHARS,
+  IDENTICAL_ARMS_DISCLOSURE_RE_SRC,
+  IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS,
 } from './scaffold-disclosure.js';
 // D-ask-1 (2.11) applied to the population it did not cover: CEE-INFERRED
 // FACTOR values. Same claim-safety ruling — "the analysis result must never
@@ -524,7 +524,7 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // supplied. Budgeted from the builder's own worst case, never
   // hand-estimated, so an honest disclosure cannot be dropped on length.
   INFERRED_VALUE_DISCLOSURE_MAX_CHARS +
-  IDENTICAL_TO_BASELINE_DISCLOSURE_MAX_CHARS;
+  IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -2583,7 +2583,7 @@ const OBJECTIVE_CONTRADICTION_BOUND_RE_SRC =
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
 // in the run_analysis handler.
-const TAIL_PATTERN = `(?:${GOAL_FRAME_WITHDRAWN_RE_SRC})?(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_BOUND_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?(?:${IDENTICAL_TO_BASELINE_DISCLOSURE_RE_SRC})?`;
+const TAIL_PATTERN = `(?:${GOAL_FRAME_WITHDRAWN_RE_SRC})?(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_BOUND_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?(?:${IDENTICAL_ARMS_DISCLOSURE_RE_SRC})?`;
 
 /** One disclosure family admitted on the locked-template (withheld) branch. */
 export interface TemplateSuffixDisclosureGrammar {
@@ -2712,7 +2712,7 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclos
   // two disagree, which is how a suffix silently stops being admitted.
   { name: 'INFERRED_VALUE_DISCLOSURE_RE_SRC', source: INFERRED_VALUE_DISCLOSURE_RE_SRC },
   { name: 'SEPARABILITY_DISCLOSURE_RE_SRC', source: SEPARABILITY_DISCLOSURE_RE_SRC },
-  { name: 'IDENTICAL_TO_BASELINE_DISCLOSURE_RE_SRC', source: IDENTICAL_TO_BASELINE_DISCLOSURE_RE_SRC },
+  { name: 'IDENTICAL_ARMS_DISCLOSURE_RE_SRC', source: IDENTICAL_ARMS_DISCLOSURE_RE_SRC },
 ];
 
 /** A `*_RE_SRC` grammar that is deliberately NOT on the template branch. */
