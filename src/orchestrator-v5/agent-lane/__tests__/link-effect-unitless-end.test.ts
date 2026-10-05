@@ -133,8 +133,16 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     const { caps, store } = world(graph);
     const r = await caps.proposeLinkEffect!(ctxSaying(SAID_READ), { ...LINK, quote: SAID_READ }) as Json;
     expectRefused(r, 'unit_mismatch', undefined, store, graph, before);
-    expect(String(r.detail)).toContain(`"${FOOTFALL}" has no unit or scale`);
-    expect(String(r.detail), 'the % goal is never called unitless').not.toContain(`"${MARGIN}" has no unit`);
+    expect(String(r.detail)).toContain(`\u201c${FOOTFALL}\u201d has no unit or scale`);
+    expect(String(r.detail), 'the % goal is never called unitless').not.toContain(`\u201c${MARGIN}\u201d has no unit`);
+    // RT-6 step 1: never a dead end — the route that works, by THIS link's two ends and the link panel's own words.
+    // The ONE sentence the Agent is told to say verbatim (Science wording check), by THIS link's two ends.
+    expect(String(r.detail)).toBe('Nothing was prepared. Tell the user exactly this: "'
+      + `\u201c${FOOTFALL}\u201d has no unit or scale in this model yet, so I can\u2019t record your figure from chat. Your wording is fine. `
+      + `You can set how strong this link is now: on the canvas, click the link from \u201c${FOOTFALL}\u201d to \u201c${MARGIN}\u201d, and under `
+      + '\u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, '
+      + 'not the figure itself."');
+    expect(String(r.detail)).not.toMatch(/available tools/i);
   });
 
   it('C contrast: an end WITH its own unit stays strict (a £ figure for the % "Bread price increase" → unit_mismatch)', async () => {
@@ -145,6 +153,8 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
       amount: 2, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: '£', quote: said }) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
     expect(String(r.detail)).not.toContain('has no unit or scale');
+    // Contrast for step 1: an end that HAS a unit gets "use its unit", never the canvas detour.
+    expect(String(r.detail)).not.toContain('How strong is this effect?');
     expectRefused(r, 'unit_mismatch', undefined, store, graph, before, 'bread_price_increase');
   });
 
