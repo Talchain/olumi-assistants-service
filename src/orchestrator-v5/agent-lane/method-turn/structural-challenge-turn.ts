@@ -64,6 +64,8 @@ function outcomeLevelLine(who: string, q: StructuralChallengeQuantityClaimV1, re
     const where = b === null && a === null ? 'in both versions' : b === null ? 'in the baseline' : 'without the link';
     return `${who}'s expected result is unavailable ${where}.${tail}`;
   }
+  // A not-comparable claim asserts no direction: its own reason (definitions, frame, unit…) says why (Codex #2582 P1).
+  if (q.verdict === 'not_comparable') return `${who}'s expected result can't be compared between the two versions.${tail}`;
   const direction = a === b ? 'is the same without the link' : a > b ? 'is higher without the link' : 'is lower without the link';
   const t = q.target;
   if (t === null) return `${who}'s expected result ${direction}.${tail}`;

@@ -422,15 +422,19 @@ describe('review closure: final presentation is bound to its baseline execution 
   });
 
   it.each([
-    ['the same', 85500, 85500, 85000, 'is the same without the link, and stays above your target.'],
-    ['stays above', 90000, 87000, 85000, 'is lower without the link, and stays above your target.'],
-    ['no target', 0.0213, -0.0031, null, 'is lower without the link.'],
-    ['unavailable without the link', 0.0213, null, null, 'is unavailable without the link.'],
-  ] as const)('DL beat-4 audit: an outcome level reads as a direction (%s), never a number', (_name, baseline, alternative, target, words) => {
-    const claim = { ...changed.claims.find((c) => c.kind === 'outcome_level')!, baseline, alternative, target };
-    const reply = composeStructuralChallengeReply({ result: { ...changed, claims: [changed.claims[0]!, claim] } as StructuralChallengeResultV1, labels: LABELS });
+    // [name, baseline, alternative, target, verdict, basis, noise, expected words] — every claim parsed against the contract.
+    ['the same', 85500, 85500, 85000, 'holds', 'same_side_of_target', 'within_noise', 'is the same without the link, and stays above your target.'],
+    ['stays above', 90000, 87000, 85000, 'holds', 'same_side_of_target', 'signal', 'is lower without the link, and stays above your target.'],
+    ['no target (the served beat-4 shape)', 0.0213, -0.0031, null, 'delta_only', 'no_licensed_boundary', 'signal', 'is lower without the link.'],
+    ['unavailable without the link', 0.0213, null, null, 'not_comparable', 'missing_on_one_side', 'not_noise_qualified', 'is unavailable without the link.'],
+    ['not comparable (Codex P1)', 100, 1, null, 'not_comparable', 'identity_status_changed', 'not_noise_qualified', 'can\'t be compared between the two versions.'],
+  ] as const)('DL beat-4 audit: an outcome level reads as a direction only when comparable (%s), never a number', (_name, baseline, alternative, target, verdict, basis, noise_verdict, words) => {
+    const claim = { ...changed.claims.find((c) => c.kind === 'outcome_level')!, baseline, alternative, target, verdict, basis, noise_verdict };
+    const result = StructuralChallengeResultV1Schema.parse({ ...changed, claims: [changed.claims[0]!, claim] });
+    const reply = composeStructuralChallengeReply({ result, labels: LABELS });
     expect(reply).toContain(`Raise Pro price to £59's expected result ${words}`);
     expect(reply).not.toMatch(/expected result is -?\d/);
+    if (verdict === 'not_comparable') expect(reply).not.toMatch(/expected result is (higher|lower|the same)/);
   });
   it.each(['leader', 'goal_probability', 'outcome_level', 'constraint_probability'] as const)(
     'P1-4 / prior #4: %s change names its observed claim and discloses unpaired sampling without dependency prose', async (kind) => {
