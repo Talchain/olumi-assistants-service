@@ -428,6 +428,10 @@ describe('review closure: final presentation is bound to its baseline execution 
     ['no target (the served beat-4 shape)', 0.0213, -0.0031, null, 'delta_only', 'no_licensed_boundary', 'signal', 'is lower without the link.'],
     ['unavailable without the link', 0.0213, null, null, 'not_comparable', 'missing_on_one_side', 'not_noise_qualified', 'is unavailable without the link.'],
     ['not comparable (Codex P1)', 100, 1, null, 'not_comparable', 'identity_status_changed', 'not_noise_qualified', 'can\'t be compared between the two versions.'],
+    // Codex r3: an unlicensed basis never narrates the target; a within-noise delta never states a direction.
+    ['unlicensed + within noise (Codex r3)', 100, 101, 100.5, 'delta_only', 'no_licensed_boundary', 'within_noise', 'is about the same without the link (the difference is within sampling noise).'],
+    ['producer within_noise basis (once)', 100, 101, 100.5, 'delta_only', 'within_noise', 'within_noise', 'is about the same without the link (the difference is within sampling noise).'],
+    ['not noise-qualified', 0.0213, -0.0031, null, 'delta_only', 'not_noise_qualified', 'not_noise_qualified', 'is lower without the link (a difference that couldn\'t be checked against sampling noise).'],
   ] as const)('DL beat-4 audit: an outcome level reads as a direction only when comparable (%s), never a number', (_name, baseline, alternative, target, verdict, basis, noise_verdict, words) => {
     const claim = { ...changed.claims.find((c) => c.kind === 'outcome_level')!, baseline, alternative, target, verdict, basis, noise_verdict };
     const result = StructuralChallengeResultV1Schema.parse({ ...changed, claims: [changed.claims[0]!, claim] });
@@ -435,6 +439,8 @@ describe('review closure: final presentation is bound to its baseline execution 
     expect(reply).toContain(`Raise Pro price to £59's expected result ${words}`);
     expect(reply).not.toMatch(/expected result is -?\d/);
     if (verdict === 'not_comparable') expect(reply).not.toMatch(/expected result is (higher|lower|the same)/);
+    if (basis !== 'target_crossed' && basis !== 'same_side_of_target') expect(reply).not.toMatch(/your target/);
+    expect(reply.match(/within sampling noise/g)?.length ?? 0).toBeLessThanOrEqual(1);
   });
 
   it('Codex #2582 r2: a construction-invariant outcome never narrates sampling noise as movement', () => {

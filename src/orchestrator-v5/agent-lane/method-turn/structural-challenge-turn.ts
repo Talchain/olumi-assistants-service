@@ -57,9 +57,9 @@ function chance(p: number): string {
  */
 function outcomeLevelLine(who: string, q: StructuralChallengeQuantityClaimV1, reason: string): string {
   const b = q.baseline, a = q.alternative;
-  // "The figures can be compared, but no supported conclusion boundary…" refers to figures this line no longer prints;
-  // the direction is all that can be said, so that basis adds nothing here. Every other basis keeps its sentence.
-  const tail = reason && q.basis !== 'no_licensed_boundary' ? ` ${reason}` : '';
+  // These bases' sentences are carried by the line's own words below (or refer to figures it no longer prints).
+  const tail = reason && q.basis !== 'no_licensed_boundary' && q.basis !== 'within_noise' && q.basis !== 'not_noise_qualified'
+    ? ` ${reason}` : '';
   if (b === null || a === null) {
     const where = b === null && a === null ? 'in both versions' : b === null ? 'in the baseline' : 'without the link';
     return `${who}'s expected result is unavailable ${where}.${tail}`;
@@ -68,12 +68,18 @@ function outcomeLevelLine(who: string, q: StructuralChallengeQuantityClaimV1, re
   if (q.verdict === 'not_comparable') return `${who}'s expected result can't be compared between the two versions.${tail}`;
   // Construction-invariant: any difference between the two values is sampling, not this link (Codex #2582 r2 P2).
   if (q.invariant_by_construction) return `${who}'s expected result can't be affected by this link.${tail}`;
-  const direction = a === b ? 'is the same without the link' : a > b ? 'is higher without the link' : 'is lower without the link';
+  // Direction only where the noise check supports it (Codex #2582 r3 P2).
+  const core = a === b ? 'is the same without the link'
+    : q.noise_verdict === 'within_noise' ? 'is about the same without the link (the difference is within sampling noise)'
+      : q.noise_verdict === 'not_noise_qualified'
+        ? `is ${a > b ? 'higher' : 'lower'} without the link (a difference that couldn't be checked against sampling noise)`
+        : `is ${a > b ? 'higher' : 'lower'} without the link`;
+  // Target words only on the bases whose strict side test (contract C5) licenses them.
   const t = q.target;
-  if (t === null) return `${who}'s expected result ${direction}.${tail}`;
+  if (t === null || (q.basis !== 'target_crossed' && q.basis !== 'same_side_of_target')) return `${who}'s expected result ${core}.${tail}`;
   const side = (v: number) => (v > t ? 'above' : v < t ? 'below' : 'at');
   const target = side(b) === side(a) ? `, and stays ${side(b)} your target` : `, and moves from ${side(b)} your target to ${side(a)} it`;
-  return `${who}'s expected result ${direction}${target}.${tail}`;
+  return `${who}'s expected result ${core}${target}.${tail}`;
 }
 const TARGET_FREQUENCY_UNAVAILABLE = 'The target frequency was unavailable.';
 
