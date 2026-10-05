@@ -149,9 +149,28 @@ describe('DR row 1: the approved card holds the goal\'s direction on the goal no
     expect(computeAnalysisAffectingGraphHash(out as never)).not.toBe(computeAnalysisAffectingGraphHash(floor as never));
   });
 
-  it('CONTROL: a ceiling card on a goal holding no direction writes none (as before)', async () => {
-    const out = await card(graphWith(), 'at_most', 1_400_000);
+  it('RT-10 B′ (was CONTROL "writes none"): a ceiling card on a goal holding no target figure HOLDS `<=`, and the run minimises', async () => {
+    const before = graphWith();
+    const out = await card(before, 'at_most', 1_400_000);
+    expect(goalOf(out).goal_direction).toBe('<=');
+    expect(resolveGoalDirection(out, GOAL)).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
+    expect(computeAnalysisAffectingGraphHash(out as never)).not.toBe(computeAnalysisAffectingGraphHash(before as never));
+  });
+
+  it('⭐ RT-10 B′ (DL row): "monthly churn" with no direction — the user\'s approved "at most 2%" re-orders: held `<=`, its row, minimise', async () => {
+    const before = graphWith({ label: 'Monthly churn' });
+    expect(resolveGoalDirection(before, GOAL), 'PRECONDITION: unattested (the assumption line speaks)').toBeUndefined();
+    const out = await card(before, 'at_most', 2, '%');
+    expect(goalOf(out).goal_direction).toBe('<=');
+    expect(out.goal_constraints).toEqual(expect.arrayContaining([expect.objectContaining({ node_id: GOAL, operator: '<=', value: 2 })]));
+    expect(resolveGoalDirection(out, GOAL)).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
+    expect(heldGoalPointsUp(out, GOAL)).toBe(false);
+  });
+
+  it('RT-10 B′ CONTRAST: a limit on ANOTHER node (not the card) never sets the goal\'s sense', async () => {
+    const out = await notTheCard(graphWith({ label: 'Monthly churn' }), 'f-churn', 'at_most', 3, '%');
     expect(goalOf(out).goal_direction).toBeUndefined();
+    expect(resolveGoalDirection(out, GOAL)).toBeUndefined();
   });
 
   it('CODEX (C2/C3 control): a prior strict `>` then the plain "at least" card → `>=`, scored non-strictly (the card\'s words replace)', async () => {
