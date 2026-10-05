@@ -154,24 +154,35 @@ export function statedFirstRecords(brief: string, main: DraftRecordSet, pass: re
 }
 
 /** Mode off returns the identical call objects. Mode on captures the pass but suppresses the old merge. */
-export function statedFirstCalls(enabled: boolean, brief: string, main: CallStructuredModel, sentencePass: CallStructuredModel) {
+export function statedFirstCalls(enabled: boolean, brief: string, main: CallStructuredModel, sentencePass: CallStructuredModel,
+  kind: 'CEILING (self-authored)' | 'LIVE (harness-only)' = 'CEILING (self-authored)') {
   if (!enabled) return { main, sentencePass, receipt: () => undefined };
   let pass: CeilingRecord[] | undefined;
+  let passError: string | undefined;
   let receipt: Record<string, unknown> | undefined;
+  // The builder starts the pass BEFORE the main call and runs them in parallel. Live, the main answer can land first, so
+  // the main wrapper awaits a started pass; set synchronously on entry, so "no pass started" never waits (pass absent).
+  let passDone: Promise<void> | undefined;
   return {
     sentencePass: (async req => {
-      const out = await sentencePass(req);
-      if (out.status !== 'incomplete' && out.text.length > 0) pass = parseCeilingPass(out.text);
+      const call = sentencePass(req);
+      passDone = call.then(() => undefined, () => undefined);
+      const out = await call;
+      if (out.status !== 'incomplete' && out.text.length > 0) {
+        try { pass = parseCeilingPass(out.text); } catch (e) { passError = e instanceof Error ? e.message : String(e); }
+      }
       // Empty text is the existing builder's pass-absent arm: the original merge cannot run twice.
       return { ...out, text: '' };
     }) as CallStructuredModel,
     main: (async req => {
       const out = await main(req);
+      if (passDone !== undefined) await passDone;
+      if (passError !== undefined) receipt = { kind, mode: 'stated-first', status: 'not_applied', reason: passError };
       if (out.status === 'incomplete' || out.text.length === 0 || pass === undefined) return out;
       const raw = JSON.parse(out.text) as DraftRecordSet;
       const records = statedFirstRecords(brief, raw, pass);
       const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-      receipt = { kind: 'CEILING (self-authored)', mode: 'stated-first', main_stated_dropped: raw.stated_items.length,
+      receipt = { kind, mode: 'stated-first', main_stated_dropped: raw.stated_items.length,
         pass_records: pass.length, stated_items: records.stated_items.length, claims_kept: records.claims.length,
         claims_byte_identical: JSON.stringify(records.claims) === JSON.stringify(raw.claims),
         original_records_sha256: digest(raw), pass_records_sha256: digest(pass), compiled_input_sha256: digest(records),

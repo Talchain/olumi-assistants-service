@@ -91,6 +91,27 @@ describe('CEILING (self-authored) stated-first harness rows', () => {
     expect(c.projection.stated_dispositions).toContainEqual(expect.objectContaining({ stated_index: 4, disposition: 'rejected' }));
     expect(c.projection.graph.nodes.filter(n => n.kind === 'option').every(n => !Object.values(n.data?.raw_interventions ?? {}).includes(201))).toBe(true);
   });
+  it('LIVE ordering: a main answer that lands BEFORE a started pass still gets the pass-only stated set', async () => {
+    const claims = [{ claim_kind: 'factor' as const, label: 'Kept claim', quantity: 0, basis: [0] }];
+    const old = { stated_items: [{ kind: 'figure' as const, source_quote: 'MAIN ONLY SENTINEL' }], claims };
+    const slowPass: CallStructuredModel = async () => {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      return { text: JSON.stringify({ records: typed() }), status: 'completed' };
+    };
+    const c = statedFirstCalls(true, brief, call(old), slowPass, 'LIVE (harness-only)');
+    const passing = c.sentencePass({} as never);          // the builder starts the pass first, in parallel
+    const text = (await c.main({} as never)).text;        // the main answer resolves first (no delay)
+    await passing;
+    expect(text).not.toContain('MAIN ONLY SENTINEL');
+    expect(JSON.parse(text).stated_items).toEqual(statedFirstRecords(brief, old, typed()).stated_items);
+    expect(c.receipt()).toMatchObject({ kind: 'LIVE (harness-only)', mode: 'stated-first' });
+  });
+  it('a pass that does not parse is disclosed as not_applied and leaves the main bytes unchanged', async () => {
+    const old = synMain(), main = call(old), c = statedFirstCalls(true, SYN, main, call('{"records": "nope"}'));
+    await c.sentencePass({} as never);
+    expect(await c.main({} as never)).toEqual(await main({} as never));
+    expect(c.receipt()).toMatchObject({ status: 'not_applied' });
+  });
   it('an absent pass leaves mode-on main bytes unchanged', async () => {
     const old = synMain(), main = call(old), c = statedFirstCalls(true, SYN, main, call(''));
     await c.sentencePass({} as never);

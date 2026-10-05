@@ -42,7 +42,8 @@ if ((mode !== 'live' && mode !== 'replay' && mode !== 'fixture') || !briefPath |
 }
 // DL 5 Oct: offline CEILING experiment only; this switch is never read by served code.
 const statedFirst = process.env.MC_STATED_FIRST === '1';
-if (statedFirst && mode === 'live') throw new Error('stated-first is an offline CEILING experiment only');
+// DL 5 Oct ~13:5xZ: ONE live stated-first measurement (harness-only, 20-draw bank, <=35 calls) behind an explicit switch.
+if (statedFirst && mode === 'live' && process.env.MC_STATED_FIRST_LIVE !== '1') throw new Error('stated-first is an offline CEILING experiment only');
 if (mode === 'live' && !(process.env.OPENAI_API_KEY ?? '').startsWith('sk-')) { console.error('live: OPENAI_API_KEY missing or without the sk- prefix'); process.exit(3); }
 if (mode !== 'live') process.env.OPENAI_API_KEY = 'sk-harness-offline-never-sent';
 const brief = readFileSync(briefPath, 'utf8').trim();
@@ -179,7 +180,7 @@ const startedAt = Date.now();
 const deadlineAt = constructionDeadline(startedAt);
 const harnessCalls = statedFirstCalls(statedFirst, brief,
   (reqBody) => constructionCallStructured(reqBody, deadlineAt),
-  (reqBody) => constructionCallStructured(reqBody, deadlineAt));
+  (reqBody) => constructionCallStructured(reqBody, deadlineAt), mode === 'live' ? 'LIVE (harness-only)' : 'CEILING (self-authored)');
 const result = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () =>
   buildModelFromRecords(SCENARIO, brief, dispatch as never, harnessCalls.main,
     undefined, undefined, harnessCalls.sentencePass));
