@@ -1,6 +1,7 @@
 import { literalConventionValue } from './quantity-evidence.js';
 import type { DraftRecordSet, DraftStatedItem } from './grammar.js';
 import type { DroppedRecordRef, RecordProjection } from './projector.js';
+import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 
 /** Edge endpoints are its persisted identity; V3 deliberately strips legacy edge ids. */
 export type StatedCarrier = (
@@ -101,7 +102,9 @@ export function reconcileStatedDispositions(rows: readonly StatedDisposition[], 
       : location.path[0] === 'data' && location.path[1] === 'intervention_details'
         ? ['interventions', ...location.path.slice(2)] : location.path;
     const held = path.length === 0 && object(carrier) ? { id: carrier.id } : field(carrier, path);
-    if (held !== undefined && JSON.stringify(held) === JSON.stringify(row.stored_value)) return { ...row, location: { ...location, path } };
+    // Structural equality, independent of object KEY ORDER: a GraphV3 parse rebuilds objects in schema order (a
+    // `natural_effect` came back reordered), and the same carrier must not read as removed (R2, Codex P2).
+    if (held !== undefined && stableStringify(held) === stableStringify(row.stored_value)) return { ...row, location: { ...location, path } };
     return { stated_index: row.stated_index, stated_item: row.stated_item, disposition: 'rejected', reason: 'carrier_removed' };
   });
 }

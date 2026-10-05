@@ -154,6 +154,9 @@ import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-p
 import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from "../orchestrator/tools/encode-option-interventions.js";
 import { assignEntityRefs } from "../orchestrator-v5/graph/entity-refs.js";
 import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
+import { StatedDispositionsV3, omitStatedDispositions, STATED_DISPOSITIONS_KEY } from "../schemas/graph-stated-dispositions.js";
+import { statedDispositionsBindingHash } from "../orchestrator-v5/graph/stated-dispositions-binding.js";
+import { reconcileStatedDispositions, type StatedDisposition } from "../cee/draft/records/stated-dispositions.js";
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
@@ -367,6 +370,32 @@ function withStoredEdgeFactsWhenUnstated<T extends { edges: ReadonlyArray<EdgeRe
     return { ...edge, ...carried };
   });
   return changed ? { ...graph, edges } : graph;
+}
+
+/**
+ * ⭐ THE ONE WRITER OF `graph.stated_dispositions` (DL ruling, 5 Oct 2026).
+ *
+ * The records compiler's receipt reaches this route as the request's `stated_dispositions` SIDECAR — never through
+ * the graph bytes. Whatever `graph.stated_dispositions` a caller submitted is dropped first: a client that read a
+ * graph and sends it back must not re-store a receipt for a model it may since have edited. The sidecar is then
+ * RECONCILED against the exact bytes about to be stored (`reconcileStatedDispositions`, the compiler's own
+ * carrier-identity check): a `carried` row whose carrier those bytes do not hold becomes `rejected: carrier_removed`,
+ * so the stored receipt can never advertise a write the stored graph lacks. No sidecar → no key (the graph is
+ * returned by reference, byte-identical to before this carrier existed).
+ *
+ * ⛔ P1: the stored receipt is `{ reconciled_against, rows }` — `reconciled_against` is the full-content hash of exactly
+ * these bytes WITHOUT the receipt (R2: never `graph_identity_hash`, which drops transient-UI keys at every depth), so a reader can tell when a later writer (production CEE copies root keys forward on
+ * edit) has carried it onto a different model (`orchestrator-v5/graph/stated-dispositions-binding.ts`). Bytes that
+ * cannot be hashed cannot be bound, so they get no receipt.
+ */
+function withRegisteredStatedDispositions<G>(graph: G, receipt: readonly StatedDisposition[] | undefined): G {
+  const bare = omitStatedDispositions(graph);
+  if (receipt === undefined || receipt.length === 0) return bare;
+  const reconciledAgainst = statedDispositionsBindingHash(bare);
+  if (reconciledAgainst === null) return bare;
+  return Object.assign({}, bare, {
+    [STATED_DISPOSITIONS_KEY]: { reconciled_against: reconciledAgainst, rows: reconcileStatedDispositions(receipt, bare) },
+  });
 }
 
 export const SCENARIO_GRAPH_REGISTRATION_SCHEMA =
@@ -666,6 +695,18 @@ export default async function route(app: FastifyInstance) {
       if (brief.truncated) {
         return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
       }
+      // The records compiler's receipt (see `withRegisteredStatedDispositions`). Validated before any database work;
+      // a malformed one is refused rather than guessed at, since it would become a persisted claim about the user's words.
+      let statedReceipt: readonly StatedDisposition[] | undefined;
+      if (body.stated_dispositions != null) {
+        const receipt = StatedDispositionsV3.safeParse(body.stated_dispositions);
+        if (!receipt.success) {
+          return invalid("STATED_DISPOSITIONS_INVALID", "`stated_dispositions` does not match the receipt contract.", {
+            issues: receipt.error.issues.slice(0, 10),
+          });
+        }
+        statedReceipt = receipt.data as readonly StatedDisposition[];
+      }
       const submitted = body.graph;
       if (submitted === null || typeof submitted !== "object" || Array.isArray(submitted)) {
         return invalid("GRAPH_MISSING", "A `graph` object is required.");
@@ -955,11 +996,11 @@ export default async function route(app: FastifyInstance) {
           try {
             const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
             if (committed === null) return false;
-            const bytes = withEntityRefs(projectGraphForPersistence(graphToRegister, {
+            const bytes = withRegisteredStatedDispositions(withEntityRefs(projectGraphForPersistence(graphToRegister, {
               scenarioId,
               turnClass: "direct_answer",
               source: "graph_registration",
-            }));
+            })), statedReceipt);
             return committed.request_hash === registrationRequestHash(bytes, brief.value);
           } catch {
             return false;
@@ -1092,10 +1133,11 @@ export default async function route(app: FastifyInstance) {
           'A new or changed likely range needs approval on its stored change card. Nothing was written.',
           { code: 'INTERVENTION_RANGE_APPROVAL_REQUIRED' }, requestId));
       }
-      const graphForStore = withEntityRefs(projectGraphForPersistence(
+      // The receipt goes on LAST, onto the exact bytes that are hashed, versioned, checked and stored.
+      const graphForStore = withRegisteredStatedDispositions(withEntityRefs(projectGraphForPersistence(
         clearInheritedInterventionSourceQuotes(baseGraphForInvariants, projected), {
           scenarioId, turnClass: "direct_answer", source: "graph_registration",
-        }));
+        })), statedReceipt);
 
       const turnId = registrationTurnId(scenarioId, operationId);
       const requestHash = registrationRequestHash(graphForStore, brief.value);

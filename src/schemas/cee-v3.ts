@@ -22,6 +22,7 @@ import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_C
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 import { OBSERVED_STATE_STATED_ROLES } from "../cee/context-integrity/stated-role-vocabulary.js";
+import { StatedDispositionsReceiptV3 } from "./graph-stated-dispositions.js";
 
 // ============================================================================
 // Node Types
@@ -1033,6 +1034,13 @@ export const GraphV3 = z.object({
    * reissued. A counter, not content: excluded from the identity hash and absent from the analysis projection.
    */
   ref_high_water: z.record(z.string(), z.number().int().nonnegative().max(999_999_999)).optional().catch(undefined),
+  /**
+   * The records compiler's typed receipt, one row per stated item, bound to the identity of the graph it was
+   * reconciled against (`graph-stated-dispositions.ts`). ADDITIVE and OPTIONAL, CEE-only. Written by the register
+   * route alone; every other writer drops it. Bookkeeping, not model content: PLoT and the UI-facing graph never
+   * receive it. A malformed (or unbound, pre-P1 array) receipt reads as absent, never as a failed graph.
+   */
+  stated_dispositions: StatedDispositionsReceiptV3.optional().catch(undefined),
 });
 export type GraphV3T = z.infer<typeof GraphV3>;
 

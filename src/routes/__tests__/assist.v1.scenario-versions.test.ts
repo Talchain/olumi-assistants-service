@@ -1690,3 +1690,48 @@ describe("Semantic spine: approved scope survives the existing restore", () => {
     await app.close();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESTORE — THE COMPILER'S RECEIPT IS NOT CARRIED FORWARD (DL ruling 5 Oct 2026, condition 1)
+//
+// A version registered by the records compiler stores `graph.stated_dispositions` in its snapshot (the register's
+// p_graph is the version graph). The register route is the ONLY writer of that key; a restore is a different writer,
+// so it drops the key rather than re-advertising a receipt it did not reconcile against the bytes it writes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("POST /versions/restore — graph.stated_dispositions is dropped, never carried forward", () => {
+  const RECEIPT = [{ stated_index: 0, stated_item: { kind: "option", source_quote: "Take the job" },
+    disposition: "rejected", reason: "stated_value_not_carried" }];
+
+  beforeEach(() => {
+    restoreVersionAtomic.mockImplementation(async (args: { graph: unknown }) => {
+      const ok = atomicRestoreOk();
+      return { ...ok, value: { ...ok.value, graph: args.graph } };
+    });
+  });
+
+  it("⭐ RED: a version carrying the receipt is restored WITHOUT it — the RPC never receives it", async () => {
+    getVersion.mockResolvedValue({ status: "ok", value: { ...summary(), graph: { ...STORED_VERSION_GRAPH, stated_dispositions: RECEIPT } } });
+    const app = await buildApp();
+    const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+    expect(res.statusCode, res.body).toBe(200);
+    const sent = restoreVersionAtomic.mock.calls[0][0].graph;
+    expect(sent).not.toHaveProperty("stated_dispositions");
+    // contrast: the version's own model is what was restored
+    expect(sent.nodes.map((n: { id: string }) => n.id)).toEqual(["n1", "n2"]);
+    expect(res.json().receipt.graph).not.toHaveProperty("stated_dispositions");
+    await app.close();
+  });
+
+  it("CONTROL: a version without the key restores byte-identically to one that never had it", async () => {
+    getVersion.mockResolvedValue({ status: "ok", value: { ...summary(), graph: STORED_VERSION_GRAPH } });
+    const app = await buildApp();
+    await post(app, "/versions/restore", { version_id: VERSION_A });
+    const plain = JSON.stringify(restoreVersionAtomic.mock.calls[0][0].graph);
+    restoreVersionAtomic.mockClear();
+    getVersion.mockResolvedValue({ status: "ok", value: { ...summary(), graph: { ...STORED_VERSION_GRAPH, stated_dispositions: RECEIPT } } });
+    await post(app, "/versions/restore", { version_id: VERSION_A });
+    expect(JSON.stringify(restoreVersionAtomic.mock.calls[0][0].graph)).toBe(plain);
+    await app.close();
+  });
+});
