@@ -93,7 +93,8 @@ export const TARGET_ONLY_NOTE =
 export const TARGET_ONLY_OUTCOME_KEPT_NOTE =
   'This run withheld, for EVERY option, the chance of reaching the goal’s target: the target can’t be tested yet. Each option’s '
   + 'outcome for the goal is shown to the user on the results panel; you are not given those figures, so never quote or estimate '
-  + 'one. The share of runs in which each option did best IS a result of this run: say it, if at all, as a finding of this model '
+  + 'one, never rank or order the options by those outcomes, and never say one option is better or worse than another (DL #2448 '
+  + 'condition (1)). The share of runs in which each option did best IS a result of this run: say it, if at all, as a finding of this model '
   + 'in the goal’s own direction (where lower is better, the option that came out lowest), always said as ‘in this model’, never '
   + 'as a chance of reaching the target and never as a recommendation. Say `say` once, as written, when you describe the run.';
 

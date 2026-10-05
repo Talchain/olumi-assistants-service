@@ -15,7 +15,7 @@ import { extractPersistedGoalTarget } from '../../compose/goal-target-receipt-gu
 import { projectGoalTargetRecord } from '../../context/goal-target-record.js';
 import { ContextPackGoalTargetSchema } from '../../context/context-pack-schema.js';
 import { decisionInputAsk } from '../../agent-lane/decision-input-ask.js';
-import { targetTestabilityOf } from '../../admission/target-testability.js';
+import { targetTestabilityOf, untestableTargetTail } from '../../admission/target-testability.js';
 
 type Rec = Record<string, unknown>;
 const FIXTURE = JSON.parse(readFileSync(new URL('../../tools/handlers/__tests__/fixtures/bprime-rt10b.json', import.meta.url), 'utf8')) as {
@@ -29,6 +29,33 @@ const deadlineOnly = (): Rec => {
   for (const row of g.goal_constraints as Rec[]) row.deadline_metadata = { months: 12 };
   return g;
 };
+
+/** "below 400" as the store holds it: the row `<=` with `operator_as_stated: '<'`; `onNode` also holds `<` on the goal. */
+const below = (onNode: boolean): Rec => {
+  const g = structuredClone(FIXTURE.graph_with_target);
+  for (const row of g.goal_constraints as Rec[]) row.operator_as_stated = '<';
+  for (const n of g.nodes as Rec[]) if (n.kind === 'goal') { if (onNode) n.goal_direction = '<'; else delete n.goal_direction; }
+  return g;
+};
+const p3 = (g: Rec): boolean => { const v = targetTestabilityOf(g); return v.kind === 'not_testable' && v.failures.some((f) => f.precondition === 'P3'); };
+
+describe('B′ R3 (Codex r1 #2606) — "below" and "at most" read the same in every reader', () => {
+  it.each([['held on the goal too', true], ['on its row only', false]])('"below 400" (%s): receipt, record, tail and P3 all read "<"', (_w, onNode) => {
+    const g = below(onNode as boolean);
+    expect(extractPersistedGoalTarget(g)?.held).toBe('<');
+    expect(projectGoalTargetRecord(g)).toMatchObject({ status: 'set', value: 400, operator: '<' });
+    expect(untestableTargetTail(g, targetTestabilityOf(g))).toMatch(/^I can't yet say how likely any option is to keep monthly cancellations below 400 /);
+    expect(p3(g)).toBe(true);
+  });
+
+  it('CONTRAST: "at most 400" reads "<=" in every reader, and P3 does not fail', () => {
+    const g = FIXTURE.graph_with_target;
+    expect(extractPersistedGoalTarget(g)?.held).toBe('<=');
+    expect(projectGoalTargetRecord(g)).toMatchObject({ operator: '<=' });
+    expect(untestableTargetTail(g, targetTestabilityOf(g))).toMatch(/keep monthly cancellations at or below 400 /);
+    expect(p3(g)).toBe(false);
+  });
+});
 
 describe('B′ R3 — "at most 400" is a recorded target everywhere it is read', () => {
   it('precondition: the post-edit goal holds no raw threshold; the target lives only in its own <= row', () => {

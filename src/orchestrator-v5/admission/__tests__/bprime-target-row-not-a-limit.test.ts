@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { targetTestabilityOf, untestableGoalTargetRowId } from '../target-testability.js';
+import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 
 type Json = Record<string, any>;
 const RT10B = JSON.parse(readFileSync(new URL('../../tools/handlers/__tests__/fixtures/bprime-rt10b.json', import.meta.url), 'utf8')) as {
@@ -74,6 +75,15 @@ describe('B′ R2 at T1 — the goal\'s own target row is the target, never also
 
   it('CONTRAST: no target (the pre-edit graph) → nothing leaves', () => {
     expect(untestableGoalTargetRowId(RT10B.graph_without_target)).toBeNull();
+  });
+
+  it('CONTRAST (Codex r1 #2606): beside a raw target, a row stating ANOTHER figure is a separate limit — it stays in T1 and lends no comparator', () => {
+    const g = poundsInto(RAW.paul);
+    const row = g.goal_constraints[0];
+    row.value = 1400000; row.operator = '<=';
+    expect(targetTestabilityOf(g).kind).toBe('not_testable');
+    expect(untestableGoalTargetRowId(g)).toBeNull();
+    expect(statedGoalTargetOf(g, goalOf(g))).toEqual({ value: 1200000, unit: '£', frame: 'level' });
   });
 
   it('CONTRAST: a target that can be tested moves nothing; the same graph without today\'s level names its own row', () => {

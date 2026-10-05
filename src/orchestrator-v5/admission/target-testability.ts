@@ -19,7 +19,7 @@ import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
-import { goalOwnLimitRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -111,15 +111,16 @@ export function targetVerdictWithholdsTargetClaims(verdict: TargetTestability): 
  * target (DR row 1), not a feasibility limit: its claims are withheld, and said once, under
  * GOAL_FIGURES_TARGET_NOT_TESTABLE. Counting it in T1 too double-withholds and makes "at most" a precondition for the
  * leader (served Run 2 after "at most 400": `constraint_withheld`, "One limit on your model could not be checked").
- * Bound by IDENTITY, as the row {@link goalOwnLimitRow} reads (same goal, non-deadline), never by value or operator. A
- * deadline row on the goal (DR row 3), every other node's limit, and a target that can be tested: null, nothing moves.
+ * Bound by IDENTITY, as the row that IS the target ({@link goalTargetRow}: the goal's own non-deadline row, and beside a
+ * raw target only the row stating that figure; Codex r1 #2606), never by operator. A deadline row on the goal (DR row 3),
+ * a different-figure row beside a raw target, every other node's limit, and a testable target: null, nothing moves.
  */
 export function untestableGoalTargetRowId(input: unknown): string | null {
   const verdict = targetTestabilityOf(input);
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable' || !isRec(input) || !Array.isArray(input.nodes)) return null;
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
   const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && n.id === verdict.goal_id);
-  const row = goal === undefined ? undefined : ownLimitRow(graph, goal);
+  const row = goal === undefined ? undefined : goalTargetRow(graph, goal);
   return typeof row?.constraint_id === 'string' && row.constraint_id !== '' ? row.constraint_id : null;
 }
 
@@ -142,7 +143,9 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     failures.push({ precondition: 'P2', case: 'd', code: 'threshold_off_scale' });
   }
   // P3 — a comparator science can score: `>=` / `<=`, and a strict `>` (it travels as `goal_threshold_strict`).
-  if (readHeldGoalComparator(graph, goalId) === '<') failures.push({ precondition: 'P3', case: 'b', code: 'comparator_unscorable' });
+  // The comparator the node HOLDS, else the one its own target row STATES (one reader, Codex r1 #2606).
+  const heldComparator = readHeldGoalComparator(graph, goalId) ?? statedGoalTargetOf(graph, goal)?.held;
+  if (heldComparator === '<') failures.push({ precondition: 'P3', case: 'b', code: 'comparator_unscorable' });
   // P5 — the goal's samples arrive in its own unit (see `linkSized`). LEVEL goals only (R3 #75 5914084339): the ruler
   // artefact is `raw / (raw × 1.25) = 0.8` on a level frame; a change frame ("cut by 20%") is left as it was.
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
@@ -232,7 +235,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const name = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'your goal';
   const unit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit
     : typeof ownLimitRow(graph, goal)?.unit === 'string' ? ownLimitRow(graph, goal)!.unit as string : '';
-  const comparator = readHeldGoalComparator(graph, verdict.goal_id) ?? ownLimitRow(graph, goal)?.operator;
+  const comparator = readHeldGoalComparator(graph, verdict.goal_id) ?? statedGoalTargetOf(graph, goal)?.held;
   const figure = unit !== '' ? sayFigure(raw, unit) : raw.toLocaleString('en-GB');
   const target = [typeof comparator === 'string' ? COMPARATOR_WORDS[comparator] : undefined, figure].filter(Boolean).join(' ');
   const tailWords = typeof comparator === 'string' ? TAIL_COMPARATOR_WORDS[comparator] : undefined;

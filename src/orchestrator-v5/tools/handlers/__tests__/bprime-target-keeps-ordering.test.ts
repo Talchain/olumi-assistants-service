@@ -56,16 +56,20 @@ describe('B′ R2 — "at most" keeps the comparison (the served rt10b journey)'
     expect(after.flip_thresholds).toEqual(FIXTURE.plot_body_minimise.flip_thresholds);
   });
 
-  it('row 1: only the claims AGAINST the target go — the goal chance, the joint, and (P1/P5) the outcome', () => {
+  it('row 1: only the claims AGAINST the target go — the goal chance, the joint, and (P1/P5) the outcome and its downside', () => {
+    // Precondition: the real body carries every option's downside (p05, cvar_10, regret: the goal's outcome units).
+    for (const row of rows(FIXTURE.plot_body_minimise)) expect(row.downside, String(row.option_id)).toEqual(expect.objectContaining({ p05: expect.any(Number) }));
     const after = withholdGoalFiguresForUntestableTarget(envelopeWithGoalChance(), FIXTURE.graph_with_target) as Rec;
     for (const row of rows(after)) {
       expect(row).not.toHaveProperty('probability_of_goal');
       expect(row).not.toHaveProperty('probability_of_joint_goal');
       expect(row.outcome).not.toHaveProperty('mean');
       expect(row.outcome).not.toHaveProperty('p50');
+      // Codex r1 #2606: kept, they reached the Agent while the outcome was withheld.
+      expect(row).not.toHaveProperty('downside');
     }
     const warning = (after.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
-    expect(warning?.withheld_claims).toEqual(['goal_probability', 'joint_probability', 'outcome']);
+    expect(warning?.withheld_claims).toEqual(['goal_probability', 'joint_probability', 'outcome', 'downside']);
     expect(warning).not.toHaveProperty('win_shares_withheld');
   });
 

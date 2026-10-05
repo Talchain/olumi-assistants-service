@@ -115,11 +115,15 @@ function admissionReason(analysisReady: unknown): LeaderLicenceWithheldReason {
 function goalFigureReason(result: Rec): LeaderLicenceWithheldReason | null {
   const envelope = rec(result.enrichment);
   if (envelope === null) return null;
-  const warning = goalFiguresWithheldWarning(envelope);
+  // RT-10 B′ R2: a withhold that KEPT the shares (its `withheld_claims` lists no `win_share`) withholds no leader. The
+  // reason is the first withhold that did not keep them, in ANY order: a target-only withhold beside a placeholder-path
+  // one never licenses the leader the other withheld (Codex-style order hazard: `goalFiguresWithheldWarning` reads first).
+  const keptShares = (w: Rec): boolean => Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share');
+  const warnings = (Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [])
+    .map(rec).filter((w): w is Rec => w !== null && typeof w.code === 'string' && goalFiguresWithheldWarning({ inference_warnings: [w] }) !== undefined);
+  const warning = warnings.find((w) => !keptShares(w));
   const code = warning?.code;
   if (typeof code !== 'string') return null;
-  // RT-10 B′ R2: a withhold that KEPT the shares (its `withheld_claims` lists no `win_share`) withholds no leader.
-  if (Array.isArray(warning?.withheld_claims) && !(warning.withheld_claims as unknown[]).includes('win_share')) return null;
   if (code === GOAL_FIGURES_OPTIONS_IDENTICAL) return 'options_do_not_separate';
   if (code === GOAL_FIGURES_TARGET_NOT_TESTABLE) return 'target_not_testable';
   return 'goal_figures_withheld';

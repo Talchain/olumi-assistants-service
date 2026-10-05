@@ -9,6 +9,11 @@
  * beside a reply that names no leader (the R&C `bw-580d135b` class, through the admission arm).
  *
  * The admission is the PRODUCER's (`buildCanonicalAnalysisReadyFromGraph`) over served graphs, never a typed literal.
+ *
+ * RE-PINNED, RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): the served cold graph was `exploratory` only through
+ * the untestable-target cap R2 retired, and no producer path mints an analysable `exploratory` now. The class this file
+ * guards still reaches the bind through STORED readbacks: every Run persisted before R2 deploys carries the cap. So
+ * `READY.exploratory` is the producer's admission for that same graph, as a pre-R2 Run stored it (mode `exploratory`).
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -22,8 +27,15 @@ import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 const fixture = (name: string): unknown => JSON.parse(readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), 'utf8'));
 const exploratoryGraph = (fixture('served-799d1a5d-cold-s1-graph.json') as { graph: unknown }).graph;
 const m1 = fixture('m1-s1-served-graphs.json') as { cases: { graph: unknown }[] };
+const producedForExploratoryGraph = buildCanonicalAnalysisReadyFromGraph(exploratoryGraph);
+/** The same admission as a pre-R2 Run STORED it: only the retired cap differs. */
+const storedPreR2 = (ready: unknown): unknown => {
+  const r = structuredClone(ready) as { analysis_admission: Record<string, unknown> };
+  r.analysis_admission.permitted_analysis_mode = 'exploratory';
+  return r;
+};
 const READY = {
-  exploratory: buildCanonicalAnalysisReadyFromGraph(exploratoryGraph),
+  exploratory: storedPreR2(producedForExploratoryGraph),
   comparative: buildCanonicalAnalysisReadyFromGraph(m1.cases[0]!.graph),
   provisional: buildCanonicalAnalysisReadyFromGraph(m1.cases[1]!.graph),
 };
@@ -40,6 +52,8 @@ const result = { type: 'analysis_result' };
 
 describe('PRECONDITION: the served admissions are what the rows say they are (producer, not literal)', () => {
   it('exploratory / comparative_leader / quantified_provisional', () => {
+    // The producer now admits the cold graph uncapped (B′ R2); the stored pre-R2 shape is the exploratory row's input.
+    expect(permittedAnalysisModeFromAnalysisReady(producedForExploratoryGraph)).toBe('quantified_provisional');
     expect(permittedAnalysisModeFromAnalysisReady(READY.exploratory)).toBe('exploratory');
     expect(permittedAnalysisModeFromAnalysisReady(READY.comparative)).toBe('comparative_leader');
     expect(permittedAnalysisModeFromAnalysisReady(READY.provisional)).toBe('quantified_provisional');

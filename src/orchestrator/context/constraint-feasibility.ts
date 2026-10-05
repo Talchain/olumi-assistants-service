@@ -282,7 +282,9 @@ export function withholdOptionGoalFigures<E>(
     if (id !== undefined && withheld.has(id)) {
       delete out.probability_of_goal;
       delete out.probability_of_joint_goal;
-      if (opts.keepOrdering !== true) delete out.downside;
+      // The downside figures (p05, cvar_10, regret) are in the goal's outcome units: they go with the target claims, as
+      // before R2 (Codex r1 #2606: kept under P1/P5 they reached the Agent while the outcome was withheld).
+      delete out.downside;
       const outcome = readRecord(r.outcome);
       if (outcome !== null && opts.keepOutcome !== true) {
         const kept: Record<string, unknown> = { ...outcome };
@@ -328,7 +330,8 @@ export function withholdOptionGoalFigures<E>(
   // removed share from one PLoT never sent; only this record can (`runWithheldWinShares`, CODEX on CEE 864e915c P1).
   const sharesRemoved = opts.keepOrdering !== true && identityBoundWinProbabilities(env).size > 0;
   const withheldClaims: readonly WithheldGoalClaim[] | undefined = opts.keepOrdering === true
-    ? [...TARGET_ONLY_CLAIMS, ...(opts.keepOutcome === true ? [] : ['outcome' as const])]
+    // `downside` goes with them as before R2 (in the goal's outcome units; its `expected_regret` compares options).
+    ? [...TARGET_ONLY_CLAIMS, ...(opts.keepOutcome === true ? [] : ['outcome' as const]), 'downside' as const]
     : opts.keepOutcome === true ? OUTCOME_KEPT_CLAIMS : undefined;
   const recorded = {
     ...warning,

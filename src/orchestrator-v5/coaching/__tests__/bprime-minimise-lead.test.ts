@@ -76,6 +76,8 @@ const PLAIN_SITES: readonly Site[] = [
   { site: 'Case E (D margin shed)', candidate: (l) => `${l} ${PLAIN}.`, records: (l) => two(l, 0.62, 0.38) },
   { site: 'Case C (A shed)', candidate: (l) => `${l} ${PLAIN}${PROVISIONAL_HIRING}`, records: LEAD_CAP_SITES[0]!.records, extra: LEAD_CAP_SITES[0]!.extra },
   { site: 'Case B (no margin)', candidate: (l) => `${l} ${PLAIN}${DRIVER_TECH_LEAD}`, records: LEAD_CAP_SITES[1]!.records, extra: LEAD_CAP_SITES[1]!.extra },
+  // Codex r1 #2606 follow-up: the SC soft-confidence shed (`scNoMargin`).
+  { site: 'SC soft confidence, no margin (SC shed)', candidate: (l) => `${l} ${PLAIN}${PROVISIONAL_LAUNCH}`, records: LEAD_CAP_SITES[7]!.records, extra: LEAD_CAP_SITES[7]!.extra },
 ];
 
 const labelFor = (site: Site, target: number): string => {
