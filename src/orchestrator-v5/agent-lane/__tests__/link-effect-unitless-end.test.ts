@@ -61,8 +61,9 @@ const cardFor = (store: ProposalStore, r: Json) => approvalChipsFor([{ name: 'pr
 const linkOf = (g: Json, from = SOURCE, to = TARGET) => (g.edges as Json[]).find((e) => e.from === from && e.to === to)!;
 const RISING_READING = `Record: +5% on "${FOOTFALL}" → −2 percentage points in "${MARGIN}": `
   + `raising "${FOOTFALL}" by 5% lowers "${MARGIN}" by 2 percentage points.`;
-const CONFIRM_DISCLOSURE = ' On approval: from your words, as you confirmed. Approve, or correct.';
-const expectedRisingCard = (quote: string): string => `${RISING_READING} — from your words: "${quote}".${CONFIRM_DISCLOSURE}`;
+const CONFIRM_DISCLOSURE = ' Approve, or correct.';
+const closeQuote = (q: string): string => (/[.!?]$/.test(q) ? '"' : '".');
+const expectedRisingCard = (quote: string): string => `${RISING_READING} From your words: "${quote}${closeQuote(quote)}${CONFIRM_DISCLOSURE}`;
 const expectedMarginPercentQuestion = 'Nothing was prepared. Tell the user exactly this: "'
   + `Is that a 2-point fall in “${MARGIN}” (say 12% → 10%), or 2% of today’s level? Nothing is recorded until you answer. `
   + `If you’d rather not answer, you can set how strong this link is on the canvas: click the link from “${FOOTFALL}” `
@@ -109,7 +110,7 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     const out = await caps.authoriseChange(ctxPressing(proposalId, card.message), { proposal_id: proposalId }) as Json;
     expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true, proposal_id: proposalId,
       revision_before: proposal.base_graph_identity_hash, revision_after: computeAnalysisAffectingGraphHash(graph as never),
-      follow_up: `Recorded your figure for how "${FOOTFALL}" moves "${MARGIN}", in your words: "${STATED_READ}". Any earlier result is now out of date.` }));
+      follow_up: `Recorded your figure for how "${FOOTFALL}" moves "${MARGIN}", from your words, as you confirmed: "${STATED_READ}${closeQuote(STATED_READ)} Any earlier result is now out of date.` }));
     expect(commits).toHaveLength(1);
     expect(commits[0]!.link_effect).toMatchObject({ from: SOURCE, to: TARGET, quote: STATED_READ,
       effect: { amount: -2, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: '%' } });
@@ -181,7 +182,7 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     const card = cardFor(store, r);
     expect(card.detail).toBe('REVERSAL: this changes the link from negative to positive. '
       + `Record: −5% on "${FOOTFALL}" → −2 percentage points in "${MARGIN}": `
-      + `lowering "${FOOTFALL}" by 5% lowers "${MARGIN}" by 2 percentage points. — from your words: "${said}".`
+      + `lowering "${FOOTFALL}" by 5% lowers "${MARGIN}" by 2 percentage points. From your words: "${said}${closeQuote(said)}`
       + CONFIRM_DISCLOSURE);
     expect(commits).toEqual([]);
     expect(linkOf(graph).provenance).toEqual(before);

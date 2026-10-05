@@ -376,9 +376,10 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
     seen.add(item.node_id);
     disclosures.push(`I've taken "${item.node_id === op.from ? labels.from : labels.to}" to be in ${reading.unit}, from your words.`);
   }
-  return `${head} \u2014 from your words: "${op.quote}".`
+  // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.
+  return `${head} From your words: "${op.quote}"${/[.!?]$/.test(op.quote) ? '' : '.'}`
     + (disclosures.length > 0 ? ` ${disclosures.join(' ')}` : '')
-    + ' On approval: from your words, as you confirmed. Approve, or correct.';
+    + ' Approve, or correct.';
 }
 
 /** The same card reading for one stored operation; kept separate so the single-link wording remains byte-for-byte. */

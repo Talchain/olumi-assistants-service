@@ -35,9 +35,11 @@ interface CorpusRow {
   selection?: Selection;
   card?: string;
   ask?: string;
+  /** An honest limit (the model's range, not the user's figure, stops it): said plainly, never a question about the figure. */
+  limit?: string;
 }
 const SCENARIOS = { f0eb03ac: 'f0eb03ac-f6c6-4e68-9631-fa41d29d693f', b8143909: 'b8143909-9267-479e-ae3d-da8e19188427' } as const;
-const TAIL = ' On approval: from your words, as you confirmed. Approve, or correct.';
+const TAIL = ' Approve, or correct.';
 const wasteHead = 'Record: +1 percentage point on "Production waste rate" → −0.5 percentage points in "gross margin": raising "Production waste rate" by 1 percentage point lowers "gross margin" by 0.5 percentage points.';
 const effect = (amount: number, amount_unit: string, per_source_change: number, per_source_change_unit: string): LinkEffectStatement => ({ amount, amount_unit, per_source_change, per_source_change_unit });
 // Card expectations are literals, independent of the production formatter and its interpretation.
@@ -45,19 +47,19 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
   { id: 'S1', fixture: 'f0eb03ac', from: 'production_waste_rate', to: 'gross_margin',
     quote: 'Each 1 percentage point rise in production waste rate cuts our gross margin by about 0.5 percentage points.',
     effect: effect(-0.5, 'percentage points', 1, 'percentage points'),
-    card: wasteHead + ' — from your words: "Each 1 percentage point rise in production waste rate cuts our gross margin by about 0.5 percentage points.".' + TAIL },
+    card: wasteHead + ' From your words: "Each 1 percentage point rise in production waste rate cuts our gross margin by about 0.5 percentage points."' + TAIL },
   { id: 'S2', fixture: 'f0eb03ac', from: 'production_waste_rate', to: 'gross_margin',
     quote: 'Each 1 percentage point rise in production waste rate costs us about 0.5 percentage points of gross margin.',
     effect: effect(-0.5, 'percentage points', 1, 'percentage points'),
-    card: wasteHead + ' — from your words: "Each 1 percentage point rise in production waste rate costs us about 0.5 percentage points of gross margin.".' + TAIL },
+    card: wasteHead + ' From your words: "Each 1 percentage point rise in production waste rate costs us about 0.5 percentage points of gross margin."' + TAIL },
   { id: 'S3', fixture: 'f0eb03ac', from: 'production_waste_rate', to: 'gross_margin',
     quote: 'When Production waste rate rises by 1 percentage point, gross margin falls by about 0.5 percentage points.',
     effect: effect(-0.5, 'percentage points', 1, 'percentage points'),
-    card: wasteHead + ' — from your words: "When Production waste rate rises by 1 percentage point, gross margin falls by about 0.5 percentage points.".' + TAIL },
+    card: wasteHead + ' From your words: "When Production waste rate rises by 1 percentage point, gross margin falls by about 0.5 percentage points."' + TAIL },
   { id: 'S4', fixture: 'f0eb03ac', from: 'production_waste_rate', to: 'gross_margin',
     quote: 'Each 1 percentage point rise in production waste rate reduces gross margin by about 0.5 percentage points.',
     effect: effect(-0.5, 'percentage points', 1, 'percentage points'),
-    card: wasteHead + ' — from your words: "Each 1 percentage point rise in production waste rate reduces gross margin by about 0.5 percentage points.".' + TAIL },
+    card: wasteHead + ' From your words: "Each 1 percentage point rise in production waste rate reduces gross margin by about 0.5 percentage points."' + TAIL },
   { id: 'S5', fixture: 'f0eb03ac', from: 'monthly_wholesale_subscription_revenue', to: 'gross_margin',
     quote: 'Each 10% rise in monthly wholesale subscription revenue adds about 1 percentage point of gross margin.',
     effect: effect(1, 'percentage points', 10, '%'),
@@ -65,7 +67,7 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
   { id: 'S6', fixture: 'f0eb03ac', from: 'subscribed_local_caf_s', to: 'monthly_wholesale_subscription_revenue',
     quote: 'Each additional subscribed local café raises monthly wholesale subscription revenue by about £400.',
     effect: effect(400, 'GBP per month', 1, 'cafés'),
-    card: 'Record: +1 café on "Subscribed local cafés" → +£400/month in "Monthly wholesale subscription revenue": raising "Subscribed local cafés" by 1 café raises "Monthly wholesale subscription revenue" by £400/month. — from your words: "Each additional subscribed local café raises monthly wholesale subscription revenue by about £400.".' + TAIL },
+    card: 'Record: +1 café on "Subscribed local cafés" → +£400/month in "Monthly wholesale subscription revenue": raising "Subscribed local cafés" by 1 café raises "Monthly wholesale subscription revenue" by £400/month. From your words: "Each additional subscribed local café raises monthly wholesale subscription revenue by about £400."' + TAIL },
   { id: 'F1', fixture: 'b8143909', from: 'bread_price_change', to: 'footfall',
     quote: "If we put bread prices up 10%, I'd expect footfall to drop by roughly 3%.",
     effect: effect(-3, '%', 10, '%'),
@@ -73,11 +75,12 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
   { id: 'F2', fixture: 'b8143909', from: 'staff_hours', to: 'gross_margin',
     quote: 'Cutting 100 staff hours a week would add about one and a half points to our gross margin.',
     effect: effect(1.5, 'points', -100, 'staff hours/week'),
-    ask: 'The model’s current range cannot represent that effect. Which part of the model’s range should we review?' },
+    // D7 doctrine: the user's figure is not cut down and not questioned; the RANGE is named as what stops it.
+    limit: 'Nothing was prepared: the user\'s figure is more than the analysis can represent on the range the model uses for "Staff hours"' },
   { id: 'F3', fixture: 'b8143909', from: 'production_waste_rate', to: 'gross_margin',
     quote: 'Halving waste from 8% to 4% would lift gross margin by about 2 points.',
     effect: effect(2, 'points', -4, 'percentage points'),
-    card: 'Record: −4 percentage points on "Production waste rate" → +2 points in "gross margin": lowering "Production waste rate" by 4 percentage points raises "gross margin" by 2 points. Source change: 8% → 4% = −4 percentage points. — from your words: "Halving waste from 8% to 4% would lift gross margin by about 2 points.".' + TAIL },
+    card: 'Record: −4 percentage points on "Production waste rate" → +2 points in "gross margin": lowering "Production waste rate" by 4 percentage points raises "gross margin" by 2 points. Source change: 8% → 4% = −4 percentage points. From your words: "Halving waste from 8% to 4% would lift gross margin by about 2 points."' + TAIL },
   { id: 'F4', fixture: 'b8143909', from: 'bread_price_change', to: 'gross_margin',
     quote: 'A 5% price increase should be worth something like 3 to 4 points of margin to us.',
     effect: effect(3.5, 'points', 5, '%'),
@@ -85,19 +88,19 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
   { id: 'F5', fixture: 'b8143909', from: 'caf_subscribers', to: 'wholesale_subscription_revenue', selection: 'link',
     quote: 'Every new café that signs up brings in around £250 a month.',
     effect: effect(250, 'GBP per month', 1, 'cafés'),
-    card: 'Record: +1 café on "Café subscribers" → +£250/month in "Wholesale subscription revenue": raising "Café subscribers" by 1 café raises "Wholesale subscription revenue" by £250/month. — from your words: "Every new café that signs up brings in around £250 a month.". I\'ve taken "Wholesale subscription revenue" to be in GBP/month, from your words.' + TAIL },
+    card: 'Record: +1 café on "Café subscribers" → +£250/month in "Wholesale subscription revenue": raising "Café subscribers" by 1 café raises "Wholesale subscription revenue" by £250/month. From your words: "Every new café that signs up brings in around £250 a month." I\'ve taken "Wholesale subscription revenue" to be in GBP/month, from your words.' + TAIL },
   { id: 'F6', fixture: 'f0eb03ac', from: 'shops_operating', to: 'gross_margin',
     quote: 'Closing two shops would probably push gross margin up by about a point.',
     effect: effect(1, 'points', -2, 'shops'),
-    card: 'Record: −2 shops on "Shops operating" → +1 point in "gross margin": lowering "Shops operating" by 2 shops raises "gross margin" by 1 point. — from your words: "Closing two shops would probably push gross margin up by about a point.".' + TAIL },
+    card: 'Record: −2 shops on "Shops operating" → +1 point in "gross margin": lowering "Shops operating" by 2 shops raises "gross margin" by 1 point. From your words: "Closing two shops would probably push gross margin up by about a point."' + TAIL },
   { id: 'F7', fixture: 'f0eb03ac', from: 'wholesale_flour_cost_increase', to: 'gross_margin',
     quote: 'Every 10% jump in flour prices knocks roughly 4 points off our gross margin.',
     effect: effect(-4, 'points', 10, '% increase from prior year'),
-    card: 'Record: +10 % increase from prior year on "Wholesale flour cost increase" → −4 points in "gross margin": raising "Wholesale flour cost increase" by 10 % increase from prior year lowers "gross margin" by 4 points. — from your words: "Every 10% jump in flour prices knocks roughly 4 points off our gross margin.".' + TAIL },
+    card: 'Record: +10 % increase from prior year on "Wholesale flour cost increase" → −4 points in "gross margin": raising "Wholesale flour cost increase" by 10 % increase from prior year lowers "gross margin" by 4 points. From your words: "Every 10% jump in flour prices knocks roughly 4 points off our gross margin."' + TAIL },
   { id: 'F8', fixture: 'f0eb03ac', from: 'central_kitchen_fit_out_cost', to: 'gross_margin',
     quote: 'Spending £250k on the central kitchen fit-out would cost us about 1.5 margin points this year.',
     effect: effect(-1.5, 'points', 250000, 'GBP'),
-    card: 'Record: +£250,000 on "Central kitchen fit-out cost" → −1.5 points in "gross margin": raising "Central kitchen fit-out cost" by £250,000 lowers "gross margin" by 1.5 points. — from your words: "Spending £250k on the central kitchen fit-out would cost us about 1.5 margin points this year.".' + TAIL },
+    card: 'Record: +£250,000 on "Central kitchen fit-out cost" → −1.5 points in "gross margin": raising "Central kitchen fit-out cost" by £250,000 lowers "gross margin" by 1.5 points. From your words: "Spending £250k on the central kitchen fit-out would cost us about 1.5 margin points this year."' + TAIL },
 ];
 const nodeOf = (graph: Json, id: string): Json => graph.nodes.find((n: Json) => n.id === id)!;
 const edgeOf = (graph: Json, row: Pick<CorpusRow, 'from' | 'to'>): Json => {
@@ -220,6 +223,15 @@ function oneQuestion(result: Json, expected: string): void {
 describe('RT-6 natural sentences: held-out B5 corpus', () => {
   for (const row of NATURAL_SENTENCE_ROWS) it(`${row.id}: ${row.quote}`, async () => {
     const w = world(row); const before = w.graph(); const result = await propose(w, row);
+    if (row.limit !== undefined) {
+      expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'not_representable' });
+      expect(String(result.detail)).toContain(row.limit);
+      expect(String(result.detail)).toContain('never shrink it yourself');
+      expect(String(result.detail)).not.toMatch(/rephrase|which part of the model/i);
+      expect(cardsFor(w, result)).toEqual([]);
+      noWrite(w, row, before);
+      return;
+    }
     if (row.ask !== undefined) {
       oneQuestion(result, row.ask);
       expect(cardsFor(w, result)).toEqual([]);
@@ -294,7 +306,7 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     const row = { ...NATURAL_SENTENCE_ROWS[0]!, effect: effect(0.5, 'percentage points', 1, 'percentage points') };
     const w = world(row); const before = w.graph(); const result = await propose(w, row);
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
-    expect(cardsFor(w, result)[0]?.detail).toBe('REVERSAL: this changes the link from negative to positive. Record: +1 percentage point on "Production waste rate" → +0.5 percentage points in "gross margin": raising "Production waste rate" by 1 percentage point raises "gross margin" by 0.5 percentage points. — from your words: "Each 1 percentage point rise in production waste rate cuts our gross margin by about 0.5 percentage points.".' + TAIL);
+    expect(cardsFor(w, result)[0]?.detail).toBe('REVERSAL: this changes the link from negative to positive. Record: +1 percentage point on "Production waste rate" → +0.5 percentage points in "gross margin": raising "Production waste rate" by 1 percentage point raises "gross margin" by 0.5 percentage points. From your words: "Each 1 percentage point rise in production waste rate cuts our gross margin by about 0.5 percentage points."' + TAIL);
     expect(w.attempts).toEqual([]); expect(w.graph()).toEqual(before);
   });
   it('M-bare: a literal bare source % on a % of output level asks once, even when the Agent calls it points', async () => {

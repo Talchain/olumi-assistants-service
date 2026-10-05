@@ -2788,8 +2788,8 @@ export function createAgentCapabilities(
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       follow_up: approvedEffects.length === 1
-        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", in your words: "${approvedEffects[0]!.quote}". Any earlier result is now out of date.`
-        : `Recorded your figures for ${approvedEffects.length} links, in your words. Any earlier result is now out of date.`,
+        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'} Any earlier result is now out of date.`
+        : `Recorded your figures for ${approvedEffects.length} links, from your words, as you confirmed. Any earlier result is now out of date.`,
     };
   };
 
@@ -3497,8 +3497,7 @@ export function createAgentCapabilities(
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,
-          ...(dry.reason === 'not_representable' ? { question: `The model’s current range cannot represent that effect. Which part of the model’s range should we review?` } : {}),
-          detail: dry.reason === 'not_representable' ? linkEffectUnitAskWords(`The model’s current range cannot represent that effect. Which part of the model’s range should we review?`, from, to) : definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to, effect) };
+          detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, from, to, effect) };
       }
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
