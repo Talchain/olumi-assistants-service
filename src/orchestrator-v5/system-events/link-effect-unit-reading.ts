@@ -67,18 +67,30 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   const figureStart = a.index + (a.matchedText.length - a.matchedText.trimStart().length);
   const figureEnd = a.index + a.matchedText.length;
   const next = amounts[i + 1]?.index ?? quote.length;
-  // A run may use any word of the end's label (shared words included: "marketing revenue" beside "marketing spend"), but
-  // it names THIS end only if it holds ≥2 of its distinguishing words, or all of them when it has fewer. So a partial
-  // prefix ("of gross profit" for Gross margin) never names it (Codex buddy r2 HIGH).
-  const labelWords = wordsOf(String(node.label ?? node.id));
-  const distinct = [...new Set([...labelWords.filter(w => !wordsOf(String(other.label ?? other.id)).some(o => sameWord(w, o))),
-    ...(typeof node.count_noun === 'string' ? wordsOf(node.count_noun) : [])])];
-  if (distinct.length === 0) return undefined;
-  const inLabel = (w: string): boolean => [...labelWords, ...distinct].some(o => sameWord(o, w.toLowerCase()));
+  // A run (contiguous label words beside the figure) names THIS end only if it holds the label's HEAD noun (its last
+  // word before any preposition: "margin" of Gross margin, "loss" of Footfall loss from price rise) AND at least one word
+  // the other end's label lacks. A partial prefix ("of gross profit" for Gross margin or Gross profit margin) lacks the
+  // head; "of margin" beside Operating margin lacks a distinguishing word (Codex buddy r2/r3 HIGH). Each token counts
+  // once. A count noun stands in for the label only when it IS the head ("customers" of Customers), never as an alias.
+  const rawLabel = String(node.label ?? node.id);
+  const labelWords = wordsOf(rawLabel);
+  const otherWords = wordsOf(String(other.label ?? other.id));
+  const beforePreposition = rawLabel.split(/\s+(?:from|of|in|for|to|on|per|with|after|by)\s+/i)[0] ?? rawLabel;
+  const head = wordsOf(beforePreposition).at(-1);
+  const countNoun = typeof node.count_noun === 'string' ? wordsOf(node.count_noun) : [];
+  const countIsHead = head !== undefined && countNoun.some(w => sameWord(w, head));
+  if (head === undefined) return undefined;
+  const inLabel = (w: string): boolean => labelWords.some(o => sameWord(o, w.toLowerCase()))
+    || (countIsHead && countNoun.some(o => sameWord(o, w.toLowerCase())));
   const namesThisEnd = (run: readonly string[]): boolean => {
-    const hit = distinct.filter(d => run.some(w => sameWord(d, w.toLowerCase()))).length;
-    return hit >= Math.min(2, distinct.length);
+    const has = (word: string): boolean => run.some(w => sameWord(word, w.toLowerCase()));
+    const headHit = has(head) || (countIsHead && countNoun.some(has));
+    const distinguishing = run.some(w => !otherWords.some(o => sameWord(o, w.toLowerCase())));
+    return headHit && distinguishing;
   };
+  // "per 12 months", "/ 3 years": a numbered period the unit grammar cannot carry → no adoption, so the end is ASKED
+  // (buddy r3 P2), never silently stored without its period.
+  const numberedPeriodAt = (from: number): boolean => /^\s*(?:per\s+|\/\s*)\d/i.test(quote.slice(from));
   const bounded = (from: number, to: number): string | undefined => {
     const clause = quote.slice(from, to).trimEnd();
     return clause.length >= 1 && clause.length <= 500 ? clause : undefined;
@@ -106,6 +118,7 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   if (named > 0 && namesThisEnd(run)) {
     const after = at + named;
     const period = PERIOD.exec(rest.slice(after))![0];
+    if (numberedPeriodAt(figureEnd + unitTail.length) || numberedPeriodAt(figureEnd + after + period.length)) return undefined;
     return bounded(figureStart, figureEnd + after + period.length);
   }
   // Backward, within this local clause only.
@@ -125,6 +138,7 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   if (first < 0 || !namesThisEnd(back)) return undefined;
   const suffix = UNIT_WORDS.exec(rest)![0];
   const period = PERIOD.exec(rest.slice(suffix.length))![0];
+  if (numberedPeriodAt(figureEnd + suffix.length + period.length)) return undefined;
   return bounded(previousEnd + boundary + words[first]!.index!, figureEnd + suffix.length + period.length);
 }
 

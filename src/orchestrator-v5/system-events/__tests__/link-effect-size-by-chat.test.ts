@@ -388,6 +388,42 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(findStatedAmounts(`${code} 1,000`).map((a) => a.kind)).toEqual(['plain']); // default scan unchanged
   });
 
+  // Codex buddy r3 (5 Oct): each counterexample, verbatim. A run must hold the label's HEAD noun + a distinguishing word.
+  it.each([
+    ['Operating margin → Gross margin', 'Operating margin', 'Gross margin'],
+    ['… → Gross profit margin', FOOTFALL, 'Gross profit margin'],
+  ] as const)('H3 a partial prefix without the head noun never names the end (%s)', (_n, sourceLabel, targetLabel) => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: sourceLabel });
+    Object.assign(nodeOf(graph, TARGET), { label: targetLabel });
+    const said = `Each 5 percentage points of ${sourceLabel.toLowerCase()} costs us 2 percentage points of gross profit for gross margin`;
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET, EFFECT, said);
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+    expect(prepared.ask).toBeDefined();
+  });
+
+  it('P2 a count noun that is not the label head is no alias ("3 more customers" never names Customer retention)', () => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2', scale_frame: 10000 });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Customer retention', count_noun: 'customers' });
+    graph.ref_high_water.F = 2;
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: 3, amount_unit: 'customers', per_source_change: 1000, per_source_change_unit: 'GBP' }, 'Each £1,000 of marketing spend brings about 3 more customers');
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+    expect(prepared.ask).toBeDefined();
+  });
+
+  it('P2 a numbered period ("per 12 months") is asked about, never dropped', () => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2', scale_frame: 10000 });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Revenue' });
+    graph.ref_high_water.F = 2;
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: 3, amount_unit: 'GBP', per_source_change: 1000, per_source_change_unit: 'GBP' }, 'Each £1,000 of marketing spend brings in £3 of revenue per 12 months');
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+    expect(prepared.ask).toBeDefined();
+  });
+
   it('R4 own-clause negative: a multiword count noun cannot be adopted from a different counted thing', () => {
     const graph = unsizedGraph();
     Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', scale_frame: 10000 });
