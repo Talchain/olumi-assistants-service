@@ -2003,10 +2003,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
-    // ⛔ DR ROW 4 (AIQ #2371 5914730220 / 5915342964): a target this run can't test (the verdict that capped the admission's
-    // mode at `exploratory`) has no goal chance for ANY option, as it has no leader or share. Runs after every earlier
-    // withhold, and withholds whatever options STILL show a goal figure: (S) is per option, so "something was withheld"
-    // never means "every chance is gone" (AIQ's executed run: m1 + one option's placeholder lever kept £59's 0.9929).
+    // ⛔ DR ROW 4 (AIQ #2371 5914730220 / 5915342964): a target this run can't test has no goal chance for ANY option.
+    // ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8): only the claims against the target go; the leader and the shares stay,
+    // as on a run with no target. Runs after every earlier withhold, and withholds whatever options STILL show a goal
+    // figure: (S) is per option, so "something was withheld" never means "every chance is gone" (AIQ's executed run: m1 +
+    // one option's placeholder lever kept £59's 0.9929).
     {
       const before = response;
       response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis);

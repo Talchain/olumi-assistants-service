@@ -283,8 +283,9 @@ export function untestableTargetTail(graph: unknown, verdict: TargetTestability)
 
 /**
  * The `run_analysis` warning for a run whose goal figures are withheld because the target can't be tested yet (AIQ #2371
- * 5914730220): the goal chance goes with the leader and the shares. "Not shown." opens it, as every goal-figure withhold
- * does (its readers key on that opener); the rest is the DR sentence. `null` for a verdict that doesn't cap.
+ * 5914730220). RT-10 B′ R2: only the claims AGAINST the target go; the leader and the shares stay. "Not shown." opens it,
+ * as every goal-figure withhold does (its readers key on that opener); the rest is the DR sentence, and `say` is the B′
+ * tail the reply says. `null` for a verdict that withholds no target claim.
  */
 export function targetNotTestableWarning(
   graph: unknown, verdict: TargetTestability, optionIds: readonly string[], code: string,
