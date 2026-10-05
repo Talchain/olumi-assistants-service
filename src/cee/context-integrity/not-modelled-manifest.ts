@@ -1501,6 +1501,14 @@ function collectBriefNaturalEffectCandidates(
     // the user repeating their brief figure to size a link must not leave "What I was given" saying it is missing.
     // An Olumi estimate never counts.
     if (p.magnitude !== "user_stated") continue;
+    // ⛔ ...but WHO STAMPED IT decides how much the stamp alone proves (Codex r1 on #2610, P1). Construction's label door
+    // (`admit-model.ts` userSizeEarned) stamps a size when its amount is written about EITHER endpoint, so "Monthly
+    // revenue is £75,000 a month" earns a £75,000-per-switch effect on an inferred Campaign → Revenue link the user never
+    // sized. An INFERRED link (any source but the two below) is therefore credited only through a brief sentence that
+    // verifies its WHOLE effect: MC P0's Fi receipt (`source_quote`) or a records `quote`. A link the brief itself states
+    // (`brief_extraction`) keeps #2601's quote-less one-span rule; a size said in chat (`user_specified`) keeps Science's.
+    const chatSized = p.source === "user_specified";
+    const quoteLessWarrant = chatSized || p.source === "brief_extraction";
     const effect = p.natural_effect;
     if (effect === null || typeof effect !== "object" || Array.isArray(effect)) continue;
     const natural = effect as Record<string, unknown>;
@@ -1514,9 +1522,9 @@ function collectBriefNaturalEffectCandidates(
     // AIE capture-b43bb79e/c1). The served agent route admits a stated size WITHOUT a `provenance.quote`
     // (`admit-candidate.ts:116` has no such field), so requiring one made this whole route dead on the default path:
     // "£75,000 a year" and "£12,000 upfront" read `absent` while two edges held them, and the coach told the user
-    // they "aren't represented". The warrant without a quote is the writer's own rule: `magnitude: 'user_stated'`
-    // is written ONLY on the user's own size (`value-warrant-guard.ts:810`), and the figure binds to the one place the
-    // brief states it (below). A quote that IS present must still be the user's words verbatim and must still match
+    // they "aren't represented". The warrant without a quote is the writer's stamp, `magnitude: 'user_stated'`, held
+    // to the limit above (quote-less, it counts only on a link the brief states or a chat size), and the figure binds
+    // to the one place the brief states it (below). A quote that IS present must still be the user's words verbatim and must still match
     // the whole effect.
     // The edge's quote: the records projector writes `quote`; MC P0's Fi door writes `source_quote` — the ONE brief
     // sentence its C2 binding validated (MC 5 Oct). A `source_quote` that is not in the brief (a size said in CHAT) is
@@ -1524,24 +1532,17 @@ function collectBriefNaturalEffectCandidates(
     const sourceQuote = typeof p.source_quote === "string" && p.source_quote.length > 0 && briefText.includes(p.source_quote)
       ? p.source_quote
       : null;
-    const quote = typeof p.quote === "string" && p.quote.length > 0 ? p.quote : sourceQuote;
-    if (quote !== null && !briefText.includes(quote)) continue;
+    let quote = typeof p.quote === "string" && p.quote.length > 0 ? p.quote : sourceQuote;
+    if (quote !== null && !briefText.includes(quote)) {
+      if (!chatSized) continue;
+      quote = null;
+    }
 
     const amount = natural.amount;
     const amountUnit = natural.amount_unit;
     const perSourceChange = natural.per_source_change;
     const perSourceChangeUnit = natural.per_source_change_unit;
     if (typeof amount !== "number" || typeof amountUnit !== "string") continue;
-    // ⛔ Without a quote, nothing says WHICH written figure the edge holds (Codex r1 on #2601: "Pension contributions are
-    // £75,000 a month" was credited to the spending edge too). So the edge binds to the ONE place the brief states its
-    // amount in its declared currency AND period, read by the quote check's own reader: "£75,000 a month" is not
-    // GBP/year. Two such places, or none, and it is not credited — the figure stays visibly unmatched, never guessed.
-    let boundSpan: { start: number; end: number } | undefined;
-    if (quote === null) {
-      const spans = statedTargetAmountSpans(briefText, amount, amountUnit);
-      if (spans.length !== 1) continue;
-      boundSpan = spans[0];
-    }
     const quoteVerified =
       quote !== null &&
       typeof perSourceChange === "number" &&
@@ -1552,7 +1553,25 @@ function collectBriefNaturalEffectCandidates(
         per_source_change: perSourceChange,
         per_source_change_unit: perSourceChangeUnit,
       });
-    if (quote !== null && !quoteVerified) continue;
+    // ⛔ A RESIZE IN CHAT KEEPS THE OLD EVIDENCE (Codex r1 on #2610, P2): `link-effect-edit.ts` replaces `natural_effect`
+    // and keeps the rest of the provenance, so a Fi link resized from £1,200 to £2,000 still carries the £1,200 sentence.
+    // That sentence no longer describes the link's size. On a chat-sized link it is stale, never a veto: the link binds
+    // quote-less like any chat size. Any other link whose quote fails is not credited.
+    if (quote !== null && !quoteVerified) {
+      if (!chatSized) continue;
+      quote = null;
+    }
+    if (quote === null && !quoteLessWarrant) continue;
+    // ⛔ Without a quote, nothing says WHICH written figure the edge holds (Codex r1 on #2601: "Pension contributions are
+    // £75,000 a month" was credited to the spending edge too). So the edge binds to the ONE place the brief states its
+    // amount in its declared currency AND period, read by the quote check's own reader: "£75,000 a month" is not
+    // GBP/year. Two such places, or none, and it is not credited — the figure stays visibly unmatched, never guessed.
+    let boundSpan: { start: number; end: number } | undefined;
+    if (quote === null) {
+      const spans = statedTargetAmountSpans(briefText, amount, amountUnit);
+      if (spans.length !== 1) continue;
+      boundSpan = spans[0];
+    }
     // ⛔ FA-R3 (Codex r2 on #2604): a VERIFIED quote binds its candidates to the numerals inside the quote's ONE place in
     // the brief. Once "annually" verifies, an unbound quoted edge would also credit "Pension contributions are £75,000".
     let sourceSpan: { start: number; end: number } | undefined;
