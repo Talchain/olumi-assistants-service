@@ -102,6 +102,8 @@ export function isOptionData(data: V1NodeData | undefined): data is V1OptionData
 export interface V1Node {
   threshold_source?: string;
   goal_direction?: ">=" | "<=";
+  /** Goal nodes only: the sense of the records goal item's TYPED `direction` (Science ruling 5 Oct). */
+  goal_sense_reading?: { sense: "maximise" | "minimise"; basis: "typed_comparator" };
   goal_horizon_months?: number;
   id: string;
   kind: string;

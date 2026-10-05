@@ -106,6 +106,7 @@ import { generateConstraintId } from "../../compound-goal/extractor.js";
 import { classifyUnitScaleClass } from "./unit-scale-class.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
+import { senseOfTypedComparator, type TypedComparatorSenseReading } from "../../../orchestrator-v5/agent-lane/goal-sense-reading.js";
 import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/placeholder-parts.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
 import { defaultFrameFor, framedFields, statedRangeFrame } from "../../../orchestrator-v5/agent-lane/frame-rule.js";
@@ -959,6 +960,8 @@ export interface ProjectedNode {
   quantity_ref?: number;
   threshold_source?: string;
   goal_direction?: ">=" | "<=";
+  /** `goal` nodes only: the sense of the goal item's TYPED `direction` (`applyStatedGoalEvidence`; Science ruling 5 Oct). */
+  goal_sense_reading?: TypedComparatorSenseReading;
   goal_horizon_months?: number;
   declared_scale?: DraftRecordValueScale;
   goal_threshold?: number;
@@ -1654,6 +1657,13 @@ function applyStatedGoalEvidence(node: ProjectedNode, item: DraftStatedItem, sta
         && item.direction_span.end <= item.source_quote.length && LIMIT_OPERATOR_WORDS[operator] === words) node.goal_direction = operator;
     }
   }
+  // ⭐ THE GOAL'S SENSE FROM ITS TYPED COMPARATOR (Science ruling 5 Oct, MC brief-goal-sense). The stamp above holds
+  // `goal_direction` only when the direction WORDS are exactly the operator words, so "reach 1,100 …" held nothing though
+  // the drafter typed `floor` (measured: 0 of 15 held-out goals held a sense). The TYPED field is the user's comparator,
+  // so it is written here from the type alone, never from words: floor → maximise, ceiling → minimise. An `'unresolved'`
+  // direction is decoded away by the seam (fix (a)'s typed ask) and an absent one writes nothing: both stay the
+  // classifier/default, with the assumption line. The stamp above is unchanged.
+  if (item.direction !== undefined) node.goal_sense_reading = senseOfTypedComparator(item.direction);
   const horizon = item.horizon_ref === undefined ? undefined : statedItems[item.horizon_ref];
   if (horizon !== undefined && horizon.value === item.horizon_months && horizon.value !== undefined
     && Number.isInteger(horizon.value) && horizon.value > 0 && horizon.unit !== undefined
@@ -2724,6 +2734,7 @@ function projectOnce(
         || (survivor.quantity_ref !== undefined && candidate?.quantity_ref !== survivor.quantity_ref)
         || (survivor.goal_baseline_raw !== undefined && candidate?.goal_baseline_raw !== survivor.goal_baseline_raw)
         || (survivor.goal_direction !== undefined && candidate?.goal_direction !== survivor.goal_direction)
+        || (survivor.goal_sense_reading !== undefined && candidate?.goal_sense_reading?.sense !== survivor.goal_sense_reading.sense)
         || (survivor.goal_horizon_months !== undefined && candidate?.goal_horizon_months !== survivor.goal_horizon_months)
       );
 

@@ -30,6 +30,23 @@ export interface GoalSenseReading {
   readonly words: string;
 }
 
+/**
+ * ⭐ THE GOAL'S SENSE FROM ITS TYPED COMPARATOR (Science ruling 5 Oct, MC brief-goal-sense). Written ONLY by the records
+ * compile (`applyStatedGoalEvidence`, projector.ts), from the goal stated item's TYPED `direction`, never its words:
+ * `floor` → `maximise`, `ceiling` → `minimise`; `'unresolved'` (fix (a)'s typed ask) and an absent direction write
+ * nothing. It is the USER's comparator as the drafter typed it, so it carries no words of Olumi's (the
+ * `typed_change_sign` reading above is Olumi's, and says so).
+ */
+export interface TypedComparatorSenseReading {
+  readonly sense: 'maximise' | 'minimise';
+  readonly basis: 'typed_comparator';
+}
+
+/** The one mapping from the typed comparator to the goal's sense (Science (1) ceiling ⇒ minimise; (3) floor ⇒ maximise). */
+export function senseOfTypedComparator(direction: 'floor' | 'ceiling'): TypedComparatorSenseReading {
+  return { sense: direction === 'floor' ? 'maximise' : 'minimise', basis: 'typed_comparator' };
+}
+
 type GoalNode = {
   readonly kind?: unknown;
   readonly label?: unknown;

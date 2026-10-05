@@ -344,13 +344,27 @@ export const NodeV3 = z.object({
    * `words` say so wherever the direction is shown (AIQ condition (a)). The same G1 contract as the fields above: kept by every write, CEE-owned (`field-safety.ts`), and a
    * malformed value is absence, never a refused graph.
    */
-  goal_sense_reading: z.object({
-    sense: z.literal('minimise'),
-    basis: z.literal('typed_change_sign'),
-    threshold: z.number().finite(),
-    threshold_frame: z.enum(['change_rel', 'change_abs']),
-    words: z.string().min(1).max(300),
-  }).optional().catch(undefined),
+  /*
+   * ⭐ ADDITIVE (Science ruling 5 Oct, MC brief-goal-sense): `basis: 'typed_comparator'` is the goal's sense from the
+   * drafter's TYPED `direction` on the goal stated item (records compile only, `applyStatedGoalEvidence`): `floor` →
+   * `maximise`, `ceiling` → `minimise`. It is the user's comparator, typed, so it carries no words of Olumi's and no
+   * staleness key of its own; `resolveGoalDirection` honours it after the held-ceiling branches and before the label
+   * classifier, and never against a comparator or goal limit the user has since stated. The first member is the
+   * `typed_change_sign` reading above, byte-for-byte.
+   */
+  goal_sense_reading: z.union([
+    z.object({
+      sense: z.literal('minimise'),
+      basis: z.literal('typed_change_sign'),
+      threshold: z.number().finite(),
+      threshold_frame: z.enum(['change_rel', 'change_abs']),
+      words: z.string().min(1).max(300),
+    }),
+    z.object({
+      sense: z.enum(['maximise', 'minimise']),
+      basis: z.literal('typed_comparator'),
+    }),
+  ]).optional().catch(undefined),
   /**
    * ⛔ OLUMI'S READING OF THE BRIEF'S FIGURE AS A CHANGE GOAL'S TODAY LEVEL (goal nodes only; R3-B #72 5894575583, MG
    * 5894657102 / 5894719651, AIQ (b) 5894808343 (1)). Written ONLY by construction (`admitStatedGoalChange`, from

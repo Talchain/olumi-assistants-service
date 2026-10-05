@@ -63,6 +63,7 @@
  *   |----------------------|-------------------------------|-------------------------|
  *   | `'<='` or `'<'`, PROVEN (below) | `'minimise'`       | `stated_comparator`     |
  *   | no proven ceiling; Olumi's `goal_sense_reading` of a NEGATIVE typed change ("cut by 20%") | `'minimise'` | `typed_change_sign` |
+ *   | the goal item's TYPED comparator (`goal_sense_reading` `typed_comparator`, records; Science 5 Oct), uncontradicted | floor `'maximise'`, ceiling `'minimise'` | `stated_comparator` |
  *   | anything else (a held floor, an unproven ceiling, none) | the label classifier, exactly as base | `derived_from_goal_label` |
  *
  * ⚠ R1 S1 (AIQ 5871459631, DL 5871433038): a held ceiling sends `minimise` only when the goal carries the current
@@ -70,7 +71,8 @@
  * the frame, that the target is a LEVEL of the node and not a change ("reduce costs by at most 10%" is a floor on
  * cost). Otherwise nothing is sent. `maximise` for a held floor waits for R1 S4 (a real draft, `cloud-0`: "costs >=
  * 20 % reduction", would otherwise be attested a false maximiser, MG 5871403407).
- * `maximise` is still never sent — the one-sided argument above is unchanged. A held floor (and an unproven ceiling)
+ * `maximise` is sent ONLY from a typed floor (Science ruling 5 Oct, the row above) — from no label, held floor or default,
+ * so the one-sided argument above is unchanged for every other class. A held floor (and an unproven ceiling)
  * reads exactly as base — the label classifier (DL E13, 5872375159); the held floor's own sense belongs to S4.
  */
 
@@ -78,8 +80,13 @@ import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 
-/** The only sense this module will ever put on the wire. */
-export type EmittedGoalDirection = 'minimise';
+/**
+ * The senses this module puts on the wire. `'maximise'` ONLY from the goal's typed comparator (`floor`, Science ruling
+ * 5 Oct (3)): never from a label, a held floor or a default, so the one-sided argument above still holds for every
+ * other class. On ISL it ranks byte-identically to absent; what it changes is that the run is ATTESTED (no
+ * GOAL_DIRECTION_UNATTESTED, so the reply does not say the direction was assumed).
+ */
+export type EmittedGoalDirection = 'minimise' | 'maximise';
 
 /**
  * Where a sent direction came from: the comparator the user stated, the SIGN of a target typed as a change from today,
@@ -201,11 +208,34 @@ function goalHoldsOlumisDecreaseReading(graph: unknown, goalNodeId: unknown): bo
 }
 
 /**
+ * ⭐ THE GOAL'S SENSE FROM ITS TYPED COMPARATOR (Science ruling 5 Oct; MC brief-goal-sense). Construction writes
+ * `goal_sense_reading {sense, basis: 'typed_comparator'}` from the records goal item's TYPED `direction` (floor →
+ * maximise, ceiling → minimise; `goal-sense-reading.ts`). Science (1): ceiling ⇒ minimise is sound for a goal's
+ * direction of preference; (3): a typed floor is user-stated too. It speaks only while nothing the user has STATED
+ * since contradicts it: no held comparator of the other side (`goal_direction`, e.g. a floor approved on the goal target
+ * card over a typed ceiling) and no goal limit of the other side on this goal (`goal_constraints`, e.g. the card's
+ * approved ceiling, which clears a held floor and holds only a `<=` row). Either ⇒ the reading is silent and the goal
+ * reads exactly as base. The latest statement replaces.
+ */
+function typedComparatorSense(graph: unknown, goalNodeId: unknown): 'maximise' | 'minimise' | undefined {
+  if (typeof goalNodeId !== 'string' || goalNodeId === '') return undefined;
+  const node = readNodes(graph).find((n) => n.id === goalNodeId);
+  const reading = node?.goal_sense_reading as { sense?: unknown; basis?: unknown } | undefined;
+  if (reading?.basis !== 'typed_comparator' || (reading.sense !== 'maximise' && reading.sense !== 'minimise')) return undefined;
+  const otherSide: readonly unknown[] = reading.sense === 'maximise' ? ['<=', '<'] : ['>=', '>'];
+  if (otherSide.includes(node?.goal_direction)) return undefined;
+  const limits = graph !== null && typeof graph === 'object' ? (graph as Record<string, unknown>).goal_constraints : undefined;
+  if (Array.isArray(limits) && limits.some((row) => row !== null && typeof row === 'object'
+    && (row as Record<string, unknown>).node_id === goalNodeId && otherSide.includes((row as Record<string, unknown>).operator))) return undefined;
+  return reading.sense;
+}
+
+/**
  * The sense a HELD comparator attests: `'minimise'` for a ceiling (`'<='`, `'<'`), otherwise `undefined` (a floor
  * is today's maximiser, never sent). ONE reading, shared by the wire (`resolveGoalDirection`) and by admission of a
  * stated current level beside a ceiling (`admitStatedGoalLevel`), so a level is admitted only where the run minimises.
  */
-export function heldComparatorSense(held: unknown): EmittedGoalDirection | undefined {
+export function heldComparatorSense(held: unknown): 'minimise' | undefined {
   return held === '<=' || held === '<' ? 'minimise' : undefined;
 }
 
@@ -247,6 +277,10 @@ export function resolveGoalDirection(
     return { direction: 'minimise', provenance: 'stated_comparator' };
   }
   if (goalHoldsOlumisDecreaseReading(graph, goalNodeId)) return { direction: 'minimise', provenance: 'typed_change_sign' };
+  // ⭐ Science ruling 5 Oct: the goal's TYPED comparator (records compile), after the held-ceiling branches and before
+  // the label classifier. Only a truly absent direction reaches the classifier/default below (with the assumption line).
+  const typed = typedComparatorSense(graph, goalNodeId);
+  if (typed !== undefined) return { direction: typed, provenance: 'stated_comparator' };
   const derived = directionFromGoalLabel(graph, goalNodeId);
   return derived === undefined ? undefined : { direction: derived, provenance: 'derived_from_goal_label' };
 }
@@ -297,14 +331,14 @@ export function resolveGoalThresholdStrict(graph: unknown, goalNodeId: unknown):
 function directionFromGoalLabel(
   graph: unknown,
   goalNodeId: unknown,
-): EmittedGoalDirection | undefined {
+): 'minimise' | undefined {
   const label = readGoalLabel(graph, goalNodeId);
   if (label === null) return undefined;
   return directionFromLabelText(label);
 }
 
 /** The label classifier on the label's own text — `directionFromGoalLabel` and `heldStrictFloorIsScoredStrictly` share it. */
-function directionFromLabelText(label: string): EmittedGoalDirection | undefined {
+function directionFromLabelText(label: string): 'minimise' | undefined {
   // ⚠ CONSUMED IN ITS VALIDATED CONJUNCTION, NOT BY `.direction` ALONE.
   // The incumbent surface this classifier was built for
   // (`objective-contradiction.ts`) requires `subject !== null` before it acts

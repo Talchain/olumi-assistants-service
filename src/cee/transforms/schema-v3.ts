@@ -338,6 +338,9 @@ export function transformNodeToV3(
     ...(node.goal_threshold != null && { goal_threshold: node.goal_threshold }),
     ...(node.kind === "goal" && node.threshold_source !== undefined ? { threshold_source: node.threshold_source } : {}),
     ...(node.kind === "goal" && node.goal_direction !== undefined ? { goal_direction: node.goal_direction } : {}),
+    // The typed comparator's sense (records compile; Science ruling 5 Oct) rides with the comparator: a field-by-field
+    // rebuild drops whatever it does not name. Only that basis: no other reading ever crossed this transform.
+    ...(node.kind === "goal" && node.goal_sense_reading?.basis === "typed_comparator" ? { goal_sense_reading: node.goal_sense_reading } : {}),
     ...(node.kind === "goal" && node.goal_horizon_months !== undefined ? { goal_horizon_months: node.goal_horizon_months } : {}),
     ...(node.goal_threshold_raw != null && { goal_threshold_raw: node.goal_threshold_raw }),
     ...(node.goal_threshold_unit != null && { goal_threshold_unit: node.goal_threshold_unit }),
