@@ -1,4 +1,4 @@
-import { unsizedLinkSentence, legacyLinkSentence } from './unsized-path-cause.js';
+import { unsizedLinkSentence, unsizedLinkStatement, legacyLinkSentence } from './unsized-path-cause.js';
 /**
  * ⭐ IS A GOAL CERTAINTY EARNED? — ONE typed decision the reply and every goal-probability display read (AI Quality
  * 5882366427 + R3 5882389030, ACKed 5882498938; the DL assigns the producer to MG, 5882387398).
@@ -485,6 +485,7 @@ export function placeholderGoalWarning(
   graph: unknown,
   paths: readonly PlaceholderGoalPath[],
   code: string,
+  productBlocks = false,
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }> } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
@@ -509,7 +510,9 @@ export function placeholderGoalWarning(
   const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined);
   const ordered = goalOrderedLinks(graph, links);
   const labelOf = (id: string): string => text(byId.get(id)?.label) ?? id;
-  const message = unsizedLinkSentence(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+  // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
+  const said = productBlocks ? unsizedLinkStatement : unsizedLinkSentence;
+  const message = said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
   return {
     code, message,
     links: ordered,
@@ -519,6 +522,6 @@ export function placeholderGoalWarning(
     // ⭐ DL [R2] (5930827933): the links the row may offer as ONE click, "Accept starting strength", through the
     // approval that sizes a placeholder (#2446 `approvalSizes`). Only the ones whose size can make the figure right — the
     // SAME set the sentence asks about (a levelled source, not a guessed mechanism): the offer gate (V4).
-    ...(asked.length > 0 ? { acceptable_links: asked.map((l) => ({ from: l.from, to: l.to })) } : {}),
+    ...(asked.length > 0 && !productBlocks ? { acceptable_links: asked.map((l) => ({ from: l.from, to: l.to })) } : {}),
   };
 }

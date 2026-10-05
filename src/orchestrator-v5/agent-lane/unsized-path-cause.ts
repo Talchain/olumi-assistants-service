@@ -55,12 +55,13 @@ export function linkList(links: readonly UnsizedPathLink[], count = Math.min(3, 
 }
 
 /** R8 Science copy: fewer names, then compact labels, only when needed for the 400 character carrier. */
-function linkSentence(links: readonly UnsizedPathLink[], legacy: boolean): string {
+function linkSentence(links: readonly UnsizedPathLink[], legacy: boolean, invite = true): string {
   if (links.length === 0) return '';
   const plural = links.length > 1;
   const render = (named: readonly UnsizedPathLink[], count: number): string => legacy
     ? `Olumi supplied the figures for the ${linkList(named, count)}. Set your own to see how much ${plural ? 'they matter' : 'it matters'}.`
-    : `This comparison turns on the ${linkList(named, count)}, whose ${plural ? 'strengths' : 'strength'} nobody has set yet. Set ${plural ? 'them' : 'it'} to see how much ${plural ? 'they matter' : 'it matters'}.`;
+    : `This comparison turns on the ${linkList(named, count)}, whose ${plural ? 'strengths' : 'strength'} nobody has set yet.${invite
+      ? ` Set ${plural ? 'them' : 'it'} to see how much ${plural ? 'they matter' : 'it matters'}.` : ''}`;
   for (let count = Math.min(3, links.length); count > 0; count--) {
     const full = render(links, count);
     if (full.length <= 400) return full;
@@ -72,4 +73,6 @@ function linkSentence(links: readonly UnsizedPathLink[], legacy: boolean): strin
 }
 
 export const unsizedLinkSentence = (links: readonly UnsizedPathLink[]): string => linkSentence(links, false);
+/** #2613 CR (b): the same statement with no invitation, for a Run whose goal product (Gate 5) still blocks every option. */
+export const unsizedLinkStatement = (links: readonly UnsizedPathLink[]): string => linkSentence(links, false, false);
 export const legacyLinkSentence = (links: readonly UnsizedPathLink[]): string => linkSentence(links, true);

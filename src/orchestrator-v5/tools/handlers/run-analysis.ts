@@ -2004,7 +2004,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           };
         }
         response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
-          placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH));
+          placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH, productGateWithholds));
         log.info(
           {
             event: 'run_analysis.goal_figures_withheld_for_placeholder_paths',
@@ -2016,7 +2016,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           'run_analysis: goal figures withheld for the options an unsized Olumi link moves',
         );
       }
-      const legacyLinks = legacyLeaderGoalLinks(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
+      // #2613 CR (b): no "Set your own…" disclosure while Gate 5 withholds every figure it would describe.
+      const legacyLinks = productGateWithholds ? [] : legacyLeaderGoalLinks(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
       if (legacyLinks.length > 0) {
         const warning = legacyGoalWarning(graphForAnalysis, legacyLinks);
         const current = response as Record<string, unknown>;

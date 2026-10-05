@@ -18,7 +18,7 @@ vi.mock('../../../session/index.js', async original => ({
 }));
 import { admitCandidateLinks } from '../../../agent-lane/admit-candidate.js';
 import { admitCandidateModel } from '../../../agent-lane/admit-model.js';
-import { unsizedLeaderGoalPaths, legacyLeaderGoalLinks } from '../../../agent-lane/goal-certainty.js';
+import { unsizedLeaderGoalPaths, legacyLeaderGoalLinks, placeholderGoalWarning } from '../../../agent-lane/goal-certainty.js';
 import { readUnsizedPathLeaderCause, unsizedLinkSentence } from '../../../agent-lane/unsized-path-cause.js';
 import { GraphV3, EdgeProvenanceV3 } from '../../../../schemas/cee-v3.js';
 import { GraphStateIngressSchema } from '../../../boundary/request-extensions.js';
@@ -362,6 +362,17 @@ it('R7-3 (#2613 CR b, DL 0df0e1 + e8): unread whole-product gate AND projected-m
   expect(r.leading_option_id).toBeNull();
   // Gate 5 withholds every option, so sizing the link could not lift it: no unsized-path cause is stated for this Run.
   expect(readUnsizedPathLeaderCause(r)).toBeUndefined();
+  // Buddy r4 P1: the Run's own warning keeps its code and links (the licence guard reads them) but asks and offers nothing.
+  expect(placeholder.message).toContain('nobody has set yet.');
+  expect(placeholder.message).not.toMatch(/to see how much|Set (?:it|them|your own)/);
+  expect(placeholder).not.toHaveProperty('acceptable_links');
+  expect(codes).not.toContain('GOAL_FIGURES_OLUMI_SUPPLIED_LINK');
+  // Contrast on the same graph without Gate 5: the same paths DO ask and offer, so the three rows above are not vacuous.
+  const optionIds = g.nodes.filter((n: R) => n.kind === 'option').map((n: R) => n.id);
+  const contrast = placeholderGoalWarning(g, unsizedLeaderGoalPaths(g, optionIds), 'GOAL_FIGURES_PLACEHOLDER_PATH');
+  expect(contrast.message).toMatch(/Set (?:it|them) to see how much/);
+  expect(contrast.acceptable_links).toContainEqual({ from: 'pro_plan_price', to: 'mrr' });
+  expect(legacyLeaderGoalLinks(g, optionIds)).toContainEqual(expect.objectContaining({ from: 'pro_paying_subscribers', to: 'mrr' }));
   for (const reason of [undefined, 'goal_path_unsized'] as const) {
     const wire = enforceAgentLaneLeaderClaimsAtWire({ assistant_text: 'An option currently leads.',
       blocks: [{ type: 'analysis_result', ...r }] } as never,
