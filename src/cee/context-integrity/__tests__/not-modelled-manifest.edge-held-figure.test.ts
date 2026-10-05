@@ -79,11 +79,20 @@ describe("served c1: a figure held in an edge's natural_effect is in the model",
     expect(rows(brief, graph).get("£75,000")?.verdict).toBe("absent");
   });
 
-  it("(e) CONTRAST: an option's on/off encoding (100 %) is never offered as a figure the user stated", () => {
+  // (e) was first written against "100%", and CI at 189a6326 showed that row RED on the BASE code: the served option
+  // `merge_routes` really does set `route_consolidation` to 100 % (its intervention, and the factor's own cap), so a
+  // stated "100%" legitimately matches it. The guard this row exists for is narrower — a QUOTE-LESS edge's
+  // `per_source_change` is the producer's encoding, never a figure the user wrote — so it is pinned on a value no
+  // other carrier in the served graph holds (7 %), with that one edge field edited.
+  it("(e) CONTRAST: a quote-less edge's per_source_change is never offered as a figure the user stated", () => {
     const { brief, graph } = fresh();
-    const r = rows(`${brief} We want 100% of rounds covered.`, graph);
-    expect(r.get("100%")?.matched_node_id ?? null).not.toBe("route_consolidation");
-    expect(r.get("100%")?.verdict).not.toBe("in_model");
+    const effect = edgeTo(graph, SPENDING).provenance.natural_effect as Record<string, unknown>;
+    effect.per_source_change = 7;
+    effect.per_source_change_unit = "%";
+    const r = rows(`${brief} About 7% of rounds overlap today.`, graph);
+    expect(r.get("7%"), "the brief's 7% is extracted").toBeDefined();
+    expect(r.get("7%")?.verdict).not.toBe("in_model");
+    expect(r.get("£75,000")).toMatchObject({ verdict: "in_model", matched_node_id: SPENDING });
   });
 
   it("(f) CONTRAST: a quote that IS present must still be the user's words verbatim (unchanged path)", () => {
