@@ -8,6 +8,85 @@ const admission = (ids: unknown = ['subscribers']) => ({ semantic_signals: { mat
 const graph = (state = observed('cee_inference'), options = [option('a'), option('b')]) => ({ nodes: [factor('subscribers', state), ...options], edges: [] });
 const say = (g: unknown = graph(), a: unknown = admission(), ids = ['a', 'b']) => conditionalInputBasis({ graph: g, admission: a, analysedOptionIds: ids });
 
+describe('RT-12: example figures are disclosed from edges only', () => {
+  const before = 'This comparison uses Olumi’s estimates for "Subscribers". These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.';
+  const edge = (from: string, to: string, magnitude: string) => ({ from, to, provenance: { magnitude } });
+  const exampleGraph = (count: number) => ({
+    nodes: [...graph().nodes, factor('revenue'), { id: 'goal', kind: 'goal', label: 'Revenue goal' }],
+    edges: [
+      edge('a', 'subscribers', 'user_stated'),
+      edge('b', 'subscribers', 'user_stated'),
+      edge('subscribers', 'revenue', count >= 1 ? 'example_figure' : 'user_stated'),
+      edge('revenue', 'goal', count >= 2 ? 'example_figure' : 'user_stated'),
+    ],
+  });
+
+  it('(c) puts the 2-link example sentence first and preserves the existing text', () => {
+    expect(say(exampleGraph(2))).toBe(`This comparison uses the example's figures for 2 links. ${before}`);
+  });
+
+  it('(c) uses the singular sentence for 1 example link', () => {
+    expect(say(exampleGraph(1))).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
+  });
+
+  it('(d) no example edges leaves the output byte-identical to before', () => {
+    const output = say(exampleGraph(0));
+    expect(output).not.toContain("This comparison uses the example's figures");
+    expect(output).toBe(before);
+  });
+
+  it('CONTROL: option, decision and missing endpoints do not count as causal links', () => {
+    const g = exampleGraph(0);
+    g.nodes.push({ id: 'decision', kind: 'decision', label: 'Choose' });
+    g.edges.push(...[
+      ['decision', 'a'], ['a', 'subscribers'], ['revenue', 'b'],
+      ['decision', 'subscribers'], ['revenue', 'decision'], ['missing', 'goal'], ['revenue', 'missing'],
+    ].map(([from, to]) => edge(from!, to!, 'example_figure')));
+    expect(say(g)).toBe(before);
+  });
+
+  it('Codex #2591 r1 P2: a link into a factor kept out of the calculation is not disclosed as used (contrast: kept in → 1 link)', () => {
+    const withX = (excluded: boolean) => {
+      const g = exampleGraph(0);
+      g.nodes.push({ ...factor('x'), ...(excluded ? { analysis_participation: 'retained_excluded' } : {}) } as never);
+      g.edges.push(edge('x', 'goal', 'example_figure'));
+      return g;
+    };
+    expect(say(withX(true))).toBe(before);
+    expect(say(withX(false))).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
+  });
+
+  it('Codex #2591 r2 P2: a second goal kept out of the calculation is not "used"; the selected goal always is', () => {
+    const twoGoals = (excluded: boolean) => {
+      const g = { ...exampleGraph(0), goal_node_id: 'goal' };
+      g.nodes.push({ id: 'goal_2', kind: 'goal', label: 'Other goal', ...(excluded ? { analysis_participation: 'retained_excluded' } : {}) } as never);
+      g.edges.push(edge('subscribers', 'goal_2', 'example_figure'));
+      return g;
+    };
+    expect(say(twoGoals(true))).toBe(before);
+    expect(say(twoGoals(false))).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
+    // The selected goal is never dropped, even if marked.
+    const selected = { ...exampleGraph(0), goal_node_id: 'goal' };
+    selected.nodes = selected.nodes.map((n) => (n.id === 'goal' ? { ...n, analysis_participation: 'retained_excluded' } : n)) as never;
+    selected.edges = selected.edges.map((e) => (e.to === 'goal' ? edge(e.from, e.to, 'example_figure') : e));
+    expect(say(selected)).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
+  });
+
+  it('Codex #2591 r1 P2: duplicate stored copies of one example link count once', () => {
+    const g = exampleGraph(1);
+    g.edges.push(edge('subscribers', 'revenue', 'example_figure'));
+    expect(say(g)).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
+  });
+
+  it('discloses example links even when the factor census is known-empty', () => {
+    expect(say(exampleGraph(2), admission([]))).toBe("This comparison uses the example's figures for 2 links.");
+  });
+
+  it('keeps the unavailable factor sentence after the example sentence', () => {
+    expect(say(exampleGraph(1), admission(null))).toBe("This comparison uses the example's figures for 1 link. The sources of this comparison’s factor starting values are unavailable.");
+  });
+});
+
 describe('B3-8: named factor baselines, with bounded coverage', () => {
   it('RED: names verified Olumi inputs and states the census coverage', () => {
     expect(say()).toContain('Olumi’s estimates for "Subscribers"');
