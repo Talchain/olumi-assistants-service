@@ -61,6 +61,8 @@ import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
+import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, withNonlinearIdentity, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
 import { goalCertaintyForAgent } from '../orchestrator-v5/agent-lane/goal-certainty-for-agent.js';
@@ -1635,6 +1637,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
     const message = typeof body.message === 'string' ? body.message : '';
+    /** RT-1: what the user had selected on the canvas (`selection-context.ts`); resolved below against the turn's state. */
+    const selectedElements = parseSelectedElements(body['selected_elements']);
     const sessionId = typeof body.agent_session_id === 'string' && body.agent_session_id.length > 0
       ? body.agent_session_id
       : `sess_${scenarioId}`;
@@ -2773,6 +2777,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
     let briefReadingOpen = false;
+    /** RT-1: set only on the path that runs the Agent with the selection; absent ⇒ no `_grounded_selection`. */
+    let selectionContext: AgentSelectionContext | null | undefined;
     if (result === undefined) try {
       /**
        * ⭐ THE SERVER READS THE MODEL ONCE AND GIVES IT (slice C1). The same `get_canonical_state` result the Agent
@@ -2782,8 +2788,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       let canonicalContext: Parameters<typeof runAgentTurn>[0]['canonicalContext'];
       let hostFirstCall: Parameters<typeof runAgentTurn>[0]['hostFirstCall'];
+      // RT-1: a failed state read leaves the selection unchecked (`could_not_check`), never silently dropped.
+      selectionContext = agentSelectionContext(selectedElements, undefined);
       try {
         const st = await capabilities.getCanonicalState(toolCtx);
+        selectionContext = agentSelectionContext(selectedElements, st);
         // Select once from the initial host read; registration later in this turn cannot switch the model.
         budget = conversationBudgetFor(st.ok === true && (st as { empty?: unknown }).empty === true);
         const revision = (st as { graph_revision?: unknown }).graph_revision;
@@ -2871,6 +2880,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
+          ...(selectionContext !== null && selectionContext !== undefined ? { selectionNote: selectionContext.note } : {}),
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
           composeReply: (tool, args, toolResult) => {
             const firstResult = tool === 'build_model_from_brief'
@@ -3770,6 +3780,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * (DGAI `src/v5/responseParser.ts`) moves an undeclared root key into `__additive__` — no schemas release.
        */
       ...(notModelledCarrier !== undefined ? { _not_modelled: notModelledCarrier } : {}),
+      /**
+       * ⭐ RT-1: which selected elements this answer was given, route-v2's `_grounded_selection` shape (DGAI
+       * `GroundedOnNotice` reads it). A sidecar like `_not_modelled`; absent when nothing was selected or the turn never
+       * reached the Agent with it.
+       */
+      ...(selectionContext !== null && selectionContext !== undefined ? { _grounded_selection: selectionContext.grounded } : {}),
       /**
        * ⭐ B5 (DL 5859845823): the run's per-limit verdicts, `{per_limit, joint}`, as a SIDECAR root key, the A7 pattern
        * above: spread after the finalised body, undeclared in 0.60, moved into `__additive__` by the UI parser (DGAI
