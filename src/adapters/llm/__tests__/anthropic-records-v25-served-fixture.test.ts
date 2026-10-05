@@ -7,6 +7,10 @@
  * modules turns this row RED: six effects → zero, and the baseline and range are lost.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { deriveNotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
+import { deriveNotModelledManifest as stagingManifest } from '../../../cee/draft/records-v25/not-modelled-manifest.js';
+import { statedEffectFiguresMatch } from '../../../cee/provenance/stated-effect.js';
+import { statedEffectQuoteMatches as stagingFiguresMatch } from '../../../cee/draft/records-v25/stated-effect.js';
 
 const h = vi.hoisted(() => ({ payload: { text: '' }, bodies: [] as unknown[] }));
 
@@ -104,5 +108,29 @@ describe('F1 the Anthropic route compiles the served fixture as staging did (rec
     expect.soft(goal?.goal_baseline_raw).toBe(120000);
     const starter = graph.nodes.find(n => String(n.label).includes('starter tier would win'));
     expect.soft(starter?.observed_state).toMatchObject({ value: 0.75, raw_value: 150, baseline: 150, range: { min: 80, max: 250 } });
+  });
+});
+
+describe('Codex R2 F3: the LIVE cold reader reads the frozen compile\'s natural effects as staging\'s reader did', () => {
+  it('R3-3 replaying the served fixture, £1,200 and £49 are in_model under the live manifest, exactly as under staging\'s', async () => {
+    h.payload.text = JSON.stringify(SERVED_RECORDS);
+    const result = await draftGraphWithAnthropic({ brief: BRIEF, docs: [], seed: 1, model: 'claude-sonnet-4-6' }, { timeoutMs: 120_000, forceDefault: true });
+    const graph = (result as { graph: { nodes: AnyNode[]; edges: AnyNode[] } }).graph;
+    // Positive control: these carriers are the frozen compile's, with no records-only stated_relationship.
+    const carriers = graph.edges.filter(e => e.provenance?.natural_effect !== undefined);
+    expect(carriers.length).toBeGreaterThan(0);
+    expect(carriers.every(e => e.provenance.stated_relationship === undefined)).toBe(true);
+    // The live figure check these carriers now take agrees with staging's on every served carrier.
+    for (const e of carriers) {
+      const n = e.provenance.natural_effect;
+      const d = { amount: n.amount, amount_unit: n.amount_unit, per_source_change: n.per_source_change, per_source_change_unit: n.per_source_change_unit };
+      expect(statedEffectFiguresMatch(e.provenance.quote, d), e.provenance.quote).toBe(stagingFiguresMatch(e.provenance.quote, d));
+    }
+    const verdict = (m: ReturnType<typeof deriveNotModelledManifest>, literal: string) => m.quantities?.items.find(i => i.literal === literal)?.verdict;
+    const live = deriveNotModelledManifest(BRIEF, graph), staging = stagingManifest(BRIEF, graph);
+    for (const literal of ['£1,200', '£49']) {
+      expect(verdict(staging, literal), `staging ${literal}`).toBe('in_model');
+      expect(verdict(live, literal), `live ${literal}`).toBe('in_model');
+    }
   });
 });
