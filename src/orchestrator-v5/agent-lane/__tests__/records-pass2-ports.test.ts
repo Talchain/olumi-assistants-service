@@ -77,3 +77,55 @@ describe('P2-P1: the stated limit persists with the registered graph, compiled b
     expect(result.goal_constraints_carried).toBe(0);
   });
 });
+
+/** Two options the user named, one Olumi added (an `option_refinement` claim), and the model's own status quo. */
+const AUTHORSHIP_BRIEF = 'Hire a tech lead or hire two developers for Delivery reliability.';
+const authorshipRecords = (): DraftRecordSet => ({
+  stated_items: [
+    { kind: 'goal', source_quote: 'Delivery reliability' },
+    { kind: 'option', source_quote: 'Hire a tech lead' },
+    { kind: 'option', source_quote: 'hire two developers' },
+  ],
+  claims: [
+    { claim_kind: 'factor', label: 'Team capacity', value: 5, unit: 'people', value_scale: 'raw_count' },
+    { claim_kind: 'outcome', label: 'Delivery reliability' },
+    { claim_kind: 'causal_link', label: 'Lead sets capacity', from_stated: 1, to_claim: 0, sets_to: 7, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Developers set capacity', from_stated: 2, to_claim: 0, sets_to: 8, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Capacity affects result', from_claim: 0, to_claim: 1, effect: 'positive', strength: 0.5 },
+    { claim_kind: 'causal_link', label: 'Result reaches goal', from_claim: 1, to_stated: 0, effect: 'positive', strength: 1 },
+    { claim_kind: 'option_refinement', label: 'Phased hiring' },
+    { claim_kind: 'causal_link', label: 'Phased level', from_claim: 6, to_claim: 0, sets_to: 6, effect: 'positive' },
+    { claim_kind: 'option_refinement', label: 'Carry on as now', is_baseline: true },
+  ],
+});
+
+type AuthoredNode = { id: string; kind: string; label: string; proposed_by?: string; is_baseline?: boolean; interventions?: Record<string, unknown> };
+
+describe('P2-P2: an option Olumi added carries proposed_by olumi, from the record\'s own typed origin', () => {
+  it('marks exactly the claim-minted option, never a stated option or the model\'s status quo', async () => {
+    const { result, writes } = await build(authorshipRecords(), AUTHORSHIP_BRIEF);
+    expect(result).toMatchObject({ ok: true, mutated: true });
+    const options = (writes[0]!.graph as { nodes: AuthoredNode[] }).nodes.filter((node) => node.kind === 'option');
+    const byLabel = (label: string) => { const hit = options.filter((o) => o.label === label); expect(hit, label).toHaveLength(1); return hit[0]!; };
+    expect(byLabel('Phased hiring').proposed_by).toBe('olumi');
+    expect(byLabel('Hire a Tech Lead').proposed_by).toBeUndefined();
+    expect(byLabel('Hire Two Developers').proposed_by).toBeUndefined();
+    expect(byLabel('Carry on as now')).toMatchObject({ is_baseline: true });
+    expect(byLabel('Carry on as now').proposed_by).toBeUndefined();
+    expect(options.filter((o) => o.proposed_by === 'olumi').map((o) => o.id)).toEqual([byLabel('Phased hiring').id]);
+  });
+
+  it('the licence leaves the Olumi option out exactly as on the legacy path (excluded_olumi_proposed)', async () => {
+    const { filterOlumiProposedOptions } = await import('../../tools/handlers/olumi-option-filter.js');
+    const { writes } = await build(authorshipRecords(), AUTHORSHIP_BRIEF);
+    const graph = writes[0]!.graph as { nodes: AuthoredNode[] };
+    const submitted = graph.nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true)
+      .map((n) => ({ option_id: n.id, label: n.label, interventions: n.interventions ?? {} }));
+    expect(submitted, 'control: three options with levels are submitted').toHaveLength(3);
+    const phased = graph.nodes.find((n) => n.kind === 'option' && n.label === 'Phased hiring')!;
+    const out = filterOlumiProposedOptions({ submitted, graph });
+    expect(out.participation).toEqual([{ option_id: phased.id, state: 'excluded_olumi_proposed' }]);
+    expect(out.options.map((o) => o.option_id)).toEqual(submitted.filter((o) => o.option_id !== phased.id).map((o) => o.option_id));
+    expect(out.keptOlumiProvisional).toBe(false);
+  });
+});

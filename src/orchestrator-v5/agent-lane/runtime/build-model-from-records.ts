@@ -10,6 +10,7 @@ import { projectGraphAndOptionsToV3, transformGraphToV3 } from '../../../cee/tra
 import type { V1Graph } from '../../../cee/transforms/schema-v2.js';
 import type { GoalConstraintT } from '../../../schemas/assist.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { PROPOSED_BY_OLUMI } from '../olumi-option-marker.js';
 import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { constructionOperationId, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
@@ -97,16 +98,13 @@ export function joinRecordConstraints(
 }
 
 /**
- * The compiled constraints name V1 node ids; the registered graph is in V3 ids. `transformGraphToV3` is the id
- * authority `projectGraphAndOptionsToV3` itself calls, index-aligned with its input, so the map is read from it, never
- * guessed from labels. A constraint whose target is not in the final graph is said, never dropped silently.
+ * The compiled constraints name V1 node ids; the registered graph is in V3 ids (`projectedIdsOf`). A constraint whose
+ * target is not in the final graph is said, never dropped silently.
  */
 function bindConstraintsToProjectedIds(
-  v1: V1Graph, projectedNodeIds: ReadonlySet<string>, compiled: { constraints: GoalConstraintT[]; notCarried: RecordConstraintNotCarried[] },
+  idOf: ReadonlyMap<string, string>, projectedNodeIds: ReadonlySet<string>, compiled: { constraints: GoalConstraintT[]; notCarried: RecordConstraintNotCarried[] },
   candidates: readonly RecordConstraintCandidate[],
 ): { constraints: GoalConstraintT[]; notCarried: RecordConstraintNotCarried[] } {
-  const v3Nodes = transformGraphToV3(structuredClone(v1)).graph.nodes as Array<{ id: string }>;
-  const idOf = new Map(v1.nodes.map((node, index) => [node.id, v3Nodes[index]?.id ?? node.id]));
   const constraints: GoalConstraintT[] = [];
   const notCarried = [...compiled.notCarried];
   for (const row of compiled.constraints) {
@@ -116,6 +114,42 @@ function bindConstraintsToProjectedIds(
     if (owner !== undefined) notCarried.push({ stated_index: owner.stated_index, reason: 'record_constraint_target_absent_after_projection' });
   }
   return { constraints, notCarried };
+}
+
+/**
+ * The projected (V3) id of every compiled (V1) node. `transformGraphToV3` is the id authority
+ * `projectGraphAndOptionsToV3` itself calls, index-aligned with its input, so the map is read from it — never guessed
+ * from labels.
+ */
+function projectedIdsOf(v1: V1Graph): Map<string, string> {
+  const v3Nodes = transformGraphToV3(structuredClone(v1)).graph.nodes as Array<{ id: string }>;
+  return new Map(v1.nodes.map((node, index) => [node.id, v3Nodes[index]?.id ?? node.id]));
+}
+
+/** The compiled node's own typed origin (`RecordProvenance.provenance_class`), keyed by its projected id. */
+function recordOriginsOf(v1: V1Graph, idOf: ReadonlyMap<string, string>): Map<string, { cls: unknown; unbased: boolean }> {
+  return new Map(v1.nodes.map((node) => {
+    const provenance = (node as { provenance?: { provenance_class?: unknown; unbased?: unknown } }).provenance;
+    return [idOf.get(node.id) ?? node.id, { cls: provenance?.provenance_class, unbased: provenance?.unbased === true }];
+  }));
+}
+
+/**
+ * ⭐ P2-P2: AN OPTION OLUMI ADDED SAYS SO (`proposed_by: 'olumi'`). The licence, the Run's option filter, the analysis
+ * hash and the UI all exclude an unapproved suggestion by this mark (`olumi-option-filter.ts`, `option-status-edit.ts:140`,
+ * `graph-identity.ts:120`; UI `analysisParticipation.ts:164`), so without it an option the user never named competes
+ * as theirs. Read from the record's OWN typed origin — an option minted from an `option_refinement` CLAIM is
+ * `ai_inferred`; one minted from a stated item is `stated` — never from a label. The legacy marker's other rules hold:
+ * never a baseline (`is_baseline`), and only an option that sets a level (an inert option is not compared anyway).
+ */
+export function markRecordsOlumiOptions<N extends { readonly id: string; readonly kind?: unknown; readonly is_baseline?: unknown; readonly interventions?: unknown }>(
+  nodes: readonly N[], origins: ReadonlyMap<string, { cls: unknown }>,
+): N[] {
+  const setsALevel = (n: N): boolean => n.interventions !== null && typeof n.interventions === 'object'
+    && Object.values(n.interventions as Record<string, unknown>).some((v) =>
+      v !== null && typeof v === 'object' && Number.isFinite(Number((v as { value?: unknown }).value)));
+  return nodes.map((n) => (n.kind === 'option' && origins.get(n.id)?.cls === 'ai_inferred' && n.is_baseline !== true && setsALevel(n)
+    ? { ...n, proposed_by: PROPOSED_BY_OLUMI } : n));
 }
 
 export async function buildModelFromRecords(
@@ -154,10 +188,13 @@ export async function buildModelFromRecords(
   const candidates = compiled.projection.constraintCandidates ?? [];
   const joined = joinRecordConstraints(compiled.graph, candidates, brief);
   const projected = projectGraphAndOptionsToV3(joined.graph, { brief });
-  const limits = bindConstraintsToProjectedIds(joined.graph,
-    new Set((projected.graph.nodes as Array<{ id: string }>).map((node) => node.id)), joined, candidates);
+  const idOf = projectedIdsOf(joined.graph);
+  const projectedNodes = projected.graph.nodes as Array<{ id: string; kind?: unknown; is_baseline?: unknown; interventions?: unknown }>;
+  const limits = bindConstraintsToProjectedIds(idOf, new Set(projectedNodes.map((node) => node.id)), joined, candidates);
+  const origins = recordOriginsOf(joined.graph, idOf);
+  const authored = { ...projected.graph, nodes: markRecordsOlumiOptions(projectedNodes, origins) };
   const parsed = GraphV3.safeParse(limits.constraints.length > 0
-    ? { ...projected.graph, goal_constraints: limits.constraints } : projected.graph);
+    ? { ...authored, goal_constraints: limits.constraints } : authored);
   if (!parsed.success) return { ok: false, mutated: false, refusal: 'construction_failed', detail: parsed.error.message };
   const graph = parsed.data;
   const stillEmpty = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, { ...FRESH_READ });
