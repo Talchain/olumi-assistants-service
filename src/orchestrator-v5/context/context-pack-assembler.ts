@@ -40,6 +40,7 @@ import type { ContextPackGoalTarget } from './goal-target-record.js';
 import type { ContextPackFactorValues } from './factor-value-record.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
 import { projectModelFacingRunDelta } from './model-facing-run-delta.js';
+import { isGoalSnapshotStaleReason } from './freshness.js';
 import { eligibleInvestigationPriority, type InvestigationPriorityLicence } from '../coaching/investigation-priority.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
@@ -1858,8 +1859,7 @@ export function assembleContextPackWithSummary(
   // AND-gates that against each run's own persisted verdict, so this can only
   // ever withhold a leader id, never promote one.
   const runDeltaBuild =
-    input.priorFacts === undefined || analysisStateSummary?.freshness_reason === 'goal_unit_changed'
-      || analysisStateSummary?.freshness_reason === 'goal_snapshot_unverified'
+    input.priorFacts === undefined || isGoalSnapshotStaleReason(analysisStateSummary?.freshness_reason)
       ? null
       : buildRunDelta({
           priorFacts: input.priorFacts,

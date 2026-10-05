@@ -102,7 +102,7 @@ import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 import { projectEvidenceAssessment } from './compose/project-evidence-assessment.js';
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.js';
-import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
+import { isGoalSnapshotStaleReason, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
 import { deriveEveryOptionLimitVerdict, readRatifiedConstraints, type ConstraintVerdictState } from '../orchestrator/context/constraint-feasibility.js';
 import { nodesUnderANonlinearIdentity } from './agent-lane/admit-model.js';
 
@@ -139,8 +139,9 @@ export type RunDeltaDisclosureReason =
   | 'run_identity_conflict'
   /** A newer degraded Run supersedes the older successful pair. */
   | 'newer_run_degraded'
-  /** Selected goal-unit snapshot cannot attest the comparison as current. */
+  /** Selected goal snapshot (unit or sent direction) cannot attest the comparison as current. */
   | 'goal_unit_changed'
+  | 'goal_direction_changed'
   | 'goal_snapshot_unverified';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
@@ -480,8 +481,7 @@ export function finaliseV5Response(
   // `'unknown'`; supersession requires `'none'`).
   const exitFreshnessForStamp = exitDerivationFor(ctx);
   const freshnessForStamp = ctx.analysisStateFreshness ?? ctx.freshness
-    ?? (exitFreshnessForStamp?.reason === 'goal_unit_changed' || exitFreshnessForStamp?.reason === 'goal_snapshot_unverified'
-      ? exitFreshnessForStamp : undefined);
+    ?? (isGoalSnapshotStaleReason(exitFreshnessForStamp?.reason) ? exitFreshnessForStamp : undefined);
   const stamped: OlumiResponse = payloadForStamp
     ? {
         ...scrubbed,
@@ -878,7 +878,7 @@ function attachRunDelta(
 
   const freshnessReason = (ctx.analysisStateCanonical ?? ctx.canonicalState)?.freshness_reason
     ?? (ctx.analysisStateFreshness ?? ctx.freshness)?.reason ?? exitDerivationFor(ctx)?.reason;
-  if (freshnessReason === 'goal_unit_changed' || freshnessReason === 'goal_snapshot_unverified') {
+  if (isGoalSnapshotStaleReason(freshnessReason)) {
     const { run_delta: _unitUnboundDelta, ...withoutDelta } = response;
     return disclose('skipped', freshnessReason, withoutDelta as OlumiResponse);
   }
