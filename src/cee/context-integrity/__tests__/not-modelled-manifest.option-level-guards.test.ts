@@ -56,6 +56,14 @@ describe("W2 — a stated limit is never anchored to an option's level", () => {
     expect(item.matched_node_id).toBe("fac_support_spend");
   });
 
+  it("a limit row holding the magnitude AS WRITTEN (120, \"£\") matches no limit carrier: only W2 keeps it off the option's factor", () => {
+    // `classifyStatedKind` reads the span's value as written or expanded; `collectLimitCandidates` does not, so here no
+    // other carrier claims the figure and the fallback route is open. W2 is what keeps the user's limit off the option.
+    const item = itemsAt(brief, { nodes, goal_constraints: [{ ...limitRow, value: 120 }] })("£120k", 0);
+    expect(item.stated_kind).toBe("constraint");
+    expect(item.matched_node_id).not.toBe("fac_tool_cost");
+  });
+
   it("CONTROL: with no limit stated, the same £120k is the option's level and is credited to its factor", () => {
     const item = itemsAt(brief, { nodes })("£120k", 0);
     expect(item.stated_kind).toBe("figure");
