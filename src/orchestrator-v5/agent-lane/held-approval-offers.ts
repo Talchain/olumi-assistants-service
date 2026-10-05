@@ -72,7 +72,9 @@ export async function readExecutableHeldProposalOffers(input: {
     if (candidates.length !== 1) return [];
     const id = candidates[0]!.proposal_id;
     const request = { proposal_id: id, scenario_id: input.scenarioId,
-      authenticated_user_id: input.userId, current_graph_identity_hash: input.graphHash };
+      authenticated_user_id: input.userId, current_graph_identity_hash: input.graphHash,
+      // Test the exact chip click; the row below must still offer this same typed identity.
+      typed_approval_of: id };
     if (membership.authorise(request).status !== 'execute') return [];
     // get and authorise only read Maps; neither changes order, capacity, or settlement.
     // A known warm refusal (including applied/partial/stale/integrity) vetoes durable authority.

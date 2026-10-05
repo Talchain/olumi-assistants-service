@@ -139,7 +139,7 @@ beforeEach(() => {
 
 
 import { agentProposals, HELD_OFFER_ROWS_READ_CAP } from '../../orchestrator-v5/agent-lane/held-approval-offers.js'
-import { createProposal, ProposalStore, MAX_PROPOSALS, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js'
+import { createProposal, computeProposalId, hasCardOnlyOperations, ProposalStore, MAX_PROPOSALS, type ProposalOperation, type StructuredProposal } from '../../orchestrator-v5/agent-lane/proposal.js'
 import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-proposal.js'
 import { parsePendingAction, type PendingAction } from '../../orchestrator-v5/session/pending-action.js'
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js'
@@ -222,6 +222,76 @@ const heldRead = async (request: Record<string, unknown> = { include_conversatio
     return res.json()
   } finally { await app.close() }
 }
+
+const cardOnlyRange = { likely_range: { low: 5, high: 20 } }
+const cardOnlyMechanisms = { unmodelled_mechanisms: [{ mechanism: 'Recruitment delay', basis: 'May slow delivery' }] }
+const cardOnlyLevel = (value: Record<string, unknown>, path = 'n1::n2'): ProposalOperation => ({
+  op: 'set_option_intervention', path, value: { raw: 10, normalised: 0.25, ...value },
+})
+// The class is ownership of either key, including an explicitly empty mechanisms array.
+const cardOnlyCases: { name: string; operations: ProposalOperation[] }[] = [
+  { name: 'likely_range only', operations: [cardOnlyLevel(cardOnlyRange)] },
+  { name: 'unmodelled_mechanisms EMPTY', operations: [cardOnlyLevel({ unmodelled_mechanisms: [] })] },
+  { name: 'unmodelled_mechanisms POPULATED', operations: [cardOnlyLevel(cardOnlyMechanisms)] },
+  { name: 'both card-only keys', operations: [cardOnlyLevel({ ...cardOnlyRange, ...cardOnlyMechanisms })] },
+  { name: 'multiple levels, one card-only', operations: [cardOnlyLevel({}, 'n3::n2'), cardOnlyLevel(cardOnlyRange)] },
+  { name: 'compound card-only plus add_edge', operations: [cardOnlyLevel(cardOnlyRange), { op: 'add_edge', path: 'n1::n2', value: 0.4 }] },
+]
+const installCardOnlyOffer = (name: string, operations: ProposalOperation[]) => {
+  const { proposal_id: _id, ...content } = proposalOf(offered)
+  const proposal = createProposal({ ...content, operations, public_label: `Held card-only change: ${name}` })
+  const { proposal_id, ...hashedContent } = proposal
+  expect(proposal_id).toBe(computeProposalId(hashedContent))
+  expect(hasCardOnlyOperations(proposal.operations)).toBe(true)
+  chip = { ...chip, id: `agent-approve-proposal:${proposal_id}` }
+  offered = parsePendingAction(proposalPendingAction(proposal, chip, {
+    scenario_id: SCENARIO, emitted_at_iso: offered.emitted_at_iso,
+  }))!
+  expect(offered).not.toBeNull()
+  latest = [offered]
+  const turnId = `card-only-${name}`
+  table = [answerRow(offered, turnId)]
+  return { proposal, turnId }
+}
+describe('R2 card-only held offers mirror the exact offered chip click', () => {
+  it.each(cardOnlyCases.flatMap(row => ['cold', 'warm'].map(temperature => ({ ...row, temperature }))))(
+    '$name / $temperature → exact turn, proposal and approve/amend identities', async ({ name, operations, temperature }) => {
+      const { proposal, turnId } = installCardOnlyOffer(name, operations)
+      const request = { proposal_id: proposal.proposal_id, scenario_id: SCENARIO,
+        authenticated_user_id: OWNER, current_graph_identity_hash: proposal.base_graph_identity_hash }
+      const authority = new ProposalStore()
+      authority.put(proposal)
+      expect(authority.authorise(request).status).toBe('approval_required')
+      expect(authority.authorise({ ...request, typed_approval_of: proposal.proposal_id }).status).toBe('execute')
+      if (temperature === 'warm') agentProposals.put(proposal)
+      expect(agentProposals.size()).toBe(temperature === 'warm' ? 1 : 0)
+      expect(agentProposals.get(proposal.proposal_id)).toEqual(temperature === 'warm' ? proposal : undefined)
+      const before = sharedSnapshot()
+      const body = await heldRead()
+      expect(sharedSnapshot()).toEqual(before)
+      expect(body.held_proposal_offers).toEqual([{ turn_id: turnId, proposal_id: proposal.proposal_id,
+        suggested_actions: [chip, { id: 'agent-amend-proposal', label: 'Change something first',
+          message: 'Before you apply it, I want to change some of it.' }] }])
+      expect(body.held_proposal_offers[0].suggested_actions.map((a: { id: string }) => a.id))
+        .toEqual([`agent-approve-proposal:${proposal.proposal_id}`, 'agent-amend-proposal'])
+      expect(readCommittedTurn).toHaveBeenCalledWith(SCENARIO, turnId)
+      expect(selections.some(s => s.includes('pending_actions'))).toBe(true)
+      expect((await realStore.readRecent(SCENARIO))[0]).not.toHaveProperty('pending_actions')
+    })
+  it.each(cardOnlyCases.flatMap(row => ['stale graph hash', 'another caller', 'already applied warm'].map(control => ({ ...row, control }))))(
+    '$name / $control → no offer', async ({ name, operations, control }) => {
+      const { proposal } = installCardOnlyOffer(name, operations)
+      if (control === 'stale graph hash') loadGraphAndBriefText.mockResolvedValue({ graph: { ...GRAPH_NO_LAYOUT, edges: [] }, briefText: 'Changed' })
+      if (control === 'another caller') resolveUserIdentity.mockResolvedValue({ mode: 'verified', userId: OTHER_USER })
+      if (control === 'already applied warm') { agentProposals.put(proposal); agentProposals.markApplied(proposal.proposal_id) }
+      const before = sharedSnapshot()
+      const body = await heldRead()
+      expect(sharedSnapshot()).toEqual(before)
+      expect(body).not.toHaveProperty('held_proposal_offers')
+      expect(body.graph).toBeDefined()
+      expect(body.conversation_turns.map((turn: { turn_id: string }) => turn.turn_id)).toEqual([`card-only-${name}`])
+    })
+})
 describe('R2 /graph server-validated held offers (only when conversation requested)', () => {
   it('(c) executable held proposal → exact original approve plus shared amend', async () => {
     expect(await realStore.readRecent(SCENARIO)).toHaveLength(1)
