@@ -180,7 +180,8 @@ const startedAt = Date.now();
 const deadlineAt = constructionDeadline(startedAt);
 const harnessCalls = statedFirstCalls(statedFirst, brief,
   (reqBody) => constructionCallStructured(reqBody, deadlineAt),
-  (reqBody) => constructionCallStructured(reqBody, deadlineAt), mode === 'live' ? 'LIVE (harness-only)' : 'CEILING (self-authored)');
+  (reqBody) => constructionCallStructured(reqBody, deadlineAt), mode === 'live' ? 'LIVE (harness-only)' : 'CEILING (self-authored)',
+  process.env.MC_PASS_EXT === '1');
 const result = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () =>
   buildModelFromRecords(SCENARIO, brief, dispatch as never, harnessCalls.main,
     undefined, undefined, harnessCalls.sentencePass));
