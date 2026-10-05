@@ -517,6 +517,14 @@ describe('RT-6 row 1 (red team #87 6004429045): a unit the sentence WROTE is nev
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
     expect(cardsFor(w, result)).toHaveLength(2);
   });
+  // ...and the SOURCE arm reads the same list (S1: a % level source stated in points).
+  it.each([...POINTS_SPELLINGS])('source stated in "%s": a card, never unit_mismatch', async (unit) => {
+    const s1 = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'S1')!;
+    const w = world(s1);
+    const result = await propose(w, { ...s1, effect: effect(-0.5, 'percentage points', 1, unit) });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)).toHaveLength(2);
+  });
 });
 
 describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never the end', () => {
