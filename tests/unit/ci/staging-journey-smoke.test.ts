@@ -429,6 +429,16 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
     expect(smokeStep.shell, "step pipes output but does not set `shell: bash` (no pipefail)").toBe("bash");
   });
 
+  it("spends the shared LLM budget at k=1 per deploy; k=5 only by an explicit dispatch, never a schedule", () => {
+    // DL ruling, 5 Oct 2026: one sample = 3 provider calls (measured on served 5e79d2d).
+    expect(String(requireSmokeStep().env.SMOKE_DRAFT_SAMPLES)).toBe("${{ github.event.inputs.samples || '1' }}");
+    const samples = wf.on.workflow_dispatch.inputs.samples;
+    expect(samples.type).toBe("choice");
+    expect(samples.options).toEqual(["1", "5"]);
+    expect(samples.default).toBe("1");
+    expect(wf.on.schedule).toBeUndefined();
+  });
+
   it("asserts deploy freshness by passing the expected commit", () => {
     // The "deploy did not ship" half. Without SMOKE_EXPECT_SHA the gate would
     // happily test whatever stale build is deployed and call it green.
