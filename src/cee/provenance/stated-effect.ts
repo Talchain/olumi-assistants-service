@@ -1,6 +1,7 @@
 import type { DraftQuoteSpan, DraftStatedRelationship } from "../draft/records/grammar.js";
 import { findStatedAmounts, readUnit, type StatedAmount } from "./stated-amounts.js";
-import { sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
+import { boundLiteral } from "../draft/records/quantity-evidence.js";
+import { sameUnit, readCountRate, readMoney } from "../../orchestrator-v5/agent-lane/same-unit.js";
 
 export interface StatedEffectDetail {
   readonly amount: number;
@@ -47,13 +48,14 @@ function unitsAt(quote: string, amount: StatedAmount): readonly string[] {
     const period = /^\s*(?:(?:a|per)\s+)?(month|months|mo|monthly|year|years|yr|yearly)\b/iu.exec(tail)?.[1];
     return [period === undefined ? currency : `${currency}/${PERIOD_WORDS[period.toLowerCase()]!}`];
   }
-  return nounUnitsAt(quote.slice(amount.index + amount.matchedText.length));
+  const before=quote.slice(0,amount.index).match(/(?:[A-Za-z][A-Za-z-]*\s*){1,3}$/u)?.[0] ?? '';
+  return [...nounUnitsAt(quote.slice(amount.index + amount.matchedText.length)),...nounUnitsAt(' '+before)];
 }
 
 function locatedAmounts(quote: string): LocatedAmount[] {
   const amounts: LocatedAmount[] = findStatedAmounts(quote).flatMap((amount) => {
     const units = unitsAt(quote, amount);
-    return units.length === 0 ? [] : [{ ...amount, units }];
+    return [{ ...amount, units }];
   });
   // A counting determiner locates ONE source unit. It contributes no target
   // value, endpoint or sign, and explicit numerals still use the collector above.
@@ -83,6 +85,63 @@ function oneMatchingAmount(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
+/** Missing local unit words are not contradictions to the owning quantity declaration. */
+function unitAgrees(amount: LocatedAmount, expected: string, other: string): boolean {
+  const money=readMoney(expected,'');
+  if(amount.kind==='currency')return money!==null && money.code===amount.currencyCode
+    && amount.units.every(u=>{const m=readMoney(u,'');return m===null || m.period===null || m.period===money.period;});
+  if(amount.kind==='percent')return sameUnit(expected,'%');
+  const count=readCountRate(expected),otherCount=readCountRate(other);
+  if(count===null)return true;
+  const sameNoun=(unit:string,noun:string[])=>readCountRate(unit)?.noun.join(' ')===noun.join(' ');
+  if(amount.units.some(u=>sameNoun(u,count.noun)))return true;
+  return otherCount===null || !amount.units.some(u=>sameNoun(u,otherCount.noun));
+}
+
+/** A counting determiner needs its source unit, not an unrelated calendar marker. */
+function implicitSourceAgrees(amount: LocatedAmount, unit: string): boolean {
+  if (!amount.implicitSource) return true;
+  const count = readCountRate(unit);
+  if (count !== null) return amount.units.some(candidate => {
+    const actual = readCountRate(candidate);
+    return actual !== null && actual.noun.join(' ') === count.noun.join(' ')
+      && (actual.period === null || actual.period === count.period);
+  });
+  const money = readMoney(unit, '');
+  if (money !== null) return amount.units.some(candidate => {
+    const actual = readMoney(candidate, '');
+    return actual !== null && actual.code === money.code
+      && (actual.period === null || actual.period === money.period)
+      && (actual.per ?? []).join(' ') === (money.per ?? []).join(' ');
+  });
+  return amount.units.some(candidate => sameUnit(unit, candidate));
+}
+
+/** Unit words only check the declared ends; they never supply an endpoint or a unit. */
+export function statedEffectUnitsMatch(quote: string, detail: StatedEffectDetail, authority: DraftStatedRelationship): boolean {
+  const amounts = locatedAmounts(quote);
+  const agrees = (span: DraftQuoteSpan | undefined, unit: string, other: string, source = false): boolean => {
+    if (span === undefined) return true; // Missing evidence is refused by the evidence guard, not guessed here.
+    const amount = amounts.find(a => atSpan(a, span, quote) && (source || !a.implicitSource));
+    return amount === undefined || unitAgrees(amount, unit, other) && (!source || implicitSourceAgrees(amount, unit));
+  };
+  return agrees(authority.amount_span, detail.amount_unit, detail.per_source_change_unit)
+    && agrees(authority.range?.low_span, detail.amount_unit, detail.per_source_change_unit)
+    && agrees(authority.range?.high_span, detail.amount_unit, detail.per_source_change_unit)
+    && agrees(authority.source_span, detail.per_source_change_unit, detail.amount_unit, true);
+}
+
+/** Numeric punctuation inside an owned literal is not a sentence boundary. */
+function spansShareClause(quote: string, spans: readonly DraftQuoteSpan[]): boolean {
+  const ordered = [...spans].sort((a, b) => a.start - b.start);
+  let end = ordered[0]?.end ?? 0;
+  for (const span of ordered.slice(1)) {
+    if (span.start > end && ['.', '!', '?', ';'].some(d => quote.slice(end, span.start).includes(d))) return false;
+    end = Math.max(end, span.end);
+  }
+  return true;
+}
+
 /**
  * Validate, rather than extract, a typed natural effect against its quoted span.
  * The quote supplies no endpoints, signs or target values to the model. It
@@ -105,7 +164,7 @@ export function statedEffectFiguresMatch(
 function atSpan(amount: LocatedAmount, span: DraftQuoteSpan, quote: string): boolean {
   return Number.isInteger(span.start) && Number.isInteger(span.end)
     && span.start >= 0 && span.end <= quote.length && span.start < span.end
-    && amount.index === span.start && amount.index + amount.matchedText.length === span.end;
+    && amount.index >= span.start && amount.index + amount.matchedText.length <= span.end;
 }
 
 /** Figures alone cannot attest a signed relationship. The stated cause owns it. */
@@ -114,7 +173,32 @@ export function statedEffectQuoteMatches(
   detail: StatedEffectDetail,
   authority?: DraftStatedRelationship,
 ): boolean {
-  if (authority === undefined || !statedEffectFiguresMatch(quote, detail)) return false;
+  if(authority?.amount_literal!==undefined && authority.range===undefined && authority.amount_span!==undefined && authority.source_span!==undefined){
+    if(authority.amount!==detail.amount || authority.per_source_change!==detail.per_source_change || detail.amount===0 || detail.per_source_change===0
+      || !sameUnit(authority.amount_unit,detail.amount_unit) || !sameUnit(authority.per_source_change_unit,detail.per_source_change_unit)
+      || boundLiteral(quote,authority.amount_literal,detail.amount).reason!==undefined)return false;
+    const amounts=locatedAmounts(quote);
+    const target=amounts.find(a=>!a.implicitSource && atSpan(a,authority.amount_span!,quote));
+    const source=amounts.find(a=>atSpan(a,authority.source_span!,quote) && (a.implicitSource ? Math.abs(detail.per_source_change)===1 : magnitudeMatches(Math.abs(detail.per_source_change),a)));
+    if(target===undefined || source===undefined || target.index===source.index || !statedEffectUnitsMatch(quote,detail,authority) || !unitAgrees(target,detail.amount_unit,detail.per_source_change_unit)
+      || !unitAgrees(source,detail.per_source_change_unit,detail.amount_unit))return false;
+    const left=Math.min(authority.amount_span.end,authority.source_span.end),right=Math.max(authority.amount_span.start,authority.source_span.start);
+    return !['.','!','?',';'].some(d=>quote.slice(left,right).includes(d));
+  }
+  if(authority?.range !== undefined && authority.source_span !== undefined) {
+    const r=authority.range;
+    if(authority.amount !== detail.amount || authority.per_source_change !== detail.per_source_change
+      || !sameUnit(authority.amount_unit,detail.amount_unit) || !sameUnit(authority.per_source_change_unit,detail.per_source_change_unit)
+      || r.low>detail.amount || detail.amount>r.high || r.low>r.high || r.low<0 && r.high>0) return false;
+    if(r.low_literal===undefined || r.high_literal===undefined || boundLiteral(quote,r.low_literal,r.low).reason!==undefined
+      || boundLiteral(quote,r.high_literal,r.high).reason!==undefined) return false;
+    if(authority.amount_literal!==undefined && boundLiteral(quote,authority.amount_literal,detail.amount).reason!==undefined)return false;
+    const source=locatedAmounts(quote).find(a=>atSpan(a,authority.source_span!,quote) && (a.implicitSource ? Math.abs(detail.per_source_change)===1 : magnitudeMatches(Math.abs(detail.per_source_change),a)));
+    if(source===undefined || !statedEffectUnitsMatch(quote,detail,authority))return false;
+    const spans=[authority.source_span,r.low_span,r.high_span,authority.amount_span].filter((s):s is DraftQuoteSpan=>s!==undefined);
+    return spansShareClause(quote,spans);
+  }
+  if (authority === undefined || authority.amount_span === undefined || authority.source_span === undefined || !statedEffectFiguresMatch(quote, detail)) return false;
   if (authority.amount !== detail.amount || authority.per_source_change !== detail.per_source_change
     || !sameUnit(authority.amount_unit, detail.amount_unit)
     || !sameUnit(authority.per_source_change_unit, detail.per_source_change_unit)) return false;

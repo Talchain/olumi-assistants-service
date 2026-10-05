@@ -1,5 +1,7 @@
+import { literalConventionValue } from './quantity-evidence.js';
 import type { DraftRecordSet, DraftStatedItem } from './grammar.js';
 import type { DroppedRecordRef, RecordProjection } from './projector.js';
+import { stableStringify } from '../../../orchestrator/context/stable-stringify.js';
 
 /** Edge endpoints are its persisted identity; V3 deliberately strips legacy edge ids. */
 export type StatedCarrier = (
@@ -9,7 +11,7 @@ export type StatedCarrier = (
 export type StatedDisposition = { readonly stated_index: number; readonly stated_item: DraftStatedItem } & (
   | { readonly disposition: 'carried'; readonly location: StatedCarrier; readonly stored_value: unknown }
   | { readonly disposition: 'rejected'; readonly reason: DroppedRecordRef['reason'] | 'stated_value_not_carried' | 'stated_relationship_not_carried' | 'carrier_removed' }
-  | { readonly disposition: 'asked' }
+  | { readonly disposition: 'asked'; readonly reason?: 'goal_quantity_missing' }
 );
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -22,6 +24,12 @@ function field(value: unknown, path: readonly string[]): unknown {
   }
   return value;
 }
+
+const FAILED_EVIDENCE = new Set<DroppedRecordRef['reason']>([
+  'literal_absent', 'literal_ambiguous', 'literal_not_whole_amount', 'literal_value_mismatch',
+  'span_and_literal_both', 'quantity_unit_undeclared', 'quantity_declaration_mismatch',
+  'unit_not_evidenced', 'unit_period_ambiguous', 'unit_literal_contradicts_unit',
+]);
 
 /** One receipt per input index, using only the projector's own identities and writes. */
 export function deriveStatedDispositions(
@@ -36,6 +44,12 @@ export function deriveStatedDispositions(
     const origin = { stated_index, stated_item: originalRecords.stated_items[stated_index]! };
     const carry = (location: StatedCarrier, stored_value: unknown): StatedDisposition =>
       ({ ...origin, disposition: 'carried', location, stored_value });
+    // P2-B6x: an unknown the projector asks about is an ask, never a carried value or a silent default.
+    if (projection.dropped.some(d => d.stated_index === stated_index && d.reason === 'goal_quantity_missing')) {
+      return { ...origin, disposition: 'asked', reason: 'goal_quantity_missing' };
+    }
+    const evidenceFailure = projection.dropped.find(d => d.stated_index === stated_index && FAILED_EVIDENCE.has(d.reason));
+    if (evidenceFailure !== undefined) return { ...origin, disposition: 'rejected', reason: evidenceFailure.reason };
     const nodeId = statedNodeIds.get(stated_index);
     const node = nodes.find(n => n.id === nodeId);
     // A typed relationship needs its executable bundle, never just its cause label.
@@ -62,8 +76,8 @@ export function deriveStatedDispositions(
         if (!object(details)) continue;
         for (const [factorId, detail] of Object.entries(details)) {
           if (object(detail) && detail.source === 'brief_extraction' && detail.stated_index === stated_index
-            && detail.raw_value === item.value) {
-            return carry({ kind: 'node', node_id: option.id, path: ['data', 'intervention_details', factorId, 'raw_value'] }, item.value);
+            && detail.raw_value === literalConventionValue(item.value, item.unit, item.value_scale)) {
+            return carry({ kind: 'node', node_id: option.id, path: ['data', 'intervention_details', factorId, 'raw_value'] }, detail.raw_value);
           }
         }
       }
@@ -88,7 +102,9 @@ export function reconcileStatedDispositions(rows: readonly StatedDisposition[], 
       : location.path[0] === 'data' && location.path[1] === 'intervention_details'
         ? ['interventions', ...location.path.slice(2)] : location.path;
     const held = path.length === 0 && object(carrier) ? { id: carrier.id } : field(carrier, path);
-    if (held !== undefined && JSON.stringify(held) === JSON.stringify(row.stored_value)) return { ...row, location: { ...location, path } };
+    // Structural equality, independent of object KEY ORDER: a GraphV3 parse rebuilds objects in schema order (a
+    // `natural_effect` came back reordered), and the same carrier must not read as removed (R2, Codex P2).
+    if (held !== undefined && stableStringify(held) === stableStringify(row.stored_value)) return { ...row, location: { ...location, path } };
     return { stated_index: row.stated_index, stated_item: row.stated_item, disposition: 'rejected', reason: 'carrier_removed' };
   });
 }

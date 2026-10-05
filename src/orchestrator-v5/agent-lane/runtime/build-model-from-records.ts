@@ -1,6 +1,6 @@
 /** Agent construction: one records extraction, deterministic compile, canonical registration. */
-import { buildDraftRecordsSchema, type DraftRecordSet } from '../../../cee/draft/records/grammar.js';
-import { DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction.js';
+import { buildVNextDraftRecordsSchema, type DraftRecordSet } from '../../../cee/draft/records/grammar.js';
+import { V_NEXT_DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction-vnext.js';
 import { reconcileStatedDispositions } from '../../../cee/draft/records/stated-dispositions.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
 import type { RecordConstraintCandidate } from '../../../cee/draft/records/projector.js';
@@ -14,6 +14,7 @@ import type { CompileStageEvent, CompileStageName } from '../../../cee/unified-p
 import { PROPOSED_BY_OLUMI } from '../olumi-option-marker.js';
 import { assessConstructionSize } from '../construction-size-gate.js';
 import type { InferenceClass } from '../admit-model.js';
+import { structuralFactorCategories } from '../../../validators/graph-validator.js';
 import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { constructionOperationId, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
@@ -41,11 +42,11 @@ export function buildStrictDraftRecordsSchema(): JsonSchema {
     if (object(schema.items)) out.items = nullable(schema.items);
     return out;
   };
-  return strictForTheDrafter(nullable(buildDraftRecordsSchema()));
+  return strictForTheDrafter(nullable(buildVNextDraftRecordsSchema()));
 }
 
 /** Null means omitted only for a key that the records grammar actually marks optional. */
-export function omitOptionalRecordNulls(value: unknown, schema: JsonSchema = buildDraftRecordsSchema()): unknown {
+export function omitOptionalRecordNulls(value: unknown, schema: JsonSchema = buildVNextDraftRecordsSchema()): unknown {
   if (Array.isArray(value) && object(schema.items)) return value.map(item => omitOptionalRecordNulls(item, schema.items as JsonSchema));
   if (!object(value) || !object(schema.properties)) return value;
   const properties = schema.properties;
@@ -191,7 +192,7 @@ export async function buildModelFromRecords(
   let raw: unknown;
   try {
     const out = await callStructured({
-      model: budget.model, instructions: DRAFT_RECORDS_INSTRUCTION, input: brief,
+      model: budget.model, instructions: V_NEXT_DRAFT_RECORDS_INSTRUCTION, input: brief,
       max_output_tokens: budget.max_output_tokens, reasoning_effort: budget.reasoning_effort,
       schema: buildStrictDraftRecordsSchema(),
     });
@@ -214,8 +215,17 @@ export async function buildModelFromRecords(
   // The seam's own reason, unchanged (`ReplayFailure.reason`), on the typed event.
   if (!compiled.ok) return refuse('parsed', { ok: false, mutated: false, refusal: 'construction_failed', detail: compiled.detail }, compiled.reason);
   stage({ stage: 'parsed', status: 'ok', stated_items: compiled.records.stated_items.length, claims: compiled.records.claims.length });
+  // ⭐ P2-A6: each factor's driver role, typed from the compile on the EXISTING V3 `category` field: the lever an option
+  // sets is `controllable`; a stated or derived quantity no option sets is `observable` (it holds a level) or
+  // `external`. Stamped by the validator's own structural rule, so the stored type and readiness cannot disagree.
+  const compiledGraph = compiled.graph as V1Graph;
+  const categories = structuralFactorCategories(compiledGraph.nodes, compiledGraph.edges);
+  const typed: V1Graph = { ...compiledGraph, nodes: compiledGraph.nodes.map(node => {
+    const role = node.kind === 'factor' ? categories.get(node.id)?.category : undefined;
+    return role === undefined ? node : { ...node, category: role };
+  }) };
   const candidates = compiled.projection.constraintCandidates ?? [];
-  const joined = joinRecordConstraints(compiled.graph, candidates, brief);
+  const joined = joinRecordConstraints(typed, candidates, brief);
   const projected = projectGraphAndOptionsToV3(joined.graph, { brief });
   const idOf = projectedIdsOf(joined.graph);
   const projectedNodes = projected.graph.nodes as Array<{ id: string; kind?: unknown; is_baseline?: unknown; interventions?: unknown }>;
@@ -268,7 +278,8 @@ export async function buildModelFromRecords(
     }, 'populated_before_write');
   }
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
-    // Registration diagnostic only: GraphV3 has no declared persisted receipt carrier.
+    // The compiler's receipt, as the register SIDECAR: the route reconciles it against the bytes it stores and is the
+    // only writer of `graph.stated_dispositions` (`schemas/graph-stated-dispositions.ts`).
     stated_dispositions: reconcileStatedDispositions(compiled.projection.stated_dispositions ?? [], graph),
     graph, brief_text: brief, operation_id: constructionOperationId(scenarioId, brief), expected_graph_identity_hash: null,
   });

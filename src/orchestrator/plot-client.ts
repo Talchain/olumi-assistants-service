@@ -62,6 +62,17 @@ import {
 import { log } from "../utils/telemetry.js";
 import { contentDigest } from "../utils/redaction.js";
 import type { V2RunResponseEnvelope, OrchestratorError } from "./types.js";
+import { omitStatedDispositions } from "../schemas/graph-stated-dispositions.js";
+
+/**
+ * The bytes PLoT receives. `graph.stated_dispositions` is CEE bookkeeping (the records compiler's receipt, declared on
+ * CEE `GraphV3` only): a GraphV3-parsed snapshot now keeps it where the base commit stripped it, so it is dropped HERE,
+ * at the wire, for every endpoint that posts a graph. A payload without it serialises exactly as before.
+ */
+function plotWireBody(payload: Record<string, unknown>): string {
+  const graph = omitStatedDispositions(payload.graph);
+  return JSON.stringify(graph === payload.graph ? payload : { ...payload, graph });
+}
 
 // ============================================================================
 // Inbound Response Validation (P0-2)
@@ -545,7 +556,7 @@ class PLoTClientImpl implements PLoTClient {
       const response = await fetch(`${this.baseUrl}/v2/run`, {
         method: 'POST',
         headers: this.buildHeaders(requestId),
-        body: JSON.stringify(payload),
+        body: plotWireBody(payload),
         signal: fetchSignal,
       });
       if (!response.ok) return { ok: false, reason: 'http_error', status: response.status };
@@ -880,7 +891,7 @@ class PLoTClientImpl implements PLoTClient {
       const response = await fetch(url, {
         method: 'POST',
         headers: this.buildHeaders(requestId),
-        body: JSON.stringify(payload),
+        body: plotWireBody(payload),
         signal: fetchSignal,
       });
 
@@ -1063,7 +1074,7 @@ class PLoTClientImpl implements PLoTClient {
       const response = await fetch(url, {
         method: 'POST',
         headers: this.buildHeaders(requestId),
-        body: JSON.stringify(payload),
+        body: plotWireBody(payload),
         signal: fetchSignal,
       });
 

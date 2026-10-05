@@ -1,0 +1,152 @@
+{
+  "stored_graph_bytes": "{\"nodes\":[{\"id\":\"g_mrr\",\"kind\":\"goal\",\"label\":\"MRR\",\"ref\":\"G1\"},{\"id\":\"dec_price\",\"kind\":\"decision\",\"label\":\"Pro price\",\"ref\":\"D1\"},{\"id\":\"fac_price\",\"kind\":\"factor\",\"label\":\"Pro plan price\",\"category\":\"controllable\",\"observed_state\":{\"value\":0.245},\"ref\":\"F1\"},{\"id\":\"opt_keep\",\"kind\":\"option\",\"label\":\"Keep £49\",\"is_baseline\":true,\"interventions\":{\"fac_price\":0.245},\"ref\":\"O1\"},{\"id\":\"opt_59\",\"kind\":\"option\",\"label\":\"Raise to £59\",\"interventions\":{\"fac_price\":0.295},\"ref\":\"O2\"}],\"edges\":[{\"from\":\"fac_price\",\"to\":\"g_mrr\",\"strength\":{\"mean\":0.5,\"std\":0.1},\"exists_probability\":0.9,\"effect_direction\":\"positive\"},{\"from\":\"dec_price\",\"to\":\"opt_keep\",\"strength\":{\"mean\":1,\"std\":0.01},\"exists_probability\":1,\"effect_direction\":\"positive\"},{\"from\":\"dec_price\",\"to\":\"opt_59\",\"strength\":{\"mean\":1,\"std\":0.01},\"exists_probability\":1,\"effect_direction\":\"positive\"},{\"from\":\"opt_keep\",\"to\":\"fac_price\",\"strength\":{\"mean\":1,\"std\":0.01},\"exists_probability\":1,\"effect_direction\":\"positive\"},{\"from\":\"opt_59\",\"to\":\"fac_price\",\"strength\":{\"mean\":1,\"std\":0.01},\"exists_probability\":1,\"effect_direction\":\"positive\"}],\"goal_node_id\":\"g_mrr\",\"ref_high_water\":{\"G\":1,\"D\":1,\"F\":1,\"O\":2}}",
+  "write": {
+    "scenario_id": "5d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6",
+    "turn_id": "graph_registration:079ece38-73be-4cec-b102-1e62b165425c",
+    "turn_class": "direct_answer",
+    "handler_id": null,
+    "request_hash": "graph_registration:aeadcaddb80ff46dd1f53564778b282406c23120ceb483094e3e97fa9720c688",
+    "response_emitted": false,
+    "llm_calls_used": 0,
+    "handler_facts": [],
+    "graph": {
+      "nodes": [
+        {
+          "id": "g_mrr",
+          "kind": "goal",
+          "label": "MRR",
+          "ref": "G1"
+        },
+        {
+          "id": "dec_price",
+          "kind": "decision",
+          "label": "Pro price",
+          "ref": "D1"
+        },
+        {
+          "id": "fac_price",
+          "kind": "factor",
+          "label": "Pro plan price",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0.245
+          },
+          "ref": "F1"
+        },
+        {
+          "id": "opt_keep",
+          "kind": "option",
+          "label": "Keep £49",
+          "is_baseline": true,
+          "interventions": {
+            "fac_price": 0.245
+          },
+          "ref": "O1"
+        },
+        {
+          "id": "opt_59",
+          "kind": "option",
+          "label": "Raise to £59",
+          "interventions": {
+            "fac_price": 0.295
+          },
+          "ref": "O2"
+        }
+      ],
+      "edges": [
+        {
+          "from": "fac_price",
+          "to": "g_mrr",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.1
+          },
+          "exists_probability": 0.9,
+          "effect_direction": "positive"
+        },
+        {
+          "from": "dec_price",
+          "to": "opt_keep",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive"
+        },
+        {
+          "from": "dec_price",
+          "to": "opt_59",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive"
+        },
+        {
+          "from": "opt_keep",
+          "to": "fac_price",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive"
+        },
+        {
+          "from": "opt_59",
+          "to": "fac_price",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive"
+        }
+      ],
+      "goal_node_id": "g_mrr",
+      "ref_high_water": {
+        "G": 1,
+        "D": 1,
+        "F": 1,
+        "O": 2
+      }
+    },
+    "modelVersion": {
+      "mutation_id": "d689aa57-e131-5478-a236-d04545d74986",
+      "graph_identity_hash": "02f0671476d70cca7586ccddd9701d95d32c4a03f34897f1bb346c7ec1b2475e",
+      "analysis_affecting_hash": "bc9884639dc1aa3f89f3485fd83ff69117728c2981a9e036a24471c083a82dfe",
+      "hash_algorithm": "sha256",
+      "identity_projection_version": "identity.v1",
+      "identity_normaliser_version": "1",
+      "graph_schema_version": "graph_v3",
+      "actor_kind": "unknown",
+      "authored_by": null,
+      "creation_kind": "committed_mutation",
+      "source_turn_id": "graph_registration:079ece38-73be-4cec-b102-1e62b165425c"
+    },
+    "briefText": "Our Pro plan costs £49 a month. Raising it to £59 would lose about 5% of customers. Monthly churn is 3% today.",
+    "pending_actions": [],
+    "expectedGraphIdentityHash": null,
+    "expectedGraphAnalysisHash": null
+  },
+  "register_response": {
+    "schema": "scenario_graph_registration.v1",
+    "scenario_id": "5d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6",
+    "registered": true,
+    "graph_identity_hash": {
+      "kind": "graph_identity_hash",
+      "value": "02f0671476d70cca7586ccddd9701d95d32c4a03f34897f1bb346c7ec1b2475e",
+      "algorithm": "sha256",
+      "projection_version": "identity.v1",
+      "graph_schema_version": "graph_v3",
+      "normaliser_version": "1"
+    },
+    "graph_hash": "bc9884639dc1aa3f",
+    "node_count": 5,
+    "edge_count": 5,
+    "kind_fields_normalised": 0
+  },
+  "read_response_bytes": "{\"schema\":\"scenario_graph.v1\",\"scenario_id\":\"5d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6\",\"graph\":{\"nodes\":[{\"id\":\"g_mrr\",\"kind\":\"goal\",\"label\":\"MRR\",\"ref\":\"G1\"},{\"id\":\"dec_price\",\"kind\":\"decision\",\"label\":\"Pro price\",\"ref\":\"D1\"},{\"id\":\"fac_price\",\"kind\":\"factor\",\"label\":\"Pro plan price\",\"category\":\"controllable\",\"observed_state\":{\"value\":0.245},\"ref\":\"F1\"},{\"id\":\"opt_keep\",\"kind\":\"option\",\"label\":\"Keep £49\",\"is_baseline\":true,\"interventions\":{\"fac_price\":0.245},\"ref\":\"O1\"},{\"id\":\"opt_59\",\"kind\":\"option\",\"label\":\"Raise to £59\",\"interventions\":{\"fac_price\":0.295},\"ref\":\"O2\"}],\"edges\":[{\"from\":\"fac_price\",\"to\":\"g_mrr\",\"strength\":{\"mean\":0.5,\"std\":0.1},\"exists_probability\":0.9,\"effect_direction\":\"positive\"},{\"from\":\"dec_price\",\"to\":\"opt_keep\",\"strength\":{\"mean\":1,\"std\":0.01},\"exists_probability\":1,\"effect_direction\":\"positive\"},{\"from\":\"dec_price\",\"to\":\"opt_59\",\"strength\":{\"mean\":1,\"std\":0.01},\"exists_probability\":1,\"effect_direction\":\"positive\"},{\"from\":\"opt_keep\",\"to\":\"fac_price\",\"strength\":{\"mean\":1,\"std\":0.01},\"exists_probability\":1,\"effect_direction\":\"positive\"},{\"from\":\"opt_59\",\"to\":\"fac_price\",\"strength\":{\"mean\":1,\"std\":0.01},\"exists_probability\":1,\"effect_direction\":\"positive\"}],\"goal_node_id\":\"g_mrr\",\"ref_high_water\":{\"G\":1,\"D\":1,\"F\":1,\"O\":2}},\"graph_present\":true,\"brief_text\":\"Our Pro plan costs £49 a month. Raising it to £59 would lose about 5% of customers. Monthly churn is 3% today.\",\"graph_identity_hash\":{\"kind\":\"graph_identity_hash\",\"value\":\"02f0671476d70cca7586ccddd9701d95d32c4a03f34897f1bb346c7ec1b2475e\",\"algorithm\":\"sha256\",\"projection_version\":\"identity.v1\",\"graph_schema_version\":\"graph_v3\",\"normaliser_version\":\"1\"},\"graph_hash\":\"bc9884639dc1aa3f\",\"layout_present\":false,\"not_modelled\":{\"schema\":\"not_modelled.v1\",\"status\":\"derived\",\"unavailable_reason\":null,\"scope\":{\"searched\":\"quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods\",\"model_surface\":[\"node and option values, caps, units, labels and encoding maps\"],\"prose_surface\":[\"coaching cards\",\"draft warnings\",\"validation warnings\"],\"excluded_from_search\":[\"bare numbers carrying no unit, currency or percent sign\",\"everything in not_tracked\"]},\"quantities\":{\"total\":4,\"in_model\":0,\"in_model_anchored\":0,\"in_model_unanchored\":0,\"prose_only\":2,\"absent\":2,\"truncated\":false,\"items\":[{\"literal\":\"£49\",\"kind\":\"money\",\"char_offset\":19,\"verdict\":\"prose_only\",\"matched_node_id\":null,\"stated_kind\":\"figure\",\"reason\":\"no_executable_quantity_carrier\"},{\"literal\":\"£59\",\"kind\":\"money\",\"char_offset\":46,\"verdict\":\"prose_only\",\"matched_node_id\":null,\"stated_kind\":\"figure\",\"reason\":\"no_executable_quantity_carrier\"},{\"literal\":\"5%\",\"kind\":\"percent\",\"char_offset\":67,\"verdict\":\"absent\",\"matched_node_id\":null,\"stated_kind\":\"figure\",\"reason\":\"no_executable_quantity_carrier\"},{\"literal\":\"3%\",\"kind\":\"percent\",\"char_offset\":101,\"verdict\":\"absent\",\"matched_node_id\":null,\"stated_kind\":\"figure\",\"reason\":\"no_executable_quantity_carrier\"}]},\"stated_kinds\":{\"status\":\"derived\",\"tally\":{\"goal\":0,\"option\":0,\"constraint\":0,\"figure\":4,\"evidence\":0,\"assumption\":0,\"disagreement\":0,\"correction\":0},\"sourced\":[\"constraint\",\"figure\"],\"unsourced\":[\"goal\",\"option\",\"evidence\",\"assumption\",\"disagreement\",\"correction\"],\"producers\":{\"figure\":\"extractStatedQuantities (this module) — quantities stated in the brief\",\"constraint\":\"graph.goal_constraints[] with source_quote (draft/anthropic-graph-schema.ts:447-467)\"}},\"declared_exclusions\":{\"status\":\"not_recorded\",\"items\":[]},\"inferred_factors\":{\"status\":\"derived\",\"items\":[{\"node_id\":\"fac_price\",\"label\":\"Pro plan price\"}]},\"not_tracked\":[\"competing_or_dissenting_proposals\",\"corrections_and_second_thoughts\",\"named_evidence_sources_and_their_pedigree\",\"qualitative_constraints_and_rules\",\"stated_confidence_and_self_flagged_weakness\",\"statements_the_drafting_model_did_not_report_discarding\"]},\"analysis_state\":{\"run_state\":{\"kind\":\"unknown_degraded\",\"cause\":\"store_unreadable\"},\"readiness\":{\"status\":\"ready\",\"blockers\":[]},\"leader_claim\":{\"permitted\":false,\"withheld_reason\":\"constraint_verdict_withheld\"},\"robustness\":{},\"usable_for_prose\":false,\"usable_for_chips\":false,\"usable_for_followup\":false,\"requires_rerun\":false,\"blocked_unusable\":false,\"contradictions\":[]},\"analysis_result\":null,\"current_read\":{\"run_state\":{\"kind\":\"unknown_degraded\",\"cause\":\"store_unreadable\"},\"computed_against_hash\":null,\"current_analysis_hash\":\"bc9884639dc1aa3f\",\"figures\":[]},\"analysis_identity_run_use\":null,\"analysis_admission\":{\"admitted\":true,\"permitted_analysis_mode\":\"quantified_provisional\",\"semantic_quality_sufficient\":false,\"reason_codes\":[\"READY_TO_COMPARE\",\"CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED\"],\"missing_input_codes\":[],\"missing_input_count\":0,\"inputs_demanded_of_user\":0,\"inputs_waived_by_exclusion\":0,\"graph_hash\":\"bc9884639dc1aa3f89f3485fd83ff69117728c2981a9e036a24471c083a82dfe\",\"semantic_signals\":{\"material_parameters_awaiting_user_node_ids\":[\"fac_price\"]}}}"
+}

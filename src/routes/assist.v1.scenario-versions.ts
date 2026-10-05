@@ -138,6 +138,7 @@ import {
   CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
 } from "../orchestrator/route-v2-preflight.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { omitStatedDispositions } from "../schemas/graph-stated-dispositions.js";
 import { raiseRefHighWaterForRestore } from "../orchestrator-v5/graph/entity-refs.js";
 import { assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
 import {
@@ -1067,7 +1068,9 @@ export default async function route(app: FastifyInstance) {
       // The restored refs come back exactly (a restored node brings its own ref); only `ref_high_water` rises to cover
       // everything the current graph issued, so the next new entity never reuses a number. The counter is outside the
       // identity hash, so these bytes still bind to the target version (`graph/entity-refs.ts`).
-      const graphForStore = raiseRefHighWaterForRestore(projectGraphForPersistence(parsedGraph.data, {
+      // ⛔ `graph.stated_dispositions` has ONE writer, the register route (DL ruling 5 Oct 2026). A restore is another
+      // writer: it drops the records compiler's receipt the version snapshot carries rather than re-advertising it.
+      const graphForStore = raiseRefHighWaterForRestore(projectGraphForPersistence(omitStatedDispositions(parsedGraph.data), {
         scenarioId: ctx.scenarioId,
         turnClass: "direct_answer",
         source: "version_restore",

@@ -89,6 +89,8 @@ export interface FactorScaleInfo {
   readonly cap?: number;
   readonly unit?: string;
   readonly normalisedConvention?: boolean;
+  /** The factor's CURRENT raw level (observed_state.raw_value), read only to resolve a `change_by` (P2-A1). */
+  readonly baselineRaw?: number;
 }
 
 /**
@@ -260,6 +262,15 @@ export function resolveRawInterventionValue(
       codeNotMagnitude: true,
       ...(encodedAdmissibility === 'inadmissible' ? { invalidEncodedContract: true } : {}),
     };
+  }
+  // ⭐ P2-A1: a delta option (`change_by`) is a CHANGE of its factor, resolved HERE, at Run assembly, against the
+  // factor's CURRENT raw baseline, so a user's baseline edit moves it with the baseline instead of freezing it into
+  // a no-op. With no current raw baseline the compile-time absolute stands (never a zero baseline).
+  const changeBy = coerceFiniteNumber(obj.change_by);
+  if (changeBy !== undefined && factor?.baselineRaw !== undefined) {
+    const resolvedRaw = factor.baselineRaw + changeBy;
+    const cap = factor.cap;
+    return scaleNumeric(isFiniteNumber(cap) && cap > 0 ? resolvedRaw / cap : resolvedRaw, resolvedRaw, factor);
   }
   // Coerce raw_value to a number (accepts numeric strings like "5000"); a
   // non-numeric string falls through to the factor-evidence path.
@@ -441,6 +452,7 @@ export function buildFactorScaleMap(nodes: unknown): ReadonlyMap<string, FactorS
       ...(cap !== undefined ? { cap } : {}),
       ...(unit !== undefined ? { unit } : {}),
       ...(normalisedConvention ? { normalisedConvention: true } : {}),
+      ...(baselineRaw !== undefined ? { baselineRaw } : {}),
     };
     map.set(id, info);
   }

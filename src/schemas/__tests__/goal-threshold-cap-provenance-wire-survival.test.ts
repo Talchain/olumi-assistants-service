@@ -227,7 +227,8 @@ describe('⭐ THE MINT — the live £20k case, end to end through the projector
   it('£20,000 mints cap 25,000 — and DISCLOSES that the target produced it', () => {
     const goal = goalOf({
       stated_items: [
-        { kind: 'goal', source_quote: GOAL_QUOTE, role: 'target' },
+        // Typed target authority replaces extraction from prose; the exact cap assertion stays unchanged.
+        { kind: 'goal', source_quote: GOAL_QUOTE, role: 'target', value: 20_000, unit: '£' },
         { kind: 'option', source_quote: 'increase the Pro plan price from £49 to £59' },
         { kind: 'option', source_quote: 'hold the Pro plan price' },
       ],

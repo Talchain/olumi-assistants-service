@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { buildModelFromRecords, buildStrictDraftRecordsSchema, omitOptionalRecordNulls } from '../../../../../orchestrator-v5/agent-lane/runtime/build-model-from-records.js';
 import { constructionOperationId, strictForTheDrafter, type CallStructuredModel } from '../../../../../orchestrator-v5/agent-lane/runtime/build-model.js';
 import type { InternalDispatch } from '../../../../../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
-import { DRAFT_RECORDS_INSTRUCTION } from '../../instruction.js';
+import { V_NEXT_DRAFT_RECORDS_INSTRUCTION as DRAFT_RECORDS_INSTRUCTION } from '../../instruction-vnext.js';
 import { projectDraftRecords } from '../../seam.js';
 import { projectGraphForPersistence } from '../../../../../orchestrator-v5/persisted-graph-projection.js';
 import { assignEntityRefs } from '../../../../../orchestrator-v5/graph/entity-refs.js';
@@ -13,7 +13,8 @@ import { resolveAnalysisAdmission } from '../../../../../orchestrator-v5/admissi
 import { GraphV3, type GraphV3T } from '../../../../../schemas/cee-v3.js';
 import { GraphStateIngressSchema } from '../../../../../orchestrator-v5/boundary/request-extensions.js';
 import { deriveNotModelledManifest } from '../../../../context-integrity/not-modelled-manifest.js';
-import { BRIEF, sealedRecords } from './sealed-fixture.js';
+// The strict attach site now accepts v-next literals; legacy draws have their own replay rows.
+import { BRIEF, sealedRecordsVNext as sealedRecords } from './sealed-fixture-vnext.js';
 
 const SCENARIO = '11111111-1111-4111-8111-111111111111';
 type RegisterBody = { graph: GraphV3T; brief_text: string; operation_id: string; expected_graph_identity_hash: null };
@@ -73,7 +74,7 @@ describe('Agent-route records bridge', () => {
       if (Array.isArray(value)) return value.map(item => materialise(item, shape.items));
       if (!shape.properties || value === null || typeof value !== 'object') return value;
       return Object.fromEntries(Object.entries(shape.properties).map(([key, child]) => [key,
-        key in value ? materialise((value as Record<string, unknown>)[key], child as Record<string, any>) : null]));
+        (key in value && (value as Record<string, unknown>)[key] !== undefined) ? materialise((value as Record<string, unknown>)[key], child as Record<string, any>) : null]));
     };
     const response = materialise(sealedRecords(), schema);
     expect(validate(response), JSON.stringify(validate.errors)).toBe(true);
@@ -128,12 +129,16 @@ describe('Sealed M1/M2 compile', () => {
     expect(testability).toMatchObject({ kind: 'testable' });
     expect(JSON.stringify(admission)).not.toContain('TARGET_NOT_TESTABLE');
     expect(figures).toEqual({ 'raise prices by 10%': 126000, 'launch a starter tier at £49 a month': 127350, 'keep pricing as it is': 120000 });
-    for (const index of [8, 9, 10, 12, 13]) {
+    // P2-0 (pass 2): the support-cost clause (13) sizes an outcome outside the gross-MRR goal, so the connectivity
+    // prune now withdraws it with its £6 disclosed (vnext-rows P2-0); readiness no longer refuses the whole model.
+    expect(admission.permitted_analysis_mode).not.toBe('none');
+    expect(graph.edges.some(edge => edge.provenance?.source_quote === sealedRecords().stated_items[13]!.source_quote)).toBe(false);
+    for (const index of [8, 9, 10, 12]) {
       const stated = sealedRecords().stated_items[index]!;
       const authority = stated.relationship!;
       const edge = graph.edges.find(edge => edge.provenance?.source_quote === stated.source_quote);
       expect(edge?.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: stated.source_quote, natural_effect: {
-        amount: authority.amount, amount_unit: authority.amount_unit, per_source_change: 1, per_source_change_unit: authority.per_source_change_unit,
+        amount: authority.amount, amount_unit: sealedRecords().stated_items[authority.to_quantity]!.unit, per_source_change: 1, per_source_change_unit: sealedRecords().stated_items[authority.from_quantity]!.unit,
       } });
     }
   });

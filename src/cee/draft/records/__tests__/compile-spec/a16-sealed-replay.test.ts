@@ -46,10 +46,14 @@ describe('A16 banked sealed compile → registered → stored carriers (zero pro
       expect(location.path.length === 0 ? { id: (carrier as { id: string }).id } : readPath(carrier, location.path)).toEqual(row.stored_value);
     }
     expect(reconcileStatedDispositions(rows, stored)).toEqual(rows);
-    // No declared graph field exists for the receipts. The registration sidecar
-    // is deliberately excluded from GET-shaped storage, and schema extension is forbidden here.
+    // The receipts ride the register SIDECAR, never the submitted graph; the register route is the one writer of
+    // `graph.stated_dispositions` (DL ruling 5 Oct 2026). CEE GraphV3 now DECLARES the key, so every real receipt
+    // from the sealed draws must survive a strict GraphV3 read verbatim — a stripped or rewritten row would be lost
+    // on the first read after registration.
     expect(stored).not.toHaveProperty('stated_dispositions');
-    expect(GraphV3.parse({ ...stored, stated_dispositions: rows })).not.toHaveProperty('stated_dispositions');
+    // P1: the stored receipt is bound to the identity of the graph it was reconciled against.
+    const bound = { reconciled_against: 'a'.repeat(64), rows };
+    expect(GraphV3.parse({ ...stored, stated_dispositions: bound }).stated_dispositions).toEqual(bound);
 
     const row = (index: number) => rows[index];
     const goalId = draw === 3 ? '6144a59c' : '876e0d81';
@@ -61,20 +65,26 @@ describe('A16 banked sealed compile → registered → stored carriers (zero pro
     if (draw !== 3) {
       expect(row(0)).toMatchObject({ stated_index: 0, disposition: 'carried', location: { kind: 'node', node_id: goalId, path: ['observed_state', 'raw_value'] }, stored_value: 120000 });
       expect(row(1)).toMatchObject({ stated_index: 1, disposition: 'rejected', reason: 'unconnected_to_goal' });
-      expect(row(4)).toMatchObject({ stated_index: 4, disposition: 'rejected', reason: 'stated_value_not_carried' });
+      // B2 names the undeclared lever; B5 names draw 2's existing non-whole offset. Neither may earn a setting.
+      expect(row(4)).toMatchObject({ stated_index: 4, disposition: 'rejected', reason: draw === 1 ? 'option_lever_undeclared' : 'literal_not_whole_amount' });
     }
     if (draw === 1) {
       expect(row(13)).toMatchObject({ stated_index: 13, disposition: 'carried', location: { kind: 'edge', from: '19b1afd6', to: '1d05778b' }, stored_value: { amount: 6, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: 'subscribers' } });
       // A2 preserves this measurement instead of merging it into stated_items[8].
       expect(replay.projection.graph.nodes.find(n => n.id === '56015172')).toMatchObject({ kind: 'factor', quantity_ref: 3, data: { unit: '%' } });
     } else if (draw === 2) {
-      expect(row(10)).toMatchObject({ stated_index: 10, disposition: 'carried', location: { kind: 'edge', from: 'dd58e25f', to: '3c450669' }, stored_value: { amount: -300, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: 'customers' } });
-      expect(row(12)).toMatchObject({ stated_index: 12, disposition: 'carried', location: { kind: 'edge', from: '3b5eec5e', to: '7b510c7f' }, stored_value: { amount: 49 } });
+      // B4 refuses both relationships targeting the ambiguous q0 claim carriers, never choosing an alias.
+      for (const index of [10, 12]) {
+        expect(row(index)).toMatchObject({ stated_index: index, disposition: 'rejected', reason: 'relationship_endpoint_ambiguous' });
+        expect(stored.edges.filter(e=>e.provenance?.source_quote===records.stated_items[index]!.source_quote && e.provenance?.natural_effect)).toHaveLength(0);
+      }
       expect(replay.projection.graph.nodes.find(n => n.id === goalId)?.quantity_ref).toBe(0);
     } else {
       expect(row(0)).toMatchObject({ stated_index: 0, disposition: 'rejected', reason: 'unconnected_to_goal' });
       expect(row(13)).toMatchObject({ stated_index: 13, disposition: 'carried', location: { kind: 'node', node_id: '22ae8802', path: ['interventions', '19b1afd6', 'raw_value'] }, stored_value: 150 });
-      expect(row(15)).toMatchObject({ stated_index: 15, disposition: 'carried', location: { kind: 'edge', from: '19b1afd6', to: '2c9b42d4' }, stored_value: { amount: 49 } });
+      // B4 refuses the two q0 claim carriers instead of choosing the old endpoint by emission order.
+      expect(row(15)).toMatchObject({ stated_index: 15, disposition: 'rejected', reason: 'relationship_endpoint_ambiguous' });
+      expect(stored.edges.filter(e=>e.provenance?.source_quote===records.stated_items[15]!.source_quote && e.provenance?.natural_effect)).toHaveLength(0);
     }
   });
 });

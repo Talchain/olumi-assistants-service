@@ -32,18 +32,29 @@
  */
 import { z } from "zod";
 import {
-  buildDraftRecordsSchema,
+  buildVNextDraftRecordsSchema,
   DRAFT_RECORD_CATEGORIES,
   DRAFT_RECORD_CLAIM_KINDS,
   DRAFT_RECORD_DIRECTIONS,
   DRAFT_RECORD_EFFECTS,
+  DRAFT_RECORD_OPTION_SETTINGS,
   DRAFT_RECORD_ROLES,
   DRAFT_RECORD_STATED_KINDS,
   DRAFT_RECORD_VALUE_SCALES,
   type DraftRecordSet,
+  type DraftValueRange,
 } from "./grammar.js";
 import { projectRecordsToGraph, type RecordProjection } from "./projector.js";
 import { log } from "../../../utils/telemetry.js";
+
+/** Compatibility input only. The v-next schema never asks a model to repeat an effect. */
+export interface LegacyEffectDetail {
+  amount: number;
+  amount_unit: string;
+  per_source_change: number;
+  per_source_change_unit: string;
+  range?: DraftValueRange;
+}
 
 /**
  * The CEE-INTERNAL validator for what came back off the wire.
@@ -58,19 +69,25 @@ import { log } from "../../../utils/telemetry.js";
 // Decode typed offsets; nonempty, located spans earn authority only at the evidence guard.
 const QuoteSpanWire = z.object({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative() });
 const ValueRangeWire = z.object({
-  low: z.number().finite(), high: z.number().finite(), unit: z.string(), meaning: z.enum(["min_max", "likely_range"]).optional(),
-  low_span: QuoteSpanWire, high_span: QuoteSpanWire,
+  low: z.number().finite(), high: z.number().finite(), unit: z.string().optional(), low_literal: z.string().optional(), high_literal: z.string().optional(), meaning: z.enum(["min_max", "likely_range"]).optional(),
+  low_span: QuoteSpanWire.optional(), high_span: QuoteSpanWire.optional(),
 });
 const StatedRelationshipWire = z.object({
   from_quantity: z.number().int().nonnegative(), to_quantity: z.number().int().nonnegative(),
-  amount: z.number().finite(), amount_unit: z.string(),
-  per_source_change: z.number().finite(), per_source_change_unit: z.string(),
-  amount_span: QuoteSpanWire, source_span: QuoteSpanWire,
+  amount: z.number().finite().optional(), amount_unit: z.string().optional(),
+  amount_literal: z.string().optional(), range: ValueRangeWire.optional(),
+  per_source_change: z.number().finite().optional(), per_source_change_unit: z.string().optional(),
+  per_source_literal: z.string().optional(), no_effect_literal: z.string().optional(),
+  amount_span: QuoteSpanWire.optional(), source_span: QuoteSpanWire.optional(),
 });
 const StatedItemWire = z.object({
   kind: z.enum(DRAFT_RECORD_STATED_KINDS),
   source_quote: z.string(),
   value: z.number().optional(),
+  value_literal: z.string().optional(), unit_literals: z.array(z.string()).optional(), direction_literal: z.string().optional(),
+  setting: z.enum(DRAFT_RECORD_OPTION_SETTINGS).optional(),
+  plausible_max: z.number().optional(),
+  legacy_evidence: z.literal(true).optional(), evidence_conflicts: z.array(z.string()).optional(),
   value_span: QuoteSpanWire.optional(), unit_span: QuoteSpanWire.optional(),
   baseline: z.number().optional(),
   quantity: z.number().int().nonnegative().optional(),
@@ -156,6 +173,7 @@ const InferenceClaimWire = z.object({
   from_claim: z.number().int().optional(),
   to_stated: z.number().int().optional(),
   to_claim: z.number().int().optional(),
+  change_of: z.number().int().optional(),
   effect: z.enum(DRAFT_RECORD_EFFECTS).optional(),
   quantity: z.number().int().nonnegative().optional(),
   range: ValueRangeWire.optional(),
@@ -310,7 +328,7 @@ export function projectDraftRecords(
         `edges=${Array.isArray(rec.edges) ? rec.edges.length : "absent"}) instead of a record set`,
     };
   }
-  const parsed = DraftRecordSetWire.safeParse(rawJson);
+  const parsed = DraftRecordSetWire.safeParse(upgradeLegacyRecords(rawJson));
   if (!parsed.success) {
     const flat = parsed.error.flatten();
     const fieldIssues = Object.entries(flat.fieldErrors || {})
@@ -334,6 +352,13 @@ export function projectDraftRecords(
       kind: item.kind,
       source_quote: item.source_quote,
       ...(item.value !== undefined ? { value: item.value } : {}),
+      ...(item.value_literal !== undefined ? { value_literal: item.value_literal } : {}),
+      ...(item.unit_literals !== undefined ? { unit_literals: item.unit_literals } : {}),
+      ...(item.direction_literal !== undefined ? { direction_literal: item.direction_literal } : {}),
+      ...(item.setting !== undefined ? { setting: item.setting } : {}),
+      ...(item.plausible_max !== undefined ? { plausible_max: item.plausible_max } : {}),
+      ...(item.legacy_evidence !== undefined ? { legacy_evidence: item.legacy_evidence } : {}),
+      ...(item.evidence_conflicts !== undefined ? { evidence_conflicts: item.evidence_conflicts } : {}),
       ...(item.value_span !== undefined ? { value_span: item.value_span } : {}),
       ...(item.unit_span !== undefined ? { unit_span: item.unit_span } : {}),
       ...(item.baseline !== undefined ? { baseline: item.baseline } : {}),
@@ -360,6 +385,7 @@ export function projectDraftRecords(
       ...(claim.from_claim !== undefined ? { from_claim: claim.from_claim } : {}),
       ...(claim.to_stated !== undefined ? { to_stated: claim.to_stated } : {}),
       ...(claim.to_claim !== undefined ? { to_claim: claim.to_claim } : {}),
+      ...(claim.change_of !== undefined ? { change_of: claim.change_of } : {}),
       ...(claim.effect !== undefined ? { effect: claim.effect } : {}),
       ...(claim.effect_detail !== undefined ? { effect_detail: claim.effect_detail } : {}),
       ...(claim.quantity !== undefined ? { quantity: claim.quantity } : {}),
@@ -500,7 +526,7 @@ export function projectDraftRecords(
     "Draft record set accepted at the seam",
   );
 
-  return { ok: true, records, projection: projectRecordsToGraph(records, brief) };
+  return { ok: true, records, projection: projectRecordsToGraph(records, brief, undefined, rawJson as DraftRecordSet) };
 }
 
 /**
@@ -567,7 +593,7 @@ function propertiesOf(schema: unknown, path: readonly string[]): Record<string, 
 }
 
 export function findGrammarFieldsDroppedBySeam(): { claims: string[]; statedItems: string[] } {
-  const schema = buildDraftRecordsSchema();
+  const schema = buildVNextDraftRecordsSchema();
   const statedProps = propertiesOf(schema, ["properties", "stated_items", "items", "properties"]);
   const claimProps = propertiesOf(schema, ["properties", "claims", "items", "properties"]);
 
@@ -612,4 +638,51 @@ export function isSalvageableRecordSet(value: unknown): boolean {
   if (value === null || typeof value !== "object") return false;
   const rec = value as Record<string, unknown>;
   return Array.isArray(rec.stated_items) && rec.stated_items.length > 0;
+}
+
+/** V-current spans are checked inputs, not a second extraction route. No figure is inferred. */
+export function upgradeLegacyRecords(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const record = raw as Record<string, unknown>;
+  if (!Array.isArray(record.stated_items)) return raw;
+  const copy = structuredClone(record);
+  const clean=(owner:Record<string,unknown>,shape:Record<string,z.ZodTypeAny>)=>{for(const key of Object.keys(owner))if(owner[key]===null && shape[key]?.isOptional())delete owner[key];};
+  copy.stated_items = (copy.stated_items as Record<string, unknown>[]).map(item => {
+    clean(item,StatedItemWire.shape);
+    if(item.range && typeof item.range==='object')clean(item.range as Record<string,unknown>,ValueRangeWire.shape);
+    if(item.relationship && typeof item.relationship==='object'){
+      clean(item.relationship as Record<string,unknown>,StatedRelationshipWire.shape);
+      const range=(item.relationship as Record<string,unknown>).range;
+      if(range && typeof range==='object')clean(range as Record<string,unknown>,ValueRangeWire.shape);
+    }
+    const quote = typeof item.source_quote === "string" ? item.source_quote : "";
+    const conflicts: string[] = [];
+    let legacy = false;
+    const convert = (owner: Record<string, unknown>, spanKey: string, literalKey: string, array = false) => {
+      const span = owner[spanKey] as { start?: unknown; end?: unknown } | undefined;
+      if (span === undefined || span === null) return;
+      legacy = true;
+      if (owner[literalKey] !== undefined) { conflicts.push("span_and_literal_both"); return; }
+      if (typeof span.start === "number" && typeof span.end === "number" && Number.isInteger(span.start) && Number.isInteger(span.end)
+        && span.start >= 0 && span.end > span.start && span.end <= quote.length) {
+        const literal = quote.slice(span.start, span.end);
+        owner[literalKey] = array ? [literal] : literal;
+      }
+    };
+    convert(item, "value_span", "value_literal"); convert(item, "unit_span", "unit_literals", true); convert(item, "direction_span", "direction_literal");
+    const convertRange = (r: unknown) => { if (r && typeof r === "object") { convert(r as Record<string, unknown>, "low_span", "low_literal"); convert(r as Record<string, unknown>, "high_span", "high_literal"); } };
+    convertRange(item.range);
+    if (item.relationship && typeof item.relationship === "object") {
+      const r = item.relationship as Record<string, unknown>;
+      convert(r, "amount_span", "amount_literal"); convert(r, "source_span", "per_source_literal"); convertRange(r.range);
+    }
+    return { ...item, ...(legacy ? { legacy_evidence: true } : {}), ...(conflicts.length ? { evidence_conflicts: conflicts } : {}) };
+  });
+  if(Array.isArray(copy.claims))for(const claim of copy.claims as Record<string,unknown>[]){
+    clean(claim,InferenceClaimWire.shape);
+    if(claim.range && typeof claim.range==='object')clean(claim.range as Record<string,unknown>,ValueRangeWire.shape);
+    const detail=claim.effect_detail as Record<string,unknown> | undefined;
+    if(detail?.range===null)delete detail.range;
+  }
+  return copy;
 }

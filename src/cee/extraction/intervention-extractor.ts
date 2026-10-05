@@ -73,6 +73,8 @@ export interface EdgeHint {
 export interface V4InterventionBinding {
   range?: InterventionV3T["range"];
   raw_value: number;
+  /** P2-A1: a records-path `change_by` option's signed change; resolved against the current baseline at Run time. */
+  change_by?: number;
   unit?: string;
   source: "brief_extraction" | "cee_hypothesis";
   reasoning: string;
@@ -1163,6 +1165,7 @@ function buildInterventionsFromV4Data(
       interventions[factorId] = {
         value,
         ...(rawIsFinite ? { raw_value: carriedRaw } : {}),
+        ...(binding?.change_by !== undefined ? { change_by: binding.change_by } : {}),
         unit: binding?.unit ?? unit ?? statedDenomination?.unit,
         source: earnsBriefClaim ? "brief_extraction" : "cee_hypothesis",
         target_match: {

@@ -106,10 +106,15 @@ import { generateConstraintId } from "../../compound-goal/extractor.js";
 import { classifyUnitScaleClass } from "./unit-scale-class.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
+import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/placeholder-parts.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
+import { statedRangeFrame } from "../../../orchestrator-v5/agent-lane/frame-rule.js";
+// The readiness validator's own exemptions from NO_PATH_TO_GOAL, read here so the prune and readiness share one rule.
+import { limitSinkBranch } from "../../../graph/limit-sink-branch.js";
+import { inertRiskBranch } from "../../../graph/inert-risk.js";
 import { admitGoalBaseline } from "../../factor-extraction/goal-baseline-admissibility.js";
-import { admittedValueRange, statedValueIsBound } from "./quantity-evidence.js";
-import { statedEffectQuoteMatches } from "../../provenance/stated-effect.js";
+import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits, literalConventionValue, locateLiteral } from "./quantity-evidence.js";
+import { statedEffectQuoteMatches, statedEffectUnitsMatch } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
 import { sizeLink, resolveMagnitudeFrame, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
 import type { InterventionV3T } from "../../../schemas/cee-v3.js";
@@ -484,6 +489,19 @@ export interface DroppedRecordRef {
   /** The unit the user stated, alongside `value`. Same conditions, same source. */
   readonly unit?: string;
   readonly reason:
+    | "user_stated_no_effect" | "no_effect_with_amount"
+    | "change_of_index_invalid" | "change_of_self" | "change_of_unit_mismatch" | "change_of_horizon_mismatch" | "change_of_target_not_quantity" | "change_of_not_definitional"
+    | "range_bounds_inverted" | "range_excludes_point" | "range_straddles_zero" | "relationship_unsized"
+    | "option_lever_undeclared" | "option_lever_is_goal" | "option_value_unbound" | "option_lever_link_conflict" | "lever_endpoint_ambiguous"
+    // P2-A1: a `change_by` option whose lever has no stated current level. Unknown is an ask, never a zero baseline.
+    | "option_change_by_baseline_unknown"
+    // P2-B6x (a994c38a): a deadline goal that names no measurable quantity. An ASK for the quantity, never a guess
+    // and never a default "higher is better" direction.
+    | "goal_quantity_missing"
+    | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
+    | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
+    | import("./quantity-evidence.js").UnitRefusal
+    | import("./quantity-evidence.js").LiteralRefusal
     | "unparseable_ref"
     | "ref_out_of_range"
     | "ref_target_not_a_node"
@@ -1651,32 +1669,30 @@ function quotedEffectForEdge(args: {
   readonly nodes: readonly ProjectedNode[];
   readonly statedItems: readonly DraftStatedItem[];
   readonly brief: string;
-}): { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; authority: NonNullable<DraftStatedItem["relationship"]>; stated_range?: StatedRangeEnd } | undefined {
+  readonly carrierForQuantity: (q:number)=>string|undefined;
+}): { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; authority: NonNullable<DraftStatedItem["relationship"]>; stated_range?: StatedRangeEnd; amount_range?: {low:number;high:number} } | undefined {
   const { edge, claim, nodes, statedItems, brief } = args;
   const source = nodes.find((node) => node.id === edge.from);
   const target = nodes.find((node) => node.id === edge.to);
   if (source === undefined || target === undefined) return undefined;
-  const detail = claim?.effect_detail;
-  if (claim?.claim_kind !== "causal_link" || detail === undefined) return undefined;
-  const basis = [...new Set(claim.basis ?? [])];
-  if (basis.length !== 1 || !Number.isInteger(basis[0])) return undefined;
-  const item = statedItems[basis[0]!];
-  const quote = item?.source_quote;
-  const authority = item?.relationship;
-  if (item?.kind !== "cause" || authority === undefined || typeof quote !== "string" || quote.length === 0 || !brief.includes(quote)) return undefined;
-  // Endpoint identity is compulsory even for singleton effects; labels supply nothing.
-  if (source.quantity_ref !== authority.from_quantity || target.quantity_ref !== authority.to_quantity) return undefined;
-  const fromQuantity = statedItems[authority.from_quantity];
-  const toQuantity = statedItems[authority.to_quantity];
-  if (fromQuantity?.unit === undefined || toQuantity?.unit === undefined
-    || !brief.includes(fromQuantity.source_quote) || !brief.includes(toQuantity.source_quote)
-    || !sameUnit(fromQuantity.unit, detail.per_source_change_unit) || !sameUnit(toQuantity.unit, detail.amount_unit)) return undefined;
-  return { ...detail, quote, authority };
+  if(source.quantity_ref===undefined || target.quantity_ref===undefined
+    || args.carrierForQuantity(source.quantity_ref)!==source.id || args.carrierForQuantity(target.quantity_ref)!==target.id)return undefined;
+  const entries = statedItems.filter(item => item.kind === "cause" && item.relationship?.from_quantity === source.quantity_ref
+    && item.relationship?.to_quantity === target.quantity_ref && item.source_quote.length > 0 && brief.includes(item.source_quote));
+  if(entries.length !== 1) return undefined;
+  const item=entries[0]!, authority=item.relationship!, quote=item.source_quote;
+  if(authority.amount === undefined || authority.per_source_change === undefined || authority.amount_unit === undefined || authority.per_source_change_unit === undefined) return undefined;
+  const detail=claim?.effect_detail;
+  if(detail !== undefined && (detail.amount !== authority.amount || detail.per_source_change !== authority.per_source_change
+    || !sameUnit(detail.amount_unit,authority.amount_unit) || !sameUnit(detail.per_source_change_unit,authority.per_source_change_unit))) return undefined;
+  return { amount:authority.amount,amount_unit:authority.amount_unit,per_source_change:authority.per_source_change,
+    per_source_change_unit:authority.per_source_change_unit,quote,authority, ...(authority.range!==undefined ? {amount_range:{low:authority.range.low,high:authority.range.high}} : {}) };
+
 }
 
 interface StatedEdgeEffectCandidate {
   readonly edge: ProjectedEdge;
-  readonly claim: DraftInferenceClaim;
+  readonly claim: DraftInferenceClaim | undefined;
   readonly effect: NonNullable<ReturnType<typeof quotedEffectForEdge>>;
 }
 
@@ -1690,7 +1706,7 @@ function effectForEdge(
   if (pairs.size > 1) return undefined;
   if (!statedEffectQuoteMatches(effect.quote, effect, effect.authority)) return undefined;
   const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? "negative" : "positive";
-  if (claim.effect !== direction) return undefined;
+  if ((claim?.effect ?? candidate.edge.effect_direction) !== direction) return undefined;
   return effect;
 }
 
@@ -1772,6 +1788,8 @@ interface ProjectedInterventionBinding {
   readonly stated_index?: number;
   readonly range?: InterventionV3T["range"];
   readonly raw_value: number;
+  /** P2-A1: the signed change a `change_by` option makes to its lever; `raw_value` is its compile-time absolute. */
+  readonly change_by?: number;
   readonly unit?: string;
   readonly source: "brief_extraction" | "cee_hypothesis";
   readonly reasoning: string;
@@ -2153,7 +2171,7 @@ function bindDirectStatedMagnitude(args: {
     bindingEarnsBriefClaim(
       bindStatedItemToBrief({
         quote: item.source_quote,
-        value: item.value,
+        value: item.value === undefined ? undefined : literalConventionValue(item.value,item.unit,item.value_scale),
         unit: item.unit,
         brief,
       }),
@@ -2202,7 +2220,7 @@ function bindDirectStatedMagnitude(args: {
     };
   }
 
-  const ownedRange = admittedValueRange(claim.range ?? item.range, item.source_quote, claim.sets_to, item.unit);
+  const ownedRange = admittedValueRange(claim.range ?? item.range, item.source_quote, claim.sets_to, item.unit, item.legacy_evidence);
   return {
     stated_index: index,
     raw_value: claim.sets_to,
@@ -2700,9 +2718,9 @@ function projectOnce(
     // What it never knew is whether the brief SAYS this, and that is the thing
     // the user reads off the badge. Derived here, at the brief's bytes, by the
     // one authority the response transform also uses.
-    const briefBinding = statedValueIsBound(item, brief) ? "verified" : bindStatedItemToBrief({
+    const briefBinding = item.value_literal!==undefined ? (statedValueIsBound(item,brief) ? "verified" : "unverified") : bindStatedItemToBrief({
       quote: item.source_quote,
-      value: item.value,
+      value: item.value === undefined ? undefined : literalConventionValue(item.value,item.unit,item.value_scale),
       unit: item.unit,
       brief,
     });
@@ -3019,7 +3037,7 @@ function projectOnce(
       // a factor carrying constraint metadata matches NEITHER union branch and
       // 400s. Unit lives on `data`, never here.
       const statedRange = bindingEarnsBriefClaim(briefBinding)
-        ? admittedValueRange(item.range, item.source_quote, item.value, item.unit) : undefined;
+        ? admittedValueRange(item.range, item.source_quote, item.value, item.unit, item.legacy_evidence) : undefined;
       node.observed_state = {
         value: item.value,
         raw_value: item.value,
@@ -3097,7 +3115,7 @@ function projectOnce(
     // explicit `false` is carried as faithfully as a `true`, because "the model
     // considered this and said no" and "the model never spoke" are different
     // facts and the consumer distinguishes them (`analysis-ready-helper.ts:276`).
-    if (item.quantity !== undefined) node.quantity_ref = item.quantity;
+    if (kind !== "option" && item.quantity !== undefined) node.quantity_ref = item.quantity;
     if (kind === "option" && typeof item.is_baseline === "boolean") {
       node.is_baseline = item.is_baseline;
     }
@@ -3403,12 +3421,9 @@ function projectOnce(
         // alone does not attest the subject, measurement or current-value role.
         // raw_value is the display magnitude, not a second calculation value.
         // Derive it only from the producer's declared convention, never size.
-        const rawValue = unit === "%" &&
-          (claim.value_scale === "unit_interval" || claim.value_scale === "ratio")
-          ? claim.value * 100
-          : claim.value_scale === "raw_count" || claim.value_scale === "ratio"
-            ? claim.value
-            : undefined;
+        const rawValue = unit === "%" && (claim.value_scale === "unit_interval" || claim.value_scale === "ratio")
+          || claim.value_scale === "raw_count" || claim.value_scale === "ratio"
+          ? literalConventionValue(claim.value,unit,claim.value_scale) : undefined;
         node.data = {
           value: claim.value,
           ...(rawValue !== undefined ? { raw_value: rawValue } : {}),
@@ -3475,6 +3490,62 @@ function projectOnce(
       }
     }
     nodes.push(node);
+  });
+
+  const leverByQuantity = new Map<number,ProjectedNode>();
+  const ownOptionSettings = new Map<string,{index:number;lever:ProjectedNode;binding:ProjectedInterventionBinding}>();
+  const carrier = (q: number): { node?: ProjectedNode; reason?: DroppedRecordRef["reason"] } => {
+    const claimIds=new Set(claimIdByIndex.values());
+    const own=nodes.filter(n=>n.kind !== "goal" && n.kind !== "option" && claimIds.has(n.id) && n.quantity_ref===q);
+    if(own.length>1)return {reason:"relationship_endpoint_ambiguous"};
+    if(own.length===1)return {node:own[0]};
+    const lever=leverByQuantity.get(q);
+    if(lever!==undefined)return {node:lever};
+    const goals=nodes.filter(n=>n.kind==="goal" && n.quantity_ref===q);
+    return goals.length>1 ? {reason:"relationship_endpoint_ambiguous"} : goals.length===1 ? {node:goals[0]} : {reason:"relationship_endpoint_missing"};
+  };
+  // ⭐ P2-B6x (a994c38a, "Target not captured"): a goal with a deadline but no measurable quantity (no declared
+  // quantity, no value) is asked about by type. Nothing is inferred: no quantity, no target and no direction.
+  statedItems.forEach((item,index)=>{
+    if(item.kind!=="goal" || item.quantity!==undefined || item.value!==undefined)return;
+    if(item.horizon_ref===undefined && item.horizon_months===undefined)return;
+    dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index:index,label:item.source_quote,reason:"goal_quantity_missing"});
+  });
+  statedItems.forEach((item,index)=>{
+    if(item.kind!=="option" || item.value===undefined)return;
+    const refuse=(reason:DroppedRecordRef["reason"])=>dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index:index,label:item.source_quote,reason});
+    const q=item.quantity, declaration=q===undefined ? undefined : statedItems[q];
+    if(q===undefined && item.value_literal===undefined)return;
+    if(q===undefined || declaration?.unit===undefined){refuse("option_lever_undeclared");return;}
+    if(nodes.some(n=>n.kind==="goal" && n.quantity_ref===q)){refuse("option_lever_is_goal");return;}
+    if(!statedValueIsBound(item,brief)){refuse("option_value_unbound");return;}
+    const resolved=carrier(q);
+    if(resolved.reason==="relationship_endpoint_ambiguous"){refuse("lever_endpoint_ambiguous");return;}
+    let lever=resolved.node;
+    if(lever!==undefined && lever.kind!=="factor"){refuse("lever_endpoint_ambiguous");return;}
+    if(lever===undefined){
+      const id=mintUnique(sha8("factor","quantity-lever",String(q)),usedIds);
+      const prov:RecordProvenance={provenance_class:"stated",source_quote:declaration.source_quote};
+      lever={id,kind:"factor",label:declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
+      nodes.push(lever);provenance[id]=prov;leverByQuantity.set(q,lever);
+    }
+    // ⭐ P2-A1 (Science ruling, 5 Oct; a994c38a): a typed `change_by` is a CHANGE of the lever, never its level. The
+    // delta is this option's own bound literal value; the absolute written here is only the compile-time reading
+    // against the declaring item's stated level, and the Run assembly re-resolves `change_by` against the CURRENT
+    // baseline (`plot-intervention-scale.ts`). No wording heuristic decides which: the model types `setting`.
+    const settingValue=literalConventionValue(item.value,declaration.unit,declaration.value_scale);
+    let changeBy:number|undefined;
+    let rawValue=settingValue;
+    if(item.setting==="change_by"){
+      const level=q===index ? undefined : declaration.value;
+      if(typeof level!=="number" || !Number.isFinite(level)){refuse("option_change_by_baseline_unknown");return;}
+      changeBy=settingValue;
+      rawValue=literalConventionValue(level,declaration.unit,declaration.value_scale)+settingValue;
+    }
+    ownOptionSettings.set(statedIdByIndex.get(index)!,{index,lever,binding:{stated_index:index,raw_value:rawValue,unit:declaration.unit,source:"brief_extraction",
+      ...(changeBy!==undefined ? {change_by:changeBy} : {}),
+      reasoning:changeBy===undefined ? `Stated option value bound to stated_items[${index}]: ${item.source_quote}`
+        : `Stated option change bound to stated_items[${index}]: ${item.source_quote}`}});
   });
 
   // ── Pass 3: causal_link claims → edges. Runs AFTER both node passes so a
@@ -3776,6 +3847,87 @@ function projectOnce(
     });
   });
 
+  // Option settings reuse the model's pair or add the one structural binding edge.
+  for(const [optionId,setting] of ownOptionSettings){
+    const pair=edges.filter(e=>e.from===optionId && e.to===setting.lever.id);
+    if(pair.length===0){
+      const id=mintUnique(sha8("edge","option-lever",optionId,setting.lever.id),usedIds);
+      const prov=scaffoldingProvenance(EDGE_ATTRIBUTION.projector_structural.quote);
+      edges.push({id,from:optionId,to:setting.lever.id,effect_direction:"positive",origin:"default",provenance_source:"structural",provenance:prov});provenance[id]=prov;
+    }
+    for(const e of edges.filter(e=>e.from===optionId && e.to===setting.lever.id)){
+      const model=setsToByEdgeId.get(e.id);
+      if(model!==undefined && model!==setting.binding.raw_value)dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index:setting.index,label:statedItems[setting.index]!.source_quote,reason:"option_lever_link_conflict"});
+      setsToByEdgeId.set(e.id,setting.binding.raw_value);
+    }
+  }
+
+  // Relationship endpoints are resolved solely by quantity identity, before connectivity pruning.
+  statedItems.forEach((item,stated_index)=>{
+    const r=item.relationship;
+    if(item.kind!=="cause" || r===undefined) return;
+    const rangeRefuse=(reason:DroppedRecordRef["reason"])=>{dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index,label:item.source_quote,reason});delete r.amount_span;delete r.source_span;};
+    if(r.no_effect_literal!==undefined){
+      if(r.amount!==undefined || r.range!==undefined){rangeRefuse("no_effect_with_amount");return;}
+      const literal=locateLiteral(item.source_quote,r.no_effect_literal);
+      if(literal.reason!==undefined || typeof brief!=="string" || !brief.includes(item.source_quote))return;
+      const from=carrier(r.from_quantity),to=carrier(r.to_quantity);
+      if(from.reason || to.reason){rangeRefuse(from.reason ?? to.reason!);return;}
+      const source=from.node!,target=to.node!;
+      const fromKind=PROJECTED_KIND_AFTER_NORMALISATION[source.kind] ?? source.kind;
+      const toKind=PROJECTED_KIND_AFTER_NORMALISATION[target.kind] ?? target.kind;
+      if(source.id===target.id || UNRESCUABLE_EDGE_SHAPES.has(`${fromKind}->${toKind}`)){rangeRefuse("relationship_endpoint_illegal");return;}
+      for(let i=edges.length-1;i>=0;i--)if(edges[i]!.from===source.id && edges[i]!.to===target.id){delete provenance[edges[i]!.id];edges.splice(i,1);}
+      rangeRefuse("user_stated_no_effect");return;
+    }
+    if(r.range!==undefined){
+      const {low,high}=r.range;
+      if(![low,high].every(Number.isFinite) || low>high){rangeRefuse("range_bounds_inverted");return;}
+      if(r.amount!==undefined && (r.amount<low || r.amount>high)){rangeRefuse("range_excludes_point");return;}
+      if(low<0 && high>0){rangeRefuse("range_straddles_zero");return;}
+      if(r.amount===undefined)r.amount=(low+high)/2;
+    }
+    if(r.amount===undefined || r.per_source_change===undefined){
+      if(r.no_effect_literal===undefined)rangeRefuse("relationship_unsized");return;
+    }
+    const refuse=(reason:DroppedRecordRef["reason"])=>{
+      dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index,label:item.source_quote,reason});
+      // An unresolved authority cannot leak back through an existing model link.
+      delete r.amount_span;delete r.source_span;
+    };
+    const from=carrier(r.from_quantity),to=carrier(r.to_quantity);
+    if(from.reason || to.reason){refuse(from.reason ?? to.reason!);return;}
+    const source=from.node!,target=to.node!;
+    const fromKind=PROJECTED_KIND_AFTER_NORMALISATION[source.kind] ?? source.kind;
+    const toKind=PROJECTED_KIND_AFTER_NORMALISATION[target.kind] ?? target.kind;
+    if(source.id===target.id || UNRESCUABLE_EDGE_SHAPES.has(`${fromKind}->${toKind}`)
+      || fromKind==="factor" && toKind==="factor" && isOptionControlledFactor(target.id,kindAtLinkTime,provisionalOptionTargets)) {refuse("relationship_endpoint_illegal");return;}
+    // Legacy claim-side repetition is a checked input, never a competing authority.
+    for(const c of claims){
+      if(c.effect_detail===undefined || !(c.basis ?? []).includes(stated_index))continue;
+      const fromId=c.from_claim===undefined ? statedIdByIndex.get(c.from_stated!) : claimIdByIndex.get(c.from_claim);
+      const toId=c.to_claim===undefined ? statedIdByIndex.get(c.to_stated!) : claimIdByIndex.get(c.to_claim);
+      if(nodes.find(n=>n.id===fromId)?.quantity_ref!==r.from_quantity || nodes.find(n=>n.id===toId)?.quantity_ref!==r.to_quantity){refuse("effect_detail_conflicts_with_relationship");return;}
+    }
+    if(r.amount_unit===undefined || r.per_source_change_unit===undefined) return;
+    const detail={amount:r.amount,amount_unit:r.amount_unit,per_source_change:r.per_source_change,per_source_change_unit:r.per_source_change_unit};
+    if(!statedEffectUnitsMatch(item.source_quote,detail,r)){refuse("unit_literal_contradicts_unit");return;}
+    if(!statedEffectQuoteMatches(item.source_quote,detail,r)) return;
+    const direction=Math.sign(r.amount*r.per_source_change)<0 ? "negative" : "positive";
+    const matches=edges.filter(e=>e.from===source.id && e.to===target.id);
+    for(const e of matches){
+      const origin=claimOriginByEdgeId.get(e.id), claim=origin===undefined ? undefined : claims[origin.index];
+      if(claim?.effect_detail!==undefined && claim.effect===undefined || claim?.effect!==undefined && claim.effect!==direction){refuse("relationship_sign_conflicts_with_link");return;}
+      const d=claim?.effect_detail;
+      if(d!==undefined && (d.amount!==r.amount || d.per_source_change!==r.per_source_change || !sameUnit(d.amount_unit,r.amount_unit) || !sameUnit(d.per_source_change_unit,r.per_source_change_unit))){refuse("effect_detail_conflicts_with_relationship");return;}
+    }
+    if(matches.length>0)return;
+    const id=mintUnique(sha8("edge", "stated-relationship",source.id,target.id),usedIds);
+    const prov:RecordProvenance={provenance_class:"ai_inferred",...EDGE_ATTRIBUTION.ai_inferred,basis:[statedIdByIndex.get(stated_index)!],unbased:false};
+    provenance[id]=prov;
+    edges.push({id,from:source.id,to:target.id,effect_direction:direction,origin:"ai",provenance_source:"inferred",provenance:prov});
+  });
+
   // ── Pass 3b: DISCLOSE what the model never connected; never force it in. ───
   //
   // MEASURED, and this is the finding the whole slice turned on. A record set is
@@ -3850,8 +4002,18 @@ function projectOnce(
         ? reachesGoal
         : reachingGoal([...edges, ...refusedByShapeGate]);
 
+    // ⭐ PASS 2 P2-0 (sealed v-next, 5 Oct): readiness (`graph-structure-validator.ts` loop 2) refuses EVERY edged
+    // node except the goal, decision and options that cannot reach the goal — so an `outcome` the user sized outside
+    // the goal ("Monthly support cost", the £6 clause) left the whole sealed model at admission `none` with
+    // NO_PATH_TO_GOAL. The prune therefore withdraws every kind readiness would refuse (factor, constraint, outcome,
+    // risk), and keeps readiness's two exemptions through the SAME helpers, never a second rule: a limit-sink branch
+    // (`limitSinkBranch`) and a K3 inert risk with the causes drawn only into it (`inertRiskBranch`).
+    const limitIds = goalConstraints.map((row) => row.node_id);
+    const limitSink = limitSinkBranch(nodes, edges, limitIds);
+    const inertRisk = inertRiskBranch(nodes, edges, limitIds);
     const unmodelled = nodes.filter(
-      (n) => (n.kind === "factor" || n.kind === "constraint") && !reachesGoal.has(n.id),
+      (n) => (n.kind === "factor" || n.kind === "constraint" || n.kind === "outcome" || n.kind === "risk")
+        && !reachesGoal.has(n.id) && !limitSink.has(n.id) && !inertRisk.has(n.id),
     );
     if (unmodelled.length > 0) {
       const unmodelledIds = new Set(unmodelled.map((n) => n.id));
@@ -3889,6 +4051,20 @@ function projectOnce(
       // Edges among pruned nodes go with them. An edge whose endpoint is not on
       // the graph is not a partial truth, it is a dangling reference.
       for (const edge of edges.filter((e) => unmodelledIds.has(e.from) || unmodelledIds.has(e.to))) {
+        // ⭐ P2-0: a withdrawn edge that carries the user's own stated effect (its cause's validated relationship,
+        // bound by quantity identity at both ends) keeps that number on the cause's disclosure — the £6 a month of
+        // the support-cost clause — under the same contract as `value` above. Sizing runs after this pass, so the
+        // number is the stated relationship's located amount, never a sized coefficient.
+        const causeId = edge.provenance?.basis?.[0];
+        const causeIndex = causeId === undefined ? undefined : [...statedIdByIndex].find(([, id]) => id === causeId)?.[0];
+        const stated = causeIndex === undefined ? undefined : statedItems[causeIndex]?.relationship;
+        const at = causeId === undefined ? -1 : dropped.findIndex((d) => d.node_id === causeId && d.value === undefined
+          && (d.reason === "unconnected_to_goal" || d.reason === "disconnected_by_shape_gate"));
+        if (stated !== undefined && at >= 0 && stated.amount_span !== undefined && typeof stated.amount === "number" && Number.isFinite(stated.amount)
+          && nodes.find((n) => n.id === edge.from)?.quantity_ref === stated.from_quantity
+          && nodes.find((n) => n.id === edge.to)?.quantity_ref === stated.to_quantity) {
+          dropped[at] = { ...dropped[at], value: stated.amount, ...(stated.amount_unit ? { unit: stated.amount_unit } : {}) };
+        }
         delete provenance[edge.id];
       }
       const keptEdges = edges.filter((e) => !unmodelledIds.has(e.from) && !unmodelledIds.has(e.to));
@@ -4012,7 +4188,8 @@ function projectOnce(
         const claim = origin === undefined ? undefined : claims[origin.index];
         const isDirectStatedOption =
           claim?.from_stated !== undefined && statedItems[claim.from_stated]?.kind === "option";
-        const directBinding =
+        const ownSetting=ownOptionSettings.get(edge.from);
+        const directBinding = ownSetting?.lever.id === edge.to ? ownSetting.binding :
           claim === undefined
             ? undefined
             : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief });
@@ -4079,7 +4256,7 @@ function projectOnce(
         candidate = {
           edgeId: edge.id,
           setsTo,
-          authority: isDirectStatedOption ? "direct_stated_option" : "ai_claim",
+          authority: directBinding?.source === "brief_extraction" || isDirectStatedOption ? "direct_stated_option" : "ai_claim",
           ...(binding !== undefined ? { binding } : {}),
         };
       } else {
@@ -4343,7 +4520,13 @@ function projectOnce(
       }
       if (magnitudes.length === 0) continue;
       const unit = (factor.data as { unit?: unknown } | undefined)?.unit;
-      const frame = deriveFactorScaleFrame(magnitudes, typeof unit === "string" ? unit : undefined);
+      // ⭐ P2-FRAME (DL ruling): a quantity's declared `plausible_max` IS its frame, through the legacy construct's own
+      // rule (`statedRangeFrame`: the stated range, widened only when a level exceeds it). Without one, the records
+      // ladder below still applies (the legacy fallback switch is measured and STOPPED in the pass-2 report).
+      const declaredMax = factor.quantity_ref === undefined ? undefined : statedItems[factor.quantity_ref]?.plausible_max;
+      const frame = typeof declaredMax === "number" && Number.isFinite(declaredMax) && declaredMax > 1 && !magnitudes.some((m) => m < 0)
+        ? statedRangeFrame(declaredMax, magnitudes)
+        : deriveFactorScaleFrame(magnitudes, typeof unit === "string" ? unit : undefined);
       if (frame === undefined) continue;
       // ⭐⭐ PERSIST THE DIVISOR. Everything below divides by `frame` and, until
       // this line existed, then discarded it — so the ONLY surviving trace of
@@ -4426,10 +4609,10 @@ function projectOnce(
       for (const edge of edges) {
         const origin = claimOriginByEdgeId.get(edge.id);
         const claim = origin === undefined ? undefined : claims[origin.index];
-        const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief });
+        const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief, carrierForQuantity:q=>carrier(q).node?.id });
         const target = nodes.find(node => node.id === edge.to);
         const source = current.get(edge.from);
-        if (effect === undefined || claim === undefined || target === undefined || source === undefined
+        if (effect === undefined || target === undefined || source === undefined
           || target.kind === "goal" || target.scale_frame !== undefined
           || !statedEffectQuoteMatches(effect.quote, effect, effect.authority)) continue;
         const targetUnit = target.data?.unit;
@@ -4438,7 +4621,7 @@ function projectOnce(
         if (typeof sourceUnit !== "string" || !sameUnit(sourceUnit, effect.per_source_change_unit)) continue;
         const sourceFrame = resolveMagnitudeFrame(source);
         if (sourceFrame === undefined) continue;
-        const ownedRange = admittedValueRange(claim.effect_detail?.range, effect.quote, Math.abs(effect.amount), effect.amount_unit);
+        const ownedRange = effect.authority.range ?? admittedValueRange(claim?.effect_detail?.range, effect.quote, Math.abs(effect.amount), effect.amount_unit);
         const amount = ownedRange === undefined ? Math.abs(effect.amount) : Math.max(Math.abs(ownedRange.low), Math.abs(ownedRange.high));
         const frame = amount / Math.abs(effect.per_source_change) * sourceFrame;
         if (!Number.isFinite(frame) || frame <= 1) continue;
@@ -4453,36 +4636,59 @@ function projectOnce(
       if (!changed) break;
     }
     const view = magnitudeNodes(nodes.map(node => ({ ...node, interventions: node.data?.interventions })), percentLevelIds({ goal_constraints: goalConstraints }));
-    // Equality of an explicit quantity identity is an exact unit conversion.
-    // It contributes no newly stated business figure and no inferred causal effect.
-    for (const edge of edges) {
-      const sourceNode = nodes.find(node => node.id === edge.from);
-      const targetNode = nodes.find(node => node.id === edge.to);
-      const origin = claimOriginByEdgeId.get(edge.id);
-      const claim = origin === undefined ? undefined : claims[origin.index];
-      if (sourceNode?.quantity_ref === undefined || sourceNode.quantity_ref !== targetNode?.quantity_ref
-        || claim?.effect !== "positive" || claim.effect_detail !== undefined) continue;
-      const source = view.get(edge.from), target = view.get(edge.to);
-      const unit = statedItems[sourceNode.quantity_ref]?.unit;
-      if (source === undefined || target === undefined || unit === undefined) continue;
-      const sourceUnit = source.observed_state?.unit ?? source.unit;
-      const targetUnit = target.observed_state?.unit ?? target.goal_threshold_unit ?? target.unit;
-      if (typeof sourceUnit !== "string" || typeof targetUnit !== "string"
-        || !sameUnit(unit, sourceUnit) || !sameUnit(unit, targetUnit)) continue;
-      const sized = sizeLink({ direction: "positive", effect_amount: 1, effect_per_source_change: 1, user_stated: true }, source, target);
-      if (sized.problem !== undefined || sized.natural_effect === undefined) continue;
-      edge.strength_mean = sized.mean;
-      edge.strength_std = sized.std;
-      edge.provenance = { ...edge.provenance!, source: "domain_knowledge", definitional: true, natural_effect: sized.natural_effect };
-      provenance[edge.id] = edge.provenance;
+    // Both existing same-quantity identities and explicit own-horizon flows use one checked writer.
+    const writeDefinition=(edge:ProjectedEdge,unit:string,amount:number,source:NonNullable<ReturnType<typeof view.get>>,target:NonNullable<ReturnType<typeof view.get>>):boolean=>{
+      const sized=sizeLink({direction:amount<0 ? "negative" : "positive",effect_amount:amount,effect_per_source_change:1,user_stated:true},source,target);
+      if(sized.problem!==undefined || sized.natural_effect===undefined)return false;
+      const prov:RecordProvenance={...edge.provenance!,source:"domain_knowledge",definitional:true,natural_effect:{...sized.natural_effect,amount,amount_unit:unit,per_source_change:1,per_source_change_unit:unit}};
+      const v3nodes=nodes.map(n=>({id:n.id,kind:n.kind,unit:n.data?.unit,observed_state:n.observed_state,goal_threshold_unit:n.goal_threshold_unit}));
+      if(!holdsByDefinition({from:edge.from,to:edge.to,strength:{mean:sized.mean,std:sized.std},provenance:prov},nodeUnitOf(v3nodes)))return false;
+      edge.strength_mean=sized.mean;edge.strength_std=sized.std;edge.provenance=prov;provenance[edge.id]=prov;return true;
+    };
+    for(const edge of edges){
+      const sourceNode=nodes.find(n=>n.id===edge.from),targetNode=nodes.find(n=>n.id===edge.to);
+      const origin=claimOriginByEdgeId.get(edge.id),link=origin===undefined ? undefined : claims[origin.index];
+      const sourceIndex=[...claimIdByIndex].find(([,id])=>id===edge.from)?.[0];
+      const flow=sourceIndex===undefined ? undefined : claims[sourceIndex];
+      const q=flow?.change_of;
+      const refuse=(reason:DroppedRecordRef["reason"])=>{
+        dropped.push({claim_index:sourceIndex ?? -1,claim_kind:flow?.claim_kind ?? "claim",label:sourceNode?.label ?? "",reason});
+        if(edge.provenance?.definitional){const {definitional:_,natural_effect:__,...rest}=edge.provenance;edge.provenance=rest;provenance[edge.id]=rest;}
+      };
+      if(q!==undefined){
+        if(!Number.isInteger(q) || q<0 || statedItems[q]===undefined || !["factor","risk","outcome"].includes(flow!.claim_kind)){refuse("change_of_index_invalid");continue;}
+        if(flow!.quantity===q){refuse("change_of_self");continue;}
+        const declaration=flow!.quantity===undefined ? undefined : statedItems[flow!.quantity];
+        const own=flow!.quantity===undefined ? flow!.unit : declaration?.unit,unit=statedItems[q]?.unit;
+        if(own===undefined || unit===undefined || !sameUnit(own,unit)){refuse("change_of_unit_mismatch");continue;}
+        if(targetNode?.quantity_ref!==q){refuse("change_of_target_not_quantity");continue;}
+        const goal=nodes.find(n=>n.kind==="goal" && n.quantity_ref===q);
+        const goalItem=statedItems.find(i=>i.kind==="goal" && i.quantity===q);
+        if(goal?.goal_horizon_months===undefined || declaration?.horizon_ref!==undefined && declaration.horizon_ref!==goalItem?.horizon_ref){refuse("change_of_horizon_mismatch");continue;}
+        const target=view.get(edge.to),heldSource=view.get(edge.from);
+        if(sourceNode===undefined || target===undefined || heldSource===undefined || link?.effect===undefined){refuse("change_of_not_definitional");continue;}
+        const frame=resolveMagnitudeFrame(target);
+        if(frame===undefined){refuse("change_of_not_definitional");continue;}
+        // No level is invented. The flow's one-unit conversion uses the target's calculation frame.
+        if(sourceNode.scale_frame===undefined)sourceNode.scale_frame=frame;
+        const source={...heldSource,scale_frame:sourceNode.scale_frame};
+        if(!writeDefinition(edge,unit,link.effect==="negative" ? -1 : 1,source,target))refuse("change_of_not_definitional");
+      }else{
+        if(sourceNode?.quantity_ref===undefined || sourceNode.quantity_ref!==targetNode?.quantity_ref
+          || link?.effect!=="positive" || link.effect_detail!==undefined)continue;
+        const unit=statedItems[sourceNode.quantity_ref]?.unit,source=view.get(edge.from),target=view.get(edge.to);
+        if(unit===undefined || source===undefined || target===undefined)continue;
+        if(!sameUnit(unit,source.observed_state?.unit ?? source.unit) || !sameUnit(unit,target.observed_state?.unit ?? target.goal_threshold_unit ?? target.unit))continue;
+        writeDefinition(edge,unit,1,source,target);
+      }
     }
     const groups = new Map<string, StatedEdgeEffectCandidate[]>();
     for (const edge of edges) {
       if (edge.origin !== "ai") continue;
       const origin = claimOriginByEdgeId.get(edge.id);
       const claim = origin === undefined ? undefined : claims[origin.index];
-      const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief });
-      if (claim === undefined || effect === undefined) continue;
+      const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief, carrierForQuantity:q=>carrier(q).node?.id });
+      if (effect === undefined) continue;
       const key = JSON.stringify([effect.quote, effect.authority.from_quantity, effect.authority.to_quantity, effect.amount, effect.per_source_change]);
       const group = groups.get(key) ?? [];
       group.push({ edge, claim, effect });
@@ -4505,6 +4711,7 @@ function projectOnce(
         effect_amount: effect.amount,
         effect_per_source_change: effect.per_source_change,
         user_stated: true,
+        ...(effect.amount_range !== undefined ? {amount_range:effect.amount_range} : {}),
         ...(effect.stated_range !== undefined ? { stated_range: effect.stated_range } : {}),
       }, source, target);
       if (sizing.outcome !== "user_stated" || sizing.natural_effect === undefined || sizing.problem !== undefined) continue;
@@ -4516,6 +4723,7 @@ function projectOnce(
       };
       const prov: RecordProvenance = {
         ...baseProvenance,
+        basis: statedItems.flatMap((item,index)=>item.relationship===effect.authority ? [statedIdByIndex.get(index)!] : []),
         source: "brief_extraction",
         quote: effect.quote.slice(0, 100),
         source_quote: effect.quote,
@@ -5251,9 +5459,12 @@ export function projectRecordsToGraph(
   brief?: string,
   /** See `projectOnce`. Absent = byte-identical to the previous behaviour. */
   completionBoundary?: number,
+  /** Authored input before seam compatibility enrichment, for diagnostic receipts only. */
+  originalRecords: DraftRecordSet = records,
 ): RecordProjection {
-  const originalRecords = records;
-  records = unifyGoalQuantityReferences(records);
+  const located = locateRecordEvidence(records);
+  const units = canonicalQuantityUnits(located.records);
+  records = unifyGoalQuantityReferences(units.records);
   const claimCount = (records.claims ?? []).length;
   const demoted = new Map<number, DemoteDecision>();
   let projection = projectOnce(records, demoted, brief, completionBoundary);
@@ -5265,6 +5476,10 @@ export function projectRecordsToGraph(
     projection = projectOnce(records, demoted, brief, completionBoundary);
     repairStatedOptionTargets(projection);
   }
+  projection = { ...projection, dropped: [
+    ...[...located.refusals, ...units.refusals].filter(r => records.stated_items[r.stated_index] !== undefined).map(r => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: records.stated_items[r.stated_index]!.source_quote,
+      stated_index: r.stated_index, reason: r.reason, source_quote: records.stated_items[r.stated_index]!.source_quote })), ...projection.dropped,
+  ] };
   // The internal binding is not part of the contract: consumers get the same
   // graph/provenance/disclosures and the explicitly declared constraint carriers.
   return boundEveryNodeLabel(
