@@ -64,10 +64,13 @@ export declare function watchStep(
   target: string,
   baselineHead: string | null,
   revertTicks?: number,
-): { state: { mismatches: number }; verdict: "continue" | "superseded" | "revert"; decided: boolean; served?: string; head?: string };
+): { state: { mismatches: number }; verdict: "continue" | "superseded" | "revert"; decided: boolean; matched: boolean; served?: string; head?: string };
 
-/** The watch verdict at the end of its window: `held` only with enough decided ticks, else `unmeasured`. */
-export declare function watchOutcome(input: { ticks: number; decided: number }): "held" | "unmeasured";
+/**
+ * The watch verdict at the end of its window: `held` only with affirmative evidence (enough ticks, at least half
+ * MATCHED the target, the last decided tick matched), else `unmeasured`.
+ */
+export declare function watchOutcome(input: { ticks: number; matched: number; lastDecidedMatched: boolean }): "held" | "unmeasured";
 
 /** The revert red: what went live over the head, and the exact redeploy command. */
 export declare function revertMessage(input: { target: string; served: string; renderServiceId?: string }): string;

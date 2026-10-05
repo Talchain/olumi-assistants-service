@@ -195,8 +195,11 @@ export function settleStep(streak, served, want, needed) {
  * push ends the watch (its own run takes over). The served build differing from
  * the target, with the head still the baseline, on WATCH_REVERT_TICKS
  * CONSECUTIVE decided ticks is a REVERT, and a red. A tick missing either
- * reading decides nothing AND breaks the streak. `held` needs at least
- * WATCH_MIN_DECIDED_FRACTION of the ticks decided; less is UNMEASURED, a red.
+ * reading decides nothing AND breaks the streak. `held` needs AFFIRMATIVE
+ * evidence: at least WATCH_MIN_DECIDED_FRACTION of the ticks MATCHED the target,
+ * the last decided tick matched, and at least WATCH_REVERT_TICKS ticks ran.
+ * Anything less is UNMEASURED, a red (Codex r2: 16 decided mismatches broken up
+ * by unreadable ticks must not read as held).
  *
  * 3 ticks (90 s), not 2: an old instance still answering just after a rollover
  * must not read as a revert. The stale build in both incidents stayed live until
@@ -212,24 +215,30 @@ export const WATCH_MIN_DECIDED_FRACTION = 0.5;
  * @param {{served: string|null, head: string|null}} tick
  * @param {string} target the commit the run measured
  * @param {string|null} baselineHead the head the watch compares against (see above); null = cannot tell a push from a revert
- * @returns {{state: {mismatches: number}, verdict: "continue"|"superseded"|"revert", decided: boolean, served?: string, head?: string}}
+ * @returns {{state: {mismatches: number}, verdict: "continue"|"superseded"|"revert", decided: boolean, matched: boolean, served?: string, head?: string}}
  */
 export function watchStep(state, tick, target, baselineHead, revertTicks = WATCH_REVERT_TICKS) {
   const mismatches = state?.mismatches ?? 0;
   const head = typeof tick?.head === "string" && SHA40_RE.test(tick.head) ? tick.head.toLowerCase() : null;
   const served = typeof tick?.served === "string" && /^[0-9a-f]{7,40}$/i.test(tick.served) ? tick.served : null;
   const baseline = typeof baselineHead === "string" && SHA40_RE.test(baselineHead) ? baselineHead : null;
-  if (head && baseline && !sameBuild(head, baseline)) return { state: { mismatches: 0 }, verdict: "superseded", decided: true, head };
+  if (head && baseline && !sameBuild(head, baseline)) return { state: { mismatches: 0 }, verdict: "superseded", decided: true, matched: false, head };
   // Undecidable: the streak is broken, so a revert needs CONSECUTIVE decided mismatches.
-  if (!head || !baseline || !served) return { state: { mismatches: 0 }, verdict: "continue", decided: false };
-  if (sameBuild(served, target)) return { state: { mismatches: 0 }, verdict: "continue", decided: true };
+  if (!head || !baseline || !served) return { state: { mismatches: 0 }, verdict: "continue", decided: false, matched: false };
+  if (sameBuild(served, target)) return { state: { mismatches: 0 }, verdict: "continue", decided: true, matched: true };
   const n = mismatches + 1;
-  return { state: { mismatches: n }, verdict: n >= revertTicks ? "revert" : "continue", decided: true, served };
+  return { state: { mismatches: n }, verdict: n >= revertTicks ? "revert" : "continue", decided: true, matched: false, served };
 }
 
-/** The watch's verdict when its window ends without a revert or a newer push. Pure. */
-export function watchOutcome({ ticks, decided }) {
-  return decided > 0 && decided >= Math.ceil(ticks * WATCH_MIN_DECIDED_FRACTION) ? "held" : "unmeasured";
+/**
+ * The watch's verdict when its window ends without a revert or a newer push. Pure.
+ * @param {{ticks: number, matched: number, lastDecidedMatched: boolean}} input
+ */
+export function watchOutcome({ ticks, matched, lastDecidedMatched }) {
+  if (ticks < WATCH_REVERT_TICKS) return "unmeasured";
+  return matched > 0 && matched >= Math.ceil(ticks * WATCH_MIN_DECIDED_FRACTION) && lastDecidedMatched === true
+    ? "held"
+    : "unmeasured";
 }
 
 /** The red a revert produces: what happened, and the exact redeploy. */
@@ -1609,6 +1618,8 @@ async function watchLiveVsHead(base, target, baselineHead, windowMs) {
   let state = { mismatches: 0 };
   let ticks = 0;
   let decided = 0;
+  let matched = 0;
+  let lastDecidedMatched = false;
   log(`\n## Phase 3 — live-vs-head watch (${Math.round(windowMs / 60000)} min, every ${WATCH_INTERVAL_MS / 1000}s, head ${target.slice(0, 8)})`);
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, Math.min(WATCH_INTERVAL_MS, Math.max(0, deadline - Date.now()))));
@@ -1616,7 +1627,11 @@ async function watchLiveVsHead(base, target, baselineHead, windowMs) {
     const [probe, head] = await Promise.all([probeServedBuild(base), readBranchHead()]);
     const step = watchStep(state, { served: probe?.served ?? null, head }, target, baselineHead);
     state = step.state;
-    if (step.decided) decided += 1;
+    if (step.decided) {
+      decided += 1;
+      lastDecidedMatched = step.matched;
+    }
+    if (step.matched) matched += 1;
     if (step.verdict === "superseded") {
       log(`  tick ${ticks}: staging moved to ${step.head.slice(0, 8)} — its own run watches it. Watch ends.`);
       return { verdict: "superseded", ticks, decided };
@@ -1624,9 +1639,12 @@ async function watchLiveVsHead(base, target, baselineHead, windowMs) {
     if (step.served) log(`  tick ${ticks}: ⚠ serving ${step.served}, head still ${target.slice(0, 8)} (${state.mismatches}/${WATCH_REVERT_TICKS})`);
     if (step.verdict === "revert") return { verdict: "revert", served: step.served, ticks, decided };
   }
-  const verdict = watchOutcome({ ticks, decided });
-  log(`  ${ticks} ticks, ${decided} decided — ${verdict === "held" ? "the head stayed live" : "too few ticks could read both the served build and the head"}.`);
-  return { verdict, ticks, decided };
+  const verdict = watchOutcome({ ticks, matched, lastDecidedMatched });
+  log(
+    `  ${ticks} ticks, ${decided} decided, ${matched} serving the target — ` +
+      (verdict === "held" ? "the head stayed live." : "NOT enough affirmative evidence that the head stayed live."),
+  );
+  return { verdict, ticks, decided, matched };
 }
 
 /**
@@ -1810,8 +1828,11 @@ async function main() {
   // Phase 3 window. 0 turns the watch off — local runs only: with a required head
   // (CI) anything under a minute is refused, so the watch cannot be quietly disabled.
   const watchMs = intFromEnv("SMOKE_WATCH_MS", 720000, 0, 1800000);
-  if (headRequired && watchMs < 60000) {
-    log(`FATAL: SMOKE_WATCH_MS=${watchMs} with SMOKE_HEAD_REPO set — the live-vs-head watch cannot be turned off in CI.`);
+  if (headRequired && watchMs < WATCH_INTERVAL_MS * WATCH_REVERT_TICKS) {
+    log(
+      `FATAL: SMOKE_WATCH_MS=${watchMs} with SMOKE_HEAD_REPO set — the watch must run at least ` +
+        `${WATCH_REVERT_TICKS} ticks (${(WATCH_INTERVAL_MS * WATCH_REVERT_TICKS) / 1000}s) to be able to see a revert.`,
+    );
     process.exit(2);
   }
 
@@ -1914,8 +1935,8 @@ async function main() {
       log(`::error title=STAGING LIVE ≠ HEAD::${msg}`);
     } else if (watch.verdict === "unmeasured") {
       failures.push(
-        `LIVE-VS-HEAD WATCH UNMEASURED: only ${watch.decided} of ${watch.ticks} ticks could read both the served build ` +
-          "and the branch head. Could-not-measure, never a pass.",
+        `LIVE-VS-HEAD WATCH UNMEASURED: ${watch.ticks} ticks, ${watch.decided} decided, ${watch.matched} serving the ` +
+          "measured commit — not enough affirmative evidence that it stayed live. Could-not-measure, never a pass.",
       );
     }
   } else if (expectSha && watchMs > 0) {

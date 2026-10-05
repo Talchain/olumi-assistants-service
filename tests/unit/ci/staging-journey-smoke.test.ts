@@ -2140,16 +2140,18 @@ describe("staging journey smoke — a late duplicate push event cannot pass unse
     let at = 0;
     let served: string | undefined;
     let ticks = 0;
-    let decided = 0;
+    let matched = 0;
+    let lastDecidedMatched = false;
     while (t + WATCH_INTERVAL_MS <= end) {
       t += WATCH_INTERVAL_MS;
       ticks += 1;
       const step = watchStep(state, { served: servedAt(t), head: headAt(t) }, target.sha as string, baseline);
       state = step.state;
-      if (step.decided) decided += 1;
+      if (step.decided) lastDecidedMatched = step.matched;
+      if (step.matched) matched += 1;
       if (step.verdict !== "continue") { verdict = step.verdict; at = t; served = step.served; break; }
     }
-    if (!verdict) verdict = watchOutcome({ ticks, decided }); // the loop's own end-of-window verdict
+    if (!verdict) verdict = watchOutcome({ ticks, matched, lastDecidedMatched }); // the loop's own end-of-window verdict
     return { target, settled, settledAt: new Date(settledAt).toISOString(), verdict, at: at ? new Date(at).toISOString() : null, served };
   };
 
@@ -2233,9 +2235,11 @@ describe("staging journey smoke — target, settle and watch decisions", () => {
   it("watchStep: superseded only when the head leaves the baseline; undecidable ticks break the streak; revert needs 3 consecutive", () => {
     const tick = (served: string | null, head: string | null) => ({ served, head });
     expect(watchStep({ mismatches: 0 }, tick("147c663", B), A, A).verdict).toBe("superseded");
-    expect(watchStep({ mismatches: 2 }, tick("147c663", null), A, A)).toEqual({ state: { mismatches: 0 }, verdict: "continue", decided: false });
-    expect(watchStep({ mismatches: 2 }, tick(null, A), A, A)).toEqual({ state: { mismatches: 0 }, verdict: "continue", decided: false });
-    expect(watchStep({ mismatches: 2 }, tick("147c663", A), A, null)).toEqual({ state: { mismatches: 0 }, verdict: "continue", decided: false });
+    const undecided = { state: { mismatches: 0 }, verdict: "continue", decided: false, matched: false };
+    expect(watchStep({ mismatches: 2 }, tick("147c663", null), A, A)).toEqual(undecided);
+    expect(watchStep({ mismatches: 2 }, tick(null, A), A, A)).toEqual(undecided);
+    expect(watchStep({ mismatches: 2 }, tick("147c663", A), A, null)).toEqual(undecided);
+    expect(watchStep({ mismatches: 0 }, tick("b02a3cc", A), A, A)).toMatchObject({ decided: true, matched: true });
     let st = { mismatches: 0 };
     const verdicts: string[] = [];
     for (let i = 0; i < 3; i += 1) {
@@ -2276,11 +2280,31 @@ describe("staging journey smoke — target, settle and watch decisions", () => {
     expect(watchStep({ mismatches: 0 }, { served: "7b1d841", head: B }, X, A).verdict).toBe("superseded");
   });
 
-  it("Codex r1 P1-1: watchOutcome — one decided tick out of 24 is UNMEASURED, not held", () => {
-    expect(watchOutcome({ ticks: 24, decided: 1 })).toBe("unmeasured");
-    expect(watchOutcome({ ticks: 24, decided: 11 })).toBe("unmeasured");
-    expect(watchOutcome({ ticks: 24, decided: 12 })).toBe("held");
-    expect(watchOutcome({ ticks: 0, decided: 0 })).toBe("unmeasured");
+  it("watchOutcome: `held` needs AFFIRMATIVE matches (Codex r1 P1-1, r2 P1/P2)", () => {
+    // r1 P1-1: one good tick and 23 unreadable ones.
+    expect(watchOutcome({ ticks: 24, matched: 1, lastDecidedMatched: true })).toBe("unmeasured");
+    // r2 P1: 24 ticks of the OLD build, every third head unreadable — 16 decided mismatches, 0 matches.
+    let st = { mismatches: 0 };
+    let matched = 0;
+    let last = false;
+    const verdicts: string[] = [];
+    for (let i = 0; i < 24; i += 1) {
+      const step = watchStep(st, { served: "147c663", head: i % 3 === 2 ? null : A }, A, A);
+      st = step.state;
+      if (step.decided) last = step.matched;
+      if (step.matched) matched += 1;
+      verdicts.push(step.verdict);
+    }
+    expect(verdicts).not.toContain("revert"); // the interruptions defeat the streak…
+    expect(watchOutcome({ ticks: 24, matched, lastDecidedMatched: last })).toBe("unmeasured"); // …but never pass as held
+    // r2 P2: two ticks cannot reach the 3-tick threshold, even when both match.
+    expect(watchOutcome({ ticks: 2, matched: 2, lastDecidedMatched: true })).toBe("unmeasured");
+    // Held: enough ticks, at least half matched, and the last decided tick matched.
+    expect(watchOutcome({ ticks: 24, matched: 24, lastDecidedMatched: true })).toBe("held");
+    expect(watchOutcome({ ticks: 24, matched: 12, lastDecidedMatched: true })).toBe("held");
+    expect(watchOutcome({ ticks: 24, matched: 11, lastDecidedMatched: true })).toBe("unmeasured");
+    expect(watchOutcome({ ticks: 24, matched: 20, lastDecidedMatched: false })).toBe("unmeasured");
+    expect(watchOutcome({ ticks: 0, matched: 0, lastDecidedMatched: false })).toBe("unmeasured");
     expect(WATCH_MIN_DECIDED_FRACTION).toBe(0.5);
   });
 
@@ -2290,9 +2314,9 @@ describe("staging journey smoke — target, settle and watch decisions", () => {
     expect(src).toContain("settleStep(streak, served, expectSha, settleMatches)");
     expect(src).toContain("watchStep(state, { served: probe?.served ?? null, head }, target, baselineHead)");
     expect(src).toContain("await watchLiveVsHead(base, expectSha, baselineHead, watchMs)");
-    expect(src).toContain("const verdict = watchOutcome({ ticks, decided });");
+    expect(src).toContain("const verdict = watchOutcome({ ticks, matched, lastDecidedMatched });");
     expect(src).toContain('const baselineHead = target.source === "head" ? expectSha : headSha;');
     // CI cannot turn the watch off.
-    expect(src).toContain("if (headRequired && watchMs < 60000) {");
+    expect(src).toContain("if (headRequired && watchMs < WATCH_INTERVAL_MS * WATCH_REVERT_TICKS) {");
   });
 });
