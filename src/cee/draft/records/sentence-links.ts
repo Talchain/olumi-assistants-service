@@ -99,14 +99,16 @@ export function mergeSentenceLinks(input: {
   }
   const carried = new Set(input.facts.dispositions.filter((d) => d.disposition === 'carried').map((d) => d.stated_index));
   /**
-   * A link is OPEN when the main compile asked it (typed `unresolved`), or refused its item for a fillable reason and the
-   * link is not typed on it. A relationship is the whole of a cause's link, so a refused cause's relationship is open.
-   * A carried item is never open.
+   * A link is OPEN when the main compile asked it (typed `unresolved`: the compile's own statement that this link is
+   * missing, carried item or not), or refused its item for a fillable reason and the link is not typed on it. A
+   * relationship is the whole of a cause's link, so a refused cause's relationship is open. A carried item's typed links
+   * are never open.
    */
   const open = (index: number, field: string): boolean => {
-    if (index >= mainCount || carried.has(index)) return false;
+    if (index >= mainCount) return false;
+    // The compile's own typed ask names the missing link, even on an item it carried (a goal carried without direction).
     if (asked.get(index)?.has(field) === true) return true;
-    if ((refused.get(index)?.size ?? 0) === 0) return false;
+    if (carried.has(index) || (refused.get(index)?.size ?? 0) === 0) return false;
     const value = items[index]![field];
     return field === 'relationship' || value === undefined || unresolvedToken(value);
   };

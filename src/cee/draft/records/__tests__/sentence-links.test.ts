@@ -37,9 +37,9 @@ describe('(c) precedence', () => {
   it('a compiled main link is NEVER overwritten: a carried item the pass disagrees with is a receipt only', async () => {
     const main = synMain();
     // The main typed the barista cause itself; it compiled and was carried.
-    main.stated_items[5]!.relationship = { from_quantity: 2, to_quantity: 1, per_source_change: 1, per_source_literal: 'Each extra barista', amount: 150, amount_literal: 'about 150' };
+    main.stated_items[5]!.relationship = { from_quantity: 2, to_quantity: 1, per_source_change: 1, per_source_literal: 'Each extra barista', amount: 450, amount_literal: '£450' };
     const pass = synPass();
-    pass[1]!.relationship!.amount = 140; // the pass disagrees
+    pass[1]!.relationship!.amount = 400; // the pass disagrees
     const { main: before, merge } = await merged(main, pass);
     expect(disposition(before, 5).disposition).toBe('carried');
     expect(merge.records.stated_items[5]!.relationship).toEqual(main.stated_items[5]!.relationship);
@@ -64,12 +64,12 @@ describe('(c) precedence', () => {
 });
 
 describe('BINDING 1: a cross-sentence cause (its endpoints are declared in another sentence)', () => {
-  it('the barista cause (S4) links the S1 barista and cup quantities by figure id; the compile mints the stated effect', async () => {
+  it('the barista cause (S4) links the S1 barista and takings quantities by figure id; the compile mints the stated effect', async () => {
     const { main, merge, after } = await merged();
     expect(reasonsAt(main, 5)).toContain('link_unresolved');
-    expect(merge.records.stated_items[5]!.relationship).toMatchObject({ from_quantity: 2, to_quantity: 1, amount: 150, per_source_change: 1 });
+    expect(merge.records.stated_items[5]!.relationship).toMatchObject({ from_quantity: 2, to_quantity: 1, amount: 450, per_source_change: 1 });
     expect(disposition(after, 5).disposition).toBe('carried');
-    expect(JSON.stringify(after.graph)).toContain('"amount":150');
+    expect(JSON.stringify(after.graph)).toContain('"amount":450');
   });
   it('contrast: the same cause with its source endpoint "unresolved" is refused by the merge and stays a typed ask', async () => {
     const pass = synPass();
@@ -77,7 +77,7 @@ describe('BINDING 1: a cross-sentence cause (its endpoints are declared in anoth
     const { merge, after } = await merged(synMain(), pass);
     expect(merge.refusals).toContainEqual(expect.objectContaining({ stated_index: 5, reason: 'endpoint_unresolved' }));
     expect(reasonsAt(after, 5)).toContain('link_unresolved');
-    expect(JSON.stringify(after.graph)).not.toContain('"amount":150');
+    expect(JSON.stringify(after.graph)).not.toContain('"amount":450');
   });
 });
 
@@ -91,7 +91,7 @@ describe('BINDING 3: a negated clause is carried as typed no-effect, never a pos
   });
   it('contrast: the same clause typed with an amount is not a no-effect (the compile refuses the contradiction)', async () => {
     const pass = synPass();
-    pass[2]!.relationship = { ...pass[2]!.relationship!, amount: 10, amount_literal: 'will not change' };
+    pass[2]!.relationship = { ...pass[2]!.relationship!, amount: 10 };
     const { merge, after } = await merged(synMain(), pass);
     expect(merge.records.stated_items[6]!.relationship).toMatchObject({ no_effect_literal: 'will not change', amount: 10 });
     expect(reasonsAt(after, 6)).toContain('no_effect_with_amount');
@@ -101,7 +101,7 @@ describe('BINDING 3: a negated clause is carried as typed no-effect, never a pos
 describe('(d) adversarial: the existing validators refuse what the pass gets wrong', () => {
   it('a literal from another sentence cannot be placed (not in the main quote, not in its own sentence)', async () => {
     const pass = synPass();
-    pass[1]!.relationship!.amount_literal = '1,500';
+    pass[1]!.relationship!.amount_literal = '£7,500';
     const { merge, after } = await merged(synMain(), pass);
     expect(merge.refusals).toContainEqual(expect.objectContaining({ stated_index: 5, reason: 'literal_not_in_sentence' }));
     expect(reasonsAt(after, 5)).toContain('link_unresolved');
@@ -115,13 +115,13 @@ describe('(d) adversarial: the existing validators refuse what the pass gets wro
   });
   it('a wrong figure id (a figure of another sentence) is refused before any alignment', async () => {
     const pass = synPass();
-    pass[0] = { ...pass[0]!, figure: F('150') };
+    pass[0] = { ...pass[0]!, figure: F('£450') };
     const { merge } = await merged(synMain(), pass);
     expect(merge.refusals).toContainEqual(expect.objectContaining({ reason: 'figure_not_in_sentence' }));
   });
   it('a mistyped amount reaches the compile and the compile refuses it (literal_value_mismatch), no stated edge', async () => {
     const pass = synPass();
-    pass[1]!.relationship!.amount = 15;
+    pass[1]!.relationship!.amount = 45;
     const { merge, after } = await merged(synMain(), pass);
     expect(merge.fills).toContainEqual(expect.objectContaining({ stated_index: 5, field: 'relationship' }));
     expect(reasonsAt(after, 5)).toContain('literal_value_mismatch');

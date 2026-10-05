@@ -131,7 +131,10 @@ describe('(e) import graph: the merge module reads no label and calls no unit or
       './grammar.js#DRAFT_RECORD_UNRESOLVED',
       './quantity-evidence.js#locateLiteral',
     ]);
-    expect(linksSource).not.toMatch(/stated-amounts|findStatedAmounts|readUnit|readMoney|readCountRate|parseCardinal|unitEvidenceReason/);
-    expect(linksSource).not.toMatch(/\.label\b|claims\s*\[|\.claims\b/);
+    // Code only: the module's own comments name the validators it defers to.
+    const code = linksSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(code).not.toMatch(/stated-amounts|findStatedAmounts|readUnit|readMoney|readCountRate|parseCardinal|unitEvidenceReason|boundLiteral/);
+    expect(code).not.toMatch(/\.label\b|claims\s*\[|\.claims\b/);
+    expect(code).toMatch(/sameUnit\(/); // contrast: the probe sees a call it allows
   });
 });
