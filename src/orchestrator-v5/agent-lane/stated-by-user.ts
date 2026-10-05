@@ -69,16 +69,39 @@ export function timesTheUserWrote(value: number, unit: unknown, userText: string
  * Read in the figure's own clause (ends at . ! ? ; , : a dash or a new line, as `figureTheUserWroteFor`), and NOT the
  * user's ceiling on a level when, before the figure in that clause:
  *   - "by" is written: a change ("reduce costs by at most 10%", "by a maximum of 2%", "by 2% or less"; R1 S1);
- *   - "not" / "never" / "-n't" is written: a denial, and often a FLOOR ("must not go below 2%");
+ *   - a denial is written (not / never / cannot / -n't), or a verb that keeps the quantity above it (avoid / prevent /
+ *     stop / without): often a FLOOR ("must not go below 2%", "cannot fall below £36k");
  *   - the phrase is "no less / lower / fewer than": a FLOOR.
- * With `scope`, the figure must also be written ABOUT the goal (`figureTheUserWroteFor` at that very amount): "Churn
- * target 2%; tax below 2%" never lends tax's ceiling to churn. Every miss under-claims: no comparator is held and the
+ * With `scope`, the clause's left side must not name ANOTHER quantity of the model instead of the goal
+ * (`leftNamesAnotherQuantity`): "Churn target 2%; tax below 2%" never lends tax's ceiling to churn. KNOWN LIMIT: a
+ * quantity the model does not hold names nothing ("…; tax below £36k" with no tax node), so it is caught only where the
+ * drafter ALSO typed a ceiling for the goal (the hold needs both). Every miss under-claims: no comparator is held and the
  * goal reads as base.
  */
 const CEILING_BEFORE_FIGURE = /(?<!\bno\s+)\b(?:(?:below|under|less\s+than)\s+or\s+equal\s+to|below|under|beneath|less\s+than|lower\s+than|fewer\s+than|at\s+most|no\s+more\s+than|no\s+higher\s+than|up\s+to|(?:a\s+)?maximum\s+of|max(?:imum)?|down\s+to|capped\s+at)\s+(?:(?:the|about|around|roughly|approximately|just)\s+)?$/i;
 const CEILING_AFTER_FIGURE = /^[^\S\n]*(?:or\s+(?:less|lower|below|under|fewer)|at\s+most|max(?:imum)?)\b/i;
-/** Before the figure in its clause: a change ("by") or a denial (not / never / -n't) — never the user's ceiling on a level. */
-const CHANGE_OR_DENIAL_BEFORE = /\bby\b|\bnot\b|\bnever\b|n['\u2019]t\b/i;
+/**
+ * Before the figure in its clause: a change ("by") or a denial — not / never / cannot / -n't, or a verb that keeps the
+ * quantity ABOVE the figure (avoid, prevent, stop, without: "avoid falling below 2%" is a FLOOR). Never the user's
+ * ceiling on a level.
+ */
+const CHANGE_OR_DENIAL_BEFORE = /\bby\b|\bnot\b|\bnever\b|\bcannot\b|n['\u2019]t\b|\bavoid(?:s|ing)?\b|\bprevent(?:s|ing)?\b|\bstop(?:s|ping)?\b|\bwithout\b/i;
+
+/**
+ * RT-10 round 3 (Codex buddy on dee7bbc6): the ceiling's own clause, on the figure's LEFT, names ANOTHER quantity of the
+ * model and not the goal ("keep the GCP unit-cost saving below 4%"). The left side only: a right-hand label is the
+ * clause's next subject, not the ceiling's ("cut it to at most £36k a month without … migration downtime risk"), and an
+ * anaphor ("it") names nothing. Words shared by the goal's and another label name neither (`figureTheUserWroteFor`'s rule).
+ */
+function leftNamesAnotherQuantity(clauseBefore: string, scope: EntityScope): boolean {
+  const target = [...new Set(scope.target.flatMap(wordsOf))];
+  const others = [...new Set(scope.others.flatMap(wordsOf))];
+  const decisiveTarget = target.filter((t) => !others.some((o) => sameWord(t, o)));
+  const decisiveOther = others.filter((o) => !target.some((t) => sameWord(t, o)));
+  const said = wordsOf(clauseBefore);
+  const names = (pool: readonly string[]): boolean => said.some((w) => pool.some((p) => sameWord(w, p)));
+  return names(decisiveOther) && !names(decisiveTarget);
+}
 
 export function ceilingTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope?: EntityScope): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
@@ -91,7 +114,7 @@ export function ceilingTheUserWroteFor(value: number, unit: unknown, userText: s
     if (CHANGE_OR_DENIAL_BEFORE.test(clauseBefore)) return false;
     const end = a.index + a.matchedText.length;
     const ceiling = CEILING_BEFORE_FIGURE.test(clauseBefore) || CEILING_AFTER_FIGURE.test(userText.slice(end, end + 24));
-    return ceiling && (scope === undefined || figureTheUserWroteFor(value, unit, userText, { ...scope, at: a.index }));
+    return ceiling && (scope === undefined || !leftNamesAnotherQuantity(clauseBefore, scope));
   });
 }
 

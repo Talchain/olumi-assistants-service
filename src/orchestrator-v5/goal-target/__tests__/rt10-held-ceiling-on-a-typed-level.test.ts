@@ -245,6 +245,10 @@ describe('ceilingTheUserWroteFor: a ceiling is the USER\'S only where the brief 
     ['"by … or less": a change, the after-figure words too', 'Reduce churn by 2% or less.', 2, '%', false],
     ['"by a maximum of": a change', 'Reduce churn by a maximum of 2%.', 2, '%', false],
     ['"no less than": a FLOOR', 'Keep margin no less than 2%.', 2, '%', false],
+    // Codex buddy round 3 on dee7bbc6:
+    ['"cannot fall below": a FLOOR', 'Monthly spend cannot fall below £36k.', 36000, 'GBP/month', false],
+    ['"avoid falling below": a FLOOR', 'Avoid margin falling below 2%.', 2, '%', false],
+    ['"without dropping below": a FLOOR', 'Grow output without margin dropping below 2%.', 2, '%', false],
     ['"below or equal to"', 'Keep churn below or equal to 2%.', 2, '%', true],
     ['"under the 2% target"', 'Keep churn under the 2% target.', 2, '%', true],
 
