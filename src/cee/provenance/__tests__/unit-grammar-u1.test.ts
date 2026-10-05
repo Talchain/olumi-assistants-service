@@ -147,6 +147,10 @@ describe("Codex r1 on #2604, P1: every part the user STATED after a figure reach
     spendingEffect(g).amount_unit = "GBP per client per year";
     expect(verdictAt(brief, g, AT_75K)).toEqual({ verdict: "in_model", matched: SPENDING });
   });
+  it("a denominator read with a following word still binds its own unit, never another noun's", () => {
+    expect(statedTargetAmountSpans("Each audit costs £8k per audit aiming for four.", 8000, "£/audit")).toHaveLength(1);
+    expect(statedTargetAmountSpans("Each audit costs £8k per audit aiming for four.", 8000, "£/client")).toHaveLength(0);
+  });
   it("a count's stated period and a share's stated base are kept", () => {
     expect(statedTargetAmountSpans("We log 500 hours per week.", 500, "hours per month")).toHaveLength(0);
     expect(statedTargetAmountSpans("We log 500 hours per week.", 500, "hours per week")).toHaveLength(1);

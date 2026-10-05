@@ -248,7 +248,11 @@ export function carrierCompatible(stated: UnitParts, declared: UnitParts): boole
   const conflicts = (a: readonly string[] | null, b: readonly string[] | null): boolean =>
     a !== null && b !== null && a.length > 0 && b.length > 0 && !sameWords(a, b);
   if (stated.period !== null && declared.period !== null && stated.period !== declared.period) return false;
-  if (conflicts(stated.per, declared.per)) return false;
+  // A stated denominator is read up to two words ("per billable day"; "per audit aiming…" reads [audit, aiming]), so
+  // two denominators conflict only when NEITHER contains the other: "client" vs "customer" does, "audit aiming" vs
+  // "audit" does not.
+  if (stated.per !== null && declared.per !== null && stated.per.length > 0 && declared.per.length > 0
+    && !containsWords(stated.per, declared.per) && !containsWords(declared.per, stated.per)) return false;
   if (conflicts(stated.base, declared.base)) return false;
   if (conflicts(stated.qualifiers, declared.qualifiers)) return false;
   return true;
