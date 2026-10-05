@@ -224,3 +224,43 @@ describe('CR-E1: a node carrying ANY stated receipt is user evidence; neither (e
     expect(aside(result, 'invented_root_level_unknown').map(d => d.label)).toEqual([INVENTED]);
   });
 });
+
+/** Every node id `from` reaches along the registered graph's edges (options and the decision are never walked through). */
+function reaches(body: Json, from: string, to: string): boolean {
+  const kind = new Map((body.graph.nodes as Json[]).map(n => [n.id, n.kind]));
+  const seen = new Set([from]); const stack = [from];
+  while (stack.length > 0) {
+    const at = stack.pop()!;
+    for (const e of body.graph.edges as Json[]) {
+      if (e.from !== at || seen.has(e.to) || kind.get(e.to) === 'option' || kind.get(e.to) === 'decision') continue;
+      if (e.to === to) return true;
+      seen.add(e.to); stack.push(e.to);
+    }
+  }
+  return false;
+}
+
+describe('Science merge condition (item 3): an option WITH a stated path keeps it after (e), by OPTION ID', () => {
+  // Ids are the projector's content hashes for these quotes/quantities (`raise prices by 10%` → 4b7b0125; its lever
+  // 67a2010a; "400 customers" 8cad8149; the goal-quantity outcome 8a21277c; the goal 876e0d81).
+  const OPTION = '4b7b0125', GOAL_ID = '876e0d81';
+  const STATED_PATH = [['4b7b0125', '67a2010a'], ['67a2010a', '8cad8149'], ['8cad8149', '8a21277c'], ['8a21277c', '876e0d81']] as const;
+  it('the invented claim on its path is set aside; option 4b7b0125 still reaches the goal along its own sized stated path', async () => {
+    const { result, body } = await build(withInvention());
+    expect(aside(result, 'superseded_by_stated_path').map(d => d.label)).toContain(INVENTED);
+    for (const [from, to] of STATED_PATH) {
+      const edge = (body.graph.edges as Json[]).find(e => e.from === from && e.to === to);
+      expect(edge, `${from}→${to}`).toBeDefined();
+      if (from !== OPTION) expect(edge!.provenance?.natural_effect, `${from}→${to}`).toBeDefined();
+    }
+    expect(reaches(body, OPTION, GOAL_ID)).toBe(true);
+  });
+  it('CONTRAST (the 28 class): with no stated path, removing the invented root leaves option 4b7b0125 with no path (gate 1 v2 says so)', async () => {
+    const records = withInvention(statedPath());
+    records.stated_items.splice(7, 2);
+    const { result, body } = await build(records);
+    expect(aside(result, 'invented_root_level_unknown').map(d => d.label)).toEqual([INVENTED]);
+    expect((body.graph.nodes as Json[]).some(n => n.id === OPTION)).toBe(true);
+    expect(reaches(body, OPTION, GOAL_ID)).toBe(false);
+  });
+});
