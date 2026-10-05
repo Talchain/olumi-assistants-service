@@ -17,6 +17,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 import { compareRunGoalUnitSnapshot, deriveAnalysisFreshness, goalSnapshotStaleMessage } from '../freshness.js';
 import { resolveGoalDirection } from '../../goal-target/goal-direction.js';
+import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
 import { composeToolCallResponse } from '../../compose.js';
 import { composeAnalysisStateV1, projectAnalysisBlocksForRunBinding } from '../../compose/analysis-state-v1.js';
 import { attachComputedAt } from '../../compose/analysis-ready-emit.js';
@@ -123,6 +124,39 @@ describe('RT-10 — the direction a Run sent is part of its currentness', () => 
     expect(derive(churnGraph(), fact({ goal: { ...snapshotGoal(), node_id: 'other_goal' } })))
       .toMatchObject({ freshness: 'stale', reason: 'goal_snapshot_unverified' });
   });
+
+  // Science (#2596 PASS, row 1): `maximise` and absent give the same verdict against a minimise AND a non-minimise current.
+  it.each([
+    ['a held ceiling (sends minimise now)', '<', 'stale'],
+    ['a held floor (sends nothing now)', '>=', 'fresh'],
+  ] as const)('R12: recorded maximise ≡ recorded nothing on %s', (_name, held, verdict) => {
+    const graph = churnGraph();
+    goalOf(graph).goal_direction = held;
+    const absent = derive(graph, fact({ goal: { ...snapshotGoal(), operator: held } }));
+    const maximise = derive(graph, fact({ goal: { ...snapshotGoal('maximise'), operator: held } }));
+    expect(maximise).toEqual(absent);
+    expect(absent.freshness).toBe(verdict);
+  });
+
+  // Science (#2596 PASS, row 2, REQUIRED): the run resolves on the PARTICIPATION graph, the read on the RAW stored graph.
+  // A node the user kept out of the calculation that carries its own `<=` (on the node and as a limit row) must not
+  // make the two disagree: the sense is the goal's alone.
+  it.each([['<', 'minimise'], ['>=', undefined]] as const)(
+    'R13: a retained-excluded node with its own <= does not move the goal sense (goal holds %s)', (held, sends) => {
+      const raw = churnGraph();
+      goalOf(raw).goal_direction = held;
+      raw.nodes.push({ id: 'agent_cost', kind: 'factor', label: 'Agent cost', goal_direction: '<=',
+        analysis_participation: 'retained_excluded' });
+      raw.goal_constraints = [{ id: 'gc-agent-cost', node_id: 'agent_cost', operator: '<=', value: 5, label: 'Agent cost' }];
+      const participation = guardAnalysisParticipation(raw, { goalNodeId: GOAL });
+      expect(participation.excludedNodeIds, 'precondition: the real guard withholds the node').toEqual(['agent_cost']);
+      expect((participation.graph as Rec).nodes.some((n: Rec) => n.id === 'agent_cost')).toBe(false);
+      expect(resolveGoalDirection(raw, GOAL)?.direction).toBe(sends);
+      expect(resolveGoalDirection(participation.graph, GOAL)).toEqual(resolveGoalDirection(raw, GOAL));
+      const sentByTheRun = resolveGoalDirection(participation.graph, GOAL)?.direction;
+      expect(derive(raw, fact({ goal: { ...snapshotGoal(sentByTheRun), operator: held } })))
+        .toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+    });
 
   it('R11: model-restore chronology still outranks the direction reason', () => {
     expect(deriveAnalysisFreshness([fact({ goal: snapshotGoal() })], HASH, undefined, {
