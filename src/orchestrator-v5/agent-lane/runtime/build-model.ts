@@ -748,6 +748,10 @@ export function prepareProvisionalCandidate(drafted: CandidateModel): {
         ...intervention, value_kind: 'absolute', value: factor.baseline_value + intervention.value,
         provenance: factor.baseline_known && factor.provenance === 'explicit' && intervention.provenance === 'explicit'
           ? 'explicit' : 'ai_proposed',
+        // ⛔ A TOTAL WE COMPUTED IS NOT A FIGURE THE USER WROTE (RT-4 class A, #2603; Codex r1): a stated 5% today plus a
+        // stated 2% is the user's 7%, but "7%" appears nowhere as theirs, and an unrelated "Churn is 7%" was credited to it.
+        // Admission marks the level (`constructedLevel`) so the not-modelled manifest never credits a brief literal to it.
+        derived_total: true,
       } as Iv);
     }
     const changes = [...(option.changes ?? [])];

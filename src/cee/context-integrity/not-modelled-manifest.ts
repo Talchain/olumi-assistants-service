@@ -1274,6 +1274,11 @@ interface Candidate {
   /** The unit string the model declared, verbatim. A count can only match a
    *  carrier that declares the same unit family. */
   readonly declaredUnit: string | null;
+  /** An option's level on this factor (`collectSourceBoundInterventionCandidates`).
+   *  Admitted only under Science's W2/W3, see {@link admissibleCandidates}. */
+  readonly optionLevel?: true;
+  /** The `char_offset` of the ONE brief quantity an option level states (`bindOptionLevels`). */
+  readonly boundAt?: number;
 }
 
 /**
@@ -1403,6 +1408,7 @@ function collectSourceBoundInterventionCandidates(
       unitKind: kind,
       currencyCode: currencyCode ?? null,
       declaredUnit,
+      optionLevel: true,
     });
   }
   return out;
@@ -1607,6 +1613,8 @@ const canonicaliseMonths = (s: string): string =>
 
 interface Surfaces {
   readonly candidates: readonly Candidate[];
+  /** Where the brief states each limit (`constraintSpans`), so `classify` can keep a stated limit off an option's level. */
+  readonly limitSpans: readonly ConstraintSpan[];
   /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
   readonly modelStrings: readonly string[];
   /** ⚠ ALREADY MONTH-CANONICAL. See `splitSurfaces`. */
@@ -1667,7 +1675,12 @@ function splitSurfaces(graph: Record<string, unknown>, briefText: string): Surfa
     else if (cls === "prose") walkText(v, true);
   }
 
-  return { candidates: collectCandidates(graph, briefText), modelStrings, proseStrings };
+  return {
+    candidates: bindOptionLevels(collectCandidates(graph, briefText), extractStatedQuantities(briefText)),
+    limitSpans: constraintSpans(graph, briefText),
+    modelStrings,
+    proseStrings,
+  };
 }
 
 // ── matching ────────────────────────────────────────────────────────────────
@@ -1757,11 +1770,55 @@ function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidat
   return null;
 }
 
+/**
+ * The candidates a quantity may be matched against. Option levels are admitted
+ * only under Science's ruling on RT-4 class A (#87 5999083694):
+ *
+ *  · W2 — A LIMIT THE USER STATED IS NEVER AN OPTION'S LEVEL. Option candidates
+ *    are collected before limit candidates and `matchCandidate` takes the first
+ *    match, so "a £120k budget" beside a £120k option level would otherwise be
+ *    anchored to the option's factor instead of the limit.
+ *  · W3 — A FIGURE MATCHING LEVELS ON TWO DIFFERENT FACTORS NAMES NEITHER. Value
+ *    and unit cannot say which factor the user meant, so no option level is
+ *    credited. The same factor set by several options is one claim, not two.
+ *
+ * Every other candidate is untouched, so no previously anchored match moves.
+ */
+function admissibleCandidates(q: Quantity, s: Surfaces): readonly Candidate[] {
+  if (!s.candidates.some((c) => c.optionLevel === true)) return s.candidates;
+  const withoutOptionLevels = (): readonly Candidate[] => s.candidates.filter((c) => c.optionLevel !== true);
+  if (classifyStatedKind(q, s.limitSpans) === "constraint") return withoutOptionLevels();
+  // Own span: an option level is offered only to the one literal it was bound to (`bindOptionLevels`).
+  const offered = s.candidates.filter((c) => c.optionLevel !== true || c.boundAt === q.at);
+  const factors = new Set(offered.filter((c) => c.optionLevel === true).map((c) => c.nodeId));
+  return factors.size > 1 ? withoutOptionLevels() : offered;
+}
+
+/**
+ * ⛔ AN OPTION LEVEL IS THE USER'S FIGURE ONLY WHERE THE BRIEF STATES IT ONCE (DL ruling on #2603, the Review Desk's
+ * lease ask; the same own-span rule #2601 applies to an unquoted edge effect). Value and unit alone cannot say which
+ * written figure a level holds: "raise prices by 8%" and "churn is 8% today" both read as 8%. So a level binds to the
+ * ONE brief quantity with its value and unit. Two such places, or none, and it is not offered at all — the figure stays
+ * visibly unmatched, never guessed. The cost is deliberate: a figure the user wrote twice is not credited by this route.
+ */
+function bindOptionLevels(candidates: readonly Candidate[], quantities: readonly Quantity[]): Candidate[] {
+  const out: Candidate[] = [];
+  for (const c of candidates) {
+    if (c.optionLevel !== true) {
+      out.push(c);
+      continue;
+    }
+    const places = quantities.filter((q) => q.value !== null && unitCompatible(q, c) && numbersEqual(c.value, q.value));
+    if (places.length === 1) out.push({ ...c, boundAt: places[0]!.at });
+  }
+  return out;
+}
+
 function classify(
   q: Quantity,
   s: Surfaces,
 ): { verdict: QuantityVerdict; matched: Candidate | null } {
-  const matched = matchCandidate(q, s.candidates);
+  const matched = matchCandidate(q, admissibleCandidates(q, s));
   if (matched !== null) return { verdict: "in_model", matched };
   // Text is the second route: a figure written into a label, a unit string or
   // an encoding-map caption ("45 roles offshored (~40% saving)", "(Jan 2027)")

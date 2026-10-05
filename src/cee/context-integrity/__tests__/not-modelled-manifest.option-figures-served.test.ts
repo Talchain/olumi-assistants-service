@@ -33,6 +33,8 @@ interface ServedDraft {
     readonly absent: number;
     readonly in_model: number;
     readonly verdicts: Readonly<Record<string, string>>;
+    /** literal@offset → the node the served build anchored it to (in_model items only). */
+    readonly anchors: Readonly<Record<string, string>>;
   };
   readonly draft_graph: Record<string, unknown>;
 }
@@ -64,13 +66,20 @@ const itemAt = (capture: string, literal: string, offset: number) => {
 const CREDITED: readonly (readonly [string, string, number, string])[] = [
   ["b1r3", "£250k", 352, "central_kitchen_fit_out_cost"],
   ["b1r3", "6%", 673, "production_waste_rate"],
-  ["r2", "8%", 206, "bread_price_change_from_current"],
   ["r2", "£250k", 352, "central_kitchen_fit_out_cost"],
-  ["r2", "8%", 567, "bread_price_change_from_current"],
   ["b2", "15%", 475, "ai_ticket_deflection"],
   ["b2r2", "£120k", 285, "annual_incremental_support_investment"],
   ["prod-b2", "£120k", 285, "annual_intervention_cost"],
   ["prod-b2", "15%", 475, "ai_ticket_deflection"],
+];
+
+/**
+ * OWN SPAN (DL ruling on #2603): the bakery writes its 8% price rise TWICE. Value and unit cannot say which written
+ * figure the level holds, so neither is credited by the option route. A known, deliberate cost in the safe direction.
+ */
+const STATED_TWICE: readonly (readonly [string, string, number])[] = [
+  ["r2", "8%", 206],
+  ["r2", "8%", 567],
 ];
 
 /** Stated in the brief, but the producer marked the level as Olumi's own (`cee_hypothesis`): never credited. */
@@ -80,6 +89,17 @@ const HYPOTHESIS_ONLY: readonly (readonly [string, string, number, string])[] = 
   ["b2r2", "15%", 475, "ai_ticket_deflection"],
   ["j1", "£8k", 201, "security_audit_price"],
 ];
+
+/**
+ * RT-4 CLASS B, NOT THIS CLAIM: figures whose unit is composite ("% of output", "% increase from prior
+ * year", "£/billable day") do not read as % or £ (`stated-amounts.ts` allows a one-word denominator).
+ * Their verdicts belong to class B's fix, so these rows neither credit them nor pin today's false absence.
+ */
+const KNOWN_CLASS_B: Readonly<Record<string, readonly string[]>> = {
+  r2: ["18%@92", "12%@656", "6%@673"],
+  j1: ["£900@271", "£1,000@279"],
+};
+const isClassB = (capture: string, key: string): boolean => (KNOWN_CLASS_B[capture] ?? []).includes(key);
 
 describe("RT-4 class A — a stated option figure the model carries is credited", () => {
   it("the corpus is the served shape: no option level carries value_confidence", () => {
@@ -99,6 +119,12 @@ describe("RT-4 class A — a stated option figure the model carries is credited"
     const item = itemAt(capture, literal, offset);
     expect(item.verdict).toBe("in_model");
     expect(item.matched_node_id).toBe(nodeId);
+  });
+
+  it.each(STATED_TWICE)("OWN SPAN %s: %s@%i, written twice, is not credited by the option route", (capture, literal, offset) => {
+    const item = itemAt(capture, literal, offset);
+    expect(item.verdict).toBe("absent");
+    expect(item.matched_node_id).toBeNull();
   });
 
   it.each(HYPOTHESIS_ONLY)(
@@ -129,6 +155,7 @@ describe("RT-4 class A — a stated option figure the model carries is credited"
       for (const item of items) {
         const key = `${item.literal}@${item.char_offset}`;
         expect(d.served.verdicts[key], `${capture} ${key} was served`).toBeDefined();
+        if (isClassB(capture, key)) continue;
         if (credited.has(key)) {
           expect(d.served.verdicts[key], `${capture} ${key} was a false absent`).toBe("absent");
         } else {
@@ -138,17 +165,43 @@ describe("RT-4 class A — a stated option figure the model carries is credited"
     },
   );
 
+  it.each(FIXTURE.drafts.map((d) => [d.capture] as const))(
+    "%s: no previously anchored match moves (Science W2)",
+    (capture) => {
+      const d = draft(capture);
+      const items = manifestFor(capture).items;
+      let anchored = 0;
+      for (const [key, nodeId] of Object.entries(d.served.anchors)) {
+        const item = items.find((i) => `${i.literal}@${i.char_offset}` === key);
+        expect(item?.matched_node_id, `${capture} ${key}`).toBe(nodeId);
+        anchored += 1;
+      }
+      expect(anchored).toBe(Object.keys(d.served.anchors).length);
+    },
+  );
+
+  it("the anchored-match rows see something: the corpus has served anchors", () => {
+    expect(FIXTURE.drafts.reduce((n, d) => n + Object.keys(d.served.anchors).length, 0)).toBeGreaterThan(0);
+  });
+
+  it("the class B list names items the corpus really reports", () => {
+    for (const [capture, keys] of Object.entries(KNOWN_CLASS_B)) {
+      for (const key of keys) expect(draft(capture).served.verdicts[key], `${capture} ${key}`).toBe("absent");
+    }
+  });
+
+  // Counted over every item outside class B, so a later class B fix does not move these rows.
   it.each([
     ["b1r3", 6, 7],
-    ["r2", 8, 5],
+    ["r2", 7, 3],
     ["b2", 8, 2],
     ["b2r2", 8, 2],
     ["prod-b2", 7, 3],
-    ["j1", 9, 2],
+    ["j1", 7, 2],
     ["b3", 1, 0],
-  ] as const)("%s: absent %i, in_model %i", (capture, absent, inModel) => {
-    const q = manifestFor(capture);
-    expect(q.absent).toBe(absent);
-    expect(q.in_model).toBe(inModel);
+  ] as const)("%s: outside class B, absent %i and in_model %i", (capture, absent, inModel) => {
+    const items = manifestFor(capture).items.filter((i) => !isClassB(capture, `${i.literal}@${i.char_offset}`));
+    expect(items.filter((i) => i.verdict === "absent").length).toBe(absent);
+    expect(items.filter((i) => i.verdict === "in_model").length).toBe(inModel);
   });
 });
