@@ -10,7 +10,7 @@ export type StatedCarrier = (
 export type StatedDisposition = { readonly stated_index: number; readonly stated_item: DraftStatedItem } & (
   | { readonly disposition: 'carried'; readonly location: StatedCarrier; readonly stored_value: unknown }
   | { readonly disposition: 'rejected'; readonly reason: DroppedRecordRef['reason'] | 'stated_value_not_carried' | 'stated_relationship_not_carried' | 'carrier_removed' }
-  | { readonly disposition: 'asked' }
+  | { readonly disposition: 'asked'; readonly reason?: 'goal_quantity_missing' }
 );
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -43,6 +43,10 @@ export function deriveStatedDispositions(
     const origin = { stated_index, stated_item: originalRecords.stated_items[stated_index]! };
     const carry = (location: StatedCarrier, stored_value: unknown): StatedDisposition =>
       ({ ...origin, disposition: 'carried', location, stored_value });
+    // P2-B6x: an unknown the projector asks about is an ask, never a carried value or a silent default.
+    if (projection.dropped.some(d => d.stated_index === stated_index && d.reason === 'goal_quantity_missing')) {
+      return { ...origin, disposition: 'asked', reason: 'goal_quantity_missing' };
+    }
     const evidenceFailure = projection.dropped.find(d => d.stated_index === stated_index && FAILED_EVIDENCE.has(d.reason));
     if (evidenceFailure !== undefined) return { ...origin, disposition: 'rejected', reason: evidenceFailure.reason };
     const nodeId = statedNodeIds.get(stated_index);

@@ -253,3 +253,37 @@ describe('pass 2 P2-A6: each factor carries its driver role from the compile', (
     expect(graph.nodes.filter((n: any) => n.kind === 'factor' && n.category === undefined)).toEqual([]);
   });
 });
+
+// EXTRACTION-UNPROVEN (a994c38a lesson, generic vans text): unknowns are asks, never zeros or defaults.
+const VANS_DEADLINE = 'We have 8 vans. Lease 5 vans. Goal: open the new depot within 7 months.';
+function vansDeadline(): DraftRecordSet { return { stated_items: [
+  { kind: 'figure', source_quote: 'We have 8 vans.', quantity: 0, value: 8, value_literal: '8', unit: 'vans', unit_literals: ['vans'], role: 'baseline' },
+  { kind: 'option', source_quote: 'Lease 5 vans.', quantity: 0, value: 5, value_literal: '5', is_baseline: false },
+  { kind: 'goal', source_quote: 'Goal: open the new depot within 7 months.', role: 'target', horizon_ref: 3, horizon_months: 7 },
+  { kind: 'figure', source_quote: 'within 7 months', value: 7, value_literal: '7', unit: 'months', unit_literals: ['months'] },
+], claims: [{ claim_kind: 'factor', label: 'Vans', quantity: 0, value: 8 }, { claim_kind: 'causal_link', label: 'lease setting', from_stated: 1, to_claim: 0, effect: 'positive' },
+  { claim_kind: 'causal_link', label: 'more vans open the depot sooner', from_claim: 0, to_stated: 2, effect: 'positive' }] }; }
+
+describe('pass 2 P2-B6x: a missing value is an ask, never a zero or a default', () => {
+  it('P2-B6x a factor with no stated or typed level stores no zero and is asked for', async () => {
+    const r = vans(); r.claims.push({ claim_kind: 'factor', label: 'Drivers on shift' }, { claim_kind: 'causal_link', label: 'drivers move deliveries', from_claim: 2, to_stated: 3, effect: 'positive' });
+    const graph: any = await registeredWith(r, VANS);
+    const drivers = graph.nodes.find((n: any) => n.label === 'Drivers on shift')!;
+    expect(drivers.observed_state?.value).toBeUndefined();
+    expect(drivers.observed_state?.raw_value).toBeUndefined();
+    // No node value anywhere is a zero the records did not type.
+    expect(graph.nodes.filter((n: any) => n.observed_state?.value === 0 || n.observed_state?.raw_value === 0).map((n: any) => n.label)).toEqual([]);
+    const admission = resolveAnalysisAdmission(graph);
+    expect(admission.permitted_analysis_mode).toBe('none');
+    expect(admission.missing_important_inputs.map(i => i.code)).toContain('MISSING_FACTOR_LEVEL');
+  });
+  it('P2-B6x a deadline goal with no measurable quantity is a typed goal_quantity_missing ask, never higher-is-better', async () => {
+    const r = vansDeadline(); const p = project(r, VANS_DEADLINE);
+    expect(p.dropped).toContainEqual(expect.objectContaining({ stated_index: 2, reason: 'goal_quantity_missing' }));
+    expect(p.stated_dispositions?.find(d => d.stated_index === 2)).toMatchObject({ disposition: 'asked' });
+    const goal = p.graph.nodes.find(n => n.kind === 'goal')!;
+    expect(goal.goal_direction).toBeUndefined();
+    const graph: any = await registeredWith(r, VANS_DEADLINE);
+    expect(graph.nodes.find((n: any) => n.kind === 'goal')?.goal_direction).toBeUndefined();
+  });
+});

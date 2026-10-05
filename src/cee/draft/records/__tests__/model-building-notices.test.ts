@@ -49,6 +49,8 @@ const PRODUCER_REASONS = [
   "lever_endpoint_ambiguous",
   // Pass 2 P2-A1: a change_by option whose lever states no current level (never a zero baseline).
   "option_change_by_baseline_unknown",
+  // Pass 2 P2-B6x: the typed ask for a deadline goal's measurable quantity.
+  "goal_quantity_missing",
   "range_bounds_inverted",
   "range_excludes_point",
   "range_straddles_zero",

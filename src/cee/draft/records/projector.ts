@@ -494,6 +494,9 @@ export interface DroppedRecordRef {
     | "option_lever_undeclared" | "option_lever_is_goal" | "option_value_unbound" | "option_lever_link_conflict" | "lever_endpoint_ambiguous"
     // P2-A1: a `change_by` option whose lever has no stated current level. Unknown is an ask, never a zero baseline.
     | "option_change_by_baseline_unknown"
+    // P2-B6x (a994c38a): a deadline goal that names no measurable quantity. An ASK for the quantity, never a guess
+    // and never a default "higher is better" direction.
+    | "goal_quantity_missing"
     | "relationship_endpoint_missing" | "relationship_endpoint_ambiguous" | "relationship_endpoint_illegal"
     | "relationship_sign_conflicts_with_link" | "effect_detail_conflicts_with_relationship"
     | import("./quantity-evidence.js").UnitRefusal
@@ -3500,6 +3503,13 @@ function projectOnce(
     const goals=nodes.filter(n=>n.kind==="goal" && n.quantity_ref===q);
     return goals.length>1 ? {reason:"relationship_endpoint_ambiguous"} : goals.length===1 ? {node:goals[0]} : {reason:"relationship_endpoint_missing"};
   };
+  // ⭐ P2-B6x (a994c38a, "Target not captured"): a goal with a deadline but no measurable quantity (no declared
+  // quantity, no value) is asked about by type. Nothing is inferred: no quantity, no target and no direction.
+  statedItems.forEach((item,index)=>{
+    if(item.kind!=="goal" || item.quantity!==undefined || item.value!==undefined)return;
+    if(item.horizon_ref===undefined && item.horizon_months===undefined)return;
+    dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index:index,label:item.source_quote,reason:"goal_quantity_missing"});
+  });
   statedItems.forEach((item,index)=>{
     if(item.kind!=="option" || item.value===undefined)return;
     const refuse=(reason:DroppedRecordRef["reason"])=>dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index:index,label:item.source_quote,reason});
