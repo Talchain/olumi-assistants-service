@@ -542,7 +542,7 @@ export interface DraftGoalScope {
   stated_in_brief: boolean;
 }
 
-/** An option-bound intervention, never a quantity-to-quantity causal relationship. */
+/** An option-bound effect is a delta; sets_to is an explicitly typed, quoted level override. */
 export interface DraftStatedOptionEffect {
   option: number;
   quantity: number;

@@ -41,7 +41,7 @@ function pass(): SentencePassRecord[] {
     { sentence: S('would bring'), role: 'context', figure: F('45'), value: 45, value_literal: '45',
       unit: 'attendees', unit_literals: ['attendees'], quantity_of: F('45'), kind: 'change_quantity', quantity_label: 'new attendees' },
     { sentence: S('would bring'), role: 'option_effect', unit: 'attendees', unit_literals: ['attendees'], option_effect: {
-      option_sentence: S('We can'), option_literal: HALL, quantity_figure: F('45'), setting: 'sets_to', value: 45, value_literal: '45',
+      option_sentence: S('We can'), option_literal: HALL, quantity_figure: F('45'), setting: 'change_by', value: 45, value_literal: '45',
       range: { low: 20, high: 70, low_literal: '20', high_literal: '70', meaning: 'min_max' },
     } },
   ];
@@ -121,7 +121,7 @@ describe('BUILD cross-sentence option effect merge and replay', () => {
   it('binds the precise option quote span and compiles its value and raw range', async () => {
     const { merge, after } = await merged();
     expect(merge.records.stated_items.find(item => item.kind === 'option_effect')).toMatchObject({
-      source_quote: EFFECT, option_effect: { option: 2, quantity: 3, sets_to: 45,
+      source_quote: EFFECT, option_effect: { option: 2, quantity: 3, change_by: 45,
         range: { low: 20, high: 70, meaning: 'min_max' } },
     });
     expect(raw(after, HALL)).toBe(45);
@@ -132,7 +132,7 @@ describe('BUILD cross-sentence option effect merge and replay', () => {
     expect(quantity.observed_state?.raw_value).toBe(0);
     const option = after.projection.graph.nodes.find(n => n.provenance?.source_quote === HALL)!;
     expect((option.data as { intervention_details?: Record<string, unknown> } | undefined)?.intervention_details?.[quantity.id]).toMatchObject({
-      raw_value: 45, unit: 'attendees', source: 'brief_extraction',
+      raw_value: 45, change_by: 45, unit: 'attendees', source: 'brief_extraction',
       range: { low: 20, high: 70, meaning: 'min_max', source: 'brief_extraction', source_quote: EFFECT },
     });
     const control = await merged(pass().slice(0, 1));
@@ -151,6 +151,17 @@ describe('BUILD cross-sentence option effect merge and replay', () => {
     expect((option.data as { intervention_details?: Record<string, unknown> } | undefined)?.intervention_details?.[quantity.id]).toMatchObject({
       raw_value: 45, change_by: 45, range: { low: 20, high: 70, meaning: 'min_max' },
     });
+  });
+
+  it('defaults a typed effect to change_by when the setting is omitted', async () => {
+    const records = pass();
+    delete records[1]!.option_effect!.setting;
+    expect(parseSentencePassOutput(JSON.stringify({ records })).ok).toBe(true);
+    const { merge, after } = await merged(records);
+    expect(merge.records.stated_items.find(item => item.kind === 'option_effect')?.option_effect).toMatchObject({ option: 2, quantity: 3, change_by: 45 });
+    const quantity = after.projection.graph.nodes.find(n => n.kind === 'factor' && n.quantity_ref === 3)!;
+    const option = after.projection.graph.nodes.find(n => n.provenance?.source_quote === HALL)!;
+    expect((option.data as { intervention_details?: Record<string, unknown> } | undefined)?.intervention_details?.[quantity.id]).toMatchObject({ raw_value: 45, change_by: 45 });
   });
 
   it('leaves no intervention when the option binding is omitted', async () => {

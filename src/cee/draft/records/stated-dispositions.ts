@@ -72,6 +72,20 @@ export function deriveStatedDispositions(
         if (detail[key] === value) return carry({ kind: 'node', node_id: option.id, path: ['data', 'intervention_details', factorId, key] }, value);
       }
     }
+    // The rate-less cause door carries the same option intervention, identified
+    // by its owning stated index and target quantity rather than a causal edge.
+    if (item.kind === 'cause' && item.relationship?.per_source_change === undefined && item.relationship?.amount !== undefined) {
+      for (const option of nodes.filter(n => n.kind === 'option')) {
+        const details = option.data?.intervention_details;
+        if (!object(details)) continue;
+        for (const [factorId, detail] of Object.entries(details)) {
+          if (!object(detail) || detail.source !== 'brief_extraction' || detail.stated_index !== stated_index
+            || nodes.find(n => n.id === factorId)?.quantity_ref !== item.relationship.to_quantity
+            || detail.change_by !== item.relationship.amount) continue;
+          return carry({ kind: 'node', node_id: option.id, path: ['data', 'intervention_details', factorId, 'change_by'] }, detail.change_by);
+        }
+      }
+    }
     // A typed relationship needs its executable bundle, never just its cause label.
     if (item.relationship !== undefined) {
       const edge = edges.find(e => e.provenance?.magnitude === 'user_stated'

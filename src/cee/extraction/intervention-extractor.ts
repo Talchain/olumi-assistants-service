@@ -1173,7 +1173,9 @@ function buildInterventionsFromV4Data(
         binding.source === "brief_extraction" &&
         carriedRaw === binding.raw_value &&
         bindingEarnsBriefClaim(
-          bindStatedItemToBrief({ quote: changeQuote, value: binding.change_by, unit: binding.unit, brief: briefText }),
+          // The checked typed delta owns its sign (including "lose 150").
+          // This consumer rechecks the quoted magnitude, never its absolute level.
+          bindStatedItemToBrief({ quote: changeQuote, value: Math.abs(binding.change_by), unit: binding.unit, brief: briefText }),
         );
 
       const earnsBriefClaim =

@@ -20,7 +20,7 @@ function records(): DraftRecordSet {
       { kind: 'change_quantity', source_quote: EFFECT, quantity: 2, quantity_label: 'new subscribers',
         unit: 'subscribers', unit_literals: ['subscribers'], value_scale: 'raw_count' },
       { kind: 'option_effect', source_quote: EFFECT, option_effect: {
-        option: 1, quantity: 2, sets_to: 150, value_literal: 'about 150',
+        option: 1, quantity: 2, change_by: 150, value_literal: 'about 150',
         range: { low: 80, high: 250, low_literal: '80', high_literal: '250', meaning: 'min_max' },
       } },
       { kind: 'option', source_quote: OTHER_OPTION },
@@ -47,7 +47,7 @@ function rawFor(c: Awaited<ReturnType<typeof compile>>, option = c.option) {
 }
 
 describe('BUILD option→quantity effects through the records replay and V3 intervention consumer', () => {
-  it('sets only its bound option to the stated effect, with a raw range and quoted brief authority', async () => {
+  it('shifts only its bound option by the stated effect, with a raw range and quoted brief authority', async () => {
     const c = await compile();
     expect(rawFor(c)).toBe(150);
     const other = c.result.projection.graph.nodes.find(n => n.kind === 'option' && n.provenance?.source_quote === OTHER_OPTION)!;
@@ -55,7 +55,7 @@ describe('BUILD option→quantity effects through the records replay and V3 inte
     const starter = c.wire.options.find(o => o.id === c.option.id)!;
     const intervention = Object.values(starter.interventions).find(i => i.raw_value === 150);
     expect(intervention).toMatchObject({
-      raw_value: 150, unit: 'subscribers', source: 'brief_extraction', value_confidence: 'high',
+      raw_value: 150, change_by: 150, unit: 'subscribers', source: 'brief_extraction', value_confidence: 'high',
       range: { low: 80, high: 250, meaning: 'min_max', source: 'brief_extraction', source_quote: EFFECT },
     });
     expect(intervention?.reasoning).toContain(EFFECT);
@@ -111,7 +111,7 @@ describe('BUILD option→quantity effects through the records replay and V3 inte
   it('asks for today when a stock change_by has no stated baseline', async () => {
     const r = records();
     r.stated_items[2] = { kind: 'figure', source_quote: EFFECT, quantity: 2, unit: 'subscribers', unit_literals: ['subscribers'] };
-    delete r.stated_items[3]!.option_effect!.sets_to;
+    delete r.stated_items[3]!.option_effect!.change_by;
     r.stated_items[3]!.option_effect!.change_by = 150;
     const c = await compile(r);
     expect(rawFor(c)).toBeUndefined();
@@ -130,12 +130,12 @@ describe('BUILD option→quantity effects through the records replay and V3 inte
     ['an option reference outside the record set', (r: DraftRecordSet) => { r.stated_items[3]!.option_effect!.option = 99; }],
     ['a goal used as the intervention quantity', (r: DraftRecordSet) => { r.stated_items[3]!.option_effect!.quantity = 0; }],
     ['a missing intervention quantity', (r: DraftRecordSet) => { r.stated_items[3]!.option_effect!.quantity = 99; }],
-    ['a transcribed value absent from its quote', (r: DraftRecordSet) => { r.stated_items[3]!.option_effect!.sets_to = 151; }],
+    ['a transcribed value absent from its quote', (r: DraftRecordSet) => { r.stated_items[3]!.option_effect!.change_by = 151; }],
     ['a unit contradicted by its own evidence', (r: DraftRecordSet) => { r.stated_items[2]!.unit = '%'; }],
     ['a unit declaration without its quoted evidence', (r: DraftRecordSet) => { r.stated_items[2]!.unit_literals = []; }],
     ['an unquoted low range bound', (r: DraftRecordSet) => { r.stated_items[3]!.option_effect!.range!.low = 90; }],
     ['a reversed range', (r: DraftRecordSet) => { const range = r.stated_items[3]!.option_effect!.range!; range.low = 250; range.high = 80; }],
-    ['both setting operators on one effect', (r: DraftRecordSet) => { r.stated_items[3]!.option_effect!.change_by = 150; }],
+    ['both setting operators on one effect', (r: DraftRecordSet) => { r.stated_items[3]!.option_effect!.sets_to = 150; }],
   ])('refuses %s', async (_name, mutate) => {
     const r = records();
     mutate(r);

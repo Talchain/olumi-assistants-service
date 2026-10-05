@@ -95,7 +95,7 @@ export interface SentencePassRecord {
     option_sentence: number;
     option_literal: string;
     quantity_figure: Fig;
-    setting: (typeof DRAFT_RECORD_OPTION_SETTINGS)[number];
+    setting?: (typeof DRAFT_RECORD_OPTION_SETTINGS)[number];
     value: number;
     value_literal: string;
     range?: DraftValueRange;
@@ -144,7 +144,7 @@ export function buildSentencePassBaseSchema(): Record<string, unknown> {
                 option_sentence: { type: 'integer' }, option_literal: { type: 'string' }, quantity_figure: FIG_SCHEMA,
                 setting: { type: 'string', enum: [...DRAFT_RECORD_OPTION_SETTINGS] },
                 value: { type: 'number' }, value_literal: { type: 'string' }, range: VALUE_RANGE_SCHEMA,
-              }, required: ['option_sentence', 'option_literal', 'quantity_figure', 'setting', 'value', 'value_literal'], additionalProperties: false,
+              }, required: ['option_sentence', 'option_literal', 'quantity_figure', 'value', 'value_literal'], additionalProperties: false,
             },
             figure: FIG_SCHEMA,
             value: { type: 'number' },
@@ -205,7 +205,7 @@ const RecordZ = z.object({
   quantity_label: z.string().optional(),
   option_effect: z.object({
     option_sentence: z.number().int(), option_literal: z.string(), quantity_figure: FigZ,
-    setting: z.enum(DRAFT_RECORD_OPTION_SETTINGS), value: z.number().finite(), value_literal: z.string(), range: RangeZ.optional(),
+    setting: z.enum(DRAFT_RECORD_OPTION_SETTINGS).optional(), value: z.number().finite(), value_literal: z.string(), range: RangeZ.optional(),
   }).strict().optional(),
   figure: FigZ.optional(),
   value: z.number().optional(),
@@ -265,7 +265,7 @@ quantity_of: the id of the figure that declares the quantity this figure measure
 direction: on the goal only: floor when the user wants the quantity at or above the figure, ceiling when at or below, "unresolved" when the brief states no comparator.
 direction_literal: on the goal only: the comparator words copied exactly from the goal's sentence, or "unresolved".
 baseline_figure: on the goal only: the id of the figure stating the current level of the same quantity, or "unresolved".
-setting: on an option_setting or option_effect, change_by for a signed shift from the quantity's level today, sets_to for its level under that option.
+setting: on an option_setting, type the stated setting; on an option_effect, default to change_by for a signed shift preserving the quantity's level today, and type sets_to only for an explicitly stated level under that option with its quote; a missing per-source rate never supplies sets_to.
 option_effect: on an option_effect only, transcribe the particular option's intervention on a quantity without adding a causal relationship, using these fields.
 option_sentence: the id of the sentence that declares the particular option.
 option_literal: the characters in option_sentence that select that option, copied exactly; never omit the option binding.

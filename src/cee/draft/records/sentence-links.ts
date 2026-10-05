@@ -311,7 +311,7 @@ export function mergeSentenceLinks(input: {
       if (existing >= 0) { refuse(r, 'main_link_compiled', { stated_index: existing }); continue; }
       const index = items.length;
       items.push({ kind: 'option_effect', source_quote: sentence.text, unit: r.unit, unit_literals: r.unit_literals,
-        option_effect: { option: options[0]!, quantity, [effect.setting]: effect.value, value_literal: effect.value_literal,
+        option_effect: { option: options[0]!, quantity, [effect.setting ?? 'change_by']: effect.value, value_literal: effect.value_literal,
           ...(effect.range !== undefined ? { range: { ...effect.range } } : {}) } } as DraftStatedItem & Record<string, unknown>);
       fills.push({ stated_index: index, field: 'option_effect', mode: 'appended', sentence: r.sentence });
       continue;

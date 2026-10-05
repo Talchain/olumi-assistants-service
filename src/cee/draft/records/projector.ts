@@ -4059,10 +4059,29 @@ function projectOnce(
     });
   }
 
+  // Science 5 Oct: the second door binds a rate-less effect to the unique option
+  // that actually sets its own source lever. Shared levers and per-unit rates
+  // retain the relationship path. No label or missing rate supplies a level.
+  const causeOptionEffects = new Map<number, NonNullable<DraftStatedItem["option_effect"]>>();
+  statedItems.forEach((item, index) => {
+    const r = item.relationship;
+    if (item.kind !== "cause" || r === undefined || r.per_source_change !== undefined
+      || r.no_effect_literal !== undefined || r.amount === undefined) return;
+    const owners = statedItems.flatMap((option, optionIndex) => option.kind === "option"
+      && option.quantity === r.from_quantity && option.value !== undefined ? [optionIndex] : []);
+    if (owners.length !== 1) return;
+    const option = owners[0]!, optionId = statedIdByIndex.get(option);
+    const own = optionId === undefined ? undefined : ownOptionSettings.get(optionId);
+    if (own === undefined || own.index !== option || own.lever.quantity_ref !== r.from_quantity) return;
+    causeOptionEffects.set(index, { option, quantity: r.to_quantity, change_by: r.amount,
+      value_literal: r.amount_literal ?? "", ...(r.range === undefined ? {} : { range: r.range }) });
+  });
+
   // Relationship endpoints are resolved solely by quantity identity, before connectivity pruning.
   statedItems.forEach((item,stated_index)=>{
     const r=item.relationship;
     if(item.kind!=="cause" || r===undefined) return;
+    if (causeOptionEffects.has(stated_index)) return;
     const rangeRefuse=(reason:DroppedRecordRef["reason"])=>{dropped.push({claim_index:-1,claim_kind:STATED_ITEM_DROP_KIND,stated_index,label:item.source_quote,reason});delete r.amount_span;delete r.source_span;};
     if(r.no_effect_literal!==undefined){
       if(r.amount!==undefined || r.range!==undefined){rangeRefuse("no_effect_with_amount");return;}
@@ -4138,9 +4157,12 @@ function projectOnce(
   }
 
   statedItems.forEach((item, index) => {
-    if (item.kind !== "option_effect") return;
-    const e = item.option_effect;
+    const causeEffect = causeOptionEffects.get(index);
+    if (item.kind !== "option_effect" && causeEffect === undefined) return;
+    const e = causeEffect ?? item.option_effect;
     const refuse = (reason: DroppedRecordRef["reason"] = "option_effect_invalid") => dropped.push({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, stated_index: index, label: item.source_quote, reason });
+    if (item.evidence_conflicts?.includes("span_and_literal_both")) { refuse("span_and_literal_both"); return; }
+    if (causeEffect !== undefined && item.relationship?.amount_span === undefined) { refuse(); return; }
     if (e === undefined || (e.sets_to === undefined) === (e.change_by === undefined) || statedItems[e.option]?.kind !== "option") { refuse(); return; }
     const declaration = statedItems[e.quantity];
     if (declaration === undefined || declaration.kind === "goal" || declaration.kind === "constraint" || declaration.unit === undefined
@@ -4148,11 +4170,14 @@ function projectOnce(
     const optionId = statedIdByIndex.get(e.option), resolved = carrier(e.quantity);
     if (optionId === undefined || resolved.node?.kind !== "factor") { refuse(resolved.reason ?? "option_lever_is_goal"); return; }
     const unit = declaration.unit, authoredValue = e.sets_to ?? e.change_by!;
-    const rawValue = literalConventionValue(authoredValue, unit, declaration.value_scale);
+    // Relationship amounts/ranges have already been converted by locateRecordEvidence.
+    const rawValue = causeEffect === undefined ? literalConventionValue(authoredValue, unit, declaration.value_scale) : authoredValue;
     const range = e.range === undefined ? undefined : { ...e.range,
-      low: literalConventionValue(e.range.low, unit, declaration.value_scale), high: literalConventionValue(e.range.high, unit, declaration.value_scale) };
+      low: causeEffect === undefined ? literalConventionValue(e.range.low, unit, declaration.value_scale) : e.range.low,
+      high: causeEffect === undefined ? literalConventionValue(e.range.high, unit, declaration.value_scale) : e.range.high };
     const checked = { ...e, sets_to: e.sets_to === undefined ? undefined : rawValue, change_by: e.change_by === undefined ? undefined : rawValue, range };
     const evidenceItem = { ...item, value_literal: e.value_literal };
+    if (causeEffect !== undefined && (item.relationship?.amount_unit === undefined || !sameUnit(item.relationship.amount_unit, unit))) { refuse("unit_not_evidenced"); return; }
     if (item.unit !== undefined && !sameUnit(item.unit, unit) || (item.unit_literals !== undefined || item.unit !== undefined) && unitEvidenceReason(evidenceItem, unit) !== undefined) { refuse("unit_not_evidenced"); return; }
     if (typeof brief !== "string" || !statedEffectQuoteMatches(item.source_quote, { amount: rawValue, amount_unit: unit },
       { kind: "option_effect", effect: checked, option_quote: statedItems[e.option]!.source_quote, brief })) { refuse(); return; }
@@ -4160,7 +4185,9 @@ function projectOnce(
     if (range !== undefined && admittedRange === undefined) { refuse(); return; }
     let baseline = 0;
     if (e.change_by !== undefined) {
-      baseline = zeroQuantities.has(e.quantity) ? 0 : declaration.kind === "change_quantity" ? NaN : declaration.value!;
+      baseline = zeroQuantities.has(e.quantity) ? 0 : declaration.kind === "change_quantity" || declaration.kind === "option"
+        || declaration.kind === "cause" && declaration.role !== "baseline"
+        || declaration.role !== undefined && declaration.role !== "baseline" ? NaN : declaration.value!;
       if (!Number.isFinite(baseline)) { refuse("option_change_by_baseline_unknown"); return; }
       if (!zeroQuantities.has(e.quantity) && !statedValueIsBound(declaration, brief)) { refuse("option_change_by_baseline_unbound"); return; }
       baseline = literalConventionValue(baseline, unit, declaration.value_scale);
