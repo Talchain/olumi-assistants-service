@@ -19,7 +19,6 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
 }));
 
 let agentCalls = 0;
-let narratorCalls = 0;
 
 describe('RT-7: the hop limit says why nothing changed', () => {
   let app: FastifyInstance;
@@ -27,7 +26,6 @@ describe('RT-7: the hop limit says why nothing changed', () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       if (body['tool_choice'] === 'none') {
-        narratorCalls += 1;
         return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: '' }] }] }), { status: 200 });
       }
       agentCalls += 1;
