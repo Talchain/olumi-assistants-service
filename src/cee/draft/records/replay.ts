@@ -60,6 +60,7 @@ import { PROJECTOR_STRUCTURAL_CLASS } from "./projector.js";
 import type { DraftRecordSet } from "./grammar.js";
 import type { RecordProjection } from "./projector.js";
 import { projectDraftRecords } from "./seam.js";
+import { setAsideInventedStructure } from "./invented-structure.js";
 
 /** A node as it stands at the end of the replay. Structural, not the V3 wire shape. */
 interface ReplayNode {
@@ -178,6 +179,8 @@ export interface ReplaySuccess {
     readonly blocking: boolean;
   };
   readonly semantics: SemanticTable;
+  /** Rule (e2): the level asks for the invented roots set aside (at most 3, ordered by option→goal paths). */
+  readonly inventedRootAsks: readonly string[];
 }
 
 export type ReplayResult = ReplaySuccess | ReplayFailure;
@@ -219,9 +222,15 @@ export async function replayRecordSet(
   // ── 2. Normalisation, the adapter's own next step. Load-bearing here: it is
   // what maps a projected `constraint` node to `risk`, and the repair stages
   // below judge kinds AFTER it has run.
-  const normalised = normaliseDraftResponse(
+  const normalisedDraft = normaliseDraftResponse(
     JSON.parse(JSON.stringify(seam.projection.graph)) as unknown,
   );
+  // ── 2b. RULE (e) (Science GO, 5 Oct; `invented-structure.ts`): Olumi's own unsupported structure is set aside BEFORE
+  // the shared repair stages, so the sweep never scaffolds around a node the compile withdraws. Disclosed in `dropped`.
+  const aside = setAsideInventedStructure(normalisedDraft as { nodes: unknown[]; edges: unknown[] }, brief);
+  const normalised = aside.graph;
+  const projection = aside.disclosures.length === 0 ? seam.projection
+    : { ...seam.projection, dropped: [...seam.projection.dropped, ...aside.disclosures] };
 
   // ── 3. The completion ask — pass 2's deterministic half, computed from the
   // PRE-repair projection, which is where the real caller computes it.
@@ -262,7 +271,7 @@ export async function replayRecordSet(
   return {
     ok: true,
     records: seam.records,
-    projection: seam.projection,
+    projection,
     ask,
     graph,
     repairs: ctx.deterministicRepairs,
@@ -272,6 +281,7 @@ export async function replayRecordSet(
       blocking: verdict.errors.length > 0,
     },
     semantics: measureSemanticTable(graph),
+    inventedRootAsks: aside.asks,
   };
 }
 

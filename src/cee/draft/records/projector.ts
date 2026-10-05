@@ -816,7 +816,20 @@ export interface DroppedRecordRef {
      * relationship sentence by design, runs to 103 characters in the banked
      * corpora, and mints an EDGE — it is never judged by this predicate.
      */
-    | "claim_label_not_a_name";
+    | "claim_label_not_a_name"
+    /**
+     * Rule (e1) (Science GO, 5 Oct): an UNQUANTIFIED claim Olumi invented sat on a path from an option to the goal that
+     * the user's own SIZED stated causes already join. It leaves the analysis graph and is disclosed here, with
+     * `restore` holding exactly what re-adds it in one step. Never silently lost.
+     */
+    | "superseded_by_stated_path"
+    /**
+     * Rule (e2) (Science GO, 5 Oct): a root factor Olumi invented with no level, reaching the goal. Removed (no Olumi
+     * level is ever written), disclosed with `restore`, and asked about ("What is <label> today?", at most 3 per turn).
+     */
+    | "invented_root_level_unknown";
+  /** Rules (e1)/(e2): exactly what was set aside, so adding it back is one step (the node, its edges, its settings). */
+  readonly restore?: { readonly node: unknown; readonly edges: readonly unknown[]; readonly interventions: Readonly<Record<string, unknown>> };
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
   /**

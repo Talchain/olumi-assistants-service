@@ -217,6 +217,10 @@ export const NOTICE_KIND_BY_REASON: Record<
   // named". The module's own ruling applies — a coarse-but-true bucket beats a
   // specific-but-false one on a channel whose purpose is telling the truth.
   claim_label_not_a_name: "other",
+  // Rules (e1)/(e2): Olumi set its OWN unsized structure aside — the user's stated path stands, or a level is asked for.
+  // Nothing was guessed, and the disclosure carries what re-adds it.
+  superseded_by_stated_path: "conflict_resolved_conservatively",
+  invented_root_level_unknown: "conflict_resolved_conservatively",
 
   // ── A STATED TARGET IS NOT MODELLED AS A THRESHOLD ────────────────────────
   // "It is on the graph as the user's own words, but it is NOT yet a goal
