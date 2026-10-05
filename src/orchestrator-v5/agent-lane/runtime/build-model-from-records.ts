@@ -17,7 +17,8 @@ import type { InferenceClass } from '../admit-model.js';
 import { structuralFactorCategories } from '../../../validators/graph-validator.js';
 import { budgetFor } from '../model-budgets.js';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { constructionOperationId, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
+import { holdStatedGoalAttributes } from '../stated-by-user.js';
+import { constructionOperationId, deadlineOpenQuestion, strictForTheDrafter, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 import type { ToolResult } from './agent-tools.js';
 
@@ -171,6 +172,28 @@ function inferenceClassesOf(origins: ReadonlyMap<string, { cls: unknown; unbased
   return out;
 }
 
+/**
+ * ⭐ PORT 1 (DL WIRING PORTS 3): THE DEADLINE QUESTION, by CALLING its one producer (`deadlineOpenQuestion`,
+ * `build-model.ts`) on the SAME brief-side verdict the legacy constructor uses (`holdStatedGoalAttributes`), never a
+ * second writer. Its inputs are read from what this build registers: the goal's held `goal_horizon_months`, the metric
+ * the goal measures (the quantity it names: the node sharing its `quantity_ref`, by its registered label; the goal's own
+ * label when none does), and whether the goal holds the deadline's own words (`goal_deadline_as_stated`; nothing on the
+ * records path writes it, so the question never claims the model keeps them). One goal, as legacy's `held` requires.
+ */
+function recordsDeadlineQuestion(v1: V1Graph, idOf: ReadonlyMap<string, string>, graph: { readonly nodes: readonly unknown[] }, brief: string): string | undefined {
+  const nodes = graph.nodes as ReadonlyArray<{ readonly id: string; readonly kind?: unknown; readonly label?: unknown; readonly goal_horizon_months?: unknown; readonly goal_deadline_as_stated?: unknown }>;
+  const goals = nodes.filter((node) => node.kind === 'goal');
+  if (goals.length !== 1) return undefined;
+  const goal = goals[0]!;
+  const compiledGoal = v1.nodes.find((node) => (idOf.get(node.id) ?? node.id) === goal.id) as { quantity_ref?: unknown } | undefined;
+  const ref = compiledGoal?.quantity_ref;
+  const measured = ref === undefined ? undefined : v1.nodes.find((node) => node.kind !== 'goal' && node.kind !== 'option' && node.kind !== 'decision'
+    && (node as { quantity_ref?: unknown }).quantity_ref === ref);
+  const metric = measured === undefined ? goal.label : nodes.find((node) => node.id === (idOf.get(measured.id) ?? measured.id))?.label ?? goal.label;
+  const statedGoal = holdStatedGoalAttributes(nodes, { horizon_months: goal.goal_horizon_months }, brief);
+  return deadlineOpenQuestion(statedGoal, metric, goal.goal_horizon_months, typeof goal.goal_deadline_as_stated === 'string');
+}
+
 export async function buildModelFromRecords(
   scenarioId: string,
   brief: string,
@@ -298,6 +321,8 @@ export async function buildModelFromRecords(
   }
   if (reg.status !== 200) return refuse('registered', { ok: false, mutated: false, refusal: 'registration_refused', http: reg.status, detail: String(reg.json.message ?? '').slice(0, 200) }, `http_${reg.status}`);
   stage({ stage: 'registered', status: 'ok', replayed: reg.json.replayed === true, model_version: reg.json.model_version ?? null });
+  // PORT 1: the deadline question FIRST, ahead of the five-question cap, exactly as the legacy constructor places it.
+  const deadline = recordsDeadlineQuestion(joined.graph, idOf, graph, brief);
   return {
     ok: true, mutated: true, ...(reg.json.replayed === true ? { replayed: true } : {}),
     ...(reg.json.model_version === undefined ? {} : { model_version: reg.json.model_version }),
@@ -308,7 +333,7 @@ export async function buildModelFromRecords(
     options: graph.nodes.filter(node => node.kind === 'option').length,
     goal_constraints_carried: graph.goal_constraints?.length ?? 0,
     ...(limits.notCarried.length > 0 ? { goal_constraints_not_carried: limits.notCarried } : {}),
-    open_questions: compiled.ask.items.map(item => item.detail),
+    open_questions: [...(deadline !== undefined ? [deadline] : []), ...compiled.ask.items.map(item => item.detail)],
     // Preserve the projector's typed identities and reasons; do not reconstruct them from labels.
     not_represented: compiled.projection.dropped,
   };
