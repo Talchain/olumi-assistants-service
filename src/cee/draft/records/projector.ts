@@ -3531,6 +3531,19 @@ function projectOnce(
   const goalOfQuantityOutcome = new Map<string,string>();
   const goalQuantityIdentityEdgeIds = new Set<string>();
   const ownOptionSettings = new Map<string,{index:number;lever:ProjectedNode;binding:ProjectedInterventionBinding}>();
+  // Fix (d): a stated cause's endpoint quantity carried by its DECLARING item's own stated node (pass below the options).
+  const endpointByQuantity = new Map<number,ProjectedNode>();
+  /**
+   * ONE MINT for a quantity no claim carries, from its declaring stated item (label = its quote, its unit, provenance
+   * stated). The option-lever pass and fix (d)'s stated-relationship endpoints both call it; one quantity, one node.
+   */
+  const mintDeclaredQuantity=(q:number,declaration:DraftStatedItem):ProjectedNode=>{
+    const id=mintUnique(sha8("factor","quantity-lever",String(q)),usedIds);
+    const prov:RecordProvenance={provenance_class:"stated",source_quote:declaration.source_quote};
+    const node:ProjectedNode={id,kind:"factor",label:declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
+    nodes.push(node);provenance[id]=prov;leverByQuantity.set(q,node);
+    return node;
+  };
   const carrier = (q: number): { node?: ProjectedNode; reason?: DroppedRecordRef["reason"] } => {
     const claimIds=new Set(claimIdByIndex.values());
     const own=nodes.filter(n=>n.kind !== "goal" && n.kind !== "option" && claimIds.has(n.id) && n.quantity_ref===q);
@@ -3538,6 +3551,8 @@ function projectOnce(
     if(own.length===1)return {node:own[0]};
     const lever=leverByQuantity.get(q);
     if(lever!==undefined)return {node:lever};
+    const declared=endpointByQuantity.get(q);
+    if(declared!==undefined)return {node:declared};
     const outcome=goalQuantityOutcome.get(q);
     if(outcome!==undefined)return {node:outcome};
     const goals=nodes.filter(n=>n.kind==="goal" && n.quantity_ref===q);
@@ -3562,12 +3577,7 @@ function projectOnce(
     if(resolved.reason==="relationship_endpoint_ambiguous"){refuse("lever_endpoint_ambiguous");return;}
     let lever=resolved.node;
     if(lever!==undefined && lever.kind!=="factor"){refuse("lever_endpoint_ambiguous");return;}
-    if(lever===undefined){
-      const id=mintUnique(sha8("factor","quantity-lever",String(q)),usedIds);
-      const prov:RecordProvenance={provenance_class:"stated",source_quote:declaration.source_quote};
-      lever={id,kind:"factor",label:declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
-      nodes.push(lever);provenance[id]=prov;leverByQuantity.set(q,lever);
-    }
+    if(lever===undefined)lever=mintDeclaredQuantity(q,declaration);
     // ⭐ P2-A1 (Science ruling, 5 Oct; a994c38a): a typed `change_by` is a CHANGE of the lever, never its level. The
     // delta is this option's own bound literal value; the absolute written here is only the compile-time reading
     // against the declaring item's stated level, and the Run assembly re-resolves `change_by` against the CURRENT
@@ -3589,6 +3599,50 @@ function projectOnce(
       reasoning:changeBy===undefined ? `Stated option value bound to stated_items[${index}]: ${item.source_quote}`
         : `Stated option change bound to stated_items[${index}]: ${item.source_quote}`}});
   });
+
+  // ⭐ FIX (d): STRUCTURE FROM THE USER'S TYPED RECORDS (records-first endpoints). Measured on the live 4×5 on fix (a):
+  // the drafter's stated causes typed their from/to quantities, but the quantities they name (a price rise, customers,
+  // starter subscribers) had NO claim node, so `carrier` refused every one (`relationship_endpoint_missing`, 11 in 9
+  // draws) while the model's own claims invented a collapsed structure the user never stated. So a stated cause whose
+  // endpoint quantity no claim, lever, goal-quantity outcome or goal carries gets that quantity's node from its DECLARING
+  // stated item (`statedItems[q]`, the item its own typed quantity index names; never a label):
+  //   · the declaring item's OWN stated factor node when it has one (a figure or a cause: label = its quote, its unit,
+  //     its stated value as its level under the stated pass's typed-role rule, provenance stated) — one node, no twin;
+  //   · else (an option declares it) the option-lever mint (`mintDeclaredQuantity`), exactly as an option's lever.
+  // The causal edge then comes from the relationship (B4, below). Only for a SIZED cause whose quote is in the brief, whose
+  // evidence located (spans kept) and whose endpoint units canonicalised (both typed): a refused, unsized or no-effect
+  // clause mints nothing, so nothing is left orphaned. A model claim carrying q always wins (`carrier`'s first rule), so
+  // a claim duplicating the quantity never makes a second node. A goal or a limit never declares a minted quantity.
+  if(typeof brief==="string" && brief.trim()!==""){
+    statedItems.forEach((item)=>{
+      const r=item.relationship;
+      if(item.kind!=="cause" || r===undefined || r.no_effect_literal!==undefined || !brief.includes(item.source_quote))return;
+      if(r.amount===undefined && r.range===undefined || r.per_source_change===undefined)return;
+      if(r.amount_unit===undefined || r.per_source_change_unit===undefined || r.source_span===undefined || r.amount_span===undefined && r.range===undefined)return;
+      const ends=[...new Set([r.from_quantity,r.to_quantity])];
+      const missing=ends.filter(q=>carrier(q).reason==="relationship_endpoint_missing");
+      if(missing.length===0 || ends.some(q=>{const c=carrier(q);return c.reason!==undefined && c.reason!=="relationship_endpoint_missing";}))return;
+      const plan=missing.map(q=>{
+        const declaration=statedItems[q];
+        if(declaration===undefined || declaration.unit===undefined || declaration.kind==="goal" || declaration.kind==="constraint"
+          || declaration.quantity!==undefined && declaration.quantity!==q)return undefined;
+        if(declaration.kind==="option")return {q,declaration,own:undefined};
+        // A figure or cause declares the quantity with its OWN stated node, and only when that node holds the quantity's
+        // current level (a bound value whose typed role is a current measurement: the stated pass's own rule). A context
+        // or target figure is not a level, so no link is drawn from a quantity nobody sized (it stays endpoint_missing).
+        const own=nodes.find(n=>n.id===statedIdByIndex.get(q));
+        const level=typeof declaration.value==="number" && (declaration.role===undefined || declaration.role==="baseline")
+          && statedValueIsBound(declaration,brief);
+        return level && own?.kind==="factor" && (own.quantity_ref===undefined || own.quantity_ref===q) ? {q,declaration,own} : undefined;
+      });
+      if(plan.some(p=>p===undefined))return;
+      for(const p of plan){
+        if(p===undefined)continue;
+        if(p.own===undefined){mintDeclaredQuantity(p.q,p.declaration);continue;}
+        p.own.quantity_ref=p.q;endpointByQuantity.set(p.q,p.own);
+      }
+    });
+  }
 
   // ── Pass 3: causal_link claims → edges. Runs AFTER both node passes so a
   // link may reference a claim declared later in the array.
