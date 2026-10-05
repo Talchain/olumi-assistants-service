@@ -594,7 +594,7 @@ export async function proposeGoalCurrentLevel(
   // ⭐ RT-10 B′ R3 (Science #87 5999608477): `noTargetYet` decides only the FRAME the level is read on (no target figure on
   // the node). Whether the goal HAS a target is the one reader's answer: "at most 5%" set through the goal panel lives on
   // the goal's own limit row, so the approval never tells the user that goal "has no target yet".
-  const targetStated = statedGoalTargetOf(g.raw, goal as unknown as Record<string, unknown>) !== null;
+  const targetStated = statedGoalTargetOf(g.raw, goal as Record<string, unknown>) !== null;
   if (!isChange && !noTargetYet && (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level')) {
     return refuse(
       'no_target',

@@ -19,7 +19,7 @@ import {
   WITHHELD_SEPARATION_UNAVAILABLE, WITHHELD_UNREQUESTED_ANALYSIS,
 } from './analysis-state-v1.js';
 import {
-  GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_TARGET_NOT_TESTABLE, goalFiguresWithheldWarning,
+  GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_TARGET_NOT_TESTABLE, goalFiguresWithheldWarnings,
 } from '../../orchestrator/context/option-result-source.js';
 
 export const LEADER_LICENCE_AUTHORITY_VERSION = 1 as const;
@@ -119,9 +119,7 @@ function goalFigureReason(result: Rec): LeaderLicenceWithheldReason | null {
   // reason is the first withhold that did not keep them, in ANY order: a target-only withhold beside a placeholder-path
   // one never licenses the leader the other withheld (Codex-style order hazard: `goalFiguresWithheldWarning` reads first).
   const keptShares = (w: Rec): boolean => Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share');
-  const warnings = (Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [])
-    .map(rec).filter((w): w is Rec => w !== null && typeof w.code === 'string' && goalFiguresWithheldWarning({ inference_warnings: [w] }) !== undefined);
-  const warning = warnings.find((w) => !keptShares(w));
+  const warning = goalFiguresWithheldWarnings(envelope).find((w) => !keptShares(w));
   const code = warning?.code;
   if (typeof code !== 'string') return null;
   if (code === GOAL_FIGURES_OPTIONS_IDENTICAL) return 'options_do_not_separate';
