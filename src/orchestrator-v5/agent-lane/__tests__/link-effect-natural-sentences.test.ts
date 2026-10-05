@@ -517,6 +517,8 @@ describe('RT-6 step 4: a hyphenated end name and "raise <end> by N points" bind 
   it.each([
     ['S4-H hyphenated name', { ...coordination, id: 'S4-H', quote: 'Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risk.',
       effect: effect(1, 'percentage points', 5, 'percentage points') }, 'feature_launch_delay_risk', '1 percentage point of feature-launch delay risk'],
+    ['S4-H backward', { ...coordination, id: 'S4-H2', quote: 'When team coordination overhead rises by 5 percentage points, feature-launch delay risk rises by about 1 percentage point.',
+      effect: effect(1, 'percentage points', 5, 'percentage points') }, 'feature_launch_delay_risk', 'feature-launch delay risk rises by about 1 percentage point'],
     ['S4-B "raise <end> by"', { ...headcount, id: 'S4-B1', quote: 'Each 2 more developers raise onboarding drag by about 1 percentage point.',
       effect: effect(1, 'percentage points', 2, 'developers') }, 'onboarding_drag', 'onboarding drag by about 1 percentage point'],
   ] as const)('%s: Approve → ONE real commit → strict reload keeps the link sized AND the end\'s unit reading from the user\'s own clause', async (_n, row, endId, clause) => {
@@ -536,6 +538,9 @@ describe('RT-6 step 4: a hyphenated end name and "raise <end> by N points" bind 
     ['a hyphen joins a name word to ANOTHER word ("launch-day delay risk")', { ...coordination, id: 'S4-Hx',
       quote: 'Every 5 percentage points of team coordination overhead adds about 1 percentage point of launch-day delay risk.',
       effect: effect(1, 'percentage points', 5, 'percentage points') }, 'Is 1 percentage point of launch-day delay risk a change in “Feature-launch delay risk”?'],
+    ['only a HYPHEN joins name words: "feature/launch delay risk"', { ...coordination, id: 'S4-Hy',
+      quote: 'Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature/launch delay risk.',
+      effect: effect(1, 'percentage points', 5, 'percentage points') }, 'What unit is the 1 change in “Feature-launch delay risk” stated in?'],
     ['"raise <another quantity> by 1 percentage point" ("onboarding costs")', { ...headcount, id: 'S4-Bx',
       quote: 'Each 2 more developers raise onboarding costs by about 1 percentage point.', effect: effect(1, 'percentage points', 2, 'developers') },
       'What unit is the 1 change in “Onboarding drag” stated in?'],
