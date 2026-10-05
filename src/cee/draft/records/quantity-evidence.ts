@@ -1,4 +1,4 @@
-import { periodIn, sameUnit } from '../../../orchestrator-v5/agent-lane/same-unit.js';
+import { periodIn, sameUnit, readCountRate, readMoney, evidencePeriod, words, singular } from '../../../orchestrator-v5/agent-lane/same-unit.js';
 import { findStatedAmounts, readUnit, readCurrencyUnitWithQualifiers } from '../../provenance/stated-amounts.js';
 import type { DraftQuoteSpan, DraftValueRange, DraftStatedItem } from './grammar.js';
 
@@ -26,15 +26,75 @@ export function admittedValueRange(range: DraftValueRange | undefined, quote: st
 
 /** Evidence-bound typed value. Unit text validates the declared unit; it never supplies a field. */
 export function statedValueIsBound(item: DraftStatedItem, brief: string | undefined): boolean {
-  const { value, unit, source_quote: quote, value_span, unit_span } = item;
-  if (typeof brief !== 'string' || !brief.includes(quote) || quote.length === 0 || value === undefined
-    || unit === undefined || value_span === undefined || unit_span === undefined
-    || !boundMatches(quote, value_span, value, unit)
+  const { value, unit, source_quote: quote } = item;
+  if (item.evidence_conflicts?.includes('span_and_literal_both')) return false;
+  if (typeof brief !== 'string' || !brief.includes(quote) || quote.length === 0 || value === undefined || unit === undefined) return false;
+  if (item.value_literal !== undefined) {
+    if (boundLiteral(quote, item.value_literal, value).reason !== undefined) return false;
+    // Referenced quantities inherit the declaration, never require unit words in every clause.
+    if (item.unit_literals === undefined) return true;
+    return unitEvidenceReason(item, unit) === undefined;
+  }
+  const { value_span, unit_span } = item;
+  if(value_span === undefined || unit_span === undefined || !boundMatches(quote,value_span,value,unit)
     || unit_span.start < 0 || unit_span.end > quote.length || unit_span.start >= unit_span.end) return false;
-  const unitText = quote.slice(unit_span.start, unit_span.end);
-  const reading = readCurrencyUnitWithQualifiers(unit);
-  if (reading.kind === 'currency') return periodIn(unit) === periodIn(unitText);
-  return sameUnit(unit, unitText);
+  const unitText=quote.slice(unit_span.start,unit_span.end);
+  return readCurrencyUnitWithQualifiers(unit).kind === 'currency' ? periodIn(unit) === periodIn(unitText) : sameUnit(unit,unitText);
+}
+
+export type UnitRefusal = 'quantity_unit_undeclared' | 'quantity_declaration_mismatch' | 'unit_not_evidenced' | 'unit_period_ambiguous' | 'unit_literal_contradicts_unit' | 'unit_restated_conflict';
+/** Unit parts validate one authored declaration; they never supply a unit. */
+export function unitEvidenceReason(item: DraftStatedItem, unit: string): UnitRefusal | undefined {
+  const parts = item.unit_literals ?? [];
+  if (parts.some(p => locateLiteral(item.source_quote,p).reason !== undefined)) return 'unit_not_evidenced';
+  const valueLiteral=item.value_literal ?? item.relationship?.amount_literal ?? '';
+  const amount=findStatedAmounts(valueLiteral)[0];
+  const money=readMoney(unit,'');
+  const period=evidencePeriod(parts);
+  if(period === 'ambiguous') return 'unit_period_ambiguous';
+  if(money !== null) {
+    const code=amount?.currencyCode ?? parts.map(p=>readCurrencyUnitWithQualifiers(p)).find(p=>p.kind==='currency')?.currencyCode;
+    if(code !== money.code || period !== money.period) return 'unit_not_evidenced';
+    return undefined;
+  }
+  if(unit === '%') return amount?.kind === 'percent' || parts.includes('%') ? undefined : 'unit_not_evidenced';
+  const count=readCountRate(unit);
+  if(count !== null) {
+    const noun=count.noun.join(' ');
+    if(!parts.some(p=>words(p).map(singular).join(' ').includes(noun)) || period !== count.period) return 'unit_not_evidenced';
+    return undefined;
+  }
+  return parts.some(p=>sameUnit(unit,p)) ? undefined : 'unit_not_evidenced';
+}
+
+export function canonicalQuantityUnits(records: import('./grammar.js').DraftRecordSet): { records: import('./grammar.js').DraftRecordSet; refusals: {stated_index:number;reason:UnitRefusal}[] } {
+  const copy=structuredClone(records); const refusals: {stated_index:number;reason:UnitRefusal}[]=[];
+  const unitOf=(q:number): string | undefined => {
+    const item=records.stated_items[q];
+    if(item?.unit === undefined){refusals.push({stated_index:q,reason:'quantity_unit_undeclared'});return undefined;}
+    if(item.quantity !== undefined && item.quantity !== q){refusals.push({stated_index:q,reason:'quantity_declaration_mismatch'});return undefined;}
+    // Legacy restatements remain checked input; the new literal declaration is evidence-bound.
+    const reason=item.legacy_evidence || item.unit_literals === undefined ? undefined : unitEvidenceReason(item,item.unit);
+    if(reason !== undefined){refusals.push({stated_index:q,reason});return undefined;}
+    return item.unit;
+  };
+  copy.stated_items.forEach((item,index)=>{
+    if(item.quantity !== undefined){const unit=unitOf(item.quantity);if(unit !== undefined){
+      if(item.unit !== undefined && !sameUnit(item.unit,unit))refusals.push({stated_index:index,reason:'unit_restated_conflict'});
+      // Legacy independently evidenced units retain R1 semantics; v-next has one declaration.
+      if(!item.legacy_evidence || !statedValueIsBound(item,item.source_quote))item.unit=unit;
+    }}
+    const r=item.relationship;
+    if(r !== undefined){const from=unitOf(r.from_quantity),to=unitOf(r.to_quantity);
+      if(r.amount_unit !== undefined && to !== undefined && !sameUnit(r.amount_unit,to) || r.per_source_change_unit !== undefined && from !== undefined && !sameUnit(r.per_source_change_unit,from)) {
+        refusals.push({stated_index:index,reason:'unit_restated_conflict'});delete r.amount_span;delete r.source_span;
+      } else { r.amount_unit=to;r.per_source_change_unit=from; }
+      if(r.range !== undefined)r.range.unit=to;
+    }
+    if(item.range !== undefined)item.range.unit=item.unit;
+  });
+  copy.claims.forEach(c=>{if(c.quantity !== undefined){const unit=unitOf(c.quantity);if(c.unit !== undefined && unit !== undefined && !sameUnit(c.unit,unit))refusals.push({stated_index:c.quantity,reason:'unit_restated_conflict'});c.unit=unit;}});
+  return {records:copy,refusals:[...new Map(refusals.map(r=>[JSON.stringify(r),r])).values()]};
 }
 
 export type LiteralRefusal = 'literal_absent' | 'literal_ambiguous' | 'literal_not_whole_amount' | 'literal_value_mismatch' | 'span_and_literal_both';
