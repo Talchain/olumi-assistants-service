@@ -184,7 +184,7 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
     named = tail.slice(0, tail.lastIndexOf(last, named)).trimEnd().length;
   }
   // "…of feature-launch delay risk'S SHARE of total delivery risk": the name OWNS another quantity (Codex step-4 r1 HIGH).
-  const owned = /^['\u2019]s\b/i.test(rest.slice(at + named));
+  const owned = /^['\u2019]s?(?=\s+\p{L})/iu.test(rest.slice(at + named)); // singular or plural ("risks' share", Codex r2)
   if (named > 0 && !owned && namesThisEnd(run) && completeAfter(rest.slice(at + named).replace(/^(?:(?:\s+per\s+|\s*\/\s*)[\p{L}]+\b)*/iu, ''))) {
     const after = at + named;
     const period = PERIOD.exec(rest.slice(after))![0];
@@ -206,10 +206,14 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
   const back: string[] = [];
   while (k >= 0 && inLabel(words[k]![0]) && gapOk(k)) { first = k; back.push(words[k]![0]); k--; }
   if (first < 0 || !namesThisEnd(back) || (k >= 0 && gapOk(k) && !startsPhrase(words[k]![0]))) return undefined;
-  // A movement verb opens the phrase only as THE verb: in "customers increase LIFT revenue" another movement word stands
-  // before it, so "lift" names a different quantity (Codex step-4 r1 HIGH).
-  if (k >= 1 && MOVEMENT_STARTER.test(words[k]![0]) && gapOk(k - 1)
-    && (MOVEMENT_STARTER.test(words[k - 1]![0]) || LINKING.test(words[k - 1]![0]))) return undefined;
+  // A movement verb opens the phrase only as THE verb (Codex step-4 r1/r2): an inflected form is a finite verb ("a price
+  // increase RAISES revenue"); a bare form after a determiner ("increase our LIFT revenue") or after another movement word
+  // ("increase LIFT revenue") names a different quantity, unless that word is a relative clause's own ("customers we add").
+  if (k >= 1 && MOVEMENT_STARTER.test(words[k]![0]) && !/(?:s|ed|ing)$/i.test(words[k]![0]) && gapOk(k - 1)) {
+    const prev = words[k - 1]![0]; const relative = k >= 2 && /^(?:i|we|you|they|he|she|it)$/i.test(words[k - 2]![0]);
+    if (/^(?:our|the|their|its|your|my|a|an|this|that|these|those)$/i.test(prev)
+      || ((MOVEMENT_STARTER.test(prev) || LINKING.test(prev)) && !relative)) return undefined;
+  }
   const suffix = UNIT_WORDS.exec(rest)![0];
   const period = PERIOD.exec(rest.slice(suffix.length))![0];
   if (numberedPeriodAt(figureEnd + suffix.length + period.length)) return undefined;

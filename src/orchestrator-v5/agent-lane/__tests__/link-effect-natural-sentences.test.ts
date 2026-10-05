@@ -566,8 +566,34 @@ describe('RT-6 step 4: a hyphenated end name and "raise <end> by N points" bind 
 });
 
 describe('RT-6 step 4: the UNIT READER itself never takes a unit from another quantity\'s words (the writer re-runs it at commit)', () => {
-  const read = (fixtureId: CorpusRow['fixture'], from: string, to: string, e: LinkEffectStatement, quote: string) =>
-    prepareLinkEffectUnitReadings(fixture({ fixture: fixtureId } as CorpusRow), from, to, e, quote).unit_readings.filter(r => r.node_id === to);
+  const read = (fixtureId: CorpusRow['fixture'], from: string, to: string, e: LinkEffectStatement, quote: string, change?: (g: Json) => void) => {
+    const g = structuredClone(fixture({ fixture: fixtureId } as CorpusRow)); change?.(g);
+    return prepareLinkEffectUnitReadings(projectGraphForPersistence(GraphV3.parse(g)), from, to, e, quote).unit_readings.filter(r => r.node_id === to);
+  };
+  const risks = (g: Json) => { g.nodes.find((n: Json) => n.id === 'feature_launch_delay_risk').label = 'Feature-launch delay risks'; };
+  const priceIncrease = (g: Json) => {
+    g.nodes.push({ id: 'price_increase', kind: 'factor', label: 'Price increase', category: 'controllable',
+      observed_state: { value: 0, raw_value: 0, cap: 100, unit: '%', source: 'user_override' } });
+    g.edges.push({ from: 'price_increase', to: 'revenue', strength: { mean: 0.5, std: 0.125 }, defaulted: true,
+      provenance: { source: 'cee_hypothesis' }, effect_direction: 'positive', exists_probability: 0.8 });
+  };
+  it.each([
+    ['Codex r2: a determiner before the modifier ("increase OUR lift revenue")', 'lift0', 'customers', 'revenue', effect(100, 'GBP/month', 2, 'customers'),
+      'Every 2 additional customers increase our lift revenue by £100 per month.', undefined],
+    ['Codex r2: a PLURAL possessive ("…delay risks’ share of …")', '96ea7439', 'team_coordination_overhead', 'feature_launch_delay_risk',
+      effect(1, 'percentage points', 5, 'percentage points'),
+      'Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risks’ share of total delivery risk.', risks],
+  ] as const)('NOT adopted: %s', (_n, fx, from, to, e, quote, change) => {
+    expect(read(fx, from, to, e, quote, change)).toEqual([]);
+  });
+  it.each([
+    ['Codex r2 P2: an inflected verb opens the phrase ("a price increase RAISES revenue")', 'lift0', 'price_increase', 'revenue',
+      effect(100, 'GBP/month', 2, 'percentage points'), 'A 2 percentage point price increase raises revenue by £100 per month.', priceIncrease],
+    ['Codex r2 P2: a relative clause\'s verb is not a modifier ("customers we add increase revenue")', 'lift0', 'customers', 'revenue',
+      effect(100, 'GBP/month', 2, 'customers'), 'Every 2 customers we add increase revenue by £100 per month.', undefined],
+  ] as const)('CONTROL adopted: %s', (_n, fx, from, to, e, quote, change) => {
+    expect(read(fx, from, to, e, quote, change)).toEqual([{ node_id: to, unit_reading: { unit: 'GBP/month', source: 'user_stated', source_quote: 'revenue by £100 per month' } }]);
+  });
   it.each([
     ['a possessive after the name ("…feature-launch delay risk\'s share of …")', '96ea7439', 'team_coordination_overhead', 'feature_launch_delay_risk',
       effect(1, 'percentage points', 5, 'percentage points'),
