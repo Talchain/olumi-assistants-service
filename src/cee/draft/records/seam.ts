@@ -645,6 +645,10 @@ export function upgradeLegacyRecords(raw: unknown): unknown {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return raw;
   const record = raw as Record<string, unknown>;
   if (!Array.isArray(record.stated_items)) return raw;
+  // Every ENTRY is validated before it is read: a null or non-object entry is handed on untouched, so the wire parse
+  // refuses it with the typed `not_a_record_set` rather than a TypeError escaping the seam (Codex R1 F7).
+  const isRecord = (entry: unknown): boolean => entry !== null && typeof entry === "object" && !Array.isArray(entry);
+  if (!record.stated_items.every(isRecord) || Array.isArray(record.claims) && !record.claims.every(isRecord)) return raw;
   const copy = structuredClone(record);
   const clean=(owner:Record<string,unknown>,shape:Record<string,z.ZodTypeAny>)=>{for(const key of Object.keys(owner))if(owner[key]===null && shape[key]?.isOptional())delete owner[key];};
   copy.stated_items = (copy.stated_items as Record<string, unknown>[]).map(item => {
