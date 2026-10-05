@@ -171,7 +171,7 @@
       "note": "Grounded, plain-language, coherent. Should PASS every dimension.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Enter European Market produced the best outcome in 72% of runs of this model. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
+        "narrative_summary": "In this model, 72% of runs supported Enter European Market. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
         "story_headlines": {
           "opt_expand": "Enter European Market holds on growth across the simulated range",
           "opt_wait": "Protects near term spend but gives up the growth window"
@@ -305,7 +305,7 @@
       "note": "Narrates 0.72 / 0.28 as bare decimals where the prompt requires \"72%\".",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Enter European Market produced the best outcome with a probability of 0.72 in runs of this model. Competitive intensity is the main fragility.",
+        "narrative_summary": "In this model, runs supported Enter European Market with a probability of 0.72. Competitive intensity is the main fragility.",
         "story_headlines": {
           "opt_expand": "Enter European Market holds on growth across the simulated range",
           "opt_wait": "Protects near term spend but gives up the growth window"
@@ -372,7 +372,7 @@
       "note": "99.4% is within no input value's ±10% band — the runtime grounding rule must catch it.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Enter European Market produced the best outcome in 72% of runs of this model. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
+        "narrative_summary": "In this model, 72% of runs supported Enter European Market. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
         "story_headlines": {
           "opt_expand": "Enter European Market holds on growth across the simulated range",
           "opt_wait": "Protects near term spend but gives up the growth window"

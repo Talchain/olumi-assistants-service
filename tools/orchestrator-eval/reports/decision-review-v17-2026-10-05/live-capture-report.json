@@ -1,5 +1,5 @@
 {
-  "servedHash": "7de3ec66a381076e",
+  "servedHash": "994d94a693cb18fa",
   "reports": [
     {
       "fixtureId": "r1/01-clear-winner",
@@ -177,7 +177,7 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "33 user-facing string(s), 2667 chars",
+              "detail": "33 user-facing string(s), 2949 chars",
               "scanned": 33,
               "scannedUnit": "prose_strings"
             }
@@ -234,7 +234,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 35,
+              "scanned": 34,
               "scannedUnit": "output_strings"
             },
             {
@@ -249,8 +249,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "6 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
-              "scanned": 6,
+              "detail": "5 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
+              "scanned": 5,
               "scannedUnit": "capped_items"
             },
             {
@@ -275,7 +275,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 32,
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -283,8 +283,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "32 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 32,
+              "detail": "31 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -292,8 +292,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "32 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 32,
+              "detail": "31 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -302,7 +302,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 32,
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -311,7 +311,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 32,
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -319,8 +319,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "32 prose string(s) clean at tone \"balanced, both options viable\" against 2 forbidden phrasing(s)",
-              "scanned": 32,
+              "detail": "31 prose string(s) clean at tone \"balanced, both options viable\" against 2 forbidden phrasing(s)",
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -329,7 +329,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 32,
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -380,8 +380,8 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "32 user-facing string(s), 2722 chars",
-              "scanned": 32,
+              "detail": "31 user-facing string(s), 2668 chars",
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             }
           ],
@@ -437,7 +437,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 41,
+              "scanned": 38,
               "scannedUnit": "output_strings"
             },
             {
@@ -445,8 +445,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "2 bias affected_element(s) checked against 8 graph id(s), all resolve",
-              "scanned": 2,
+              "detail": "1 bias affected_element(s) checked against 8 graph id(s), all resolve",
+              "scanned": 1,
               "scannedUnit": "entity_refs"
             },
             {
@@ -454,8 +454,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "7 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
-              "scanned": 7,
+              "detail": "6 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
+              "scanned": 6,
               "scannedUnit": "capped_items"
             },
             {
@@ -480,7 +480,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 37,
+              "scanned": 35,
               "scannedUnit": "prose_strings"
             },
             {
@@ -488,8 +488,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "37 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 37,
+              "detail": "35 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 35,
               "scannedUnit": "prose_strings"
             },
             {
@@ -497,8 +497,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "37 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 37,
+              "detail": "35 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 35,
               "scannedUnit": "prose_strings"
             },
             {
@@ -507,7 +507,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 37,
+              "scanned": 35,
               "scannedUnit": "prose_strings"
             },
             {
@@ -516,7 +516,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 37,
+              "scanned": 35,
               "scannedUnit": "prose_strings"
             },
             {
@@ -524,8 +524,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "37 prose string(s) clean at tone \"cautious, evidence first\" against 3 forbidden phrasing(s)",
-              "scanned": 37,
+              "detail": "35 prose string(s) clean at tone \"cautious, evidence first\" against 3 forbidden phrasing(s)",
+              "scanned": 35,
               "scannedUnit": "prose_strings"
             },
             {
@@ -534,7 +534,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 37,
+              "scanned": 35,
               "scannedUnit": "prose_strings"
             },
             {
@@ -585,8 +585,8 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "37 user-facing string(s), 3401 chars",
-              "scanned": 37,
+              "detail": "35 user-facing string(s), 3192 chars",
+              "scanned": 35,
               "scannedUnit": "prose_strings"
             }
           ],
@@ -643,7 +643,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 35,
+              "scanned": 34,
               "scannedUnit": "output_strings"
             },
             {
@@ -658,8 +658,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "6 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
-              "scanned": 6,
+              "detail": "5 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
+              "scanned": 5,
               "scannedUnit": "capped_items"
             },
             {
@@ -684,7 +684,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 32,
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -692,8 +692,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "32 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 32,
+              "detail": "31 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -701,8 +701,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "32 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 32,
+              "detail": "31 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -711,7 +711,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 32,
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -720,7 +720,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 32,
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -736,7 +736,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 32,
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             },
             {
@@ -787,8 +787,8 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "32 user-facing string(s), 2815 chars",
-              "scanned": 32,
+              "detail": "31 user-facing string(s), 2718 chars",
+              "scanned": 31,
               "scannedUnit": "prose_strings"
             }
           ],
@@ -844,7 +844,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 20,
+              "scanned": 17,
               "scannedUnit": "output_strings"
             },
             {
@@ -885,7 +885,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 20,
+              "scanned": 17,
               "scannedUnit": "prose_strings"
             },
             {
@@ -893,8 +893,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "20 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 20,
+              "detail": "17 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 17,
               "scannedUnit": "prose_strings"
             },
             {
@@ -902,8 +902,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "20 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 20,
+              "detail": "17 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 17,
               "scannedUnit": "prose_strings"
             },
             {
@@ -912,7 +912,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 20,
+              "scanned": 17,
               "scannedUnit": "prose_strings"
             },
             {
@@ -921,7 +921,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 20,
+              "scanned": 17,
               "scannedUnit": "prose_strings"
             },
             {
@@ -929,8 +929,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "20 prose string(s) clean at tone \"structural concern\" against 3 forbidden phrasing(s)",
-              "scanned": 20,
+              "detail": "17 prose string(s) clean at tone \"structural concern\" against 3 forbidden phrasing(s)",
+              "scanned": 17,
               "scannedUnit": "prose_strings"
             },
             {
@@ -939,7 +939,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 20,
+              "scanned": 17,
               "scannedUnit": "prose_strings"
             },
             {
@@ -963,11 +963,9 @@
             {
               "name": "scenario_contexts_keyed_on_fragile_edges",
               "pass": true,
-              "status": "pass",
+              "status": "not_applicable",
               "source": "eval-assertion",
-              "detail": "1 key(s) checked against 1 fragile edge id(s), all present",
-              "scanned": 1,
-              "scannedUnit": "scenario_keys"
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
             },
             {
               "name": "primary_risk_coherent",
@@ -984,7 +982,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "infeasibility disclosed (marker: constraint)",
-              "scanned": 20,
+              "scanned": 17,
               "scannedUnit": "prose_strings"
             },
             {
@@ -992,14 +990,14 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "20 user-facing string(s), 2171 chars",
-              "scanned": 20,
+              "detail": "17 user-facing string(s), 1980 chars",
+              "scanned": 17,
               "scannedUnit": "prose_strings"
             }
           ],
-          "measured": 18,
-          "notApplicable": 1,
-          "passed": 18
+          "measured": 17,
+          "notApplicable": 2,
+          "passed": 17
         }
       ],
       "agreement": {
@@ -1010,9 +1008,9 @@
       },
       "counts": {
         "served_v17": {
-          "measured": 18,
-          "notApplicable": 1,
-          "passed": 18
+          "measured": 17,
+          "notApplicable": 2,
+          "passed": 17
         }
       },
       "ok": true
@@ -1193,7 +1191,7 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "33 user-facing string(s), 2704 chars",
+              "detail": "33 user-facing string(s), 2893 chars",
               "scanned": 33,
               "scannedUnit": "prose_strings"
             }
@@ -1390,7 +1388,7 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "15 user-facing string(s), 1489 chars",
+              "detail": "15 user-facing string(s), 1531 chars",
               "scanned": 15,
               "scannedUnit": "prose_strings"
             }
@@ -1591,7 +1589,7 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "33 user-facing string(s), 2819 chars",
+              "detail": "33 user-facing string(s), 2839 chars",
               "scanned": 33,
               "scannedUnit": "prose_strings"
             }
@@ -1633,7 +1631,7 @@
       "scores": [
         {
           "candidate": "served_v17",
-          "pass": true,
+          "pass": false,
           "dimensions": [
             {
               "name": "review_card_coverage",
@@ -1648,7 +1646,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 34,
+              "scanned": 35,
               "scannedUnit": "output_strings"
             },
             {
@@ -1663,8 +1661,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "5 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
-              "scanned": 5,
+              "detail": "6 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
+              "scanned": 6,
               "scannedUnit": "capped_items"
             },
             {
@@ -1689,7 +1687,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 31,
+              "scanned": 32,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1697,17 +1695,17 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "31 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 31,
+              "detail": "32 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 32,
               "scannedUnit": "prose_strings"
             },
             {
               "name": "no_internal_vocabulary",
-              "pass": true,
-              "status": "pass",
+              "pass": false,
+              "status": "fail",
               "source": "served-prompt-derived",
-              "detail": "31 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 31,
+              "detail": "internal vocabulary surfaced: edge",
+              "scanned": 32,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1716,7 +1714,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 31,
+              "scanned": 32,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1725,7 +1723,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 31,
+              "scanned": 32,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1733,8 +1731,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "31 prose string(s) clean at tone \"balanced, both options viable\" against 2 forbidden phrasing(s)",
-              "scanned": 31,
+              "detail": "32 prose string(s) clean at tone \"balanced, both options viable\" against 2 forbidden phrasing(s)",
+              "scanned": 32,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1743,7 +1741,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 31,
+              "scanned": 32,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1794,18 +1792,18 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "31 user-facing string(s), 2770 chars",
-              "scanned": 31,
+              "detail": "32 user-facing string(s), 3010 chars",
+              "scanned": 32,
               "scannedUnit": "prose_strings"
             }
           ],
           "measured": 17,
           "notApplicable": 2,
-          "passed": 17
+          "passed": 16
         }
       ],
       "agreement": {
-        "served_v17": true
+        "served_v17": false
       },
       "dimensionAgreement": {
         "served_v17": true
@@ -1814,10 +1812,10 @@
         "served_v17": {
           "measured": 17,
           "notApplicable": 2,
-          "passed": 17
+          "passed": 16
         }
       },
-      "ok": true
+      "ok": false
     },
     {
       "fixtureId": "r2/03-needs-evidence",
@@ -1851,7 +1849,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 38,
+              "scanned": 37,
               "scannedUnit": "output_strings"
             },
             {
@@ -1859,8 +1857,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "1 bias affected_element(s) checked against 8 graph id(s), all resolve",
-              "scanned": 1,
+              "detail": "2 bias affected_element(s) checked against 8 graph id(s), all resolve",
+              "scanned": 2,
               "scannedUnit": "entity_refs"
             },
             {
@@ -1868,8 +1866,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "6 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
-              "scanned": 6,
+              "detail": "5 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
+              "scanned": 5,
               "scannedUnit": "capped_items"
             },
             {
@@ -1894,7 +1892,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 35,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1902,8 +1900,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "35 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 35,
+              "detail": "33 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1911,8 +1909,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "35 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 35,
+              "detail": "33 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1921,7 +1919,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 35,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1930,7 +1928,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 35,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1938,8 +1936,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "35 prose string(s) clean at tone \"cautious, evidence first\" against 3 forbidden phrasing(s)",
-              "scanned": 35,
+              "detail": "33 prose string(s) clean at tone \"cautious, evidence first\" against 3 forbidden phrasing(s)",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1948,7 +1946,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 35,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -1997,8 +1995,8 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "35 user-facing string(s), 3017 chars",
-              "scanned": 35,
+              "detail": "33 user-facing string(s), 2735 chars",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             }
           ],
@@ -2199,7 +2197,7 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "32 user-facing string(s), 2740 chars",
+              "detail": "32 user-facing string(s), 2806 chars",
               "scanned": 32,
               "scannedUnit": "prose_strings"
             }
@@ -2256,7 +2254,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 17,
+              "scanned": 19,
               "scannedUnit": "output_strings"
             },
             {
@@ -2271,8 +2269,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "5 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
-              "scanned": 5,
+              "detail": "6 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
+              "scanned": 6,
               "scannedUnit": "capped_items"
             },
             {
@@ -2297,7 +2295,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 17,
+              "scanned": 19,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2305,8 +2303,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "17 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 17,
+              "detail": "19 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 19,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2314,8 +2312,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "17 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 17,
+              "detail": "19 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 19,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2324,7 +2322,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 17,
+              "scanned": 19,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2333,7 +2331,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 17,
+              "scanned": 19,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2341,8 +2339,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "17 prose string(s) clean at tone \"structural concern\" against 3 forbidden phrasing(s)",
-              "scanned": 17,
+              "detail": "19 prose string(s) clean at tone \"structural concern\" against 3 forbidden phrasing(s)",
+              "scanned": 19,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2351,7 +2349,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 17,
+              "scanned": 19,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2375,9 +2373,11 @@
             {
               "name": "scenario_contexts_keyed_on_fragile_edges",
               "pass": true,
-              "status": "not_applicable",
+              "status": "pass",
               "source": "eval-assertion",
-              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+              "detail": "1 key(s) checked against 1 fragile edge id(s), all present",
+              "scanned": 1,
+              "scannedUnit": "scenario_keys"
             },
             {
               "name": "primary_risk_coherent",
@@ -2394,7 +2394,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "infeasibility disclosed (marker: constraint)",
-              "scanned": 17,
+              "scanned": 19,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2402,14 +2402,14 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "17 user-facing string(s), 1988 chars",
-              "scanned": 17,
+              "detail": "19 user-facing string(s), 1981 chars",
+              "scanned": 19,
               "scannedUnit": "prose_strings"
             }
           ],
-          "measured": 17,
-          "notApplicable": 2,
-          "passed": 17
+          "measured": 18,
+          "notApplicable": 1,
+          "passed": 18
         }
       ],
       "agreement": {
@@ -2420,9 +2420,9 @@
       },
       "counts": {
         "served_v17": {
-          "measured": 17,
-          "notApplicable": 2,
-          "passed": 17
+          "measured": 18,
+          "notApplicable": 1,
+          "passed": 18
         }
       },
       "ok": true
@@ -2459,7 +2459,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 34,
+              "scanned": 33,
               "scannedUnit": "output_strings"
             },
             {
@@ -2500,7 +2500,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 31,
+              "scanned": 30,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2508,8 +2508,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "31 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 31,
+              "detail": "30 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 30,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2517,8 +2517,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "31 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 31,
+              "detail": "30 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 30,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2527,7 +2527,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 31,
+              "scanned": 30,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2536,7 +2536,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 31,
+              "scanned": 30,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2552,7 +2552,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 31,
+              "scanned": 30,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2576,9 +2576,11 @@
             {
               "name": "scenario_contexts_keyed_on_fragile_edges",
               "pass": true,
-              "status": "not_applicable",
+              "status": "pass",
               "source": "eval-assertion",
-              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+              "detail": "1 key(s) checked against 1 fragile edge id(s), all present",
+              "scanned": 1,
+              "scannedUnit": "scenario_keys"
             },
             {
               "name": "primary_risk_coherent",
@@ -2601,14 +2603,14 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "31 user-facing string(s), 2718 chars",
-              "scanned": 31,
+              "detail": "30 user-facing string(s), 2595 chars",
+              "scanned": 30,
               "scannedUnit": "prose_strings"
             }
           ],
-          "measured": 15,
-          "notApplicable": 4,
-          "passed": 15
+          "measured": 16,
+          "notApplicable": 3,
+          "passed": 16
         }
       ],
       "agreement": {
@@ -2619,9 +2621,9 @@
       },
       "counts": {
         "served_v17": {
-          "measured": 15,
-          "notApplicable": 4,
-          "passed": 15
+          "measured": 16,
+          "notApplicable": 3,
+          "passed": 16
         }
       },
       "ok": true
@@ -2658,7 +2660,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 16,
+              "scanned": 15,
               "scannedUnit": "output_strings"
             },
             {
@@ -2699,7 +2701,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 16,
+              "scanned": 15,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2707,8 +2709,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "16 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 16,
+              "detail": "15 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 15,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2716,8 +2718,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "16 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 16,
+              "detail": "15 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 15,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2726,7 +2728,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 16,
+              "scanned": 15,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2735,7 +2737,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 16,
+              "scanned": 15,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2751,7 +2753,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 16,
+              "scanned": 15,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2798,8 +2800,8 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "16 user-facing string(s), 1547 chars",
-              "scanned": 16,
+              "detail": "15 user-facing string(s), 1421 chars",
+              "scanned": 15,
               "scannedUnit": "prose_strings"
             }
           ],
@@ -2855,7 +2857,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 35,
+              "scanned": 36,
               "scannedUnit": "output_strings"
             },
             {
@@ -2896,7 +2898,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 32,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2904,8 +2906,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "32 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 32,
+              "detail": "33 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2913,8 +2915,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "32 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 32,
+              "detail": "33 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2923,7 +2925,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 32,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2932,7 +2934,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 32,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2948,7 +2950,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 32,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -2999,8 +3001,8 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "32 user-facing string(s), 2832 chars",
-              "scanned": 32,
+              "detail": "33 user-facing string(s), 2843 chars",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             }
           ],
@@ -3202,7 +3204,7 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "31 user-facing string(s), 2684 chars",
+              "detail": "31 user-facing string(s), 2799 chars",
               "scanned": 31,
               "scannedUnit": "prose_strings"
             }
@@ -3259,7 +3261,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 40,
+              "scanned": 39,
               "scannedUnit": "output_strings"
             },
             {
@@ -3267,8 +3269,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "2 bias affected_element(s) checked against 8 graph id(s), all resolve",
-              "scanned": 2,
+              "detail": "1 bias affected_element(s) checked against 8 graph id(s), all resolve",
+              "scanned": 1,
               "scannedUnit": "entity_refs"
             },
             {
@@ -3407,7 +3409,7 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "36 user-facing string(s), 3349 chars",
+              "detail": "36 user-facing string(s), 3162 chars",
               "scanned": 36,
               "scannedUnit": "prose_strings"
             }
@@ -3609,7 +3611,7 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "32 user-facing string(s), 2684 chars",
+              "detail": "32 user-facing string(s), 2680 chars",
               "scanned": 32,
               "scannedUnit": "prose_strings"
             }
@@ -3666,7 +3668,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 15,
+              "scanned": 21,
               "scannedUnit": "output_strings"
             },
             {
@@ -3681,8 +3683,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
-              "scanned": 4,
+              "detail": "6 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
+              "scanned": 6,
               "scannedUnit": "capped_items"
             },
             {
@@ -3707,7 +3709,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 15,
+              "scanned": 21,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3715,8 +3717,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "15 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 15,
+              "detail": "21 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 21,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3724,8 +3726,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "15 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 15,
+              "detail": "21 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 21,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3734,7 +3736,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 15,
+              "scanned": 21,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3743,7 +3745,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 15,
+              "scanned": 21,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3751,8 +3753,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "15 prose string(s) clean at tone \"structural concern\" against 3 forbidden phrasing(s)",
-              "scanned": 15,
+              "detail": "21 prose string(s) clean at tone \"structural concern\" against 3 forbidden phrasing(s)",
+              "scanned": 21,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3761,7 +3763,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 15,
+              "scanned": 21,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3806,7 +3808,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "infeasibility disclosed (marker: constraint)",
-              "scanned": 15,
+              "scanned": 21,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3814,8 +3816,8 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "15 user-facing string(s), 1654 chars",
-              "scanned": 15,
+              "detail": "21 user-facing string(s), 2304 chars",
+              "scanned": 21,
               "scannedUnit": "prose_strings"
             }
           ],
@@ -3871,7 +3873,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 27,
+              "scanned": 36,
               "scannedUnit": "output_strings"
             },
             {
@@ -3886,8 +3888,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
-              "scanned": 4,
+              "detail": "5 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
+              "scanned": 5,
               "scannedUnit": "capped_items"
             },
             {
@@ -3912,7 +3914,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 26,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3920,8 +3922,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "26 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 26,
+              "detail": "33 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3929,8 +3931,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "26 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 26,
+              "detail": "33 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3939,7 +3941,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 26,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3948,7 +3950,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 26,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3964,7 +3966,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 26,
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             },
             {
@@ -3988,17 +3990,19 @@
             {
               "name": "scenario_contexts_keyed_on_fragile_edges",
               "pass": true,
-              "status": "not_applicable",
+              "status": "pass",
               "source": "eval-assertion",
-              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+              "detail": "1 key(s) checked against 1 fragile edge id(s), all present",
+              "scanned": 1,
+              "scannedUnit": "scenario_keys"
             },
             {
               "name": "primary_risk_coherent",
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)",
-              "scanned": 2,
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)",
+              "scanned": 3,
               "scannedUnit": "sibling_sections"
             },
             {
@@ -4013,14 +4017,14 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "26 user-facing string(s), 2251 chars",
-              "scanned": 26,
+              "detail": "33 user-facing string(s), 2939 chars",
+              "scanned": 33,
               "scannedUnit": "prose_strings"
             }
           ],
-          "measured": 15,
-          "notApplicable": 4,
-          "passed": 15
+          "measured": 16,
+          "notApplicable": 3,
+          "passed": 16
         }
       ],
       "agreement": {
@@ -4031,9 +4035,9 @@
       },
       "counts": {
         "served_v17": {
-          "measured": 15,
-          "notApplicable": 4,
-          "passed": 15
+          "measured": 16,
+          "notApplicable": 3,
+          "passed": 16
         }
       },
       "ok": true
@@ -4070,7 +4074,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "no invented conversational callbacks",
-              "scanned": 16,
+              "scanned": 25,
               "scannedUnit": "output_strings"
             },
             {
@@ -4085,8 +4089,8 @@
               "pass": true,
               "status": "pass",
               "source": "production-guard",
-              "detail": "3 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
-              "scanned": 3,
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)",
+              "scanned": 4,
               "scannedUnit": "capped_items"
             },
             {
@@ -4111,7 +4115,7 @@
               "status": "pass",
               "source": "production-guard",
               "detail": "clean",
-              "scanned": 16,
+              "scanned": 24,
               "scannedUnit": "prose_strings"
             },
             {
@@ -4119,8 +4123,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "16 prose string(s) clean against 36 banned terms parsed from the served prompt",
-              "scanned": 16,
+              "detail": "24 prose string(s) clean against 36 banned terms parsed from the served prompt",
+              "scanned": 24,
               "scannedUnit": "prose_strings"
             },
             {
@@ -4128,8 +4132,8 @@
               "pass": true,
               "status": "pass",
               "source": "served-prompt-derived",
-              "detail": "16 prose string(s) clean against 21 internal terms parsed from the served prompt",
-              "scanned": 16,
+              "detail": "24 prose string(s) clean against 21 internal terms parsed from the served prompt",
+              "scanned": 24,
               "scannedUnit": "prose_strings"
             },
             {
@@ -4138,7 +4142,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no bare probability-band decimals in output strings",
-              "scanned": 16,
+              "scanned": 24,
               "scannedUnit": "prose_strings"
             },
             {
@@ -4147,7 +4151,7 @@
               "status": "pass",
               "source": "served-prompt-derived",
               "detail": "no em/en dashes in any output string",
-              "scanned": 16,
+              "scanned": 24,
               "scannedUnit": "prose_strings"
             },
             {
@@ -4163,7 +4167,7 @@
               "status": "pass",
               "source": "eval-assertion",
               "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
-              "scanned": 16,
+              "scanned": 24,
               "scannedUnit": "prose_strings"
             },
             {
@@ -4194,8 +4198,8 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)",
-              "scanned": 2,
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)",
+              "scanned": 3,
               "scannedUnit": "sibling_sections"
             },
             {
@@ -4210,8 +4214,8 @@
               "pass": true,
               "status": "pass",
               "source": "eval-assertion",
-              "detail": "16 user-facing string(s), 1472 chars",
-              "scanned": 16,
+              "detail": "24 user-facing string(s), 2284 chars",
+              "scanned": 24,
               "scannedUnit": "prose_strings"
             }
           ],

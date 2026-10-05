@@ -163,7 +163,7 @@
       "note": "Four distinct, option-specific headlines. Should PASS.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Self Serve Funnel produced the best outcome in 41% of runs of this model. Customer acquisition cost is the input that moves all four bets.",
+        "narrative_summary": "In this model, 41% of runs supported Self Serve Funnel. Customer acquisition cost is the input that moves all four bets.",
         "story_headlines": {
           "opt_selfserve": "Ahead because acquisition cost bites it least",
           "opt_paid": "Close behind, most exposed to acquisition cost",
@@ -216,7 +216,7 @@
       "note": "All four headlines identical — the 1.121 dedupe-collision defect at its source field.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Self Serve Funnel produced the best outcome in 41% of runs of this model. Customer acquisition cost is the input that moves all four bets.",
+        "narrative_summary": "In this model, 41% of runs supported Self Serve Funnel. Customer acquisition cost is the input that moves all four bets.",
         "story_headlines": {
           "opt_selfserve": "A load bearing assumption",
           "opt_paid": "A load bearing assumption",
@@ -269,7 +269,7 @@
       "note": "primary_risk names a risk no other section mentions, breaking the prompt COHERENCE rule.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Self Serve Funnel produced the best outcome in 41% of runs of this model. Customer acquisition cost is the input that moves all four bets.",
+        "narrative_summary": "In this model, 41% of runs supported Self Serve Funnel. Customer acquisition cost is the input that moves all four bets.",
         "story_headlines": {
           "opt_selfserve": "Ahead because acquisition cost bites it least",
           "opt_paid": "Close behind, most exposed to acquisition cost",

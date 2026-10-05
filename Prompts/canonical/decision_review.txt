@@ -46,11 +46,16 @@ LEADER / RUNNER-UP (pre-computed. Trust these, do not recalculate):
   If runner_up is null: report the single option's own share the same way, and
   make no comparison at all.
   winner.constraint_infeasible / winner.recommendation_suppressed (booleans,
-  may be absent): when EITHER is true, the option the most runs supported is
-  barred by a stated constraint. You MUST say so in narrative_summary, in
-  plain words, INSTEAD of reporting its share: name the constraint it
-  breaches
-  and say the option is not available, then name the feasible alternative.
+  may be absent). They mean different things:
+  - winner.constraint_infeasible true: the option in winner breaches a
+    constraint the input states. You MUST say so in narrative_summary, in
+    plain words, INSTEAD of reporting its share: name the constraint as the
+    input states it and say the option is not available. Name another option
+    as feasible ONLY when the input establishes that it meets the constraint.
+  - winner.recommendation_suppressed true WITHOUT constraint_infeasible: this
+    run names no option. Do NOT invent a breach or a constraint. Report no
+    share for any option, and say in plain words that this run names no
+    option, so the user can see what the result rests on and test it.
   Presenting a barred option as a clean result is the most damaging failure
   this review can make, and it is silent: nothing downstream re-checks it.
 
@@ -125,16 +130,18 @@ PREFERRED:
   THAT OPTION'S OWN figure. Write: In this model, 72% of runs supported
   [label]. Each option gets its own sentence and its own number,
   and no option is ever positioned relative to another.
-- Referring to that option when you need a phrase rather than the label: say
-  the option the most runs supported. Prefer the bare label wherever it fits.
+- Refer to every option by its own label. Never describe an option by its
+  position, or by how its share compares with another option's.
 - Runs SUPPORT an option. Use that verb for what runs do, never favour,
   prefer, pick or choose. In EVERY field, never write that the model, the
   analysis or the comparison favours, prefers, picks or points to an option:
-  say which option the most runs supported.
+  give that option's own share instead.
 - Win probability: In this model, 72% of runs supported [label].
   Percentage form only. Read what this number is before you write it: it is
-  the SHARE OF SIMULATED RUNS in which that option's own modelled outcome
-  scored highest against the goal of those compared. It is NOT the chance of hitting the user's goal,
+  the SHARE OF SIMULATED RUNS credited to that option. In each run the credit
+  goes to the option whose modelled outcome is highest when higher is better
+  for the goal, or lowest when lower is better, and options that tie in a run
+  share that run's credit. It is NOT the chance of hitting the user's goal,
   NOT a score out of 100, and NOT a measure of how much better that option is
   (see TRUTH_DISCIPLINE rule 4). Never attach it to a claim about the target.
 - Stability: plain bands. Stable: "holds under most plausible variations".
@@ -256,8 +263,9 @@ cannot say. They override any older habit of narrating drivers or verdicts.
    model reflects everything the user asked for; never claim a change was
    applied, and never claim no change was made.
 4. A SHARE OF RUNS IS NOT GOAL FIT. win_probability is the SHARE OF SIMULATED
-   RUNS in which that option's own modelled outcome scored highest against
-   the goal of those compared. That is all it is. It is never evidence that a target, threshold
+   RUNS credited to that option: in each run, to the option whose modelled
+   outcome is highest when higher is better for the goal, or lowest when
+   lower is better, split between options that tie. That is all it is. It is never evidence that a target, threshold
    or goal is met, and it is not a rating of the option. Never claim an option "meets the goal",
    "achieves the target" or "satisfies the constraint" from win_probability
    or outcome_mean. If the brief names a numeric target, you may note that
@@ -389,7 +397,7 @@ alphabetically.
 COHERENCE: one primary risk shared by narrative_summary, primary_risk,
 readiness_rationale and pre_mortem. Vary wording across sections, not
 substance. Concretely: the label you name in robustness_explanation
-.primary_risk must also appear in narrative_summary's second sentence. If you
+.primary_risk must also appear in narrative_summary's first sentence. If you
 judge there is no meaningful risk, say the same thing in both, in the same
 terms; a narrative that reports no fragility beside a primary_risk naming one
 is incoherent and fails.
@@ -430,10 +438,13 @@ narrative_summary (string, 2-3 short sentences, max 280 chars, AIM FOR 230):
   runs supported [winner.label]", where X is winner.win_probability as a
   percentage. When headline_type is close_call, end that sentence with the
   four words and the options are close, with no number attached to the
-  closeness. When EITHER flag is true, write exactly TWO sentences: sentence
-  1 as above, then one sentence saying [winner.label] breaches the named
-  constraint and is not available, and naming the feasible alternative by
-  its label. Write NO share sentence and NO sentence 2 in that case.
+  closeness. When winner.constraint_infeasible is true, write exactly TWO
+  sentences: sentence 1 as above, then one sentence saying [winner.label]
+  breaches the constraint as the input states it and is not available,
+  naming another option as feasible only when the input establishes it.
+  When winner.recommendation_suppressed is true without constraint_infeasible,
+  write sentences 1 and 2 as above and end sentence 2 by saying this run
+  names no option. In either case write NO share sentence for any option.
   Do NOT report the distance to any other option, in any unit or any
   wording, and never place one option against another.
   DROP ORDER when over the cap: the close-call words, then any adjective,
@@ -448,7 +459,7 @@ story_headlines (Record<option_id, string>, max 12 words each):
   OWN option and mentions no other option. OPEN EACH ENTRY WITH THAT OPTION'S
   OWN LABEL, exactly as provided: the label is the subject of the sentence,
   as FORM 4 and PREFERRED both require, and it counts toward the 12 words.
-  For the option the most runs supported: what in the model produces its result,
+  For the winner.id entry: what in the model produces its result,
   naming a specific mechanism or trade-off. For every other option: what
   would have to change in the model for more runs to support it instead.
   EVERY ENTRY MUST BE DISTINCTIVE TO ITS OWN OPTION. This is the rule that

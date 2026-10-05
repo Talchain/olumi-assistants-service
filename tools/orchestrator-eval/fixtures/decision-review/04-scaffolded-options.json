@@ -149,7 +149,7 @@
       "note": "Discloses the placeholder inputs in plain language. Should PASS.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Automate Tier One Triage produced the best outcome in 64% of runs, though its inputs are placeholders rather than values you supplied. Automation coverage is what carries the result.",
+        "narrative_summary": "In this model, 64% of runs supported Automate Tier One Triage, though its inputs are placeholders rather than values you supplied. Automation coverage is what carries the result.",
         "story_headlines": {
           "opt_automate": "Ahead on response time, resting on placeholder inputs",
           "opt_hire": "Steadier but slower to move response time"
@@ -203,7 +203,7 @@
       "note": "Contains an em dash, banned in every output string by the served prompt.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Automate Tier One Triage produced the best outcome in 64% of runs — though its inputs are placeholders rather than values you supplied. Automation coverage is what carries the result.",
+        "narrative_summary": "In this model, 64% of runs supported Automate Tier One Triage — though its inputs are placeholders rather than values you supplied. Automation coverage is what carries the result.",
         "story_headlines": {
           "opt_automate": "Ahead on response time, resting on placeholder inputs",
           "opt_hire": "Steadier but slower to move response time"
@@ -257,7 +257,7 @@
       "note": "Leaks runtime vocabulary (\"normalised\", \"run_analysis\") into user-facing prose.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Automate Tier One Triage produced the best outcome in 64% of runs, though its inputs are placeholders rather than values you supplied. Automation coverage is what carries the result.",
+        "narrative_summary": "In this model, 64% of runs supported Automate Tier One Triage, though its inputs are placeholders rather than values you supplied. Automation coverage is what carries the result.",
         "story_headlines": {
           "opt_automate": "Ahead on response time, resting on placeholder inputs",
           "opt_hire": "Steadier but slower to move response time"
