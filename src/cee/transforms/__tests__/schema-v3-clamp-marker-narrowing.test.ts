@@ -37,7 +37,7 @@ function v1(mean: number, provenance: Rec, std = 0.25): Rec {
   };
 }
 const natural = (strength_mean: number): Rec => ({ natural_effect: { amount: 3, amount_unit: '£', per_source_change: 1, per_source_change_unit: '£', strength_mean, strength_mean_frame: 'edge_strength' } });
-const stated = (graph: Rec): Rec => projectGraphAndOptionsToV3(graph as never, { brief: '' }).graph.edges.find((e: Rec) => e.from === 'fac_1' && e.to === 'out_1');
+const stated = (graph: Rec): Rec => (projectGraphAndOptionsToV3(graph as never, { brief: '' }).graph.edges as Rec[]).find((e) => e.from === 'fac_1' && e.to === 'out_1')!;
 
 describe('schema-v3: a CONSISTENT clamp marker keeps the user\'s sizing bundle', () => {
   it.each([1, -1])('kept (mean %s): magnitude user_stated, natural_effect and clamped_from through V3', (sign) => {
