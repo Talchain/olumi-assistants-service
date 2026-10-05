@@ -188,7 +188,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
   const assertMeasuredWithheld = (body: Record<string, any>) => {
     assertWithheld(body);
     expect.soft(body.assistant_text).not.toContain('would still lead');
-    expect(body.assistant_text).toContain('no grounded factor threshold available to quote');
+    expect(body.assistant_text).toContain("There's nothing yet for a change to flip. No single option can be put forward yet"); // withheld: nothing to flip (DL 0df0e1, 5 Oct)
     expect(scripted.calls).toBe(0);
     expect(scripted.measureCalls).toBe(1);
   };

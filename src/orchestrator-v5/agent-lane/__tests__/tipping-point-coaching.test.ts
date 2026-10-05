@@ -5,7 +5,10 @@ import { tippingPointOf } from '../decision-sensitivity.js';
 import { checkMethodTurn, selectGuidance } from '../guidance/index.js';
 import { assembleGuidanceSignals } from '../turn-context/guidance-signals.js';
 import { selectorSignalsOf } from '../method-turn/method-turn.js';
-import { tippingPointCoachingFor, settleTippingPointCoaching, tippingPointDirective } from '../tipping-point-coaching.js';
+import { NOTHING_TO_FLIP_OPENER, tippingPointCoachingFor, settleTippingPointCoaching, tippingPointDirective } from '../tipping-point-coaching.js';
+import { leaderLicenceFromState } from '../../compose/leader-licence.js';
+import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
+import { AGENT_NO_LEADER_SENTENCES, dropRankingSentences, sentenceRanksOptions } from '../withheld-leader-fail-closed.js';
 import { runExplanationChip, type RunExplanationRead } from '../run-explanation.js';
 
 type Rec = Record<string, unknown>;
@@ -124,5 +127,65 @@ describe('existing RC selector consumes the same fact without reprioritisation',
   it('does not offer a typed threshold without the existing bound Run key', () => {
     const out = selectGuidance({ ...state, 'run.run_key': undefined }, {});
     expect([out.slot1, out.slot2].some(row => row?.policy_id === 'RC-WHAT-CHANGES')).toBe(false);
+  });
+});
+
+/**
+ * ⭐ NO LEADER, NOTHING TO FLIP (DL 0df0e1, 5 Oct; spine v2 step 5). Acceptance's beat-3 press on a58 (#87 5986279838)
+ * served "no grounded factor threshold" on a near-tie WITHHELD Run, which reads as broken. The claim and admission below
+ * are that served turn's, verbatim (programme-docs wip/harness-restart-20261004 @ec78d1c8, resume-acceptance/20-CHANGE-TURN.json).
+ */
+describe('a withheld leader says there is nothing to flip; a licensed one keeps its "no threshold" words', () => {
+  const ADMISSION = { analysis_admission: { structurally_analysable: true, semantic_quality_sufficient: true, permitted_analysis_mode: 'comparative_leader' } };
+  const NEAR_TIE = { permitted: false, withheld_reason: 'options_do_not_separate', separation: 'near_tie' };
+  const LICENSED = { permitted: true, separation: 'separated' };
+  const at = (leader_claim: Rec, enrichment: unknown) => ({ graphHash: HASH, analysisReady: ADMISSION,
+    analysisResult: { ...result, enrichment },
+    analysisState: { run_state: { kind: 'complete_current', computed_at: AT }, leader_claim } });
+  const NO_ROW = {};
+  const NO_FLIP_IN_RANGE = CONTROL.enrichment;
+
+  it('PRECONDITION: the served claim is withheld and the contrast claim is licensed, by the one licence', () => {
+    expect(leaderLicenceFromState(at(NEAR_TIE, NO_ROW).analysisState, ADMISSION)).toBe('withheld');
+    expect(leaderLicenceFromState(at(LICENSED, NO_ROW).analysisState, ADMISSION)).toBe('permitted');
+    expect(tippingPointOf(NO_FLIP_IN_RANGE)).toMatchObject({ status: 'no_flip_in_range' });
+    expect(tippingPointOf(NO_ROW).status).not.toMatch(/^(found|no_flip_in_range)$/);
+  });
+
+  /** The served near-tie answer, verbatim: the direct answer, then the canonical near-tie no-leader sentence. */
+  const NEAR_TIE_REPLY = "There's nothing yet for a change to flip. No single option can be put forward yet, because the options came out too close together on this run to tell apart; tell me what matters most to you between them.";
+
+  it.each([['no grounded row', NO_ROW], ['no flip in range', NO_FLIP_IN_RANGE]])(
+    'RED: served near-tie, %s → nothing to flip + the canonical near-tie reason, same Run key', (_name, enrichment) => {
+      const read = at(NEAR_TIE, enrichment);
+      const out = tippingPointCoachingFor(SID, read);
+      expect(out).toMatchObject({ kind: 'no_signal', run_key: runExplanationChip(SID, read)!.id });
+      expect(out.reply).toBe(NEAR_TIE_REPLY);
+    });
+
+  it('RED: a leader withheld for another reason gives that reason\'s canonical sentence, never "too close"', () => {
+    const out = tippingPointCoachingFor(SID, at({ permitted: false, withheld_reason: 'goal_scope_unresolved' }, NO_ROW));
+    expect(out.reply.startsWith(`${NOTHING_TO_FLIP_OPENER} `)).toBe(true);
+    expect(AGENT_NO_LEADER_SENTENCES).toContain(out.reply.slice(NOTHING_TO_FLIP_OPENER.length + 1));
+    expect(out.reply).not.toMatch(/too close/u);
+  });
+
+  it('CONTROL: a licensed leader keeps both "no threshold" sentences exactly', () => {
+    expect(tippingPointCoachingFor(SID, at(LICENSED, NO_ROW)).reply).toBe('This analysis has no grounded factor threshold available to quote.');
+    expect(tippingPointCoachingFor(SID, at(LICENSED, NO_FLIP_IN_RANGE)).reply)
+      .toBe('This analysis has no factor threshold to quote within the ranges it checked.');
+  });
+
+  it('CONTROL: a FOUND crossing keeps its exact sentence on a withheld Run (only the "no threshold" words change)', () => {
+    expect(tippingPointCoachingFor(SID, at(NEAR_TIE, POSITIVE.enrichment))).toMatchObject({ kind: 'found', reply: plan.reply });
+  });
+
+  it('both final-egress rails keep the new reply byte-identical; the leader/recommend wordings would have been removed', () => {
+    expect(findLeaderClaims({ assistant_text: NEAR_TIE_REPLY, blocks: [] } as never)).toEqual([]);
+    expect(sentenceRanksOptions(NOTHING_TO_FLIP_OPENER)).toBe(false);
+    expect(dropRankingSentences(NEAR_TIE_REPLY)).toEqual({ text: NEAR_TIE_REPLY, droppedSentences: 0 });
+    // Contrast (the probes see the class): the first drafts of this copy.
+    expect(findLeaderClaims({ assistant_text: "There's no recommendation for a change to flip.", blocks: [] } as never).length).toBeGreaterThan(0);
+    expect(sentenceRanksOptions('The options are too close for this analysis to name a leader.')).toBe(true);
   });
 });
