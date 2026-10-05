@@ -70,7 +70,23 @@ function replica(developersToday = 6, baseline = true) {
   ];
   return { nodes, edges, options, goal_node_id: 'goal' };
 }
-const gateOf = (g: ReturnType<typeof replica>) => gateAnalysableOptions({
+/** One lever, "developers", today as given; options as [id, label, interventions, is_baseline]. */
+function levelGraph(today: Rec, arms: Array<[string, string, Rec, boolean?]>) {
+  const options = arms.map(([id, label, iv, base]) => option(id, label, iv, base === true));
+  const nodes: Rec[] = [
+    { id: 'decision', kind: 'decision', label: 'Hiring approach' },
+    { id: 'goal', kind: 'goal', label: 'Meet our next feature-launch deadline' },
+    { id: 'developers', kind: 'factor', label: 'Developers', category: 'controllable', observed_state: today },
+    ...options,
+  ];
+  const edges = [
+    ...options.map((o) => edge('decision', String(o.id))),
+    ...options.map((o) => edge(String(o.id), 'developers')),
+    edge('developers', 'goal'),
+  ];
+  return { nodes, edges, options, goal_node_id: 'goal' };
+}
+const gateOf = (g: { options: Rec[] } & Rec) => gateAnalysableOptions({
   options: g.options, graph: g, rawPersistedGraph: g, scaleNetEnabled: true,
 });
 const ids = (options: readonly Rec[]) => options.map((o) => o.option_id);
@@ -108,6 +124,34 @@ describe('absolute option levels compared with today (a994c38a replica)', () => 
     expect(ids(gateOf(g).options)).toContain(DEVS);
     // Contrast (N1): without that link the same option is a disclosed no-change exclusion.
     expect(gateOf(replica(6)).excluded).toMatchObject([{ option_id: DEVS, reason: 'no_change_from_today' }]);
+  });
+
+  it('N8: the Run\'s projection decides: a stored raw_value 7 beside .value 0.2 is a change on a 6-today factor (Codex P1)', () => {
+    const today = { value: 0.2, raw_value: 6, cap: 30, unit: 'people', source: 'brief_extraction' };
+    const g = levelGraph(today, [
+      ['carry_on', 'Carry On', { developers: { value: 0.2, raw_value: 6, source: 'brief_extraction' } }, true],
+      ['seven', 'Hire One', { developers: { value: 0.2, raw_value: 7, source: 'brief_extraction' } }],
+      ['same', 'Keep Six', { developers: { value: 0.2, raw_value: 6, source: 'brief_extraction' } }],
+      ['nine', 'Hire Three', { developers: { value: 0.3, raw_value: 9, source: 'brief_extraction' } }],
+    ]);
+    const gate = gateOf(g);
+    expect(ids(gate.options)).toEqual(expect.arrayContaining(['carry_on', 'seven', 'nine']));
+    // Contrast: the consistent six-developer arm IS today's level and is the only exclusion.
+    expect(gate.excluded).toMatchObject([{ option_id: 'same', reason: 'no_change_from_today' }]);
+    expect(gate.excluded).toHaveLength(1);
+  });
+
+  it('N9: a baseline valued away from today does not represent today, so today\'s arm stays (Codex P1)', () => {
+    const today = { value: 0.6, raw_value: 18, unit: 'people', source: 'brief_extraction' };
+    const arms = (baselineLevel: number) => levelGraph(today, [
+      ['carry_on', 'Carry On', { developers: { value: baselineLevel, source: 'brief_extraction' } }, true],
+      ['today_arm', 'Keep Eighteen', { developers: { value: 0.6, source: 'brief_extraction' } }],
+      ['up', 'Hire More', { developers: { value: 0.8, source: 'brief_extraction' } }],
+    ]);
+    expect(gateOf(arms(0.4)).excluded).toEqual([]);
+    expect(ids(gateOf(arms(0.4)).options)).toEqual(expect.arrayContaining(['carry_on', 'today_arm', 'up']));
+    // Contrast: a baseline AT today represents it, and the duplicate today arm is the disclosed exclusion.
+    expect(gateOf(arms(0.6)).excluded).toMatchObject([{ option_id: 'today_arm', reason: 'no_change_from_today' }]);
   });
 
   it('N1-contrast: Developers 4 keeps the build-time intervention at 6/30', () => {

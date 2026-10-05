@@ -171,6 +171,17 @@ export interface ChipGeneratorInput {
 const MAX_CHIPS = 3;
 
 /**
+ * ⛔ A NO-CHANGE EXCLUSION IS NOT A CONFIGURE STEP (Codex review @cef745c2 P2): every slot of such an option is valued
+ * (it sets today's levels), so "Help me configure X" finds nothing to configure and declines. Its disclosure already
+ * says "Edit its value if you meant a change"; only the options left out for missing values get the configure chip.
+ */
+function configurableExclusions(
+  excluded: ChipGeneratorInput['excludedOptions'],
+): ReadonlyArray<import('../coaching/scaffold-disclosure.js').OmittedOptionRecord> {
+  return (excluded ?? []).filter((o) => o.reason !== 'no_change_from_today');
+}
+
+/**
  * Defensive chip-egress validator. Drops chips that cannot map cleanly to a
  * registered action: literal `null` action_types (defence against upstream
  * regressions that fill optional fields with null), and action_types that
@@ -529,11 +540,10 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     // option is a more specific recovery than the readiness payload's generic
     // model-level prompt. It remains the ONLY chip: known non-ready state must
     // never fall through to explain, flip, validation, or factor-EVPPI science.
+    const configurable = configurableExclusions(input.excludedOptions);
     const recovery =
-      handlerJustRan === 'run_analysis' &&
-      input.excludedOptions !== undefined &&
-      input.excludedOptions.length > 0
-        ? buildScaffoldConfigureChip(input.excludedOptions)
+      handlerJustRan === 'run_analysis' && configurable.length > 0
+        ? buildScaffoldConfigureChip(configurable)
         : buildReadinessRecoveryChip(input.analysisReady);
     emit(TelemetryEvents.V5ChipsFloorApplied, {
       reason: `readiness_${readyStatus}`,
@@ -587,8 +597,9 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     // HOLDS, for which "Help me configure X" is a futile step — offered right
     // beneath a disclosure that deliberately prescribes nothing. The options a
     // configure step genuinely repairs are the ones we LEFT OUT.
-    if (input.excludedOptions !== undefined && input.excludedOptions.length > 0) {
-      const configureChip = buildScaffoldConfigureChip(input.excludedOptions);
+    const configurable = configurableExclusions(input.excludedOptions);
+    if (configurable.length > 0) {
+      const configureChip = buildScaffoldConfigureChip(configurable);
       chips.push({
         id: configureChip.id,
         label: configureChip.label,

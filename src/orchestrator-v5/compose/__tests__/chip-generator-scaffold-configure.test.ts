@@ -109,6 +109,18 @@ describe('chip generator — run_analysis success turn that excluded an option',
     expect(chips.map((c) => c.id)).not.toContain(CONFIGURE_OPTION_GENERIC_CHIP.id);
   });
 
+  it('C1: a no-change exclusion gets no configure chip; a missing-values exclusion beside it still does (Codex P2)', () => {
+    const base = { stage: 'analyse' as const, handlerFacts: [RUN_FACT], analysis: null, validationRegistry: HANDLER_VALIDATION_REGISTRY };
+    const noChange: OmittedOptionRecord = {
+      option_id: 'hire_two', label: 'Hire Two Developers', reason: 'no_change_from_today', factor_labels: ['Developers'],
+    };
+    const chips = generateChips({ ...base, excludedOptions: [noChange] });
+    expect(chips).toEqual(generateChips(base));
+    const missing: OmittedOptionRecord = { option_id: 'explore', label: 'Explore another hire', reason: 'no_interventions' };
+    const both = generateChips({ ...base, excludedOptions: [noChange, missing] });
+    expect(both[0]).toMatchObject({ id: buildConfigureOptionChip('Explore another hire').id });
+  });
+
   it('no excluded record → post-run chips are byte-identical to today', () => {
     const withoutField = generateChips({
       stage: 'analyse',

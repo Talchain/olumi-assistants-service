@@ -467,15 +467,42 @@ export function isNoChangeFromToday(
   ownEdgeTargets: readonly string[] = [],
 ): boolean {
   if (isBaselineOption(option)) return false;
+  return levelsEqualToday(option, holdValues, ownEdgeTargets);
+}
+
+/**
+ * Every level this option submits is today's level. Fails toward KEEPING the option.
+ *
+ * ⛔ A STORED `raw_value` WINS ON THE WIRE (Codex review @cef745c2 P1): `resolveRawInterventionValue` sends an
+ * intervention's `raw_value` ahead of its `.value`, so `{value: 0.2, raw_value: 7}` on a 6-today factor is a REAL
+ * change although both `.value`s read 0.2. An option that carries a `raw_value` is "no change" only when today's hold
+ * carries the SAME `raw_value`. (A per-value projection comparison is not the Run's: the wire is projected per REQUEST,
+ * and on the a994 replica it demoted the held `{0.2, raw 6}` to the option's 0.2. Equal `.value`s with no option raw
+ * is that served case.)
+ */
+export function levelsEqualToday(
+  option: Readonly<Record<string, unknown>>,
+  holdValues: ReadonlyMap<string, unknown>,
+  ownEdgeTargets: readonly string[] = [],
+): boolean {
   const levels = interventionsOf(option);
   if (ownEdgeTargets.some((id) => extractNumericInterventionValue(levels[id]) === null)) return false;
   const entries = Object.entries(levels);
-  return entries.length > 0 && entries.every(([id, intervention]) => {
-    const hold = extractNumericInterventionValue(holdValues.get(id));
-    const value = extractNumericInterventionValue(intervention);
-    return hold !== null && value !== null
-      && Math.abs(value - hold) <= 1e-9 * Math.max(1, Math.abs(hold));
-  });
+  return entries.length > 0 && entries.every(([id, intervention]) => sameLevelAsToday(intervention, holdValues.get(id)));
+}
+
+const sameLevel = (x: number, y: number): boolean => Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(y));
+const rawValueOf = (x: unknown): number | null =>
+  isPlainObject(x) && typeof x.raw_value === 'number' && Number.isFinite(x.raw_value) ? x.raw_value : null;
+
+function sameLevelAsToday(intervention: unknown, hold: unknown): boolean {
+  const value = extractNumericInterventionValue(intervention);
+  const today = extractNumericInterventionValue(hold);
+  if (value === null || today === null || !sameLevel(value, today)) return false;
+  const raw = rawValueOf(intervention);
+  if (raw === null) return true;
+  const todayRaw = rawValueOf(hold);
+  return todayRaw !== null && sameLevel(raw, todayRaw);
 }
 
 export function gateAnalysableOptions(
@@ -565,11 +592,17 @@ export function gateAnalysableOptions(
 
     // First finish the existing hold/exclusion pass: only a SUBMITTED baseline
     // can represent today. Without one, the first no-change arm is today's arm.
-    let todayRepresented = submitted.some(isBaselineOption);
+    // ⛔ A BASELINE FLAG IS NOT TODAY (Codex review @cef745c2 P1): an explicitly valued baseline at 0.4 on a 0.6-today
+    // factor does not represent today, and excluding the 0.6 arm would lose today entirely. Only a baseline whose
+    // submitted levels ARE today's (a held baseline always is) represents it. A lever the baseline links to but leaves
+    // unset is held at today on the wire (PLoT holds un-intervened factors), so it does not disqualify it; the edge
+    // rule below is about a CHANGE's intent, not about today.
+    const edgesOf = (o: Dict): string[] => edgeTargets.get(optionIdOf(o) ?? '') ?? [];
+    let todayRepresented = submitted.some((o) => isBaselineOption(o) && levelsEqualToday(o, holdValues));
     const noChangeExcluded = new Set<Dict>();
     const labels = new Map(nodesOf(input.graph).map((n) => [n.id, n.label] as const));
     for (const opt of submitted) {
-      if (!isNoChangeFromToday(opt, holdValues, edgeTargets.get(optionIdOf(opt) ?? '') ?? [])) continue;
+      if (!isNoChangeFromToday(opt, holdValues, edgesOf(opt))) continue;
       if (!todayRepresented) {
         todayRepresented = true;
         continue;
