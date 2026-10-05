@@ -67,6 +67,7 @@ const store = {
 vi.mock("../../orchestrator-v5/session/index.js", () => ({ getSessionStore: () => store }));
 
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
+import { deriveNotModelledManifest as stagingManifest } from "../../cee/draft/records-v25/not-modelled-manifest.js";
 
 const BRIEF =
   "We need £4m out of opex by March 2027. Marketing is capped at £1.5m and the " +
@@ -219,6 +220,38 @@ describe("THE DERIVATION RUNS ON THE BYTES BEING RETURNED — pin (4)", () => {
     expect(kept.in_model).toBeGreaterThan(0); // precondition: the first graph DID keep some
     expect(none.in_model).toBe(0); // and the second kept none
     expect(none.absent).toBe(none.total);
+    await app.close();
+  });
+});
+
+// ── PR #2573 Codex R3 P2(i), DL ruling: a served Model-read regression is fixed before the PR leaves DRAFT. ──
+// A stored user_stated carrier without a records stated_relationship (the frozen Anthropic compile's shape) for
+// "Each recruiter adds 1 hire." read in_model on staging. The before-numeral unit window put "recruiter" on the
+// numeral 1 too, so the source (1 recruiter) matched both "Each" and "1" and the one-match rule refused it.
+const HIRE_BRIEF = "We have 8 recruiters. Each recruiter adds 1 hire.";
+const hireGraph = (withEdge: boolean) => ({
+  nodes: [
+    { id: "recruiters", kind: "factor", label: "Recruiters", scale_frame: 10, observed_state: { value: 0.8, raw_value: 8, unit: "recruiters" } },
+    { id: "hires", kind: "outcome", label: "Hires", scale_frame: 10, observed_state: { value: 0.8, unit: "hires" } },
+  ],
+  edges: withEdge ? [{ id: "hire-effect", from: "recruiters", to: "hires", strength: { mean: 1, std: 0.5 }, effect_direction: "positive", provenance: {
+    source: "brief_extraction", magnitude: "user_stated", quote: "Each recruiter adds 1 hire.",
+    natural_effect: { amount: 1, amount_unit: "hires", per_source_change: 1, per_source_change_unit: "recruiters", strength_mean: 1, strength_mean_frame: "edge_strength" },
+  } }] : [],
+});
+
+describe("Codex R3 P2(i): the cold read counts a stated effect whose source and target figures are equal", () => {
+  it('"Each recruiter adds 1 hire." carried without stated_relationship reads in_model on the cold read, as on staging', async () => {
+    const at = HIRE_BRIEF.indexOf("1 hire");
+    const one = (q: { items: { literal: string; char_offset: number; verdict: string }[] }) => q.items.find((i) => i.char_offset === at && i.literal === "1 hire");
+    const app = await buildApp();
+    loadGraphAndBriefText.mockResolvedValue({ graph: hireGraph(false), briefText: HIRE_BRIEF });
+    const bare = one((await read(app)).json().not_modelled.quantities);
+    expect(bare, "control: the figure is found at its offset").toBeDefined();
+    expect(bare!.verdict, "control: with no carrier it is not in the model").not.toBe("in_model");
+    loadGraphAndBriefText.mockResolvedValue({ graph: hireGraph(true), briefText: HIRE_BRIEF });
+    expect(one(stagingManifest(HIRE_BRIEF, hireGraph(true) as never).quantities as never)!.verdict, "staging's reader (frozen copy)").toBe("in_model");
+    expect(one((await read(app)).json().not_modelled.quantities)!.verdict).toBe("in_model");
     await app.close();
   });
 });

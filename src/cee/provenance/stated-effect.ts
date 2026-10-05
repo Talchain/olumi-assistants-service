@@ -85,6 +85,17 @@ function oneMatchingAmount(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
+/**
+ * One written figure is never both endpoints, so the source is located among the figures the target did not take.
+ * Codex R3 P2(i): in "Each recruiter adds 1 hire." the before-numeral window also puts "recruiter" on the numeral 1,
+ * so the source (1 recruiter) matched both "Each" and "1" and the one-match rule refused a stated effect staging read.
+ */
+function statedEndpoints(amounts: readonly LocatedAmount[], detail: StatedEffectDetail): { readonly target: LocatedAmount | undefined; readonly source: LocatedAmount | undefined } {
+  const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false);
+  const candidates = target === undefined ? amounts : amounts.filter(amount => amount !== target);
+  return { target, source: oneMatchingAmount(candidates, detail.per_source_change, detail.per_source_change_unit, true) };
+}
+
 // Unit words written directly at a plain numeral. Month and year are read by the SHARED unit reader (`periodIn`, the
 // vocabulary `sameUnit` uses: "annum", "pa", "pcm" included). Only calendar words it does not read stay local, as their
 // own periods, so "per week" can never read as a monthly rate (Codex R2 F1).
@@ -224,9 +235,7 @@ export function statedEffectFiguresMatch(
   if (quote.trim().length === 0) return false;
   if (![detail.amount, detail.per_source_change].every((value) => Number.isFinite(value) && value !== 0)) return false;
   if (![detail.amount_unit, detail.per_source_change_unit].every((unit) => typeof unit === "string" && unit.trim().length > 0)) return false;
-  const amounts = locatedAmounts(quote);
-  const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false);
-  const source = oneMatchingAmount(amounts, detail.per_source_change, detail.per_source_change_unit, true);
+  const { target, source } = statedEndpoints(locatedAmounts(quote), detail);
   return target !== undefined && source !== undefined && target.index !== source.index;
 }
 
@@ -271,9 +280,7 @@ export function statedEffectQuoteMatches(
   if (authority.amount !== detail.amount || authority.per_source_change !== detail.per_source_change
     || !sameUnit(authority.amount_unit, detail.amount_unit)
     || !sameUnit(authority.per_source_change_unit, detail.per_source_change_unit)) return false;
-  const amounts = locatedAmounts(quote);
-  const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false);
-  const source = oneMatchingAmount(amounts, detail.per_source_change, detail.per_source_change_unit, true);
+  const { target, source } = statedEndpoints(locatedAmounts(quote), detail);
   if (target === undefined || source === undefined
     || !atSpan(target, authority.amount_span, quote) || !atSpan(source, authority.source_span, quote)) return false;
   // The two typed amount spans must be in one relationship clause. Punctuation
