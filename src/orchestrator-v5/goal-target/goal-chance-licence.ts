@@ -150,10 +150,24 @@ export function goalChanceLicenceOf(
  *    (Codex r1: robustness_analyzer_v2 bypasses the gate), so it never counts.
  */
 function userLinkExistenceOn(graph: unknown, goalId: unknown, optionIds: readonly string[]): { links: number; one_in?: number } | undefined {
+  const held = userStatedLinksBelowOne(graph, goalId, optionIds);
+  if (held.length === 0) return undefined;
+  const values = [...new Set(held.map((e) => e.exists_probability as number))];
+  const n = values.length === 1 && values[0]! < 1 ? 1 / (1 - values[0]!) : NaN;
+  const oneIn = Number.isFinite(n) && Math.abs(n - Math.round(n)) < 1e-6 && Math.round(n) >= 2 ? Math.round(n) : undefined;
+  return { links: held.length, ...(oneIn !== undefined ? { one_in: oneIn } : {}) };
+}
+
+/**
+ * The links `userLinkExistenceOn` counts (exported for its rows). Science d5 #87 6008444863: a `brief_extraction` edge is
+ * the user's relationship only WITH its evidence (`source_quote`), so a drafter-invented mediator tagged brief_extraction
+ * never becomes "your link".
+ */
+export function userStatedLinksBelowOne(graph: unknown, goalId: unknown, optionIds: readonly string[]): Rec[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
-  if (goal === undefined) return undefined;
+  if (goal === undefined) return [];
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind] as const));
   const walkable = (id: unknown): boolean => { const k = kindOf.get(id); return k !== undefined && k !== 'option' && k !== 'decision'; };
   const directed = edges.filter((e) => e.edge_type !== 'bidirected');
@@ -176,18 +190,15 @@ function userLinkExistenceOn(graph: unknown, goalId: unknown, optionIds: readonl
     for (const e of directed) if (reached.has(e.from) && !reached.has(e.to) && walkable(e.to)) { reached.add(e.to); grew = true; }
   }
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
-  const userStated = (e: Rec): boolean => linkSizing(e) === 'user' || (isRec(e.provenance) && e.provenance.source === 'brief_extraction');
+  const userStated = (e: Rec): boolean => linkSizing(e) === 'user'
+    || (isRec(e.provenance) && e.provenance.source === 'brief_extraction'
+      && typeof e.provenance.source_quote === 'string' && e.provenance.source_quote.trim() !== '');
   const identityEdge = (e: Rec): boolean => {
     const id = byId.get(e.to)?.nonlinear_identity;
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(e.from);
   };
-  const held = directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && userStated(e) && !identityEdge(e)
+  return directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && userStated(e) && !identityEdge(e)
     && typeof e.exists_probability === 'number' && Number.isFinite(e.exists_probability) && e.exists_probability < 1);
-  if (held.length === 0) return undefined;
-  const values = [...new Set(held.map((e) => e.exists_probability as number))];
-  const n = values.length === 1 && values[0]! < 1 ? 1 / (1 - values[0]!) : NaN;
-  const oneIn = Number.isFinite(n) && Math.abs(n - Math.round(n)) < 1e-6 && Math.round(n) >= 2 ? Math.round(n) : undefined;
-  return { links: held.length, ...(oneIn !== undefined ? { one_in: oneIn } : {}) };
 }
 
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */

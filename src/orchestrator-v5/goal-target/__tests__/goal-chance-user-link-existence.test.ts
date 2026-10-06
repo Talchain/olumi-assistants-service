@@ -5,7 +5,8 @@
  * one value. Twins: links at 1.0, an Olumi-estimated link, an off-path link → nothing; a withheld Run has no licence.
  */
 import { describe, expect, it } from 'vitest';
-import { goalChanceLicenceOf } from '../goal-chance-licence.js';
+import { readFileSync } from 'node:fs';
+import { goalChanceLicenceOf, userStatedLinksBelowOne } from '../goal-chance-licence.js';
 
 type Rec = Record<string, any>;
 const env = (...ps: Array<[string, number]>): Rec => ({
@@ -52,7 +53,7 @@ describe('the licence says when the chances count Olumi\'s doubt about the USER\
     expect(goalChanceLicenceOf(env(['a', 0.5], ['b', 0.35]), g, 'nps')?.user_link_existence).toEqual({ links: 1, one_in: 5 });
   });
   it('Codex r1 #2: a relationship the user\'s BRIEF stated counts (brief_extraction); an Olumi hypothesis they only accepted does not', () => {
-    const brief = { ...olumiLink('price', 'mrr', 0.8), provenance: { source: 'brief_extraction', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } } };
+    const brief = { ...olumiLink('price', 'mrr', 0.8), provenance: { source: 'brief_extraction', magnitude: 'olumi_estimate', source_quote: '<quote>', reviewed_by_user: { intent: 'confirm' } } };
     expect(existence([brief])).toEqual({ links: 1, one_in: 5 });
     const accepted = { ...olumiLink('price', 'mrr', 0.8), provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } } };
     expect(existence([accepted])).toBeUndefined();
@@ -63,6 +64,20 @@ describe('the licence says when the chances count Olumi\'s doubt about the USER\
     const l = goalChanceLicenceOf(env(['a', 0.5], ['b', 0.35]), g, 'mrr');
     expect(l, 'precondition: the Run is licensed').not.toBeNull();
     expect(l!.user_link_existence).toBeUndefined();
+  });
+
+  it('Science d5 6008444863, SERVED G1 draft 1 (CEE 231affb): every counted brief edge carries its quote; an unquoted one never counts', () => {
+    const G1 = JSON.parse(readFileSync(new URL('./fixtures/g1-draft1-graph.json', import.meta.url), 'utf8')).graph as Rec;
+    const options = G1.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => n.id as string);
+    const counted = userStatedLinksBelowOne(G1, G1.goal_node_id ?? 'monthly_recurring_revenue', options);
+    // A brief edge counts by its QUOTE unless the user stated its size (magnitude 'user_stated' is the user's own figure).
+    const viaBrief = counted.filter((e) => e.provenance?.source === 'brief_extraction' && e.provenance?.magnitude !== 'user_stated');
+    for (const e of viaBrief) expect(e.provenance.source_quote, `${e.from}->${e.to}`).toBe('<quote>');
+    // PRECONDITION (non-vacuous): the draft holds an unquoted, Olumi-sized brief edge below 1 — and it is not counted.
+    const unquoted = G1.edges.filter((e: Rec) => e.provenance?.source === 'brief_extraction' && !e.provenance.source_quote
+      && e.provenance.magnitude !== 'user_stated' && e.exists_probability < 1);
+    expect(unquoted.length).toBeGreaterThan(0);
+    for (const e of unquoted) expect(counted).not.toContain(e);
   });
 
   it('a Run with no licence (no stated target) carries no record at all, so no line', () => {
