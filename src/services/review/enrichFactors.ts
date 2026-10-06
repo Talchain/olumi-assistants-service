@@ -32,12 +32,16 @@ import { EXTRACTION_TIMEOUT_MS } from "../../config/timeouts.js";
 // =============================================================================
 
 export interface EnrichFactorsOptions {
+  /** Per-call model assignment; omission retains the legacy extraction default. */
+  modelOverride?: string;
   /** Request ID for telemetry */
   requestId?: string;
   /** Maximum rank to include (default: 10) */
   maxRank?: number;
   /** Timeout in milliseconds (default: 30000) */
   timeoutMs?: number;
+  /** Outer turn deadline/cancellation; omission retains the legacy timeout. */
+  signal?: AbortSignal;
 }
 
 export interface EnrichFactorsResult {
@@ -435,6 +439,8 @@ export async function enrichFactors(
       timeoutMs,
       maxTokens: 4000,
       temperature: 0,
+      ...(options.modelOverride !== undefined ? { modelOverride: options.modelOverride } : {}),
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
     });
 
     if (!llmResult.success || !llmResult.response) {

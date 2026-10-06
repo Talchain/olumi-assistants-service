@@ -35,6 +35,8 @@ export interface ExtractionCallOptions {
   temperature?: number;
   /** Optional model override (e.g., "claude-sonnet-4-20250514") */
   modelOverride?: string;
+  /** Outer turn deadline/cancellation, when supplied by the caller. */
+  signal?: AbortSignal;
 }
 
 export interface ExtractionResult {
@@ -192,25 +194,32 @@ async function withTimeout<T>(
   signal: AbortSignal
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new Error("LLM extraction aborted"));
+    };
     // Set up timeout
     const timeoutId = setTimeout(() => {
+      cleanup();
       reject(new Error(`LLM extraction timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
     // Listen for abort signal
-    signal.addEventListener("abort", () => {
-      clearTimeout(timeoutId);
-      reject(new Error("LLM extraction aborted"));
-    });
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
 
     // Execute the promise
     promise
       .then((result) => {
-        clearTimeout(timeoutId);
+        cleanup();
         resolve(result);
       })
       .catch((error) => {
-        clearTimeout(timeoutId);
+        cleanup();
         reject(error);
       });
   });
@@ -258,7 +267,7 @@ async function callOpenAI(
       max_tokens: maxTokens,
       temperature,
       response_format: { type: "json_object" },
-    });
+    }, ...(options.signal !== undefined ? [{ signal: abortSignal }] as const : [] as const));
 
     const response = await withTimeout(responsePromise, timeoutMs, abortSignal);
 
@@ -335,7 +344,7 @@ async function callAnthropic(
       max_tokens: maxTokens,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
-    });
+    }, ...(options.signal !== undefined ? [{ signal: abortSignal }] as const : [] as const));
 
     const response = await withTimeout(responsePromise, timeoutMs, abortSignal);
 
@@ -418,6 +427,7 @@ export async function callLLMForExtraction(
   userPrompt: string,
   options: ExtractionCallOptions = {}
 ): Promise<ExtractionResult> {
+  if (options.signal?.aborted) return { response: null, success: false, error: "LLM extraction aborted" };
   let provider = getActiveProvider();
   const startTime = Date.now();
   const abortController = new AbortController();
@@ -472,6 +482,15 @@ export async function callLLMForExtraction(
 
   let result: ExtractionResult;
 
+  // This signal is the caller's actual deadline; do not restart its budget after PLoT returns.
+  const onOuterAbort = () => abortController.abort(options.signal?.reason);
+  options.signal?.addEventListener("abort", onOuterAbort, { once: true });
+  if (options.signal?.aborted) onOuterAbort();
+  // Cancel at the enrichment's own cap; withTimeout still settles if the SDK ignores cancellation.
+  const cancellationTimer = options.signal !== undefined
+    ? setTimeout(() => abortController.abort(), options.timeoutMs ?? EXTRACTION_TIMEOUT_MS)
+    : undefined;
+
   try {
     switch (provider) {
       case "openai":
@@ -498,6 +517,9 @@ export async function callLLMForExtraction(
       success: false,
       error: message,
     };
+  } finally {
+    clearTimeout(cancellationTimer);
+    options.signal?.removeEventListener("abort", onOuterAbort);
   }
 
   const durationMs = Date.now() - startTime;

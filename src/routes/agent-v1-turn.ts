@@ -134,7 +134,7 @@ import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../
 import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
-import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn } from '../orchestrator-v5/agent-lane/decision-review-press.js';
+import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn, type DecisionReviewRead } from '../orchestrator-v5/agent-lane/decision-review-press.js';
 import { guidanceRequestOf, turnGuidanceFor, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -930,6 +930,20 @@ export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; bl
 /** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
 function placeExplainCaveat(text: string, caveat: string): string {
   return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
+}
+
+/** Read only the same selected, persisted Run; no transport keep-list or second selection authority. */
+export async function persistedFactorReviewFor(scenarioId: string, read: DecisionReviewRead, requestId: string): Promise<unknown> {
+  const expected = runExplanationChip(scenarioId, read);
+  if (expected === null) return undefined;
+  try {
+    const current = await readScenarioAnalysis({ scenarioId, graph: read.graph, requestId, includeFactorEnrichments: true });
+    const actual = runExplanationChip(scenarioId, { graphHash: read.graphHash,
+      analysisState: current.analysis_state, analysisResult: current.analysis_result });
+    return actual?.id === expected.id ? current.factor_enrichments : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Prefer the identity-bound Run's own deterministic copy; only older summaries need a structural fallback. */
@@ -2026,7 +2040,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (decisionReviewReplay) {
         // Deterministic on the readback: today's bound Run gives the same review; a Run that moved gives today's (or the
         // unavailable reply). The SAME owner as the live turn, never a model call.
-        const review = decisionReviewFor(scenarioId, { ...state, recentReplies: await repliesToCheckAsks(
+        const review = decisionReviewFor(scenarioId, { ...state,
+          factorEnrichments: await persistedFactorReviewFor(scenarioId, state, String(req.id)), recentReplies: await repliesToCheckAsks(
           [goalChanceWithheldForAgent(state.analysisResult)?.say], store, scenarioId, turnId) });
         replayText = review.reply;
         boundControl.push(...decisionReviewChips(review));
@@ -3299,7 +3314,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
     }
     if (decisionReviewRequested) {
-      decisionReviewTurn = decisionReviewFor(scenarioId, { ...composedRead, recentReplies: await repliesToCheckAsks(
+      decisionReviewTurn = decisionReviewFor(scenarioId, { ...composedRead,
+        factorEnrichments: await persistedFactorReviewFor(scenarioId, composedRead, String(req.id)), recentReplies: await repliesToCheckAsks(
         [goalChanceWithheldForAgent(composedRead.analysisResult)?.say], store, scenarioId, undefined) });
       text = decisionReviewTurn.reply;
       result = { ...result, assistant_text: text };
