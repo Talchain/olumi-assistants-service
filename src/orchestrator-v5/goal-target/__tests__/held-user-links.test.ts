@@ -63,6 +63,17 @@ describe('hold-at-1.0: a user link whose own range excludes zero holds on the Ru
     expect(out).not.toBe(g);
     expect(g).toEqual(before);
   });
+  it('MC 21\'s RESHAPED link (DL: hold → MC PR-1): switch × count, "about 150, between 80 and 250" (end: centre) → held', () => {
+    // The mean is the stated POINT (150), never the range's midpoint (165); each end maps through the same per-unit β.
+    const beta150 = 0.45;
+    const ne = { amount: 150, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'switch', strength_mean: beta150,
+      strength_mean_frame: 'edge_strength', stated_range: { low: 80, high: 250, text: 'about 150, between 80 and 250', end: 'centre' } };
+    const e = userLink('switch', 'subs', ne);
+    const sd = Math.abs(beta150 * 250 / 150 - beta150 * 80 / 150) / 3.29;
+    expect(heldLinkOf(e)?.std).toBeCloseTo(sd, 12);
+    const out = withHeldUserLinks({ nodes: [], edges: [e] });
+    expect(out.edges[0]).toMatchObject({ exists_probability: 1, strength: { mean: beta150 } });
+  });
   it('mutant "default spread on a held link" → RED: the held std is the range\'s, never the edge\'s prior 0.15', () => {
     const out = withHeldUserLinks({ nodes: [], edges: [userLink('price', 'subs', ranged(20, 40))] });
     expect(out.edges[0].strength.std).not.toBe(0.15);
@@ -89,5 +100,65 @@ describe('the licence reads the SAME hold: a held link never counts as Olumi\'s 
   it('one held, one not → the count is the unheld one only', () => {
     const edges = [userLink('price', 'subs', ranged(20, 40)), userLink('subs', 'mrr', undefined)];
     expect(goalChanceLicenceOf(env, graph(edges), 'mrr')?.user_link_existence).toEqual({ links: 1, one_in: 5 });
+  });
+});
+
+describe('the Run sends PLoT the held copy (wire only); the persisted graph keeps the user\'s 0.8', () => {
+  const sendOn = async (edit: (e: Rec) => void): Promise<{ wire: Rec; persisted: Rec }> => {
+    const { readFileSync } = await import('node:fs');
+    const { vi } = await import('vitest');
+    const { createRunAnalysisHandler } = await import('../../tools/handlers/run-analysis.js');
+    const minimal = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/plot/v2-run-golden-minimal.json', import.meta.url), 'utf8'));
+    const FX = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/served/c96fc4bb-saved-graph.json', import.meta.url), 'utf8')) as { goal_node_id: string; graph: Rec };
+    const graph = structuredClone(FX.graph);
+    edit(graph.edges.find((x: Rec) => x.from === 'paying_subscribers' && x.to === 'mrr'));
+    const options = graph.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => ({ id: n.id, option_id: n.id, label: n.label, interventions: { pro_plan_price: 59 } }));
+    const snapshot = { graph: structuredClone(graph), options, goal_node_id: FX.goal_node_id, rawPersistedGraph: structuredClone(graph) };
+    const runMock = vi.fn(async () => structuredClone(minimal));
+    const handler = createRunAnalysisHandler({ plotClient: { run: runMock, validatePatch: vi.fn().mockResolvedValue({}) }, scenarioReader: async () => snapshot } as never);
+    await handler({ payload: { scenario_id: 'c96fc4bb-ccd1-4615-a6d9-52c652e3e0e4' }, requestId: 'req-hold', signal: new AbortController().signal, context: {}, orientationText: '' } as never).catch((x: unknown) => x);
+    expect(runMock).toHaveBeenCalledTimes(1);
+    const sent = ((runMock.mock.calls as unknown[][])[0]![0] as { graph: Rec }).graph;
+    return { wire: sent.edges.find((x: Rec) => x.from === 'paying_subscribers' && x.to === 'mrr'),
+      persisted: snapshot.rawPersistedGraph.edges.find((x: Rec) => x.from === 'paying_subscribers' && x.to === 'mrr') };
+  };
+
+  it('a ranged user link (20 to 40) → PLoT gets exists 1.0 and the range\'s sd at the stated mean; the stored link keeps 0.8', async () => {
+    const { wire, persisted } = await sendOn((e) => {
+      e.strength = { mean: 0.3, std: 0.15 };
+      e.exists_probability = 0.8;
+      e.provenance = { source: 'user_specified', magnitude: 'user_stated', natural_effect: ranged(20, 40) };
+    });
+    expect(wire.exists_probability).toBe(1);
+    expect(wire.strength.mean).toBe(0.3);
+    expect(wire.strength.std).toBeCloseTo(sdOf(20, 40), 12);
+    expect(persisted.exists_probability).toBe(0.8);
+    expect(persisted.strength.std).toBe(0.15);
+  });
+
+  it('CONTRAST: the same link with no range is sent exactly as stored (0.8, its own spread)', async () => {
+    const ne = ranged(20, 40);
+    delete ne.stated_range;
+    const { wire } = await sendOn((e) => {
+      e.strength = { mean: 0.3, std: 0.15 };
+      e.exists_probability = 0.8;
+      e.provenance = { source: 'user_specified', magnitude: 'user_stated', natural_effect: ne };
+    });
+    expect(wire.exists_probability).toBe(0.8);
+    expect(wire.strength.std).toBe(0.15);
+  });
+
+  it('ORDER: a stored CLAMP with a range → the full β is restored first, then the range sets the sd (never rescaled by the restore)', async () => {
+    const full = 4.61;
+    const { wire } = await sendOn((e) => {
+      e.strength = { mean: 1, std: 0.5 };
+      e.exists_probability = 0.8;
+      e.provenance = { source: 'user_specified', magnitude: 'user_stated', clamped_from: full,
+        natural_effect: { amount: 49, amount_unit: '£', per_source_change: 1, per_source_change_unit: 'subscriber', strength_mean: full,
+          strength_mean_frame: 'edge_strength', stated_range: { low: 49, high: 69, text: '£49 to £69', end: 'low' } } };
+    });
+    expect(wire.strength.mean).toBe(full);
+    expect(wire.exists_probability).toBe(1);
+    expect(wire.strength.std).toBeCloseTo(Math.abs((69 - 49) * full / 49) / 3.29, 12);
   });
 });

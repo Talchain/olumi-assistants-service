@@ -207,6 +207,7 @@ import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
+import { withHeldUserLinks } from '../../goal-target/held-user-links.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -1103,8 +1104,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis sent stored clamps at their full size (wire copy only; ids only)',
       );
     }
+    // ⭐ HOLD-AT-1.0 (Science d5 #87 6008807178 / 6008817484; D3 cut 6): a user-stated link whose own range excludes zero is
+    // sent at exists_probability 1.0 with its range's spread, on this wire copy only. AFTER the clamp restore, which
+    // rescales a restored std. The licence's existence flag reads the SAME function (`heldLinkOf`).
+    const heldWireGraph = withHeldUserLinks(statedWireGraph);
+    if (heldWireGraph !== statedWireGraph) {
+      log.info(
+        { event: 'run_analysis.user_links_held_at_one', request_id: invocation.requestId, scenario_id: args.scenario_id },
+        'run_analysis held user-stated links whose range excludes zero at existence 1.0 (wire copy only; ids only)',
+      );
+    }
     const plotPayload: Record<string, unknown> = {
-      graph: statedWireGraph,
+      graph: heldWireGraph,
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
