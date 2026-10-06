@@ -58,11 +58,10 @@ function pointsOrShareAsk(label: string, value: number, level: number | undefine
  * words begin with the label's words (case + `singular()` only). "Every 10 more café subscribers" counts "Café
  * subscribers"; "Every 10 more subscribers" does not, whatever unit the Agent passes.
  */
-export function sentenceCountsLabel(said: string, figure: number, label: unknown, otherEndFigure?: number): boolean {
+export function sentenceCountsLabel(said: string, figure: number, label: unknown): boolean {
   if (typeof label !== 'string' || !Number.isFinite(figure) || figure === 0) return false;
-  // ⛔ Codex r2: THIS end's own change occurrence, never any figure of its size. Equal source and target figures, or two
-  // figures of this size in the sentence, leave nothing saying which one counts this end: no reading, never a guess.
-  if (otherEndFigure !== undefined && Math.abs(otherEndFigure) === Math.abs(figure)) return false;
+  // ⛔ Codex r2: THIS end's own change occurrence, never any figure of its size. Two figures of this size in the sentence
+  // (including equal source and target figures) leave nothing saying which one counts this end: no reading, never a guess.
   const want = words(label).map(singular);
   const hits = findLinkEffectAmounts(said).filter((a) => Math.abs(a.magnitude) === Math.abs(figure));
   if (want.length === 0 || hits.length !== 1) return false;
