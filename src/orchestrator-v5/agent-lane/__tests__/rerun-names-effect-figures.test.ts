@@ -186,10 +186,18 @@ describe('an effect row is said once, or counted as unsaid — never silently dr
 
   it('beside a band row on the same link: the band sentence says the link, and nothing is counted unsaid', () => {
     const strength = { ...effectRow, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' } };
-    const plan = rerunExplanationPlan(delta([strength, effectRow]), labelOf, ['Raise price', 'Hold'], true, Object.values(LABELS), [])!;
+    // The band move is the user's own write in this pair (cut 6 truth floor: its receipt licenses "You changed").
+    const plan = rerunExplanationPlan(delta([strength, effectRow]), labelOf, ['Raise price', 'Hold'], true, Object.values(LABELS), [],
+      new Set([`${FROM}->${TO}`]))!;
     expect(plan.codeLine).toContain('Existing-customer price rise');
     expect(plan.codeLine).toContain(RERUN_FALLBACK_LINES.unverified);
     expect(plan.codeLine).not.toContain(RERUN_FALLBACK_LINES.other);
+  });
+
+  it('TWIN (cut 6 truth floor): the same band + effect rows with NO user write in the pair → both unsaid, "can’t say what changed"', () => {
+    const strength = { ...effectRow, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' } };
+    const plan = rerunExplanationPlan(delta([strength, effectRow]), labelOf, ['Raise price', 'Hold'], true, Object.values(LABELS), [])!;
+    expect(plan.codeLine).toBe(RERUN_NO_CHANGE_LINES.unknown);
   });
 
   it('alone, with no within-band move naming its link: unsaid, so "can’t say what changed" — never "nothing changed"', () => {
