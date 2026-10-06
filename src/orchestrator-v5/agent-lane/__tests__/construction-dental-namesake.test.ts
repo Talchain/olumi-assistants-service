@@ -10,8 +10,10 @@
  * Bound by node and edge identity on the graph the real construction door registers.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import type { CandidateModel } from '../admit-model.js';
 
 const BRIEF = 'We run a group of 12 dental clinics. Too many patients miss their appointments without warning, and we want no-shows to '
   + 'fall. We are choosing between (A) sending text reminders 48 hours before each appointment, (B) charging a £20 fee for a '
@@ -81,7 +83,9 @@ describe('the dental brief\'s first draft is built, never refused over the share
     expect(r.not_represented).toContain('The link from "Missed-appointment fee" to "Patient dissatisfaction from charges" could be the option\'s own or '
       + '"Missed-appointment fee level"\'s, so it is set aside and not in the model yet.');
     expect(r.open_questions).toContain('Does "Missed-appointment fee" change "Patient dissatisfaction from charges" directly, or through '
-      + '"Missed-appointment fee level"? Say which and I\'ll draw that link.');
+      + '"Missed-appointment fee level"? Until you say, that link is not in the model.');
+    // ⛔ DL pre-check: no promise to draw it (the link door asks for the user's own strength and direction first).
+    expect(JSON.stringify(r)).not.toContain('draw that link');
   });
 
   it('CONTROL: with no link the option could hold, the rename alone is said — nothing set aside, nothing asked', async () => {
@@ -89,5 +93,110 @@ describe('the dental brief\'s first draft is built, never refused over the share
     expect(r).toMatchObject({ ok: true });
     expect(r.not_represented).toContain('"Missed-appointment fee" names both an option and the factor it acts on, so the factor is called "Missed-appointment fee level" to keep the two apart.');
     expect([...(r.not_represented ?? []), ...(r.open_questions ?? [])].filter((s: string) => /set aside and not in the model yet|directly, or through/.test(s))).toEqual([]);
+  });
+});
+
+/**
+ * Codex r1 on #2655 (CHANGES, 4 findings), each reproduced on the cloud3 fixture (option "Enterprise discount" sets its
+ * namesake factor) through the real register door. Bound by node and edge identity, and by the exact sentences.
+ */
+describe('Codex r1 #2655: what is set aside stays true to the registered model', () => {
+  const FX = JSON.parse(readFileSync(new URL('./fixtures/cloud3-option-factor-same-name-20260929.json', import.meta.url), 'utf8')) as { brief: string; candidate: CandidateModel };
+  const L = (from: string, to: string) => ({ from, to, direction: 'positive', provenance: 'inferred' });
+  const LOCK_IN_LINE = 'The link from "Enterprise discount" to "Provider lock-in" could be the option\'s own or "Enterprise discount level"\'s, so it is set aside and not in the model yet.';
+  const LOCK_IN_ASK = 'Does "Enterprise discount" change "Provider lock-in" directly, or through "Enterprise discount level"? Until you say, that link is not in the model.';
+  async function run(c: Rec, brief = FX.brief, repair?: (x: Rec) => void): Promise<{ r: Rec; edges: [string, string][]; said: string[]; asked: string[]; trace: Rec }> {
+    let g: Rec | null = null; let calls = 0; let trace: Rec = {};
+    const call = (async (req: { input: string }) => {
+      calls += 1;
+      let x = c;
+      if (calls > 1 && repair !== undefined) {
+        // The retry is drafted from the candidate the first pass prepared (the prompt's "Candidate to repair"), as served.
+        x = JSON.parse(req.input.slice(req.input.indexOf(': {', req.input.indexOf('Candidate to repair')) + 2)) as Rec;
+        repair(x);
+      }
+      return { text: JSON.stringify(x) };
+    }) as unknown as CallStructuredModel;
+    const dispatch: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph/register')) { g = structuredClone((body as { graph: Rec }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+      return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+    };
+    const r = await buildModelFromBrief('99999999-9999-4999-8999-999999999999', brief, dispatch, call, (t) => { trace = t as unknown as Rec; }) as Rec;
+    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(true);
+    return { r, edges: (g!.edges as Rec[]).map((e) => [e.from, e.to] as [string, string]), said: r.not_represented ?? [], asked: r.open_questions ?? [], trace };
+  }
+  const withLockIn = (): Rec => {
+    const c = structuredClone(FX.candidate) as Rec;
+    c.risks.push({ label: 'Provider lock-in', provenance: 'inferred' });
+    c.links.push(L('Enterprise discount', 'Provider lock-in'), L('Provider lock-in', c.goal.metric));
+    return c;
+  };
+  const toLockIn = (edges: [string, string][]) => edges.filter(([from, to]) => to === 'provider_lock_in' && from.startsWith('enterprise_discount'));
+
+  it('P2: the same link drawn twice is said once and asked once', async () => {
+    const c = withLockIn();
+    c.links.push(L('Enterprise discount', 'Provider lock-in'));
+    const { said, asked, edges } = await run(c);
+    expect(said.filter((x) => x === LOCK_IN_LINE)).toHaveLength(1);
+    expect(asked.filter((x) => x === LOCK_IN_ASK)).toHaveLength(1);
+    expect(toLockIn(edges)).toEqual([]);
+  });
+
+  it('P1 (retry echo): an adopted retry drafted from the renamed candidate still says and asks what the first draft set aside', async () => {
+    const c = withLockIn();
+    // A coverage gap (Reserved instances sets nothing) forces the retry, which restores the intervention and is adopted.
+    c.options[0].interventions = []; c.options[0].changes = ['Reserved-instance coverage'];
+    const { said, asked, edges, trace } = await run(c, FX.brief, (x) => {
+      x.options[0].interventions = [{ factor_label: 'Reserved-instance coverage', value: 70, value_kind: 'absolute', unit: '% of cloud spend', provenance: 'ai_proposed' }];
+    });
+    expect(trace).toMatchObject({ retried: true, outcome: 'adopted' });
+    expect(said).toContain(LOCK_IN_LINE);
+    expect(asked).toContain(LOCK_IN_ASK);
+    expect(toLockIn(edges)).toEqual([]);
+  });
+
+  it('P1 (retry guess): a retry that draws "Enterprise discount level" → "Provider lock-in" does not register Olumi\'s guess; it stays asked', async () => {
+    const c = withLockIn();
+    c.options[0].interventions = []; c.options[0].changes = ['Reserved-instance coverage'];
+    const { said, asked, edges, trace } = await run(c, FX.brief, (x) => {
+      x.options[0].interventions = [{ factor_label: 'Reserved-instance coverage', value: 70, value_kind: 'absolute', unit: '% of cloud spend', provenance: 'ai_proposed' }];
+      x.links.push(L('Enterprise discount level', 'Provider lock-in'));
+    });
+    expect(trace).toMatchObject({ retried: true, outcome: 'adopted' });
+    expect(toLockIn(edges)).toEqual([]);
+    expect(said).toContain(LOCK_IN_LINE);
+    expect(asked).toContain(LOCK_IN_ASK);
+  });
+
+  it('P1 (own action): a link to the factor the option already sets is its own stated action — drawn from it, never "set aside"', async () => {
+    const c = structuredClone(FX.candidate) as Rec;
+    const opt = c.options.find((o: Rec) => o.label === 'Enterprise discount');
+    opt.changes = ['Reserved-instance coverage'];
+    opt.interventions.push({ ...c.options[0].interventions[0], value: 75 });
+    c.links.push(L('Enterprise discount', 'Reserved-instance coverage'));
+    const { said, asked, edges } = await run(c);
+    expect(edges).toContainEqual(['enterprise_discount', 'reserved_instance_coverage']);
+    expect(edges).not.toContainEqual(['enterprise_discount_level', 'reserved_instance_coverage']);
+    expect([...said, ...asked].filter((x) => x.includes('"Reserved-instance coverage"') && /set aside|directly, or through/.test(x))).toEqual([]);
+  });
+
+  it('P1 (limited outcome): an outcome a stated limit makes a factor is one the option could act on — set aside, never re-sourced', async () => {
+    const c = withLockIn();
+    c.outcomes = [{ label: 'Monthly churn', provenance: 'inferred' }];
+    c.links = c.links.map((l: Rec) => ({ ...l, to: l.to === 'Service reliability change' ? 'Monthly churn' : l.to }));
+    c.constraints = [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }];
+    c.links.push(L('Enterprise discount', 'Monthly churn'));
+    const { said, asked, edges } = await run(c, `${FX.brief} Keep monthly churn under 10%.`);
+    expect(edges.filter(([from, to]) => to === 'monthly_churn' && from.startsWith('enterprise_discount'))).toEqual([]);
+    expect(said).toContain('The link from "Enterprise discount" to "Monthly churn" could be the option\'s own or "Enterprise discount level"\'s, so it is set aside and not in the model yet.');
+    expect(asked).toContain('Does "Enterprise discount" change "Monthly churn" directly, or through "Enterprise discount level"? Until you say, that link is not in the model.');
+  });
+
+  it('CONTROL: an outcome with no limit stays the quantity\'s alone — its link is re-sourced, nothing set aside', async () => {
+    const c = withLockIn();
+    c.links.push(L('Enterprise discount', 'Service reliability change'));
+    const { said, edges } = await run(c);
+    expect(edges).toContainEqual(['enterprise_discount_level', 'service_reliability_change']);
+    expect(said.filter((x) => x.includes('"Service reliability change"') && x.includes('set aside and not in the model yet'))).toEqual([]);
   });
 });

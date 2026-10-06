@@ -76,7 +76,7 @@ describe('Canvas\'s cloud-bill brief (saved live draft): the option and the fact
     // Never re-sourced to the factor, never drawn from the option: the link is not in the model.
     expect((g.edges as Rec[]).filter((e) => e.to === risk.id && (e.from === factor.id || e.from === 'enterprise_discount'))).toEqual([]);
     expect(r.not_represented).toContain('The link from "Enterprise discount" to "Provider lock-in" could be the option\'s own or "Enterprise discount level"\'s, so it is set aside and not in the model yet.');
-    expect(r.open_questions).toContain('Does "Enterprise discount" change "Provider lock-in" directly, or through "Enterprise discount level"? Say which and I\'ll draw that link.');
+    expect(r.open_questions).toContain('Does "Enterprise discount" change "Provider lock-in" directly, or through "Enterprise discount level"? Until you say, that link is not in the model.');
   });
 });
 

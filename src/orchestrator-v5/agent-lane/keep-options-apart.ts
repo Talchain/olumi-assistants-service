@@ -33,7 +33,7 @@
  * level" already in the draft becomes "<name> level 2" (AI Quality 5885116642's collision row), so the renamed
  * quantity cannot merge into another node one label later.
  */
-import { canonicalLabel, type CandidateModel } from './admit-model.js';
+import { canonicalLabel, limitedOutcomeFrame, metricNamesLabel, type CandidateModel } from './admit-model.js';
 
 /** Admission's OWN key (`assignIds` merges labels equal under it), so a clash or a collision cannot hide from this rule. */
 const canon = canonicalLabel;
@@ -88,7 +88,10 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
     ...candidate.outcomes.map((o) => canon(o.label)),
     canon(candidate.goal.metric),
   ]);
-  const onlyAQuantityHolds = new Set([canon(candidate.goal.metric), ...candidate.outcomes.map((o) => canon(o.label))]);
+  // ⛔ Codex r1 #2655 P1: an outcome a stated limit names is admitted as an observable FACTOR (`limitedOutcomeFrame`), which
+  // an option can act on directly, so only the outcomes admission keeps as outcomes are held by the quantity alone.
+  const keptAnOutcome = (label: string): boolean => !candidate.constraints.some((c) => metricNamesLabel(c.metric, label) && limitedOutcomeFrame(c) !== undefined);
+  const onlyAQuantityHolds = new Set([canon(candidate.goal.metric), ...candidate.outcomes.filter((o) => keptAnOutcome(o.label)).map((o) => canon(o.label))]);
   // What the links drawn FROM the shared name say. `none`: nothing but (at most) a self-link, the served journey-C shape
   // the loop handling owns (it withholds the self-link, says it and asks). `quantity`: every link ends at the goal or an
   // outcome, which only the quantity can hold, so the rename is safe. `ambiguous`: any link to a factor, a risk, an
@@ -145,8 +148,15 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
   const setAside: SetAsideLink[] = [];
   const optionHolds = (l: { from: string; to: string }): boolean => split.has(canon(l.from))
     && (canon(l.to) === canon(l.from) || !onlyAQuantityHolds.has(canon(l.to)) || optionNames.has(canon(l.to)));
+  // ⛔ Codex r1 #2655 P1: a link to a quantity the option already acts on (its own intervention or change) is the option's
+  // own stated action, which admission draws from that action: it is neither set aside (it IS in the model) nor re-sourced
+  // to the quantity (that would assert a mechanism).
+  const optionActsOn = (l: { from: string; to: string }): boolean => canon(l.to) !== canon(l.from) && candidate.options.some((o) => canon(o.label) === canon(l.from)
+    && [...(o.interventions ?? []).map((i) => i.factor_label), ...(o.changes ?? [])].some((f) => canon(f) === canon(l.to)));
+  const setAsideOnly = (l: { from: string; to: string }): boolean => optionHolds(l) && !optionActsOn(l);
   for (const l of candidate.links) {
-    if (!optionHolds(l)) continue;
+    // Codex r1 #2655 P2: one relationship is said and asked once, however many times it was drawn.
+    if (!setAsideOnly(l) || setAside.some((a) => canon(a.option) === canon(l.from) && canon(a.to) === canon(l.to))) continue;
     setAside.push({ option: optionNames.get(canon(l.from))!, renamed: re(l.from), to: l.to, self: canon(l.to) === canon(l.from) });
   }
   const model: CandidateModel = {
@@ -177,7 +187,35 @@ export function setAsideLinkLine(a: SetAsideLink): string {
 
 /** The one question asked for it (`open_questions`), never for a self-link. */
 export function setAsideLinkQuestion(a: SetAsideLink): string | null {
-  return a.self ? null : `Does "${a.option}" change "${a.to}" directly, or through "${a.renamed}"? Say which and I'll draw that link.`;
+  // ⛔ No promise to draw it (DL pre-check #2655): the link door asks for the user's own strength and direction first.
+  return a.self ? null : `Does "${a.option}" change "${a.to}" directly, or through "${a.renamed}"? Until you say, that link is not in the model.`;
+}
+
+/**
+ * ⛔ AN ADOPTED RETRY KEEPS WHAT THE FIRST DRAFT SET ASIDE (Codex r1 #2655 P1). The retry is drafted from the renamed
+ * candidate, the set-aside link already gone, so its own pass finds nothing to rename or set aside; and a retry that draws
+ * a link between those ends, from the option or from the renamed quantity, is Olumi's guess at the very mechanism asked
+ * about. Each rename and set-aside whose names the retry still carries is kept (said, and asked, again), and every retry
+ * link between set-aside ends is removed. One whose names the retry no longer carries is left to the retry's own pass.
+ */
+export function holdAcrossRetry(
+  model: CandidateModel,
+  first: { readonly renamed: readonly KeptApart[]; readonly setAside: readonly SetAsideLink[] },
+  own: { readonly renamed: readonly KeptApart[]; readonly setAside: readonly SetAsideLink[] },
+): { readonly model: CandidateModel; readonly renamed: readonly KeptApart[]; readonly setAside: readonly SetAsideLink[] } {
+  const names = new Set([canon(model.goal.metric), ...model.options.map((o) => canon(o.label)), ...model.factors.map((f) => canon(f.label)),
+    ...model.risks.map((r) => canon(r.label)), ...model.outcomes.map((o) => canon(o.label))]);
+  const held = first.setAside.filter((a) => names.has(canon(a.option)) && names.has(canon(a.renamed)) && names.has(canon(a.to)));
+  const ends = (a: SetAsideLink): Set<string> => new Set([canon(a.option), canon(a.renamed)]);
+  const between = (l: { from: string; to: string }): boolean => held.some((a) => ends(a).has(canon(l.from))
+    && (a.self ? canon(l.to) === canon(l.from) : canon(l.to) === canon(a.to)));
+  const setAside = [...held];
+  for (const a of own.setAside) if (!setAside.some((b) => canon(b.option) === canon(a.option) && canon(b.to) === canon(a.to))) setAside.push(a);
+  const renamed = [...own.renamed];
+  for (const k of first.renamed) {
+    if (names.has(canon(k.option)) && names.has(canon(k.to)) && !renamed.some((r) => canon(r.to) === canon(k.to))) renamed.push(k);
+  }
+  return { model: { ...model, links: model.links.filter((l) => !between(l)) }, renamed, setAside };
 }
 
 /** The line said for each rename (`not_represented`, suffix `.label_kept_apart`). */

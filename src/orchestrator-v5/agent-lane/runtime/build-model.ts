@@ -36,7 +36,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
+import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
@@ -1567,8 +1567,9 @@ export async function buildModelFromBrief(
       });
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
+        const retryHeld = holdAcrossRetry(retryApart.model, { renamed: keptApart, setAside: linksSetAside }, retryApart);
         const retryRaw = keepLimitedQuantityAuthor(
-          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryApart.model, brief), firstCandidate, preparation.baseline_gaps),
+          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryHeld.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
@@ -1629,9 +1630,9 @@ export async function buildModelFromBrief(
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
           gapResidual = retryIdentity.residual;
-          keptApart = retryApart.renamed;
+          keptApart = retryHeld.renamed;
           notToldApart = retryApart.ambiguous;
-          linksSetAside = retryApart.setAside;
+          linksSetAside = retryHeld.setAside;
           size = retrySize;
           // ⛔ An adopted retry must not erase what the first pass had to disclose
           // (review 5822933692, B3): a retry that echoes the prepared candidate
