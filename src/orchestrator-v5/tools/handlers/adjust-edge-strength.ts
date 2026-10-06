@@ -32,7 +32,8 @@ export { ADJUST_EDGE_STRENGTH_STD_MAX, olumiSpreadForMean };
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, identityRunUseFromFacts } from '../../compose/definitional-links.js';
 import { parseEdgeAddress } from '../../compose/edge-address.js';
-import { edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude, edgeBandStd } from '../../format/edge-strength-bands.js';
+import { userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { sanitiseUserFacingText } from '../../../orchestrator/shared/output-safety.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
@@ -438,6 +439,28 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       };
       // R11: the strength the user would author is unchanged (mean and direction as stored), so this write is a review.
       const reviewOnly = newMean === beforeMean && newDirection === targetEdge.effect_direction;
+      // ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a write that MOVES the strength of a link holding the user's
+      // own figure would drop that figure (below: the magnitude contract strips `natural_effect` + `magnitude`). Refused
+      // for every caller, nothing written, the figure quoted — unless the approval carried the user's explicit replace
+      // (`edgeStrengthReplacesUserFigureAuthority`). The canvas adapter and the Agent's proposal doors refuse first, in
+      // these words (`user-figure-held.ts`). Read off the RAW edge, which keeps the passthrough `source_quote`.
+      const rawEdges = (rawGraph as { edges?: unknown }).edges;
+      const rawTargetEdge = Array.isArray(rawEdges)
+        ? (rawEdges as Array<{ from?: unknown; to?: unknown }>).find((e) => e?.from === parsed.from && e?.to === parsed.to)
+        : undefined;
+      const heldFigure = reviewOnly ? null : userFigureHeld(rawTargetEdge ?? targetEdge);
+      const replacesHeldFigure = heldFigure !== null && invocation.edgeStrengthReplacesUserFigureAuthority === true;
+      const resultBandWord = CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(newMean))];
+      if (heldFigure !== null && !replacesHeldFigure) {
+        throw new D1HandlerError(
+          'PRECONDITION_UNMET',
+          `adjust_edge_strength: ${parsed.from}→${parsed.to} holds the user's own figure; refusing to drop it without their replace.`,
+          {
+            details: { handler_id: 'adjust_edge_strength', reason: 'user_figure_held', from: parsed.from, to: parsed.to },
+            userGuidance: userFigureHeldRefusalText(heldFigure, resultBandWord),
+          },
+        );
+      }
 
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const edge = clone.edges.find(
@@ -520,6 +543,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             mean_projected: _projectedMean,
             reasoning: _reasoning,
             clamped_from: _clampedFrom,
+            // ⭐ F1 (d5 6006667946): the user's sentence that stated the figure goes WITH the figure. Kept, it read as the
+            // source of a size the link no longer holds (the stale quote the red team saw, #87 6006627551).
+            source_quote: _sourceQuote,
             ...existingProvenance
           } = (edge.provenance ?? {}) as Record<string, unknown>;
           edge.provenance = {
@@ -586,7 +612,10 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // `noop` was computed for the fact above but the narration always
       // claimed an adjustment, yielding "Adjusted the link between A and
       // B from moderate to moderate." on a turn that changed nothing.
-      const assistantText = noop
+      // ⭐ F1: an explicit replace says exactly what it replaced (d5 6006667946), never only the band move.
+      const assistantText = replacesHeldFigure && heldFigure !== null
+        ? userFigureReplacedReceipt(heldFigure, resultBandWord)
+        : noop
         ? formatEdgeStrengthUnchanged({ fromLabel, toLabel, mean: newMean })
         : formatEdgeAdjustment({
             fromLabel,

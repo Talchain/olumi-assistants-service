@@ -280,6 +280,15 @@ export interface HandlerInvocation {
    */
   readonly edgeStrengthAdoptedEstimateAuthority?: { readonly band: import('../format/influence-bands.js').InfluenceBand };
   /**
+   * ⭐ F1 (#87 6006627551; d5 6006667946) — the user asked, in their own words, to REPLACE the figure this link holds.
+   *
+   * Present only on the strict `edge_strength_edit` path, and only when the approval that sent it carried the replace
+   * in-process for this exact link (`stated-link-band-context.ts` `statedLinkReplacesUserFigureFor`). Without it, a
+   * write that moves the strength of a link holding the user's figure is refused and nothing is written
+   * (`user-figure-held.ts`). A routing model cannot populate it: it is not a proposal parameter.
+   */
+  readonly edgeStrengthReplacesUserFigureAuthority?: true;
+  /**
    * ⭐⭐ THIS TURN IS AN ANSWER TO A BASELINE QUESTION THE PRODUCT ASKED, AND
    * THE AUTHORITY IT CARRIES IS FOR THE BASELINE FIELD ONLY.
    *
