@@ -1506,6 +1506,8 @@ describe('ladder paraphrase classes (Desk 6b + DL, #2646)', () => {
     ['Raise to £59 produced the lowest churn.', 'lowest'],
     ['Raise to £59 delivered the lowest monthly cancellations.', 'lowest'],
     ['The lowest churn was delivered by Raise to £59.', 'lowest'],
+    ['Raise to £59 resulted in the lowest churn.', 'lowest'],
+    ['Raise to £59 ends up with the lowest churn.', 'lowest'],
     // has / had
     ['Raise to £59 had the lowest churn.', 'lowest'],
     ['Raise to £59 has the lowest churn.', 'lowest'],

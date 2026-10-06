@@ -229,7 +229,7 @@ const LIKELIHOOD_INPUT = new RegExp(String.raw`${PCT}\s+(?:[\w'-]+\s+){0,3}?like
 const NOT_A_RESULT_SRC = String.raw`(?!\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance)\b)`;
 const LOWEST_LEADER_RE = new RegExp(
   [
-    String.raw`\b(?:gave|gives|give|giving|came\s+out|comes\s+out|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|shows?|showed|reach(?:es|ed)?|has|had|have|having)\s+(?:the\s+)?lowest\b${NOT_A_RESULT_SRC}`,
+    String.raw`\b(?:gave|gives|give|giving|came\s+out|comes\s+out|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|shows?|showed|reach(?:es|ed)?|has|had|have|having|end(?:s|ed|ing)?\s+up\s+with|result(?:s|ed|ing)?\s+in)\s+(?:the\s+)?lowest\b${NOT_A_RESULT_SRC}`,
     String.raw`\bthe\s+lowest\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)\s+by)\b`,
     String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?lowest\s+(?:under|with|for)\s+(?!(?:the\s+)?(?:current|these|this|those|that|your|our|its|their|all|any|each|every|both|most|many|some)\b)`,
   ].join('|'),

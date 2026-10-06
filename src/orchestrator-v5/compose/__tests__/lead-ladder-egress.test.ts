@@ -106,6 +106,9 @@ const CLASSES: Record<string, readonly string[]> = {
     'Raise to £59 produced the lowest churn.',
     'Raise to £59 delivered the highest MRR.',
     'Raise to £59 yields the highest monthly revenue.',
+    // Desk 6b follow-up rows.
+    'Raise to £59 ends up with the highest MRR.',
+    'Raise to £59 resulted in the lowest churn.',
     'The highest MRR was delivered by Raise to £59.',
     'Churn was lowest under Raise to £59.',
   ],
@@ -156,6 +159,7 @@ describe('LEAVE: the contrast rows the paraphrase classes must not take', () => 
     'The team topped up the budget.',
     'Retention is the top priority this quarter.',
     'The most of the uplift came from the price change.',
+    'The price change resulted in the highest uncertainty in the model.',
     // v6 class C2, SERVED caf7d1a/pricing-1: a scoped STATISTIC comparison; the agent lane keeps it by its scope.
     'On the model’s internal normalised outcome scale, the £59 scenario produced the highest average outcome among the three tested prices.',
   ])('%s', (t) => {
