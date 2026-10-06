@@ -93,6 +93,26 @@ describe('A2 — "increase productivity by at least 10%": the change\'s "%" is n
     expect(g).toMatchObject({ goal_threshold_frame: 'change_rel', goal_threshold_raw: 0.1, goal_threshold_unit: 'GBP per month' });
   });
 
+  // ⛔ AIE review on #87 (6016108422) (1): never strip a "%" that IS the metric's unit. Must-keep rows.
+  it('MUST-KEEP: "cut churn rate by 10%" is a relative change of a % metric — the metric\'s unit stays "%"', async () => {
+    const brief = 'We need to cut our churn rate by 10% this year. Should we add onboarding calls or an annual discount?';
+    const g = goalOf(await build(candidate({ value: -10, operator: '<=', horizon_months: 12 }, 'churn rate'), brief));
+    expect(g).toMatchObject({ goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.1, goal_threshold_unit: '%' });
+  });
+
+  it('MUST-KEEP: "grow our win rate by 10%" — a rate is measured in %, so "%" stays its unit', async () => {
+    const brief = 'We want to grow our win rate by 10%. Should we hire a sales engineer or cut the discount?';
+    const g = goalOf(await build(candidate({}, 'Win rate'), brief));
+    expect(g).toMatchObject({ goal_threshold_frame: 'change_rel', goal_threshold_raw: 0.1, goal_threshold_unit: '%' });
+  });
+
+  it('MUST-KEEP: "increase conversion rate from 3% to 4%" — an absolute % level keeps "%" on its 0–100 scale', async () => {
+    const brief = 'Increase our conversion rate from 3% to 4%. Should we redesign checkout or add reviews?';
+    const g = goalOf(await build(candidate({ frame: 'level', value: 4, baseline_known: true, baseline_value: 3, baseline_provenance: 'explicit', horizon_months: 6 }, 'conversion rate'), brief));
+    expect(g).toMatchObject({ goal_threshold_frame: 'level', goal_threshold_raw: 4, goal_threshold_unit: '%', goal_threshold_cap: 100 });
+    expect(g['observed_state']).toMatchObject({ unit: '%', raw_value: 3, cap: 100 });
+  });
+
   it('CONTROL: a metric the user measures in % (today\'s level written as "3%") keeps "%" as its own unit, on its 0–100 scale', async () => {
     const brief = 'Our conversion rate is 3% today and we want to increase it by 10%. Should we redesign checkout or add reviews?';
     const g = goalOf(await build(candidate({ baseline_known: true, baseline_value: 3, baseline_provenance: 'explicit', horizon_months: 6 }, 'conversion rate'), brief));
