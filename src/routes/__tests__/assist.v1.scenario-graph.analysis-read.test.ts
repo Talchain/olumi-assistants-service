@@ -44,6 +44,7 @@
  *     read THROWS must still return the graph, with both new keys null.
  */
 
+import { maximalReviewCardBlock } from '@talchain/schemas/fixtures';
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -944,5 +945,63 @@ describe('SC-24 future goal-unit snapshot joins the cold read', () => {
       expect(rerun.analysis_result).not.toBeNull();
       expect(rerun.analysis_state.run_state.computed_at).toBe('2026-08-17T09:16:50.000Z');
     } finally { await app.close(); }
+  });
+});
+
+// ─── 0.78 SD-1 Slice R: the Run's OWN delivered record (DL ruling #87, 6 Oct) ───────────────────────────────────
+// J1 record 4b (run 37402501132): after a reload the Run's "Olumi model review" cards were gone — composed for the Run's
+// turn and stored nowhere. The read now serves the record stored on the Run's fact: only while current, only bound to
+// THAT fact, and only if this read's own licence leaves every block unchanged (serve-or-omit, never a re-worded copy).
+describe("0.78 Slice R — current_read.delivered_record", () => {
+  const RUN_ID = "run_slice_r_1";
+  const card = (body: string) => ({ ...(maximalReviewCardBlock as Record<string, unknown>), body });
+  const record = (over: Record<string, unknown> = {}) => ({
+    record_version: 1,
+    run_id: RUN_ID,
+    graph_hash: GRAPH_HASH,
+    phase3_blocks: [card("Most of this result rests on a single factor. Arguing the case against it shows whether it survives.")],
+    analysis_ready_options: [{ option_id: "opt_hire", label: "Hire a marketing manager", status: "ready", interventions: { fac_spend: 1 } }],
+    ...over,
+  });
+  const factWith = (graphHash: string, mayName: boolean, rec: Record<string, unknown>) => {
+    const f = runAnalysisFact({ graphHash, mayName });
+    (f.result as Record<string, unknown>).run_id = RUN_ID;
+    (f.result as Record<string, unknown>).delivered_record = rec;
+    return f;
+  };
+  const currentRead = async (fact: Record<string, unknown>) => {
+    readFactsFor.mockResolvedValue([fact]);
+    const app = await buildApp();
+    try { return ((await read(app)).json() as { current_read: Record<string, unknown> }).current_read; }
+    finally { await app.close(); }
+  };
+
+  it("⭐ RED: a FRESH Run serves its delivered record VERBATIM, with its run_id", async () => {
+    const cr = await currentRead(factWith(GRAPH_HASH, true, record()));
+    expect(cr.delivered_record).toEqual(record());
+    expect(cr.run_id).toBe(RUN_ID);
+  });
+
+  it("STALE (the graph changed since the Run) → no delivered record and no run_id", async () => {
+    const cr = await currentRead(factWith(PRE_EDIT_GRAPH_HASH, true, record({ graph_hash: PRE_EDIT_GRAPH_HASH })));
+    expect(cr).not.toHaveProperty("delivered_record");
+    expect(cr).not.toHaveProperty("run_id");
+  });
+
+  it.each([
+    ["another Run's record (run_id differs)", { run_id: "run_other" }],
+    ["a record for another graph (graph_hash differs)", { graph_hash: PRE_EDIT_GRAPH_HASH }],
+  ])("not bound to THIS fact: %s → not served", async (_name, over) => {
+    const cr = await currentRead(factWith(GRAPH_HASH, true, record(over)));
+    expect(cr).not.toHaveProperty("delivered_record");
+  });
+
+  it("serve-or-omit: a card naming the leader under a WITHHELD licence is not served — never a projected copy", async () => {
+    const naming = record({ phase3_blocks: [card("Hire a marketing manager leads on the current model; test it before you act.")] });
+    const withheld = await currentRead(factWith(GRAPH_HASH, false, naming));
+    expect(withheld).not.toHaveProperty("delivered_record");
+    // CONTROL: the same Run without a leader-naming card is served, so the omission is the licence, not the record.
+    const neutral = await currentRead(factWith(GRAPH_HASH, false, record()));
+    expect(neutral.delivered_record).toEqual(record());
   });
 });
