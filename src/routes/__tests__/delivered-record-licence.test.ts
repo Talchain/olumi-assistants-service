@@ -9,6 +9,7 @@ import { RunDeliveredRecordSchema, type RunDeliveredRecord } from '@talchain/sch
 import { maximalCoachingBlock, maximalReviewCardBlock } from '@talchain/schemas/fixtures';
 
 import { deliveredRecordWithinLicence } from '../delivered-record-licence.js';
+import { textAssertsLeadingOption } from '../../orchestrator-v5/compose/leading-option-egress-guard.js';
 
 const HIRE = 'Hire a marketing manager';
 const LEADS = `${HIRE} leads on the current model; test it before you act.`;
@@ -21,7 +22,7 @@ function record(over: { coaching?: Record<string, unknown>; options?: unknown[] 
     graph_hash: 'a'.repeat(16),
     phase3_blocks: [
       { ...(maximalReviewCardBlock as Record<string, unknown>), body: 'Most of this result rests on a single factor.' },
-      { ...(maximalCoachingBlock as Record<string, unknown>), action_prompt: 'Argue the case against the strongest link.', ...over.coaching },
+      { ...(maximalCoachingBlock as Record<string, unknown>), action_prompt: 'Argue the case against the single factor this result rests on.', ...over.coaching },
     ],
     analysis_ready_options: over.options ?? [{ option_id: 'opt_hire', label: HIRE, status: 'ready', interventions: { fac_spend: 1 } }],
   });
@@ -55,6 +56,35 @@ describe('0.79 · a delivered record is served only within the read\'s leader li
     expect(within(keyed, 'withheld')).toBe(false);
     // CONTROL: the same option keyed by a factor id is served, so the refusal is the key's prose.
     expect(within(record(), 'withheld')).toBe(true);
+  });
+
+  it('⭐ a claim only the AGENT lane\'s vocabulary sees ("…ends up with the highest MRR") is not served under a withheld licence', () => {
+    const highest = `${HIRE} ends up with the highest MRR.`;
+    // Precondition (Desk 6b): the v5 leader patterns miss it, bare and rostered — only the agent lane's catches it.
+    expect(textAssertsLeadingOption(highest)).toBe(false);
+    expect(textAssertsLeadingOption(highest, { optionLabels: [HIRE, 'Hold headcount'] })).toBe(false);
+    const rec = record({ coaching: { action_prompt: highest } });
+    expect(within(rec, 'withheld')).toBe(false);
+    expect(within(rec, 'permitted')).toBe(true);
+  });
+
+  it('a PLACE in an order named by the record\'s own option ("Pilot scheme trails at 40%.") is not served under a withheld licence', () => {
+    // Only the agent lane's position rule sees it, and only once it knows "Pilot scheme" is an option: the label is on
+    // the record, not the graph.
+    const rec = record({
+      coaching: { action_prompt: 'Pilot scheme trails at 40%.' },
+      options: [{ option_id: 'opt_pilot', label: 'Pilot scheme', status: 'ready', interventions: { fac_spend: 1 } }],
+    });
+    expect(textAssertsLeadingOption('Pilot scheme trails at 40%.', { optionLabels: ['Pilot scheme'] })).toBe(false);
+    expect(within(rec, 'withheld')).toBe(false);
+  });
+
+  it('KNOWN LIMIT: the agent lane\'s superlatives also omit a NEUTRAL "strongest link" card under a withheld licence', () => {
+    // Serve-or-omit errs on omission: the delivering lane's own fail-closed treats this sentence the same way. Pinned so
+    // a narrower agent-lane vocabulary later shows up here as a capability gain, not as a silent change.
+    const rec = record({ coaching: { action_prompt: 'Argue the case against the strongest link.' } });
+    expect(within(rec, 'withheld')).toBe(false);
+    expect(within(rec, 'permitted')).toBe(true);
   });
 
   it('a claim only a ROSTER sees (the record\'s own option "Team") is not served under a withheld licence', () => {

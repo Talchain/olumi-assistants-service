@@ -1082,7 +1082,7 @@ describe("0.79 Slice R — current_read.delivered_record from the Run's run_deli
   });
 
   it("CONTROL: the same coaching block with a neutral action_prompt under the same WITHHELD licence is served", async () => {
-    const neutral = record({ phase3_blocks: [{ ...(maximalCoachingBlock as Record<string, unknown>), action_prompt: "Argue the case against the strongest link and see whether it survives." }] });
+    const neutral = record({ phase3_blocks: [{ ...(maximalCoachingBlock as Record<string, unknown>), action_prompt: "Argue the case against the single factor this result rests on, and see whether it survives." }] });
     readNewestRunDeliveryFor.mockResolvedValue(delivery(neutral));
     const body = await readOnce(runFact(GRAPH_HASH, false));
     expect(body.current_read.delivered_record).toStrictEqual(neutral);
