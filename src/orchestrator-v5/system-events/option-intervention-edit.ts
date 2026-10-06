@@ -84,7 +84,7 @@ import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, storedGaugeSign, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
 import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
-import { mediatorReadings } from '../agent-lane/mediator-reading.js';
+import { mediatorReadings, storedGaugesKept } from '../agent-lane/mediator-reading.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
@@ -617,7 +617,8 @@ export function linkEffectRefitPostimageIsScoped(storedBefore: unknown, refitFro
   const fitted = refitFramesForStatedEffects(canonical);
   if (fitted.refits.length === 0) return false;
   return isDeepStrictEqual(projectGraphForPersistence(clampForPersist(fitted.graph)), after)
-    && refitKeepsOtherLinks(canonical, after as Record<string, unknown>, new Set([`${link.from}→${link.to}`]));
+    && refitKeepsOtherLinks(canonical, after as Record<string, unknown>, new Set([`${link.from}→${link.to}`]))
+    && storedGaugesKept(canonical, after);
 }
 
 const isRecordGraph = (g: unknown): g is { nodes: unknown[]; edges: unknown[] } =>

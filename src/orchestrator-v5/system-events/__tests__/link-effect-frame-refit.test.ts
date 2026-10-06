@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { prepareLinkEffectUnitReadings } from '../link-effect-unit-reading.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken } from '../link-effect-edit.js';
 import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { clampForPersist, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
@@ -323,6 +324,44 @@ describe('S5t: the chat writer refits the frame a stated size needs, exactly as 
     expect(edge2(stored, 'm', 'g').provenance.sized_by_identity).toEqual({ op: 'gauge' });
     expect(Math.abs(edge2(stored, 'x', 'm').strength.mean)).toBeLessThanOrEqual(1);
     expect(stored.nodes.find((n: Rec) => n.id === 'g').observed_state.cap).toBeGreaterThan(100); // the frame was refit
+  });
+
+  /** Codex r2 P1: the gauge path with UNEQUAL mediator and child frames (m 100, revenue 150). */
+  function unequalGauge(): Rec {
+    return assignEntityRefs(projectGraphForPersistence({ goal_node_id: 'g',
+      nodes: [node('g', 'goal', 'Revenue', { value: 0.5, raw_value: 75, cap: 150, unit: '£', source: 'user_override' }),
+        node('x', 'factor', 'Subscribers', framed(50, 'subscribers')), { id: 'm', kind: 'outcome', label: 'Account value', scale_frame: 100 }],
+      edges: [ph('x', 'm', 0.2), ph('m', 'g', 0.5)] }), { nodes: [], edges: [] }).graph as Rec;
+  }
+  const GAUGE_SAID = 'Every 1 more subscriber adds about £2 to revenue through account value.';
+  const gaugeWrite = (g: Rec) => {
+    const effect = { amount: 2, amount_unit: '£', per_source_change: 1, per_source_change_unit: 'subscribers' };
+    const prepared = prepareLinkEffectUnitReadings(g, 'x', 'm', effect, GAUGE_SAID);
+    const p = { persistedGraph: g, from: 'x', to: 'm', effect, quote: GAUGE_SAID, unit_readings: prepared.unit_readings,
+      expected: { graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, 'x', 'm')! } };
+    return applyLinkEffectEdit({ ...p, reading_token: linkEffectReadingToken(p), frameRefit: true });
+  };
+  it('r2b GAUGE KEPT (Codex r2 P1): a refit that would take the gauge off ±1 (unequal frames) is refused, nothing written', () => {
+    const g = unequalGauge();
+    const before = JSON.stringify(g);
+    expect(gaugeWrite(g)).toMatchObject({ kind: 'refused', reason: 'not_representable' });
+    expect(JSON.stringify(g)).toBe(before);
+  });
+  it('r2b GAUGE KEPT at the door: the recomputed refit of an unequal-frame gauge write is out of scope', () => {
+    const g = unequalGauge();
+    // The user's pre-refit write as the writer builds it (gauge ±1 written with the answer), then construction's refit.
+    const pre = structuredClone(g);
+    const lever = edge2(pre, 'x', 'm');
+    lever.strength = { ...lever.strength, mean: 2 * 100 / 150 * 1.5 };
+    lever.provenance = { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 2, amount_unit: '£', per_source_change: 1,
+      per_source_change_unit: 'subscribers', strength_mean: lever.strength.mean, strength_mean_frame: 'edge_strength' } };
+    const gauge = edge2(pre, 'm', 'g');
+    gauge.strength = { ...gauge.strength, mean: 1 };
+    gauge.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate', sized_by_identity: { op: 'gauge' } };
+    delete gauge.defaulted;
+    const after = projectGraphForPersistence(clampForPersist(refitFramesForStatedEffects(projectGraphForPersistence(pre) as Rec).graph)) as Rec;
+    expect(Math.abs(edge2(after, 'm', 'g').strength.mean)).not.toBe(1); // precondition: the refit broke the gauge
+    expect(linkEffectRefitPostimageIsScoped(g, pre, after, { from: 'x', to: 'm' })).toBe(false);
   });
 });
 

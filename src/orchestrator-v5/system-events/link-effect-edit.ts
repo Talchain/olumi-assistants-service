@@ -39,7 +39,7 @@ import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-v
 import { prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
-import { GAUGE_OP, mediatorReadings, withMediatorReading } from '../agent-lane/mediator-reading.js';
+import { GAUGE_OP, mediatorReadings, storedGaugesKept, withMediatorReading } from '../agent-lane/mediator-reading.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 
 type Rec = Record<string, unknown>;
@@ -594,6 +594,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     written = clampForPersist(fitted.graph) as typeof graph;
     // r2 (Codex r1 on #2631): no OTHER link's analysed size may move (a clamped sibling, or one from an implicit frame).
     if (!refitKeepsOtherLinks(refitFrom as Rec, written, new Set([`${from}→${to}`]))) return refuse('not_representable');
+    // r2b (Codex r2 on #2631): a refit never breaks a gauge (the one written with this answer, or one already stored).
+    if (!storedGaugesKept(refitFrom, written)) return refuse('not_representable');
   }
   const writtenEdge = (written.edges as Rec[]).find(e => e.from === from && e.to === to && isDirectedEdge(e as never)) ?? edge;
   const parsed = GraphV3.safeParse(written);
