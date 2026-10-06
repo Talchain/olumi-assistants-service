@@ -44,6 +44,9 @@ export function currentDefinitionalCarrier(e: unknown): string | undefined {
   return carriesStatedSize(e, ne.strength_mean) ? u : undefined;
 }
 
+/** A definitional link's spread on the Run input: the structural minimum (d5). */
+const DEFINITIONAL_STD = 0.01;
+
 /** The z-width of a 90% range: 2 × 1.645. */
 const RANGE_90_WIDTH_Z = 3.29;
 
@@ -65,6 +68,11 @@ export function isUserStatedLink(e: unknown): boolean {
  */
 export function heldLinkOf(e: unknown): { readonly std: number } | null {
   if (!isUserStatedLink(e)) return null;
+  // ⭐ DEFINITIONAL (Science d5 #87, 6 Oct): the user's own definitional link (a part → its total, +1 per 1) is exact, so it
+  // holds with no range, at the structural minimum spread (as on option → factor edges), never the ±50% default. A
+  // drafter-only definitional flag never reaches here (not user-stated): it stays Olumi's 0.8, disclosed.
+  // ⛔ Codex r1 #2653 P1: only while the link still carries its definition (the ONE predicate): a band edit keeps the flag.
+  if (currentDefinitionalCarrier(e) !== undefined) return { std: DEFINITIONAL_STD };
   const ne = (e as Rec).provenance?.natural_effect;
   if (!isRec(ne) || !isRec(ne.stated_range)) return null;
   const { low, high } = ne.stated_range;
