@@ -34,7 +34,7 @@ describe('interim: a summary Olumi\'s own existence prior could have produced is
     expect(l.form).toBe('each');
     expect(l).not.toHaveProperty('leader_option_id');
     expect(l).not.toHaveProperty('next_option_id');
-    expect(l.summary_withheld).toBe('olumi_existence_assumption');
+    expect(l.summary_withheld).toEqual({ cause: 'olumi_existence_assumption', form: 'highest' });
     expect(l.pct_by_option).toEqual({ a: 50, b: 35 }); // the per-option chances stay the headline
   });
   it('CONTRAST: every path link at 1.0 → "highest" is still licensed, no cause', () => {
@@ -55,13 +55,15 @@ describe('interim: a summary Olumi\'s own existence prior could have produced is
   it('d5 amendment: `similar` (46 vs 44) with an unheld 0.8 → `each` too', () => {
     const on = lic(env(['a', 0.46], ['b', 0.44]), graph([link('price', 'customers', 0.8), link('customers', 'mrr', 1)]));
     expect(on.form).toBe('each');
+    expect(on.summary_withheld).toEqual({ cause: 'olumi_existence_assumption', form: 'similar' });
     expect(on).not.toHaveProperty('similar_option_ids');
     // CONTRAST: the same chances with no prior on the path → `similar`.
     expect(lic(env(['a', 0.46], ['b', 0.44]), graph([link('price', 'customers', 1), link('customers', 'mrr', 1)])).form).toBe('similar');
   });
   it('both all-likely-to-miss forms (35 vs 20; 30 vs 28) with an unheld 0.8 → `each`', () => {
     const edges = [link('price', 'customers', 0.8), link('customers', 'mrr', 1)];
-    expect(lic(env(['a', 0.35], ['b', 0.2]), graph(edges)).form).toBe('each');
+    expect(lic(env(['a', 0.35], ['b', 0.2]), graph(edges)).summary_withheld).toEqual({ cause: 'olumi_existence_assumption', form: 'highest_all_likely_to_miss' });
+    expect(lic(env(['a', 0.3], ['b', 0.28]), graph(edges)).summary_withheld).toEqual({ cause: 'olumi_existence_assumption', form: 'all_likely_to_miss' });
     expect(lic(env(['a', 0.3], ['b', 0.28]), graph(edges)).form).toBe('each');
   });
   it('an OFF-PATH link at 0.8 (no compared option reaches it) does not withhold the summary', () => {
@@ -97,7 +99,7 @@ describe('SERVED J4 R17 (scenario 49e22bef, graph_hash 97a724c215d9920d, CEE 231
     const fx = await load();
     const l = goalChanceLicenceOf(fx.envelope, fx.graph, fx.goal_node_id, earnedBy(fx)) as Rec;
     expect(l.form).toBe('each');
-    expect(l.summary_withheld).toBe('olumi_existence_assumption');
+    expect(l.summary_withheld).toEqual({ cause: 'olumi_existence_assumption', form: 'highest' });
     expect(l.pct_by_option).toMatchObject({ raise_prices_10: 50, launch_starter_tier: 35 });
     expect(l).not.toHaveProperty('leader_option_id');
   });

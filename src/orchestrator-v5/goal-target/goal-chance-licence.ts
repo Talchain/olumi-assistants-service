@@ -69,9 +69,10 @@ export interface GoalChanceLicence {
    * ⭐ D3 cut 6 INTERIM (Science d5 #87 6009272273 + amendment; DL adopted): present iff a compared option's goal path
    * carries an existence < 1 the user did not set (any link but a held one or an identity). Every summary form (highest,
    * either all-likely-to-miss, similar) can then be produced by Olumi's own existence prior, so the form is `each` and the
-   * words say why (c6 owns them). Per-option chances stay the headline.
+   * words say why (c6 owns them, by `form`: never "highest" when what was withheld was `similar`). Per-option chances stay
+   * the headline.
    */
-  readonly summary_withheld?: 'olumi_existence_assumption';
+  readonly summary_withheld?: { readonly cause: 'olumi_existence_assumption'; readonly form: Exclude<GoalChanceForm, 'each'> };
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -147,7 +148,7 @@ export function goalChanceLicenceOf(
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit },
     ...(existence !== undefined ? { user_link_existence: existence } : {}),
-    ...(priorOnPath ? { summary_withheld: 'olumi_existence_assumption' as const } : {}),
+    ...(priorOnPath ? { summary_withheld: { cause: 'olumi_existence_assumption' as const, form: summary as Exclude<GoalChanceForm, 'each'> } } : {}),
   };
 }
 
