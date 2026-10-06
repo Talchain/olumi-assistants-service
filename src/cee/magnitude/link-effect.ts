@@ -235,12 +235,16 @@ export interface LinkStatement {
   readonly stated_range?: StatedRangeEnd;
 }
 
-/** One end of a range the user wrote, in the size's own unit: `text` is the range exactly as written. */
+/**
+ * A range the user wrote, in the size's own unit: `text` is the range exactly as written. `end` says where the size sits:
+ * one END of it (A4: a floor or a ceiling), or its `centre` (the user's point inside it, "about 150, between 80 and 250":
+ * `centreRangeAt`, d5 6009282279), whose spread a8's Run-input hold reads.
+ */
 export interface StatedRangeEnd {
   readonly low: number;
   readonly high: number;
   readonly text: string;
-  readonly end: 'low' | 'high';
+  readonly end: 'low' | 'high' | 'centre';
 }
 
 /**
@@ -445,8 +449,11 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   const statement = stated ? statementWords(amount, per, source, target, sourceFrame, targetFrame) : undefined;
   // A4: a size read from one end of a range the user wrote is said WITH the range, never as their single figure (R3 C1).
   const range = link.user_stated ? link.stated_range : undefined;
+  // a8's shape ruling: the user's point inside their range is said as theirs, with the range ("You said about 150 (80 to 250)").
   const who = !link.user_stated ? 'Olumi estimated that'
-    : range === undefined ? 'You said' : `You wrote "${range.text}"; its ${range.end} end says`;
+    : range === undefined ? 'You said'
+      : range.end === 'centre' ? `You said about ${fmt(Math.abs(amount as number))} (${fmt(range.low)} to ${fmt(range.high)}):`
+        : `You wrote "${range.text}"; its ${range.end} end says`;
   // The natural size of what the edge CARRIES; never of an estimate set aside (the placeholder's own is said instead).
   const natural = (b: number, statedPer: number | undefined): { natural_effect?: NaturalEffect } => {
     const n = naturalEffectOf(b, source, target, statedPer);
@@ -506,7 +513,8 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
       const floor = (range?.end === 'low') === (sign === 1);
       const bound = target.kind !== 'goal' ? '.'
         : `, so any figure that runs through this link is a ${floor ? 'floor: at least' : 'ceiling: at most'} that much.`;
-      const range_words = range === undefined || carried === undefined ? undefined
+      // A centre is no bound: the point stays the user's figure, and the range is the spread the Run reads (no loss to say).
+      const range_words = range === undefined || range.end === 'centre' || carried === undefined ? undefined
         : `${sayFigure(Math.abs(amount as number), unitOf(target) ?? '')} per ${perWords} on "${source.label}" → "${target.label}" is the `
           + `${range.end} end of your "${range.text}" range${bound}`;
       return {

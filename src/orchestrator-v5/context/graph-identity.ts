@@ -76,7 +76,9 @@ export const RUN_ANALYSIS_PROJECTION_KEY = '__cee_analysis_projection_version';
 /** Immutable version validation only; never licenses current freshness. */
 export function matchesHistoricalAnalysisIdentity(graph: GraphStateIngress, storedHash: string): boolean {
   return computeAnalysisAffectingGraphHashSha256(graph) === storedHash
-    || computeAnalysisAffectingGraphHashSha256(graph, 'legacy') === storedHash;
+    || computeAnalysisAffectingGraphHashSha256(graph, 'legacy') === storedHash
+    // Codex r2 #2643: a version recorded before hold-at-1.0 hashed its held links unheld; it is still that version.
+    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_hold') === storedHash;
 }
 
 /** Compare's recorded Run and admission identity use the existing sanctioned seam.
@@ -92,7 +94,9 @@ export function matchesHistoricalRunAnalysisIdentity(
   // unresolved targets an unstamped historical Run consumed.
   if (projection === undefined && carriesGaps
     && currentHash === computeAnalysisAffectingGraphHash(graph, 'legacy')) return false;
-  if (currentHash !== storedHash
+  // Codex r2 #2643: a Run computed before hold-at-1.0 is identified by the pre-hold projection (history only, never freshness).
+  const preHoldHash = computeAnalysisAffectingGraphHash(graph, 'pre_hold');
+  if (currentHash !== storedHash && preHoldHash !== storedHash
     && (projection !== undefined || carriesGaps
       || computeAnalysisAffectingGraphHash(graph, 'legacy') !== storedHash)) return false;
   const snapshot = RunInputSnapshotSchema.safeParse(inputSnapshot);

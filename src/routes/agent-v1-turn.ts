@@ -29,7 +29,7 @@ import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.j
 import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
-import { withinBandMovesForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
+import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
 import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
@@ -2514,15 +2514,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // CODE LINE from the selected delta's TYPED rows; the model only says why, and its sentences pass RC's checker beside
       // that line. `null` (no delta: a first Run) leaves this path exactly as it was.
       const graphNodes = Array.isArray((st.graph as { nodes?: unknown } | null)?.nodes) ? (st.graph as { nodes: { id?: unknown; kind?: unknown; label?: unknown }[] }).nodes : [];
-      // SD-1 interim: a link restated inside its band, named from the pair's own persisted Run facts (never on the wire).
-      const withinBand = await withinBandMovesForRunDelta(scenarioId, String(req.id), currentRead?.run_delta);
+      // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
+      // from the pair's own persisted Run facts (never on the wire).
+      const pairRead = await rerunPairReadForRunDelta(scenarioId, String(req.id), currentRead?.run_delta);
       const rerunPlan = rerunExplanationPlan(currentRead?.run_delta,
         (id) => { const n = graphNodes.find((x) => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; },
         [...new Set([...graphNodes.filter((n) => n.kind === 'option' && typeof n.label === 'string').map((n) => n.label as string),
           ...[...optionNameAliases(st.graph).values()].map((a) => a.display)])],
         runToolOutputLicensesLeader(selectedRun),
         graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''),
-        withinBand);
+        pairRead.withinBand, pairRead.userWrittenLinks);
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;

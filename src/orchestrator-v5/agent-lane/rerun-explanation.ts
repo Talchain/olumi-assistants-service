@@ -132,8 +132,12 @@ const value = (v: unknown): string | undefined => {
  * The change sentences: one per link (its sizing + strength rows together), one per other row. `skipped` counts rows no
  * template can name (unknown link ends, a link `presence` row, a row with no label): those changes happened but go unsaid,
  * so the line never says "Nothing else changed" beside them (Codex pre-review e1c7c788 P2).
+ * ⛔ A BAND MOVE IS THE USER'S CHANGE ONLY WITH THEIR WRITE IN THE PAIR (cut 6; DL 0df0e1 + Science d5 on #2631, 6 Oct).
+ * A band also moves when Olumi refits a frame or a goal's level re-frames it, and the snapshot carries no frames, so a
+ * `strength` row with no sizing row says "You changed" only for a link in `userWritten` (a recorded user link write between
+ * the two Runs, for the pair's own means). Any other band move goes unsaid and counts as skipped: never "You changed".
  */
-function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string | undefined): {
+function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string | undefined, userWritten: ReadonlySet<string>): {
   sentences: string[]; skipped: number; effects: Map<string, Rec>; saidLinks: Set<string>;
 } {
   let skipped = 0;
@@ -177,7 +181,7 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
       return band?.before !== undefined && band.after !== undefined
         ? `You accepted Olumi's estimate for how much ${l.from} changes ${l.to}: ${band.before} → ${band.after}.` : acceptedEstimate(l.from, l.to);
     }
-    if (band?.before !== undefined && band.after !== undefined) return strengthMoved(l.from, l.to, band.before, band.after);
+    if (band?.before !== undefined && band.after !== undefined && userWritten.has(s)) return strengthMoved(l.from, l.to, band.before, band.after);
     saidLinks.delete(s);
     skipped += 1;
     return undefined;
@@ -208,11 +212,13 @@ export function rerunExplanationPlan(
   modelLabels: readonly string[] = [],
   /** SD-1 interim: the pair's within-band link moves (`withinBandLinkMovesForRunPair`), named after the typed rows. */
   withinBand: readonly WithinBandLinkMove[] = [],
+  /** Cut 6 truth floor: the `from->to` links the user wrote between the two Runs (`userWrittenLinksForRunPair`). */
+  userWrittenLinks: ReadonlySet<string> = new Set(),
 ): RerunExplanationPlan | null {
   const d = rec(runDelta);
   if (d === undefined) return null;
   const rows = Array.isArray(d.input_changes) ? d.input_changes.map(rec).filter((r): r is Rec => r !== undefined) : [];
-  const typed = changeSentences(rows, labelOf);
+  const typed = changeSentences(rows, labelOf, userWrittenLinks);
   // c6: one sentence per link, after the typed rows and inside the cap; a link that already has a sizing or strength row
   // is said by that row's sentence, never twice. A link whose ends have no label goes unsaid (coverage is partial anyway).
   const linkWithRow = new Set(rows.filter((r) => r.entity_kind === 'link' && (r.field === 'sizing' || r.field === 'strength'))
@@ -392,13 +398,14 @@ export function rerunRecordForModel(
   nodes: readonly NodeLike[],
   optionDisplayLabels: readonly string[] = [],
   withinBand: readonly WithinBandLinkMove[] = [],
+  userWrittenLinks: ReadonlySet<string> = new Set(),
 ): RerunRecordForModel | undefined {
   if (modelDeltaShown) return undefined;
   const labelled = nodes.filter((n): n is NodeLike & { id: string; label: string } =>
     typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '');
   const labelOf = (id: string): string | undefined => labelled.find((n) => n.id === id)?.label;
   const optionLabels = [...new Set([...labelled.filter((n) => n.kind === 'option').map((n) => n.label), ...optionDisplayLabels])];
-  const plan = rerunExplanationPlan(wireDelta, labelOf, optionLabels, false, labelled.map((n) => n.label), withinBand);
+  const plan = rerunExplanationPlan(wireDelta, labelOf, optionLabels, false, labelled.map((n) => n.label), withinBand, userWrittenLinks);
   if (plan === null) return undefined;
   return {
     code_line: leaksPairLeaderOrShare(plan.codeLine, wireDelta) ? RERUN_NO_CHANGE_LINES.unknown : plan.codeLine,

@@ -367,7 +367,9 @@ describe('propose_link_effect — the user\'s stated effect on a link, prepared 
     expect(detail).toMatch(/it is that range, not their figure, that stops it being used/);
     expect(detail).toMatch(/Never ask them to change their figure first/);
     expect(detail).toMatch(/Repeat their figure in their own words/);
-    expect(detail).toMatch(/cannot be changed from this conversation yet/); // no dead-end "OK?" before a reframe door exists (Canonical 5883707376)
+    // S5t (DL; Science d5 6007669630): never a refusal with no way forward — the one route that works today, by its visible label.
+    expect(detail).toMatch(/under \u201cHow strong is this effect\?\u201d choose Slight, Moderate, Strong or Very strong/);
+    expect(detail).not.toMatch(/cannot be changed from this conversation/);
     expect(detail).not.toMatch(/Is that the size they meant/); // mutant: asking the user's size first → RED
     // Canonical 5883707376: no typed field says whose a cap is — the words never claim the range is Olumi's (or theirs).
     expect(detail).not.toMatch(/Olumi\u2019s own|Olumi's own|their range|range they gave/);

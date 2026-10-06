@@ -10,7 +10,18 @@
  *   · the record's rule never frames the next link as a value-of-information choice (d5 (c): none was computed).
  */
 import { describe, expect, it } from 'vitest';
-import { NO_MATCHED_FIGURES_RULE, rerunExplanationPlan, rerunRecordForModel, TYPED_RERUN_RECORD_RULE, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
+import { NO_MATCHED_FIGURES_RULE, rerunExplanationPlan as planFor, rerunRecordForModel as recordFor, TYPED_RERUN_RECORD_RULE, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
+
+/**
+ * ⛔ CUT 6 TRUTH FLOOR (DL 0df0e1 + Science d5, 6 Oct): a band row is "You changed" only for a link the user wrote between
+ * the two Runs (a recorded receipt; `userWrittenLinksForRunPair`). Every link row in this file IS that user's own write
+ * (s7-d4: "withheld Run → link set → permitted Run"), so each call passes the pair's user-written links explicitly; these
+ * rows pin the record's shape and leader-freedom, not the floor (that is `rerun-band-row-needs-user-write.test.ts`).
+ */
+const USER_WROTE = new Set(['current_plan_mrr->mrr', 'from_node->to_node', 'price->churn']);
+const rerunRecordForModel = (d: unknown, shown: boolean, nodes: Parameters<typeof recordFor>[2], labels: readonly string[] = []) =>
+  recordFor(d, shown, nodes, labels, [], USER_WROTE);
+const rerunExplanationPlan = (...a: Parameters<typeof planFor>) => planFor(a[0], a[1], a[2], a[3], a[4], a[5] ?? [], a[6] ?? USER_WROTE);
 
 const NODES = [
   { id: 'current_plan_mrr', kind: 'factor', label: 'Current-plan monthly recurring revenue' },

@@ -26,8 +26,9 @@ import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.j
 import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testability.js';
 export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { userSizedLevelLessLinks } from './mediator-reading.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { sayFigure } from './say-figure.js';
+import { isTwoStateSource, sayFigure, sourceChangeWords } from './say-figure.js';
 import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
 import { sameUnit } from './same-unit.js';
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
@@ -151,10 +152,13 @@ export function goalCertaintyDecisions(
               : undefined;
   // #2473 CR P2 (CODEX_CLI_OVERFLOW 5937437431): the same unit-less-limit-node reading as every other sized reader.
   const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints));
+  // ⭐ T1b (Science d5, 6 Oct; Codex r1 on #2648): the user's sizes on both sides of a level-less mediator size that path
+  // here too, by the ONE reader P5 uses, so a certainty through it is never called "isn't sized".
+  const userChain = userSizedLevelLessLinks(graph);
   const exact = (e: Rec): boolean => {
     const to = byId.get(e.to);
     const id = isRec(to?.nonlinear_identity) && evaluated(to!.id) ? to!.nonlinear_identity : undefined;
-    return (Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from)) || sized(e);
+    return (Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from)) || sized(e) || userChain.has(`${String(e.from)}→${String(e.to)}`);
   };
   const good = goodSign(goal.goal_direction);
   const out: GoalCertaintyDecision[] = [];
@@ -658,7 +662,7 @@ export function noDeadEndAsks(
       : given.length > 0 ? `, on top of its effect through ${q(String(given[0]!.to))} that you already gave` : '';
     first ??= { kind: 'gauge', from: lever, through: String(m), to: String(r.child) };
     sentences.push(fitted(() => `This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which nobody has set yet.`
-      + ` Roughly how much would a ${oneOf(leverUnit)} rise in ${q(lever)} change ${q(r.child)} that way${onTop()}, in ${r.unit}?`
+      + ` Roughly how much would ${sourceChangeWords(q(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${q(r.child)} that way${onTop()}, in ${r.unit}?`
       + ' A best guess and a range is fine.'));
     for (const k of [key(lever, m), key(m, r.child)]) covered.add(k);
   }
@@ -670,7 +674,7 @@ export function noDeadEndAsks(
     first ??= { kind: 'link', from: l.from, to: l.to };
     sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
       + ` Olumi measures ${q(l.from)} in ${r.unit}, from its own estimate of the link from ${q(r.parents[0]!)}; correct that if it\u2019s wrong.`
-      + ` Roughly how much does each ${oneOf(r.unit)} of ${q(l.from)} change ${q(l.to)}, in ${childUnit}?`));
+      + ` Roughly how much does ${sourceChangeWords(q(l.from), r.unit, isTwoStateSource(nodes, l.from, r.unit)).eachOf} change ${q(l.to)}, in ${childUnit}?`));
     covered.add(key(l.from, l.to));
   }
   if (sentences.length === 0) return gaugeLinks.size > 0 ? { gaugeLinks } : undefined;
@@ -679,11 +683,6 @@ export function noDeadEndAsks(
   return { message: fit(sentences) || sentences[0]!, gaugeLinks, first: first! };
 }
 
-/** One of a unit, said singular ("1 week", never "1 weeks"; "£1" as `sayFigure` says it). */
-function oneOf(unit: string): string {
-  return sayFigure(1, unit).replace(/^1 (\p{L}+)\b/u, (_, w: string) => `1 ${w.endsWith('ies') ? `${w.slice(0, -3)}y`
-    : /(?:ss|sh|ch|x|z)es$/.test(w) ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w}`);
-}
 
 /** Every node with a directed path to the goal (options and the decision aside), the goal included. */
 function goalPathNodes(nodes: readonly Rec[], edges: readonly Rec[]): Set<unknown> {
