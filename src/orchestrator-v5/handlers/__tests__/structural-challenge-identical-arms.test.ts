@@ -250,7 +250,7 @@ describe('SCI-DEEP: the candidate is licensed on the baseline admission and its 
     expect(h.turn.reply).not.toContain('your options all come out the same');
     expect(h.turn.identicalArms).toBe(false);
     // Still true and disclosed: without the link they come out the same, so no candidate leader is compared.
-    expect(h.turn.reply).toContain('come out the same, so which option leads isn\'t compared for that version.');
+    expect(h.turn.reply).toContain('come out the same, so which option most runs support isn\'t compared for that version.');
   });
 
   it('R4: arms that differ by 1e-9 relative are not identical (tolerance contrast)', async () => {
@@ -345,7 +345,7 @@ describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candida
     expect(h.turn.leaderSameAs).toEqual(['continue_current_plan']);
     expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
     expect(h.turn.reply.split('\n')[0]).toBe('Without the link from Enterprise prospect signing likelihood to Quarterly revenue, AI Reporting Module Sprint comes out the same as Continue Current Plan, so its edge over it rests entirely on this link.');
-    expect(h.turn.reply).toContain('- Without the link, AI Reporting Module Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
+    expect(h.turn.reply).toContain('- Without the link, AI Reporting Module Sprint and Continue Current Plan come out the same, so which option most runs support isn\'t compared for that version.');
     expect(h.turn.reply).not.toContain('Which option most runs support cannot be compared');
     expect(h.turn.reply).not.toContain('your options all come out the same');
   });
@@ -360,7 +360,7 @@ describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candida
     expect(h.turn.reply).not.toContain('leads in both versions');
     expect(h.turn.reply).not.toContain('leads in the version without the link');
     expect(h.turn.reply).not.toContain('rests entirely');
-    expect(h.turn.reply).toContain('- Without the link, Integration Bug Fix Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
+    expect(h.turn.reply).toContain('- Without the link, Integration Bug Fix Sprint and Continue Current Plan come out the same, so which option most runs support isn\'t compared for that version.');
     expect(h.turn.reply).not.toContain('Which option most runs support cannot be compared');
   });
 
@@ -369,7 +369,7 @@ describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candida
     expect(h.turn.identicalGroups).toEqual([['ai_reporting_module_sprint', 'continue_current_plan']]);
     expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
     expect(h.turn.reply).not.toContain('leads in the version without the link');
-    expect(h.turn.reply).toContain('- Without the link, AI Reporting Module Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
+    expect(h.turn.reply).toContain('- Without the link, AI Reporting Module Sprint and Continue Current Plan come out the same, so which option most runs support isn\'t compared for that version.');
   });
 
   it('C7 (Codex #2574 r3 P1): a pair without valid-draw counts still BLOCKS, but never earns "its edge rests entirely"', async () => {
@@ -379,7 +379,7 @@ describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candida
     expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
     expect(h.turn.reply).not.toContain('rests entirely');
     expect(h.turn.reply).not.toContain('leads in the version without the link');
-    expect(h.turn.reply).toContain('- Without the link, AI Reporting Module Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
+    expect(h.turn.reply).toContain('- Without the link, AI Reporting Module Sprint and Continue Current Plan come out the same, so which option most runs support isn\'t compared for that version.');
   });
 
   it('D2 (contrast): every arm distinct → a clear leader change is still stated, and nothing is disclosed as the same', async () => {

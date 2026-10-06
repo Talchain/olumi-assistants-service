@@ -467,7 +467,7 @@ describe('review closure: final presentation is bound to its baseline execution 
       expect(turn?.result?.baseline.run_id).toBe(BASE.baseline.run_id);
       expect(turn?.reply).toContain('The two Runs are separately sampled (unpaired).');
       const next = turn!.reply.split('\n').find((line) => line.startsWith('Next step:'))!;
-      expect(next).toContain(kind === 'leader' ? 'which option leads' : kind === 'goal_probability' ? 'Status quo’s target certainty'
+      expect(next).toContain(kind === 'leader' ? 'which option most runs support' : kind === 'goal_probability' ? 'Status quo’s target certainty'
         : kind === 'outcome_level' ? 'Status quo’s position relative to the target' : 'Status quo’s frequency within c');
       expect(turn?.reply).not.toMatch(/rests on|depends on|doesn.t depend|independent of/i);
     },

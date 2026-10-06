@@ -1069,6 +1069,7 @@ describe('withhold paths: leader-presuming BLOCK PROSE must not reach the wire',
         // entries assert a leader, and `tip which option leads` is the phrasing
         // shared by FLIP_RISK_ISOLATED and FLIP_RISK_CORRELATED.
         expect(prose).not.toContain('tip which option leads');
+        expect(prose).not.toContain('could change the most-supported option on its own');
         expect(prose).not.toContain('leading option is ahead');
       });
 
