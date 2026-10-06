@@ -19,12 +19,14 @@
  *    drafter saying something else, and its sign is never overwritten by Olumi's + product (Desk 6b #2644 Q2);
  *  · no option sets the COUNT to a single figure: the brief's range must survive (Science: "a point 150 gives Starter
  *    100%"). A count fed by a link keeps that link's spread; a point-set count waits for the range reshape (a8's hold);
- *  · every option level on a part is a figure the brief writes, in that part's unit (the user's own option levels).
+ *  · every option level on a part is a figure the brief writes ABOUT that part or its option, in that part's unit (the
+ *    user's own option levels; `figureTheUserWroteFor`, never the same number about another quantity).
  * Admission then judges the declaration like any other (`markProductIdentities`). Pure.
  */
 import type { CandidateModel } from './admit-model.js';
 import { unitsCompose } from './reconciling-product.js';
-import { figureTheUserWrote } from './stated-by-user.js';
+import { figureTheUserWroteForSpan, sameWord, wordsOf } from './stated-by-user.js';
+import { canonicalLabel } from './model-primitives.js';
 
 export interface RateCountProduct {
   readonly outcome: string;
@@ -33,19 +35,25 @@ export interface RateCountProduct {
 }
 
 export function withRateCountProducts(candidate: CandidateModel, brief: string): { model: CandidateModel; minted: RateCountProduct[] } {
-  const options = new Set(candidate.options.map((o) => o.label));
-  const declared = new Set((candidate.identities ?? []).map((i) => i.outcome));
+  // Every label is compared as admission MERGES it (`canonicalLabel`: case and spacing), so a respelling never slips past
+  // a check that its merged node would fail (Codex buddy r1 F1, #2644).
+  const k = canonicalLabel;
+  const options = new Set(candidate.options.map((o) => k(o.label)));
+  const declared = new Set((candidate.identities ?? []).map((i) => k(i.outcome)));
   const unitOf = (label: string): unknown =>
-    candidate.factors.find((f) => f.label === label)?.unit ?? candidate.outcomes.find((o) => o.label === label)?.unit;
-  const levelsSet = (label: string) => candidate.options.flatMap((o) => (o.interventions ?? []).filter((i) => i.factor_label === label));
+    candidate.factors.find((f) => k(f.label) === k(label))?.unit ?? candidate.outcomes.find((o) => k(o.label) === k(label))?.unit;
+  const settingOf = (label: string) => candidate.options.flatMap((o) => (o.interventions ?? [])
+    .filter((i) => k(i.factor_label) === k(label)).map((i) => ({ option: o.label, level: i })));
+  const levelsSet = (label: string) => settingOf(label).map((s) => s.level);
+  const quantityLabels = [...candidate.factors.map((f) => f.label), ...candidate.outcomes.map((o) => o.label), ...(candidate.risks ?? []).map((r) => r.label)];
   const minted: RateCountProduct[] = [];
   for (const outcome of candidate.outcomes) {
     const label = outcome.label;
-    if (label === candidate.goal.metric || declared.has(label)) continue;
+    if (k(label) === k(candidate.goal.metric) || declared.has(k(label))) continue;
     // A same-labelled factor is this node's level (`buildCandidateSchema` gives an outcome none of its own).
-    if (candidate.factors.some((f) => f.label === label)) continue;
-    const into = candidate.links.filter((l) => l.to === label && !options.has(l.from));
-    const parents = [...new Set(into.map((l) => l.from))];
+    if (candidate.factors.some((f) => k(f.label) === k(label))) continue;
+    const into = candidate.links.filter((l) => k(l.to) === k(label) && !options.has(k(l.from)));
+    const parents = [...new Map(into.map((l) => [k(l.from), l.from] as const)).values()];
     if (parents.length !== 2) continue;
     // Both drawn positive, or the drafter's sign would be replaced by the product's.
     if (!into.every((l) => l.direction === 'positive')) continue;
@@ -54,7 +62,23 @@ export function withRateCountProducts(candidate: CandidateModel, brief: string):
     if (composed.kind !== 'proof') continue;
     // The count's range survives only through a link: an option that sets it to one figure is a point (Science (A)).
     if (levelsSet(composed.count).length > 0) continue;
-    if (![a, b].every((part) => levelsSet(part).every((i) => typeof i.value === 'number' && figureTheUserWrote(i.value, unitOf(part), brief)))) continue;
+    // The user's figure FOR THAT PART (or the option setting it), never the same number written about another quantity
+    // ("Pro subscribers pay £49"; Codex buddy r1 F6).
+    const theirs = (part: string): boolean => settingOf(part).every(({ option, level }) => {
+      if (typeof level.value !== 'number') return false;
+      const span = figureTheUserWroteForSpan(level.value, unitOf(part), brief, { target: [part, option], others: quantityLabels.filter((q) => k(q) !== k(part)) });
+      if (span === null) return false;
+      // The clause the figure is written in names the part or the option that sets it, by ANY of their words ("launch a
+      // starter tier at £49"), so a clause about something the model does not hold ("Pro subscribers pay £49") is not it.
+      const before = brief.slice(0, span.start).search(/[^.!?;,:\n]*$/u);
+      const after = brief.slice(span.end).search(/[.!?;,:\n]/u);
+      // The figure's own unit names no entity ("£49 … per month" is not ‘monthly price’), as the shared reader holds.
+      const unitWords = typeof unitOf(part) === 'string' ? wordsOf(unitOf(part) as string) : [];
+      const clause = wordsOf(brief.slice(before, after === -1 ? brief.length : span.end + after))
+        .filter((c) => !unitWords.some((u) => sameWord(u, c)));
+      return [...wordsOf(part), ...wordsOf(option)].some((w) => clause.some((c) => sameWord(c, w)));
+    });
+    if (![a, b].every(theirs)) continue;
     minted.push({ outcome: label, rate: composed.rate, count: composed.count });
   }
   if (minted.length === 0) return { model: candidate, minted };

@@ -130,8 +130,9 @@ export function bindStatedLinkSizes(
     // SIGN-1 S2: a counting determiner cannot attest a negative source change.
     if (d.per_source_change < 0 && /\b(?:each|every|per)\s+[A-Za-z0-9]/iu.test(sentences[p.sentence]!)) return false;
     // ⛔ A direct bind carries the user's quote, so its drawn sign must not be the other way from the sentence (DL #2644 pilot).
+    // Against the TARGET's change for the stated source change (its signed amount), never the coefficient (Codex r1 F5).
     const saysOnTarget = through === undefined ? directSignTheSentenceSays(sentences[p.sentence]!, nodeById.get(l.to)?.label) : null;
-    if (saysOnTarget !== null && saysOnTarget !== sign) {
+    if (saysOnTarget !== null && saysOnTarget !== Math.sign(d.amount)) {
       directSignRefused?.push({ link: p.link, sentence: sentences[p.sentence]! });
       return false;
     }
@@ -164,8 +165,10 @@ export function bindStatedLinkSizes(
     const through: PassThroughBinding = { link, onward: onward[0]!, sign: o.effect_direction === 'negative' ? -1 : 1, sentence };
     // ⛔ The PATH carries the user's figure, so its sign is the sentence's (Desk 6b #2644 Q3): the source link's sign × the
     // onward link's must be the way the sentence says the figure moves Q. Read neither way, or the other way: refused.
+    // The verb says how Q moves for the source change the sentence states: the target's own change (its amount, signed),
+    // never the coefficient, so "a £1 price REDUCTION increases …" reads + (Codex buddy r1 F5).
     const said = signTheSentenceSays(sentence);
-    if (said !== Math.sign(d.amount * d.per_source_change) * through.sign) {
+    if (said !== Math.sign(d.amount) * through.sign) {
       signRefused?.push({ through, said });
       return undefined;
     }
@@ -202,7 +205,8 @@ const tokens = (text: string): string[] => text.toLowerCase().split(/[^\p{L}\p{N
  * Read only from the sentence that bound the link, at the bound amount:
  *  · the sentence's ONE "between a and b", written AFTER the amount, with no other figure between the two;
  *  · low < |amount| < high, strictly: an amount that IS an end is A4's (`writtenRangeFor`), never a centre;
- *  · both ends bare, or in pounds when the amount is money (read in the amount's own scale).
+ *  · both ends bare, or in pounds when the amount is money (read in the amount's own scale), and no other kind of unit
+ *    written after the range ("between 1 and 4 months" is a time);
  * Nothing else writes a spread: no range written, none carried (never a default ±k around the point).
  */
 export function centreRangeAt(sentence: string, amountSpan: { readonly end: number }, amount: number, amountUnit: string): StatedRangeEnd | undefined {
@@ -212,6 +216,11 @@ export function centreRangeAt(sentence: string, amountSpan: { readonly end: numb
   if (range === undefined) return undefined;
   const at = tail.indexOf(range.text);
   if (at < 0 || /\d/u.test(tail.slice(0, at))) return undefined;
+  // A range in ANOTHER kind of unit is not the size's ("between 1 and 4 months after launch": a time, never a count of
+  // customers; Codex buddy r1 F3): the word after its high end must not name a different family.
+  const after = tail.slice(at + range.text.length).match(/^\s*([A-Za-z%]+)/u)?.[1];
+  const afterFamily = after === undefined ? null : unitPhraseFamily(after);
+  if (afterFamily !== null && afterFamily !== unitPhraseFamily(amountUnit)) return undefined;
   const pounds = range.text.includes('£');
   if (pounds && unitPhraseFamily(amountUnit) !== 'currency') return undefined;
   const scale = pounds ? moneyUnitScale(amountUnit) : 1;

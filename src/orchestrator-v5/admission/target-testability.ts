@@ -257,14 +257,20 @@ export function targetTestabilityOf(
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
     const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
-    const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity)
-      && (n.nonlinear_identity.stated_in_brief !== false || evaluated.has(n.id))).map((n) => n.id));
+    const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.stated_in_brief !== false).map((n) => n.id));
+    // An inferred identity THIS Run evaluated carries only its OWN operand links exactly, as the licence reads them
+    // (`reachedGoalPaths` exactLinks); any other link into it stays a guess (Codex buddy r1 F2, #2644).
+    const evaluatedOperand = (e: Record<string, unknown>): boolean => {
+      const to = nodes.find((n) => n.id === e.to);
+      const identity = isRec(to?.nonlinear_identity) ? to!.nonlinear_identity : undefined;
+      return identity !== undefined && evaluated.has(to!.id) && Array.isArray(identity.factor_ids) && identity.factor_ids.includes(e.from);
+    };
     // A link Olumi sized (R3 #2371 5914745577: an `olumi_*` magnitude, or a plain `defaulted: true` size — m1's churn →
     // subscribers-at-12-months) that does not hold by definition: B6's ONE test (`olumiGuessedLink`), so the goal and a
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
     const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
-      && olumiGuessedGoalLink(e, unitOf));
+      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     const unconverted = identityForwarded ? [] : into.filter((e) => !sizedInGoalUnit(e, goalUnit, graph));
@@ -356,11 +362,6 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     const ends = linkEffectEndUnits(graph, upstream.from, upstream.to);
     const [fromUnit, toUnit] = [ends?.source.own[0], ends?.target.own[0]];
     const to = failingLink?.link_to ?? upstream.to;
-    // A yes/no lever is switched on, never "rises by 1 0 / 1" (a8 + red team 19, CEE b38592ed): the sizer's own word for
-    // its source unit is 'switch' (`sourceUnitWords`), the link-effect convention the card says it in.
-    if (toUnit !== undefined && ends?.source.own.includes('switch') === true) {
-      return `Roughly how much does ${to} change, in ${toUnit}, when ${lever} is switched on?`;
-    }
     return fromUnit !== undefined && toUnit !== undefined
       ? `Roughly how much does ${to} change, in ${toUnit}, when ${lever} rises by ${sayFigure(1, fromUnit)}?`
       : `Roughly how much does ${to} change when ${lever} changes?`;

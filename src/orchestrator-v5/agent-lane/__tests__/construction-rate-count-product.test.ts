@@ -33,7 +33,7 @@ const set = (factor_label: string, value: number, unit: string, provenance = 'ex
  * `countDirection`: the drafter's sign on the count's link (Desk 6b Q2). `levelledOutcome`: the outcome ALSO drafted as a
  * factor with a level, which admission makes the same node (Desk 6b Q1).
  */
-function draft7(over: { pointCount?: boolean; priceUnit?: string; price?: number; countDirection?: Dir; levelledOutcome?: number } = {}): Record<string, unknown> {
+function draft7(over: { pointCount?: boolean; priceUnit?: string; price?: number; countDirection?: Dir; levelledOutcome?: number; levelledSpelling?: string } = {}): Record<string, unknown> {
   const launch = over.pointCount === true
     ? [set('Starter subscribers', 150, 'subscribers', 'ai_proposed'), set('Starter tier monthly price', over.price ?? 49, over.priceUnit ?? 'GBP per subscriber per month', 'ai_proposed')]
     : [set('Starter tier launched', 1, '', 'ai_proposed'), set('Starter tier monthly price', over.price ?? 49, over.priceUnit ?? 'GBP per subscriber per month', 'ai_proposed')];
@@ -55,7 +55,7 @@ function draft7(over: { pointCount?: boolean; priceUnit?: string; price?: number
         unit: over.priceUnit ?? 'GBP per subscriber per month', provenance: over.levelledOutcome !== undefined ? 'explicit' : 'ai_proposed', plausible_max: 200 },
       // Desk 6b Q1: the outcome drafted with a level of its own, and BOTH parts levelled (so no part-level refusal applies).
       ...(over.levelledOutcome !== undefined
-        ? [{ label: 'Starter-tier MRR', role: 'observable', baseline_known: true, baseline_value: over.levelledOutcome, unit: 'GBP per month', provenance: 'explicit', plausible_max: 50000 },
+        ? [{ label: over.levelledSpelling ?? 'Starter-tier MRR', role: 'observable', baseline_known: true, baseline_value: over.levelledOutcome, unit: 'GBP per month', provenance: 'explicit', plausible_max: 50000 },
           { label: 'Starter subscribers', role: 'observable', baseline_known: true, baseline_value: 120, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000 }]
         : []),
     ],
@@ -81,7 +81,7 @@ function draft7(over: { pointCount?: boolean; priceUnit?: string; price?: number
 }
 
 type Rec = Record<string, any>;
-async function build(wire: Record<string, unknown>): Promise<{ graph: Rec; node: (label: string) => Rec; edge: (from: string, to: string) => Rec; said: string[] }> {
+async function build(wire: Record<string, unknown>, brief = T1B): Promise<{ graph: Rec; node: (label: string) => Rec; edge: (from: string, to: string) => Rec; said: string[] }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let registered: Rec | null = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -92,7 +92,7 @@ async function build(wire: Record<string, unknown>): Promise<{ graph: Rec; node:
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('b63d8672-0000-4000-8000-0000000b63d8', T1B, dispatch, call) as Rec;
+  const out = await buildModelFromBrief('b63d8672-0000-4000-8000-0000000b63d8', brief, dispatch, call) as Rec;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   const graph = registered!;
   // As a reload reads them back (`NodeV3` / `EdgeV3`).
@@ -136,6 +136,24 @@ describe('(A) a rate × count drawn as two added links is Olumi\'s product of th
     // Admission refuses a levelled product only when a part is 0 or has none (`levelRefused`): with both parts levelled,
     // nothing else stops the mint (measured without the check: minted at £9,000 and at £5,880).
     const { node } = await build(draft7({ levelledOutcome: 9000 }));
+    expect(node('Starter-tier MRR').nonlinear_identity).toBeUndefined();
+  });
+
+  it('CONTROL (Codex r1 F1): the levelled outcome RESPELLED (‘starter-tier mrr’, merged by admission) still gets no product', async () => {
+    const { graph } = await build(draft7({ levelledOutcome: 9000, levelledSpelling: 'starter-tier mrr' }));
+    // Admission merged the two spellings into ONE node (it keeps the factor's): that node carries no product.
+    const merged = (graph.nodes as Rec[]).filter((n) => String(n.label).toLowerCase() === 'starter-tier mrr');
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.nonlinear_identity).toBeUndefined();
+  });
+
+  it('CONTROL (Codex r1 F6): £49 written only about ANOTHER tier ("Pro subscribers pay £49") is not the starter price — no product', async () => {
+    // Codex's brief: the only £49 is the Pro tier's (T1b's own "Each starter subscriber adds £49" is taken out too).
+    const brief = T1B.replace('launch a starter tier at £49 a month', 'launch a starter tier, its price undecided')
+      .replace('Each starter subscriber adds £49 a month to monthly recurring revenue.', 'Each starter subscriber adds revenue at the starter price.')
+      + ' Pro subscribers pay £49 per subscriber per month.';
+    expect(brief.match(/£49/gu)).toHaveLength(1);
+    const { node } = await build(draft7(), brief);
     expect(node('Starter-tier MRR').nonlinear_identity).toBeUndefined();
   });
 

@@ -811,8 +811,9 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "`provenance.magnitude: 'user_stated'`: admission writes it ONLY on the user's own size, and only when ONE written " +
       "span about this link's source carries the range (`writtenRangeFor`, stated-by-user.ts), or the very sentence " +
       "that bound the size writes it around that figure (`centreRangeAt`, stated-size-binding.ts; d5 6009282279). " +
-      "Out of the analysis hash (graph-hash.ts picks natural_effect fields by name); a centre's spread is read only at " +
-      "Run-input time by the hold (#2643), never written back.",
+      "The range itself is not hashed (graph-hash.ts picks natural_effect fields by name), but it IS an analysis input " +
+      "once #2643's hold reads it: a held link's effective existence and its range-derived spread are projected into the " +
+      "hash there (#2643 @a59c9e10), read at Run-input time and never written back (Desk 6b, #2644).",
   },
   {
     id: "unwarranted:cee.EdgeV3::provenance.natural_effect.stated_range.high",

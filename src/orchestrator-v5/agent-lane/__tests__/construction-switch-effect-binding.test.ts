@@ -76,8 +76,9 @@ describe('a switch\'s stated effect is bound with its quote', () => {
   });
 
   it('RED: the switch is named by its SETTING option when its own label is all switch words ("Launched" set by "Launch starter tier")', async () => {
-    const edge = await build(draft7({ switchLabel: 'Tier launched' }));
-    expect(edge('Tier launched', 'Starter subscribers').provenance).toMatchObject({ source_quote: WIN });
+    // ‘Launched’ has no word but a switch word, so only the setter fallback can name it (Codex buddy r1 F8).
+    const edge = await build(draft7({ switchLabel: 'Launched' }));
+    expect(edge('Launched', 'Starter subscribers').provenance).toMatchObject({ source_quote: WIN });
   });
 
   it('CONTROL (Science mutant: source not named): a sentence that never names the switch or its option binds nothing', async () => {

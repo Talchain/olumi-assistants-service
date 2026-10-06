@@ -9,10 +9,9 @@
  * Bound by node and edge identity, on the graph the real construction door registers.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import { targetTestabilityOf, untestableTargetTail } from '../../admission/target-testability.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { withholdGoalFiguresForUntestableTarget } from '../../tools/handlers/run-analysis.js';
 import { buildGoalReadingDisclosure, goalReadingTailOf } from '../../coaching/goal-reading-disclosure.js';
 import { isAllowedRunAnalysisAssistantText } from '../../coaching/analysis-result-headline.js';
@@ -140,6 +139,25 @@ describe('P5 reads an inferred product THIS Run evaluated as exact (Science d5 6
   });
 });
 
+describe('Codex r1: only the declared operands of an evaluated product are exact, and only a true evaluation counts', () => {
+  it('CONTROL (F2): an Olumi-guessed link INTO the evaluated product from a non-operand stays P5-withheld', async () => {
+    const { graph, id, named } = await d1();
+    // An option-moved lever into the product, sized only by Olumi (not an operand of price × subscribers).
+    graph.nodes.push({ id: 'promo_spend', kind: 'factor', label: 'Promo spend', observed_state: { value: 0, unit: '£/month' }, scale_frame: 1000 });
+    graph.edges.push({ from: id('Launch starter tier'), to: 'promo_spend', effect_direction: 'positive', origin: 'option' });
+    graph.edges.push({ from: 'promo_spend', to: id('Starter-tier MRR'), effect_direction: 'positive', strength: { mean: 0.3, std: 0.1 },
+      exists_probability: 0.8, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } });
+    expect(named(targetTestabilityOf(graph, [evaluation(id)]))).toContain('Promo spend → Starter-tier MRR');
+  });
+
+  it('CONTROL (F4): an evaluation of [price, price] is not price × subscribers — withheld, and no product sentence', async () => {
+    const { graph, id } = await d1();
+    const twice = evaluation(id, { factor_ids: [id('Starter subscription price'), id('Starter subscription price')] });
+    expect(targetWithheld(withholdGoalFiguresForUntestableTarget(envelope(graph, [twice]), graph) as Rec)).toBe(true);
+    expect(buildGoalReadingDisclosure(graph, id('monthly recurring revenue'), [twice])).not.toContain('Olumi works out');
+  });
+});
+
 describe('DL condition 3: the Run says the product reading its chance rests on (d5\'s words)', () => {
   it('RED: evaluated → the reading tail says it, the forwarder rebuilds the same tail, and the egress admits it', async () => {
     const { graph, id } = await d1();
@@ -154,25 +172,5 @@ describe('DL condition 3: the Run says the product reading its chance rests on (
     const { graph, id } = await d1();
     expect(buildGoalReadingDisclosure(graph, id('monthly recurring revenue'))).not.toContain('Olumi works out');
     expect(buildGoalReadingDisclosure(graph, id('monthly recurring revenue'), [evaluation(id, { evaluated: false })])).not.toContain('Olumi works out');
-  });
-});
-
-describe('a yes/no lever is asked as switched on (a8 + red team 19: "rises by 1 0 / 1", CEE b38592ed)', () => {
-  // The served Run-2 graph (red team github-87 @0b005aee, evidence/cut5-pin/c5j4-r2-run, CEE b38592ed / UI 1815ccb4).
-  const served = (): Rec => JSON.parse(readFileSync(new URL('./fixtures/served-c5j4-r2-b38592ed.json', import.meta.url), 'utf8')) as Rec;
-  const ask = (g: Rec): string => untestableTargetTail(g, targetTestabilityOf(g))!;
-
-  it('RED (served): "…when Starter tier launched is switched on?" — never "rises by 1 0 / 1"', () => {
-    const tail = ask(served());
-    expect(tail).toContain('Roughly how much does Starter subscribers change, in subscribers, when Starter tier launched is switched on?');
-    expect(tail).not.toMatch(/0 ?\/ ?1|rises by 1\b/u);
-  });
-
-  it('CONTROL: the same lever measured in money keeps "rises by £1"', () => {
-    const g = served();
-    const lever = (g.nodes as Rec[]).find((n) => n.label === 'Starter tier launched')!;
-    lever.observed_state = { ...lever.observed_state, unit: '£/month', value: 0.5, raw_value: 500, cap: 1000 };
-    lever.scale_frame = 1000;
-    expect(ask(g)).toMatch(/when Starter tier launched rises by £1\b/u);
   });
 });

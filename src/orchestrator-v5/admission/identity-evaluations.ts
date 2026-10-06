@@ -19,6 +19,8 @@ export function evaluatedIdentityCarriers(nodes: readonly Rec[], identityEvaluat
     const declared: unknown[] = Array.isArray(identity.factor_ids) ? identity.factor_ids : [];
     const said = Array.isArray(e.factor_ids) ? e.factor_ids : undefined;
     return (e.operation === undefined || e.operation === identity.operation)
-      && (said === undefined || (said.length === declared.length && said.every((f) => declared.includes(f))));
+      // The SAME operand set: no repeats, and each side holds every operand of the other (Codex buddy r1 F4: [price, price]).
+      && (said === undefined || (new Set(said).size === said.length && said.length === declared.length
+        && said.every((f) => declared.includes(f)) && declared.every((f) => said.includes(f))));
   }).map((e) => e.node_id));
 }

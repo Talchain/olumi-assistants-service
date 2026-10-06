@@ -13,6 +13,7 @@ import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { EdgeV3 } from '../../../schemas/cee-v3.js';
 import { sizeLink, type MagnitudeNode } from '../../../cee/magnitude/link-effect.js';
 import { centreRangeAt } from '../stated-size-binding.js';
+import { deriveNotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 
 const LOSES = 'Each 1% price rise loses about 2 customers, between 1 and 4.';
 const WIN = 'The starter tier would win about 150 new subscribers, between 80 and 250.';
@@ -64,7 +65,7 @@ function t1b(over: { lost?: number } = {}): Record<string, unknown> {
 }
 
 type Rec = Record<string, any>;
-async function build(wire: Record<string, unknown>, brief = T1B): Promise<{ edge: (from: string, to: string) => Rec; said: string[] }> {
+async function build(wire: Record<string, unknown>, brief = T1B): Promise<{ edge: (from: string, to: string) => Rec; said: string[]; graph: Rec }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let registered: { nodes: Rec[]; edges: Rec[] } | null = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -81,7 +82,7 @@ async function build(wire: Record<string, unknown>, brief = T1B): Promise<{ edge
   const idOf = (l: string) => g.nodes.find((n) => n.label === l)!.id;
   // The stored edge, as a reload reads it back (`EdgeV3`: a malformed range is `.catch`-dropped there).
   const edge = (from: string, to: string): Rec => EdgeV3.parse(g.edges.find((e) => e.from === idOf(from) && e.to === idOf(to))!) as Rec;
-  return { edge, said: [...(out.not_represented ?? []), ...(out.open_questions ?? [])] };
+  return { edge, said: [...(out.not_represented ?? []), ...(out.open_questions ?? [])], graph: g as unknown as Rec };
 }
 
 describe('the range the user wrote around their figure is carried with it', () => {
@@ -117,6 +118,39 @@ describe('the range the user wrote around their figure is carried with it', () =
     const said = 'Each 1% price rise loses about 5 customers, between 1 and 4.';
     const { edge } = await build(t1b({ lost: 5 }), T1B.replace(LOSES, said));
     expect(edge('Price rise', 'Customers lost from price rise').provenance.natural_effect?.stated_range).toBeUndefined();
+  });
+
+  it('CONTROL (Codex r1 F3): a TIME interval after the figure ("between 1 and 4 months after launch") is never the size\'s range', async () => {
+    const said = 'Each 1% price rise loses about 2 customers, between 1 and 4 months after launch.';
+    const { edge } = await build(t1b(), T1B.replace(LOSES, said));
+    const lost = edge('Price rise', 'Customers lost from price rise').provenance;
+    expect(lost).toMatchObject({ magnitude: 'user_stated', source_quote: said });
+    expect(lost.natural_effect.stated_range).toBeUndefined();
+  });
+
+  it('RED (Codex r1 F7): the not-modelled manifest credits a switch\'s quoted figure ("The AI release reduces Support cost by £150 a month")', async () => {
+    const SAID_150 = 'The AI release reduces Support cost by £150 a month.';
+    const brief = 'We are deciding whether to release an AI assistant for customer support. Support cost is £5,000 a month today. '
+      + `${SAID_150} Goal: get Support cost below £4,900 a month within 6 months.`;
+    const wire = {
+      goal: { metric: 'Support cost', operator: '<', target_stated: true, frame: 'level', value: 4900, unit: 'GBP per month', horizon_months: 6,
+        provenance: 'explicit', baseline_known: true, baseline_value: 5000, baseline_provenance: 'explicit', scope: null },
+      constraints: [],
+      options: [
+        { label: 'Release the AI assistant', provenance: 'explicit', is_status_quo: null, changes: [], interventions: [set('AI release', 1, '', 'ai_proposed')] },
+        { label: 'Keep support as it is', provenance: 'explicit', is_status_quo: true, changes: [], interventions: [] },
+      ],
+      factors: [{ label: 'AI release', role: 'controllable', baseline_known: true, baseline_value: 0, unit: '', provenance: 'ai_proposed', plausible_max: 1 }],
+      risks: [], outcomes: [],
+      links: [sized('AI release', 'Support cost', 'negative', -150, 1)],
+      identities: [], unknowns: [], decision_question: null,
+    };
+    const { edge, graph } = await build(wire, brief);
+    expect(edge('AI release', 'Support cost').provenance).toMatchObject({ magnitude: 'user_stated', source_quote: SAID_150 });
+    const at = brief.indexOf('£150');
+    const item = (deriveNotModelledManifest(brief, graph).quantities?.items ?? []).find((i) => i.char_offset === at);
+    expect(item?.literal).toBe('£150');
+    expect(item?.verdict).toBe('in_model');
   });
 
   it('CONTROL: a centre is no bound — no "end of your range" sentence is said for it (A4\'s floor/ceiling words are ends only)', async () => {

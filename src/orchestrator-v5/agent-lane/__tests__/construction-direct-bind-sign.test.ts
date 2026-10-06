@@ -94,3 +94,27 @@ describe('a direct bind is the user\'s only when it runs the way their sentence 
       + 'is drawn to run the other way from what you wrote. Check which way it runs.');
   });
 });
+
+describe('Codex r1 F5: the verb is read against the TARGET\'s change, never the coefficient', () => {
+  it('CONTROL: "a £1 price REDUCTION adds 2 subscribers" drawn negative (2 per −1) stays the user\'s, with its quote', async () => {
+    const said = 'A £1 price reduction adds 2 subscribers.';
+    const brief = `${T1B} ${said}`;
+    const wire = draft('Price rise', 'Customers lost from price rise', 2) as Rec;
+    (wire.factors as Rec[]).push({ label: 'Price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 });
+    (wire.outcomes as Rec[]).push({ label: 'Subscribers', provenance: 'inferred', unit: 'subscribers', plausible_max: 1000 });
+    (wire.links as Rec[]).push(sized('Price', 'Subscribers', 'negative', 2, -1), sized('Subscribers', 'monthly recurring revenue', 'positive', 49, 1));
+    (wire.options as Rec[])[0]!.interventions.push({ factor_label: 'Price', value: 45, value_kind: 'absolute', unit: 'GBP', provenance: 'ai_proposed' });
+    let g: Rec | null = null;
+    const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
+    const dispatch: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph/register')) { g = structuredClone((body as { graph: Rec }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+      return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+    };
+    const out = await buildModelFromBrief('956e3c12-0000-4000-8000-0000000956e3', brief, dispatch, call) as Rec;
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    const idOf = (l: string): string => (g!.nodes as Rec[]).find((n) => n.label === l)!.id;
+    const e = EdgeV3.parse((g!.edges as Rec[]).find((x) => x.from === idOf('Price') && x.to === idOf('Subscribers'))!) as Rec;
+    expect(e.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: said });
+    expect([...(out.not_represented ?? [])].filter((x: string) => x.includes('drawn to run the other way'))).toEqual([]);
+  });
+});
