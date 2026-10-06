@@ -1142,6 +1142,12 @@ const HEDGE = /^(?:about|around|roughly|approximately|nearly|almost|only|just|so
 const CHANGE_BEFORE = /^(?:every|each|per|by|a|an|another|extra|additional|one)$/i;
 /** Right after a figure: it is a change ("£1 rise", "50 fewer", "4 points off"). */
 const CHANGE_AFTER = /^\s*(?:(?:percentage\s+)?points?\s+)?(?:rises?|increases?|cuts?|drops?|falls?|jumps?|hikes?|reductions?|decreases?|gains?|loss|more|fewer|less|extra|additional|higher|lower|up|down|off|changes?|swings?)\b/i;
+/** Whether ONE word is a change word the binder itself reads ("adds", "costs", "raises", "means", …): where a statement's
+ * predicate begins, after the counted phrase (RT-6 row 1b). */
+export function isChangeWord(token: string): boolean {
+  return CHANGE_STATED.test(token);
+}
+
 /** The text after a figure with its ONE change word dropped ("10 more café subscribers" → " café subscribers"), read by
  * the binder's own `CHANGE_AFTER`: the counted phrase an end's label is checked against (RT-6 row 1b). */
 export function afterChangeWord(tail: string): string {
