@@ -18,7 +18,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
+import { toolsFor, dispatchTool, MUTATION_TOOLS, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
 import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
@@ -223,6 +223,43 @@ export interface AgentTurnResult {
 }
 
 const DEFAULT_MAX_HOPS = 6;
+
+// Diagnostic content is deliberately narrower than the tool schema: never
+// copy basis, rationale, quotes, messages, credentials or arbitrary properties.
+const REFUSAL_SCALARS = [
+  'value', 'unit', 'label', 'goal_label', 'factor_label', 'option_label',
+  'from_label', 'to_label', 'goal_id', 'factor_id', 'option_id', 'proposal_id',
+  'direction', 'strength', 'goal_is', 'user_stated', 'estimate', 'revise', 'keep',
+] as const;
+
+const credentialLike = /(?:\b(?:bearer|password|secret|credential|authorization|token|api[_ -]?key|private[_ -]?key)\b|\bsk-[\w-]+|\bAKIA[\w]+|[A-Za-z0-9_+/=-]{32,}|https?:\/\/\S+|[^\s@]+@[^\s@]+)/i;
+const quotedSpans = /"[^"]*"|“[^”]*”|‘[^’]*’|'[^']*'|`[^`]*`/g;
+
+const refusalDetail = (detail: unknown): string | undefined => {
+  if (typeof detail !== 'string') return undefined;
+  // Test the entire detail BEFORE truncating: a key prefix beyond the bound
+  // must not make an earlier part of a credential visible.
+  if (credentialLike.test(detail)) return '[redacted]';
+  return detail.replace(quotedSpans, '[redacted]').replace(/[\r\n\t]/g, ' ').slice(0, 300);
+};
+
+const proposedScalars = (raw: unknown): Record<string, string | number | boolean> => {
+  const summary: Record<string, string | number | boolean> = {};
+  if (typeof raw !== 'string') return summary;
+  let args: unknown;
+  try { args = JSON.parse(raw); } catch { return summary; }
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return summary;
+  for (const key of REFUSAL_SCALARS) {
+    const value = (args as Record<string, unknown>)[key];
+    if (typeof value === 'number' ? !Number.isFinite(value)
+      : typeof value === 'string' ? value.length > 80 || credentialLike.test(value)
+        || /["“”‘’`\r\n\t]/.test(value) || /(?:^|\s)'|'(?:\s|$)/.test(value)
+      : typeof value !== 'boolean') continue;
+    const next = { ...summary, [key]: value };
+    if (JSON.stringify(next).length <= 600) summary[key] = value as string | number | boolean;
+  }
+  return summary;
+};
 
 const textOf = (items: readonly Record<string, unknown>[]): string => {
   let t = '';
@@ -530,6 +567,16 @@ export async function runAgentTurn(
         providerCalls += Math.floor(claimedCalls);
       }
       if (result.mutated) mutated = true;
+      if (result.ok === false && MUTATION_TOOLS.includes(String(call.name))) {
+        log.info({
+          event: 'v5.agent.tool_refused',
+          request_id: input.ctx.request_id,
+          tool: String(call.name),
+          refusal: result.refusal,
+          detail: refusalDetail(result.detail),
+          proposed: proposedScalars(call.arguments),
+        }, 'Agent mutation tool refused');
+      }
       toolCalls.push({
         name: String(call.name),
         ok: result.ok,
