@@ -81,6 +81,7 @@ describe('LEAVE: "the highest priority" is a weighting, not a result (Codex budd
   });
   it('CONTROL: the same verb with a QUANTITY is the ladder\'s claim', () => {
     expect(both('Raise prices 10% gave the highest monthly revenue.')).toEqual([true, true]);
+    expect(both('Raise prices 10% produced the highest mean revenue.')).toEqual([true, true]);
   });
 });
 
@@ -155,6 +156,8 @@ describe('LEAVE: the contrast rows the paraphrase classes must not take', () => 
     'The team topped up the budget.',
     'Retention is the top priority this quarter.',
     'The most of the uplift came from the price change.',
+    // v6 class C2, SERVED caf7d1a/pricing-1: a scoped STATISTIC comparison; the agent lane keeps it by its scope.
+    'On the model’s internal normalised outcome scale, the £59 scenario produced the highest average outcome among the three tested prices.',
   ])('%s', (t) => {
     expect(both(t)).toEqual([false, false]);
   });

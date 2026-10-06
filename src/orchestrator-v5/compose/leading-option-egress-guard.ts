@@ -145,13 +145,20 @@ const LADDER_VERB_SRC = String.raw`(?:gave|gives|give|giving|produc(?:e|es|ed|in
 const LADDER_PASSIVE_SRC = String.raw`(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)`;
 /** A weighting, a mechanism or the goal-chance copy: "the highest priority", "the highest influence", "the highest chance". */
 const NOT_A_RESULT_SRC = String.raw`(?!\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds)\b)`;
+/**
+ * A STATISTIC comparison ("produced the highest average outcome", "has the lowest modelled median") is v6 class C2 when
+ * the sentence names its metric scope, and the served agent lane keeps it by that scope (`blankScopedMetricComparison`).
+ * This context-free reader cannot see the scope, so it leaves the statistic form alone, exactly as on the base (served
+ * caf7d1a/pricing-1). The ladder's own lead names a QUANTITY ("the highest monthly recurring revenue"), never this form.
+ */
+const NOT_A_STATISTIC_SRC = String.raw`(?!\s+(?:(?:modelled|average|mean|median|expected|simulated|normalised)\s+)+(?:median|mean|average|outcome|value|score)s?\b)`;
 const RUN_SHARE_SRC = String.raw`\bin\s+(?:the\s+most|\d{1,3}(?:\.\d+)?\s?%)\s+(?:of\s+(?:the\s+)?)?(?:runs?|simulations?)\b`;
 /** A scope, not an option: "risk is highest under the current assumptions". */
 const NOT_AN_OPTION_SCOPE_SRC = String.raw`(?!(?:the\s+)?(?:current|these|this|those|that|your|our|its|their|all|any|each|every|both|most|many|some)\b)`;
 const GAVE_THE_EXTREME_RE = new RegExp(
   [
     // Active: "X gave / produced / had the highest|lowest {q}".
-    String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:highest|lowest)\b${NOT_A_RESULT_SRC}`,
+    String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:highest|lowest)\b${NOT_A_RESULT_SRC}${NOT_A_STATISTIC_SRC}`,
     // "the most|least {q}", only with a run share: "X gave the most MRR in 62% of runs".
     String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:most|least)\b[^.;:!?\n]{0,60}?${RUN_SHARE_SRC}`,
     // Fronted with a run share: "The highest {q} came from X in 81% of runs".
