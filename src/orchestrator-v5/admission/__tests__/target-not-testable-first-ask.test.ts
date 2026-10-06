@@ -40,6 +40,23 @@ describe('the target warning types the link its question asks', () => {
       + 'roughly how much monthly recurring revenue in GBP/month does a change in Customers lost from price rise bring?');
     expect(w.first_ask).toEqual({ kind: 'link', from: LOST, to: GOAL });
   });
+  it('⛔ Codex r1 P1: a % LEVEL goal\'s question says "in %", which the writer refuses (points only), so no typed invitation', () => {
+    const g: Rec = { goal_node_id: 'gm', goal_constraints: [{ node_id: 'gm', operator: '>=', value: 40, unit: '%', value_frame: 'level' }],
+      nodes: [
+        { id: 'gm', kind: 'goal', label: 'Gross margin', observed_state: { value: 0.3, raw_value: 30, baseline: 0.3, cap: 100, unit: '%', source: 'user_override' },
+          goal_threshold_raw: 40, goal_threshold_unit: '%', goal_threshold: 0.4, goal_direction: '>=' },
+        { id: 'price', kind: 'factor', label: 'Price', observed_state: { value: 0.5, raw_value: 50, cap: 100, unit: 'GBP', source: 'user_override' } },
+        { id: 'o', kind: 'option', label: 'Raise price', interventions: { price: { value: 0.6, raw_value: 60 } } },
+      ],
+      edges: [
+        { from: 'o', to: 'price', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive', provenance: { source: 'cee_hypothesis' } },
+        { from: 'price', to: 'gm', strength: { mean: 0.6, std: 0.15 }, exists_probability: 0.8, effect_direction: 'positive',
+          provenance: { source: 'user_specified' }, provenance_display: 'user_set' },
+      ] };
+    const w = targetNotTestableWarning(g, targetTestabilityOf(g), ['o'], CODE)!;
+    expect(w.say).toContain('roughly how much Gross margin in % does a change in Price bring?'); // PRECONDITION: the words ask it
+    expect(w).not.toHaveProperty('first_ask');
+  });
   it('TWIN (DL): when the words ask today\'s level first, they ask no link, so there is no `first_ask`', () => {
     const g = singleBand();
     delete g.nodes.find((n: Rec) => n.kind === 'goal').observed_state;

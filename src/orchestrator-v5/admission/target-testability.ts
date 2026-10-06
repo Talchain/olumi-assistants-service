@@ -336,6 +336,8 @@ export interface UntestableTargetParts {
    * own link, the one the band clause reads); null when the question asks anything else (today's level first) or nothing.
    */
   readonly asked: { readonly from: string; readonly to: string } | null;
+  /** The unit the (c) question asks the amount in (the goal's for a link into it, the link's target's upstream); null when unitless. */
+  readonly askedIn: string | null;
 }
 
 export function untestableTargetParts(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): UntestableTargetParts | null {
@@ -415,6 +417,8 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     untestableComparator: cases.includes('b') ? `'${typeof comparator === 'string' ? comparator : ''} ${figure}'` : null,
     question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
     asked: askingCase === 'c' && failingLink?.link !== undefined ? { from: failingLink.link.from, to: failingLink.link.to } : null,
+    askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
+      : (linkEffectEndUnits(graph, upstream.from, upstream.to)?.target.own[0] ?? null),
   };
 }
 
@@ -486,7 +490,12 @@ export function targetNotTestableWarning(
   // ⭐ Near tie (DL #87, 6 Oct): the link the `say` asks for, typed by id, so the panel names the SAME next step as the chat
   // (as `GOAL_FIGURES_PLACEHOLDER_PATH`'s `first_ask`). Only when the words ask exactly that link; never otherwise.
   const parts = tail === null ? null : untestableTargetParts(graph, verdict);
-  const asked = parts?.asked !== undefined && parts.asked !== null && parts.question !== null && tail!.includes(parts.question) ? parts.asked : null;
+  // ⛔ Codex r1 #2659 P1: never a typed invitation the door refuses. A % LEVEL goal's question says "in %", but the writer
+  // takes a level's change in points only (Science 5993238492), so its answer is `unit_mismatch`: no `first_ask` then.
+  // Read through the writer's own end units and comparator, never a second rule.
+  const sayAsks = parts?.asked !== undefined && parts.asked !== null && parts.question !== null && tail!.includes(parts.question) ? parts.asked : null;
+  const ends = sayAsks === null || parts?.askedIn == null ? null : linkEffectEndUnits(graph, sayAsks.from, sayAsks.to);
+  const asked = sayAsks !== null && ends !== null && statedInOneOf(parts!.askedIn, [...ends.target.own, ends.target.adopted]) ? sayAsks : null;
   return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds], ...(tail !== null ? { say: tail } : {}),
     ...(asked !== null ? { first_ask: { kind: 'link' as const, from: asked.from, to: asked.to } } : {}) };
 }
