@@ -160,17 +160,22 @@ describe('THE WRITER: (C) sized in the parent\'s unit; (B) one end-to-end answer
     expect(linkEffectEndUnits(corrected, 'cost', 'mrr')!.source.own).toContain('GBP/year');
     expect(linkEffectEndUnits(corrected, 'cost', 'mrr')!.source.own).not.toContain('£/month');
   });
-  it('(B) RED: one end-to-end answer sizes price → strain in MRR\'s units AND writes strain → MRR = 1 as the gauge', () => {
+  it('(B) RED: one end-to-end answer sizes price → strain in MRR\'s units AND writes strain → MRR = ±1 as the gauge', () => {
     const r = write(gaugeGraph(), 'price', 'strain', { ...E2E }, E2E_QUOTE);
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     if (r.kind !== 'mutated') return;
     const lever = edge(r.mutatedGraph, 'price', 'strain');
     expect(lever.provenance.magnitude).toBe('user_stated');
     expect(lever.provenance.natural_effect.amount_unit).toBe('£/month');
-    expect(lever.strength.mean).toBeCloseTo(convertLinkEffect(-1200, 1, 200000, 100)!, 12);
-    expect(lever.effect_direction, "the PATH's sign rides on the lever").toBe('negative');
+    // M keeps its orientation (MC: ±1): strain → MRR stays negative, so E = −£1,200 is +£1,200 of strain (in MRR's units).
+    expect(lever.provenance.natural_effect.amount).toBe(1200);
+    expect(lever.strength.mean).toBeCloseTo(convertLinkEffect(1200, 1, 200000, 100)!, 12);
+    expect(lever.effect_direction, "the lever keeps its own sign").toBe('positive');
     const gauge = edge(r.mutatedGraph, 'strain', 'mrr');
-    expect(gauge.strength.mean).toBe(1);
+    expect(gauge.strength.mean).toBe(-1);
+    expect(gauge.effect_direction).toBe('negative');
+    // END TO END: Δ MRR / Δ price = β(lever) × g × frame(MRR) / frame(price) = the user's −£1,200 per £1.
+    expect(lever.strength.mean * gauge.strength.mean * 200000 / 100).toBeCloseTo(-1200, 6);
     expect(gauge.provenance).toMatchObject({ magnitude: 'olumi_estimate', sized_by_identity: { op: 'gauge' } });
     expect(gauge.provenance).not.toHaveProperty('mean_projected');
     expect(gauge.provenance).not.toHaveProperty('natural_effect');
@@ -184,6 +189,36 @@ describe('THE WRITER: (C) sized in the parent\'s unit; (B) one end-to-end answer
   it('(B) CONTROL: before the answer the path withholds on both links', () => {
     expect(unsizedLeaderGoalPaths(gaugeGraph(), ['o-raise']).flatMap(p => p.links)).toEqual(
       [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }]);
+  });
+  it('⛔ P0 GUARD: a gauge never overwrites a figure the user already gave M → child (no reading, nothing written)', () => {
+    const g = gaugeGraph();
+    Object.assign(edge(g, 'strain', 'mrr'), { strength: { mean: -0.4, std: 0.1 }, provenance: { source: 'user_specified', magnitude: 'user_stated',
+      natural_effect: { amount: -100, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: 'points', strength_mean: -0.4, strength_mean_frame: 'edge_strength' } } });
+    expect(mediatorReadings(g).has('strain')).toBe(false);
+    const before = JSON.stringify(edge(g, 'strain', 'mrr'));
+    const r = applyLinkEffectEdit(approved({ persistedGraph: g, from: 'price', to: 'strain', effect: { ...E2E }, quote: E2E_QUOTE,
+      expected: { graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, 'price', 'strain')! } }));
+    expect(r.kind).toBe('refused');
+    expect(JSON.stringify(edge(g, 'strain', 'mrr'))).toBe(before);
+  });
+  it.each([
+    ['a definitional child link', (e: Rec) => { e.provenance.definitional = true; }],
+    ["Olumi's sized estimate on the child link", (e: Rec) => { e.provenance.magnitude = 'olumi_estimate'; }],
+    ['a bidirected child link (a shared cause, not a path)', (e: Rec) => { e.edge_type = 'bidirected'; }],
+  ])('(B) CONTRAST: %s is never gauged', (_why, mutate) => {
+    const g = gaugeGraph();
+    mutate(edge(g, 'strain', 'mrr'));
+    expect(mediatorReadings(g).has('strain')).toBe(false);
+  });
+  it("(B) ORIENTATION: another parent's link into M, and its implied sign on MRR, are untouched by the answer", () => {
+    const g = gaugeGraph();
+    g.nodes.push({ id: 'staff', kind: 'factor', label: 'Support staff' });
+    g.edges.push(placeholder('staff', 'strain', -0.2));
+    const r = write(g, 'price', 'strain', { ...E2E }, E2E_QUOTE);
+    if (r.kind !== 'mutated') throw new Error(JSON.stringify(r));
+    expect(edge(r.mutatedGraph, 'staff', 'strain')).toEqual(edge(g, 'staff', 'strain'));
+    // staff → strain (−) × strain → MRR (−, still): more staff still means MORE MRR, as before the answer.
+    expect(Math.sign(edge(r.mutatedGraph, 'staff', 'strain').strength.mean * edge(r.mutatedGraph, 'strain', 'mrr').strength.mean)).toBe(1);
   });
   it('(B) the PATH sign governs: a positive end-to-end statement against a negative path is a sign conflict', () => {
     const r = write(gaugeGraph(), 'price', 'strain', { ...E2E, amount: 1200 }, 'every £1 on the price adds about £1,200 a month of MRR');

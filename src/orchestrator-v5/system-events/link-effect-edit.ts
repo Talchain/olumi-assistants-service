@@ -423,7 +423,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const sourceNode = withAdoptedPercentFrame(nodes.find(n => n.id === from), withMediatorReading(view.get(from)!, readings.get(from), 'source'));
   const targetNode = withAdoptedPercentFrame(nodes.find(n => n.id === to), withMediatorReading(view.get(to)!, readings.get(to), 'target'));
   // ⭐ (B) THE GAUGE (Science #87 6006425419): the user's END-TO-END answer through a level-less M sizes lever→M in M's one
-  // child's units, and M→child = 1 is written in the SAME mutation (never before the answer, never asked separately).
+  // child's units, and M→child = ±1 (its stored sign) is written in the SAME mutation (never before, never asked apart).
   // brief3's fallback (6006685510 (2)): only the lever whose Olumi-sized link the answer replaces may answer.
   const mediated = readings.get(to);
   const gauge = mediated?.via === 'gauge' && mediated.stored !== true ? mediated : undefined;
@@ -455,18 +455,18 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // for an ordinary sizing cannot approve a reversal: both old and proposed direction are bound into its reading.
   // The link's direction is the SIGNED SLOPE (amount ÷ per_source_change; PR Review 5883720887): "lowering price by £1
   // gains 50" (+50 per −1) runs the same way as "raising it by £1 loses 50" (−50 per +1).
-  const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? 'negative' : 'positive';
   const directionOf = (e: Rec): 'positive' | 'negative' | null => {
     const mean = isRec(e.strength) && finite(e.strength.mean) ? e.strength.mean : 0;
     return e.effect_direction === 'positive' || e.effect_direction === 'negative' ? e.effect_direction
       : mean < 0 ? 'negative' : mean > 0 ? 'positive' : null;
   };
-  // Through a gauge the user states the PATH's direction (lever→M × M→child): M is Olumi's own abstraction, so its
-  // orientation is free and the gauge is +1; the path the user can see is never silently reversed.
-  const linkDirection = directionOf(edge);
-  const childDirection = gaugeEdge === undefined ? undefined : directionOf(gaugeEdge);
-  const storedDirection = childDirection === undefined ? linkDirection
-    : linkDirection === null || childDirection === null ? null : linkDirection === childDirection ? 'positive' : 'negative';
+  // ⭐ (B) THE GAUGE KEEPS M'S ORIENTATION (MC 21: "M→child = ±1"): M→child = g, its stored sign, so M is measured in the
+  // child's units AS IT ALREADY MOVES IT, and the user's END-TO-END figure E sizes lever→M = E × g. Every other link into or
+  // out of M keeps its meaning (a +1 gauge would silently flip them), and the ordinary sign check below is the PATH's.
+  const gaugeSign = gaugeEdge === undefined ? 1 : directionOf(gaugeEdge) === 'negative' ? -1 : 1;
+  const stated = gaugeSign === 1 ? effect : { ...effect, amount: effect.amount * gaugeSign };
+  const direction = Math.sign(stated.amount) * Math.sign(stated.per_source_change) < 0 ? 'negative' : 'positive';
+  const storedDirection = directionOf(edge);
   if (params.reversal !== undefined && (!isRec(params.reversal) || Object.keys(params.reversal).length !== 2
     || params.reversal.from !== storedDirection || params.reversal.to !== direction
     || params.reversal.from === params.reversal.to)) return refuse('sign_conflict');
@@ -474,7 +474,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
 
   // ── THE CONSTRUCTION PATH'S OWN SIZING ────────────────────────────────────────────────────────────────────────────
   const sizing = sizeLink(
-    { direction, effect_amount: effect.amount, effect_per_source_change: effect.per_source_change, user_stated: true },
+    { direction, effect_amount: stated.amount, effect_per_source_change: stated.per_source_change, user_stated: true },
     sourceNode,
     targetNode,
   );
@@ -494,12 +494,12 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // The card's figures ARE the stored ones (Codex buddy r1 P2): the sizing rounds to 6 significant figures to cancel float
   // error, so once it reproduces the user's figures their exact numbers are stored; a sizing that does not is no write.
   const sameToSixFigures = (stated: number, sized: number): boolean => Number(stated.toPrecision(6)) === sized;
-  if (!sameToSixFigures(effect.amount, sizing.natural_effect.amount)
-    || !sameToSixFigures(effect.per_source_change, sizing.natural_effect.per_source_change)) return refuse('unconvertible');
+  if (!sameToSixFigures(stated.amount, sizing.natural_effect.amount)
+    || !sameToSixFigures(stated.per_source_change, sizing.natural_effect.per_source_change)) return refuse('unconvertible');
   const naturalEffect = {
     ...sizing.natural_effect,
-    amount: effect.amount,
-    per_source_change: effect.per_source_change,
+    amount: stated.amount,
+    per_source_change: stated.per_source_change,
     ...(endUnits.source.adopted !== undefined || unitReadings.some(r => r.node_id === from)
       ? { per_source_change_unit: effect.per_source_change_unit } : {}),
     ...(endUnits.target.adopted !== undefined || endUnits.target.storeAsStated === true || unitReadings.some(r => r.node_id === to)
@@ -519,8 +519,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     const kept = isRec(gaugeEdge.provenance) ? gaugeEdge.provenance : {};
     const { reasoning: _gaugeWhy, natural_effect: _gaugeSize, clamped_from: _gaugeClamp, definitional: _gaugeDefinition,
       mean_projected: _gaugeProjected, ...keptGauge } = kept;
-    gaugeEdge.strength = { ...(isRec(gaugeEdge.strength) ? gaugeEdge.strength : {}), mean: 1 };
-    gaugeEdge.effect_direction = 'positive';
+    gaugeEdge.strength = { ...(isRec(gaugeEdge.strength) ? gaugeEdge.strength : {}), mean: gaugeSign };
+    gaugeEdge.effect_direction = gaugeSign < 0 ? 'negative' : 'positive';
     gaugeEdge.provenance = { ...keptGauge, magnitude: 'olumi_estimate', sized_by_identity: { op: GAUGE_OP } };
     if (gaugeEdge.defaulted === true) gaugeEdge.exists_defaulted = true;
     delete gaugeEdge.defaulted;

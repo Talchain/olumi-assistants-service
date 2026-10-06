@@ -93,7 +93,8 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
   const out = new Map<string, MediatorReading>();
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return out;
   const nodes = graph.nodes.filter(isRec);
-  const edges = graph.edges.filter(isRec);
+  // Directed links only: a bidirected pair is a shared cause, never a path a gauge can size.
+  const edges = graph.edges.filter(isRec).filter(e => e.edge_type !== 'bidirected');
   const byId = new Map(nodes.map(n => [n.id, n] as const));
   const goal = nodes.find(n => n.kind === 'goal');
   if (goal === undefined || typeof goal.id !== 'string') return out;
@@ -115,8 +116,14 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const cv = view.get(childId);
     const childUnit = cv === undefined ? undefined : unitOf(cv);
     const childFrame = cv === undefined ? undefined : resolveMagnitudeFrame(cv);
+    // ⛔ A gauge only ever sizes a link NOBODY sized (P5's unsized: an Olumi placeholder or a projected mean), never the
+    // user's figure, a definition or Olumi's sized estimate: the writer overwrites M→child with it.
+    const kidProvenance = isRec(kids[0]!.provenance) ? kids[0]!.provenance as Rec : {};
+    const kidUnsized = !isRec(kidProvenance.natural_effect) && kidProvenance.definitional !== true
+      && (kidProvenance.magnitude === 'olumi_placeholder' || kidProvenance.mean_projected === true)
+      && kidProvenance.source !== 'user_specified';
     const gauge = (extra: { stored?: true; replaces?: string }): MediatorReading | null =>
-      childUnit === undefined || childFrame === undefined ? null
+      childUnit === undefined || childFrame === undefined || (extra.stored !== true && !kidUnsized) ? null
         : { via: 'gauge', unit: childUnit, scale_frame: childFrame, child: childId, ...extra };
     // After the user's answer, the stored gauge edge IS the reading (its parent is now the user's).
     if (isGaugeLink(kids[0])) {
