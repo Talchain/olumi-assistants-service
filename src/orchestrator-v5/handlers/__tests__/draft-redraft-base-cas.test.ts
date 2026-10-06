@@ -204,7 +204,7 @@ describe('S1-A draft/redraft base through the real durable commit door', () => {
     expect(h.persisted).toEqual(BASE);
   });
 
-  it('RED: real route sends the existing stale-base 409; cold GET in a fresh app reads the user model', async () => {
+  it('RED: real route sends the existing stale-base 409; cold read in a fresh app reads the user model', async () => {
     const h = harness(BASE, state => { state.persisted = structuredClone(USER_MODEL); });
     const app = Fastify();
     await ceeOrchestratorRouteV2(app);
@@ -226,7 +226,7 @@ describe('S1-A draft/redraft base through the real durable commit door', () => {
     const coldApp = Fastify();
     await scenarioGraphRoute(coldApp);
     try {
-      const cold = await coldApp.inject({ method: 'GET', url: `/assist/v1/scenarios/${SCENARIO}/graph` });
+      const cold = await coldApp.inject({ method: 'POST', url: `/assist/v1/scenarios/${SCENARIO}/graph`, payload: {} });
       expect(cold.statusCode).toBe(200);
       expect(cold.json().graph).toEqual(USER_MODEL);
       expect(JSON.stringify(h.persisted)).toBe(JSON.stringify(USER_MODEL));
