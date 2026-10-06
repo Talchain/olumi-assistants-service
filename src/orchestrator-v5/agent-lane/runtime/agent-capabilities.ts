@@ -38,7 +38,8 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, type LinkEffectLabelReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, linkEffectMediatorReadings, linkEffectGaugeStatement, type LinkEffectLabelReading, type LinkEffectMediatorReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
+import { mediatorReadings } from '../mediator-reading.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
@@ -283,6 +284,8 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
 
 // `newFactorScopeIn` moved to `../figure-scope.ts` (one predicate for the Agent's doors and the chat writers, AIQ 5882852814).
 export { newFactorScopeIn };
+/** Exported for the no-dead-end rows only: the words a refused link-effect card gives the Agent. */
+export { linkEffectRefusalWords, linkEffectConsent };
 
 /**
  * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
@@ -1434,7 +1437,9 @@ function linkEffectConsent(raw: unknown, from: string, to: string, effect: { amo
   const mean = isPlainRecord(edge.strength) ? edge.strength.mean : undefined;
   const stored = edge.effect_direction === 'positive' || edge.effect_direction === 'negative' ? edge.effect_direction
     : typeof mean === 'number' && mean !== 0 ? (mean < 0 ? 'negative' : 'positive') : undefined;
-  const wanted = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? 'negative' as const : 'positive' as const;
+  // No-dead-end (B): through a gauge the stored link is lever→M, sized E × g — the writer's ONE statement rule.
+  const sized = linkEffectGaugeStatement(raw, from, to, effect);
+  const wanted = Math.sign(sized.amount) * Math.sign(sized.per_source_change) < 0 ? 'negative' as const : 'positive' as const;
   return stored !== undefined && stored !== wanted ? { reversal: { from: stored, to: wanted } } : {};
 }
 function linkEffectStatementAsk(miss: string, from: string, to: string, figureAsk?: string): string {
@@ -1474,8 +1479,12 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
   const unitOfNode = (id: string): string => {
     const n = ((view as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as
       { observed_state?: { unit?: unknown }; unit_reading?: { unit?: unknown } } | undefined;
+    // No-dead-end (C)/(B): a level-less mediator is measured in its derived unit, as the writer reads it (a gauge only as
+    // the target of the answer), so the Agent can ask for the figure in it. Every other end reads exactly as before.
+    const mediated = mediatorReadings(view).get(id);
+    const derived = mediated === undefined || (mediated.via === 'gauge' && id !== to.id) ? undefined : mediated.unit;
     return typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit
-      : typeof n?.unit_reading?.unit === 'string' ? n.unit_reading.unit : 'its own unit';
+      : typeof n?.unit_reading?.unit === 'string' ? n.unit_reading.unit : derived ?? 'its own unit';
   };
   switch (reason) {
     case 'unit_mismatch': {
@@ -3389,7 +3398,7 @@ export function createAgentCapabilities(
         if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
         let working: unknown = g.raw;
         const prepared: { from: string; to: string; effect: { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string };
-          quote: string; edge_token: string; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; label_readings?: readonly LinkEffectLabelReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true }[] = [];
+          quote: string; edge_token: string; said: string; from_label: string; to_label: string; unit_readings?: readonly LinkEffectUnitReading[]; label_readings?: readonly LinkEffectLabelReading[]; mediator_readings?: readonly LinkEffectMediatorReading[]; reversal?: { from: 'positive' | 'negative'; to: 'positive' | 'negative' }; link_selected?: true }[] = [];
         const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string }[] = [];
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
@@ -3479,8 +3488,10 @@ export function createAgentCapabilities(
               : linkEffectRefusalWords(dry.reason, working, from, to, effect, unitReading.unit_readings));
             continue;
           }
+          // No-dead-end (B)/(C): a level-less mediator's reading is said on the card, for approval.
+          const mediated = linkEffectMediatorReadings(working, from.id, to.id);
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
-            ...unitReadings, ...labelReadings, ...consent,
+            ...unitReadings, ...labelReadings, ...(mediated.length > 0 ? { mediator_readings: mediated } : {}), ...consent,
             from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
           working = dry.mutatedGraph;
         }
@@ -3494,7 +3505,8 @@ export function createAgentCapabilities(
           value: { from: item.from, to: item.to, effect: item.effect, quote: item.said, edge_token: item.edge_token,
             ...(item.reversal !== undefined ? { reversal: item.reversal } : {}), ...(item.link_selected ? { link_selected: true } : {}),
             ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}),
-            ...(item.label_readings !== undefined ? { label_readings: item.label_readings } : {}) } }));
+            ...(item.label_readings !== undefined ? { label_readings: item.label_readings } : {}),
+            ...(item.mediator_readings !== undefined ? { mediator_readings: item.mediator_readings } : {}) } }));
         const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id, base_graph_identity_hash: g.graph_hash,
           operations, provenance: { authored_by: 'user_stated', basis: prepared.map((item) => item.said).join('\n') },
           validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: `Record your figures for ${prepared.length} links` });
@@ -3595,7 +3607,9 @@ export function createAgentCapabilities(
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_link_effect', path: `${from.id}::${to.id}`,
-          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, ...unitReadings, ...labelReadings, ...consent } }],
+          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, ...unitReadings, ...labelReadings,
+            // No-dead-end (B)/(C): a level-less mediator's reading is said on the card, for approval.
+            ...((m) => m.length > 0 ? { mediator_readings: m } : {})(linkEffectMediatorReadings(g.raw, from.id, to.id)), ...consent } }],
         provenance: { authored_by: 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`,

@@ -1,4 +1,5 @@
 import { readUnsizedPathLeaderCause, unsizedLinkSentence } from './unsized-path-cause.js';
+import { placeholderAskWords } from './goal-certainty.js';
 /**
  * ⛔ AGENT LANE — WHEN THE LEADER IS WITHHELD, NO RANKING SENTENCE REACHES THE USER.
  *
@@ -1090,7 +1091,9 @@ function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold |
       return typeof link?.from === 'string' && typeof link.to === 'string'
         ? [{ from: link.from, to: link.to, from_label: label(link.from), to_label: label(link.to) }] : [];
     }) : legacyLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })));
-  const words = unsizedLinkSentence(links);
+  // No-dead-end (#2623): the reply says the SAME ask as the warning (one source), only for a Run that recorded the cause
+  // (never while a product gate withholds every option: no cause, no invitation).
+  const words = (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
   return words !== '' ? { why: words, say: words } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
 }
 
