@@ -13,6 +13,7 @@ import {
   agentNoLeaderSentence,
   dropRankingSentences,
   enforceAgentLaneLeaderClaimsAtWire,
+  rankingCodesIn,
   rankingLabelContext,
   sentenceRanksOptions,
 } from '../withheld-leader-fail-closed.js';
@@ -1499,24 +1500,26 @@ describe('a sentence naming ONE option as separated ranks the options', () => {
  * so the gap was `lowest` (bound to gave/came out only) and "came top": a minimise leader claim with no share passed.
  */
 describe('ladder paraphrase classes (Desk 6b + DL, #2646)', () => {
+  // Bound by IDENTITY: the agent lane's OWN code fires, not merely the shared vocabulary it also consults.
   it.each([
     // production verbs
-    'Raise to £59 produced the lowest churn.',
-    'Raise to £59 delivered the lowest monthly cancellations.',
-    'The lowest churn was delivered by Raise to £59.',
+    ['Raise to £59 produced the lowest churn.', 'lowest'],
+    ['Raise to £59 delivered the lowest monthly cancellations.', 'lowest'],
+    ['The lowest churn was delivered by Raise to £59.', 'lowest'],
     // has / had
-    'Raise to £59 had the lowest churn.',
-    'Raise to £59 has the lowest churn.',
+    ['Raise to £59 had the lowest churn.', 'lowest'],
+    ['Raise to £59 has the lowest churn.', 'lowest'],
     // fronted and predicative
-    'The lowest churn came from Raise to £59.',
-    'Churn was lowest under Raise to £59.',
-    'Churn is the lowest for Raise to £59.',
+    ['The lowest churn came from Raise to £59.', 'lowest'],
+    ['Churn was lowest under Raise to £59.', 'lowest'],
+    ['Churn is the lowest for Raise to £59.', 'lowest'],
     // top
-    'Raise to £59 came top.',
-    'Raise to £59 was top on churn.',
-    'Top on churn was Raise to £59.',
-  ])('CATCH: %s', (s) => {
+    ['Raise to £59 came top.', 'top'],
+    ['Raise to £59 was top on churn.', 'top'],
+    ['Top on churn was Raise to £59.', 'top'],
+  ])('CATCH: %s (%s)', (s, code) => {
     expect(sentenceRanksOptions(s)).toBe(true);
+    expect(rankingCodesIn(s)).toContain(code);
   });
   it.each([
     'You want the lowest churn you can get.',
