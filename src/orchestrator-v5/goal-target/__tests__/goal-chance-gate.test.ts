@@ -86,6 +86,47 @@ describe('D3 step 1 — the goal-chance seam gate', () => {
     expect(gateWarning(out)?.causes[0]).toEqual({ option_id: 'a', cause: 'ceiling_not_minimised' });
   });
 
+  // ⭐ floor_minimised (Review Desk 6b; DL 0df0e1 pulled forward; rows pre-registered by Science d5, #87 6007413821).
+  describe('the stated comparator and the scored sense must agree, both ways', () => {
+    const goalOf = (label: string, held: string, raw: number) =>
+      ({ nodes: [{ id: 'goal', kind: 'goal', label, goal_direction: held, goal_threshold_raw: raw, goal_threshold_unit: 'tickets' }], edges: [] });
+
+    it('CAUSE (RED on base): ">= 300" on a goal the run MINIMISED (a "reduce" label) scored P(≤300) → withheld, floor_minimised', () => {
+      const g = goalOf('Reduce support tickets', '>=', 300);
+      expect(goalChanceTargetCause(g, 'goal')).toBe('floor_minimised');
+      const out = withholdUnusableGoalChances(envelope(0.15), g, 'goal') as Json;
+      expect(rowOf(out, 'a')).not.toHaveProperty('probability_of_goal');
+      expect(gateWarning(out)?.causes).toEqual([{ option_id: 'a', cause: 'floor_minimised' }, { option_id: 'b', cause: 'floor_minimised' }]);
+      // The same floor on a goal the run did not minimise is a chance of meeting it: nothing withheld.
+      expect(goalChanceTargetCause(goalOf('Support tickets handled', '>=', 300), 'goal')).toBeNull();
+    });
+
+    it('CONTROL: "<= 400" on the same minimised goal is a chance of staying at or below it — unchanged', () => {
+      const g = goalOf('Reduce support tickets', '<=', 400);
+      expect(goalChanceTargetCause(g, 'goal')).toBeNull();
+      expect(withholdUnusableGoalChances(envelope(0.15), g, 'goal')).toEqual(envelope(0.15));
+    });
+
+    it('CONTROL (Codex r1): "at least a 20% cut" — held ">=" on a NEGATIVE typed change — points DOWN; minimising is its sense', () => {
+      for (const frame of ['change_rel', 'change_abs'] as const) {
+        const raw = frame === 'change_rel' ? -0.2 : -500;
+        const g = { nodes: [{ id: 'goal', kind: 'goal', label: 'Reduce cloud costs', goal_direction: '>=', goal_threshold_frame: frame,
+          goal_threshold_raw: raw, goal_threshold: raw, goal_threshold_unit: '£/month' }], edges: [] };
+        expect(goalChanceTargetCause(g, 'goal'), frame).toBeNull();
+        // …while a POSITIVE change held as a floor ("grow by at least 20%") on the same minimised goal still conflicts.
+        const up = { nodes: [{ ...g.nodes[0], goal_threshold_raw: -raw, goal_threshold: -raw }], edges: [] };
+        expect(goalChanceTargetCause(up, 'goal'), `${frame} positive`).toBe('floor_minimised');
+      }
+    });
+
+    it('MIRROR: "<= 400" on a goal the run MAXIMISED (an "increase" label) scored P(≥400) → withheld, ceiling_not_minimised', () => {
+      const g = goalOf('Increase support tickets handled', '<=', 400);
+      expect(goalChanceTargetCause(g, 'goal')).toBe('ceiling_not_minimised');
+      const out = withholdUnusableGoalChances(envelope(0.15), g, 'goal') as Json;
+      expect(rowOf(out, 'a')).not.toHaveProperty('probability_of_goal');
+    });
+  });
+
   it('the threshold CEE holds on the goal (raw figure absent on an older graph) is the target the Run scored; NONE is not', () => {
     const held = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR', goal_threshold: 0.8, goal_threshold_unit: '£/month' }], edges: [] };
     expect(goalChanceTargetCause(held, 'goal')).toBeNull();
