@@ -3223,7 +3223,8 @@ export function createAgentCapabilities(
       const pairRead = delta !== undefined && !modelCaseCheckedDown ? undefined
         : await rerunPairReadForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta);
       const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
-        [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks);
+        [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks,
+        pairRead?.frameRefitLinks);
       return {
         ok: true,
         mutated: false,

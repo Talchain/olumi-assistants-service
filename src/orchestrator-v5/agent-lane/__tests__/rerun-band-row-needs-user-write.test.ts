@@ -62,7 +62,8 @@ describe('(1) the truth floor: no receipt in the pair → never "You changed" fo
 
   it('⭐ CONTRAST (j3rw): the user\'s OWN band edit, with its receipt, still says "You changed"', () => {
     const line = planLine(J3RW, new Set([J3RW.edited]));
-    expect(line).toContain('You changed how much Price rise changes Customers lost to price rise: very_strong → strong.');
+    // S5t-W (e7 #87 6011176086): the band is said in the canvas's words, never the contract literal ("very_strong").
+    expect(line).toContain('You changed how much Price rise changes Customers lost to price rise: very strong → strong.');
   });
 
   it('the same edit WITHOUT its receipt in the pair goes unsaid too (the receipt is what licenses "You")', () => {
@@ -70,7 +71,7 @@ describe('(1) the truth floor: no receipt in the pair → never "You changed" fo
   });
 
   it('investor: the edited link\'s sizing row still says the user\'s own estimate (a sizing move is its own evidence)', () => {
-    expect(planLine(INVESTOR, new Set())).toContain('You gave your own estimate for how much Enterprise win rate changes quarterly revenue: strong → very_strong.');
+    expect(planLine(INVESTOR, new Set())).toContain('You gave your own estimate for how much Enterprise win rate changes quarterly revenue: strong → very strong.');
   });
 });
 
