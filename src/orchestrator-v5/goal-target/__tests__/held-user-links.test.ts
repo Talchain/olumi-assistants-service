@@ -162,3 +162,23 @@ describe('the Run sends PLoT the held copy (wire only); the persisted graph keep
     expect(wire.strength.std).toBeCloseTo(Math.abs((69 - 49) * full / 49) / 3.29, 12);
   });
 });
+
+describe('the model reasons with the existence the Run USES (d5: every reader that shows existence)', () => {
+  const g = (): Rec => ({ version: '3', default_seed: 1, nodes: [
+    { id: 'price', kind: 'factor', label: 'Price' }, { id: 'subs', kind: 'factor', label: 'Subscribers' }, { id: 'office', kind: 'factor', label: 'Office' },
+    { id: 'mrr', kind: 'goal', label: 'MRR' }],
+  edges: [userLink('price', 'subs', ranged(20, 40)), userLink('office', 'mrr', undefined)] });
+  it('graph-compact (decision-continuity reads it): the held link exists at 1, the unheld user link keeps 0.8', async () => {
+    const { compactGraph } = await import('../../../orchestrator/context/graph-compact.js');
+    const edges = (compactGraph(g() as never).edges as Rec[]);
+    expect(edges.find((e) => e.from === 'price')?.exists).toBe(1);
+    expect(edges.find((e) => e.from === 'office')?.exists).toBe(0.8);
+  });
+  it('serialise compactGraph: the same; the EDIT view keeps the stored 0.8 (a patch must never persist the hold)', async () => {
+    const { compactGraph, editCompactGraph } = await import('../../../orchestrator/context/serialise.js');
+    const edges = (compactGraph(g() as never).edges as Rec[]);
+    expect(edges.find((e) => e.from === 'price')?.exists_probability).toBe(1);
+    expect(edges.find((e) => e.from === 'office')?.exists_probability).toBe(0.8);
+    expect((editCompactGraph(g() as never).edges as Rec[]).find((e) => e.from === 'price')?.exists_probability).toBe(0.8);
+  });
+});
