@@ -29,6 +29,12 @@ describe('LEAVE: a negated option subject opens the clause, so no option is name
     ['neither', 'Neither option is the most supported.'],
     ['there is no', 'There is no most-supported option in this model.'],
     ['no option … yet', 'No option is the most-supported option yet.'],
+    // Review Desk round 3 (#2639 @1c3c70b6): the negator binds only a copula/adverb span, and these keep passing.
+    ['there is no single', 'There is no single most-supported option.'],
+    ["there's no clear", "There's no clear most supported option yet."],
+    ['bulleted no option', '- No option is the most supported.'],
+    ['none of the options', 'None of the options is the most supported.'],
+    ['not a single … clearly', 'Not a single option is clearly the most supported.'],
   ])('%s', (_name, text) => {
     expect(textNamesLeadingOption(text), text).toBe(false);
     expect(textAssertsLeadingOption(text), text).toBe(false);
@@ -86,6 +92,16 @@ describe('CATCH: the adjective names a leader on a withheld turn, whatever the v
     "Hire Marketing Manager's the most supported.",
     // The negator binds an OPTION subject, not a label that happens to open with "No".
     'No New Hire is the most supported in this model.',
+    'No single factor would change the most-supported option.',
+    // Review Desk round 3 (#2639 @1c3c70b6): a negated subject that opens the clause but is not the trigger's subject.
+    'No option beats Hire Marketing Manager as the most supported option.',
+    'Neither option changes much and Hire Marketing Manager is the most supported.',
+    'None of them come close so Hire Marketing Manager is the most supported.',
+    // …and the adverb and comparative slots.
+    'Hire Marketing Manager is the most well supported option.',
+    'Hire Marketing Manager is the most well-supported option.',
+    'Hire Marketing Manager is better supported than Outsource.',
+    'Hire Marketing Manager is the option with the most support.',
     // Accepted over-block (DL): no CEE emitter or prompt puts the adjective on a non-option noun (grep, #2639 body).
     'The most-supported assumption in your model is the delivery estimate.',
   ])('%s', (text) => {
