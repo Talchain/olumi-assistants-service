@@ -187,12 +187,17 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
       .map((w) => (typeof w.message === 'string' ? w.message.trim() : '')).find((m) => m !== '');
     return words === undefined ? '' : words.replace(UI_OPENING, '').trim();
   };
-  // ⭐ MC D1 (f) (DL 6 Oct; Acceptance g1-b501 drafts 1 and 6, full wire on CEE 231affb): a placeholder path beside an
-  // untestable target that KEPT the shares fell through to the bare opening, so the chat asked nothing answerable while
-  // the panel named a link. The placeholder's own words ARE its one ask ("… whose strengths nobody has set yet. Set them
-  // to see how much they matter."), so they are said here, after any PLoT reason; the target's own question is not added.
+  // W5 round 2 (DL ruling; witnessed item 3, scenario 549f6ab8): the placeholder ask named only 2 of the 5 links
+  // the target needed. When both causes hold, say the target's complete requirement (named links + remaining count),
+  // never only the placeholder subset. Keep independent identity/cut reasons and the mixed run's existing licence.
+  const mixedTarget = warnings.some((w) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH)
+    && warnings.some((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
+  const targetSay = warnings.filter((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)
+    .map((w) => (typeof w.say === 'string' ? w.say.trim() : '')).find((s) => s !== '');
+  const sizingReason = mixedTarget ? (targetSay ?? reasonFor(GOAL_FIGURES_TARGET_NOT_TESTABLE))
+    : reasonFor(GOAL_FIGURES_PLACEHOLDER_PATH);
   const reason = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED),
-    reasonFor(GOAL_FIGURES_PLACEHOLDER_PATH)].filter((r) => r !== '').join(' ');
+    sizingReason].filter((r) => r !== '').join(' ');
   const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
   return { withheld: true, say: reason === '' ? OPENING : `${OPENING} ${reason}`, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
 }

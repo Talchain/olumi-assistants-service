@@ -1,0 +1,66 @@
+{
+  "_provenance": {
+    "source": "/Users/paulslee/olumi-work/acceptance-pd/output/acceptance-20261006/item3-journey/wire/turn-002-run2-1791316905935.json",
+    "sha256": "9a1c2dc39b52ed13db6b403ca8ffda06ee32baa76a0bf0be4d5e106df58bb8e2",
+    "scenario_id": "549f6ab8-faf4-439f-bba8-8caa718c9e36",
+    "cee_build": "97106cd",
+    "extraction": "analysis_result type and enrichment.inference_warnings only; warning objects copied without changes"
+  },
+  "analysis_result": {
+    "type": "analysis_result",
+    "enrichment": {
+      "inference_warnings": [
+        {
+          "code": "FACTOR_EVPPI_NOT_COMPUTED",
+          "field": "factor_evppi",
+          "message": "Value-of-information ran but produced no rows. The reason is not known at this layer and has deliberately not been inferred.",
+          "severity": "info"
+        },
+        {
+          "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+          "links": [
+            {
+              "to": "monthly_booked_appointments",
+              "from": "online_booking_rollout_disruption"
+            }
+          ],
+          "message": "This comparison turns on the link from ‘Online booking rollout disruption’ to ‘Monthly booked appointments’, whose strength nobody has set yet. Set it to see how much it matters.",
+          "node_ids": [
+            "online_booking_rollout_disruption",
+            "monthly_booked_appointments"
+          ],
+          "severity": "warning",
+          "option_ids": [
+            "online_booking_system"
+          ],
+          "win_shares_withheld": true
+        },
+        {
+          "say": "I can't yet say how likely any option is to keep Monthly booked appointments at or above 1,600 appointments / month: I need a size for the links from Receptionist headcount to Monthly booked appointments, from Online booking availability to Monthly booked appointments and from Additional evening opening hours to Monthly booked appointments and 1 more. Roughly how much Monthly booked appointments in appointments/month does a change in Receptionist headcount bring?",
+          "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
+          "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least 1,600 appointments / month), because it needs a size for the links from Receptionist headcount to Monthly booked appointments and 3 more. Roughly how much Monthly booked appointments in appointments/month does a change in Receptionist headcount bring?",
+          "node_ids": [
+            "monthly_booked_appointments"
+          ],
+          "severity": "warning",
+          "first_ask": {
+            "to": "monthly_booked_appointments",
+            "from": "receptionist_headcount",
+            "kind": "link"
+          },
+          "option_ids": [
+            "second_receptionist",
+            "extended_evening_hours",
+            "continue_current_operations"
+          ],
+          "withheld_claims": [
+            "goal_probability",
+            "joint_probability",
+            "outcome",
+            "downside"
+          ]
+        }
+      ]
+    }
+  }
+}
