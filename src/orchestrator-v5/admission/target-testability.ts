@@ -331,6 +331,13 @@ export interface UntestableTargetParts {
    */
   readonly untestableComparator: string | null;
   readonly question: string | null;
+  /**
+   * ⭐ Near tie (red team 19; DL #87, 6 Oct): the link `question` asks, when it IS the (c) link question (the failing case's
+   * own link, the one the band clause reads); null when the question asks anything else (today's level first) or nothing.
+   */
+  readonly asked: { readonly from: string; readonly to: string } | null;
+  /** The unit the (c) question asks the amount in (the goal's for a link into it, the link's target's upstream); null when unitless. */
+  readonly askedIn: string | null;
 }
 
 export function untestableTargetParts(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): UntestableTargetParts | null {
@@ -400,6 +407,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     : [`your target is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
       `${name} measured in ${unit || 'its own units'}`, `What's today's level of ${name}${unit !== '' ? `, in ${unit}` : ''}?`];
   const cases = [...new Set(verdict.failures.map((f) => f.case))];
+  const askingCase = cases.find((c) => said(c)[2] !== null);
   return {
     name,
     target,
@@ -408,6 +416,10 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     needs: cases.map((c) => said(c)[1]).filter((n): n is string => n !== null),
     untestableComparator: cases.includes('b') ? `'${typeof comparator === 'string' ? comparator : ''} ${figure}'` : null,
     question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
+    asked: askingCase === 'c' && failingLink?.link !== undefined ? { from: failingLink.link.from, to: failingLink.link.to } : null,
+    askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
+      // ⛔ Codex r2 #2659 P1: the writer also takes an end's ADOPTED unit (the link's own stored size), so read it here too.
+      : ((ends) => ends?.target.own[0] ?? ends?.target.adopted ?? null)(linkEffectEndUnits(graph, upstream.from, upstream.to)),
   };
 }
 
@@ -470,11 +482,21 @@ export function untestableTargetTail(graph: unknown, verdict: TargetTestability)
  */
 export function targetNotTestableWarning(
   graph: unknown, verdict: TargetTestability, optionIds: readonly string[], code: string,
-): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string } | null {
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string; first_ask?: { kind: 'link'; from: string; to: string } } | null {
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable') return null;
   const said = targetWarningSentence(graph, verdict);
   const message = said !== null && said.length <= TARGET_TESTABLE_SENTENCE_CAP ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
   // RT-10 B′ R2: what the reply says about the target, from the same parts (`untestableTargetTail`).
   const tail = untestableTargetTail(graph, verdict);
-  return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds], ...(tail !== null ? { say: tail } : {}) };
+  // ⭐ Near tie (DL #87, 6 Oct): the link the `say` asks for, typed by id, so the panel names the SAME next step as the chat
+  // (as `GOAL_FIGURES_PLACEHOLDER_PATH`'s `first_ask`). Only when the words ask exactly that link; never otherwise.
+  const parts = tail === null ? null : untestableTargetParts(graph, verdict);
+  // ⛔ Codex r1 #2659 P1: never a typed invitation the door refuses. A % LEVEL goal's question says "in %", but the writer
+  // takes a level's change in points only (Science 5993238492), so its answer is `unit_mismatch`: no `first_ask` then.
+  // Read through the writer's own end units and comparator, never a second rule.
+  const sayAsks = parts?.asked !== undefined && parts.asked !== null && parts.question !== null && tail!.includes(parts.question) ? parts.asked : null;
+  const ends = sayAsks === null || parts?.askedIn == null ? null : linkEffectEndUnits(graph, sayAsks.from, sayAsks.to);
+  const asked = sayAsks !== null && ends !== null && statedInOneOf(parts!.askedIn, [...ends.target.own, ends.target.adopted]) ? sayAsks : null;
+  return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds], ...(tail !== null ? { say: tail } : {}),
+    ...(asked !== null ? { first_ask: { kind: 'link' as const, from: asked.from, to: asked.to } } : {}) };
 }
