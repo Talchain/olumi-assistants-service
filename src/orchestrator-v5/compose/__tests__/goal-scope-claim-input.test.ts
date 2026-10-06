@@ -13,7 +13,7 @@ const hash = (PRIOR as unknown as { result: { graph_hash_at_run: string } }).res
 const pending = () => reconciliationPending(FROM.scenario_id, {
   kind: 'reconcile_goal_scope', goal_id: 'n_revenue', goal_label: 'Revenue',
   declared_scope: { modelled: 'all revenue', alternative: 'one stream', stated_in_brief: true },
-  question: 'Which revenue scope should this model represent?', expected: 'scope', operands: [], derivations: [],
+  question: 'Which revenue scope should this model represent?', /* #2613-successor (Science d5 6006584860): an UNTYPED question no longer blocks; this fixture's open issue is a typed one. */ scope: { modelled: 'all revenue', alternative: 'one stream', extent: 'total', stated_in_brief: true, source: { quote: 'all revenue' } }, expected: 'billing_basis', operands: [], derivations: [],
 }, 0);
 const state = (input: Awaited<ReturnType<typeof readGoalScopeClaimInput>>) => {
   const readiness = buildCanonicalAnalysisReadyFromGraph(FROM.graph);

@@ -204,6 +204,7 @@ import {
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
+import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 
@@ -2707,6 +2708,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis — goal certainty not recorded on the Run (absent = not recorded; the Run itself stands)',
       );
     }
+    // ⭐ D3 step 2 (DL 0df0e1 #87 6006078553; d5; c6): the goal chance's OWN licence, decided here and stored with the Run
+    // (`goal-chance-licence.ts`): one `info` record the UI renders by identity. After the certainty decision, so an exact
+    // 0 or 1 counts only where this Run earned it.
+    response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, (optionId, p) =>
+      goalCertainty.recorded && goalCertainty.decisions.some((d) => d.option_id === optionId && d.probability_of_goal === p && d.earned));
 
     const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
       snapshot.rawPersistedGraph,

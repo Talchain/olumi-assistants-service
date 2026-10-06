@@ -3,7 +3,7 @@
  *
  * ISL #198 (served on ISL `e24c88c`) echoes each `factor_evppi` row's `spread_source`: `template` when the factor's
  * uncertainty range is Olumi's own assumption, `user` when it is the user's. AIQ's ruling: a template spread is not
- * silenced, it is attributed: "Within the range Olumi assumed for X, X could change which option leads. Do you know X
+ * silenced, it is attributed: "Within the range Olumi assumed for X, X could change how the options compare. Do you know X
  * more precisely?" (words ACK 5870069785). A user's spread is said plainly.
  *
  * The Agent's `decision_sensitivity: measured` named the factor with no provenance for its range, so an assumption of
@@ -46,7 +46,7 @@ describe('⛔ the Agent says whose range makes a factor decision-sensitive (AIQ 
     expect(ds.status).toBe('measured');
     expect(ds.most_sensitive!.factor_id).toBe(String(ROWS[0]!.factor_id));
     expect(ds.most_sensitive!.range).toBe('olumi_assumed');
-    expect(ds.say).toBe(`Within the range Olumi assumed for ${label}, ${label} could change which option leads. Do you know ${label} more precisely?`);
+    expect(ds.say).toBe(`Within the range Olumi assumed for ${label}, ${label} could change how the options compare. Do you know ${label} more precisely?`);
   });
 
   it('a user spread → range "yours", said plainly (no attribution sentence)', () => {
@@ -75,7 +75,7 @@ describe('⛔ the Agent says whose range makes a factor decision-sensitive (AIQ 
     }
   });
 
-  it('CONTROL (AIQ precondition 5870069785): "could change which option leads" is a DECISION claim, so a template row below resolution ("decision_gain_not_significant") says nothing of the kind', () => {
+  it('CONTROL (AIQ precondition 5870069785): "could change how the options compare" is a DECISION claim, so a template row below resolution ("decision_gain_not_significant") says nothing of the kind', () => {
     const rows = ROWS.map((r, k) => ({ ...r, status: 'below_resolution', ...(k === 0 ? { status_reason: 'decision_gain_not_significant', spread_source: 'template' } : {}) }));
     expect(decisionSensitivityOf({ ...ENR, factor_evppi: rows })).toEqual({ status: 'none_measurable' });
   });

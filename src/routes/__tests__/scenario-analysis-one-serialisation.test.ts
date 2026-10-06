@@ -265,7 +265,7 @@ describe('Semantic spine: unresolved scope uses the existing claim licence', () 
     expect(ordinary.analysis_state.leader_claim.permitted).toBe(true);
     readMostRecentPendingActions.mockResolvedValue([reconciliationPending(SCENARIO, {
       kind: 'reconcile_goal_scope', goal_id: 'goal', goal_label: 'Synthetic goal',
-      expected: 'scope', question: 'Confirm this goal scope', operands: [], derivations: [],
+      /* #2613-successor (Science d5 6006584860): an UNTYPED question no longer blocks; this fixture's open issue is a typed one. */ scope: { modelled: 'all revenue', alternative: 'one stream', extent: 'total', stated_in_brief: true, source: { quote: 'all revenue' } }, expected: 'billing_basis', question: 'Confirm this goal scope', operands: [], derivations: [],
     })]);
     const gated = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'scope-open' });
     expect(gated.analysis_state?.run_state).toEqual(ordinary.analysis_state.run_state);

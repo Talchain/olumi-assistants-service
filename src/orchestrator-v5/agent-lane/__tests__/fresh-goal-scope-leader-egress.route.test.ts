@@ -95,7 +95,7 @@ const MEASURED_MESSAGE = 'What would change the result?';
 const pending = (scenarioId = SID): PendingAction => ({ ...reconciliationPending(scenarioId, {
   kind: 'reconcile_goal_scope', goal_id: 'n_revenue', goal_label: 'Revenue',
   declared_scope: { modelled: 'all revenue', alternative: 'one stream', stated_in_brief: true },
-  question: 'Which revenue scope should this model represent?', expected: 'scope', operands: [], derivations: [],
+  question: 'Which revenue scope should this model represent?', /* #2613-successor (Science d5 6006584860): an UNTYPED question no longer blocks; this fixture's open issue is a typed one. */ scope: { modelled: 'all revenue', alternative: 'one stream', extent: 'total', stated_in_brief: true, source: { quote: 'all revenue' } }, expected: 'billing_basis', operands: [], derivations: [],
 }, Date.parse(AT)), id: PENDING_ID });
 
 describe('fresh goal scope reaches the canonical leader claim at every route egress', () => {

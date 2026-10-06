@@ -134,7 +134,7 @@ export const POLICY = {
         "W2": "Is it really just {option_label} or carry on as now? What other routes are there?",
         "W3": "These options all pull the same lever. Is there a different way to reach the goal?",
         "W4": "Would carrying on as now be a real option worth comparing against?",
-        "W5": "These options come out about the same. Is there a hybrid that takes the best of each?",
+        "W5": "These options come out about the same. Is there a hybrid that combines the strengths of each?",
         "W6": "What else could stop this working?",
         "W7": "What else really drives {goal_label}?",
         "W2Z": "What could you actually do about {goal_label}? Name the routes you are weighing."
@@ -144,7 +144,7 @@ export const POLICY = {
         "W2": "Only one real option on the table. Decisions go better with alternatives.",
         "W3": "These options all work through the same lever. A different mechanism?",
         "W4": "Comparing against 'carry on as now' shows what each change really adds.",
-        "W5": "The options come out close. A hybrid might beat both.",
+        "W5": "The options come out close. A hybrid might combine the strengths of both.",
         "W6": "Only one risk is on the map. What else could go wrong?",
         "W7": "Few drivers are mapped for {goal_label}. What else moves it?",
         "W2Z": "No options on the table yet. What could you do?"
@@ -266,10 +266,10 @@ export const POLICY = {
       ],
       "priority": "P2",
       "reasoning_question": {
-        "range_olumi_assumed": "Do you know {factor_label} more precisely? Within Olumi's assumed range it could change which option leads.",
+        "range_olumi_assumed": "Do you know {factor_label} more precisely? Within Olumi's assumed range it could change how the options compare.",
         "range_yours_or_unknown": "Would {leader_label} still score highest in this model if {factor_label} changed?"
       },
-      "short_copy": "{factor_label} could change which option leads.",
+      "short_copy": "{factor_label} could change how the options compare.",
       "why_now": "In this model, which option scores highest is sensitive to {factor_label}.",
       "primary_action": {
         "when_range_olumi_assumed": {

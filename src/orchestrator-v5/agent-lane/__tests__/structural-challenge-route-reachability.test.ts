@@ -87,11 +87,12 @@ describe('agent route: real structural challenge press reachability', () => {
       if (graphReadFailed) throw new Error('offline graph read failure');
       /** Only the post-candidate graph read introduces this issue; dispatch has already read its receipt. */
       if (lateScope && plotCalls.length > 0) {
-        const pending = reconciliationPending(SCENARIO, {
+        // A typed issue gains its operands on the first refresh; its refreshed form is the stable open issue.
+        const pending = refreshScopePending(reconciliationPending(SCENARIO, {
           kind: 'reconcile_goal_scope', goal_id: 'mrr', goal_label: 'MRR',
           declared_scope: { modelled: 'all revenue', alternative: 'one stream', stated_in_brief: true },
-          question: 'Which revenue scope should this model represent?', expected: 'scope', operands: [], derivations: [],
-        });
+          question: 'Which revenue scope should this model represent?', /* #2613-successor (Science d5 6006584860): an UNTYPED question no longer blocks; this fixture's open issue is a typed one. */ scope: { modelled: 'all revenue', alternative: 'one stream', extent: 'total', stated_in_brief: true, source: { quote: 'all revenue' } }, expected: 'billing_basis', operands: [], derivations: [],
+        }), graph)!;
         expect(refreshScopePending(pending, graph)).toEqual(pending);
         transport.store!.readMostRecentPendingActions = vi.fn(async () => [pending]);
       }

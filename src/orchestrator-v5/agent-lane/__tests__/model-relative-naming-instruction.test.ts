@@ -45,7 +45,8 @@ describe('the model-relative naming rule', () => {
 
   it('is APPENDED after the reply-length sentence in the route source: no swap, the template and every host rule unchanged', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(src).toContain("'{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION].join(' ')");
+    // Re-pinned for D3 step 2 (DL 0df0e1 ruling C, 6 Oct): the goal-chance ranking rule is appended AFTER this one.
+    expect(src).toContain("[MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')");
     expect(SELECTED_COACH_V02_TEMPLATE.split('{{MODE_AND_AUTHORITY}}')).toHaveLength(2);
     expect(SELECTED_COACH_V02_TEMPLATE).not.toContain(MODEL_RELATIVE_NAMING_INSTRUCTION);
     expect(HOST_TOOL_CONTRACT).not.toContain(MODEL_RELATIVE_NAMING_INSTRUCTION);

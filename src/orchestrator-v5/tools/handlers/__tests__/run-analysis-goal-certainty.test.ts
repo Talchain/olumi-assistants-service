@@ -56,6 +56,10 @@ function withoutTarget<G>(graph: G): G {
   const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
   const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
   for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  // ⭐ D3 step 2 (DL 0df0e1; c6): 17d1's goal holds no comparator (the 22% class), and a goal chance with no stated direction
+  // is withheld with its "at least / at most" invitation (goal-chance-gate.ts, pinned there). The user's answer — "at
+  // least", as the brief put it — is held here, so this file keeps testing the Run's certainty, not that gate.
+  for (const n of c.nodes) if (n.kind === 'goal') n.goal_direction = '>=';
   if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
   return c as unknown as G;
 }
