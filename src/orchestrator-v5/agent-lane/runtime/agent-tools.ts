@@ -13,6 +13,7 @@
  */
 import type { ReconcileGoalScopeArgs } from '../reconcile-goal-scope.js';
 import { sendableQuery } from './public-research.js';
+import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
 
 /**
  * ⭐ THE CANVAS'S WORD FOR THE LOWEST BAND IS "Slight" (Canvas #70 5847910497). The `strength` enum keeps the wire value
@@ -745,21 +746,22 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'give_provisional_view',
     description:
-      'Give YOUR OWN provisional view when the analysis cannot put an option forward yet (a leader may not be named). ' +
+      'Give a provisional view of what this model needs testing when the analysis cannot put an option forward yet (a leader may not be named). ' +
+      PROVISIONAL_VIEW_RULE + ' ' +
       'This changes nothing. Olumi shows it beneath your reply as ONE paragraph labelled as your provisional view \u2014 ' +
       'never as the analysis result \u2014 with why the analysis cannot confirm it yet. Call it at most once per reply, and ' +
       'never write the view in your reply text: a reply sentence that ranks or favours an option is removed. It is refused ' +
       'when the analysis may name a leading option (then report what the analysis says) or when no analysis has completed.',
     parameters: obj({
-      view: { type: 'string', description: 'At most 2 sentences: what you would do, in plain words.' },
+      view: { type: 'string', description: 'At most 2 sentences: what to test or find out about a factor, assumption or figure. ' + PROVISIONAL_VIEW_RULE },
       reasoning: {
         type: 'string',
-        description: 'At most 3 sentences: why, from the model\u2019s own facts and the user\u2019s own words. Never quote win percentages as a ranking.',
+        description: 'At most 3 sentences: why, from the model\u2019s own facts and the user\u2019s own words. Never quote win percentages as a ranking or favour an option.',
       },
       confirm_step: {
         type: 'string',
         description: 'ONE sentence: the one thing that would let the analysis confirm or overturn this view \u2014 something the user can do, ' +
-          'or a change one of your tools can propose. Never a step that cannot help.',
+          'or a change one of your tools can propose. Never a step that cannot help, or an option to do or explore first.',
       },
     }, ['view', 'reasoning', 'confirm_step']),
   },

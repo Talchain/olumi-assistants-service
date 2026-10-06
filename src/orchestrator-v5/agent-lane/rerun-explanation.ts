@@ -178,6 +178,27 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
     const label = text(row.label_after) ?? text(row.label_before);
     const before = value(row.before); const after = value(row.after);
     if (label === undefined) { skipped += 1; continue; }
+    if (row.entity_kind === 'goal') {
+      if (row.field === 'value') {
+        out.push(after !== undefined
+          ? `Today's level of ‘${label}’ was recorded: ${after}.`
+          : `Today's recorded level of ‘${label}’ was removed.`);
+        continue;
+      }
+      if (row.field === 'unit') {
+        // The level sentence already carries the adopted unit. Never print a second generic goal-change sentence.
+        if (!rows.some((r) => r.entity_kind === 'goal' && r.entity_id === row.entity_id && r.field === 'value' && r.after != null)) {
+          out.push(after !== undefined ? `‘${label}’ is now measured in ${after}.` : `The recorded unit for ‘${label}’ was removed.`);
+        }
+        continue;
+      }
+      if (row.field === 'target') {
+        out.push(before !== undefined && after !== undefined
+          ? `You changed the target for ‘${label}’: ${before} → ${after}.`
+          : after !== undefined ? `The target for ‘${label}’ was recorded: ${after}.` : `The recorded target for ‘${label}’ was removed.`);
+        continue;
+      }
+    }
     out.push(before !== undefined && after !== undefined ? `You changed ${label}: ${before} → ${after}.` : `You changed ${label}.`);
   }
   const sentences = out.map((s) => {

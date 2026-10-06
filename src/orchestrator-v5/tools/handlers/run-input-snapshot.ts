@@ -195,7 +195,9 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
   const factors = nodes.flatMap((n) => {
     const id = text(n.id);
     const os = isRec(n.observed_state) ? n.observed_state : null;
-    if (id === undefined || os === null || id === goalId) return [];
+    // A goal is also a measured quantity. Retain its authored current level in the existing value carrier;
+    // `goal.target_raw` remains the target, never this level. Older snapshots simply have no such value.
+    if (id === undefined || os === null) return [];
     const encoded = finite(os.value);
     // The AUTHORED figure only: a normalised `value` is never recorded as the user's raw (contract header).
     const raw = finite(os.raw_value) ?? text(os.display_value);

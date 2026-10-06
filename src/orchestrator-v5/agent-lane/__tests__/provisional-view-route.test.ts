@@ -31,8 +31,8 @@ const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { kind: 'complet
 const PERMITTED_STATE = { ...WITHHELD_STATE, leader_claim: { permitted: true, separation: 'separated' } };
 
 const VIEW = {
-  view: 'I would raise Pro to £59 at release: on this model it is the strongest path to your MRR goal.',
-  reasoning: 'You said most Pro subscribers asked for the release, and the model holds churn at 4% either way. The price rise carries MRR further than holding at £49 does.',
+  view: 'Before comparing, it is worth testing how much churn moves the MRR goal.',
+  reasoning: 'You said most Pro subscribers asked for the release, and the model holds churn at 4% either way. The comparison needs the churn assumption checked.',
   confirm_step: 'Tell me the churn you actually expect at £59, and I can propose it so the analysis can check the limit.',
 };
 
@@ -234,6 +234,26 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
    * JSON `{answer, provisional_view}`, and the view goes to the SAME sidecar as the Agent's tool call, after the gate.
    */
   const pressRunAnswering = (answer: string, view: typeof VIEW | null) => pressRun(JSON.stringify({ answer, provisional_view: view }));
+
+  it.each([
+    'I would explore a Tech lead first, without committing to a hire yet.',
+    "I'd start with Tech lead.",
+    'Tech lead is worth trying first.',
+  ])('HARNESS 3 RED at base: Run-button egress withholds the option preference %s', async (view) => {
+    const r = await pressRunAnswering(REPLY.text, { ...VIEW, view });
+    expect(r.statusCode).toBe(200);
+    const b = r.json() as Body;
+    expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
+    expect(b.assistant_text).not.toContain(view);
+  });
+
+  it('HARNESS 3 must pass: Run-button egress retains a model-relative test', async () => {
+    const view = { ...VIEW, view: "Before comparing, it's worth testing how much ‘churn’ moves the goal." };
+    const r = await pressRunAnswering(REPLY.text, view);
+    expect(r.statusCode).toBe(200);
+    const b = r.json() as Body;
+    expect(b._agent.provisional_view).toMatchObject(view);
+  });
 
   it('C5b RED: the Run BUTTON on a withheld result → ONE interpreting call, no tools, a strict schema; the labelled view is typed on `_agent`, never in the prose', async () => {
     const r = await pressRunAnswering(REPLY.text, VIEW);

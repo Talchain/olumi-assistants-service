@@ -21,6 +21,7 @@ import {
   provisionalViewOfTurn,
   type LeaderStanding,
   readRunInterpretation,
+  sanitiseProvisionalView,
 } from '../provisional-view.js';
 import { AGENT_TOOLS, MUTATION_TOOLS, dispatchTool, toolsFor, type AgentToolContext } from '../runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -41,12 +42,54 @@ const PERMITTED_STATE = { ...WITHHELD_STATE, leader_claim: { permitted: true, se
 const NEVER_RUN_STATE = { ...WITHHELD_STATE, run_state: { kind: 'never_run' } };
 const READY = FX.state.analysis_ready;
 
-/** A view that ranks — exactly what the gate must strip from prose, and what the typed block must carry. */
+/** A model-relative view; option preferences are refused in both prose and the typed block. */
 const VIEW = {
-  view: 'I would raise Pro to £59 at release: on this model it is the strongest path to your MRR goal.',
-  reasoning: 'You said most Pro subscribers asked for the release, and the model holds churn at 4% either way. The price rise carries MRR further than holding at £49 does.',
+  view: 'Before comparing, it is worth testing how much churn moves the MRR goal.',
+  reasoning: 'You said most Pro subscribers asked for the release, and the model holds churn at 4% either way. The comparison needs the churn assumption checked.',
   confirm_step: 'Tell me the churn you actually expect at £59, and I can propose it so the analysis can check the limit.',
 };
+
+const RANKING_VIEW = 'I would raise Pro to £59 at release: on this model it is the strongest path to your MRR goal.';
+
+const OPTION_FIRST = [
+  'I would explore a Tech lead first, without committing to a hire yet.',
+  "I'd start with Tech lead.",
+  'Tech lead is worth trying first.',
+  'I’d start with Tech lead.',
+];
+
+describe('HARNESS 3: a provisional view tests the model, never chooses an option', () => {
+  it.each(OPTION_FIRST)('RED at base: refuses %s in every field and at Run JSON egress', async (line) => {
+    for (const field of ['view', 'reasoning', 'confirm_step'] as const) {
+      const args = { ...VIEW, [field]: line };
+      expect(checkProvisionalView(args)).toMatchObject({ ok: false, field, problem: 'option_recommendation' });
+      expect(readRunInterpretation(JSON.stringify({ answer: 'The comparison is withheld.', provisional_view: args }))?.view).toBeNull();
+      const r = await dispatchTool('give_provisional_view', JSON.stringify(args), ctx, capsWith(withheldStanding()));
+      expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'invalid_provisional_view', problem: 'option_recommendation' });
+      // Re-check even a stored result that claims the tool accepted it.
+      expect(provisionalViewOfTurn([{ name: 'give_provisional_view', ok: true }], [{ ok: true, provisional_view: args }])).toBeNull();
+    }
+  });
+
+  it('must pass: names what to test, with no option preference', () => {
+    const args = { ...VIEW, view: "Before comparing, it's worth testing how much ‘sprint capacity’ moves the goal." };
+    expect(checkProvisionalView(args)).toEqual({ ok: true, view: args });
+    expect(sanitiseProvisionalView(args, { nodes: [{ id: 'tech_lead', kind: 'option', label: 'Tech lead' }] })).toEqual(args);
+  });
+
+  it('RED at base: option-labelled exploration is refused at egress even without the word first', () => {
+    const args = { ...VIEW, view: 'Exploring Tech lead would help.' };
+    expect(sanitiseProvisionalView(args, { nodes: [{ id: 'tech_lead', kind: 'option', label: 'Tech lead' }] })).toBeNull();
+  });
+
+  it('producer instructions and both schemas ask what to test, never which option first', async () => {
+    const { RUN_INTERPRETATION_VIEW_INSTRUCTION, RUN_INTERPRETATION_FORMAT } = await import('../provisional-view.js');
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).toContain('Never say WHICH option to do or explore first');
+    expect(RUN_INTERPRETATION_VIEW_INSTRUCTION).not.toContain('what you would do');
+    expect(JSON.stringify(RUN_INTERPRETATION_FORMAT.schema)).toContain('Never say WHICH option');
+    expect(JSON.stringify(AGENT_TOOLS.find((t) => t.name === 'give_provisional_view'))).toContain('Never say WHICH option');
+  });
+});
 
 const ctx: AgentToolContext = { scenario_id: '5e3d2c1b-6f7a-4b8c-9d0e-1f2a3b4c5d6e', authenticated_user_id: null, request_id: 'req-c5' };
 const noDispatch: InternalDispatch = async () => { throw new Error('the provisional view reads nothing of its own: its standing is injected'); };
@@ -109,10 +152,10 @@ describe('the capability — validates, and refuses whenever the analysis may sp
   });
 
   it('checkProvisionalView: one line each, sentence-final (a newline or list marker cannot break the block)', () => {
-    const c = checkProvisionalView({ ...VIEW, view: 'I would raise Pro\n\n- to £59', confirm_step: 'Tell me the churn at £59' });
+    const c = checkProvisionalView({ ...VIEW, view: 'Test churn\n\n- at £59', confirm_step: 'Tell me the churn at £59' });
     expect(c.ok).toBe(true);
     if (!c.ok) return;
-    expect(c.view.view).toBe('I would raise Pro - to £59.');
+    expect(c.view.view).toBe('Test churn - at £59.');
     expect(c.view.confirm_step).toBe('Tell me the churn at £59.');
   });
 });
@@ -132,14 +175,14 @@ const gate = (text: string, state: typeof WITHHELD_STATE) => {
 describe('the standing reads the wire gate\'s OWN predicate and reason — never a second derivation', () => {
 
   it('control: the view sentence RANKS an option (the classifier sees it)', () => {
-    expect(sentenceRanksOptions(VIEW.view, labels)).toBe(true);
+    expect(sentenceRanksOptions(RANKING_VIEW, labels)).toBe(true);
   });
 
   it('withheld ⇔ the gate edits a ranking reply (withheld state yes; permitted state no)', () => {
     expect(withheldStanding().withheld).toBe(true);
-    expect(gate(VIEW.view, WITHHELD_STATE).changed).toBe(true);
+    expect(gate(RANKING_VIEW, WITHHELD_STATE).changed).toBe(true);
     expect(leaderStandingOf({ analysisState: PERMITTED_STATE, analysisReady: READY }).withheld).toBe(false);
-    expect(gate(VIEW.view, PERMITTED_STATE).changed).toBe(false);
+    expect(gate(RANKING_VIEW, PERMITTED_STATE).changed).toBe(false);
   });
 
   it('`because` is the gate\'s own reason — the no-leader sentence\'s clause, before its next action', () => {
@@ -176,9 +219,9 @@ describe('the ROUTE\'s renderer — typed and labelled, never prose (AIC 5855633
     expect(provisionalViewSidecar(VIEW, because)).toEqual({ heading: provisionalViewHeading(), ...VIEW, because });
   });
 
-  it('CONTRAST (why it is typed): the gate strips the SAME view written as prose', () => {
-    const gated = gate(`Here is where things stand. ${VIEW.view}`, WITHHELD_STATE).response.assistant_text;
-    expect(gated).not.toContain(VIEW.view);
+  it('CONTRAST (why it is typed): the gate still strips an option preference written as prose', () => {
+    const gated = gate(`Here is where things stand. ${RANKING_VIEW}`, WITHHELD_STATE).response.assistant_text;
+    expect(gated).not.toContain(RANKING_VIEW);
   });
 
   it('never fabricated: no call, a refused call, or a malformed result → nothing to render', () => {
@@ -200,7 +243,7 @@ describe('the ROUTE\'s renderer — typed and labelled, never prose (AIC 5855633
 });
 
 describe('C5b — readRunInterpretation: the Run button\'s one call, typed', () => {
-  const V = { view: 'I would hold at £49 this quarter.', reasoning: 'Churn is the risk you named first.', confirm_step: 'Tell me the churn you expect at £59.' };
+  const V = { view: 'Before comparing, test how much churn moves the goal.', reasoning: 'Churn is the risk you named first.', confirm_step: 'Tell me the churn you expect at £59.' };
   it('the typed answer and a valid view', () => {
     expect(readRunInterpretation(JSON.stringify({ answer: 'No option can be put forward yet.', provisional_view: V }))).toEqual({ answer: 'No option can be put forward yet.', view: V });
   });

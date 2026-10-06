@@ -8243,7 +8243,7 @@ export function createAgentCapabilities(
         return {
           ok: false, mutated: false, refusal: 'invalid_provisional_view', field: checked.field, problem: checked.problem,
           ...(checked.limit !== undefined ? { limit: checked.limit } : {}),
-          detail: 'Nothing was shown. The view is at most 2 sentences, the reasoning at most 3 and the confirming step ONE; '
+          detail: 'Nothing was shown. Say what to test or find out, never which option to do or explore first. The view is at most 2 sentences, the reasoning at most 3 and the confirming step ONE; '
             + `\`${checked.field}\` was ${checked.problem.replace(/_/g, ' ')}. Call give_provisional_view again with it fixed.`,
         };
       }

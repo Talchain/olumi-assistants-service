@@ -37,7 +37,7 @@ const RUN_DELTA = {
 const SAID = "You accepted Olumi's estimate for how much Sprint capacity for AI reporting changes AI reporting module availability.";
 const MOVED = `${SAID}\nAI Reporting Sprint's chance rose to 57%.`;
 const WHY = 'The model now shows a provisional comparison of the options.';
-const VIEW = { view: 'I would lean towards AI Reporting Sprint for now.', reasoning: 'It needs the least new capacity.', confirm_step: 'Size the sprint capacity link.' };
+const VIEW = { view: 'Before comparing, test how much sprint capacity moves the goal.', reasoning: 'It needs the least new capacity.', confirm_step: 'Size the sprint capacity link.' };
 const labels = new Map(GRAPH.nodes.map((n) => [n.id, n.label] as const));
 const FALLBACK = rerunExplanationPlan(RUN_DELTA, (id) => labels.get(id), ['AI Reporting Sprint'], false)!.fallback;
 

@@ -35,7 +35,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
  */
 const CLAUSE =
   'When the run says a limit cannot be checked in this model yet, say so plainly. When a leader cannot be named, you may give your own '
-  + 'provisional view by calling give_provisional_view once: what you would do, your reasoning from the model\u2019s facts and the '
+  + 'provisional view by calling give_provisional_view once: what to test or find out about a factor, an assumption or a figure, never which option to do or explore first, your reasoning from the model\u2019s facts and the '
   + 'user\u2019s own words, and the ONE step that would let the analysis confirm or overturn it \u2014 a step the user can take or a '
   + 'change one of your tools can propose, never one that cannot help. Never write that view in your reply text: Olumi shows it '
   + 'beneath your reply, labelled as your provisional view and never as the analysis result, and your reply text still never names, '
