@@ -413,6 +413,48 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
     expect(enrichRunAnalysisMock).toHaveBeenCalledTimes(1);
   });
 
+  /** ⭐ SD-1 Slice R (cut 7): the chip Run's commit records what this exit delivered — from THIS exit's graph. */
+  const sd1RunFact = () => ({
+    fact_type: 'run_analysis' as const, fact_version: 1, noop: false,
+    result: {
+      scenario_id: SCENARIO_ID, leading_option_id: null, summary: 's', run_id: 'run_b', graph_hash_at_run: 'gh_b',
+      computed_at: '2026-10-06T03:00:00.000Z', win_probabilities: { opt_a: 0.6, opt_b: 0.4 },
+      constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'unevaluated' },
+    },
+  });
+  const sd1Commit = () => commitDirectAnswerMock.mock.calls.at(-1)?.[1] as {
+    stampHandlerFacts?: (r: unknown, f: readonly unknown[]) => readonly { result: Record<string, unknown> }[];
+  };
+
+  it('⭐ SD-1: a Conventional chip Run hands the commit a delivered_record stamper bound to this exit\'s snapshot graph', async () => {
+    const { maximalReviewCardBlock } = await import('@talchain/schemas/fixtures');
+    const payload = makeMessagePayload({
+      scenario_id: SCENARIO_ID, turn_id: TURN_ID, stage: 'analyse', message: 'Re-run the analysis.',
+      turn_class: 'decide', source: 'chip_click',
+      chip: { id: 'chip_action_rerun_analysis', action_type: 'run_analysis' },
+    });
+    await dispatchDeterministicChipClick('run_analysis', { payload, requestId: 'req-sd1-conv' });
+    const stamp = sd1Commit().stampHandlerFacts;
+    expect(typeof stamp).toBe('function');
+    const card = { ...(maximalReviewCardBlock as unknown as Record<string, unknown>), body: 'Most of this result rests on opt_a.' };
+    const out = stamp!({ assistant_text: '', suggested_actions: [], insights: [], blocks: [card] }, [sd1RunFact()]);
+    const record = out[0]!.result.delivered_record as { phase3_blocks: { body: string }[] };
+    // The snapshot graph's label for opt_a — a null graph would leave the id or a generic word.
+    expect(record.phase3_blocks[0]!.body).toBe('Most of this result rests on Option A.');
+  });
+
+  it('⭐ SD-1: the Agent lane\'s chip Run hands the commit NO stamper (its user sees agent-v1-turn\'s own blocks)', async () => {
+    const { AGENT_RUN_ANALYSIS_CHIP_ID } = await import('../chip-click-dispatch.js');
+    const payload = makeMessagePayload({
+      scenario_id: SCENARIO_ID, turn_id: TURN_ID, stage: 'analyse', message: 'Run it.',
+      turn_class: 'decide', source: 'chip_click',
+      chip: { id: AGENT_RUN_ANALYSIS_CHIP_ID, action_type: 'run_analysis' },
+    });
+    await dispatchDeterministicChipClick('run_analysis', { payload, requestId: 'req-sd1-agent' });
+    expect(commitDirectAnswerMock).toHaveBeenCalled();
+    expect(sd1Commit()).not.toHaveProperty('stampHandlerFacts');
+  });
+
   it('run_analysis chip-click continues to dispatch with no behavioural change for the existing path', async () => {
     const out = await dispatchDeterministicChipClick('run_analysis', {
       payload: payloadFor('run_analysis'),

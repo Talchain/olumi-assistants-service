@@ -101,6 +101,13 @@ export interface CommitMetadata {
   readonly duration_ms: number;
   readonly handler_facts: readonly HandlerFact[];
   /**
+   * SD-1 Slice R (schemas 0.78 `delivered_record`; cut 7, `writer-after-prod-0.78`): given the response AS COMMITTED
+   * (after every pre-commit transform in `commitDirectAnswer`), return the facts THIS write carries — the Run fact
+   * stamped with what the turn delivered (`compose/run-delivered-record.ts`). Optional. It never fails the commit: a
+   * throw, or anything but an array of the same length, writes `handler_facts` exactly as given.
+   */
+  readonly stampHandlerFacts?: (response: OlumiResponse, facts: readonly HandlerFact[]) => readonly HandlerFact[];
+  /**
    * Draft graph to persist atomically with the turn insert via
    * append_turn_atomic(p_graph). Both the graph write and the turn row commit
    * or roll back together. Omit for non-draft turns — the RPC leaves
@@ -1222,6 +1229,18 @@ async function refBaseFor(metadata: CommitMetadata, store: Pick<SessionStore, 'l
   }
 }
 
+function stampHandlerFactsOrKeep(metadata: CommitMetadata, response: OlumiResponse): readonly HandlerFact[] {
+  if (metadata.stampHandlerFacts === undefined) return metadata.handler_facts;
+  try {
+    const stamped = metadata.stampHandlerFacts(response, metadata.handler_facts);
+    return Array.isArray(stamped) && stamped.length === metadata.handler_facts.length ? stamped : metadata.handler_facts;
+  } catch (err) {
+    log.warn({ event: 'v5.delivered_record.stamp_threw', turn_id: metadata.turn_id, err: err instanceof Error ? err.name : 'unknown' },
+      'SD-1 delivered_record stamp threw — the turn commits its facts unstamped');
+    return metadata.handler_facts;
+  }
+}
+
 export async function commitDirectAnswer(
   response: OlumiResponse,
   metadata: CommitMetadata,
@@ -1625,6 +1644,9 @@ export async function commitDirectAnswer(
   // there from `write.graph` rather than passed in from this function's earlier
   // `persistedInvariants` (which serves the advertised analysis hash, a
   // different question, and must not be reused as this one).
+  // SD-1 Slice R — the stamp reads the response here, after its last pre-commit transform, so the record is built from
+  // the same response the caller ships. Never fails the commit (see `CommitMetadata.stampHandlerFacts`).
+  const handlerFactsForWrite = stampHandlerFactsOrKeep(metadata, responseForCommit);
   const appendOutcome = await appendCheckedGraphWrite({
     store,
     writesGraph,
@@ -1639,7 +1661,7 @@ export async function commitDirectAnswer(
       response_emitted: true,
       llm_calls_used: metadata.llm_calls_used,
       duration_ms: metadata.duration_ms,
-      handler_facts: metadata.handler_facts,
+      handler_facts: handlerFactsForWrite,
       graph: graphForStore,
       briefText: metadata.briefText,
       pending_actions: finalPendings,

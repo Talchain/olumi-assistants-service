@@ -21,11 +21,12 @@
  * what was seen (`phase3_blocks: []` means "none delivered").
  */
 import { RunDeliveredRecordSchema, type OlumiResponse, type RunDeliveredRecord } from '@talchain/schemas/boundary';
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { BLOCK_PROSE_FIELDS, textAssertsLeadingOption } from './leading-option-egress-guard.js';
 import { sanitiseOlumiResponseForEgress } from './output-safety.js';
 import type { AnalysisReadyPayload } from './analysis-ready-emit.js';
+import { log } from '../../utils/telemetry.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -95,7 +96,13 @@ export function buildRunDeliveredRecord(input: DeliveredRecordInput): DeliveredR
       // A blocks-only carrier: no prose, chips or insights (their finalisers and telemetry belong to the wire, not to
       // this record). The sanitiser's block pass is per block, so the Phase 3 bytes are the wire's.
       { ...input.response, assistant_text: '', suggested_actions: [], insights: [], blocks: phase3 } as OlumiResponse,
-      { graph: input.graph, requestId: input.requestId, exitPath: input.exitPath },
+      {
+        graph: input.graph, requestId: input.requestId, exitPath: input.exitPath,
+        // The looping-chip guard's only input; the carrier has no chips.
+        userMessage: null,
+        // No reader (EgressSanitiseOpts, E1 2026-07-27). The leader rule here is this builder's own omission below.
+        mayNameLeadingOption: false,
+      },
     ).blocks ?? []) as unknown[];
     const roster = rosterOf(input.graph, input.analysisReady);
     if (sanitised.some((b) => isRec(b) && assertsLeader(b, roster))) return omitted('asserts_leader');
@@ -139,4 +146,31 @@ export function stampDeliveredRecord(
   });
   if (stamped !== 1) return facts;
   return next.every((f) => f.fact_type !== 'run_analysis' || parsesAsRunFact(f)) ? next : facts;
+}
+
+/**
+ * The commit hook (`CommitMetadata.stampHandlerFacts`): build from the response AS COMMITTED, stamp the Run fact, and
+ * hand back the facts the write carries. Any omission returns the facts exactly as given (by reference). Content-free
+ * log line only: the reason, never the prose.
+ */
+export function makeDeliveredRecordStamper(
+  ctx: Omit<DeliveredRecordInput, 'response' | 'handlerFacts'>,
+): (response: OlumiResponse, facts: readonly HandlerFact[]) => readonly HandlerFact[] {
+  return (response, facts) => {
+    const out = buildRunDeliveredRecord({ ...ctx, response, handlerFacts: facts });
+    if (out.kind === 'omitted') {
+      if (out.reason !== 'no_run_fact') {
+        log.info({ event: 'v5.delivered_record.omitted', request_id: ctx.requestId, exit_path: ctx.exitPath, reason: out.reason },
+          'SD-1 delivered_record omitted (the Run commits without it)');
+      }
+      return facts;
+    }
+    const stamped = stampDeliveredRecord(facts, out.record, (f) => RunAnalysisHandlerFactSchema.safeParse(f).success);
+    log.info({
+      event: stamped === facts ? 'v5.delivered_record.omitted' : 'v5.delivered_record.recorded',
+      request_id: ctx.requestId, exit_path: ctx.exitPath,
+      ...(stamped === facts ? { reason: 'stamp_refused' } : { block_count: out.record.phase3_blocks.length }),
+    }, 'SD-1 delivered_record');
+    return stamped;
+  };
 }

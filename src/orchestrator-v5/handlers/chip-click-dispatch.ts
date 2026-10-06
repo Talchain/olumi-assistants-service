@@ -53,6 +53,7 @@ import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analy
 
 import type { MessageTurnPayload, OlumiResponse, StageType } from '@talchain/schemas/boundary';
 import { AGENT_RUN_ANALYSIS_CHIP_ID } from './agent-chip-ids.js';
+import { makeDeliveredRecordStamper } from '../compose/run-delivered-record.js';
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
 import { config } from '../../config/index.js';
@@ -2357,6 +2358,21 @@ export async function dispatchChipClickRunAnalysis(
         // Same GraphV3T the egress sanitiser uses for this turn — resolves
         // entity-id labels in the stored assistant answer so stored == wire.
         contentGraph: snapshotGraph,
+        // ⭐ SD-1 Slice R (cut 7, `writer-after-prod-0.78`) — record the Run's delivered Phase 3 cards on its fact, from
+        // the graph and readiness this exit ships (`graph: snapshotGraph`, `analysisReady` below). The route's `ok` exit
+        // carries no analysis-authority provenance, so its authority-unavailable arm cannot empty these blocks.
+        // Never for the agent lane: its user sees agent-v1-turn's own re-bound blocks, not this response.
+        ...(agentLaneRun
+          ? {}
+          : {
+              stampHandlerFacts: makeDeliveredRecordStamper({
+                graph: snapshotGraph,
+                analysisReady,
+                authorityUnavailable: false,
+                requestId,
+                exitPath: 'chip_click_run_analysis',
+              }),
+            }),
       });
       emitFreshnessTelemetry(
         freshness,

@@ -76,7 +76,7 @@ describe('the delivered record holds what the wire would ship', () => {
   it('the stored blocks are the wire SANITISER\'s output (the same pure function, the same graph)', () => {
     const composed = [card(NEUTRAL)];
     const record = (build(composed) as { record: Rec }).record;
-    const sanitised = sanitiseOlumiResponseForEgress(response(composed), { graph: GRAPH, requestId: 'req-1', exitPath: 'test' }).blocks;
+    const sanitised = sanitiseOlumiResponseForEgress(response(composed), { graph: GRAPH, requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: false }).blocks;
     expect(record.phase3_blocks).toEqual(sanitised);
   });
 

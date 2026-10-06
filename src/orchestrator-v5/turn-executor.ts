@@ -83,6 +83,7 @@ import {
   type PermittedAnalysisMode,
 } from './admission/analysis-admission.js';
 import { buildGraphNodeLookupFromGraph } from './compose/phase3-blocks.js';
+import { makeDeliveredRecordStamper } from './compose/run-delivered-record.js';
 import {
   commitDirectAnswer,
   computeRequestHash,
@@ -15125,6 +15126,20 @@ export async function runTurnExecutor(
         llm_calls_used: llmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: handlerFactsForCommit,
+        // ⭐ SD-1 Slice R (cut 7, `writer-after-prod-0.78`) — record the Run's delivered Phase 3 cards on its fact, from
+        // the same graph, readiness and authority the route's wire uses for this turn. Not on a graph-writing turn: its
+        // `analysis_ready` is re-derived AFTER this commit (below), so the pre-commit options are not the ones shipped.
+        ...(graphForCommit === null || graphForCommit === undefined
+          ? {
+              stampHandlerFacts: makeDeliveredRecordStamper({
+                graph: effectiveTurnGraph,
+                analysisReady: analysisReadyForTurn,
+                authorityUnavailable: mayNameLeadingOptionVerdictForRun.provenance === 'fail_closed_unavailable',
+                requestId: context.request_id,
+                exitPath: 'turn_executor',
+              }),
+            }
+          : {}),
         graph: graphForCommit,
         briefText: context.scenarioBriefText ?? undefined,
         ...(Array.isArray(pendingForCommit) && pendingForCommit.length > 0
