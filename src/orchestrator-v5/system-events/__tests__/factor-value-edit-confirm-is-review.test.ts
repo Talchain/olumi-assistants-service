@@ -14,6 +14,7 @@ import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
 import { applyFactorValueEdit } from '../factor-value-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 
 const SCENARIO_ID = '0938f068-2b83-4a77-9b47-def252ac03f0';
 const TARGET = 'monthly_churn';
@@ -121,5 +122,75 @@ describe('factor_value_edit — a confirm is review, a typed figure is authorshi
     expect(nodeOf(r.mutatedGraph).observed_state!.value).toBe(1234565000);
     expect(nodeOf(r.mutatedGraph).observed_state!.source).toBe('user_override');
     expect(nodeOf(r.mutatedGraph).observed_state!.reviewed_by_user).toBeUndefined();
+  });
+});
+
+/**
+ * ⭐⭐ SD-1 (domain 2, github-07; DL 0df0e1 6 Oct, conditions 1-3; Codex buddy on DGAI #2543 r1): A CONFIRM IS A REVIEW OF
+ * THE PERSISTED FIGURE, NEVER A SET. Each row is the event DGAI's Confirm sends for that stored shape (the SET builder on
+ * the shown number: `raw_value` when stored, else `value`). Before the fix the first three fell through to a SET
+ * (`user_override`) or were refused. Mutant (run by hand): the early `confirm_current` branch skipped → rows 1-3 RED.
+ */
+describe('factor_value_edit confirm_current: review of the persisted figure, by one rule, on every stored shape', () => {
+  function withFactor(observed: Record<string, unknown>) {
+    const base = servedGraph() as { nodes: Array<Record<string, unknown>> };
+    base.nodes[1]!.observed_state = observed;
+    return base;
+  }
+  async function expectKeptAndReviewed(observed: Record<string, unknown>, event: Record<string, unknown>) {
+    const base = withFactor(observed);
+    const r = await edit({ intent: 'confirm_current', ...event }, base);
+    expect(r.kind).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    const { reviewed_by_user: review, ...kept } = nodeOf(r.mutatedGraph).observed_state!;
+    expect(kept).toEqual(observed);
+    expect((review as { intent: string }).intent).toBe('confirm');
+    // Condition 3: the Run stays current (analysis hash identical); identity moves (the review is persisted).
+    expect(hash(r.mutatedGraph)).toBe(hash(base));
+    expect(computeGraphIdentityHash(r.mutatedGraph as never)!.value).not.toBe(computeGraphIdentityHash(base as never)!.value);
+    expect(r.handlerFacts.map((f) => (f as { noop?: boolean }).noop)).toEqual([true]);
+  }
+
+  it('1. value-only factor: no raw_value is added, source kept, reviewed', async () => {
+    await expectKeptAndReviewed({ value: 0.1, source: 'cee_inference' }, { value: 0.1 });
+  });
+
+  it('2. capped float drift (.3 / 3 = .0999…): the stored .1 is kept byte for byte, reviewed', async () => {
+    await expectKeptAndReviewed(
+      { value: 0.1, raw_value: 0.3, cap: 3, unit: 'days', source: 'cee_inference' },
+      { value: 0.3 / 3, raw_value: 0.3, unit: 'days' },
+    );
+  });
+
+  it('3. equal-pair percent (3.2 / 3.2 / %): reviewed, not refused as a scale change', async () => {
+    await expectKeptAndReviewed(
+      { value: 3.2, raw_value: 3.2, unit: '%', source: 'cee_inference' },
+      { value: 3.2, raw_value: 3.2, unit: '%' },
+    );
+  });
+
+  it('the served churn shape in DGAI\'s own form (value 3.2, raw 3.2, %): reviewed', async () => {
+    await expectKeptAndReviewed(
+      { unit: '%', value: 0.032, source: 'cee_inference', raw_value: 3.2, extractionType: 'inferred' },
+      { value: 3.2, raw_value: 3.2, unit: '%' },
+    );
+  });
+
+  it.each([
+    ['a moved value-only figure', { value: 0.1, source: 'cee_inference' }, { value: 0.2 }],
+    ['a moved raw beside a matching value', { unit: '%', value: 0.032, source: 'cee_inference', raw_value: 3.2 }, { value: 0.032, raw_value: 3.5 }],
+    ['another unit', { unit: '%', value: 0.032, source: 'cee_inference', raw_value: 3.2 }, { value: 3.2, raw_value: 3.2, unit: '£' }],
+  ])('REFUSED as confirm_value_moved, nothing written: %s', async (_name, observed, event) => {
+    const r = await edit({ intent: 'confirm_current', ...event }, withFactor(observed));
+    expect(r.kind).toBe('refused');
+    if (r.kind === 'refused') expect(r.reason).toBe('confirm_value_moved');
+  });
+
+  it('CONTRAST: the user\'s own figure keeps its bytes and gains no review (reviewOnly\'s rule)', async () => {
+    const observed = { value: 0.1, source: 'user_override' };
+    const r = await edit({ intent: 'confirm_current', value: 0.1 }, withFactor(observed));
+    expect(r.kind).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    expect(nodeOf(r.mutatedGraph).observed_state).toEqual(observed);
   });
 });

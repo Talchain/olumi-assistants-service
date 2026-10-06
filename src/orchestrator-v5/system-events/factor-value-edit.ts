@@ -46,6 +46,7 @@ import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../tools/registry.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { recordFactorReview } from '../tools/handlers/set-factor-value.js';
 import { canonicaliseUnitForDisplay } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { checkPairCoherence, resolveScaleFrame } from '../tools/handlers/d1-shared/scale-frame.js';
 import {
@@ -101,6 +102,37 @@ const SCALE_CONSISTENCY_TOLERANCE = 1e-6;
 function sameStoredNumber(actual: unknown, expected: number): boolean {
   if (typeof actual !== 'number' || !Number.isFinite(actual) || !Number.isFinite(expected)) return false;
   return Math.abs(actual - expected) <= 1e-12 * Math.max(1, Math.abs(actual), Math.abs(expected));
+}
+
+/**
+ * ⭐ SD-1 — THE ONE RULE FOR "this confirm ratifies the persisted figure" (DL 0df0e1 6 Oct, condition 1).
+ *
+ * The client states the figure it was SHOWN, in that figure's own scale, and each stated figure is compared with the
+ * persisted one IN THE SAME SCALE by the one tolerance, `sameStoredNumber` (relative 1e-12, floored at 1: float noise
+ * only — £1 on £1,234,565,000 is a move, pinned below). Nothing is re-normalised: re-normalising is what resolved an
+ * equal-pair 3.2 % to 0.032 and refused it (Codex buddy, DGAI #2543 r1).
+ *   · `value` must equal the persisted `value`, or the persisted `raw_value` (the user-unit form: a capless amount or
+ *     percent is SET as the shown 3.2 — CEE's own confirm-is-review row sends exactly that);
+ *   · a stated `raw_value` must equal the persisted `raw_value` (or `value`, where none is persisted);
+ *   · a stated `unit` must be the persisted unit (`canonicaliseUnitForDisplay`).
+ * Every stated figure must agree. A factor with no persisted finite `value` has nothing to ratify.
+ */
+function confirmMatchesPersisted(
+  event: { readonly value: number; readonly raw_value?: number; readonly unit?: string },
+  persisted: { value?: unknown; raw_value?: unknown; unit?: unknown } | undefined,
+): boolean {
+  if (typeof persisted?.value !== 'number' || !Number.isFinite(persisted.value)) return false;
+  const storedValue = persisted.value;
+  const storedRaw = typeof persisted.raw_value === 'number' ? persisted.raw_value : undefined;
+  const valueAgrees = sameStoredNumber(event.value, storedValue)
+    || (storedRaw !== undefined && sameStoredNumber(event.value, storedRaw));
+  if (!valueAgrees) return false;
+  if (event.raw_value !== undefined && !sameStoredNumber(event.raw_value, storedRaw ?? storedValue)) return false;
+  if (event.unit !== undefined) {
+    const storedUnit = typeof persisted.unit === 'string' ? persisted.unit : undefined;
+    if (storedUnit === undefined || canonicaliseUnitForDisplay(event.unit) !== canonicaliseUnitForDisplay(storedUnit)) return false;
+  }
+  return true;
 }
 
 function scaleValuesAgree(actual: unknown, expected: number): boolean {
@@ -342,6 +374,49 @@ export async function applyFactorValueEdit(
     | undefined;
   const factorCap = typeof observed?.cap === 'number' ? observed.cap : undefined;
   const factorUnit = typeof observed?.unit === 'string' ? observed.unit : undefined;
+
+  // ⭐⭐ SD-1 (domain 2; DL 0df0e1 6 Oct; Codex buddy on DGAI #2543): A CONFIRM IS A REVIEW OF THE PERSISTED FIGURE,
+  // NEVER A SET. It used to be resolved exactly as a set and judged after the handler, whose review path needs STRICT
+  // equality — so a value-only factor, a capped float drift and an equal-pair percent became `user_override` or were
+  // refused. Now it is matched against the persisted figure by ONE rule (`confirmMatchesPersisted`) before anything is
+  // resolved, and the single writer records only the review (`recordFactorReview`). A panel apply cannot ride a
+  // confirm (its server-substituted number is a set by construction).
+  if ((event as { readonly intent?: unknown }).intent === 'confirm_current') {
+    if (event.applied_from !== undefined || !confirmMatchesPersisted(event, observed)) {
+      return refuse(
+        payload,
+        'confirm_value_moved',
+        `That confirmation doesn't match the value in the model, so I haven't changed anything. ` +
+          `To change the figure, type the new value instead.`,
+      );
+    }
+    const review = recordFactorReview(persistedGraph, event.target_id, new Date().toISOString());
+    const reviewedGraph = mergeMutatedGraphForPersistence({
+      mutatedGraph: review.mutated_graph as Record<string, unknown>,
+      persistedBase: persistedGraph,
+      requestId,
+      scenarioId: payload.scenario_id,
+    });
+    const reviewedParse = GraphV3.safeParse(reviewedGraph);
+    if (!reviewedParse.success) {
+      return refuse(payload, 'merged_graph_invalid', `I couldn't save that change. I haven't changed anything.`);
+    }
+    return {
+      kind: 'mutated',
+      response: composeToolCallResponse({
+        answerKind: 'functional',
+        orientation: '',
+        confirmation: review.assistant_text,
+        coaching: null,
+        stage: payload.stage,
+        handlerFacts: review.handler_facts as unknown as HandlerFact[],
+      }),
+      mutatedGraph: reviewedGraph,
+      handlerFacts: review.handler_facts as unknown as HandlerFact[],
+      graph: reviewedParse.data,
+      baseGraph: persistedGraph,
+    };
+  }
 
   // ── the PANEL APPLY claim, verified before anything else is decided ──────
   //
@@ -829,27 +904,7 @@ export async function applyFactorValueEdit(
     );
   }
 
-  // ⭐ A CONFIRM NEVER BECOMES A SET (Shared Data row 1 — Canonical #72 5881225605; AIQ 5881277231 / 5881405845). The
-  // value was resolved above EXACTLY as a set would resolve it, so capped, capless and percent confirms read one rule,
-  // against the PERSISTED node (`targetNode`, never a client copy — DL 5881485082). "The same" is near-exact (float noise
-  // only), never the scale-consistency tolerance: £1 on £1,234,565,000 is a move. A kept value was already written as
-  // review by the single writer (`unchangedValueIsReview`, above).
-  if ((event as { readonly intent?: unknown }).intent === 'confirm_current') {
-    const before = targetNode.observed_state as { value?: unknown; raw_value?: unknown } | undefined;
-    const after = mergedParse.data.nodes.find((n) => n.id === event.target_id)?.observed_state as
-      | { value?: unknown; raw_value?: unknown }
-      | undefined;
-    const sameValue = typeof before?.value === 'number' && sameStoredNumber(after?.value, before.value)
-      && (typeof before.raw_value !== 'number' || sameStoredNumber(after?.raw_value, before.raw_value));
-    if (appliedProvenance !== undefined || !sameValue) {
-      return refuse(
-        payload,
-        'confirm_value_moved',
-        `That confirmation doesn't match the value in the model, so I haven't changed anything. ` +
-          `To change the figure, type the new value instead.`,
-      );
-    }
-  }
+  // A `confirm_current` never reaches here: it returned above as a review of the persisted figure (SD-1).
 
   // The SAME composer the NL lane uses — this is what maps the
   // `set_factor_value` fact to the boundary `graph_patch` block.
