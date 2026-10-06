@@ -1527,6 +1527,9 @@ describe('ladder paraphrase classes (Desk 6b + DL, #2646)', () => {
     'You want the lowest churn you can get.',
     'This gives the lowest priority to cost.',
     'Risk is lowest under the current assumptions.',
+    // Codex #2660 r1.
+    'This resulted in the lowest-risk path through the onboarding checklist.',
+    'We ended up with the lowest estimate for churn.',
     'The team topped up the budget.',
   ])('LEAVE: %s', (s) => {
     expect(sentenceRanksOptions(s)).toBe(false);

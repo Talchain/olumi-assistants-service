@@ -144,7 +144,9 @@ const MOST_SUPPORTED_LEADER_RE = new RegExp(
 const LADDER_VERB_SRC = String.raw`(?:gave|gives|give|giving|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|has|had|have|having|end(?:s|ed|ing)?\s+up\s+with|result(?:s|ed|ing)?\s+in)`;
 const LADDER_PASSIVE_SRC = String.raw`(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)`;
 /** A weighting, a mechanism or the goal-chance copy: "the highest priority", "the highest influence", "the highest chance". */
-const NOT_A_RESULT_SRC = String.raw`(?!\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds)\b)`;
+// Codex #2660 r1: a hyphenated compound ("the lowest-risk path", "the highest-cost assumption") or an input noun describes
+// the thing, not a result.
+const NOT_A_RESULT_SRC = String.raw`(?!-|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds|assumptions?|inputs?|estimates?)\b)`;
 /**
  * A STATISTIC comparison ("produced the highest average outcome", "has the lowest modelled median") is v6 class C2 when
  * the sentence names its metric scope, and the served agent lane keeps it by that scope (`blankScopedMetricComparison`).

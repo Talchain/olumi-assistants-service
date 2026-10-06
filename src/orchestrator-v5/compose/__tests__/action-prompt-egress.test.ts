@@ -88,6 +88,17 @@ describe('controls: nothing else moves', () => {
     expect(changed).toBe(false);
     expect(response).toBe(input);
   });
+  it('withheld, a prompt that NAMES an option with an input, not a result, ships byte for byte (Codex #2660 r1)', () => {
+    const prompt = 'While discussing Hold, we ended up with the highest-cost assumption for the sensitivity test.';
+    const input = envelope(card(CLEAN_Q, prompt));
+    const { response, changed } = enforceLeadingOptionClaimsAtWire(input, { ...OPTS, mayNameLeadingOption: false });
+    expect(changed).toBe(false);
+    expect(response).toBe(input);
+  });
+  it('CONTROL: the same verb with a RESULT still omits the chip', () => {
+    const b = blockOf(enforce(card(CLEAN_Q, 'Hold ended up with the highest MRR.'), false).response);
+    expect(b).not.toHaveProperty('action_prompt');
+  });
   it('LICENSED: the same claim-bearing card ships byte for byte', () => {
     const input = envelope(card(CLAIM_Q, CLAIM_Q));
     const { response, changed } = enforceLeadingOptionClaimsAtWire(input, { ...OPTS, mayNameLeadingOption: true });
