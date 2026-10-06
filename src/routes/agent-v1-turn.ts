@@ -567,13 +567,15 @@ export const MODEL_RELATIVE_NAMING_INSTRUCTION =
  * Words follow Wording c6 (6 Oct): "similar chances" below the rule. The egress guard is cut 6.
  */
 export const GOAL_CHANCE_RANKING_INSTRUCTION =
-  'Comparing options by their chance of meeting the goal (a saved_run_options row\u2019s probability_of_goal): only as CURRENT MODEL STATE '
-  + 'analysis.goal_chance_licence allows, never by your own reading of the figures. '
+  'Comparing options by their chance of meeting the goal (any probability_of_goal you are given, including goal_certainty): only as '
+  + 'the GOAL_CHANCE_LICENSED record of the result you are reporting allows (CURRENT MODEL STATE analysis.goal_chance_licence, or that '
+  + 'record among a run result\u2019s inference_warnings), never by your own reading of the figures; a licence from an earlier result never '
+  + 'speaks for a newer one. '
   + 'If its form is highest or highest_all_likely_to_miss, you may say that the option whose option_id is its leader_option_id has the highest '
   + 'chance of meeting the goal in this model, naming it by its display label. '
   + 'If its form is similar, say the options in its similar_option_ids have similar chances of meeting the goal in this model; never say one is '
   + 'higher, ahead or more likely. '
-  + 'For any other form, or with no goal_chance_licence, give each option\u2019s chance in its recorded order and never rank, order or single '
+  + 'For any other form, or with no such licence, give each option\u2019s chance in its recorded order and never rank, order or single '
   + 'out options by it.';
 
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(

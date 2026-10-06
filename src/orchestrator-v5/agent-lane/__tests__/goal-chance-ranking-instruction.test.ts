@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { GOAL_CHANCE_RANKING_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
+import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
 
 type Json = Record<string, any>;
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url), 'utf8')) as Json;
@@ -46,10 +47,30 @@ describe('ruling C: the model sees the Run\'s goal-chance licence beside the cha
     expect((await canonicalState(read)).analysis).not.toHaveProperty('goal_chance_licence');
   });
 
+  it('Codex r2 #3: the Agent reader refuses a record at odds with itself (DGAI refuses the same records)', () => {
+    const base = { code: 'GOAL_CHANCE_LICENSED', option_ids: ['a', 'b', 'c'], pct_by_option: { a: 44, b: 48, c: 20 } };
+    const read = (extra: Json) => goalChanceLicenceForAgent({ enrichment: { inference_warnings: [{ ...base, ...extra }] } });
+    expect(read({ form: 'highest', leader_option_id: 'b', next_option_id: 'a' })?.leader_option_id).toBe('b'); // CONTROL
+    expect(read({ form: 'similar', similar_option_ids: ['a', 'b'] })?.similar_option_ids).toEqual(['a', 'b']); // CONTROL
+    expect(read({ form: 'highest', leader_option_id: 'a', next_option_id: 'a' })).toBeUndefined();
+    expect(read({ form: 'highest', leader_option_id: 'z', next_option_id: 'a' })).toBeUndefined();
+    expect(read({ form: 'each', leader_option_id: 'a' })).toBeUndefined();
+    expect(read({ form: 'similar', similar_option_ids: ['a', 'a'] })).toBeUndefined();
+    expect(read({ form: 'each', similar_option_ids: ['a', 'b'] })).toBeUndefined();
+    expect(read({ form: 'similar', similar_option_ids: ['a', 'b'], withheld_option_ids: ['c'] })).toBeUndefined();
+    expect(read({ form: 'each', withheld_option_ids: ['z'] })).toBeUndefined();
+  });
+
+  it('Codex r2 #1/#2: the rule covers every probability_of_goal the model sees, and binds to the result being reported', () => {
+    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('any probability_of_goal you are given, including goal_certainty');
+    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('the GOAL_CHANCE_LICENSED record of the result you are reporting');
+    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('a licence from an earlier result never speaks for a newer one');
+  });
+
   it('the typed rule: the licence decides, "similar chances" below it, no ranking without it (c6 words)', () => {
-    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('only as CURRENT MODEL STATE analysis.goal_chance_licence allows, never by your own reading of the figures');
+    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('never by your own reading of the figures');
     expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('have similar chances of meeting the goal in this model; never say one is higher, ahead or more likely');
-    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('or with no goal_chance_licence, give each option’s chance in its recorded order and never rank, order or single out options by it');
+    expect(GOAL_CHANCE_RANKING_INSTRUCTION).toContain('or with no such licence, give each option’s chance in its recorded order and never rank, order or single out options by it');
     expect(GOAL_CHANCE_RANKING_INSTRUCTION).not.toMatch(/\bbest\b|\bwinner\b|recommend/i);
   });
 });

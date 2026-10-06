@@ -159,8 +159,19 @@ export function goalChanceLicenceForAgent(result: unknown): {
   if (typeof r.form !== 'string' || !forms.includes(r.form) || optionIds === undefined) return undefined;
   const similar = ids(r.similar_option_ids);
   const withheld = ids(r.withheld_option_ids);
+  // A record at odds with itself speaks for nothing (Codex r2 #2625; DGAI's reader refuses the same records).
+  const form = r.form as GoalChanceForm;
+  const superlative = form === 'highest' || form === 'highest_all_likely_to_miss';
+  const named = (v: unknown): boolean => typeof v === 'string' && optionIds.includes(v);
+  if (superlative ? !(named(r.leader_option_id) && named(r.next_option_id) && r.leader_option_id !== r.next_option_id)
+    : r.leader_option_id !== undefined || r.next_option_id !== undefined) return undefined;
+  if (form === 'similar'
+    ? similar === undefined || similar.length < 2 || new Set(similar).size !== similar.length || !similar.every((id) => optionIds.includes(id))
+    : r.similar_option_ids !== undefined) return undefined;
+  if (r.withheld_option_ids !== undefined
+    && (form !== 'each' || withheld === undefined || withheld.length === 0 || !withheld.every((id) => optionIds.includes(id)))) return undefined;
   return {
-    form: r.form as GoalChanceForm,
+    form,
     option_ids: optionIds,
     ...(typeof r.leader_option_id === 'string' ? { leader_option_id: r.leader_option_id } : {}),
     ...(similar !== undefined ? { similar_option_ids: similar } : {}),
