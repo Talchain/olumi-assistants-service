@@ -13,7 +13,8 @@ import { leaderWithheldOnlyBecauseUnrequested, mayPresentLeaderClaimForFact,
   wasAnalysisRequestedByUser } from '../compose/unrequested-analysis-confinement.js';
 import { pickLatestRawRobustness } from '../coaching/pick-raw-robustness.js';
 import { nonlinearIdentityLeaderClaimCause, nodesUnderANonlinearIdentity,
-  readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from '../agent-lane/admit-model.js';
+  readUnsizedPathLeaderCause } from '../agent-lane/admit-model.js';
+import { goalFiguresLeaderWithheldWithoutConstraintCause } from '../agent-lane/unsized-path-cause.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { deriveEveryOptionLimitVerdict, leaderWithheldWithoutConstraintCause,
   readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
@@ -130,7 +131,7 @@ export function boundRunLeaderClaim(
     withheldBecauseNonlinearIdentity: identityCause?.withheldBecauseNonlinearIdentity === true,
     withheldBecauseUnsizedPath: readUnsizedPathLeaderCause(fact.result),
     withheldWithoutConstraintCause: leaderWithheldWithoutConstraintCause(fact.result)
-      || unsizedPathLeaderWithheldWithoutConstraintCause(fact.result),
+      || goalFiguresLeaderWithheldWithoutConstraintCause(fact.result),
     ...(limit === null ? {} : { everyOptionLimit: limit.kind }),
     rawRobustness: pickLatestRawRobustness(facts),
   });

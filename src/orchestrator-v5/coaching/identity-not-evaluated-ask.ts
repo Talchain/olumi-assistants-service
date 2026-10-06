@@ -101,6 +101,63 @@ export function sayFigure(value: number, unit: unknown, label: string): string {
 }
 
 const q = (label: string): string => `“${label}”`;
+
+/**
+ * ⭐ AN OPERAND AN OPTION CREATES IS 0 TODAY — NEVER "WHAT IS IT TODAY?" (Science d5 #87 6007736377; DL 6 Oct, rehearsal 14
+ * on CEE 6ce136c: "I need ‘Starter-tier subscribers’: what is it today?" for a tier the brief says has not launched).
+ * Creation evidence ONLY: a stored typed 0, or an option whose label carries a creation verb (launch / introduce / start /
+ * new) and whose path reaches the operand. An option that merely targets it ("Offer a 10% discount") changes an existing
+ * level nobody gave, so its operand is still asked about today.
+ */
+const CREATION_VERB = /\b(launch(?:es|ed|ing)?|introduc(?:e|es|ed|ing)|start(?:s|ed|ing)?|new)\b/i;
+
+interface Creator { readonly option: string; readonly level: { readonly value: number; readonly unit: string } | null }
+
+function creatorOf(graph: unknown, operandId: string, storedZero: boolean): Creator | null {
+  const g = rec(graph);
+  const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(rec).filter((n): n is Rec => n !== null && typeof n.id === 'string');
+  const edges = (Array.isArray(g?.edges) ? g.edges : []).map(rec)
+    .filter((e): e is Rec => e !== null && typeof e.from === 'string' && typeof e.to === 'string');
+  const reaches = (from: string): boolean => {
+    const seen = new Set<string>([from]); const walk = [from];
+    while (walk.length > 0) {
+      const at = walk.pop()!;
+      for (const e of edges) if (e.from === at && !seen.has(e.to as string)) {
+        if (e.to === operandId) return true;
+        seen.add(e.to as string); walk.push(e.to as string);
+      }
+    }
+    return false;
+  };
+  for (const o of nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && typeof n.label === 'string')) {
+    const sets = rec(rec(o.interventions)?.[operandId]);
+    if (!(sets !== null || reaches(o.id as string))) continue;
+    if (!storedZero && !CREATION_VERB.test(o.label as string)) continue;
+    // (ii) the option's own level, when the brief states it (its span: "about 150, between 80 and 250").
+    const value = finite(sets?.raw_value) ?? finite(sets?.value);
+    const unit = typeof sets?.unit === 'string' ? sets.unit : '';
+    return { option: (o.label as string).trim(), level: value === null ? null : { value, unit } };
+  }
+  return null;
+}
+
+/** "How many" for a count, "How much" for money or a share (Science's words, (iii)). */
+function howMuch(unit: unknown): string {
+  const u = typeof unit === 'string' ? unit.trim() : '';
+  const lead = /^([^\s/]+)/.exec(u)?.[1] ?? '';
+  const money = CODE_TO_PREFIX_SYMBOL.has(lead.toUpperCase()) || [...CODE_TO_PREFIX_SYMBOL.values()].some((sym) => u.startsWith(sym));
+  return money || /%|percent|share|rate/i.test(u) ? 'How much' : 'How many';
+}
+
+/** Science's words, verbatim: said once, then the ONE question only when the option's own level is missing. */
+function createdOperandAsk(operand: string, creator: Creator, unit: unknown): { text: string; label: string; message: string } {
+  const zero = `‘${operand}’ is 0 today, since ‘${creator.option}’ would start it.`;
+  if (creator.level !== null) {
+    return { text: zero, label: 'Use 0 today', message: `Set ‘${operand}’ to 0 today: ‘${creator.option}’ would start it.` };
+  }
+  const question = `${howMuch(unit)} ‘${operand}’ would ‘${creator.option}’ lead to? A best guess and a range is fine.`;
+  return { text: `${zero} ${question}`, label: 'Give your best guess', message: `${question} Ask me for it.` };
+}
 const andList = (xs: readonly string[]): string =>
   xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 
@@ -178,6 +235,13 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
     case 'identity_operand_missing': {
       const missing = w.participants.filter((p) => levelOf(p) === null);
       if (missing.length === 0) return unstated();
+      const created = missing.length === 1 ? creatorOf(graph, missing[0]!, false) : null;
+      if (created !== null) {
+        const unit = rec(byId.get(missing[0]!)?.observed_state)?.unit ?? created.level?.unit;
+        const ask = createdOperandAsk(labelOf(missing[0]!)!, created, unit);
+        return { reason: w.reason, node_id: w.nodeId, assistant_text: `To work out ${q(T)} ${asFormula}: ${ask.text}`,
+          chip_label: ask.label, chip_message: ask.message };
+      }
       const one = missing.length === 1;
       return {
         reason: w.reason,
@@ -192,6 +256,13 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
       const zeros = w.participants.filter((p) => levelOf(p) === 0);
       const zeroTarget = zeros.length === 0 && (w.stated === 0 || levelOf(w.nodeId) === 0);
       if (zeros.length === 0 && !zeroTarget) return unstated();
+      const created = !zeroTarget && zeros.length === 1 ? creatorOf(graph, zeros[0]!, true) : null;
+      if (created !== null) {
+        const unit = rec(byId.get(zeros[0]!)?.observed_state)?.unit ?? created.level?.unit;
+        const ask = createdOperandAsk(labelOf(zeros[0]!)!, created, unit);
+        return { reason: w.reason, node_id: w.nodeId, assistant_text: `To work out ${q(T)} ${asFormula}: ${ask.text}`,
+          chip_label: ask.label, chip_message: ask.message };
+      }
       const named = zeroTarget ? q(T) : andList(say(zeros));
       const one = zeroTarget || zeros.length === 1;
       return {
@@ -248,4 +319,28 @@ export function readIdentityAsk(v: unknown): IdentityAsk | null {
   const [text, label, message, nodeId] = [s('assistant_text'), s('chip_label'), s('chip_message'), s('node_id')];
   if (!reasons.includes(r.reason) || text === null || label === null || message === null || nodeId === null) return null;
   return { reason: r.reason as IdentityAskReason, node_id: nodeId, assistant_text: text, chip_label: label, chip_message: message };
+}
+
+/**
+ * ⭐ MC D1 (c) (DL 6 Oct; Acceptance rehearsal 13 on CEE d40fd7b): PLoT #416 (`GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED`) names
+ * only the identity node it could not calculate, and the reply asked for nothing ("separation_unavailable", no invitation).
+ * The one ask that would let it is CEE's, from its OWN graph: the first reason the declared operands show — a level the
+ * model holds none of, a zero, then a missing unit — said by the same composer as ISL's typed reason. Null when the graph
+ * shows none of them (no ask is invented).
+ */
+export function composeIdentityAskForNode(nodeId: string, graph: unknown): IdentityAsk | null {
+  const nodes = rec(graph)?.nodes;
+  if (!Array.isArray(nodes)) return null;
+  const byId = new Map<string, Rec>();
+  for (const n of nodes.map(rec)) if (n !== null && typeof n.id === 'string') byId.set(n.id, n);
+  const operands = ids(rec(byId.get(nodeId)?.nonlinear_identity)?.factor_ids);
+  if (operands === null) return null;
+  const os = (id: string): Rec | null => rec(byId.get(id)?.observed_state);
+  const level = (id: string): number | null => finite(os(id)?.raw_value) ?? finite(os(id)?.value);
+  const unitless = (id: string): boolean => { const u = os(id)?.unit; return !(typeof u === 'string' && u.trim() !== ''); };
+  const reason: IdentityWithheldReason | null = operands.some((id) => level(id) === null) ? 'identity_operand_missing'
+    : operands.some((id) => level(id) === 0) ? 'identity_zero_level'
+      : operands.some(unitless) ? 'identity_frame_missing' : null;
+  return reason === null ? null
+    : composeIdentityNotEvaluatedAsk([{ code: IDENTITY_NOT_EVALUATED_CODE, identity: { node_id: nodeId, participants: operands, withheld_reason: reason } }], graph);
 }
