@@ -104,6 +104,34 @@ describe('the receipt binding (`userWrittenLinksForRunPair`), on the j3rw pair',
     const other = receipt(edited, 0.1, 0.2);
     expect(userWrittenLinksForRunPair(facts, delta(), [{ fact: other, created_at: '2026-10-06T03:05:00.000Z' }])).toEqual([]);
   });
+  it('⭐ two user edits between the Runs that chain prior mean → current mean → that link (buddy r1 P2-1), in any input order', () => {
+    const m1 = meanOf(J3RW.s1, edited); const m2 = meanOf(J3RW.s2, edited); const mid = (m1 + m2) / 2;
+    const first = { fact: receipt(edited, m1, mid), created_at: '2026-10-06T03:03:00.000Z' };
+    const second = { fact: receipt(edited, mid, m2), created_at: '2026-10-06T03:06:00.000Z' };
+    expect(userWrittenLinksForRunPair(facts, delta(), [first, second])).toEqual([edited]);
+    expect(userWrittenLinksForRunPair(facts, delta(), [second, first])).toEqual([edited]);
+  });
+  it('a chain with a gap (something else moved the link between two edits) → none', () => {
+    const m1 = meanOf(J3RW.s1, edited); const m2 = meanOf(J3RW.s2, edited); const mid = (m1 + m2) / 2;
+    const first = { fact: receipt(edited, m1, mid), created_at: '2026-10-06T03:03:00.000Z' };
+    const second = { fact: receipt(edited, mid + 0.05, m2), created_at: '2026-10-06T03:06:00.000Z' };
+    expect(userWrittenLinksForRunPair(facts, delta(), [first, second])).toEqual([]);
+  });
+  it('a matching write beside an EARLIER one that does not chain (the link was moved by something else in between) → none', () => {
+    const stray = { fact: receipt(edited, 0.3, 0.4), created_at: '2026-10-06T03:02:00.000Z' };
+    expect(userWrittenLinksForRunPair(facts, delta(), [stray, { fact: own, created_at: '2026-10-06T03:05:00.000Z' }])).toEqual([]);
+  });
+  it('⭐ a CLAMPED link (Run 1 restored β 1.2 from clamped_from; persisted 1): the user\'s 1 → after write is theirs (buddy r1 P2-2)', () => {
+    const s1 = structuredClone(J3RW.s1);
+    (s1.links as Rec[]).find((l) => `${l.from}->${l.to}` === edited)!.mean = 1.2;
+    const clampedFacts = [run('run_1', T1, s1), run('run_2', T2, J3RW.s2)];
+    const write = { fact: receipt(edited, 1, meanOf(J3RW.s2, edited)), created_at: '2026-10-06T03:05:00.000Z' };
+    expect(userWrittenLinksForRunPair(clampedFacts, delta(), [write])).toEqual([edited]);
+    // CONTROL: the same receipt against an unclamped Run-1 mean that is not 1 → none.
+    const s1b = structuredClone(J3RW.s1);
+    (s1b.links as Rec[]).find((l) => `${l.from}->${l.to}` === edited)!.mean = 0.9;
+    expect(userWrittenLinksForRunPair([run('run_1', T1, s1b), run('run_2', T2, J3RW.s2)], delta(), [write])).toEqual([]);
+  });
   it('a pair whose Runs cannot be read → none (fail closed)', () => {
     expect(userWrittenLinksForRunPair([], delta(), [{ fact: own, created_at: '2026-10-06T03:05:00.000Z' }])).toEqual([]);
   });
