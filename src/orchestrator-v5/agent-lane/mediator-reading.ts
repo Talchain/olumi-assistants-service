@@ -190,7 +190,9 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const id = m.id;
     if (typeof id !== 'string' || out.has(id) || id === goal.id || !['factor', 'risk', 'outcome'].includes(String(m.kind)) || !reaches.has(id)) continue;
     const mv = view.get(id);
-    if (mv === undefined || unitOf(mv) !== undefined || hasLevel(m)) continue;
+    // ⛔ Codex r1 #2652 P1: the part needs its OWN frame. With none, the writer cannot convert an answer into it
+    // (`unconvertible`), so asking for one would be a dead end with an invitation; no reading, and the plain words stand.
+    if (mv === undefined || unitOf(mv) !== undefined || hasLevel(m) || resolveMagnitudeFrame(mv) === undefined) continue;
     const kids = edges.filter(e => e.from === id && reaches.has(e.to));
     if (kids.length !== 1 || typeof kids[0]!.to !== 'string') continue;
     const childId = kids[0]!.to as string;

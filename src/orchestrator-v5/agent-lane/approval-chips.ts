@@ -27,6 +27,7 @@ import { identityApproveMessage, identityReadingOf } from './identity-card.js';
 import { linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf } from './stated-by-user.js';
 import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
+import { statedInOneOf } from '../system-events/link-effect-edit.js';
 
 /**
  * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
@@ -34,7 +35,10 @@ import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
  * gauge was never built, and the prepared change had no Approve.
  */
 const POINTS_SAID: readonly string[] = [...POINTS_SPELLINGS, 'points'];
-const meetsReading = (stated: unknown, reading: string): boolean => stated === reading
+// ⛔ Codex r1 #2652 P1: the card takes the WRITER's own unit rule (`statedInOneOf`), so an answer the door writes ("GBP/month"
+// against a £/month reading) never loses its card. Exact where the writer is exact: points never meet "% of appointments",
+// and £ never meets % (#2641's twins).
+const meetsReading = (stated: unknown, reading: string): boolean => stated === reading || statedInOneOf(stated, [reading])
   || (reading.trim() === '%' && typeof stated === 'string' && POINTS_SAID.includes(stated.trim().toLowerCase().replace(/\s+/g, ' ')));
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {

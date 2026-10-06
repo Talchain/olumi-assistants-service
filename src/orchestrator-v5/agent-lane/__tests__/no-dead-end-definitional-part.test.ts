@@ -76,6 +76,8 @@ describe('THE ONE READER: a definitional part takes its total\'s unit', () => {
     ['a second out-link on the goal path', (g: Rec) => { g.edges.push(placeholder('lost', 'cost', 0.2)); }],
     ['a part that holds its own level', (g: Rec) => { g.nodes.find((n: Rec) => n.id === 'lost').observed_state = { value: 0.1, raw_value: 3000, cap: 30000, source: 'user_override' }; }],
     ['a unit-bearing label that does not fit', (g: Rec) => { g.nodes.find((n: Rec) => n.id === 'lost').label = 'Lost hours per week'; }],
+    // ⛔ Codex r1 P1: with no frame the writer cannot convert an answer (`unconvertible`), so no reading and no ask.
+    ['a part with no frame of its own', (g: Rec) => { delete g.nodes.find((n: Rec) => n.id === 'lost').scale_frame; }],
   ])('no reading: %s', (_name, mutate) => {
     const g = partGraph();
     mutate(g);
@@ -118,6 +120,13 @@ describe('SERVED FA1 (e7, guest T1b draft 46d37fb7, CEE d619668a)', () => {
     expect(w.message).toContain('Roughly how much does each £1 / month of ‘Monthly starter support…’ change ‘MRR lost to starter sup…’, in £/month?');
     expect(w.message).not.toContain('Set it to see how much it matters.');
   });
+  it('⛔ Codex r1 P1: the served graph with the risk\'s frame removed asks nothing it cannot write (served words, no first_ask)', () => {
+    const g = structuredClone(fx.graph);
+    delete g.nodes.find((n: Rec) => n.id === TO).scale_frame;
+    const w = placeholderGoalWarning(g, unsizedLeaderGoalPaths(g, ['raise_prices_10', 'launch_starter_tier', 'keep_pricing_as_it_is']), CODE);
+    expect(w).not.toHaveProperty('first_ask');
+    expect(w.message).toBe(fx.placeholder_warning.message);
+  });
   it('the answer the ask invites is WRITTEN on the served graph (it was refused unit_mismatch)', () => {
     const r = write(fx.graph, FROM, TO, ANSWER, 'every £1,000 a month of starter support cost loses about £300 a month of MRR');
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
@@ -156,6 +165,28 @@ describe('THE CARD: the reading is said for approval (d5 words)', () => {
     const words = card(partGraph())!;
     expect(words).toContain('Olumi treats ‘MRR lost to support strain’ as part of ‘MRR’, so it’s measured in £/month; correct that if it’s wrong.');
     expect(words).toContain('Olumi measures ‘Support cost’ in £/month, from its own estimate of the link from ‘Support budget’; correct that if it’s wrong.');
+  });
+  // ⛔ Codex r1 P1: an answer the door WRITES never loses its card. Each spelling goes through the real writer AND the card.
+  it.each(['GBP/month', '£ per month', '£/months', '£/MONTH'])('the writer takes "%s" for £/month, and so does the card', (unit) => {
+    const g = partGraph();
+    const effect = { ...ANSWER, amount_unit: unit, per_source_change_unit: unit };
+    expect(write(g, 'cost', 'lost', effect, ANSWER_QUOTE).kind).toBe('mutated');
+    const words = linkEffectReadingOf({ operations: [{ op: 'set_link_effect', path: 'cost::lost', value: { from: 'cost', to: 'lost', effect,
+      quote: ANSWER_QUOTE, edge_token: 't', mediator_readings: linkEffectMediatorReadings(g, 'cost', 'lost') } }] } as never,
+    { from: 'Support cost', to: 'MRR lost to support strain' });
+    expect(words).toContain('so it’s measured in £/month');
+    expect(words).toContain('Olumi measures ‘Support cost’ in £/month');
+  });
+  it.each([
+    ['sized_parents', 'from'], ['definitional_part', 'to'], ['gauge', 'to'],
+  ] as const)('CLASS (%s): a synonym of the reading meets it; another quantity never does', (via, end) => {
+    const card = (stated: string, reading: string) => linkEffectReadingOf({ operations: [{ op: 'set_link_effect', path: 'a::b', value: { from: 'a', to: 'b',
+      effect: { amount: 5, amount_unit: end === 'to' ? stated : '£/month', per_source_change: 1, per_source_change_unit: end === 'from' ? stated : '£/month' },
+      quote: 'q', edge_token: 't', mediator_readings: [{ node_id: end === 'from' ? 'a' : 'b', via, unit: reading, other_label: 'Other' }] } }] } as never,
+    { from: 'A', to: 'B' });
+    expect(card('GBP/month', '£/month')).toBeDefined();
+    expect(card('customers', '£/month')).toBeUndefined();
+    expect(card('£', '%')).toBeUndefined();
   });
   it('CONTROL: not definitional → no part reading on the card', () => {
     expect(linkEffectMediatorReadings(notDefinitional(partGraph()), 'cost', 'lost').map((m) => m.via)).toEqual(['sized_parents']);
