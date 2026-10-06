@@ -43,6 +43,28 @@ describe('the licence says when the chances count Olumi\'s doubt about the USER\
   it('only links on a licensed option\'s goal path: a user link off every option\'s path → nothing', () => {
     expect(existence([olumiLink('price', 'mrr', 0.8), userLink('office', 'mrr', 0.8)])).toBeUndefined();
   });
+  it('Codex r1 #1: the SCORED goal\'s path, never the first goal\'s', () => {
+    const g = graph([olumiLink('price', 'mrr', 1), userLink('price', 'nps', 0.8)]);
+    g.nodes.push({ id: 'nps', kind: 'goal', label: 'NPS', goal_threshold_raw: 40, goal_threshold: 0.4, goal_threshold_unit: 'points', goal_direction: '>=' });
+    const onMrr = goalChanceLicenceOf(env(['a', 0.5], ['b', 0.35]), g, 'mrr');
+    expect(onMrr, 'precondition: the Run is licensed').not.toBeNull();
+    expect(onMrr!.user_link_existence).toBeUndefined();
+    expect(goalChanceLicenceOf(env(['a', 0.5], ['b', 0.35]), g, 'nps')?.user_link_existence).toEqual({ links: 1, one_in: 5 });
+  });
+  it('Codex r1 #2: a relationship the user\'s BRIEF stated counts (brief_extraction); an Olumi hypothesis they only accepted does not', () => {
+    const brief = { ...olumiLink('price', 'mrr', 0.8), provenance: { source: 'brief_extraction', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } } };
+    expect(existence([brief])).toEqual({ links: 1, one_in: 5 });
+    const accepted = { ...olumiLink('price', 'mrr', 0.8), provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } } };
+    expect(existence([accepted])).toBeUndefined();
+  });
+  it('Codex r1 #3: an IDENTITY edge (ISL fixes it, no Bernoulli gate) never counts', () => {
+    const g = graph([userLink('price', 'mrr', 0.8), olumiLink('customers', 'mrr', 1)]);
+    g.nodes[0].nonlinear_identity = { op: 'product', factor_ids: ['price', 'customers'] };
+    const l = goalChanceLicenceOf(env(['a', 0.5], ['b', 0.35]), g, 'mrr');
+    expect(l, 'precondition: the Run is licensed').not.toBeNull();
+    expect(l!.user_link_existence).toBeUndefined();
+  });
+
   it('a Run with no licence (no stated target) carries no record at all, so no line', () => {
     const g = graph([userLink('price', 'mrr', 0.8)]);
     delete g.nodes[0].goal_threshold_raw; delete g.nodes[0].goal_threshold;

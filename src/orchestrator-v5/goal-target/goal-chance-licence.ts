@@ -123,7 +123,7 @@ export function goalChanceLicenceOf(
   const form: GoalChanceForm = superlative
     ? (allLikelyToMiss ? 'highest_all_likely_to_miss' : 'highest')
     : allLikelyToMiss ? 'all_likely_to_miss' : same.length >= 2 ? 'similar' : 'each';
-  const existence = userLinkExistenceOn(graph, licensed);
+  const existence = userLinkExistenceOn(graph, goalId, licensed);
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
@@ -140,14 +140,19 @@ export function goalChanceLicenceOf(
 }
 
 /**
- * The user-stated links (`linkSizing` = 'user', the estate's one sizing authority) that lie on a licensed option's path to
- * the goal and carry `exists_probability` < 1; `undefined` when there are none. A link is on that path when its source is
- * reached from the option's intervened factors and its target reaches the goal.
+ * The user-stated relationships on a licensed option's path to THE SCORED goal that carry `exists_probability` < 1;
+ * `undefined` when there are none. A link is on that path when its source is reached from the option's intervened
+ * factors and its target reaches the goal (Codex r1 #2637: the goal the Run scored, never the first one).
+ *  · USER-STATED is the relationship's AUTHORSHIP, not its size (Codex r1): a link the user sized (`linkSizing` 'user') or
+ *    one their brief stated (`brief_extraction`, construction's mapping of an explicit brief relationship). An Olumi
+ *    hypothesis the user only accepted is not theirs.
+ *  · An IDENTITY edge (into a node whose `nonlinear_identity` lists its source) is fixed by ISL, never Bernoulli-gated
+ *    (Codex r1: robustness_analyzer_v2 bypasses the gate), so it never counts.
  */
-function userLinkExistenceOn(graph: unknown, optionIds: readonly string[]): { links: number; one_in?: number } | undefined {
+function userLinkExistenceOn(graph: unknown, goalId: unknown, optionIds: readonly string[]): { links: number; one_in?: number } | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
-  const goal = nodes.find((n) => n.kind === 'goal');
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
   if (goal === undefined) return undefined;
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind] as const));
   const walkable = (id: unknown): boolean => { const k = kindOf.get(id); return k !== undefined && k !== 'option' && k !== 'decision'; };
@@ -170,7 +175,13 @@ function userLinkExistenceOn(graph: unknown, optionIds: readonly string[]): { li
     grew = false;
     for (const e of directed) if (reached.has(e.from) && !reached.has(e.to) && walkable(e.to)) { reached.add(e.to); grew = true; }
   }
-  const held = directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && linkSizing(e) === 'user'
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const userStated = (e: Rec): boolean => linkSizing(e) === 'user' || (isRec(e.provenance) && e.provenance.source === 'brief_extraction');
+  const identityEdge = (e: Rec): boolean => {
+    const id = byId.get(e.to)?.nonlinear_identity;
+    return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(e.from);
+  };
+  const held = directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && userStated(e) && !identityEdge(e)
     && typeof e.exists_probability === 'number' && Number.isFinite(e.exists_probability) && e.exists_probability < 1);
   if (held.length === 0) return undefined;
   const values = [...new Set(held.map((e) => e.exists_probability as number))];
