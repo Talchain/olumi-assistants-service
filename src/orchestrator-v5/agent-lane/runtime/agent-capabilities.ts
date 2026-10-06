@@ -186,7 +186,7 @@ import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-ru
 import { selectedRunDeltaForModel } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, deniesWithoutAFigure, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -1587,10 +1587,10 @@ function linkEffectUnitAskWords(ask: string, from: { label: string }, to: { labe
 }
 
 /**
- * ⭐ FU-1 (DL 0df0e1, "never re-ask what the user has closed"): a DENIAL that writes no figure ("It doesn't change.") ends
- * the ask (`deniesWithoutAFigure`). Nothing is recorded and nothing is asked: the restatement ask itself promised "If “T”
- * does not change, the link stays as it is", so asking again for "the figures you wrote" breaks that promise. A denial that
- * writes a figure (a correction, "… 50, not 20") still gets its ask (Codex r1 on #2664 P1).
+ * ⭐ FU-1 (DL 0df0e1, "never re-ask what the user has closed"): a DENIAL that says the link does not change at all ("It
+ * doesn't change.", `saysNoChange`) ends the ask. Nothing is recorded and nothing is asked: the restatement ask itself
+ * promised "If “T” does not change, the link stays as it is", so asking again for "the figures you wrote" breaks that
+ * promise. Any other denial (a corrected size or direction, a denied figure) still gets its ask (Codex r1 + r2 on #2664).
  */
 function linkEffectDeniedWords(from: { label: string }, to: { label: string }): string {
   return 'Nothing was prepared. Tell the user exactly this: "'
@@ -3505,7 +3505,7 @@ export function createAgentCapabilities(
             fail('not_the_users_figure', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label), from, to));
             continue;
           }
-          if (miss === 'denied' && deniesWithoutAFigure(entryQuote, text)) {
+          if (miss === 'denied' && saysNoChange(entryQuote, text)) {
             fail('not_the_users_statement', linkEffectDeniedWords(from, to));
             continue;
           }
@@ -3638,7 +3638,7 @@ export function createAgentCapabilities(
         const ask = linkEffectStatementAsk(miss, from.label, to.label);
         return { ok: false, mutated: false, refusal: 'not_the_users_figure', question: ask, detail: linkEffectUnitAskWords(ask, from, to) };
       }
-      if (miss === 'denied' && deniesWithoutAFigure(quote, text)) {
+      if (miss === 'denied' && saysNoChange(quote, text)) {
         return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss, detail: linkEffectDeniedWords(from, to) };
       }
       if (miss !== null) {

@@ -38,15 +38,18 @@ const grouped = (said: string, quote: string) => world(C).caps.proposeLinkEffect
 const DENIALS = [
   ['the no-change answer', 'It doesn’t change.', 'It doesn’t change'],
   ['a straight-quote no-change answer', "It doesn't change.", "It doesn't change"],
+  ['"no effect at all" (Codex r2 on #2664: an affirmative no-change, said another way)', 'It has no effect at all.', 'It has no effect at all'],
 ] as const;
 /**
- * Codex r1 on #2664 P1: a denial that WRITES A FIGURE is a correction or a denied figure, not "it doesn't change". It closes
- * nothing: it keeps its ask, exactly as before FU-1. PRECONDITION on each: the binder still reads a denial.
+ * Codex r1 + r2 on #2664 P1: a denial that is not "it doesn't change at all" — a corrected figure or direction, a denied
+ * figure, a size — closes nothing: it keeps its ask, exactly as before FU-1. PRECONDITION on each: the binder reads a denial.
  */
 const FIGURED_DENIALS = [
   ['a corrected figure', 'Every £1 on the Pro price loses us 50 paying subscribers, not 20.', 'Every £1 on the Pro price loses us 50 paying subscribers, not 20'],
   ['a denied figure (PR Review\'s row)', 'Every £1 on the Pro price does not lose us 50 paying subscribers.', 'Every £1 on the Pro price does not lose us 50 paying subscribers'],
   ['figure-free words quoted out of a correction', 'It doesn’t change by 50, more like 20.', 'It doesn’t change'],
+  ['a corrected direction, no figure (Codex r2 on #2664 P1)', 'It doesn’t fall; it rises.', 'It doesn’t fall; it rises'],
+  ['a size, no figure ("much")', 'It doesn’t change much.', 'It doesn’t change much'],
 ] as const;
 const FIGURES_ASK = 'How much does “Pro plan price” move “Pro plan paying subscribers”, using the figures you wrote?';
 

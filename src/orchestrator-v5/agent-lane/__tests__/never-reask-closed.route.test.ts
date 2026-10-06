@@ -238,6 +238,8 @@ describe('withoutAskedQuestion (the one rule)', async () => {
     ['won\'t ask it again, in quotes', `I won’t ask “${QUESTION}” again.`],
     ['shouldn\'t keep asking it, quoted at the end', `I shouldn’t keep asking “${QUESTION}”`],
     ['the words inside another word', `Something${QUESTION}`],
+    ['quoted across a sentence break (Codex r2 on #2664 P1)', `I won\u2019t ask \u201cI need a size for that link. ${QUESTION}\u201d`],
+    ['quoted across a sentence break, straight quotes', `I won't ask "I need a size for that link. ${QUESTION}" again.`],
   ] as const)('⭐ never asked, only mentioned (%s) → the question is still asked', (_n, reply) => {
     expect(withoutAskedQuestion(SAY, [reply])).toBe(SAY);
   });
@@ -245,6 +247,7 @@ describe('withoutAskedQuestion (the one rule)', async () => {
     ['asked as its own sentence', `I need a size for that link. ${QUESTION}`],
     ['asked after a colon', `One question: ${QUESTION}`],
     ['asked on its own line, in bold', `Thanks.\n**${QUESTION}**`],
+    ['asked after a closed quotation (Codex r2 on #2664: the CONTROL)', `You said \u201cabout 2 customers\u201d. I need a size for that link. ${QUESTION}`],
   ] as const)('CONTROL: asked (%s) → not asked again', (_n, reply) => {
     expect(withoutAskedQuestion(SAY, [reply])).toBe(REASON);
   });

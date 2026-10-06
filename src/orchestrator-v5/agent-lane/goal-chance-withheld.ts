@@ -253,23 +253,35 @@ const SENTENCE_BREAK = /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:\p{L}\.){2,})\s+(?=[\p{Lu
 const REPLY_BREAK = /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:\p{L}\.){2,})\s+|\n+/u;
 /** A quotation mark that OPENS a quote. */
 const OPENING_QUOTE = /[\u0022\u0027\u2018\u201A\u201B\u201C\u201E\u201F`]$/u;
+/**
+ * Whether a double quotation is still open at the end of `text` (“ … ”, or an odd number of straight "): a question
+ * quoted across a sentence break ("I won't ask “I need a size. …?”") is still a mention (Codex r2 on #2664 P1).
+ * Single quotes are not counted (’ is also the apostrophe); one opening right before the question is `OPENING_QUOTE`'s.
+ */
+function insideQuotation(text: string): boolean {
+  const count = (re: RegExp): number => (text.match(re) ?? []).length;
+  return count(/\u201C/gu) > count(/\u201D/gu) || count(/"/gu) % 2 === 1;
+}
 
 /**
  * Whether `reply` ASKED `question`: one of its sentences or lines ends with the question's words (`plainWords`), and the
- * question there starts a clause and is not opened by a quotation mark. A reply that only MENTIONS the question did not ask
+ * question there starts a clause and is not inside a quotation. A reply that only MENTIONS the question did not ask
  * it: "I won't ask “…?” again", "I will avoid asking “…?” until we agree the units" (Codex r1 on #2664 P1). Emphasis is
  * forgiven: `**…?**`.
  */
 function askedIn(reply: string, question: string): boolean {
   const asked = plainWords(question);
   if (asked === '') return false;
+  let from = 0;
   return reply.split(REPLY_BREAK).some((part) => {
+    const start = Math.max(reply.indexOf(part, from), from);
+    from = start + part.length;
     if (!plainWords(part).endsWith(asked)) return false;
     // Where the question starts in this part: the shortest tail that reads as the question.
     for (let at = part.length - 1; at >= 0; at -= 1) {
       if (plainWords(part.slice(at)) !== asked) continue;
       const before = part.slice(0, at).replace(/(?:\*\*|__|[*_\s])+$/u, '');
-      return !OPENING_QUOTE.test(before) && !/[\p{L}\p{N}]$/u.test(before);
+      return !OPENING_QUOTE.test(before) && !/[\p{L}\p{N}]$/u.test(before) && !insideQuotation(reply.slice(0, start + at));
     }
     return true;
   });
