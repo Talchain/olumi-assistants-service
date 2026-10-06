@@ -224,6 +224,7 @@ export {
   type HandlerInvocationFailedCause,
 } from '../handler-errors.js';
 import { currentProviderPolicy } from '../../../adapters/llm/provider-policy.js';
+import { agentFactorEnrichments } from '../../agent-lane/factor-review.js';
 
 // ============================================================================
 // Locked assistant_text templates (Refinement R1)
@@ -2902,6 +2903,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (withheldBecauseUnsizedPath !== undefined) {
       response = { ...response, [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath };
     }
+    // Option C: compute in-process before the existing fact commit; no callback and no brief carry.
+    const factorEnrichments = await agentFactorEnrichments(snapshot.rawPersistedGraph ?? snapshot.graph,
+      (response as Record<string, unknown>).factor_sensitivity, invocation.requestId);
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -2917,7 +2921,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // Every new Run records the existing projection version in persisted
         // enrichment. Transport strips this internal key; the provider response
         // is unchanged. Freshness still uses the one analysis-affecting hash.
-        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
+        enrichment: stampRunAnalysisProjection({ ...response as Record<string, unknown>,
+          ...(factorEnrichments !== undefined ? { factor_enrichments: factorEnrichments } : {}) }),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run
