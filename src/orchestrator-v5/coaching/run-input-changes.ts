@@ -159,11 +159,20 @@ export interface WithinBandLinkMove {
 
 const OLUMI_SIZED: ReadonlySet<string> = new Set(['olumi_estimate', 'olumi_accepted', 'placeholder']);
 
+type RecordedNaturalEffect = RunInputSnapshot['links'][number]['natural_effect'];
+/** Both Runs recorded the link's natural size and it is the same: amount, unit and the same source change. */
+function sameNaturalSize(pe: RecordedNaturalEffect, ce: RecordedNaturalEffect): boolean {
+  return pe !== undefined && ce !== undefined && pe.amount === ce.amount && pe.amount_unit === ce.amount_unit
+    && pe.per_source_change === ce.per_source_change && pe.per_source_change_unit === ce.per_source_change_unit;
+}
+
 export function linksMovedWithinBand(
   prior: RunInputSnapshot,
   current: RunInputSnapshot,
   /** The persisted receipt of a user write that moved `from → to` from `priorMean` to `currentMean`; absent = none. */
   userWroteLink: (from: string, to: string, priorMean: number, currentMean: number) => boolean = () => false,
+  /** S5t-W: the link's whole move between the Runs is a frame refit's rescale (`frameRefitLinksForRunPair`); absent = none. */
+  refitMovedLink: (from: string, to: string, priorMean: number, currentMean: number) => boolean = () => false,
 ): WithinBandLinkMove[] {
   const key = (l: { from: string; to: string }) => `${l.from}->${l.to}`;
   const pL = byId(prior.links, key);
@@ -174,6 +183,9 @@ export function linksMovedWithinBand(
     const cl = cL.get(id)!;
     if (pl === undefined || pl.band === undefined || cl.band === undefined || pl.band !== cl.band) continue;
     if (pl.mean === cl.mean || Math.sign(pl.mean) !== Math.sign(cl.mean)) continue;
+    // ⛔ A FRAME CHANGE IS NEVER A CHANGE (Science Q2 6009456901; e7 #87 6011176086): a move the refit's receipt accounts for
+    // whole, or one both Runs record at the same natural size (the rule `diffRunInputs` applies to a band row), is the frame's.
+    if (refitMovedLink(cl.from, cl.to, pl.mean, cl.mean) || sameNaturalSize(pl.natural_effect, cl.natural_effect)) continue;
     const userWrite = cl.sizing === 'user'
       && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined && pl.authorship_digest !== cl.authorship_digest
       && userWroteLink(cl.from, cl.to, pl.mean, cl.mean);
@@ -315,8 +327,7 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     // which Olumi refits (#2631) or a goal's level re-frames (`normalising-goal-frame.ts`), while the link's natural size
     // stays put. When both Runs recorded that size and it is the same (amount, unit and the same source change), the band
     // move is the frame's, never a `strength` row. The mean move it carries stays partial below (coverage unchanged).
-    const sameNaturalEffect = pe !== undefined && ce !== undefined && pe.amount === ce.amount && pe.amount_unit === ce.amount_unit
-      && pe.per_source_change === ce.per_source_change && pe.per_source_change_unit === ce.per_source_change_unit;
+    const sameNaturalEffect = sameNaturalSize(pe, ce);
     const bandMoved = !sameNaturalEffect && pl.band !== undefined && cl.band !== undefined && pl.band !== cl.band;
     if (bandMoved) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
     if (pl.sizing !== undefined && cl.sizing !== undefined) {

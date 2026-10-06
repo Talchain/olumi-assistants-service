@@ -31,7 +31,7 @@ import { claimPermissionsFrom } from './first-analysis.js';
 import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { placeholderZeroFactorIds } from '../coaching/unvalued-driver-card.js';
-import { goalChanceWithheldForAgent } from './goal-chance-withheld.js';
+import { goalChanceWithheldForAgent, withoutAskedQuestion } from './goal-chance-withheld.js';
 import { runExplanationChip, RUN_EXPLANATION_UNAVAILABLE_TEXT, type RunExplanationRead } from './run-explanation.js';
 import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany } from './root-line.js';
 import { agentNoLeaderSentence } from './withheld-leader-fail-closed.js';
@@ -61,7 +61,9 @@ export interface DecisionReviewTurn {
   readonly steps: readonly DecisionReviewStep[];
 }
 
-export type DecisionReviewRead = RunExplanationRead & { readonly graph?: unknown; readonly analysisReady?: unknown };
+export type DecisionReviewRead = RunExplanationRead & { readonly graph?: unknown; readonly analysisReady?: unknown;
+  /** The Agent's recent answers (NEVER RE-ASK, G1b d4): a withheld reason's question already asked is not asked again. */
+  readonly recentReplies?: readonly string[] };
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -150,8 +152,9 @@ export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead):
   const withheld = goalChanceWithheldForAgent(analysisResult);
   const withheldSay = str(withheld?.say);
   if (withheldSay !== null) {
-    lines.push(survivesReplyEditors(withheldSay, graph, analysisReady) ? withheldSay
-      : str(goalChanceWithheldForAgent(withoutWarningWords(analysisResult))?.say) ?? withheldSay);
+    const said = withoutAskedQuestion(survivesReplyEditors(withheldSay, graph, analysisReady) ? withheldSay
+      : str(goalChanceWithheldForAgent(withoutWarningWords(analysisResult))?.say) ?? withheldSay, read.recentReplies ?? []);
+    if (said.trim() !== '') lines.push(said);
   }
 
   // F5: the most sensitive link of the stored graph the Run carries; never names an option. The test is never promised in

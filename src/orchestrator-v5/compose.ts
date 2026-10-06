@@ -101,6 +101,8 @@ function stripEdgeContinuityLabels<T>(snapshot: T): T {
   const projected = { ...(snapshot as Record<string, unknown>) };
   delete projected.from_label;
   delete projected.to_label;
+  // S5t-W: the refit's rescale record is S7's internal carrier (build-run-delta.ts `frameRefitMove`), never wire.
+  delete projected.frame_refit;
   return projected as T;
 }
 
