@@ -86,6 +86,16 @@ describe('D3 step 1 — the goal-chance seam gate', () => {
     expect(gateWarning(out)?.causes[0]).toEqual({ option_id: 'a', cause: 'ceiling_not_minimised' });
   });
 
+  it('MIRROR (Review Desk 6b, #2618): a held FLOOR the run MINIMISED (its label read "reduce") scored P(goal ≤ X): floor_minimised', () => {
+    const g = { nodes: [{ id: 'goal', kind: 'goal', label: 'Reduce support tickets', goal_direction: '>=', goal_threshold_raw: 400, goal_threshold_unit: 'tickets' }], edges: [] };
+    expect(goalChanceTargetCause(g, 'goal')).toBe('floor_minimised');
+    const out = withholdUnusableGoalChances(envelope(0.15), g, 'goal') as Json;
+    expect(gateWarning(out)?.causes[0]).toEqual({ option_id: 'a', cause: 'floor_minimised' });
+    // CONTROL: the same floor on a goal the run did not minimise is a chance of meeting it — nothing withheld.
+    const grow = { nodes: [{ ...g.nodes[0], label: 'Support tickets handled' }], edges: [] };
+    expect(goalChanceTargetCause(grow, 'goal')).toBeNull();
+  });
+
   it('the threshold CEE holds on the goal (raw figure absent on an older graph) is the target the Run scored; NONE is not', () => {
     const held = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR', goal_threshold: 0.8, goal_threshold_unit: '£/month', goal_direction: '>=' }], edges: [] };
     expect(goalChanceTargetCause(held, 'goal')).toBeNull();

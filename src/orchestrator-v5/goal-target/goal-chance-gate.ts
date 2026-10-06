@@ -22,7 +22,7 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
 
 /** Why a goal chance was not shown. The first three are run-wide (the target); the last two are the figure's own. */
 export type GoalChanceUnusable =
-  | 'no_stated_target' | 'no_stated_direction' | 'no_target_unit' | 'ceiling_not_minimised'
+  | 'no_stated_target' | 'no_stated_direction' | 'no_target_unit' | 'ceiling_not_minimised' | 'floor_minimised'
   | 'not_finite' | 'outside_unit_interval';
 
 /** The run-wide cause, read off the goal the Run scored: null when the goal states a target, direction and unit. */
@@ -49,6 +49,9 @@ export function goalChanceTargetCause(graph: unknown, goalId: unknown): GoalChan
   if (target.held === undefined && !isChange) return 'no_stated_direction';
   // A ceiling is a chance of staying AT OR BELOW it only where the run minimised; otherwise ISL scored P(goal ≥ X).
   if ((target.held === '<=' || target.held === '<') && resolveGoalDirection(graph, goalId)?.direction !== 'minimise') return 'ceiling_not_minimised';
+  // The mirror (Review Desk 6b, #2618): a held FLOOR on a goal the run MINIMISED (a "reduce" label outranks a held floor in
+  // `resolveGoalDirection`) was scored as P(goal ≤ X) — not a chance of meeting "at least X".
+  if ((target.held === '>=' || target.held === '>') && resolveGoalDirection(graph, goalId)?.direction === 'minimise') return 'floor_minimised';
   return null;
 }
 
