@@ -219,7 +219,7 @@ describe('(c) WIRING: both Run replies owe the ask (the live turn and its replay
   });
 });
 
-describe('(f) a placeholder path beside an untestable target: the chat asks the withhold\'s OWN named link (g1-b501 draft 1)', () => {
+describe('(f) a placeholder path beside an untestable target: the chat discloses the target\'s complete requirement (g1-b501 draft 1)', () => {
   const D1 = JSON.parse(readFileSync(new URL('./fixtures/served-g1b501-draft1-placeholder-target.json', import.meta.url), 'utf8')) as Rec;
   const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
 
@@ -229,9 +229,10 @@ describe('(f) a placeholder path beside an untestable target: the chat asks the 
     expect(placeholder.message).toMatch(/Set (it|them) to see how much (it|they) matters?\.$/);
   });
 
-  it('RED (served: the reply was the bare opening, then "clarify whether support affects…"): the say carries the placeholder\'s ask', () => {
+  it('W5 DL re-pin: the say carries the target\'s complete ask, including links beyond the placeholder subset', () => {
     const say = goalChanceWithheldForAgent(D1.analysis_result)!.say;
-    expect(say).toBe(`This run doesn’t show how often each option reaches the goal’s target. ${placeholder.message}`);
+    const target = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!;
+    expect(say).toBe(`This run doesn’t show how often each option reaches the goal’s target. ${target.say}`);
   });
 
   it('CONTROL: a target-only withhold that kept the shares keeps its own tail (no placeholder words appear)', () => {
@@ -247,13 +248,13 @@ describe('Codex buddy r2', () => {
     expect(identityAskLineOwed([{ ran: true, identity_ask_say: SERVED_ASK }, { ok: true, mutated: true }], 'Ready.')).toBe(SERVED_ASK);
   });
 
-  it('P2: the Agent already quoted the placeholder\'s ask → only the opening is owed, never the ask twice', () => {
+  it('W5 DL re-pin: quoting only the placeholder subset still owes the complete target requirement', () => {
     const D1 = JSON.parse(readFileSync(new URL('./fixtures/served-g1b501-draft1-placeholder-target.json', import.meta.url), 'utf8')) as Rec;
     const chance = goalChanceWithheldForAgent(D1.analysis_result)!;
     const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
     const run = { ran: true, goal_chance: chance };
-    expect(goalChanceLineOwed([run], `Here is the run. ${placeholder.message}`)).toBe('This run doesn’t show how often each option reaches the goal’s target.');
-    expect(goalChanceLineOwed([run], `This run doesn’t show how often each option reaches the goal’s target. ${placeholder.message}`)).toBeNull();
+    expect(goalChanceLineOwed([run], `Here is the run. ${placeholder.message}`)).toBe(chance.say);
+    expect(goalChanceLineOwed([run], `This run doesn’t show how often each option reaches the goal’s target. ${placeholder.message}`)).toBe(chance.say);
     // Control: a reply that says neither owes the whole line.
     expect(goalChanceLineOwed([run], 'Here is the run.')).toBe(chance.say);
   });
