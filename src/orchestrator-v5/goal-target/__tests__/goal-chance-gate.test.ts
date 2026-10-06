@@ -107,6 +107,18 @@ describe('D3 step 1 — the goal-chance seam gate', () => {
       expect(withholdUnusableGoalChances(envelope(0.15), g, 'goal')).toEqual(envelope(0.15));
     });
 
+    it('CONTROL (Codex r1): "at least a 20% cut" — held ">=" on a NEGATIVE typed change — points DOWN; minimising is its sense', () => {
+      for (const frame of ['change_rel', 'change_abs'] as const) {
+        const raw = frame === 'change_rel' ? -0.2 : -500;
+        const g = { nodes: [{ id: 'goal', kind: 'goal', label: 'Reduce cloud costs', goal_direction: '>=', goal_threshold_frame: frame,
+          goal_threshold_raw: raw, goal_threshold: raw, goal_threshold_unit: '£/month' }], edges: [] };
+        expect(goalChanceTargetCause(g, 'goal'), frame).toBeNull();
+        // …while a POSITIVE change held as a floor ("grow by at least 20%") on the same minimised goal still conflicts.
+        const up = { nodes: [{ ...g.nodes[0], goal_threshold_raw: -raw, goal_threshold: -raw }], edges: [] };
+        expect(goalChanceTargetCause(up, 'goal'), `${frame} positive`).toBe('floor_minimised');
+      }
+    });
+
     it('MIRROR: "<= 400" on a goal the run MAXIMISED (an "increase" label) scored P(≥400) → withheld, ceiling_not_minimised', () => {
       const g = goalOf('Increase support tickets handled', '<=', 400);
       expect(goalChanceTargetCause(g, 'goal')).toBe('ceiling_not_minimised');

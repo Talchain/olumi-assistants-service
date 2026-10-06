@@ -47,8 +47,13 @@ export function goalChanceTargetCause(graph: unknown, goalId: unknown): GoalChan
   // A ceiling is a chance of staying AT OR BELOW it only where the run minimised; otherwise ISL scored P(goal ≥ X).
   if ((target.held === '<=' || target.held === '<') && resolveGoalDirection(graph, goalId)?.direction !== 'minimise') return 'ceiling_not_minimised';
   // The mirror (Review Desk 6b, #2618): a held FLOOR on a goal the run MINIMISED (a "reduce" label outranks a held floor in
-  // `resolveGoalDirection`) was scored as P(goal ≤ X) — not a chance of meeting "at least X".
-  if ((target.held === '>=' || target.held === '>') && resolveGoalDirection(graph, goalId)?.direction === 'minimise') return 'floor_minimised';
+  // `resolveGoalDirection`) was scored as P(goal ≤ X) — not a chance of meeting "at least X". EXCEPT a NEGATIVE typed change:
+  // "at least a 20% cut" is held `>=` on −20% and points DOWN (`heldGoalPointsUp`, AIQ #75 5901136155), so minimising IS its
+  // sense (Codex buddy r1, #2628).
+  const frame = 'frame' in target ? target.frame : undefined;
+  const value = 'value' in target ? target.value : undefined;
+  const floorPointsDown = (frame === 'change_rel' || frame === 'change_abs' || frame === 'delta') && typeof value === 'number' && value < 0;
+  if ((target.held === '>=' || target.held === '>') && !floorPointsDown && resolveGoalDirection(graph, goalId)?.direction === 'minimise') return 'floor_minimised';
   return null;
 }
 
