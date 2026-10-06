@@ -7,7 +7,21 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.77.0.tgz` ← **THE CURRENT PIN** (SPINE X8, a relationship the user stated is the user's)
+### `talchain-schemas-0.78.0.tgz` ← **THE CURRENT PIN — DRAFT, PRE-PUBLISH** (SD-1 cut 6: a link's size in the user's terms)
+
+⚠ Packed locally (`npm run build && npm pack`) from olumi-schemas PR #89 @ `9ac4a9b70c6ee03c91f7359c42f365c20e5b273c`,
+NOT the registry artefact. Before this PR leaves draft it is replaced by the published `@talchain/schemas@0.78.0`
+(the DL cuts the release), with its registry sha256 / sha1 / sha512 recorded here.
+
+```
+sha256 a33a66851f6355d3d4f212f728cc35e829381d5365381cfacffbe7712cac285a   (local pack, superseded on publish)
+```
+
+0.78.0 adds `RunInputLinkSchema.natural_effect?`, `RunInputField` `'effect'` and `RunInputValueSchema.per?`. ⛔ ORDER (DL,
+6 Oct): CEE vendors 0.78 as a READER first (this PR: the differ reads `natural_effect` and says `effect` rows; nothing
+writes it); the snapshot WRITE lands only once prod CEE serves 0.78, because CEE strictly re-parses stored facts.
+
+### `talchain-schemas-0.77.0.tgz` (historical — no longer vendored as of 0.78.0) (SPINE X8, a relationship the user stated is the user's)
 
 The published `@talchain/schemas@0.77.0` registry artefact (olumi-schemas #88 → main `b0378e7f` = tag `v0.77.0`),
 byte-identical to the copies DGAI #2506 and PLoT #435 vendor:
