@@ -36,7 +36,9 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { collapsedChainIssue, collapsedChains, costOffRevenueLine, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms } from '../unsupported-mechanism.js';
+import { collapsedChainIssue, collapsedChains, costOffRevenueLine, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
+import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
@@ -1371,6 +1373,28 @@ export type ConstructionTrace =
     readonly outcome: 'adopted' | 'kept_first' | 'retry_failed';
   };
 
+/**
+ * G1b's gate (stand-in for MC 21, 6 Oct): whether a Run of this graph would withhold the options' chances because a link on a
+ * goal path is only Olumi's guess. The Run's own two readers (`run-analysis.ts`: the placeholder paths, and the target's P5
+ * codes), each product read as evaluated, as a Run that evaluates it does. Pure.
+ */
+export function chancesWithheldByAGuess(drafted: { readonly nodes: readonly unknown[]; readonly edges: readonly unknown[] }): boolean {
+  // The Run reads the graph its participation guard hands PLoT (`run-analysis-participation-guard.ts`, the one literal): a
+  // node kept out of the calculation, and every link at it, is not there (the £85k draft's kept-out price risk).
+  const out = new Set((drafted.nodes as readonly Record<string, unknown>[])
+    .filter((n) => n.analysis_participation === 'retained_excluded' && n.kind !== 'goal').map((n) => n.id));
+  const nodes = (drafted.nodes as readonly Record<string, unknown>[]).filter((n) => !out.has(n.id));
+  const graph = { nodes, edges: (drafted.edges as readonly Record<string, unknown>[]).filter((e) => !out.has(e.from) && !out.has(e.to)) };
+  const options = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
+  const evaluations = nodes.filter((n) => n.nonlinear_identity !== null && typeof n.nonlinear_identity === 'object').map((n) => {
+    const i = n.nonlinear_identity as Record<string, unknown>;
+    return { node_id: n.id, evaluated: true, operation: i.operation, factor_ids: i.factor_ids };
+  });
+  if (unsizedLeaderGoalPaths(graph, options, evaluations).length > 0) return true;
+  const verdict = targetTestabilityOf(graph, evaluations) as { failures?: readonly { code?: unknown }[] };
+  return (verdict.failures ?? []).some((f) => f.code === 'goal_path_unsized' || f.code === 'goal_path_placeholder');
+}
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -1425,18 +1449,6 @@ export async function buildModelFromBrief(
   };
   // ⛔ A level the brief states for a factor is the user's, whatever the drafter tagged it (R3 5896630173 (2)).
   candidate = creditStatedFactorLevels(apart.model, brief);
-  // ⭐ G1b (Science d5 #87 6011168471): a mechanism the brief neither sizes nor says is not drafted onto the goal path, and is
-  // challenged; a cost never feeds a revenue goal. Before any read, so the retry is drafted from the model without them.
-  const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
-  candidate = unsupported.model;
-  let mechanismsUnmodelled = unsupported.mechanisms;
-  let costsOffRevenue = unsupported.costs;
-  let keptApart = apart.renamed;
-  let notToldApart = apart.ambiguous;
-  let linksSetAside = apart.setAside;
-  const firstCandidate = candidate;
-  let preparation = prepareProvisionalCandidate(candidate);
-  candidate = preparation.candidate;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
   // A link size is the user's only where the brief writes it ABOUT THIS LINK (AIQ #2383 5916497454; P0 PARTNER #2389): the
@@ -1462,6 +1474,31 @@ export async function buildModelFromBrief(
     const minted = withReconcilingProductIdentity(products, brief);
     return minted !== products ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(products, brief), dropped, residual };
   };
+  /**
+   * ⭐ G1b (Science d5 #87 6011168471; DL ruling 6 Oct): a mechanism the brief neither sizes nor says is not drafted onto the
+   * goal path, and is challenged; a cost never feeds a revenue goal. Before any read, so the retry is drafted from the model
+   * without them.
+   * ⛔ ONLY WHERE IT IS WHAT STANDS BETWEEN THE USER AND PER-OPTION CHANCES (stand-in for MC 21, 6 Oct): the cut is applied
+   * when, on a trial admission (this pass's own steps, pure), the drafted model's chances are withheld by a guess on a goal
+   * path and the cut model's are not. Anywhere else the drafted model stands: a short brief's model is Olumi's estimates
+   * throughout, so a cut there would only take a risk the user can see (DL #75 5916217417, Paul 30 Sep: "new models have
+   * fewer risks"; `construction-keeps-drafted-risks.test.ts`) and change no result.
+   */
+  const trialGraph = (c: CandidateModel) => {
+    const a = admitCandidateModel(mintOrFold(prepareProvisionalCandidate(c).candidate).model, {}, brief, goalLevelTheUserWrote(c, brief), writtenAgain, (x) => briefGoalLevel(x, brief), sizeWritten, sizeRangeEnd);
+    return { nodes: a.nodes, edges: a.edges };
+  };
+  const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
+  const cutApplies = unsupported.model !== candidate && chancesWithheldByAGuess(trialGraph(candidate)) && !chancesWithheldByAGuess(trialGraph(unsupported.model));
+  if (cutApplies) candidate = unsupported.model;
+  let mechanismsUnmodelled: readonly UnmodelledMechanism[] = cutApplies ? unsupported.mechanisms : [];
+  let costsOffRevenue: readonly CostOffRevenue[] = cutApplies ? unsupported.costs : [];
+  let keptApart = apart.renamed;
+  let notToldApart = apart.ambiguous;
+  let linksSetAside = apart.setAside;
+  const firstCandidate = candidate;
+  let preparation = prepareProvisionalCandidate(candidate);
+  candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
@@ -1587,7 +1624,9 @@ export async function buildModelFromBrief(
         const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
         const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: keptApart, setAside: linksSetAside }, retryApart);
         // The retry is held to the same rule: a mechanism it re-drafts with nothing from the brief is taken out again.
-        const retryUnsupported = withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model));
+        // (Only where the first draft's cut applied: elsewhere the retry is read exactly as before.)
+        const retryUnsupported = cutApplies ? withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model))
+          : { model: retryHeld.model, mechanisms: [], costs: [] };
         const retryRaw = keepLimitedQuantityAuthor(
           neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryUnsupported.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
@@ -1778,10 +1817,11 @@ export async function buildModelFromBrief(
       loss: [...admitted.loss, ...mechanismsUnmodelled.map((m) => ({
         field_path: `nodes[${slugId(m.label)}].mechanism_not_modelled`, before: { label: m.label }, after: null,
         reason: unmodelledMechanismChallenge(m), severity: 'warn',
-      }) as AdmittedModel['loss'][number]), ...costsOffRevenue.map((c) => ({
-        field_path: `edges[${slugId(c.cost)}->${slugId(c.goal)}].cost_not_revenue`, before: { from: c.cost, to: c.goal }, after: null,
-        reason: costOffRevenueLine(c), severity: 'info',
-      }) as AdmittedModel['loss'][number])],
+      }) as AdmittedModel['loss'][number]), ...(costsOffRevenue.length === 0 ? [] : [{
+        field_path: `edges[${slugId(costsOffRevenue[0]!.cost)}->${slugId(costsOffRevenue[0]!.goal)}].cost_not_revenue`,
+        before: { costs: costsOffRevenue.map((c) => c.cost), to: costsOffRevenue[0]!.goal }, after: null,
+        reason: costOffRevenueLine(costsOffRevenue), severity: 'info',
+      } as AdmittedModel['loss'][number]])],
     };
   }
   const heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);

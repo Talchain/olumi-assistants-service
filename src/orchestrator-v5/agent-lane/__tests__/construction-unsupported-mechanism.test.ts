@@ -4,15 +4,23 @@
  * neither sizes nor says. Each served draft is read back into the candidate it registered from
  * (fixtures/g1-2644-invented-mechanisms.json), built through the real register door, and the Run's own gates are read on the
  * registered graph (placeholder paths, P5), with each product the Run evaluates. Bound by node and edge identity.
+ *
+ * ⛔ AND THROUGH THE REAL RUN DOOR (stand-in for MC 21, 6 Oct): on #2662 d6470c9a these gate rows were green while
+ * `resolveRunAdmission` refused the served d2 draft outright (`NO_PATH_TO_GOAL` on the support cost the cut stranded) and
+ * `run_analysis` never reached PLoT. The outcome rows below read readiness and the Run handler itself.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
-import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
-import { OLUMI_GUESS_LIMIT_REASON, placeholderMovedOptions } from '../../../orchestrator/context/placeholder-parts.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { collapsedChains, withoutUnsupportedMechanisms } from '../unsupported-mechanism.js';
+import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
+import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
+import type { HandlerInvocation } from '../../tools/registry.js';
+import type { SessionStore } from '../../session/store.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/g1-2644-invented-mechanisms.json', import.meta.url), 'utf8')) as Rec;
@@ -47,6 +55,23 @@ function gates(g: Rec): { placeholder: string[]; target: string; failures: strin
     target: v.kind, failures: (v.failures ?? []).map((f: Rec) => f.code) };
 }
 const ids = (g: Rec): string[] => g.nodes.map((n: Rec) => n.id);
+/** `run_analysis` through the production snapshot loader, PLoT faked: whether the Run reaches PLoT at all. */
+async function runReachesPlot(graph: Rec): Promise<{ plotCalls: number; error: unknown }> {
+  let plotCalls = 0;
+  const store = { readMostRecentPendingActions: async () => [], loadGraph: async () => graph,
+    loadGraphAndBriefText: async () => ({ graph, briefText: null }) } as unknown as SessionStore;
+  const plotClient = { run: async (payload: { options: { option_id?: string; id?: string }[] }) => {
+    plotCalls += 1;
+    return { analysis_status: 'computed', response_hash: 'h', meta: { seed_used: 1 },
+      results: payload.options.map((o, i) => ({ option_id: o.option_id ?? o.id, option_label: String(o.option_id ?? o.id), win_probability: i === 0 ? 0.5 : 0.25 })) };
+  } } as unknown as Parameters<typeof createRunAnalysisHandler>[0]['plotClient'];
+  const handler = createRunAnalysisHandler({ plotClient, scenarioReader: async (id: string) => loadScenarioSnapshotForRunAnalysis(id, 'req-g1b', store) });
+  let error: unknown = null;
+  try { await handler({ payload: { scenario_id: '77777777-7777-4777-8777-777777777777' }, requestId: 'req-g1b', signal: undefined } as unknown as HandlerInvocation); } catch (e) { error = e; }
+  return { plotCalls, error };
+}
+const KEEP_RISKS = JSON.parse(readFileSync(new URL('./fixtures/keep-risks-live-drafts-20260930.json', import.meta.url), 'utf8')) as { drafts: { id: string; brief: string; raw: string }[] };
+const liveDraft = (id: string): { brief: string; candidate: Rec } => { const d = KEEP_RISKS.drafts.find((x) => x.id === id)!; return { brief: d.brief, candidate: JSON.parse(d.raw) as Rec }; };
 const L = (from: string, to: string, direction: string, amount: number | null = null, per: number | null = null, prov: string | null = null) =>
   ({ from, to, direction, provenance: prov === 'explicit' ? 'explicit' : 'inferred', effect_amount: amount, effect_per_source_change: per, effect_provenance: prov });
 const challenge = (m: string): string => `Olumi hasn’t modelled ‘${m}’; it could lower ‘${GOAL}’. Add it and say roughly how much if you think it matters.`;
@@ -57,9 +82,13 @@ describe('rule 1: a mechanism the brief neither sizes nor says is not drafted, a
     expect(ids(g)).not.toContain('starter_tier_service_degradation');
     expect(r.open_questions).toContain(challenge('Starter-tier service degradation'));
     expect(r.not_represented).toContain(challenge('Starter-tier service degradation'));
-    // The user's £6 support figure stays in the model, said as a cost that moves no revenue (rule 3).
-    expect(ids(g)).toContain('starter_support_cost');
-    expect(r.not_represented).toContain('‘Starter support cost’ is a cost, so it doesn’t change ‘monthly recurring revenue’; it would matter for profit.');
+    // The support cost reached the revenue only through the mechanism taken out: it goes with it (a node with no way to the
+    // goal refuses the Run), and both of the user's cost quantities are said in ONE sentence (rule 3; d5's words).
+    expect(ids(g)).not.toContain('starter_support_cost');
+    expect(ids(g)).not.toContain('support_cost_per_starter_subscriber');
+    expect(r.not_represented).toContain('‘Support cost per starter subscriber’ and ‘Starter support cost’ are costs, so they don’t change ‘monthly recurring revenue’; they would matter for profit.');
+    // What the option needs stays: the starter count still reaches the revenue through the starter tier's MRR.
+    expect(ids(g)).toContain('starter_subscribers');
     expect(gates(g)).toEqual({ placeholder: [], target: 'testable', failures: [] });
   });
   it('RED (served d2): ‘MRR lost to starter cannibalisation’ is not drafted; with the cost off revenue, chances show', async () => {
@@ -67,6 +96,27 @@ describe('rule 1: a mechanism the brief neither sizes nor says is not drafted, a
     expect(ids(g)).not.toContain('mrr_lost_to_starter_cannibalisation');
     expect(r.open_questions).toContain(challenge('MRR lost to starter cannibalisation'));
     expect(gates(g)).toEqual({ placeholder: [], target: 'testable', failures: [] });
+  });
+  it.each(['draft-1', 'draft-2'])('⛔ OUTCOME (served %s, the real Run door): readiness lets it Run and run_analysis reaches PLoT once', async (d) => {
+    const { g } = await build(FX[d]);
+    const admission = resolveRunAdmission(g as never);
+    expect(admission.assessment.blockingIssues.map((i: Rec) => i.code)).toEqual([]);
+    expect(admission.willProceed).toBe(true);
+    expect(await runReachesPlot(g)).toEqual({ plotCalls: 1, error: null });
+  });
+  it('⛔ NEVER CUT WHERE IT UNLOCKS NOTHING (DL #75 5916217417, Paul\'s live £100k draft): the rule proposes Olumi\'s risk, but the model is Olumi\'s estimates throughout, so the risk stays and nothing is said', async () => {
+    const { brief, candidate } = liveDraft('mrr-12m');
+    expect(withoutUnsupportedMechanisms(candidate as never, brief).mechanisms.map((m) => m.label), 'PRECONDITION: proposed').toEqual(['Price sensitivity risk']);
+    const { r, g } = await build(candidate, { brief });
+    expect(g.nodes.filter((n: Rec) => n.kind === 'risk').map((n: Rec) => n.label)).toContain('Price sensitivity risk');
+    expect([...(r.open_questions ?? []), ...(r.not_represented ?? [])].filter((x: string) => x.includes('hasn’t modelled'))).toEqual([]);
+  });
+  it('⛔ the gate reads the graph the Run reads: a risk ALREADY kept out of the calculation (the £85k draft) is not a guess the cut could unlock', async () => {
+    const { brief, candidate } = liveDraft('mrr-85k');
+    const { r, g } = await build(candidate, { brief });
+    const risk = g.nodes.find((n: Rec) => n.kind === 'risk' && n.label === 'Price sensitivity risk');
+    expect(risk?.analysis_participation).toBe('retained_excluded');
+    expect([...(r.open_questions ?? []), ...(r.not_represented ?? [])].filter((x: string) => x.includes('hasn’t modelled'))).toEqual([]);
   });
   it('CONTROL (d5\'s contrast): the brief mentions it in other words and the drafter marks it the brief\'s → KEPT', async () => {
     const c = structuredClone(FX['draft-2']);
@@ -220,29 +270,9 @@ describe('rule 2 (served d4): the user\'s chain collapsed into Olumi\'s £600 is
   });
 });
 
-describe('P5 reads only links on a goal path (Science d5, 6 Oct); a limit keeps its own check', () => {
-  it('a guess into a dead end withholds nothing (served d1, once the mechanism is not drafted)', async () => {
-    const { g } = await build(FX['draft-1']);
-    const { toGoal } = reachedGoalPaths(g, [], new Map());
-    expect(toGoal.has('starter_support_cost')).toBe(false);
-    expect(g.edges.some((e: Rec) => e.to === 'starter_support_cost' && e.provenance?.mean_projected === true)).toBe(true);
-    expect(gates(g).target).toBe('testable');
-  });
+describe('P5 is unchanged: a guess on a goal path still withholds', () => {
   it('CONTROL: a guess ON a goal path still withholds (served d4 first draft)', async () => {
     expect(gates((await build(FX['draft-4'])).g).failures).toEqual(['goal_path_unsized']);
-  });
-  it('⛔ d5 mutant row: a dead-end LIMIT keeps its per-limit withhold on a guessed link (never through P5)', () => {
-    const fx = JSON.parse(readFileSync(new URL('../../../orchestrator/context/__tests__/fixtures/b6-cloud-r1-20260930.json', import.meta.url), 'utf8')) as Rec;
-    // The served cloud graph with the limited quantity cut off from the goal: a LIMIT on a dead end.
-    // The served cloud graph with the limited quantity a dead end, and the ONLY guess the link into it (upstream links the
-    // user's): so the per-limit withhold rests on exactly the dead-end link P5 now leaves alone.
-    const served = fx.served.graph as Rec;
-    const g = { ...served, edges: (served.edges as Rec[]).filter((e) => e.from !== 'migration_downtime')
-      .map((e) => (e.to === 'migration_duration' ? { ...e, provenance: { source: 'user_specified' } } : e)) } as Rec;
-    expect(reachedGoalPaths(g, [], new Map()).toGoal.has('migration_downtime'), 'PRECONDITION: the limit sits on a dead end').toBe(false);
-    const opts = g.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => ({ option_id: n.id,
-      interventions: Object.fromEntries(Object.entries(n.interventions ?? {}).map(([k, v]) => [k, (v as Rec).value])) }));
-    expect([...placeholderMovedOptions('migration_downtime', g.nodes, g.edges, opts).values()]).toContain(OLUMI_GUESS_LIMIT_REASON);
   });
 });
 
@@ -276,3 +306,41 @@ describe('never a false drop: served drafts whose mechanism the brief names in o
     expect(withoutUnsupportedMechanisms(FX['draft-1'], BRIEF).mechanisms.map((m) => m.label)).toEqual(['Starter-tier service degradation']);
   });
 });
+
+/**
+ * ⛔ THE MEASURED CLASS ONLY (stand-in for MC 21, 6 Oct). CI on #2662 d6470c9a: 49 Required files red, every one a quantity
+ * this rule took that was structure or part of a chain (‘Pro subscribers’, ‘Other MRR’, ‘Price sensitivity’ → the user's
+ * ‘Monthly churn’ limit). Corpus: all 29 true drops in 60 stored drafts are risks whose only links out go into the goal.
+ */
+describe('only a risk that is a side consequence is taken, and never one whose removal strands what the user can see', () => {
+  const asOutcome = (): Rec => {
+    const c = structuredClone(FX['draft-1']);
+    c.risks = c.risks.filter((x: Rec) => x.label !== 'Starter-tier service degradation');
+    c.outcomes.push({ label: 'Starter-tier service degradation', provenance: 'inferred' });
+    return c;
+  };
+  it('CONTROL: the same unsupported mechanism drafted as an OUTCOME (structure, not a risk) is never taken', () => {
+    expect(withoutUnsupportedMechanisms(asOutcome() as never, BRIEF).mechanisms).toEqual([]);
+  });
+  it('CONTROL: a risk with a link into anything but the goal is part of a chain the model reads → kept', () => {
+    const c = structuredClone(FX['draft-1']);
+    c.factors.push({ label: 'Account manager workload', role: 'observable', baseline_known: false, baseline_value: null, unit: null, provenance: 'inferred' });
+    c.links.push(L('Starter-tier service degradation', 'Account manager workload', 'positive'), L('Account manager workload', GOAL, 'negative'));
+    expect(withoutUnsupportedMechanisms(c as never, BRIEF).mechanisms).toEqual([]);
+  });
+  it('⛔ CONTROL: a mechanism whose removal strands a quantity that is NOT the cost side (here an onboarding load) → kept, as drafted', () => {
+    const c = structuredClone(FX['draft-1']);
+    for (const l of c.links) { if (l.from === 'Starter support cost' && l.to === 'Starter-tier service degradation') l.from = 'Starter onboarding load'; }
+    c.outcomes.push({ label: 'Starter onboarding load', provenance: 'inferred' });
+    c.links.push(L('Starter subscribers', 'Starter onboarding load', 'positive'));
+    expect(withoutUnsupportedMechanisms(c as never, BRIEF).mechanisms).toEqual([]);
+  });
+  it('⛔ CONTROL: an option\'s lever whose only way to the goal is the mechanism is never stranded → kept', () => {
+    const c = structuredClone(FX['draft-2']);
+    c.factors.push({ label: 'Starter launch campaign', role: 'controllable', baseline_known: true, baseline_value: 0, unit: null, provenance: 'inferred' });
+    c.options[1].interventions.push({ factor_label: 'Starter launch campaign', value: 1, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' });
+    c.links.push(L('Starter launch campaign', 'MRR lost to starter cannibalisation', 'positive'));
+    expect(withoutUnsupportedMechanisms(c as never, BRIEF).mechanisms).toEqual([]);
+  });
+});
+

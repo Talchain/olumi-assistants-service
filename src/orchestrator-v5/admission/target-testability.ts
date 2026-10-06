@@ -152,8 +152,6 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
   reached: Set<unknown>;
   paths: Array<{ option_id: string; links: Record<string, unknown>[] }>;
   exactLinks: Set<Record<string, unknown>>;
-  /** Every node with a directed path to the goal (the goal included): the set `paths` keeps its links in. */
-  toGoal: Set<unknown>;
 } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
@@ -189,7 +187,7 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
     return { option_id, links: edges.filter(e => seen.has(e.from) && seen.has(e.to) && walkable(e.from)
       && walkable(e.to) && toGoal.has(e.to)) };
   });
-  return { reached, paths, exactLinks, toGoal };
+  return { reached, paths, exactLinks };
 }
 
 /** Stable endpoint de-duplication, ordered by shortest distance of the target from the goal. */
@@ -255,7 +253,7 @@ export function targetTestabilityOf(
     const labelOf = new Map(nodes.map((n) => [n.id, typeof n.label === 'string' && n.label.trim() !== '' ? n.label.trim() : String(n.id)] as const));
     const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
     const optionIds = nodes.filter(n => n.kind === 'option' && typeof n.id === 'string').map(n => n.id as string);
-    const { reached, toGoal } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])));
+    const { reached } = reachedGoalPaths(graph, optionIds, new Map(optionIds.map(id => [id, [id]])));
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
@@ -272,10 +270,7 @@ export function targetTestabilityOf(
     // subscribers-at-12-months) that does not hold by definition: B6's ONE test (`olumiGuessedLink`), so the goal and a
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
-    // ⭐ Science d5 (6 Oct, MC 21 G1b cut): only a link ON A GOAL PATH can move the goal's samples, the same set the licence's
-    // walk keeps (`paths`). A guess into a dead end (d1's ‘Starter support cost’ once ‘service degradation’ is not drafted)
-    // withholds nothing here; a limit on such a node keeps its own per-limit check (`placeholder-parts.ts`), never P5.
-    const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && toGoal.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
+    const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
       && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');

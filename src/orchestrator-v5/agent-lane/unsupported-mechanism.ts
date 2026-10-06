@@ -7,11 +7,14 @@
  *
  *   · Rule 1: such a MECHANISM is not drafted onto the goal path. It is SAID, with d5's challenge, where the user sees it
  *     (`open_questions`) and where the Agent reads it (`not_represented`): surfacing it keeps the challenge without making
- *     the user size Olumi's guess. Kept: anything the drafter marks as the brief's ('explicit', the only citation the
- *     candidate contract carries), anything a brief sentence names by every content word of its label, anything sized by
- *     a brief figure, set by an option, holding a level or an identity.
+ *     the user size Olumi's guess. Only a RISK whose links out all go straight into the goal (the measured class); kept:
+ *     anything the drafter marks as the brief's ('explicit', the only citation the candidate contract carries), anything a
+ *     brief sentence names by more than half its content words, anything sized by a brief figure, set by an option,
+ *     limited, or part of an identity, and anything whose removal would strand what the user can see.
  *   · Rule 3: a COST never feeds a REVENUE goal ("£6 a month in support" moves no revenue); it does feed a profit, margin or
- *     net goal. Its link into the revenue is dropped, and that is said (`not_represented`: a statement, not a question).
+ *     net goal. Its accounting link into the revenue is dropped; the cost side the cut leaves with no way to the goal goes
+ *     with it, and that is said (`not_represented`: a statement, not a question).
+ *   · Applied only where it unlocks per-option chances (`build-model.ts`, the trial admission).
  *
  * Construction only, on the candidate (labels), before admission. Pure.
  */
@@ -128,12 +131,29 @@ const reachesGoal = (c: CandidateModel, from: string): boolean => {
   return false;
 };
 
+/**
+ * The cut, PROPOSED (the caller applies it only where it is what stands between the user and per-option chances:
+ * `build-model.ts`, the trial admission). Pure.
+ *
+ * ⛔ SCOPED TO THE MEASURED CLASS (stand-in for MC 21, 6 Oct; CI on #2662 d6470c9a: 49 Required files red; corpus: every one
+ * of the 29 true drops in 60 stored Acceptance/red-team drafts is a RISK whose only links out go straight into the goal).
+ * A factor or outcome is structure (an operand, an addend, a count: ‘Pro subscribers’, ‘Other MRR’), never a mechanism this
+ * rule takes; a risk with a link into anything but the goal is part of a chain the user's model reads (‘Price sensitivity’ →
+ * ‘Monthly churn’, the user's own limit). Taking either stranded the user's quantities and blocked the Run.
+ *
+ * ⛔ NOTHING THE USER CAN SEE IS LEFT STRANDED (readiness refuses any node with no way to the goal, `NO_PATH_TO_GOAL`; on
+ * #2662 d6470c9a the served d2 draft could no longer Run at all). A node the cut leaves with no way to the goal is taken
+ * out WITH the cut only when it is the cost side of a revenue goal (a cost quantity, and what feeds only it), and that is
+ * said (rule 3's line); anything else stranded (an option's lever, a limit, any other quantity) keeps the mechanism, as drafted.
+ */
 export function withoutUnsupportedMechanisms(candidate: CandidateModel, brief: string, keep: (label: string) => boolean = () => false): {
   readonly model: CandidateModel; readonly mechanisms: readonly UnmodelledMechanism[]; readonly costs: readonly CostOffRevenue[];
 } {
   const goal = candidate.goal.metric;
   const setByOption = new Set(candidate.options.flatMap((o) => [...(o.interventions ?? []).map((i) => k(i.factor_label)), ...(o.changes ?? []).map(k)]));
   const inIdentity = new Set((candidate.identities ?? []).flatMap((i) => [k(i.outcome), ...i.factors.map(k)]));
+  const limited = new Set((candidate.constraints ?? []).map((c) => k(c.metric)));
+  const controllable = new Set(candidate.factors.filter((f) => f.role === 'controllable').map((f) => k(f.label)));
   // "No brief figure" (d5): no link at M sized by a figure the brief writes, credited to the user or not (served T1b drafts
   // size ‘Starter-tier MRR’ by the brief's £49 as Olumi's estimate), or by the product of two of its per-one figures.
   // A definition's ±1 and a "1%" are never a size the brief gives (served d2: cannibalisation → MRR is −1 per 1): only
@@ -145,77 +165,82 @@ export function withoutUnsupportedMechanisms(candidate: CandidateModel, brief: s
     && ((l.effect_provenance ?? null) === 'explicit' || isWritten(Math.abs(l.effect_amount))
       || (typeof l.effect_per_source_change === 'number' && l.effect_per_source_change !== 0 && isWritten(Math.abs(l.effect_amount / l.effect_per_source_change)))
       || collapsesUserFigures(l, brief)));
-  const quantities: { label: string; provenance: string; level: boolean }[] = [
-    ...candidate.factors.map((f) => ({ label: f.label, provenance: f.provenance, level: f.baseline_known === true })),
-    ...candidate.risks.map((r) => ({ label: r.label, provenance: r.provenance, level: false })),
-    ...candidate.outcomes.map((o) => ({ label: o.label, provenance: o.provenance, level: false })),
-  ];
-  const candidates = quantities.filter((q) => k(q.label) !== k(goal) && q.provenance !== 'explicit' && !q.level
-    && !setByOption.has(k(q.label)) && !inIdentity.has(k(q.label)) && !briefFigureAt(q.label) && briefSupport(q.label, brief) <= 0.5
-    && !keep(q.label) && reachesGoal(candidate, q.label));
-  // ⛔ An OPTION's own way to the goal is never cut (MC 21 corpus measure, 6 Oct: dental ‘Appointment awareness’, the
-  // investor brief's ‘Enterprise deals won’ for "lift our enterprise win rate"): a node the option needs to reach the goal
-  // is how the user's option works, said in other words. Where an option reaches the goal only through candidates, the
-  // best-named of them are kept, one at a time, until it does; only side paths (a second, invented consequence) go.
-  const levers = candidate.options.map((o) => [...(o.interventions ?? []).map((i) => i.factor_label), ...(o.changes ?? [])]);
-  const keptForOptions = new Set<string>();
-  const withoutCandidates = (): CandidateModel => {
-    const out = new Set(candidates.map((q) => k(q.label)).filter((x) => !keptForOptions.has(x)));
-    return { ...candidate, links: candidate.links.filter((l) => !out.has(k(l.from)) && !out.has(k(l.to))) };
+  // A side consequence: every link out of it goes straight into the goal (and there is one).
+  const intoGoalOnly = (label: string): boolean => {
+    const out = candidate.links.filter((l) => k(l.from) === k(label));
+    return out.length > 0 && out.every((l) => k(l.to) === k(goal));
   };
-  const bySupport = [...candidates].sort((a, b) => briefSupport(b.label, brief) - briefSupport(a.label, brief));
-  for (const ls of levers) {
-    if (!ls.some((f) => reachesGoal(candidate, f))) continue;
-    for (const q of bySupport) {
-      if (ls.some((f) => reachesGoal(withoutCandidates(), f))) break;
-      keptForOptions.add(k(q.label));
-    }
-  }
-  // Only those added that the option actually runs through stay kept (a candidate added and not on its path is released).
-  for (const x of [...keptForOptions]) {
-    keptForOptions.delete(x);
-    const stillConnected = levers.every((ls) => !ls.some((f) => reachesGoal(candidate, f)) || ls.some((f) => reachesGoal(withoutCandidates(), f)));
-    if (!stillConnected) keptForOptions.add(x);
-  }
-  const unsupported = candidates.filter((q) => !keptForOptions.has(k(q.label)));
-  // (`keep`: the caller's identities still to be minted, `rate-count-product.ts` and the reconciling product: an operand
-  // a mint will multiply is never a mechanism to drop, Desk 6b.)
-  const mechanisms: UnmodelledMechanism[] = unsupported.map((q) => {
-    const sign = pathSign(candidate, q.label);
-    return { label: q.label, goal, direction: sign === 1 ? 'raise' : sign === -1 ? 'lower' : null };
-  });
-  const gone = new Set(unsupported.map((q) => k(q.label)));
-  let links = candidate.links.filter((l) => !gone.has(k(l.from)) && !gone.has(k(l.to)));
-  // Rule 3 (d5 (3)): on a revenue goal, a cost QUANTITY's link into the goal is dropped and said. A lever is never one: a
-  // quantity an option sets or a controllable factor is something the user spends to move revenue (Desk 6b).
-  const costs: CostOffRevenue[] = [];
-  const controllable = new Set(candidate.factors.filter((f) => f.role === 'controllable').map((f) => k(f.label)));
-  if (isRevenueGoal(goal)) {
-    // A cost quantity that reached the revenue only through a mechanism taken out (d1: ‘Starter support cost’ fed ‘service
-    // degradation’) is kept, and said the same way: the user's figure stays in the model, and why it moves no revenue.
+  const risks = candidate.risks.filter((r) => k(r.label) !== k(goal) && r.provenance !== 'explicit' && r.analysis_participation !== 'retained_excluded'
+    && !setByOption.has(k(r.label)) && !inIdentity.has(k(r.label)) && !limited.has(k(r.label)) && !briefFigureAt(r.label)
+    && briefSupport(r.label, brief) <= 0.5 && !keep(r.label) && intoGoalOnly(r.label));
+  const revenue = isRevenueGoal(goal);
+  const labels = [...candidate.factors, ...candidate.risks, ...candidate.outcomes].map((q) => q.label);
+  const reachedBefore = new Set(labels.filter((l) => reachesGoal(candidate, l)).map(k));
+  // A cost QUANTITY (rule 3): cost words, no spend-lever words, not set by an option, not a controllable lever.
+  const costQuantity = (label: string): boolean => isCostQuantity(label) && !setByOption.has(k(label)) && !controllable.has(k(label));
+  /**
+   * The nodes a cut strands (reached the goal before, not after), or null when one of them must not be taken: anything
+   * but the cost side of a revenue goal. The cost side is a cost quantity and whatever feeds only stranded nodes (d1's
+   * ‘Support cost per starter subscriber’ into ‘Starter support cost’), never an option's lever, a controllable factor, a
+   * limited quantity or an identity part outside the cost side.
+   */
+  const strands = (gone: ReadonlySet<string>, links: CandidateModel['links']): Set<string> | null => {
     const after = { ...candidate, links };
-    for (const q of quantities) {
-      if (gone.has(k(q.label)) || !isCostQuantity(q.label) || setByOption.has(k(q.label)) || controllable.has(k(q.label))) continue;
-      if (reachesGoal(candidate, q.label) && !reachesGoal(after, q.label)) costs.push({ cost: q.label, goal });
+    const stranded = new Set(labels.filter((l) => !gone.has(k(l)) && reachedBefore.has(k(l)) && !reachesGoal(after, l)).map(k));
+    if (stranded.size === 0) return stranded;
+    if (!revenue) return null;
+    for (const x of stranded) {
+      if (setByOption.has(x) || controllable.has(x) || limited.has(x)) return null;
+      if (costQuantity(labels.find((l) => k(l) === x)!)) continue;
+      // A feeder of the cost side only: every link out of it ends in a stranded node.
+      const out = links.filter((l) => k(l.from) === x);
+      if (out.length === 0 || !out.every((l) => stranded.has(k(l.to)))) return null;
     }
-    // ACCOUNTING only (DL ruling on Desk 6b (3)): the cost subtracted £-for-£ from the revenue, drawn negative and unsized
-    // or ±1 per 1. A cost link with any other size is a causal claim and is kept.
+    // At least one cost quantity heads what is stranded (a lone feeder chain is not a cost).
+    return [...stranded].some((x) => costQuantity(labels.find((l) => k(l) === x)!)) ? stranded : null;
+  };
+  // Rule 1, one mechanism at a time, in drafted order: each is taken only if what it strands may go with it.
+  const gone = new Set<string>();
+  let links = [...candidate.links];
+  for (const r of risks) {
+    const tryGone = new Set([...gone, k(r.label)]);
+    const tryLinks = links.filter((l) => !tryGone.has(k(l.from)) && !tryGone.has(k(l.to)));
+    if (strands(tryGone, tryLinks) === null) continue;
+    gone.add(k(r.label));
+    links = tryLinks;
+  }
+  const mechanisms: UnmodelledMechanism[] = candidate.risks.filter((r) => gone.has(k(r.label))).map((r) => {
+    const sign = pathSign(candidate, r.label);
+    return { label: r.label, goal, direction: sign === 1 ? 'raise' : sign === -1 ? 'lower' : null };
+  });
+  // Rule 3 (d5 (3)), on a revenue goal: a cost QUANTITY's ACCOUNTING link into the goal (DL ruling on Desk 6b (3): the cost
+  // subtracted £-for-£, drawn negative and unsized or ±1 per 1) is taken off. A cost link with any other size is a causal
+  // claim and is kept; so is a spend LEVER (Desk 6b: "Ad spend → MRR").
+  if (revenue) {
     const accounting = (l: CandidateModel['links'][number]): boolean => l.direction === 'negative'
       && (typeof l.effect_amount !== 'number' || (typeof l.effect_per_source_change === 'number' && l.effect_per_source_change !== 0
         && Math.abs(l.effect_amount / l.effect_per_source_change) === 1));
-    const costLinks = links.filter((l) => k(l.to) === k(goal) && isCostQuantity(l.from) && !setByOption.has(k(l.from))
-      && !controllable.has(k(l.from)) && accounting(l));
-    for (const l of costLinks) if (!costs.some((c) => k(c.cost) === k(l.from))) costs.push({ cost: l.from, goal });
-    links = links.filter((l) => !costLinks.includes(l));
+    for (const l of links.filter((x) => k(x.to) === k(goal) && costQuantity(x.from) && accounting(x))) {
+      const tryLinks = links.filter((x) => x !== l);
+      if (strands(gone, tryLinks) === null) continue;
+      links = tryLinks;
+    }
   }
-  if (gone.size === 0 && costs.length === 0) return { model: candidate, mechanisms, costs };
+  const stranded = strands(gone, links) ?? new Set<string>();
+  // Every cost quantity the cut takes off the revenue is said (d1's, which reached it only through a mechanism taken out,
+  // and d2's, drawn straight into it).
+  const costs: CostOffRevenue[] = labels.filter((l) => stranded.has(k(l)) && costQuantity(l)).map((cost) => ({ cost, goal }));
+  if (gone.size === 0 && links.length === candidate.links.length) return { model: candidate, mechanisms: [], costs: [] };
+  const out = new Set([...gone, ...stranded]);
   return {
     model: {
       ...candidate,
-      factors: candidate.factors.filter((f) => !gone.has(k(f.label))),
-      risks: candidate.risks.filter((r) => !gone.has(k(r.label))),
-      outcomes: candidate.outcomes.filter((o) => !gone.has(k(o.label))),
-      links,
+      factors: candidate.factors.filter((f) => !out.has(k(f.label))),
+      risks: candidate.risks.filter((r) => !out.has(k(r.label))),
+      outcomes: candidate.outcomes.filter((o) => !out.has(k(o.label))),
+      links: links.filter((l) => !out.has(k(l.from)) && !out.has(k(l.to))),
+      ...(candidate.identities !== undefined
+        ? { identities: candidate.identities.filter((i) => !out.has(k(i.outcome)) && !i.factors.some((f) => out.has(k(f)))) } : {}),
     },
     mechanisms, costs,
   };
@@ -227,9 +252,18 @@ export function unmodelledMechanismChallenge(m: UnmodelledMechanism): string {
   return `Olumi hasn’t modelled ‘${m.label}’; it could ${moves} ‘${m.goal}’. Add it and say roughly how much if you think it matters.`;
 }
 
-/** Rule 3's statement (`not_represented` only: a statement, never one of the two visible question slots). */
-export function costOffRevenueLine(c: CostOffRevenue): string {
-  return `‘${c.cost}’ is a cost, so it doesn’t change ‘${c.goal}’; it would matter for profit.`;
+/**
+ * Rule 3's statement (`not_represented` only: a statement, never one of the two visible question slots). Every cost the cut
+ * takes off the revenue goal in ONE sentence (d5 6011168471: "Support costs … don't change monthly recurring revenue; they
+ * would matter for profit"): d1 takes the per-subscriber cost and its total together.
+ */
+export function costOffRevenueLine(costs: readonly CostOffRevenue[]): string {
+  const names = costs.map((c) => `‘${c.cost}’`);
+  const list = names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  const goal = costs[0]?.goal ?? '';
+  return names.length <= 1
+    ? `${list} is a cost, so it doesn’t change ‘${goal}’; it would matter for profit.`
+    : `${list} are costs, so they don’t change ‘${goal}’; they would matter for profit.`;
 }
 
 /** One collapsed user chain the repair retry is asked to draw as the user wrote it (d4; Science d5 (2), DL ruling 6 Oct). */
