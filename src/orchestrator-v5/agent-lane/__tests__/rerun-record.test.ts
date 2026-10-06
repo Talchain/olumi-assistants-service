@@ -107,6 +107,9 @@ describe('leader-free is CHECKED against the pair\'s own leader and shares (Code
     ['the share as "79.5 percent"', factor({ raw: 3, unit: 'percent' }, { raw: 79.5, unit: 'percent' }), undefined],
     ['the share as a bare fraction "0.795"', factor({ raw: 3 }, { raw: 0.795 }), undefined],
     ['the share in a UNIT', factor({ raw: 3, unit: 'x (0.795)' }, { raw: 5, unit: 'x (0.795)' }), undefined],
+    ['the share with doubled space, "79.5 per  cent" (buddy r3)', factor({ raw: 3, unit: 'per  cent' }, { raw: 79.5, unit: 'per  cent' }), undefined],
+    ['the share with a no-break space, "79.5\u00a0%"', factor({ raw: 3, unit: '\u00a0%' }, { raw: 79.5, unit: '\u00a0%' }), undefined],
+    ['the share at long precision, "0.7950000" (buddy r3)', factor({ raw: 3 }, { raw: '0.7950000' }), undefined],
   ])('RED: %s → the neutral line', (_n, row, nodes) => {
     expect(lineOf(row, nodes ?? NODES)).toBe(RERUN_NO_CHANGE_LINES.unknown);
   });

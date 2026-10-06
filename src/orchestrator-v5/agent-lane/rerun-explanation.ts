@@ -272,10 +272,10 @@ export const NO_MATCHED_FIGURES_RULE = ' No option has figures in both Runs, so 
  * "79 per cent", "79 percent", or the rounded "80 %" for 0.795) or a bare fraction ("0.79"), within half a percentage
  * point. Any hit → the neutral "can't say" line (fail closed: a coincidental input costs the named change, never a share).
  */
-const PERCENT_FORM = /(?<![\d.])(\d{1,3}(?:\.\d{1,6})?)\s?(?:%|per\s?cent\b|percent\b)/giu;
+const PERCENT_FORM = /(?<![\d.])(\d{1,3}(?:\.\d+)?) ?(?:%|per ?cent\b|percent\b)/giu;
 // A fraction needs its decimal point: a bare 0 or 1 is an ordinary input ("0 → 5"), not a share. A sentence's full stop
 // after it ("→ 0.795.") does not make it a longer number: only a digit or ".digit" does.
-const FRACTION_FORM = /(?<![\d.])(0?\.\d{1,6}|1\.0{1,6})(?!\d|\.\d|\s?(?:%|per\s?cent\b|percent\b))/giu;
+const FRACTION_FORM = /(?<![\d.])(0?\.\d+|1\.0+)(?!\d|\.\d| ?(?:%|per ?cent\b|percent\b))/giu;
 const SHARE_TOLERANCE = 0.005 + 1e-9;
 
 function leaksPairLeaderOrShare(line: string, wireDelta: unknown): boolean {
@@ -292,9 +292,11 @@ function leaksPairLeaderOrShare(line: string, wireDelta: unknown): boolean {
   }
   if ([...ids].some((id) => line.includes(id))) return true;
   if (shares.length === 0) return false;
+  // Any run of whitespace (incl. no-break spaces) reads as one space, so "79.5 per  cent" is "79.5 per cent" (buddy r3).
+  const flat = line.replace(/\s+/gu, ' ');
   const said = [
-    ...[...line.matchAll(PERCENT_FORM)].map((m) => Number(m[1]) / 100),
-    ...[...line.matchAll(FRACTION_FORM)].map((m) => Number(m[1])),
+    ...[...flat.matchAll(PERCENT_FORM)].map((m) => Number(m[1]) / 100),
+    ...[...flat.matchAll(FRACTION_FORM)].map((m) => Number(m[1])),
   ].filter((v) => Number.isFinite(v));
   return said.some((v) => shares.some((share) => Math.abs(v - share) <= SHARE_TOLERANCE));
 }
