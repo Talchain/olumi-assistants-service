@@ -845,12 +845,44 @@ const BAND_WORDS: Record<string, RegExp> = {
   // makes the Agent ask which band; a false hit would stamp a band the user never named as theirs.
   weak: /\b(?:weak(?:ly)?|barely|slight(?=\s*(?:$|[.,;:!?)])|\s+(?:effect|link|influence|impact|relationship|connection)\b))\b/gi,
 };
+// A negator inside a HYPHENATED COMPOUND is part of a word, not a denial: "no-shows", "No-show charge",
+// "not-for-profit", "never-ending" (red-team F2, #87 6007779166). So a hyphen joining a letter on either side ends
+// no match. "no-one" stays a negator: it IS one ("No-one thinks price matters").
 const NEGATOR = new RegExp(
-  "(?:^|[^\\w'\\u2019])(?:not|never|no|nor|neither|hardly|cannot|without|doubts?|doubtful|\\w+n['\\u2019]t"
+  "(?:^|[^\\w'\\u2019-]|(?<![\\w'\\u2019])-)(?:not|never|no|nor|neither|hardly|cannot|without|doubts?|doubtful|\\w+n['\\u2019]t"
   // A contraction typed without its apostrophe ("isnt", "doesnt") — listed, never \\w+nt ("important", "significant").
-  + "|isnt|arent|wasnt|werent|doesnt|dont|didnt|cant|couldnt|wont|wouldnt|shouldnt|hasnt|havent|hadnt|aint)(?![\\w'\\u2019])",
+  + "|isnt|arent|wasnt|werent|doesnt|dont|didnt|cant|couldnt|wont|wouldnt|shouldnt|hasnt|havent|hadnt|aint)(?![\\w'\\u2019]|-(?!one\\b)[a-z])",
   'i',
 );
+/**
+ * NEGATOR outside the link's own end labels: a negator word inside an end's NAME ("Not paid invoices", "No deposit
+ * option") is that quantity's name, not a denial (red-team F2). Only a whole label is masked, matched token by token
+ * across spaces or hyphens and case-insensitively, so a separate "no" elsewhere in the sentence still denies.
+ */
+function negatedOutsideEnds(text: string, ends: { readonly source: string; readonly target: string }): boolean {
+  const masked = [ends.source, ends.target].sort((a, b) => b.length - a.length).reduce(maskLabel, text);
+  return NEGATOR.test(masked);
+}
+/**
+ * `text` with every WHOLE mention of `label` blanked: its words in order, joined only by spaces or hyphens,
+ * case-insensitive, each word in any form with the same stem ("no-show charges" for "No-show charge"; Integrator twin (a)).
+ */
+function maskLabel(text: string, label: string): string {
+  const want = [...label.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map(t => stemOf(t[0]));
+  if (want.length === 0) return text;
+  const words = [...text.matchAll(/[\p{L}\p{N}]+/gu)];
+  const end = (w: RegExpMatchArray): number => (w.index ?? 0) + w[0].length;
+  let out = text;
+  for (let i = 0; i + want.length <= words.length; i++) {
+    const run = words.slice(i, i + want.length);
+    if (!run.every((w, k) => stemOf(w[0].toLowerCase()) === want[k]
+      && (k === 0 || /^[\s-]+$/.test(text.slice(end(run[k - 1]), w.index))))) continue;
+    const from = run[0].index ?? 0;
+    out = out.slice(0, from) + ' '.repeat(end(run[run.length - 1]) - from) + out.slice(end(run[run.length - 1]));
+    i += want.length - 1;
+  }
+  return out;
+}
 /** A sentence opened by an auxiliary ("is it strong", "does price strongly affect churn") asks, even without a "?". */
 const AUXILIARY_FIRST = /^\s*(?:is|are|was|were|am|do|does|did|can|could|would|should|will|shall|has|have|had|might|must)\b/i;
 /**
@@ -1074,7 +1106,7 @@ export function linkEffectTheUserStated(
 ): LinkEffectStatementMiss | null {
   const q = quote.trim();
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
-  if (NEGATOR.test(q)) return 'denied';
+  if (negatedOutsideEnds(q, ends)) return 'denied';
   const sentences = sentencesOf(q);
   const misses = sentences.map(sentence => linkEffectInOneSentence(sentence, effect, ends, scope));
   if (misses.some(m => m === null)) return null;
@@ -1196,11 +1228,18 @@ function wordFigureCountsAnotherUnit(q: string, figure: StatedAmount, ends: { re
   return !own.some(w => sameWord(w, head));
 }
 
+/** The words after a unit's "of" ("% of appointments" → appointments), determiners dropped; [] when it has none. */
+function unitDenominatorWords(unit: string): string[] {
+  const tail = /\bof\s+(.+)$/iu.exec(unit)?.[1];
+  return tail === undefined ? [] : [...tail.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase())
+    .filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
+}
+
 /**
  * The phrase a target figure is OF ("2 percentage points of net margin"), when its words are not all the target's own:
  * that figure sizes another quantity (PR Review's figure_not_bound, restored without direction words).
  */
-function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: string): string | undefined {
+function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: string, amountUnit: string): string | undefined {
   const after = q.slice(figure.index + figure.matchedText.length);
   const m = /^(?:\s*(?:percentage\s+points?|pp|points?|percent|per\s+cent))?\s+(?:of|in)\s+((?:(?!(?:while|and|but|which|that|when|if|as|so|for|than|to|this|next|last|each|every|per|a|an|years?|months?|weeks?|quarters?|today|now)\b)[\p{L}-]+\s*){1,5})/iu.exec(after);
   if (m === null) {
@@ -1241,6 +1280,11 @@ function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: 
   if (owned !== null) return `${run}${owned[1]}${owned[2]}${owned[3]}`;
   const content = [...run.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase()).filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
   if (content.length === 0 || content.every(w => wordsOf(target).some(t => sameWord(t, w)))) return undefined;
+  // The AMOUNT unit's own denominator ("0.05% of appointments" with unit "% of appointments"; red-team F2, #87
+  // 6007779166): that run is the unit, not another quantity, but ONLY when its words ARE the denominator, word for
+  // word. Never a subset (the head noun alone), a superset ("appointments booked online") or a fuzzy match.
+  const denominator = unitDenominatorWords(amountUnit);
+  if (denominator.length > 0 && content.length === denominator.length && content.every((w, i) => w === denominator[i])) return undefined;
   return run;
 }
 
@@ -1266,8 +1310,8 @@ export function linkEffectFigureNotAChange(
     if (per.length > 0 && per.every(f => figureIsALevel(q, f, ends.source))) {
       return { miss: 'source_figure_a_level', question: `Is ${per[0]!.matchedText.trim()} a change in “${ends.source}”, or its level today?` };
     }
-    const otherOwner = amount.length > 0 ? targetFigureOfAnotherQuantity(q, amount[0]!, ends.target) : undefined;
-    if (otherOwner !== undefined && amount.every(f => targetFigureOfAnotherQuantity(q, f, ends.target) !== undefined)) {
+    const otherOwner = amount.length > 0 ? targetFigureOfAnotherQuantity(q, amount[0]!, ends.target, effect.amount_unit) : undefined;
+    if (otherOwner !== undefined && amount.every(f => targetFigureOfAnotherQuantity(q, f, ends.target, effect.amount_unit) !== undefined)) {
       const said = q.slice(amount[0]!.index, amount[0]!.index + amount[0]!.matchedText.length).trim();
       const unit = /^\s*(?:percentage\s+points?|pp|points?|percent|per\s+cent)/i.exec(q.slice(amount[0]!.index + amount[0]!.matchedText.length))?.[0] ?? '';
       return { miss: 'figure_of_another_quantity', question: `Is ${said}${unit} of ${otherOwner} a change in \u201c${ends.target}\u201d?` };
@@ -1286,7 +1330,7 @@ function linkEffectInOneSentence(
   scope: LinkEffectScope,
 ): LinkEffectStatementMiss | null {
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
-  if (NEGATOR.test(q)) return 'denied';
+  if (negatedOutsideEnds(q, ends)) return 'denied';
   if (hasLinkEffectRange(q)) return 'unclear_figure';
   const amounts = findLinkEffectAmounts(q);
   // Link magnitudes are literal raw amounts, never the fraction fallback used for other node readers.
@@ -1309,7 +1353,13 @@ function linkEffectInOneSentence(
   if (!CHANGE_STATED.test(q)) return 'no_change_stated';
   if (scope.link_selected === true) return null;
   const quoteWords = wordsOf(q);
-  const named = (end: string, other: string): boolean => wordsOf(end).some(w => quoteWords.some(t => sameWord(w, t))
-    && !wordsOf(other).some(o => sameWord(w, o)));
+  const named = (end: string, other: string): boolean => {
+    const own = wordsOf(end).filter(w => !wordsOf(other).some(o => sameWord(w, o)));
+    if (own.length > 0) return own.some(w => quoteWords.some(t => sameWord(w, t)));
+    // Every word of this end is also the other end's ("no-shows" inside "No-show charge"; red-team F2, #87 6007779166):
+    // it is named only by a mention OUTSIDE the other end's own whole-label mentions.
+    const outside = wordsOf(maskLabel(q, other));
+    return wordsOf(end).length > 0 && wordsOf(end).every(w => outside.some(t => sameWord(w, t)));
+  };
   return named(ends.source, ends.target) && named(ends.target, ends.source) ? null : 'end_not_named';
 }
