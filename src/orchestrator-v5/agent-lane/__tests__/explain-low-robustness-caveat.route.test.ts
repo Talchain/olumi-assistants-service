@@ -260,7 +260,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     duringNarration = () => {
       retainedScope = [reconciliationPending(SCENARIO, { kind: 'reconcile_goal_scope', goal_id: 'mrr', goal_label: 'MRR',
         declared_scope: { modelled: 'all revenue', alternative: 'one stream', stated_in_brief: true },
-        question: 'Which revenue scope should this model represent?', expected: 'scope', operands: [], derivations: [] })];
+        question: 'Which revenue scope should this model represent?', /* #2613-successor (Science d5 6006584860): an UNTYPED question no longer blocks; this fixture's open issue is a typed one. */ scope: { modelled: 'all revenue', alternative: 'one stream', extent: 'total', stated_in_brief: true, source: { quote: 'all revenue' } }, expected: 'billing_basis', operands: [], derivations: [] })];
     };
     const b = await press(payload);
     expect(b.narration?.status).toBe('ready');

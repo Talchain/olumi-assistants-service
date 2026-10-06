@@ -76,7 +76,7 @@ import { validateAnalysisRunFactIdentity, type AnalysisRunFactIdentity } from '.
 // noise?" would be free to drift, and the prose one would drift silently
 // (CLAUDE.md trap #12). Behaviour here is unchanged by the move.
 import { noiseVerdictForProportions } from './win-probability-noise-band.js';
-import { diffRunInputs } from './run-input-changes.js';
+import { diffRunInputs, linksMovedWithinBand, type WithinBandLinkMove } from './run-input-changes.js';
 import { islDrawStructureKeyOfFact } from './draw-structure.js';
 
 /**
@@ -485,6 +485,63 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
     };
   }
   return { kind: 'not_recorded', members: { ...endpoints, input_coverage: 'not_recorded' } };
+}
+
+/**
+ * ⭐ SD-1 INTERIM (DL 0df0e1 ruling, 6 Oct, cut 5): the links whose size moved inside one band between the two Runs a
+ * `run_delta` names, read from THOSE Runs' own persisted facts, found by the delta's `endpoints` run ids. Internal: S7 names
+ * them; nothing here reaches the wire, and the delta's coverage stays `partial`. Fail closed (`[]`) when the delta is not a
+ * `partial` pair with both run ids, when either Run's fact or snapshot is missing, or when facts that share a run id
+ * disagree on its snapshot.
+ */
+export function withinBandLinkMovesForRunPair(
+  facts: readonly HandlerFact[],
+  runDelta: unknown,
+  /**
+   * The user-write receipts (`adjust_edge_strength`, both user link-edit paths), each with its row's DB-stamped
+   * `created_at`. A receipt counts only when it was written BETWEEN the two Runs (after the prior Run's `computed_at`,
+   * before the current's): an earlier identical move of the same link never credits this pair (buddy r2 (c)).
+   */
+  timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[] = [],
+): WithinBandLinkMove[] {
+  const d = asRecord(runDelta);
+  const endpoints = asRecord(d?.endpoints);
+  const priorId = asRecord(endpoints?.prior)?.run_id;
+  const currentId = asRecord(endpoints?.current)?.run_id;
+  if (d?.input_coverage !== 'partial' || typeof priorId !== 'string' || typeof currentId !== 'string' || priorId === currentId) return [];
+  const runOf = (runId: string): { snapshot: ReturnType<typeof RunInputSnapshotSchema.parse>; at: number | null } | null => {
+    const found = facts.map(readRunInputs).filter((r) => r.runId === runId);
+    if (found.length === 0 || found.some((r) => r.snapshot === null)) return null;
+    const first = JSON.stringify(found[0]!.snapshot);
+    if (!found.every((r) => JSON.stringify(r.snapshot) === first)) return null;
+    const at = found[0]!.computedAt === null ? Number.NaN : Date.parse(found[0]!.computedAt);
+    return { snapshot: found[0]!.snapshot!, at: Number.isNaN(at) ? null : at };
+  };
+  const prior = runOf(priorId);
+  const current = runOf(currentId);
+  if (prior === null || current === null) return [];
+  const between = (createdAt: string): boolean => {
+    const t = Date.parse(createdAt);
+    return prior.at !== null && current.at !== null && !Number.isNaN(t) && t > prior.at && t < current.at;
+  };
+  return linksMovedWithinBand(prior.snapshot, current.snapshot, (from, to, priorMean, currentMean) =>
+    timedReceipts.some((r) => between(r.created_at) && userLinkWriteReceiptMatches(r.fact, from, to, priorMean, currentMean)));
+}
+
+/**
+ * Is `fact` the persisted receipt of a user link write that moved `from → to` from exactly `priorMean` to `currentMean`?
+ * Both user paths record it as an applied, non-noop `adjust_edge_strength` (`link-effect-edit.ts` — the stated figure,
+ * `set_link_effect` — and `adjust-edge-strength.ts`, the band/strength edit), keyed `from→to`, with the strength before and
+ * after. Bound by the pair's own two means, so a receipt for another move of the same link never counts.
+ */
+function userLinkWriteReceiptMatches(fact: HandlerFact, from: string, to: string, priorMean: number, currentMean: number): boolean {
+  const f = fact as { fact_type?: unknown; noop?: unknown; result?: unknown };
+  if (f.fact_type !== 'adjust_edge_strength' || f.noop === true) return false;
+  const result = asRecord(f.result);
+  if (result === null || result.status !== 'applied' || result.target_id !== `${from}→${to}`) return false;
+  const meanOf = (side: unknown) => asRecord(asRecord(side)?.strength)?.mean;
+  const same = (a: unknown, b: number) => typeof a === 'number' && Number.isFinite(a) && Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(b));
+  return same(meanOf(result.before), priorMean) && same(meanOf(result.after), currentMean);
 }
 
 /** Exact historical execution identity resolved by the selected-version binding. */

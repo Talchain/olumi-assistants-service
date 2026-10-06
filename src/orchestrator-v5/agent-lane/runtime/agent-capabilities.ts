@@ -20,6 +20,7 @@ import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
+import { withinBandMovesForRunDelta } from '../rerun-within-band.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapApprovalWords, applyOptionGapDeclarations } from '../unmodelled-mechanisms.js';
@@ -903,7 +904,7 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 
 /** One internal dispatch, so every path is the product's own. */
 import { reconcileGoalScope } from '../reconcile-goal-scope.js';
-import { goalScopeCheck, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
+import { goalScopeCheck, scopeIssueBlocks, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
 import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
@@ -2892,7 +2893,7 @@ export function createAgentCapabilities(
     if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
       return notApplied('model_changed_since_approval', 'The model changed after this was offered, so nothing was recorded. Read it again; offer the reading afresh only if it still applies.');
     }
-    if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return notApplied('goal_scope_unresolved', 'Resolve the retained scope question before confirming this identity. Nothing was written.');
+    if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => scopeIssueBlocks(p.action))) return notApplied('goal_scope_unresolved', 'Resolve the retained scope question before confirming this identity. Nothing was written.');
     if (opts.commitOptionLevels === undefined) {
       return notApplied('identity_writer_unavailable', 'This reading could not be recorded here, so nothing was recorded.');
     }
@@ -3168,8 +3169,14 @@ export function createAgentCapabilities(
       // S7 (D4 lease #87 6005636960): a pair the model is NOT shown as licensed still gets Olumi's own leader-free record of
       // what changed, so a typed "what changed since the last run?" is answered from the record. `undefined` for a licensed
       // model delta (context byte-unchanged) and for a first Run.
-      const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined, g.nodes,
-        [...optionNames.values()].map((a) => a.display));
+      // SD-1 (rehearsal12): a licensed delta whose C1 the projection checked down (several changes, or partial coverage)
+      // gets Olumi's record too, so the model can say every change and that nothing proves one caused it.
+      const modelCaseCheckedDown = delta !== undefined && (g.run_delta as { attribution_case?: unknown } | undefined)?.attribution_case === 'C1_attributable'
+        && (delta as { attribution_case?: unknown }).attribution_case !== 'C1_attributable';
+      const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
+        [...optionNames.values()].map((a) => a.display),
+        // SD-1 interim: a link restated inside its band, named from the pair's own persisted Run facts (never on the wire).
+        delta !== undefined && !modelCaseCheckedDown ? [] : await withinBandMovesForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta));
       return {
         ok: true,
         mutated: false,
@@ -3637,7 +3644,7 @@ export function createAgentCapabilities(
       if (g === null) {
         return { ok: false, mutated: false, refusal: 'unreadable_model', detail: 'The model could not be read, so no reading was offered. Nothing was changed.' };
       }
-      if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
+      if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => scopeIssueBlocks(p.action))) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
       const card = proposeProductIdentity(g.raw);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
@@ -8141,7 +8148,7 @@ export function createAgentCapabilities(
     async proposeGoalCurrentLevel(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const issues = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
-      if (issues.some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Use reconcile_goal_scope to resolve the retained question before preparing the goal baseline. Nothing was prepared.' };
+      if (issues.some(p => scopeIssueBlocks(p.action))) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Use reconcile_goal_scope to resolve the retained question before preparing the goal baseline. Nothing was prepared.' };
       return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
     },
 
