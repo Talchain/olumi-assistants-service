@@ -8,4 +8,4 @@
  * eliminated tail ("each supported by under 1% of runs") and a withheld disclosure do not.
  */
 export const ANY_LEAD_CLAUSE_RE =
-  /\b(?:scored\s+highest|came\s+out\s+(?:ahead|lowest)|(?:gave|gives)\s+the\s+(?:highest|lowest)\b|was\s+supported\s+by\s+(?:the\s+(?:next\s+)?most\s+runs|\d{1,3}(?:\.\d+)?%\s+of\s+runs))/i;
+  /\b(?:scored\s+highest|came\s+out\s+(?:ahead|lowest)|(?:gave|gives)\s+the\s+(?:highest|lowest)\b|was\s+supported\s+by\s+(?:the\s+(?:next\s+)?most\s+runs|\d{1,3}(?:\.\d+)?%\s+of\s+runs|(?:[a-z]+\s+){0,2}more\s+runs))/i;

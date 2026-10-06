@@ -137,6 +137,9 @@ describe('CONTROL for the shared ANY_LEAD_CLAUSE_RE (negative pins elsewhere lea
     `In this model, ${X} was supported by 62% of runs.`,
     "In this model, 'Hold Price' was supported by the next most runs (38%).",
     `${X} scored highest against your goal in 62% of runs of this model.`,
+    // The near-tie and low-threshold producer forms (Codex buddy #2646 r2 F3).
+    `${X} was supported by only fractionally more runs of this model, so the options are effectively tied.`,
+    `In this model, Option B was supported by marginally more runs than ${X} (51% against 49%), so the two are close.`,
   ])('matches: %s', (t) => {
     expect(t).toMatch(ANY_LEAD_CLAUSE_RE);
   });
