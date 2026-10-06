@@ -195,6 +195,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
+import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
@@ -1615,6 +1616,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   const selectedPermissions = current && g.analysis_result !== undefined && permissions.leader_may_be_named !== true
     ? withNonlinearIdentity(permissions, g.raw, g.identity_evaluated) : permissions;
   const chancePermitted = current && goalChance === undefined && permissions.leader_may_be_named === true;
+  const goalChanceLicence = chancePermitted ? goalChanceLicenceForAgent(g.analysis_result) : undefined;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const optionNames = optionNameAliasesForCurrentRun(g);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
@@ -1657,6 +1659,8 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
     ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
+    // ⭐ DL 0df0e1 ruling C (6 Oct): where each option's chance reaches the Agent, so does the Run's licence to compare them.
+    ...(chancePermitted && goalChanceLicence !== undefined ? { goal_chance_licence: goalChanceLicence } : {}),
     ...(participation !== undefined ? { option_participation: participation } : {}),
   } };
 }
