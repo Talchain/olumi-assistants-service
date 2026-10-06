@@ -21,7 +21,7 @@ const upstreamAsk = (source?: (n: Json) => void): string => {
   e.provenance = { ...e.provenance, magnitude: 'user_stated' };
   g.nodes.find((n: Json) => n.id === 'starter_tier_monthly_recurring_revenue').observed_state = { unit: '£/month', value: 0, raw_value: 0, cap: 50000, source: 'cee_inference' };
   if (source !== undefined) source(g.nodes.find((n: Json) => n.id === 'starter_monthly_price'));
-  return notTargetTestableSentence(g, targetTestabilityOf(g));
+  return notTargetTestableSentence(g, targetTestabilityOf(g)) ?? '';
 };
 
 describe('the upstream link question', () => {
