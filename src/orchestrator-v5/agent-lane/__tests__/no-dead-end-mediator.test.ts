@@ -11,6 +11,7 @@ import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffec
   type ApplyLinkEffectEditParams } from '../../system-events/link-effect-edit.js';
 import { prepareLinkEffectUnitReadings } from '../../system-events/link-effect-unit-reading.js';
 import { linkEffectReadingOf } from '../approval-chips.js';
+import { linkEffectRefusalWords } from '../runtime/agent-capabilities.js';
 import { legacyLeaderGoalLinks, placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { labelUnitParts, mediatorReadings } from '../mediator-reading.js';
 import { unsizedLinkSentence } from '../unsized-path-cause.js';
@@ -267,6 +268,13 @@ describe('THE WORDS: the card and the withhold ask', () => {
   });
   it('CONTROL: a link with no mediator keeps its card byte for byte (no mediator_readings)', () => {
     expect(linkEffectMediatorReadings(gaugeGraph(), 'price', 'mrr')).toEqual([]);
+  });
+  it("(C) refusal words name the mediator's derived unit, so the Agent can ask for the figure in it", () => {
+    const words = linkEffectRefusalWords('unit_mismatch', sizedParentGraph(), { id: 'cost', label: 'Support cost' }, { id: 'mrr', label: 'MRR' },
+      { amount_unit: '£/month', per_source_change_unit: 'cafés' });
+    expect(words).toContain('"Support cost" in £/month');
+    expect(linkEffectRefusalWords('unit_mismatch', gaugeGraph(), { id: 'strain', label: 'Support capacity strain' }, { id: 'mrr', label: 'MRR' },
+      { amount_unit: '£/month', per_source_change_unit: 'cafés' }), 'CONTROL: a gauge is never a source unit').not.toContain('"Support capacity strain" in £/month');
   });
   const W = (graph: Rec, links: { from: string; to: string }[], option: string) =>
     placeholderGoalWarning(graph, [{ option_id: option, links }], 'GOAL_FIGURES_PLACEHOLDER_PATH');

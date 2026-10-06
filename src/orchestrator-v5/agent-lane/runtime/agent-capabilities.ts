@@ -39,6 +39,7 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js'
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, linkEffectMediatorReadings, type LinkEffectLabelReading, type LinkEffectMediatorReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
+import { mediatorReadings } from '../mediator-reading.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
@@ -282,6 +283,8 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
 
 // `newFactorScopeIn` moved to `../figure-scope.ts` (one predicate for the Agent's doors and the chat writers, AIQ 5882852814).
 export { newFactorScopeIn };
+/** Exported for the no-dead-end rows only: the words a refused link-effect card gives the Agent. */
+export { linkEffectRefusalWords };
 
 /**
  * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
@@ -1473,8 +1476,12 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
   const unitOfNode = (id: string): string => {
     const n = ((view as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as
       { observed_state?: { unit?: unknown }; unit_reading?: { unit?: unknown } } | undefined;
+    // No-dead-end (C)/(B): a level-less mediator is measured in its derived unit, as the writer reads it (a gauge only as
+    // the target of the answer), so the Agent can ask for the figure in it. Every other end reads exactly as before.
+    const mediated = mediatorReadings(view).get(id);
+    const derived = mediated === undefined || (mediated.via === 'gauge' && id !== to.id) ? undefined : mediated.unit;
     return typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit
-      : typeof n?.unit_reading?.unit === 'string' ? n.unit_reading.unit : 'its own unit';
+      : typeof n?.unit_reading?.unit === 'string' ? n.unit_reading.unit : derived ?? 'its own unit';
   };
   switch (reason) {
     case 'unit_mismatch': {
