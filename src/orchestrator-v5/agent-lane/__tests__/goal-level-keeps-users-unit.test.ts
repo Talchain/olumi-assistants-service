@@ -225,7 +225,27 @@ describe('the binder reads D from the reading (levelDenominatorOf, the ONE funct
     expect(linkEffectTheUserStated(A1, effect, ends, scope(stored))).toBeNull();
     expect(linkEffectTheUserStated(A1, effect, ends, scope(control.stored))).toBe('figure_of_another_quantity');
     const ask = linkEffectFigureNotAChange(A1, effect, ends, ownUnitsOf(goalOf(control.stored)))?.question;
-    expect(ask).toBe('What is that as a change in “no-shows”? 0.05 percentage points of appointments reads as a figure for appointments.');
+    expect(ask).toBe('What is that as a change in “no-shows”? 0.05 percentage points of appointments reads as a figure for appointments. If “no-shows” does not change, the link stays as it is.');
+  });
+});
+
+describe('Review Desk 6b: the honest "it doesn\'t change" answer to the restatement ask has an outcome, and it is never a written 0', () => {
+  const ends = { source: 'Footfall lost from price rise', target: 'Gross margin' };
+  const scope = { quantities: [ends.source, ends.target, 'Net margin'], link_selected: false, target_units: ['%'] } as never;
+  it('"…net margin while gross margin stays steady" asks for the change itself and says what "no change" does', () => {
+    const r2 = 'A 5% fall in footfall would cost us about 2 percentage points of net margin while gross margin stays steady.';
+    const e = { amount: 2, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: '%' };
+    expect(linkEffectTheUserStated(r2, e, ends, scope)).toBe('figure_of_another_quantity');
+    expect(linkEffectFigureNotAChange(r2, e, ends, ['%'])?.question).toBe('What is that as a change in \u201cGross margin\u201d? 2 percentage '
+      + 'points of net margin reads as a figure for net margin. If \u201cGross margin\u201d does not change, the link stays as it is.');
+  });
+  it.each(["It doesn't change.", 'Gross margin does not change.', 'No change in gross margin.'])('answer %j → denied: nothing is written, never a 0', (q) => {
+    const zero = { amount: 0, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: '%' };
+    expect(linkEffectTheUserStated(q, zero, ends, scope)).toBe('denied');
+  });
+  it('control: the user\'s own explicit 0 ("…by 0 percentage points") is theirs and binds', () => {
+    const zero = { amount: 0, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: '%' };
+    expect(linkEffectTheUserStated('A 5% fall in footfall changes gross margin by 0 percentage points.', zero, ends, scope)).toBeNull();
   });
 });
 

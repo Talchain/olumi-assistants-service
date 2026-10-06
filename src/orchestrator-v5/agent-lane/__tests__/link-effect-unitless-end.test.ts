@@ -230,7 +230,7 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     ["a target's current level", "When footfall goes up by 5%, gross margin of 2 percentage points is today's level.", 'target_figure_a_level',
       'Is 2 a change in \u201cGross margin\u201d, or its level today?'],
     ['net margin while gross margin stays steady', 'A 5% fall in footfall would cost us about 2 percentage points of net margin while gross margin stays steady.',
-      'figure_of_another_quantity', 'What is that as a change in \u201cGross margin\u201d? 2 percentage points of net margin reads as a figure for net margin.'],
+      'figure_of_another_quantity', 'What is that as a change in \u201cGross margin\u201d? 2 percentage points of net margin reads as a figure for net margin. If \u201cGross margin\u201d does not change, the link stays as it is.'],
   ] as const)('B2-level %s → ONE typed question about that figure, never a card, nothing stored', async (_name, said, why, question) => {
     const { caps, store, graph, commits } = world();
     const before = structuredClone(linkOf(graph).provenance);

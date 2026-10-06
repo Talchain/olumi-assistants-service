@@ -446,7 +446,7 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
       'target_figure_a_level', 'Is £400 a change in “Monthly wholesale subscription revenue”, or its level today?'],
     ['r2 HIGH: ownership BEFORE the figure ("cuts net margin by 0.5")', NATURAL_SENTENCE_ROWS[0]!,
       'Each 1 percentage point rise in production waste rate cuts net margin by 0.5 percentage points while gross margin stays steady.', NATURAL_SENTENCE_ROWS[0]!.effect,
-      'figure_of_another_quantity', 'What is that as a change in “gross margin”? 0.5 percentage points of net margin reads as a figure for net margin.'],
+      'figure_of_another_quantity', 'What is that as a change in “gross margin”? 0.5 percentage points of net margin reads as a figure for net margin. If “gross margin” does not change, the link stays as it is.'],
     ['r2 HIGH: an adjective before the counted noun ("one additional small group of")', s6,
       'One additional small group of subscribed local cafés raises monthly wholesale subscription revenue by £400.', s6.effect,
       'figure_counts_another_unit', 'What change in “Subscribed local cafés” does “One” stand for?'],
@@ -603,9 +603,9 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
   it.each([
     ['a possessive continuation ("onboarding drag\'s share of total delivery risk")', { ...headcount, id: 'P-poss',
       quote: "Every 2 extra developers add about 1 percentage point of onboarding drag's share of total delivery risk.",
-      effect: effect(1, 'percentage points', 2, 'developers') }, 'What is that as a change in “Onboarding drag”? 1 percentage point of onboarding drag\'s share of total delivery risk reads as a figure for onboarding drag\'s share of total delivery risk.'],
+      effect: effect(1, 'percentage points', 2, 'developers') }, 'What is that as a change in “Onboarding drag”? 1 percentage point of onboarding drag\'s share of total delivery risk reads as a figure for onboarding drag\'s share of total delivery risk. If “Onboarding drag” does not change, the link stays as it is.'],
     ['a modifier after the verb ("increase LIFT revenue", Revenue already in GBP/month)', { ...resort, id: 'P-lift',
-      quote: 'Every 2 additional customers increase lift revenue by £100 per month.', effect: effect(100, 'GBP/month', 2, 'customers') }, 'What is that as a change in “Revenue”? £100 of lift revenue reads as a figure for lift revenue.'],
+      quote: 'Every 2 additional customers increase lift revenue by £100 per month.', effect: effect(100, 'GBP/month', 2, 'customers') }, 'What is that as a change in “Revenue”? £100 of lift revenue reads as a figure for lift revenue. If “Revenue” does not change, the link stays as it is.'],
   ] as const)('%s → ONE typed question, no card, nothing stored', async (_n, row, question) => {
     const w = world(row as CorpusRow); const before = w.graph(); const result = await propose(w, row as CorpusRow);
     oneQuestion(result, question); expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
@@ -641,13 +641,13 @@ describe('RT-6 step 3 (Codex r2): determiner, plural and backward possessives na
   };
   it.each([
     ['a determiner before the modifier ("increase OUR lift revenue")', { ...resort, id: 'R2-det', quote: 'Every 2 additional customers increase our lift revenue by £100 per month.', effect: per100 },
-      undefined, 'What is that as a change in “Revenue”? £100 of lift revenue reads as a figure for lift revenue.'],
+      undefined, 'What is that as a change in “Revenue”? £100 of lift revenue reads as a figure for lift revenue. If “Revenue” does not change, the link stays as it is.'],
     ['a possessive BEFORE the figure ("increase revenue\'s tax by £100")', { ...resort, id: 'R2-back', quote: "Every 2 additional customers increase revenue's tax by £100 per month.", effect: per100 },
-      undefined, 'What is that as a change in “Revenue”? £100 of revenue\'s tax reads as a figure for revenue\'s tax.'],
+      undefined, 'What is that as a change in “Revenue”? £100 of revenue\'s tax reads as a figure for revenue\'s tax. If “Revenue” does not change, the link stays as it is.'],
     ['a PLURAL possessive ("…delay risks’ share of total delivery risk")', { fixture: '96ea7439', from: 'team_coordination_overhead', to: 'feature_launch_delay_risk', id: 'R2-plural',
       quote: 'Every 5 percentage points of team coordination overhead adds about 1 percentage point of feature-launch delay risks’ share of total delivery risk.',
       effect: effect(1, 'percentage points', 5, 'percentage points') }, risks,
-      'What is that as a change in “Feature-launch delay risks”? 1 percentage point of feature-launch delay risks’ share of total delivery risk reads as a figure for feature-launch delay risks’ share of total delivery risk.'],
+      'What is that as a change in “Feature-launch delay risks”? 1 percentage point of feature-launch delay risks’ share of total delivery risk reads as a figure for feature-launch delay risks’ share of total delivery risk. If “Feature-launch delay risks” does not change, the link stays as it is.'],
   ] as const)('%s → ONE typed question, no card, nothing stored', async (_n, row, change, question) => {
     const initial = change === undefined ? fixture(row as CorpusRow) : twin(row as CorpusRow, change);
     const w = world(row as CorpusRow, initial); const before = w.graph(); const result = await propose(w, row as CorpusRow);

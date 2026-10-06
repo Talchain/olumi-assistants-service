@@ -1363,7 +1363,9 @@ export function linkEffectFigureNotAChange(
       // ⛔ Never a yes/no: a "Yes" restates the same figure of another quantity, which is refused again (DL 0df0e1, RT-18:
       // never ASK a confirmation whose "Yes" cannot be recorded). The user is asked for the change in the target itself.
       return { miss: 'figure_of_another_quantity',
-        question: `What is that as a change in \u201c${ends.target}\u201d? ${said}${unit} of ${otherOwner} reads as a figure for ${otherOwner}.` };
+        // The honest "it doesn't change" has a stated outcome too (Review Desk 6b on #2642): nothing is written, never a 0.
+        question: `What is that as a change in \u201c${ends.target}\u201d? ${said}${unit} of ${otherOwner} reads as a figure for ${otherOwner}. `
+          + `If \u201c${ends.target}\u201d does not change, the link stays as it is.` };
     }
     if (amount.length > 0 && amount.every(f => figureIsALevel(q, f, ends.target))) {
       return { miss: 'target_figure_a_level', question: `Is ${amount[0]!.matchedText.trim()} a change in “${ends.target}”, or its level today?` };
