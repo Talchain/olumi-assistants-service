@@ -115,7 +115,7 @@ import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js'
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
 import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
-import { runDeliveryFactFor, turnRunReceipts, type RunDeliveryOutcome } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
+import { GUIDANCE_WRAPPER_REFUSAL, runDeliveryFactFor, turnRunReceipts, type RunDeliveryOutcome } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
 import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
@@ -164,6 +164,7 @@ import {
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { ANSWER_SHAPE_MAX_BULLETS, AnswerShapeSchema, deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure, withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 /**
  * C6-1b: the revision a turn-state packet is bound to when the read found NO graph. Never a hash (a real revision
@@ -3828,10 +3829,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * reassignment precedes this line). Bound to the Run THIS turn made (its run_identity = the readback's current Run),
      * and only within the readback's licence; any doubt omits, and the row is written exactly as before.
      */
-    // ⛔ A GUIDANCE ROW CARRIES NO FACTS (Codex r1 P1 on #2657): `appendThroughRpc` and the SQL wrapper
-    // `append_agent_answer_with_guidance` both refuse a guidance answer with facts, so the WHOLE answer would not be
-    // recorded. Until that guard admits run_delivery (a DB decision, DL), a guidance row records no delivery.
-    const runDelivery: RunDeliveryOutcome = answerGuidance !== undefined ? { kind: 'omitted', reason: 'guidance_row' } : runDeliveryFactFor({
+    // A guidance answer records it too (28% of Run answers carry guidance, DL 6 Oct): `appendThroughRpc` and the SQL
+    // wrapper `append_agent_answer_with_guidance` (migration 20261006070522) admit ONE run_delivery beside guidance.
+    const runDelivery: RunDeliveryOutcome = runDeliveryFactFor({
       sentBody: wireBody,
       // The automatic first analysis is this turn's Run too (Codex r1 P2); a later Run in the turn wins.
       toolResults: turnRunReceipts(fa, result.tool_results),
@@ -3840,7 +3840,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       graph: readbackGraph ?? null,
       analysisReady,
     });
-    if (runDelivery.kind === 'recorded' || (runDelivery.reason !== 'no_run_this_turn' && (runDelivery.reason !== 'guidance_row' || ranAnalysisThisTurn))) {
+    if (runDelivery.kind === 'recorded' || runDelivery.reason !== 'no_run_this_turn') {
       log.info({
         event: 'v5.run_delivery', request_id: String(req.id), scenario_id: scenarioId,
         ...(runDelivery.kind === 'recorded'
@@ -3855,7 +3855,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
         // `store.append` stays inside it (C8). No graph rides on this row.
-        const outcome = await appendCheckedGraphWrite({
+        const appendAnswer = (handlerFacts: readonly HandlerFact[]) => appendCheckedGraphWrite({
           store,
           writesGraph: false,
           source: 'agent_turn',
@@ -3877,7 +3877,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           llm_calls_used: providerCallsMade()
             ?? (fastPath === 'approve' || fastPath === 'strengthen' ? 0 : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? 1 : 0) : result.hops + 1),
           duration_ms: Date.now() - startedAt,
-          handler_facts: runDelivery.kind === 'recorded' ? [runDelivery.fact] : [],
+          handler_facts: handlerFacts,
           userMessage: message,
           assistantMessage: String(wireBody.assistant_text ?? text),
           ...(answerGuidance !== undefined ? { agent_guidance: answerGuidance } : {}),
@@ -3886,6 +3886,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
           },
         });
+        let outcome: Awaited<ReturnType<typeof appendAnswer>>;
+        try {
+          outcome = await appendAnswer(runDelivery.kind === 'recorded' ? [runDelivery.fact] : []);
+        } catch (err) {
+          // ⛔ The DELIVERY never costs the ANSWER: a DB whose guidance wrapper predates 20261006070522 (not yet applied,
+          // or rolled back) refuses the whole row, and the RPC rolled it back. So that one refusal retries once without
+          // the fact: the answer and its offers stay durable, and only the delivery record is lost (and logged).
+          if (runDelivery.kind !== 'recorded' || !String(err).includes(GUIDANCE_WRAPPER_REFUSAL)) throw err;
+          log.warn({ event: 'v5.run_delivery', request_id: String(req.id), scenario_id: scenarioId, outcome: 'omitted', reason: 'guidance_wrapper_refused' },
+            'agent-lane: run_delivery refused by the guidance wrapper (migration 20261006070522 not applied?) — answer written without it');
+          outcome = await appendAnswer([]);
+        }
         if (outcome.priorTurnConflict === true) {
           // A concurrent request with the SAME id and a DIFFERENT message won the
           // row. This answer is not the recorded one; say so rather than return it.

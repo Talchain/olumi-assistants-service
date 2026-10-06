@@ -28,8 +28,15 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
 /** The Phase 3 block types a Run's turn delivers (`DeliveredPhase3BlockSchema`). */
 const DELIVERED_PHASE3_TYPES: ReadonlySet<string> = new Set(['review_card', 'coaching', 'evidence', 'exercise']);
 
+/**
+ * The guidance wrapper's refusal text (`append_agent_answer_with_guidance`). A DB on the 20261004142707 body refuses a
+ * guidance answer that carries ANY fact; 20261006070522 admits one run_delivery. The route retries such a refusal once
+ * without the delivery, so a missing migration costs the record, never the answer.
+ */
+export const GUIDANCE_WRAPPER_REFUSAL = 'guidance requires a final non-graph Agent answer';
+
 export type RunDeliveryOmitReason =
-  | 'guidance_row' | 'no_run_this_turn' | 'run_not_current' | 'not_this_turns_run' | 'record_refused' | 'outside_licence' | 'fact_refused' | 'threw';
+  | 'no_run_this_turn' | 'run_not_current' | 'not_this_turns_run' | 'record_refused' | 'outside_licence' | 'fact_refused' | 'threw';
 
 export type RunDeliveryOutcome =
   | { readonly kind: 'recorded'; readonly fact: HandlerFact; readonly record: RunDeliveredRecord }

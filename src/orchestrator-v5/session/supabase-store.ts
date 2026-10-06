@@ -373,7 +373,7 @@ export class SupabaseSessionStore implements SessionStore {
   private async appendThroughRpc(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
     if (write.agent_guidance !== undefined && (parseAnswerGuidance(write.agent_guidance) === null
       || write.graph != null || write.modelVersion !== undefined || write.briefText != null
-      || write.coaching_state != null || write.handler_facts.length !== 0
+      || write.coaching_state != null || !guidanceAnswerFactsAdmitted(write.handler_facts)
       || write.turn_class !== 'direct_answer' || write.handler_id !== null || !write.response_emitted
       || write.turn_id.endsWith(TURN_CLAIM_SUFFIX) || !isAgentAnswerRow(write))) {
       throw new StateCommitFailedError('Guidance metadata requires a final Agent answer without a graph write');
@@ -2762,6 +2762,14 @@ export class SupabaseSessionStore implements SessionStore {
  * observation 1. Slice B writes an empty array in practice; Slice C+ will
  * exercise this path.
  */
+/**
+ * The facts a guidance answer may carry, exactly as `append_agent_answer_with_guidance` admits them (migration
+ * 20261006070522, CEE #2657): none, or the ONE `run_delivery` recording what the Run's turn showed (0.79 SD-1).
+ */
+function guidanceAnswerFactsAdmitted(facts: readonly HandlerFact[]): boolean {
+  return facts.length === 0 || (facts.length === 1 && facts[0]!.fact_type === 'run_delivery');
+}
+
 function serialiseHandlerFacts(
   facts: readonly HandlerFact[],
 ): Array<{ handler_id: string; action_type: string; noop: boolean; payload: unknown }> {
