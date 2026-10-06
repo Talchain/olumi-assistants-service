@@ -2523,7 +2523,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...[...optionNameAliases(st.graph).values()].map((a) => a.display)])],
         runToolOutputLicensesLeader(selectedRun),
         graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''),
-        pairRead.withinBand, pairRead.userWrittenLinks);
+        pairRead.withinBand, pairRead.userWrittenLinks, pairRead.frameRefitLinks);
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
@@ -3447,9 +3447,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && retainedScopeIssues.length === 0 && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
     const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
+    // ⭐ S5t-W (e7 #87 6011176086): an approval's text is the capability's OWN receipt (server-authored, already through
+    // `withoutAgentDirections` above), never model prose, so the completion-claim stripper — which exists for the model's
+    // words — never runs over it. It dropped "Recorded your figure … as you confirmed: "…" Olumi rescaled ‘…’ so your
+    // figure fits." whole (the quote ends `."`, so it was one sentence). The narrator still states what was saved.
     const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen' || fastPath === 'method'
       ? { text, status: null as string | null, stripped: [] as string[] }
-      : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
+      : fastPath === 'approve'
+        ? { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }), text }
+        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.
