@@ -219,8 +219,8 @@ async function runHandler(
 // The user-facing bytes, spelled here (never imported)
 // ============================================================================
 
-const FRAMED_LEAD = 'Hold at £49 Per Seat scored highest against your goal in 71% of runs of this model.';
-const WITHDRAWN_LEAD = 'Hold at £49 Per Seat scored highest in 71% of runs of this model.';
+const FRAMED_LEAD = 'Hold at £49 Per Seat was supported by 71% of runs of this model.';
+const WITHDRAWN_LEAD = 'Hold at £49 Per Seat was supported by 71% of runs of this model.';
 const COULD_NOT_TEST = ' The model could not test whether any option reaches your goal.';
 const DIRECTION_ASSUMED =
   ' In this model I’ve assumed a higher value is better for your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
@@ -230,13 +230,13 @@ const COMBINED =
 const ARM_B_FRAMED =
   ' Two different questions have two different answers here: “Hold at £49 Per Seat” scored highest against your goal most often,' +
   ' but “Raise to £59 Per Seat” is more likely to reach your stated target (48% against 0%).' +
-  ' Scoring highest counts how often an option scored highest on your goal, not whether your target was met.';
+  ' The share of runs counts how often an option ranked first on your goal’s measure, not whether your target was met.';
 const ARM_A_FRAMED =
-  ' “Hold at £49 Per Seat” scored highest against your goal most often without moving “Seat Price Level” the way your goal asks.' +
-  ' Among the options that do, “Raise to £59 Per Seat” scored highest in 28% of runs.';
+  ' “Hold at £49 Per Seat” was supported by the most runs without moving “Seat Price Level” the way your goal asks.' +
+  ' Among the options that do, “Raise to £59 Per Seat” was supported by 28% of runs.';
 const ARM_A_UNFRAMED =
-  ' “Hold at £49 Per Seat” scored highest most often without moving “Seat Price Level” the way your goal asks.' +
-  ' Among the options that do, “Raise to £59 Per Seat” scored highest in 28% of runs.';
+  ' “Hold at £49 Per Seat” was supported by the most runs without moving “Seat Price Level” the way your goal asks.' +
+  ' Among the options that do, “Raise to £59 Per Seat” was supported by 28% of runs.';
 
 // ============================================================================
 // The matrix: 2 graphs × 4 data shapes × 4 code sets = 32 rows, every one spelled out

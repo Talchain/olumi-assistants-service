@@ -368,9 +368,9 @@ describe('PRODUCER CONTROL — no post-analysis surface states the lead as a gap
       // everything would make the guard above pass only by deleting the
       // replacement copy too. These are the #906 forms this fix composes with.
       for (const honest of [
-        'Standardise on MacBook Pro scored highest against your goal in 61% of runs of this model.',
+        'Standardise on MacBook Pro was supported by 61% of runs of this model.',
         'In this model, Standardise on MacBook Pro scored highest.',
-        'Standardise on Dell XPS scored highest against your goal in 27% of runs of this model.',
+        'Standardise on Dell XPS was supported by 27% of runs of this model.',
         'Standardise on MacBook Pro and Standardise on Dell XPS are effectively tied.',
       ]) {
         expect(

@@ -117,11 +117,11 @@ const CASE_B_INPUT: AnalysisResultHeadlineInput = {
 
 /** The Case-B headline as it ships TODAY, driver clause and all. */
 const CASE_B_HEADLINE_WITH_DRIVER =
-  'Keep what we have scored highest against your goal in 82% of runs of this model because ' +
+  'Keep what we have was supported by 82% of runs of this model because ' +
   'Sales Rep Adoption Rate is the strongest driver.';
 
 /** The same run with the driver clause omitted — an existing Case-E shape. */
-const CASE_B_HEADLINE_WITHOUT_DRIVER = 'Keep what we have scored highest in this model.';
+const CASE_B_HEADLINE_WITHOUT_DRIVER = 'Keep what we have was supported by the most runs of this model.';
 
 describe('unset option-effect disclosure — registry egress', () => {
   // ───────────────────────────────────────────────────────────────────────

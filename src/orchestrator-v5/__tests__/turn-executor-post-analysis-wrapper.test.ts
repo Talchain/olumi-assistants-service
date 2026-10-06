@@ -17,6 +17,7 @@ import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/
 import { setTestSink } from '../../utils/telemetry.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { makeMessagePayload } from './fixtures.js';
+import { ANY_LEAD_CLAUSE_RE } from './support/lead-clause.support.js';
 
 const SCENARIO_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const TURN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -646,8 +647,7 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
 
     // The deterministic flip composer output — leading option A at 62% — must
     // be present, and the generic apology must NOT be the answer.
-    expect(result.response.assistant_text).toContain('scored highest');
-    expect(result.response.assistant_text).toContain('62%');
+    expect(result.response.assistant_text).toContain("In this model, 'A' was supported by 62% of runs.");
     expect(result.response.assistant_text).not.toContain("couldn't complete that turn");
 
     // Ops signal preserved: bounded fallback still fired, cause intact.
@@ -701,7 +701,7 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     // The deterministic leader answer the permitted arm asserts MUST be absent —
     // both the phrase and the probability it carries.
     expect(text).not.toContain('currently leads');
-    expect(text).not.toContain('scored highest');
+    expect(text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(text).not.toContain('62%');
     // And nothing else in the response asserts a leader either: scanned with the
     // production alarm's own reader, so this test and the alarm cannot drift.

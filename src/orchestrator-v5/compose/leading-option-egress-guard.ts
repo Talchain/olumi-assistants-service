@@ -140,6 +140,49 @@ const MOST_SUPPORTED_LEADER_RE = new RegExp(
   'i',
 );
 
+/** The ladder verb's classes (Desk 6b + DL, #2646): production verbs, and has/had (a held quantity). */
+const LADDER_VERB_SRC = String.raw`(?:gave|gives|give|giving|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|has|had|have|having|end(?:s|ed|ing)?\s+up\s+with|result(?:s|ed|ing)?\s+in)`;
+const LADDER_PASSIVE_SRC = String.raw`(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)`;
+/** A weighting, a mechanism or the goal-chance copy: "the highest priority", "the highest influence", "the highest chance". */
+// Codex #2660 r1+r2: a hyphenated compound whose HEAD names the thing ("the lowest-risk path", "the highest-cost
+// assumption"), or an input noun, is not a result. A compound with a result head ("the lowest-churn outcome", "the
+// highest-margin result") is still a claim.
+const NOT_A_RESULT_SRC = String.raw`(?!-[a-z]+\s+(?:paths?|routes?|steps?|checklists?|assumptions?|inputs?|estimates?|settings?|tests?)\b|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds|assumptions?|inputs?|estimates?)\b)`;
+/**
+ * A STATISTIC comparison ("produced the highest average outcome", "has the lowest modelled median") is v6 class C2 when
+ * the sentence names its metric scope, and the served agent lane keeps it by that scope (`blankScopedMetricComparison`).
+ * This context-free reader cannot see the scope, so it leaves the statistic form alone, exactly as on the base (served
+ * caf7d1a/pricing-1). The ladder's own lead names a QUANTITY ("the highest monthly recurring revenue"), never this form.
+ */
+const NOT_A_STATISTIC_SRC = String.raw`(?!\s+(?:(?:modelled|average|mean|median|expected|simulated|normalised)\s+)+(?:median|mean|average|outcome|value|score)s?\b)`;
+const RUN_SHARE_SRC = String.raw`\bin\s+(?:the\s+most|\d{1,3}(?:\.\d+)?\s?%)\s+(?:of\s+(?:the\s+)?)?(?:runs?|simulations?)\b`;
+/** A scope, not an option: "risk is highest under the current assumptions". */
+const NOT_AN_OPTION_SCOPE_SRC = String.raw`(?!(?:the\s+)?(?:current|these|this|those|that|your|our|its|their|all|any|each|every|both|most|many|some)\b)`;
+const GAVE_THE_EXTREME_RE = new RegExp(
+  [
+    // Active: "X gave / produced / had the highest|lowest {q}".
+    String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:highest|lowest)\b${NOT_A_RESULT_SRC}${NOT_A_STATISTIC_SRC}`,
+    // "the most|least {q}", only with a run share: "X gave the most MRR in 62% of runs".
+    String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:most|least)\b[^.;:!?\n]{0,60}?${RUN_SHARE_SRC}`,
+    // Fronted with a run share: "The highest {q} came from X in 81% of runs".
+    String.raw`\b(?:highest|lowest)\b[^.;:!?\n]{0,80}?${RUN_SHARE_SRC}`,
+    // Fronted, no share: "The lowest churn came from X" / "The highest MRR was produced by X" / "The most MRR came from X".
+    String.raw`\bthe\s+(?:highest|lowest|(?:most|least)(?!\s+(?:of|runs?|support)\b))\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+${LADDER_PASSIVE_SRC}\s+by)\b`,
+    // Predicative: "churn was lowest under X", "MRR is highest with X".
+    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?(?:highest|lowest)\s+(?:under|with|for)\s+${NOT_AN_OPTION_SCOPE_SRC}`,
+  ].join('|'),
+  'i',
+);
+const CAME_TOP_RE = new RegExp(
+  [
+    String.raw`\b(?:came|comes|coming)\s+(?:out\s+)?top\b`,
+    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?top\s+(?:on|for)\b`,
+    String.raw`(?:^|[.;:!?\n]\s*)top\s+(?:on|for)\s+[^.;:!?\n]{0,48}?\b(?:was|were|is|are|came)\b`,
+    String.raw`\btop(?:s|ped)\b(?!\s+up\b)[^.;:!?\n]{0,60}?${RUN_SHARE_SRC}`,
+  ].join('|'),
+  'i',
+);
+
 /**
  * Copy that NAMES or PRESUMES a leading option.
  *
@@ -171,7 +214,10 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
   { code: 'best_option', re: /\bbest\s+option\b/i },
   { code: 'winner', re: /\bwinners?\b/i },
-  { code: 'ahead', re: /\b(?:is|are|was|were)\s+ahead\b/i },
+  // DL 0df0e1 follow-up (#2639 family): the adverb slot ("is just / a little / still ahead") the band list could not
+  // see. NO timeline exemption ("ahead of schedule / plan / time"): a context-free reader cannot tell an option named
+  // "Plan" from a plan (Codex buddy #2646 r1 F3), so those stay caught exactly as on the base.
+  { code: 'ahead', re: /\b(?:is|are|was|were)\s+(?:(?:[a-z]+ly|just|well|still|now|a\s+little|a\s+bit)\s+)?ahead\b/i },
   { code: 'top_choice', re: /\btop\s+(?:choice|option)\b/i },
   /**
    * SECOND RECORDED DIVERGENCE from the walk's matcher — and the one that
@@ -337,6 +383,19 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * through the new verb.
    */
   { code: 'came_out_lowest', re: /\bcame\s+out\s+lowest\b/i },
+  /**
+   * ⭐ THE LEAD LADDER'S RUNG 1/2 VERB (Science d5 #87 6008589328): "{X} gave the highest|lowest {quantity} in N% of runs
+   * of this model" names the run-share leader exactly as "scored highest" did, so the withheld gate must SEE it and the
+   * paraphrases the ladder invites (Review Desk 6b + DL, #2646): any production verb or has/had ("produced the lowest
+   * churn", "had the highest MRR"), "the most|least {q}" bound to a run share, the fronted and passive forms ("The
+   * lowest churn came from X", "The highest MRR was produced by X"), and the predicative ("churn was lowest under X").
+   * Rung 3 ("was supported by") is `runs_supported`'s. A weighting or a mechanism ("the highest priority", "has the
+   * highest influence") and the goal-chance copy ("the highest chance of meeting your goal", its own licence) are not
+   * this code's.
+   */
+  { code: 'gave_the_extreme', re: GAVE_THE_EXTREME_RE },
+  /** "{X} came top", "{X} was top on MRR", "Top on MRR was {X}", "{X} topped MRR in 62% of runs" (Desk 6b, #2646). */
+  { code: 'came_top', re: CAME_TOP_RE },
   /**
    * ⭐ THE DIRECTION-NEUTRAL FORM (DL 0df0e1 #87 6002469285, Part B): where a composer cannot see the Run's sent
    * direction, it names an option as "{N}% of runs supported {X}", "{X} would be supported by the most runs if …", "the
@@ -823,6 +882,33 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   'Hire Marketing Manager is the most well supported option.',
   'Hire Marketing Manager is the most well-supported option.',
   'Hire Marketing Manager is better supported than Outsource.',
+  // The lead ladder's rung 1/2 verb (d5 #87 6008589328), numbered, shed and fronted.
+  'Raise to £59 gave the highest monthly recurring revenue in 62% of runs of this model.',
+  'Raise to £59 gave the lowest churn in the most runs of this model.',
+  'The highest monthly recurring revenue came from Raise to £59 in 62% of runs.',
+  // The `ahead` adverb slot (DL follow-up, r18's class).
+  'Raise prices 10% is just ahead.',
+  'Raise prices 10% is a little ahead.',
+  // No timeline exemption: an option named "Plan B" is a contest.
+  'Raise prices 10% is ahead of Plan B.',
+  'Raise prices 10% is slightly ahead of Plan B in this model.',
+  // >>> #2646 Desk 6b + DL: the ladder verb's paraphrase classes (active, has/had, most+share, fronted, passive,
+  // predicative, top). Each class has its own CATCH rows in lead-ladder-egress.test.ts.
+  'Raise to £59 produced the lowest churn.',
+  'Raise to £59 delivered the highest MRR.',
+  'Raise to £59 yields the highest MRR.',
+  'Raise to £59 had the highest MRR.',
+  'Raise to £59 gave the most MRR in 62% of runs.',
+  'The lowest churn came from Raise to £59.',
+  'The highest MRR was produced by Raise to £59.',
+  'Churn was lowest under Raise to £59.',
+  'Raise to £59 came top on MRR in 62% of runs.',
+  'Raise to £59 topped MRR in 62% of runs.',
+  'Top on MRR was Raise to £59.',
+  // Desk 6b follow-up rows (DL 6010662486): "ends up with" / "resulted in".
+  'Raise to £59 ends up with the highest MRR.',
+  'Raise to £59 resulted in the lowest churn.',
+  // <<< #2646 Desk 6b + DL
 ]);
 
 function assertEnforcerIsNarrowerThanAlarm(): void {
@@ -1106,6 +1192,11 @@ export const BLOCK_PROSE_FIELDS: readonly string[] = [
   'reference_class',
   'counter_case',
   'review_trigger',
+  // ⭐ THE CHIP PROMPT (DL 0df0e1 6010662486; 7b's Codex r1 on #2654). The calibration card copies the model's question
+  // VERBATIM into `body` AND `action_prompt`, and the card ships on a withheld turn, so `body` was rewritten while the
+  // chip still carried the claim — which the user then sends as their own message. The wire enforcer OMITS the chip on
+  // a hit (never rewrites words into the user's mouth); the alarm reports it here. Pinned by action-prompt-egress.test.ts.
+  'action_prompt',
 ];
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -360,7 +360,7 @@ describe('a limit on an UNANCHORABLE target is not told to restate itself', () =
     // Bound by identity to the persisted contract field. r1225 un-fixed
     // trust-spine board #1 by relaxing exactly this; nothing here may.
     expect(v.may_name_leading_option).toBe(false);
-    expect(v.summary).not.toContain('scored highest against your goal in');
+    expect(v.summary).not.toContain('was supported by');
   });
 
   it('ARM B (OPPOSITE-DIRECTION TWIN): a ROOT target is NOT given the derived-target cause', async () => {
