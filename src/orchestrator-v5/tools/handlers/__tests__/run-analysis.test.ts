@@ -48,6 +48,7 @@ import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
 import { RUN_ANALYSIS_PROJECTION_KEY } from '../../../context/analysis-projection-policy.js';
 import { ANALYSIS_PROJECTION_VERSION } from '../../../context/graph-identity.js';
 import { toSafeTransportEnrichment } from '../../../compose.js';
+import { ANY_LEAD_CLAUSE_RE } from '../../../__tests__/support/lead-clause.support.js';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -1538,7 +1539,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     // The engine's constraint warning alone must NOT change the message when
     // the user ratified nothing — this is the byte-parity guarantee, and it
     // is what proves the assertions in the next test are not vacuous.
-    expect(outcome.assistant_text).toContain('was supported by');
+    expect(outcome.assistant_text).toMatch(ANY_LEAD_CLAUSE_RE);
     expect(outcome.assistant_text).not.toContain('could not be checked');
   });
 
@@ -1551,7 +1552,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
 
     // (a) No recommendation may exist while a stated condition is unchecked.
     expect(outcome.assistant_text).not.toContain('currently leads');
-    expect(outcome.assistant_text).not.toContain('scored highest');
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(outcome.assistant_text).not.toContain('percentage points');
 
     // (b) Exactly which user condition was not evaluated.
@@ -1580,7 +1581,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).not.toContain('currently leads');
-    expect(outcome.assistant_text).not.toContain('scored highest');
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(outcome.assistant_text).toContain('Total three-year cost');
   });
 
@@ -1598,7 +1599,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     });
     const outcome = await handler(makeInvocation());
     expect(outcome.assistant_text).not.toContain('currently leads');
-    expect(outcome.assistant_text).not.toContain('scored highest');
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(outcome.assistant_text).toContain('Total three-year cost');
   });
 

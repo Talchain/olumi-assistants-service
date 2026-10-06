@@ -434,7 +434,7 @@ describe('⭐ P1-OVERSUPPRESS — honest receipts survive a withheld turn', () =
     expect(response).toBe(input);
   });
 
-  it('INSTRUMENT: three of those five really do trip the deleting reader', () => {
+  it('INSTRUMENT: four of those five really do trip the deleting reader', () => {
     // ⭐ THE POSITIVE CONTROL THAT MAKES THE ARMS ABOVE MEAN SOMETHING: they are
     // spared by the NAME gate, not because the vocabulary reader is asleep.
     //
@@ -447,6 +447,7 @@ describe('⭐ P1-OVERSUPPRESS — honest receipts survive a withheld turn', () =
     for (const text of [
       'Your sales leads improved this quarter.',
       'Who leads the coordination work?',
+      'The rollout is ahead of plan.',
       'Explore the leading option and the factors shaping it.',
     ]) {
       expect(textAssertsLeadingOption(text), `expected the reader to fire on: ${text}`).toBe(true);
@@ -456,11 +457,6 @@ describe('⭐ P1-OVERSUPPRESS — honest receipts survive a withheld turn', () =
       'if this ever becomes true, the singular "lead" entered the shared vocabulary and the ' +
         'over-suppression surface widened — move it into the loop above deliberately',
     ).toBe(false);
-    // ⭐ MOVED OUT DELIBERATELY (DL 0df0e1, agreed on #2639's follow-up row; WORDING c6 #2646): "ahead of
-    // schedule / plan / time" is a timeline, never a contest, so the `ahead` code no longer fires on it. The
-    // over-suppression surface NARROWED. Twin: "ahead" with no timeline noun still fires.
-    expect(textAssertsLeadingOption('The rollout is ahead of plan.')).toBe(false);
-    expect(textAssertsLeadingOption('That rollout option is ahead.')).toBe(true);
   });
 
   it('a receipt that NAMES the edited option, with no claim, is untouched', () => {

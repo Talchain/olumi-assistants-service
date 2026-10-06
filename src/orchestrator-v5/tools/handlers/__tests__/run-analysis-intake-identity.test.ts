@@ -4,6 +4,7 @@ import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler, type RunAnalysisScenarioSnapshot } from '../run-analysis.js';
 import { isAllowedRunAnalysisAssistantText } from '../../../coaching/analysis-result-headline.js';
+import { ANY_LEAD_CLAUSE_RE } from '../../../__tests__/support/lead-clause.support.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 // Synthetic PLoT response: deterministic transport control, no provider call.
@@ -82,7 +83,8 @@ describe('run_analysis handler — source-bound intake identity', () => {
     const { outcome, result } = await run({ nodes: boundNodes.map(({ source_quote: _quote, ...node }) => node) });
     expect(result.constraint_verdict?.may_name_leading_option).toBe(false);
     expect(outcome.assistant_text).toContain('does not establish which options correspond');
-    expect(outcome.assistant_text).not.toMatch(/candidate is missing|not in the model|Add it|scored highest/);
+    expect(outcome.assistant_text).not.toMatch(/candidate is missing|not in the model|Add it/);
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
   });
 
   it('recovers explicit quotes dropped from snapshot.options by the same canonical IDs', async () => {
@@ -110,7 +112,7 @@ describe('run_analysis handler — source-bound intake identity', () => {
     });
     expect(outcome.assistant_text).toContain('Customer churn');
     expect(outcome.assistant_text).toContain('could not be checked');
-    expect(outcome.assistant_text).not.toContain('scored highest');
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     if (!bound) expect(outcome.assistant_text).toContain('does not establish which options correspond');
   });
 
@@ -147,7 +149,7 @@ describe('run_analysis handler — source-bound intake identity', () => {
       expect(result.constraint_verdict?.constraint_verdict_state).toBe('unevaluated');
       expect(outcome.assistant_text).toContain('Customer churn');
       expect(outcome.assistant_text).toContain('could not be checked');
-      expect(outcome.assistant_text).not.toContain('scored highest');
+      expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
     }
     expect(outcome.assistant_text).not.toMatch(/not in the model|Add it|Add them/);
     if (expected === 'missing') {

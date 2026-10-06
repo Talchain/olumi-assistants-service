@@ -157,7 +157,7 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
   it('MAXIMISE CONTRAST ("at least 400"): the shares are the at-least body\'s, and the lead never says "came out lowest"', async () => {
     const { result } = await runOn(atLeast());
     expect(resultShares(result)).toEqual(sharesById(F.plot_body_at_least.option_comparison));
-    expect(result.summary).not.toMatch(/came out lowest/);
+    expect(result.summary).not.toMatch(/came out lowest|gave the lowest/);
     expect(goalChanceKeys(result)).toBe(0);
   });
 
@@ -169,7 +169,10 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(withoutTarget.result.leading_option_id).toBe('15_loyalty_discount');
     expect(withTarget.result.leading_option_id).toBe(withoutTarget.result.leading_option_id);
     expect(textNamesLeadingOption(headlineOf(withTarget.result.summary))).toBe(true);
-    // A label that states the AIM is not the quantity: the lead keeps the goal-framed words.
-    expect(withTarget.result.summary).not.toMatch(/came out lowest/);
+    // Ladder rung 2 (Science d5 #87 6008589328): an aim-verb label ("Reduce monthly cancellations") has its verb
+    // stripped, so the lead names the quantity on BOTH graphs, and never carries the verb.
+    expect(withTarget.result.summary).toMatch(/gave the lowest monthly cancellations in \d{1,3}% of runs of this model/);
+    expect(withoutTarget.result.summary).toMatch(/gave the lowest monthly cancellations in \d{1,3}% of runs of this model/);
+    expect(withTarget.result.summary).not.toMatch(/lowest reduce|came out lowest/i);
   });
 });

@@ -22,6 +22,7 @@ import {
 } from '../analysis-result-headline.js';
 import { resolveLeadQuantity } from '../lead-quantity.js';
 import { textNamesLeadingOption } from '../../compose/leading-option-egress-guard.js';
+import { ANY_LEAD_CLAUSE_RE } from '../../__tests__/support/lead-clause.support.js';
 
 type Json = Record<string, unknown>;
 const X = 'Raise to £59';
@@ -74,8 +75,15 @@ describe("d5's mutants", () => {
 describe('the resolver, alone', () => {
   it.each([
     ['', '£'], ['Reduce', '%'], ['m'.repeat(49), '£'], ['fac_monthly_revenue', '£'], ['Keep costs stable', '£'],
+    // Codex buddy #2646 r1 F1: an aim or action verb d5's list cannot strip, or a target word inside → rung 3.
+    ['Sustain revenue', '£'], ['Hit £1m ARR', '£'], ['Preserve gross margin', '%'], ['Optimise conversion', '%'],
+    ['Win market share', '%'], ['Revenue target', '£'], ['Churn goal', '%'],
   ])('"%s" → rung 3', (goalLabel, goalUnit) => {
     expect(resolveLeadQuantity({ goalLabel, goalUnit, minimised: false })).toBeNull();
+  });
+  it('CONTROL: those verbs mid-label are nouns, so the quantity rides', () => {
+    expect(resolveLeadQuantity({ goalLabel: 'Social media reach', goalUnit: 'people', minimised: false })?.quantity).toBe('social media reach');
+    expect(resolveLeadQuantity({ goalLabel: 'Meetings booked', goalUnit: 'meetings', minimised: false })?.quantity).toBe('meetings booked');
   });
   it('a quantity of exactly the budget rides', () => {
     expect(resolveLeadQuantity({ goalLabel: 'm'.repeat(48), goalUnit: '£', minimised: false })?.quantity).toBe('m'.repeat(48));
@@ -117,5 +125,25 @@ describe('the cage', () => {
   });
   it('the retired goal-framed lead is no longer admitted', () => {
     expect(isAllowedRunAnalysisAssistantText(`${X} scored highest against your goal in 62% of runs of this model.`)).toBe(false);
+  });
+});
+
+describe('CONTROL for the shared ANY_LEAD_CLAUSE_RE (negative pins elsewhere lean on it)', () => {
+  it.each([
+    caseD({ goal_label: 'Monthly recurring revenue', goal_unit: '£' }),
+    caseD({ minimised_goal_label: 'Reduce churn', goal_unit: '%' }),
+    caseD(),
+    `${X} was supported by the most runs of this model.`,
+    `In this model, ${X} was supported by 62% of runs.`,
+    "In this model, 'Hold Price' was supported by the next most runs (38%).",
+    `${X} scored highest against your goal in 62% of runs of this model.`,
+  ])('matches: %s', (t) => {
+    expect(t).toMatch(ANY_LEAD_CLAUSE_RE);
+  });
+  it.each([
+    '2 options are effectively eliminated (each supported by under 1% of runs).',
+    'Olumi can compare your options, but can\'t yet test them against your target.',
+  ])('does not match: %s', (t) => {
+    expect(t).not.toMatch(ANY_LEAD_CLAUSE_RE);
   });
 });

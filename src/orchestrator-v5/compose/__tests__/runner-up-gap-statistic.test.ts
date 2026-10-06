@@ -449,3 +449,19 @@ describe('redactRunnerUpGapStatistic — surgery, not demolition', () => {
     expect(findRunnerUpGapCodes(RUNNER_UP_GAP_REPLACEMENT)).toEqual([]);
   });
 });
+
+describe('the lead ladder\'s "supported by" (Codex buddy #2646 r1 F2): a gap when a figure follows, causal otherwise', () => {
+  it.each([
+    'Raise was supported by 17 percentage points more than Hold.',
+    'Raise was supported by about 17 points more runs than Hold.',
+  ])('CATCH: %s', (s) => {
+    expect(findRunnerUpGapCodes(s).length).toBeGreaterThan(0);
+  });
+  it.each([
+    'Growth was supported by strong demand in the north.',
+    'Raise was supported by 62% of runs of this model.',
+    '2 options are effectively eliminated (each supported by under 1% of runs).',
+  ])('LEAVE: %s', (s) => {
+    expect(findRunnerUpGapCodes(s)).toEqual([]);
+  });
+});

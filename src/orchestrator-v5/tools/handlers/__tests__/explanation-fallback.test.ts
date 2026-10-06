@@ -315,7 +315,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     expect(explain).toContain('effectively tied');
     expect(explain).not.toContain('sits in second place');
     // Union, never replace: the runner-up standing in its model-relative words (principle audit, 5 Oct).
-    expect(explain).not.toContain("'Hire Two Mid-Level' scored highest");
+    expect(explain).not.toMatch(/'Hire Two Mid-Level' (?:scored highest|was supported by)/);
     expect(explain).not.toContain("'Hire Two Mid-Level' came next");
     expect(flip).toContain('effectively tied');
   });

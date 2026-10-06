@@ -132,7 +132,7 @@ describe('what_would_flip — the answer addresses the option the user named', (
     expect(out.assistant_text).not.toContain('Hire Two Senior Engineers Locally');
     // And it is not the generic prose either (old and current openers).
     expect(out.assistant_text).not.toContain('currently leads');
-    expect(out.assistant_text).not.toMatch(/In this model, .+ scored highest/);
+    expect(out.assistant_text).not.toMatch(/In this model, .+ (?:scored highest|was supported by \d)/);
   });
 
   it('the named option IS the one that flips ⇒ an addressed answer', async () => {

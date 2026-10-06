@@ -1,12 +1,12 @@
 /**
- * ⭐ THE LEAD LADDER'S WORDS STAY VISIBLE TO THE WITHHELD GATE, AND "AHEAD" MEANS A LEADER ONLY WHEN IT IS ONE
+ * ⭐ THE LEAD LADDER'S WORDS STAY VISIBLE TO THE WITHHELD GATE, AND "AHEAD" WITH AN ADVERB IS STILL A LEADER
  * (Science d5 #87 6008589328; DL 0df0e1 follow-up row on #2639, agreed).
  *
  * The new rung 1/2 verb ("{X} gave the highest|lowest {quantity} in N% of runs of this model") names the run-share
  * leader exactly as "scored highest" did, so `gave_the_extreme` must fire in any tense and fronted. Rung 3 ("was
- * supported by") is the pre-existing `runs_supported`. And the `ahead` code gains its adverb slot ("is just ahead",
- * "is a little ahead") while "ahead of schedule / plan / time" — a timeline, never a contest — stays LEAVE on both
- * `ahead` and `band_ahead`. Rows are CATCH (blocked on a withheld turn), LEAVE (passes), PARITY (unchanged verdict).
+ * supported by") is the pre-existing `runs_supported`. The `ahead` code gains its adverb slot ("is just ahead",
+ * "is a little ahead"); "ahead of schedule / plan / time" stays caught as on the base (an option may be named "Plan").
+ * Rows are CATCH (blocked on a withheld turn), LEAVE (passes), PARITY (unchanged verdict).
  */
 import { describe, expect, it } from 'vitest';
 import { textAssertsLeadingOption, textNamesLeadingOption } from '../leading-option-egress-guard.js';
@@ -53,27 +53,34 @@ describe('CATCH: "ahead" with an adverb names a leader (the r18 sentence and its
   });
 });
 
-describe('LEAVE: "ahead of schedule / plan / time" is a timeline, not a contest', () => {
+describe('PARITY with the base: "ahead of schedule / plan / time" stays caught (Codex buddy #2646 r1 F3)', () => {
+  // A context-free reader cannot tell an option named "Plan" from a plan, so no timeline exemption ships. These are
+  // caught exactly as the base catches them; an honest one ships on a withheld turn only through the NAME gate.
   it.each([
     'The rollout is ahead of schedule.',
-    'We are slightly ahead of schedule.',
-    'Hiring is just ahead of plan.',
+    'Hiring is ahead of plan.',
     'The launch was well ahead of time.',
-    'Hiring is ahead of schedule; costs are flat.',
+    'Raise prices 10% is ahead of Plan.',
+    'Raise prices 10% is slightly ahead of Plan.',
+    'Raise prices 10% is ahead of Plan B.',
+  ])('%s', (t) => {
+    expect(both(t)).toEqual([true, true]);
+  });
+  it('CONTROL: "ahead of" another OPTION is a contest', () => {
+    expect(both('Raise prices 10% is slightly ahead of Hold Price.')).toEqual([true, true]);
+  });
+});
+
+describe('LEAVE: "the highest priority" is a weighting, not a result (Codex buddy #2646 r1 F4)', () => {
+  it.each([
+    'The team gave the highest priority to testing Raise prices 10%.',
+    'We gave the lowest weighting to the churn estimate.',
+    'Finance gives the highest importance to cash runway.',
   ])('%s', (t) => {
     expect(both(t)).toEqual([false, false]);
   });
-  it('CONTROL: "ahead of" another OPTION is still a contest', () => {
-    expect(both('Raise prices 10% is slightly ahead of Hold Price.')).toEqual([true, true]);
-  });
-  it.each([
-    'Raise prices 10% is ahead of Plan B.',
-    'Raise prices 10% is slightly ahead of Plan B in this model.',
-    'Raise prices 10% is ahead of plan b.',
-    'Raise prices 10% is ahead of Time-Boxed Hiring.',
-    'We are ahead of schedule, and Raise prices 10% is ahead.',
-  ])('CATCH: the timeline noun is exempt only where it CLOSES the phrase — %s', (t) => {
-    expect(both(t)).toEqual([true, true]);
+  it('CONTROL: the same verb with a QUANTITY is the ladder\'s claim', () => {
+    expect(both('Raise prices 10% gave the highest monthly revenue.')).toEqual([true, true]);
   });
 });
 

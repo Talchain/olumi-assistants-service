@@ -443,7 +443,7 @@ function isLabelDirectionalAdvice(text: string, det: LabelDetectors): boolean {
 // vocabulary's `scored_highest` code reads). The lead ladder's number-free forms (d5 #87 6008589328) do the same:
 // "gave the highest|lowest {quantity} in the most runs of this model" and "was supported by the most runs of this model".
 const RESULT_PRESENTATION_PATTERN =
-  /\b(?:\d{1,3}\s?%|wins?\b|leads?\b|ahead\b|out[- ]?performs?|comes?\s+out\s+ahead|scor(?:e|es|ed|ing)\s+highest|(?:gave|gives)\s+the\s+(?:highest|lowest)|supported\s+by\s+the\s+most\s+runs|highest\s+(?:chance|probability)|best\s+chance|most\s+likely\s+to\s+(?:win|succeed)|expected\s+(?:value|outcome))\b/i;
+  /\b(?:\d{1,3}\s?%|wins?\b|leads?\b|ahead\b|out[- ]?performs?|comes?\s+out\s+ahead|scor(?:e|es|ed|ing)\s+highest|(?:gave|gives)\s+the\s+(?:highest|lowest)\b(?!\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration)\b)|supported\s+by\s+the\s+most\s+runs|highest\s+(?:chance|probability)|best\s+chance|most\s+likely\s+to\s+(?:win|succeed)|expected\s+(?:value|outcome))\b/i;
 
 /** Staleness caveat / rerun nudge — text signal that the prose flagged currency. */
 const STALENESS_SIGNAL_PATTERN =

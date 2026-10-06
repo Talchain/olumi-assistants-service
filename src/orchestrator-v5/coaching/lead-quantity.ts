@@ -23,12 +23,20 @@ const AIM_VERB_OPENING_RE =
   /^(?:reduce|cut|lower|decrease|minimi[sz]e|increase|grow|raise|boost|maximi[sz]e|improve)\s+(?:(?:the|our|your)\s+)?/i;
 
 /**
+ * A label that OPENS with any other aim or action verb ("Sustain revenue", "Hit £1m ARR", "Win market share") cannot be
+ * read as a quantity, and only d5's list is safe to strip, so it drops to rung 3 (Codex buddy #2646 r1 F1). Opening-only:
+ * mid-label these are often nouns ("Social media reach", "Meetings booked").
+ */
+const UNSTRIPPABLE_VERB_OPENING_RE =
+  /^(?:sustain|preserve|protect|safeguard|optimi[sz]e|retain|secure|ensure|achieve|reach|hit|meet|attain|deliver|drive|expand|accelerate|enhance|strengthen|eliminate|limit|cap|control|manage|stay|remain|win|gain|get|make|build|launch|beat|exceed|double|triple|halve|keep|maintain|hold|stabili[sz]e|avoid|prevent|target|aim)\b/i;
+
+/**
  * A direction or stasis word INSIDE the quantity ("Churn reduction", "Keep costs stable") would make "the lowest
  * {quantity}" say something else, so it drops to rung 3. Wider than the opening list on purpose: here a false hit
  * costs only the quantity's name, never a true sentence.
  */
 const RESIDUAL_AIM_RE =
-  /\b(?:reduc|cut|lower|decreas|minimi[sz]|increas|grow|growth|rais|boost|maximi[sz]|improv|keep|maintain|hold|stabili[sz]|avoid|prevent)\w*/i;
+  /\b(?:reduc|cut|lower|decreas|minimi[sz]|increas|grow|growth|rais|boost|maximi[sz]|improv|keep|maintain|hold|stabili[sz]|avoid|prevent|sustain|preserv|optimi[sz]|retain|safeguard|target|goal)\w*/i;
 
 /** The quantity's budget, shared with the length caps that admit the lead. */
 export const LEAD_QUANTITY_MAX_CHARS = 48;
@@ -55,6 +63,7 @@ export function resolveLeadQuantity(args: {
   if (label === null) return null;
   const quantity = label.replace(AIM_VERB_OPENING_RE, '').trim();
   if (quantity.length === 0 || quantity.length > LEAD_QUANTITY_MAX_CHARS) return null;
+  if (UNSTRIPPABLE_VERB_OPENING_RE.test(quantity)) return null;
   if (RESIDUAL_AIM_RE.test(quantity) || deriveGoalIntent(quantity).direction !== 'undetermined') return null;
   if (!passesAssistantTextContentDefences(quantity)) return null;
   return { extreme: args.minimised ? 'lowest' : 'highest', quantity: midSentence(quantity) };

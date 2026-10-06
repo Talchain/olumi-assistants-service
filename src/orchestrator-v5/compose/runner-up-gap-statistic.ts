@@ -141,7 +141,11 @@ const FILLER_SRC = String.raw`[^,.!?;:]{0,22}?`;
  * neutralisation can only ever REMOVE a match, never manufacture one.
  */
 const GAP_FALSE_POSITIVE_SPANS: readonly RegExp[] = [
-  /\b(?:driven|caused|explained|supported|underpinned|helped|hurt|shaped|informed|affected|influenced|accompanied|offset|dominated|amplified|dampened)\s+by\b/gi,
+  /\b(?:driven|caused|explained|underpinned|helped|hurt|shaped|informed|affected|influenced|accompanied|offset|dominated|amplified|dampened)\s+by\b/gi,
+  // "supported by" is the lead ladder's own run-share verb (Science d5, 6 Oct), so it is causal ("supported by strong
+  // demand") only when no figure follows: "X was supported by 17 percentage points more than Y" is the gap statistic
+  // wearing the new vocabulary and must reach the binder (Codex buddy #2646 r1 F2).
+  /\bsupported\s+by\b(?!\s+(?:about\s+|around\s+|roughly\s+|some\s+|nearly\s+|almost\s+|over\s+|under\s+)?\d)/gi,
   /\b(?:gross|net|operating|profit|contribution|ebitda|ebit|retention|churn)\s+margins?\b/gi,
   /\bmargins?\s+of\s+(?:error|safety)\b/gi,
   // The accounting sense again, this time WITHOUT a qualifier in front —

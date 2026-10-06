@@ -172,8 +172,9 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'best_option', re: /\bbest\s+option\b/i },
   { code: 'winner', re: /\bwinners?\b/i },
   // DL 0df0e1 follow-up (#2639 family): the adverb slot ("is just / a little / still ahead") the band list could not
-  // see, and "ahead of schedule / plan / time" — a timeline, never a contest — LEAVE here and in `band_ahead`.
-  { code: 'ahead', re: /\b(?:is|are|was|were)\s+(?:(?:[a-z]+ly|just|well|still|now|a\s+little|a\s+bit)\s+)?ahead\b(?!\s+of\s+(?:schedule|plan|time)(?=\s*(?:[.,;:!?)]|$)))/i },
+  // see. NO timeline exemption ("ahead of schedule / plan / time"): a context-free reader cannot tell an option named
+  // "Plan" from a plan (Codex buddy #2646 r1 F3), so those stay caught exactly as on the base.
+  { code: 'ahead', re: /\b(?:is|are|was|were)\s+(?:(?:[a-z]+ly|just|well|still|now|a\s+little|a\s+bit)\s+)?ahead\b/i },
   { code: 'top_choice', re: /\btop\s+(?:choice|option)\b/i },
   /**
    * SECOND RECORDED DIVERGENCE from the walk's matcher — and the one that
@@ -289,7 +290,7 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    */
   {
     code: 'band_ahead',
-    re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b(?!\s+of\s+(?:schedule|plan|time)(?=\s*(?:[.,;:!?)]|$)))/i,
+    re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b/i,
   },
   /**
    * ⚠⚠ THE GOAL-FRAMED VOCABULARY — added 2026-09-07, IN THE SAME COMMIT that
@@ -348,7 +349,7 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    */
   {
     code: 'gave_the_extreme',
-    re: /\b(?:gave|gives|give|giving)\s+the\s+(?:highest|lowest)\b|\b(?:highest|lowest)\b[^.;:!?\n]{0,80}?\bin\s+(?:the\s+most|\d{1,3}(?:\.\d+)?\s?%)\s+(?:of\s+(?:the\s+)?)?(?:runs?|simulations?)\b/i,
+    re: /\b(?:gave|gives|give|giving)\s+the\s+(?:highest|lowest)\b(?!\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration)\b)|\b(?:highest|lowest)\b[^.;:!?\n]{0,80}?\bin\s+(?:the\s+most|\d{1,3}(?:\.\d+)?\s?%)\s+(?:of\s+(?:the\s+)?)?(?:runs?|simulations?)\b/i,
   },
   /**
    * ⭐ THE DIRECTION-NEUTRAL FORM (DL 0df0e1 #87 6002469285, Part B): where a composer cannot see the Run's sent

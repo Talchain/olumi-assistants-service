@@ -643,7 +643,7 @@ describe('the alarm mirrors the permit-with-caveat arm — no false ERROR on a l
 describe('Paul’s run 3, replayed: the leader kept with the provisional sentence first, and no false ERROR', () => {
   const EVENT = 'v5.egress.leading_option_claim_withheld_violated';
   const LEADER = 'Convertible bridge from existing supporters';
-  const SERVED = `${LEADER} was supported by 83% of runs of this model.`;
+  const SERVED = `${LEADER} scored highest in 83% of runs of this model.`;
   const paulReady = (mode: string) => ({
     status: 'ready',
     goal_node_id: 'securing_funding',
