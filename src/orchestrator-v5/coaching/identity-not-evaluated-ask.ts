@@ -119,7 +119,7 @@ const q = (label: string): string => `“${label}”`;
  * subscribers’: what is it today?" about an OUTCOME; the user answered "None today… about 150 if it launches", was told
  * "The available controls cannot save today's count for that outcome", and every Run asked it again ×3. A level (today's,
  * or the one an option sets) is saved only on a FACTOR — `set_factor_value`'s `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS` and
- * the option-level writer's own target rule (`option-intervention-edit.ts`, `value_target_not_factor`). Kept equal to the
+ * the option-level writer's own target rule (its `value_target_not_factor` refusal). Kept equal to the
  * former by a test row.
  */
 export const LEVEL_WRITER_KINDS: readonly string[] = ['factor'];
@@ -136,7 +136,7 @@ function creatorOf(graph: unknown, operandId: string, storedZero: boolean): Crea
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(rec).filter((n): n is Rec => n !== null && typeof n.id === 'string');
   const edges = (Array.isArray(g?.edges) ? g.edges : []).map(rec)
     .filter((e): e is Rec => e !== null && typeof e.from === 'string' && typeof e.to === 'string');
-  const links = edges as unknown as { from: string; to: string }[];
+  const links = edges.map((e) => ({ from: e.from as string, to: e.to as string }));
   const reaches = (from: string): boolean => reachesAlong(links, from, operandId);
   // The option's amount is already in the model when a link INTO the operand that the option reaches carries a stated
   // size (served draft 11: "Starter tier launched → Starter subscribers", 150 from the brief): it is never asked again.
