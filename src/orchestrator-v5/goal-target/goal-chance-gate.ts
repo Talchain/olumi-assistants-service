@@ -13,7 +13,7 @@
  * one of them removed is not here to gate.
  */
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
-import { GOAL_FIGURES_PROBABILITY_UNUSABLE, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_PROBABILITY_UNUSABLE, readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { resolveGoalDirection } from './goal-direction.js';
 
@@ -100,6 +100,8 @@ function stripGoalChancesWithNoTarget(env: Rec, goalId: unknown): Rec {
   const strip = (rows: unknown): unknown => (!Array.isArray(rows) ? rows : rows.map((row) => {
     if (!isRec(row) || !('probability_of_goal' in row)) return row;
     const { probability_of_goal: _gone, ...kept } = row;
+    // Its precision and drivers describe the figure that went: they go with it (design-g4g6 Q3).
+    for (const k of GOAL_CHANCE_COMPANION_KEYS) delete kept[k];
     const id = typeof row.option_id === 'string' ? row.option_id : typeof row.id === 'string' ? row.id : undefined;
     if (id !== undefined && !removed.includes(id)) removed.push(id);
     return kept;

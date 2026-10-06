@@ -29,7 +29,7 @@ import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
-import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
 
 /**
  * WHOSE RANGE (AIQ ruling #72 5867782904, words ACK 5870069785; Core Stabilisation Plan §7). ISL echoes each
@@ -233,6 +233,13 @@ function optionRowsForAgent(value: unknown, withheld: boolean, outcomeHidden: Re
     }
     if (withheld && 'probability_of_goal' in next) {
       const { probability_of_goal: _withheld, ...others } = next;
+      next = others;
+    }
+    // ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal chance's precision and drivers NEVER reach the Agent, withheld or not —
+    // no ruled Agent sentence exists, and free prose about a "main driver" passes no guard. It reads the licence record only.
+    if (GOAL_CHANCE_COMPANION_KEYS.some((k) => k in next)) {
+      const others: Record<string, unknown> = { ...next };
+      for (const k of GOAL_CHANCE_COMPANION_KEYS) delete others[k];
       next = others;
     }
     return next;
