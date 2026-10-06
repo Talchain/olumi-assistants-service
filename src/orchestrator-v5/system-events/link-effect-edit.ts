@@ -38,6 +38,7 @@ import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitio
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
+import { centreRangeOfQuote } from '../agent-lane/stated-by-user.js';
 import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
 import { GAUGE_OP, mediatorReadings, storedGaugesKept, withMediatorReading } from '../agent-lane/mediator-reading.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
@@ -534,8 +535,13 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (storedDirection !== null && storedDirection !== direction && params.reversal === undefined) return refuse('sign_conflict');
 
   // ── THE CONSTRUCTION PATH'S OWN SIZING ────────────────────────────────────────────────────────────────────────────
+  // ⭐ G1b answer door: the range the user wrote around their figure in the quoted sentence (`centreRangeOfQuote`, the
+  // door's own reading, bound by the reading token through the quote) is carried exactly as construction carries the same
+  // sentence from a brief (`natural_effect.stated_range`, `end: 'centre'`), so the chat and the brief size it alike.
+  const centre = centreRangeOfQuote(params.quote, effect);
   const sizing = sizeLink(
-    { direction, effect_amount: stated.amount, effect_per_source_change: stated.per_source_change, user_stated: true },
+    { direction, effect_amount: stated.amount, effect_per_source_change: stated.per_source_change, user_stated: true,
+      ...(centre !== undefined ? { stated_range: centre } : {}) },
     sourceNode,
     targetNode,
   );

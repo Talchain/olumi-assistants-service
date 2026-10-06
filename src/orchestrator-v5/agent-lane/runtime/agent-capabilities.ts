@@ -196,7 +196,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
-import { goalChanceLicenceForAgent } from '../../goal-target/goal-chance-licence.js';
+import { goalChanceLicenceForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
@@ -1653,6 +1653,8 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     ? withNonlinearIdentity(permissions, g.raw, g.identity_evaluated) : permissions;
   const chancePermitted = current && goalChance === undefined && permissions.leader_may_be_named === true;
   const goalChanceLicence = chancePermitted ? goalChanceLicenceForAgent(g.analysis_result) : undefined;
+  // ⭐ (9) chat and panel quote the same figure: a chance the licence displays at the nearest 5 is handed over as displayed.
+  const shownChance = chancePermitted ? nearestFiveGoalChancesForAgent(g.analysis_result) : new Map<string, number>();
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const optionNames = optionNameAliasesForCurrentRun(g);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
@@ -1671,7 +1673,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
       ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
       ...(chancePermitted && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
-        ? { probability_of_goal: row.probability_of_goal } : {}),
+        ? { probability_of_goal: shownChance.get(id) ?? row.probability_of_goal } : {}),
       ...(decision !== undefined ? { goal_certainty: decision } : {}),
     }];
   }) : [];
