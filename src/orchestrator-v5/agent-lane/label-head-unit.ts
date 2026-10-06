@@ -97,8 +97,11 @@ export function labelHeadUnitAt(quote: string, a: StatedAmount, label: string, o
   if (new Set(ps).size > 1) return undefined;
   const period = ps[0];
   // Literal currency only: the scanner may inherit a range endpoint's currency, which is no adoption warrant.
-  const currency = a.kind === 'currency' ? a.matchedText.trim().split(/\d/u, 1)[0]!.trim() : undefined;
-  if (a.kind === 'currency' && readCurrencyUnitWithQualifiers(currency).kind !== 'currency') return undefined;
+  const currencyPrefix = a.kind === 'currency' ? a.matchedText.trim().split(/\d/u, 1)[0]!.trim() : undefined;
+  if (a.kind === 'currency' && (readCurrencyUnitWithQualifiers(currencyPrefix).kind !== 'currency'
+    || a.currencyCode === undefined)) return undefined;
+  // Agree with the existing literal-unit reader: a symbol warrants the scanner's canonical code, not a new spelling.
+  const currency = a.kind === 'currency' ? a.currencyCode : undefined;
   const unit = `${currency ?? pluralNoun(head)}${period === undefined ? '' : `/${period}`}`;
   if (unit.length > 40 || local.trim().length > 500) return undefined;
   return { unit, source_quote: local.trim(), amount: { start: a.index, end } };

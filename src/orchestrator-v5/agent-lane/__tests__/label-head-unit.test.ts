@@ -33,7 +33,7 @@ const ROWS = [
   { bank: 'dental-4', from: 'appointments_cancelled_or_rescheduled_in_advance', to: 'no_shows', amount: -1,
     unit: 'no-shows', perUnit: 'appointments', quote: 'Each appointment cancelled in advance prevents about 1 no-show.' },
   { bank: 'bakery-6', from: 'shops_closed', to: 'annual_weak_shop_losses_avoided', amount: 40000,
-    unit: '£/year', perUnit: 'shops', quote: 'Each shop we close avoids about £40k a year of losses.' },
+    unit: 'GBP/year', perUnit: 'shops', quote: 'Each shop we close avoids about £40k a year of losses.' },
 ] as const;
 type Row = Omit<typeof ROWS[number], 'amount'> & { readonly amount: number };
 const nodeOf = (g: Rec, id: string): Rec => g.nodes.find((n: Rec) => n.id === id)!;
@@ -106,7 +106,7 @@ describe('MC own-label units: the four banked readings (expected RED at base)', 
     expect(statedEffectQuoteMatches(r.quote, effectOf(r), undefined,
       { source: nodeOf(g, r.from).label, target: nodeOf(g, r.to).label })).toBe(true);
     const reading = labelHeadUnit(r.quote, 40000, nodeOf(g, r.to).label, nodeOf(g, r.from).label)!;
-    expect(reading.unit).toBe('£/year');
+    expect(reading.unit).toBe('GBP/year');
     expect(reading.source_quote).toBe('£40k a year of losses');
     expect(r.quote.slice(reading.amount.start, reading.amount.end).trim()).toBe('£40k');
   });
@@ -424,7 +424,7 @@ describe('MC construction writer: admission persists only a bound own-label unit
     const result = await buildModelFromBrief(scenario, bakery.quote, dispatch, call) as Rec;
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
     const stored = NodeV3.parse(registered!.nodes.find((n: Rec) => n.kind === 'goal'));
-    expect(stored.unit_reading).toEqual({ unit: '£/year', source: 'user_stated', source_quote: '£40k a year of losses' });
+    expect(stored.unit_reading).toEqual({ unit: 'GBP/year', source: 'user_stated', source_quote: '£40k a year of losses' });
     expect(stored.observed_state).toBeUndefined();
     expect(stored.goal_threshold_raw).toBeUndefined();
   });
