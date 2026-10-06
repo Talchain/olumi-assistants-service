@@ -226,15 +226,20 @@ const PCT = String.raw`(?<![\w.])\d+(?:[.,]\d+)?\s?(?:%|per\s?cent\b)`;
 /** A factor's own likelihood VALUE, not a win share: "the current 30% product-market-fit likelihood assumption" (served survey). */
 const LIKELIHOOD_INPUT = new RegExp(String.raw`${PCT}\s+(?:[\w'-]+\s+){0,3}?likel(?:y|ihood)\s+(?:assumption|estimate|input|parameter|value|figure)s?\b`, 'gi');
 
-// Codex #2660 r1+r2: a hyphenated compound whose HEAD names the thing ("the lowest-risk path", "the highest-cost
-// assumption"), or an input noun, is not a result. A compound with a result head ("the lowest-churn outcome", "the
-// highest-margin result") is still a claim.
-const NOT_A_RESULT_SRC = String.raw`(?!-[a-z]+\s+(?:paths?|routes?|steps?|checklists?|assumptions?|inputs?|estimates?|settings?|tests?)\b|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|assumptions?|inputs?|estimates?)\b)`;
+// Desk/DL follow-up (F1/F2, DL 6 Oct): a planning head exempts only a non-result modifier ("lowest-risk path").
+// Result metrics still claim a leader ("highest-revenue path"); cost alone keeps an input head exempt
+// ("highest-cost assumption"). The same non-result nouns guard every ladder superlative.
+const RESULT_METRIC_MODIFIER_SRC = String.raw`(?:revenue|mrr|arr|margin|profit|return|growth|churn|retention|sales|income|conversion)\b|cost\s+(?!(?:assumptions?|inputs?|estimates?|settings?)\b)`;
+const LADDER_SUPERLATIVE_SRC = String.raw`(?:highest|lowest|best|top|greatest|largest|biggest|strongest)`;
+const NOT_A_RESULT_SRC = String.raw`(?!-(?!${RESULT_METRIC_MODIFIER_SRC})[a-z]+\s+(?:paths?|routes?|steps?|checklists?|assumptions?|inputs?|estimates?|settings?|tests?)\b|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|assumptions?|inputs?|estimates?|guess(?:es)?|cases?|practices?|scenarios?|ways?|option\s+to\s+test|next\s+steps?|questions?)\b)`;
+const LADDER_VERB_SRC = String.raw`(?:gave|gives|give|giving|came\s+out|comes\s+out|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|shows?|showed|reach(?:es|ed)?|has|had|have|having|end(?:s|ed|ing)?\s+up\s+with|end(?:s|ed|ing)?\s+with|finish(?:es|ed|ing)?\s+with|result(?:s|ed|ing)?\s+in)`;
 const LOWEST_LEADER_RE = new RegExp(
   [
-    String.raw`\b(?:gave|gives|give|giving|came\s+out|comes\s+out|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|shows?|showed|reach(?:es|ed)?|has|had|have|having|end(?:s|ed|ing)?\s+up\s+with|result(?:s|ed|ing)?\s+in)\s+(?:the\s+)?lowest\b${NOT_A_RESULT_SRC}`,
-    String.raw`\bthe\s+lowest\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)\s+by)\b`,
-    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?lowest\s+(?:under|with|for)\s+(?!(?:the\s+)?(?:current|these|this|those|that|your|our|its|their|all|any|each|every|both|most|many|some)\b)`,
+    // Predicative result first: "The best MRR is what X ends up with".
+    String.raw`\bthe\s+${LADDER_SUPERLATIVE_SRC}\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:is|was|are|were)\s+what\s+[^.;:!?\n]{1,80}?\b${LADDER_VERB_SRC}\b`,
+    String.raw`\b${LADDER_VERB_SRC}\s+(?:the\s+)?${LADDER_SUPERLATIVE_SRC}\b${NOT_A_RESULT_SRC}`,
+    String.raw`\bthe\s+${LADDER_SUPERLATIVE_SRC}\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)\s+by)\b`,
+    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?${LADDER_SUPERLATIVE_SRC}\b${NOT_A_RESULT_SRC}\s+(?:under|with|for)\s+(?!(?:the\s+)?(?:current|these|this|those|that|your|our|its|their|all|any|each|every|both|most|many|some)\b)`,
   ].join('|'),
   'i',
 );
@@ -285,10 +290,8 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     re: /\bstronger\s+(?:than|option|choice|case|candidate|result|outcome|performer|position|bet|path|route|contender)\b|\b(?:perform(?:s|ed|ing)?|comes?\s+out|came\s+out|looks?|scor(?:e|es|ed|ing))\s+stronger\b/i,
   },
   { code: 'highest', re: /\bhighest\b/i },
-  // The lead ladder (d5 #87 6008589328): "gave the lowest {quantity}" names a leader as "highest" does. Bound to the
-  // ladder's verb classes (Review Desk 6b + DL, #2646: any production verb or has/had, fronted "The lowest churn came
-  // from X" / passive "…was produced by X", predicative "churn was lowest under X"), so "you want the lowest churn" (an
-  // aim) and "the lowest priority" (a weighting) still pass.
+  // The existing 'lowest' code now covers every ladder superlative (F2), including fronted and predicative forms.
+  // Planning and input nouns use the same guard as the shared ladder; an aim ("you want the lowest churn") stays inert.
   { code: 'lowest', re: LOWEST_LEADER_RE },
   { code: 'top', re: TOP_LEADER_RE },
   {

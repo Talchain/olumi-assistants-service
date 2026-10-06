@@ -30,6 +30,48 @@ function record(over: { coaching?: Record<string, unknown>; options?: unknown[] 
 const within = (rec: RunDeliveredRecord, licence: 'permitted' | 'permitted_with_caveat' | 'withheld') =>
   deliveredRecordWithinLicence(rec, { licence, graph, analysisReady: undefined });
 
+// Desk/DL follow-up rows (F1/F2, DL 6 Oct).
+const F1_F2_CLAIMS = [
+  'Raise to £59 has the highest-revenue path.',
+  'Hire a marketing manager gives the lowest-churn route.',
+  ...['revenue', 'MRR', 'ARR', 'margin', 'profit', 'return', 'growth', 'churn', 'retention', 'sales', 'income', 'conversion', 'cost']
+    .map((metric) => `Raise to £59 gives the lowest-${metric} path.`),
+  ...['best', 'top', 'greatest', 'largest', 'biggest', 'strongest'].flatMap((word) => [
+    `Hire a marketing manager ends up with the ${word} MRR.`,
+    `Both hires end up with the ${word} MRR.`,
+    `Hire a marketing manager and Raise to £59 end up with the ${word} MRR.`,
+    `The ${word} MRR is what Raise to £59 ends up with.`,
+    `With the ${word} MRR, Raise to £59 comes out ahead.`,
+    `The ${word} MRR came from Raise to £59.`,
+    `The ${word} MRR was produced by Raise to £59.`,
+    `MRR is ${word} with Raise to £59.`,
+    `The ${word} MRR came from Raise to £59 in 62% of runs.`,
+  ]),
+  'Both hires end with the highest MRR.',
+  'Raise to £59 ends with the highest MRR.',
+  'Raise to £59 ended with the highest MRR.',
+  'Raise to £59 is ending with the highest MRR.',
+  'Both hires finish with the highest MRR.',
+  'Raise to £59 finishes with the highest MRR.',
+  'Raise to £59 finished with the highest MRR.',
+  'Raise to £59 is finishing with the highest MRR.',
+];
+const F1_F2_PLANNING = [
+  'That is the best guess we have.',
+  'In the best case, churn stays flat.',
+  'The top priority is pricing.',
+  'This ends with a question for you.',
+  'Start with the lowest-risk path.',
+  'Start with the lowest-effort step.',
+  // ⛔ The withheld path keeps its BLANKET best / highest / strongest / top bans (DL review 6 Oct): "Raise to £59 has the
+  // highest impact on MRR" and "The best way forward is option B" are leader claims a noun exemption would let through.
+  // So planning phrases with those four words are rowed only against the ladder (lead-ladder-egress.test.ts); here only
+  // the NEW ladder superlatives are rowed.
+  ...['greatest', 'largest', 'biggest'].flatMap((word) =>
+    ['guess', 'case', 'estimate', 'practice', 'scenario', 'way', 'option to test', 'next step', 'question']
+      .map((noun) => `We ended up with the ${word} ${noun}.`)),
+];
+
 describe('0.79 · a delivered record is served only within the read\'s leader licence', () => {
   it('CONTROL: a neutral record is served under every licence', () => {
     for (const licence of ['permitted', 'permitted_with_caveat', 'withheld'] as const) expect(within(record(), licence)).toBe(true);
@@ -67,6 +109,20 @@ describe('0.79 · a delivered record is served only within the read\'s leader li
     const rec = record({ coaching: { action_prompt: highest } });
     expect(within(rec, 'withheld')).toBe(false);
     expect(within(rec, 'permitted')).toBe(true);
+  });
+
+  it.each(F1_F2_CLAIMS)('F1/F2: %s is not served under a withheld licence', (text) => {
+    expect(textAssertsLeadingOption(text)).toBe(true);
+    expect(textAssertsLeadingOption(text, { optionLabels: [HIRE, 'Raise to £59', 'Hold headcount'] })).toBe(true);
+    const rec = record({ coaching: { action_prompt: text } });
+    expect(within(rec, 'withheld')).toBe(false);
+    expect(within(rec, 'permitted')).toBe(true);
+  });
+
+  it.each(F1_F2_PLANNING)('F1/F2: %s is served under a withheld licence', (text) => {
+    expect(textAssertsLeadingOption(text)).toBe(false);
+    expect(textAssertsLeadingOption(text, { optionLabels: [HIRE, 'Raise to £59', 'Hold headcount'] })).toBe(false);
+    expect(within(record({ coaching: { action_prompt: text } }), 'withheld')).toBe(true);
   });
 
   it('a PLACE in an order named by the record\'s own option ("Pilot scheme trails at 40%.") is not served under a withheld licence', () => {
