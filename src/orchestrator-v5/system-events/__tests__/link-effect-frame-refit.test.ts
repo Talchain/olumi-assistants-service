@@ -303,5 +303,26 @@ describe('S5t: the chat writer refits the frame a stated size needs, exactly as 
     const after = projectGraphForPersistence(clampForPersist(refitFramesForStatedEffects(raw).graph)) as Rec;
     expect(linkEffectRefitPostimageIsScoped(base, raw, after, link)).toBe(false);
   });
+
+  it('r2 P2 GAUGE + REFIT (Codex r1, closed by #2634): one end-to-end answer that needs a refit commits through the REAL door', async () => {
+    const g0 = assignEntityRefs(projectGraphForPersistence({ goal_node_id: 'g',
+      nodes: [node('g', 'goal', 'Revenue', framed(50, '£')), node('x', 'factor', 'Subscribers', framed(50, 'subscribers')),
+        { id: 'm', kind: 'outcome', label: 'Account value', scale_frame: 100 }],
+      edges: [ph('x', 'm', 0.2), ph('m', 'g', 0.5)] }), { nodes: [], edges: [] }).graph as Rec;
+    const said = 'Every 1 more subscriber adds about £2 to revenue through account value.';
+    const w = world(g0);
+    const r = await w.caps.proposeLinkEffect!(ctxSaying(said), { from_label: 'Subscribers', to_label: 'Account value', amount: 2,
+      amount_unit: '£', per_source_change: 1, per_source_change_unit: 'subscribers', quote: said }) as Rec;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const card = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
+      (id) => ({ proposal: w.proposals.get(id), result: r as never }))[0]!;
+    const out = await w.caps.authoriseChange({ ...ctxSaying(card.message), typed_approval_of: String(r.proposal_id),
+      typed_approval_words: card.message }, { proposal_id: String(r.proposal_id) }) as Rec;
+    expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    const stored = w.graph();
+    expect(edge2(stored, 'm', 'g').provenance.sized_by_identity).toEqual({ op: 'gauge' });
+    expect(Math.abs(edge2(stored, 'x', 'm').strength.mean)).toBeLessThanOrEqual(1);
+    expect(stored.nodes.find((n: Rec) => n.id === 'g').observed_state.cap).toBeGreaterThan(100); // the frame was refit
+  });
 });
 
