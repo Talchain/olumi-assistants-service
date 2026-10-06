@@ -119,11 +119,18 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     // ⛔ A gauge only ever sizes a link NOBODY sized (P5's unsized: an Olumi placeholder or a projected mean), never the
     // user's figure, a definition or Olumi's sized estimate: the writer overwrites M→child with it.
     const kidProvenance = isRec(kids[0]!.provenance) ? kids[0]!.provenance as Rec : {};
+    // ⛔ Codex r1 P1: rescaling M (M→child = ±1) rescales EVERY path through M, so a gauge is only a pure CHAIN link: M has
+    // exactly one parent and one child in the whole graph, and the child is not a product of M (an identity operand).
+    const childNode = byId.get(childId);
+    const operand = isRec(childNode?.nonlinear_identity) && Array.isArray(childNode!.nonlinear_identity.factor_ids)
+      && (childNode!.nonlinear_identity.factor_ids as unknown[]).includes(id);
+    const chainOnly = !operand && edges.filter(e => e.from === id).length === 1
+      && edges.filter(e => e.to === id && walkable(e.from)).length === 1;
     const kidUnsized = !isRec(kidProvenance.natural_effect) && kidProvenance.definitional !== true
       && (kidProvenance.magnitude === 'olumi_placeholder' || kidProvenance.mean_projected === true)
       && kidProvenance.source !== 'user_specified';
     const gauge = (extra: { stored?: true; replaces?: string }): MediatorReading | null =>
-      childUnit === undefined || childFrame === undefined || (extra.stored !== true && !kidUnsized) ? null
+      childUnit === undefined || childFrame === undefined || (extra.stored !== true && (!kidUnsized || !chainOnly)) ? null
         : { via: 'gauge', unit: childUnit, scale_frame: childFrame, child: childId, ...extra };
     // After the user's answer, the stored gauge edge IS the reading (its parent is now the user's).
     if (isGaugeLink(kids[0])) {

@@ -11,7 +11,7 @@ import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffec
   type ApplyLinkEffectEditParams } from '../../system-events/link-effect-edit.js';
 import { prepareLinkEffectUnitReadings } from '../../system-events/link-effect-unit-reading.js';
 import { linkEffectReadingOf } from '../approval-chips.js';
-import { linkEffectRefusalWords } from '../runtime/agent-capabilities.js';
+import { linkEffectConsent, linkEffectRefusalWords } from '../runtime/agent-capabilities.js';
 import { legacyLeaderGoalLinks, placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { labelUnitParts, mediatorReadings } from '../mediator-reading.js';
 import { unsizedLinkSentence } from '../unsized-path-cause.js';
@@ -211,15 +211,43 @@ describe('THE WRITER: (C) sized in the parent\'s unit; (B) one end-to-end answer
     mutate(edge(g, 'strain', 'mrr'));
     expect(mediatorReadings(g).has('strain')).toBe(false);
   });
-  it("(B) ORIENTATION: another parent's link into M, and its implied sign on MRR, are untouched by the answer", () => {
+  it.each([
+    ['another parent into M', (g: Rec) => { g.nodes.push({ id: 'staff', kind: 'factor', label: 'Support staff' }); g.edges.push(placeholder('staff', 'strain', -0.2)); }],
+    ['an off-path child of M', (g: Rec) => { g.nodes.push({ id: 'wellbeing', kind: 'outcome', label: 'Staff wellbeing' }); g.edges.push(placeholder('strain', 'wellbeing', -0.2)); }],
+    ['M an operand of the child\'s identity', (g: Rec) => { g.nodes.find((n: Rec) => n.id === 'mrr').nonlinear_identity = { operation: 'product', factor_ids: ['strain', 'price'], stated_in_brief: true }; }],
+  ])("⛔ (B) CHAIN ONLY (Codex r1 P1): %s → no gauge (rescaling M would move another path), nothing written", (_why, add) => {
     const g = gaugeGraph();
-    g.nodes.push({ id: 'staff', kind: 'factor', label: 'Support staff' });
-    g.edges.push(placeholder('staff', 'strain', -0.2));
-    const r = write(g, 'price', 'strain', { ...E2E }, E2E_QUOTE);
-    if (r.kind !== 'mutated') throw new Error(JSON.stringify(r));
-    expect(edge(r.mutatedGraph, 'staff', 'strain')).toEqual(edge(g, 'staff', 'strain'));
-    // staff → strain (−) × strain → MRR (−, still): more staff still means MORE MRR, as before the answer.
-    expect(Math.sign(edge(r.mutatedGraph, 'staff', 'strain').strength.mean * edge(r.mutatedGraph, 'strain', 'mrr').strength.mean)).toBe(1);
+    add(g);
+    expect(mediatorReadings(g).has('strain')).toBe(false);
+    const before = JSON.stringify(g.edges);
+    const r = applyLinkEffectEdit(approved({ persistedGraph: g, from: 'price', to: 'strain', effect: { ...E2E }, quote: E2E_QUOTE,
+      expected: { graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, 'price', 'strain')! } }));
+    expect(r.kind).toBe('refused');
+    expect(JSON.stringify(g.edges)).toBe(before);
+  });
+  it('(B) CONSENT reads the writer\'s ONE statement rule (Codex r1 P1): the path\'s sign, so no reversal for an agreeing answer', () => {
+    expect(linkEffectConsent(gaugeGraph(), 'price', 'strain', E2E)).toEqual({});
+    const reversal = linkEffectConsent(gaugeGraph(), 'price', 'strain', { ...E2E, amount: 1200 });
+    expect(reversal).toEqual({ reversal: { from: 'positive', to: 'negative' } });
+    // The disclosed reversal is the path's: the lever flips, the gauge keeps its sign, and the user's +£1,200 is the path.
+    const g = gaugeGraph();
+    const effect = { ...E2E, amount: 1200 };
+    const r = applyLinkEffectEdit(approved({ persistedGraph: g, from: 'price', to: 'strain', effect, quote: 'every £1 on the price adds about £1,200 a month of MRR',
+      ...reversal, expected: { graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, 'price', 'strain')! } }));
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    expect(edge(r.mutatedGraph, 'price', 'strain').strength.mean * edge(r.mutatedGraph, 'strain', 'mrr').strength.mean * 200000 / 100).toBeCloseTo(1200, 6);
+  });
+  it('(B) a STORED gauge keeps its sign and its card (Codex r1 P2): a later answer is the path again', () => {
+    const first = write(gaugeGraph(), 'price', 'strain', { ...E2E }, E2E_QUOTE);
+    if (first.kind !== 'mutated') throw new Error(JSON.stringify(first));
+    expect(mediatorReadings(first.mutatedGraph).get('strain')).toMatchObject({ via: 'gauge', stored: true });
+    expect(linkEffectMediatorReadings(first.mutatedGraph, 'price', 'strain')).toEqual(
+      [{ node_id: 'strain', via: 'gauge', unit: '£/month', other_label: 'MRR' }]);
+    const again = write(first.mutatedGraph as Rec, 'price', 'strain', { ...E2E, amount: -600 }, 'every £1 on the price loses us about £600 a month of MRR through support strain');
+    expect(again.kind, JSON.stringify(again)).toBe('mutated');
+    if (again.kind !== 'mutated') return;
+    expect(edge(again.mutatedGraph, 'price', 'strain').strength.mean * edge(again.mutatedGraph, 'strain', 'mrr').strength.mean * 200000 / 100).toBeCloseTo(-600, 6);
   });
   it('(B) the PATH sign governs: a positive end-to-end statement against a negative path is a sign conflict', () => {
     const r = write(gaugeGraph(), 'price', 'strain', { ...E2E, amount: 1200 }, 'every £1 on the price adds about £1,200 a month of MRR');
@@ -291,7 +319,32 @@ describe('THE WORDS: the card and the withhold ask', () => {
     g.edges.push({ from: 'price', to: 'subs', strength: { mean: -0.5, std: 0.1 }, effect_direction: 'negative',
       provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1,
         per_source_change_unit: '£', strength_mean: -0.5, strength_mean_frame: 'edge_strength' } } }, placeholder('subs', 'mrr', 0.5));
-    expect(W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).toContain('on top of the');
+    expect(W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).toContain('on top of its effect through \u2018Subscribers\u2019 that you already gave');
+  });
+  it('(B) "on top of" quotes a figure only in the ASKED quantity, and never an off-path link (Codex r1 P2)', () => {
+    const same = gaugeGraph();
+    same.nodes.push({ id: 'arpu', kind: 'factor', label: 'Upsell revenue' });
+    same.edges.push({ from: 'price', to: 'arpu', strength: { mean: 0.2, std: 0.1 }, effect_direction: 'positive',
+      provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 300, amount_unit: '£/month', per_source_change: 1,
+        per_source_change_unit: '£', strength_mean: 0.2, strength_mean_frame: 'edge_strength' } } }, placeholder('arpu', 'mrr', 0.5));
+    expect(W(same, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).toContain('on top of the £300 / month per £1 you already gave');
+    const offPath = gaugeGraph();
+    offPath.nodes.push({ id: 'research', kind: 'factor', label: 'Research time' });
+    offPath.edges.push({ from: 'price', to: 'research', strength: { mean: 0.2, std: 0.1 }, effect_direction: 'positive',
+      provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 2, amount_unit: 'hours', per_source_change: 10,
+        per_source_change_unit: '£', strength_mean: 0.2, strength_mean_frame: 'edge_strength' } } });
+    expect(W(offPath, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).not.toContain('on top of');
+  });
+  it('(B) long labels compact; the question is never dropped (Codex r1 P2: the message came back empty)', () => {
+    const g = gaugeGraph();
+    g.nodes.find((n: Rec) => n.id === 'price').label = 'Enterprise onboarding and implementation consulting fee for new accounts';
+    g.nodes.find((n: Rec) => n.id === 'strain').label = 'Annual security audit gross profit from enterprise contracts and renewals';
+    g.nodes.find((n: Rec) => n.id === 'mrr').label = 'Annual recurring revenue for enterprise subscription accounts and partners';
+    const m = W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message;
+    expect(m.length).toBeGreaterThan(0);
+    expect(m.length).toBeLessThanOrEqual(400);
+    expect(m).toContain(' through ');
+    expect(m).toContain('A best guess and a range is fine.');
   });
   it('(C) withhold: asked in the unit Olumi measures the mediator in, the estimate named', () => {
     expect(W(sizedParentGraph(), [{ from: 'cost', to: 'mrr' }], 'o-spend').message).toContain(

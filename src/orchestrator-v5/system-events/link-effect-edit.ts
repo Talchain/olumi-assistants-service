@@ -275,6 +275,21 @@ export function withLabelCountUnits(graph: unknown, from: string, to: string, ef
   };
 }
 
+/**
+ * ⭐ THE ONE STATEMENT RULE THROUGH A GAUGE (Codex r1 P1: the runtime's consent read the lever's sign, the writer the
+ * path's): the user's END-TO-END figure E sizes lever→M as E × g, g = M→child's stored sign (MC 21: ±1). The writer AND
+ * the consent that prepares the card's reversal read this ONE function. Any other link: the effect as stated.
+ */
+export function linkEffectGaugeStatement<E extends { readonly amount: number }>(graph: unknown, from: string, to: string, effect: E): E {
+  const reading = mediatorReadings(graph).get(to);
+  if (reading?.via !== 'gauge' || !isRec(graph) || !Array.isArray(graph.edges)) return effect;
+  const child = graph.edges.filter(isRec).find(e => e.from === to && e.to === reading.child && isDirectedEdge(e as never));
+  if (child === undefined || from === reading.child) return effect;
+  const mean = isRec(child.strength) && finite(child.strength.mean) ? child.strength.mean : 0;
+  const negative = child.effect_direction === 'negative' || (child.effect_direction !== 'positive' && mean < 0);
+  return negative ? { ...effect, amount: effect.amount * -1 } : effect;
+}
+
 /** A level-less mediator end the card names, so the reading is approved, never silent (no-dead-end (B)/(C)). */
 export interface LinkEffectMediatorReading {
   readonly node_id: string;
@@ -304,7 +319,7 @@ export function linkEffectMediatorReadings(graph: unknown, from: string, to: str
     out.push({ node_id: from, via: 'sized_parents', unit: source.unit, other_label: label(source.parents[0]!) });
   }
   const target = readings.get(to);
-  if (target?.via === 'gauge' && target.stored !== true) {
+  if (target?.via === 'gauge') {
     out.push({ node_id: to, via: 'gauge', unit: target.unit, other_label: label(target.child),
       ...(target.replaces === from ? { replaces: true as const } : {}) });
   } else if (target?.via === 'sized_parents' && !target.parents.includes(from) && target.parents.length > 0) {
@@ -426,11 +441,14 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // child's units, and M→child = ±1 (its stored sign) is written in the SAME mutation (never before, never asked apart).
   // brief3's fallback (6006685510 (2)): only the lever whose Olumi-sized link the answer replaces may answer.
   const mediated = readings.get(to);
-  const gauge = mediated?.via === 'gauge' && mediated.stored !== true ? mediated : undefined;
+  // A stored gauge is rewritten in place (idempotent), so a later answer keeps its sign (Codex r1 P2).
+  const gauge = mediated?.via === 'gauge' ? mediated : undefined;
   if (gauge?.replaces !== undefined && gauge.replaces !== from) return refuse('unit_mismatch');
   const gaugeEdge = gauge === undefined ? undefined
     : graph.edges.filter(isRec).find(e => e.from === to && e.to === gauge.child && isDirectedEdge(e as never));
   if (gauge !== undefined && gaugeEdge === undefined) return refuse('unit_mismatch');
+  // ⛔ Codex r1 P1: the gauge write is the second edge's write: it never touches a definition in use.
+  if (gauge !== undefined && definitionalLinkInUse(graph, to, gauge.child, params.lastRunIdentityUse ?? null) !== null) return refuse('definitional_link');
   const endUnits = linkEffectEndUnits(graph, from, to);
   // Either the end's stored unit or the words the ask itself is phrased in (Runtime 5882802252: a % level is asked in
   // "percentage points", a yes/no source as "switch") — the same key `sizeLink` says the natural effect back in.
@@ -464,7 +482,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // child's units AS IT ALREADY MOVES IT, and the user's END-TO-END figure E sizes lever→M = E × g. Every other link into or
   // out of M keeps its meaning (a +1 gauge would silently flip them), and the ordinary sign check below is the PATH's.
   const gaugeSign = gaugeEdge === undefined ? 1 : directionOf(gaugeEdge) === 'negative' ? -1 : 1;
-  const stated = gaugeSign === 1 ? effect : { ...effect, amount: effect.amount * gaugeSign };
+  const stated = linkEffectGaugeStatement(params.persistedGraph, from, to, effect);
+  if (gaugeEdge !== undefined && stated.amount !== effect.amount * gaugeSign) return refuse('unit_mismatch');
   const direction = Math.sign(stated.amount) * Math.sign(stated.per_source_change) < 0 ? 'negative' : 'positive';
   const storedDirection = directionOf(edge);
   if (params.reversal !== undefined && (!isRec(params.reversal) || Object.keys(params.reversal).length !== 2

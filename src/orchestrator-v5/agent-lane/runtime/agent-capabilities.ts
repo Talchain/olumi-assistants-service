@@ -38,7 +38,7 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, linkEffectMediatorReadings, type LinkEffectLabelReading, type LinkEffectMediatorReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, POINTS_STATED, withLabelCountUnits, withLinkEffectUnitReadings, linkEffectMediatorReadings, linkEffectGaugeStatement, type LinkEffectLabelReading, type LinkEffectMediatorReading, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
 import { mediatorReadings } from '../mediator-reading.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
@@ -284,7 +284,7 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
 // `newFactorScopeIn` moved to `../figure-scope.ts` (one predicate for the Agent's doors and the chat writers, AIQ 5882852814).
 export { newFactorScopeIn };
 /** Exported for the no-dead-end rows only: the words a refused link-effect card gives the Agent. */
-export { linkEffectRefusalWords };
+export { linkEffectRefusalWords, linkEffectConsent };
 
 /**
  * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
@@ -1436,7 +1436,9 @@ function linkEffectConsent(raw: unknown, from: string, to: string, effect: { amo
   const mean = isPlainRecord(edge.strength) ? edge.strength.mean : undefined;
   const stored = edge.effect_direction === 'positive' || edge.effect_direction === 'negative' ? edge.effect_direction
     : typeof mean === 'number' && mean !== 0 ? (mean < 0 ? 'negative' : 'positive') : undefined;
-  const wanted = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? 'negative' as const : 'positive' as const;
+  // No-dead-end (B): through a gauge the stored link is lever→M, sized E × g — the writer's ONE statement rule.
+  const sized = linkEffectGaugeStatement(raw, from, to, effect);
+  const wanted = Math.sign(sized.amount) * Math.sign(sized.per_source_change) < 0 ? 'negative' as const : 'positive' as const;
   return stored !== undefined && stored !== wanted ? { reversal: { from: stored, to: wanted } } : {};
 }
 function linkEffectStatementAsk(miss: string, from: string, to: string, figureAsk?: string): string {

@@ -29,6 +29,7 @@ import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placehol
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { sayFigure } from './say-figure.js';
 import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
+import { sameUnit } from './same-unit.js';
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.js';
 
@@ -552,11 +553,19 @@ export function noDeadEndAsks(
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || links.length === 0) return undefined;
   const nodes = graph.nodes.filter(isRec);
   const edges = graph.edges.filter(isRec);
-  const q = (id: string): string => `\u2018${labelOf(id)}\u2019`;
+  // Labels compact (whole sentences kept, never cut) until a sentence fits the 400-character carrier (Codex r1 P2: long
+  // labels dropped the whole gauge question and left the withhold with no words).
+  let budget = 120;
+  const compact = (v: string): string => v.length <= budget ? v : `${v.slice(0, budget - 1).trimEnd()}\u2026`;
+  const q = (id: string): string => `\u2018${compact(labelOf(id))}\u2019`;
   const fit = (sentences: readonly string[]): string => {
     let out = '';
     for (const s of sentences) { const next = out === '' ? s : `${out} ${s}`; if (next.length > 400) break; out = next; }
     return out;
+  };
+  const fitted = (build: () => string): string => {
+    for (budget = 120; budget > 12; budget -= 12) { const s = build(); if (s.length <= 400) return s; }
+    return build();
   };
   const goal = nodes.find((n) => n.kind === 'goal');
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
@@ -564,8 +573,8 @@ export function noDeadEndAsks(
   if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {
     const unit = unitOf(goalView);
     const statement = unsizedLinkStatement(links.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
-    return { message: fit([statement, `What's today's level of ${q(String(goal.id))}${unit !== undefined ? `, in ${unit}` : ''}?`]),
-      gaugeLinks: new Set() };
+    const ask = fitted(() => `What's today's level of ${q(String(goal.id))}${unit !== undefined ? `, in ${unit}` : ''}?`);
+    return { message: fit([statement, ask]) || ask, gaugeLinks: new Set() };
   }
   const readings = mediatorReadings(graph);
   const unitOfNode = (id: unknown): string | undefined => { const v = view.get(id as string); return v === undefined ? undefined : unitOf(v); };
@@ -578,15 +587,20 @@ export function noDeadEndAsks(
     const lever = gaugeLever(edges, m, r, unitOfNode);
     if (lever === undefined) continue;
     const leverUnit = unitOfNode(lever)!;
-    const given = edges.filter((e) => e.from === lever && e.to !== m && linkSizing(e) === 'user' && isRec(e.provenance)
-      && isRec(e.provenance.natural_effect)).map((e) => (e.provenance as Rec).natural_effect as Rec)
-      .filter((n) => typeof n.amount === 'number' && typeof n.amount_unit === 'string' && typeof n.per_source_change === 'number'
-        && typeof n.per_source_change_unit === 'string');
-    const onTop = given.length === 0 ? '' : `, on top of the ${sayFigure(given[0]!.amount as number, given[0]!.amount_unit as string)} `
-      + `per ${sayFigure(given[0]!.per_source_change as number, given[0]!.per_source_change_unit as string)} you already gave`;
-    sentences.push(`This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which nobody has set yet.`
-      + ` Roughly how much would a ${sayFigure(1, leverUnit)} rise in ${q(lever)} change ${q(r.child)} that way${onTop}, in ${r.unit}?`
-      + ' A best guess and a range is fine.');
+    // ⛔ NEVER DOUBLE-COUNTED, AND NEVER ANOTHER QUANTITY (Science 6006425419; Codex r1 P2): only the lever's OTHER
+    // user-sized links that lie on a goal path are "already given". One stated in the asked unit is quoted; otherwise the
+    // link is named, never an unrelated figure ("2 hours per £10").
+    const onGoalPath = goalPathNodes(nodes, edges);
+    const given = edges.filter((e) => e.from === lever && e.to !== m && onGoalPath.has(e.to) && linkSizing(e) === 'user');
+    const sameQuantity = given.map((e) => (isRec(e.provenance) && isRec(e.provenance.natural_effect) ? e.provenance.natural_effect : undefined) as Rec | undefined)
+      .find((n) => n !== undefined && typeof n.amount === 'number' && typeof n.amount_unit === 'string' && typeof n.per_source_change === 'number'
+        && typeof n.per_source_change_unit === 'string' && sameUnit(n.amount_unit as string, r.unit));
+    const onTop = (): string => sameQuantity !== undefined
+      ? `, on top of the ${sayFigure(sameQuantity.amount as number, sameQuantity.amount_unit as string)} per ${sayFigure(sameQuantity.per_source_change as number, sameQuantity.per_source_change_unit as string)} you already gave`
+      : given.length > 0 ? `, on top of its effect through ${q(String(given[0]!.to))} that you already gave` : '';
+    sentences.push(fitted(() => `This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which nobody has set yet.`
+      + ` Roughly how much would a ${sayFigure(1, leverUnit)} rise in ${q(lever)} change ${q(r.child)} that way${onTop()}, in ${r.unit}?`
+      + ' A best guess and a range is fine.'));
     for (const k of [key(lever, m), key(m, r.child)]) { covered.add(k); gaugeLinks.add(k); }
   }
   for (const l of links) {
@@ -594,15 +608,28 @@ export function noDeadEndAsks(
     if (r?.via !== 'sized_parents' || r.child !== l.to || covered.has(key(l.from, l.to))) continue;
     const childUnit = unitOfNode(l.to);
     if (childUnit === undefined) continue;
-    sentences.push(`This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
+    sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
       + ` Olumi measures ${q(l.from)} in ${r.unit}, from its own estimate of the link from ${q(r.parents[0]!)}; correct that if it\u2019s wrong.`
-      + ` Roughly how much does each ${sayFigure(1, r.unit)} of ${q(l.from)} change ${q(l.to)}, in ${childUnit}?`);
+      + ` Roughly how much does each ${sayFigure(1, r.unit)} of ${q(l.from)} change ${q(l.to)}, in ${childUnit}?`));
     covered.add(key(l.from, l.to));
   }
   if (sentences.length === 0) return undefined;
   const rest = links.filter((l) => !covered.has(key(l.from, l.to)));
   if (rest.length > 0) sentences.push(unsizedLinkSentence(rest.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) }))));
-  return { message: fit(sentences), gaugeLinks };
+  return { message: fit(sentences) || sentences[0]!, gaugeLinks };
+}
+
+/** Every node with a directed path to the goal (options and the decision aside), the goal included. */
+function goalPathNodes(nodes: readonly Rec[], edges: readonly Rec[]): Set<unknown> {
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const goal = nodes.find((n) => n.kind === 'goal');
+  const out = new Set<unknown>(goal === undefined ? [] : [goal.id]);
+  const walkable = (id: unknown): boolean => { const k = byId.get(id)?.kind; return k !== undefined && k !== 'option' && k !== 'decision'; };
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) if (e.edge_type !== 'bidirected' && out.has(e.to) && !out.has(e.from) && walkable(e.from)) { out.add(e.from); grew = true; }
+  }
+  return out;
 }
 
 /** The lever a gauge mediator is asked through: the link the answer replaces (brief3), else its one parent with a unit. */
