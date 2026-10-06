@@ -123,4 +123,15 @@ describe('first_ask: the one step the placeholder withhold asks first, typed', (
   it('CONTRAST: the gauge graph with the ask NOT lifted → never `gauge` either', () => {
     expect(warn(gaugeGraph(), 'o-raise').first_ask?.kind).not.toBe('gauge');
   });
+
+  it('DISCRIMINATING (DL CR mutant): a GATED gauge beside a (C) link → first_ask is the C link the words ask, never the gauge', () => {
+    const c = sizedParentGraph();
+    const g = gaugeGraph();
+    const both: Rec = { goal_node_id: 'mrr', nodes: [...g.nodes, ...c.nodes.filter((n: Rec) => n.id !== 'mrr')], edges: [...g.edges, ...c.edges] };
+    both.nodes.find((n: Rec) => n.id === 'o-raise').interventions.budget = { value: 0.6, raw_value: 6000 };
+    const w = warn(both, 'o-raise');
+    expect(w.message).toContain('Olumi measures');                 // the (C) question is what the words ask
+    expect(w.message).not.toMatch(/through ‘Support capacity strain’/); // the gauge question is gated off
+    expect(w.first_ask).toEqual({ kind: 'link', from: 'cost', to: 'mrr' });
+  });
 });
