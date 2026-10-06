@@ -157,5 +157,37 @@ describe('#2623 (B) at the one-link commit door: the gauge child edge is admitte
     g.effect_direction = 'positive';
     expect(linkStrengthsPostimageIsScoped(before, after, [{ from: 'price', to: 'strain' }])).toBe(false);
   });
+  it('r1 P1 BIDIRECTED: a bidirected pair on the gauge\'s endpoints is never admitted with it (position, not endpoints)', () => {
+    const before = withChurn();
+    before.edges.push({ ...placeholder('strain', 'mrr', 0.2), edge_type: 'bidirected' });
+    const { after, links } = written(before);
+    expect(linkStrengthsPostimageIsScoped(before, after, links)).toBe(true); // control: the writer's own postimage
+    after.edges.find((e: Rec) => e.edge_type === 'bidirected').strength.mean = 0.8;
+    expect(linkStrengthsPostimageIsScoped(before, after, links)).toBe(false);
+  });
+  it('r1 P2 SIGN: the gauge carries the stored child\'s own orientation; a reversed gauge is never admitted', () => {
+    const before = withChurn();
+    const { after, links } = written(before);
+    expect(edge(after, 'strain', 'mrr')).toMatchObject({ strength: { mean: -1 }, effect_direction: 'negative' }); // stored −0.3 → −1
+    const g = edge(after, 'strain', 'mrr');
+    g.strength.mean = 1;
+    g.effect_direction = 'positive';
+    expect(mediatorReadings(after).get('strain')).toMatchObject({ via: 'gauge', stored: true }); // the reader alone would pass it
+    expect(linkStrengthsPostimageIsScoped(before, after, links)).toBe(false);
+  });
+  it('NOT-INTACT (provenance): a right-signed ±1 child that is not an intact gauge (the user\'s own, no marker) is refused', () => {
+    const before = withChurn();
+    const { after, links } = written(before);
+    edge(after, 'strain', 'mrr').provenance = { source: 'user_specified', magnitude: 'user_stated' };
+    expect(edge(after, 'strain', 'mrr')).toMatchObject({ strength: { mean: -1 }, effect_direction: 'negative' });
+    expect(linkStrengthsPostimageIsScoped(before, after, links)).toBe(false);
+  });
+  it('ALREADY-STORED (same sign): a stored gauge is never rewritten through this door, even keeping its sign', () => {
+    const { after: stored0 } = written(withChurn());
+    const after = structuredClone(stored0);
+    edge(after, 'strain', 'mrr').strength.std = 0.3;
+    expect(mediatorReadings(after).get('strain')).toMatchObject({ via: 'gauge', stored: true });
+    expect(linkStrengthsPostimageIsScoped(stored0, after, [{ from: 'price', to: 'strain' }])).toBe(false);
+  });
 });
 
