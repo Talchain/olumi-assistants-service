@@ -36,6 +36,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
+import { collapsedChainIssue, collapsedChains, costOffRevenueLine, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms } from '../unsupported-mechanism.js';
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
@@ -1365,7 +1366,7 @@ export type ConstructionTrace =
   | {
     readonly retried: true;
     /** What the retry was asked about: an oversized draft, and the counts of each issue class handed to it. */
-    readonly reasons: { readonly size: boolean; readonly mechanism: number; readonly coverage: number; readonly loop: number; readonly range: number };
+    readonly reasons: { readonly size: boolean; readonly mechanism: number; readonly coverage: number; readonly loop: number; readonly range: number; readonly chain?: number };
     /** `adopted`: the retry's model registered · `kept_first`: an adoption gate refused it · `retry_failed`: the call or its parse threw. */
     readonly outcome: 'adopted' | 'kept_first' | 'retry_failed';
   };
@@ -1415,8 +1416,21 @@ export async function buildModelFromBrief(
   // ⛔ AN OPTION AND A QUANTITY NEVER SHARE A NAME (`keepOptionsAndQuantitiesApart`, Canvas #72 5884644099): admission
   // makes same-named entities one node, so the factor an option sets vanished into the option. Renamed before any read.
   const apart = keepOptionsAndQuantitiesApart(candidate);
+  // Desk 6b (lease check): every outcome and operand of an identity the mint WILL make (`mintOrFold`'s two product mints,
+  // dry-run here, pure) is kept by the mechanism rule, so it never drops a part a product multiplies.
+  const mintedLater = (c: CandidateModel) => {
+    const ids = withReconcilingProductIdentity(withRateCountProducts(c, brief).model, brief).identities ?? [];
+    const named = new Set(ids.flatMap((i) => [canonicalLabel(i.outcome), ...i.factors.map(canonicalLabel)]));
+    return (label: string): boolean => named.has(canonicalLabel(label));
+  };
   // ⛔ A level the brief states for a factor is the user's, whatever the drafter tagged it (R3 5896630173 (2)).
   candidate = creditStatedFactorLevels(apart.model, brief);
+  // ⭐ G1b (Science d5 #87 6011168471): a mechanism the brief neither sizes nor says is not drafted onto the goal path, and is
+  // challenged; a cost never feeds a revenue goal. Before any read, so the retry is drafted from the model without them.
+  const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
+  candidate = unsupported.model;
+  let mechanismsUnmodelled = unsupported.mechanisms;
+  let costsOffRevenue = unsupported.costs;
   let keptApart = apart.renamed;
   let notToldApart = apart.ambiguous;
   let linksSetAside = apart.setAside;
@@ -1530,7 +1544,10 @@ export async function buildModelFromBrief(
   const loopsAsked = needsSizeRetry ? [] : loops;
   // A4: a written money range no link carries (never on the size route, where the retry only sheds).
   const rangesAsked = needsSizeRetry ? [] : uncarriedRangeIssues(brief, admitted, candidate);
-  const asked = [...repairIssues(preparation), ...loopsAsked, ...rangesAsked];
+  // ⭐ d4 (Science d5 (2), DL 6 Oct): the user's two statements collapsed into one Olumi figure are asked of the retry, drawn
+  // as the user wrote them. Adopted ONLY when both bind as the user's and the product is gone; otherwise the first stands.
+  const chainsAsked = needsSizeRetry ? [] : collapsedChains(candidate, brief);
+  const asked = [...repairIssues(preparation), ...loopsAsked, ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -1541,6 +1558,7 @@ export async function buildModelFromBrief(
       coverage: sayCoverageGaps(preparation).length,
       loop: loopsAsked.length,
       range: rangesAsked.length,
+      chain: chainsAsked.length,
     };
     trace = { retried: true, reasons, outcome: 'kept_first' };
     try {
@@ -1568,8 +1586,10 @@ export async function buildModelFromBrief(
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
         const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: keptApart, setAside: linksSetAside }, retryApart);
+        // The retry is held to the same rule: a mechanism it re-drafts with nothing from the brief is taken out again.
+        const retryUnsupported = withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model));
         const retryRaw = keepLimitedQuantityAuthor(
-          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryHeld.model, brief), firstCandidate, preparation.baseline_gaps),
+          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryUnsupported.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
@@ -1614,10 +1634,14 @@ export async function buildModelFromBrief(
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
             || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)
             // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
-            || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)) &&
+            || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
+            || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
+          // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
+          chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted.edges)) &&
           // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
           (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
-          (asked.length === 0 || retainsRiskHypotheses(candidate, retryCandidate, needsSizeRetry)) &&
+          // The collapsed quantity is the one risk the chain issue asks the retry to replace.
+          (asked.length === 0 || retainsRiskHypotheses({ ...candidate, risks: candidate.risks.filter((r) => !chainsAsked.some((c) => canonicalLabel(c.through) === canonicalLabel(r.label))) }, retryCandidate, needsSizeRetry)) &&
           // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
           (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
         ) {
@@ -1633,6 +1657,9 @@ export async function buildModelFromBrief(
           keptApart = retryHeld.renamed;
           notToldApart = retryApart.ambiguous;
           linksSetAside = retryHeld.setAside;
+          // What the first draft took out stays said; the retry's own are added once.
+          mechanismsUnmodelled = [...mechanismsUnmodelled, ...retryUnsupported.mechanisms.filter((m) => !mechanismsUnmodelled.some((x) => canonicalLabel(x.label) === canonicalLabel(m.label)))];
+          costsOffRevenue = [...costsOffRevenue, ...retryUnsupported.costs.filter((c) => !costsOffRevenue.some((x) => canonicalLabel(x.cost) === canonicalLabel(c.cost)))];
           size = retrySize;
           // ⛔ An adopted retry must not erase what the first pass had to disclose
           // (review 5822933692, B3): a retry that echoes the prepared candidate
@@ -1745,6 +1772,18 @@ export async function buildModelFromBrief(
       }) as AdmittedModel['loss'][number])],
     };
   }
+  if (mechanismsUnmodelled.length > 0 || costsOffRevenue.length > 0) {
+    admitted = {
+      ...admitted,
+      loss: [...admitted.loss, ...mechanismsUnmodelled.map((m) => ({
+        field_path: `nodes[${slugId(m.label)}].mechanism_not_modelled`, before: { label: m.label }, after: null,
+        reason: unmodelledMechanismChallenge(m), severity: 'warn',
+      }) as AdmittedModel['loss'][number]), ...costsOffRevenue.map((c) => ({
+        field_path: `edges[${slugId(c.cost)}->${slugId(c.goal)}].cost_not_revenue`, before: { from: c.cost, to: c.goal }, after: null,
+        reason: costOffRevenueLine(c), severity: 'info',
+      }) as AdmittedModel['loss'][number])],
+    };
+  }
   const heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
   if (heldGoal.held.horizon || heldGoal.held.direction) {
     admitted = {
@@ -1825,6 +1864,8 @@ export async function buildModelFromBrief(
   if (foldedCarrier !== null) openQuestions.unshift(...foldedCarrierLines(foldedCarrier));
   // ⭐ DL (dental): a link set aside between an option and its renamed namesake is asked where the user always sees it.
   openQuestions.unshift(...linksSetAside.flatMap((a) => setAsideLinkQuestion(a) ?? []));
+  // d5's challenge where the user SEES it (DL: both seats; the server appends the first two to the reply).
+  openQuestions.unshift(...mechanismsUnmodelled.map(unmodelledMechanismChallenge));
   /**
    * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
    * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
@@ -2157,7 +2198,7 @@ export async function buildModelFromBrief(
         // other way from it (Desk 6b #2644 Q3, `stated-size-binding.ts`): said, with what to check.
         // `stated_sign`: the user's sentence not recorded on a link drawn the other way from it (DL #2644 pilot): said.
         // `link_set_aside`: a link an option could hold, set aside beside its renamed namesake and asked (DL, dental).
-        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
