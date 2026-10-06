@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import acceptance from './fixtures/reasoning-coach-acceptance.json';
 import { checkMethodTurn, entryKey, internalValueTerms, renderCopy, selectGuidance, stateKeyHash } from '../guidance/index.js';
 import { POLICY, SPEC_SHA } from '../guidance/policy.js';
+import * as plans from '../guidance/plan.js';
 import { computeResponseHash } from '../../../utils/response-hash.js';
 import type { GuidanceSignals, GuidanceState, MethodInputs, MethodTurnId, PolicyId, SelectedRow } from '../guidance/types.js';
 
@@ -25,8 +26,8 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
   it('pins amended source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    // Re-pinned for the contest-word copy class (c6, cut 5; DL + e8 #87): W5 'best'/'beat', S2 'which option leads'.
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('e1423da7cc466d38838e676b825fff9816f2681d6cd8f1bfbde4fb0e0df4bbe2');
+    // Re-pinned for the decision-level pre-mortem amendment; historical capture and checker fixtures stay intact.
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('35877a85b704285d016de0fffe1f74b56b53774642e81dbea00adc582a95ef14');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('0ed74500de3ebb72683ba212e1a48db0c080896c6ae7044256f96d4b72156df2');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
@@ -48,8 +49,10 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     }
     if ('not_offered' in c.expect && c.expect.not_offered) for (const id of c.expect.not_offered) expect(rows.some(r => r.policy_id === id)).toBe(false);
     expect(selection.runs_method).toBe('runs_method' in c.expect ? c.expect.runs_method : undefined);
-    if ('mode' in c.expect) expect(selection.mode ?? null).toBe(c.expect.mode);
-    if ('choices' in c.expect) expect(selection.choices ?? null).toEqual(c.expect.choices);
+    // Only this historical generic, multi-option, no-leader case pinned the behaviour being fixed.
+    const decisionPress = c.id === 'A-PREMORTEM-ASKED-CHOOSE-PLAN-D1';
+    if ('mode' in c.expect) expect(selection.mode ?? null).toBe(decisionPress ? 'decision_plan' : c.expect.mode);
+    if ('choices' in c.expect) expect(selection.choices ?? null).toEqual(decisionPress ? null : c.expect.choices);
     if ('runs_method' in c.expect && 'item' in c.expect) expect(selection.item ?? null).toBe(c.expect.item);
     if ('rendered_example' in c.expect && c.expect.rendered_example) for (const example of c.expect.rendered_example) {
       const row = rows.find(r => r.policy_id === example.policy_id)!;
@@ -137,15 +140,50 @@ describe('discriminating controls for selector and rendering', () => {
     expect(rowsOf(one, { [`RC-STRENGTHEN-ITEM:${link.link_id}`]: guidance[entryKey('RC-STRENGTHEN-ITEM', link.link_id)] }).rows[0].item).toBe(link.link_id);
     expect(rowsOf({ ...one, 'model.goal_path_links': [{ ...link, value_hash: 'new0estimate' }, ...otherLinks] }, guidance).rows[0].item).toBe(link.link_id);
   });
-  it('an asked pre-mortem with no licensed leader and no pick asks which option, offering nothing else', () => {
+  it('an asked generic pre-mortem with no licensed leader and no pick stresses the decision, offering nothing else', () => {
     const state = { ...stateOf('A-EXPLICIT-REQUEST-BYPASSES-COOLDOWN'), 'run.kind': 'none', 'run.leader_licensed': false, 'user.selected_option_id': null };
     const { rows, selection } = rowsOf(state);
     expect(rows).toEqual([]);
-    expect(selection).toMatchObject({ runs_method: 'RC-PREMORTEM', mode: 'choose_plan', choices: [...state['model.non_sq_option_ids']!].sort() });
+    expect(selection).toMatchObject({ runs_method: 'RC-PREMORTEM', mode: 'decision_plan' });
+    expect(selection.choices).toBeUndefined();
     const pick = state['model.non_sq_option_ids']![0];
     expect(rowsOf({ ...state, 'user.selected_option_id': pick }).selection.mode).toBeUndefined();
     // A pick that is not one of the user's options (status quo, removed) is not a plan.
     expect(rowsOf({ ...state, 'user.selected_option_id': 'not_an_option' }).selection.mode).toBe('choose_plan');
+  });
+  it('RED 58bd5e71 reported state: decision mode carries no option plan; leader, pick and one-own-option controls stay unchanged', () => {
+    // The named capture is absent; use the existing fixture with the same reported selection conditions.
+    const state = stateOf('A-PREMORTEM-ASKED-CHOOSE-PLAN-D1');
+    const [first, second] = state['model.non_sq_option_ids']!;
+    expect(state['run.leader_licensed']).toBe(false);
+    expect(state['user.selected_option_id'] ?? null).toBeNull();
+    expect(plans.methodPlanOf(state)).toBeUndefined();
+    expect(rowsOf(state).selection).toMatchObject({ runs_method: 'RC-PREMORTEM', mode: 'decision_plan' });
+    const leader = { ...state, 'run.leader_licensed': true, 'run.leader_option_id': first, 'user.selected_option_id': second };
+    expect(plans.methodPlanOf(leader)).toBe(first);
+    expect(plans.isDecisionPlan(leader)).toBe(false);
+    expect(rowsOf(leader).selection.mode).toBeUndefined();
+    const pick = { ...state, 'user.selected_option_id': second };
+    expect(plans.methodPlanOf(pick)).toBe(second);
+    expect(plans.isDecisionPlan(pick)).toBe(false);
+    expect(rowsOf(pick).selection.mode).toBeUndefined();
+    const single = { ...state, 'model.non_sq_option_ids': [first] };
+    expect(plans.methodPlanOf(single)).toBeUndefined();
+    expect(rowsOf(single).selection).toMatchObject({ mode: 'choose_plan', choices: [first] });
+    expect(rowsOf({ ...state, 'user.generic_method_press': false }).selection.mode).toBe('choose_plan');
+    expect(rowsOf({ ...state, 'run.leader_licensed': undefined }).selection.mode).toBe('choose_plan');
+  });
+  it('MUTANT: turning decision mode off makes the no-leader generic regression assertion RED', () => {
+    const state = stateOf('A-PREMORTEM-ASKED-CHOOSE-PLAN-D1');
+    const assertDecision = () => expect(rowsOf(state).selection.mode).toBe('decision_plan');
+    assertDecision();
+    const mutant = vi.spyOn(plans, 'isDecisionPlan').mockReturnValue(false);
+    try {
+      expect(assertDecision).toThrow();
+      expect(rowsOf(state).selection.mode).toBe('choose_plan');
+    } finally {
+      mutant.mockRestore();
+    }
   });
   it('rename/position edits do not offer Coach my edits', () => {
     const state = stateOf('A-COACH-EDITS-OFFERED');
