@@ -21,7 +21,7 @@ import { readStoredOptionParticipation, type StoredOptionParticipation } from '.
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { reframedNodeIds } from '../refit-frames.js';
 import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
-import { withinBandMovesForRunDelta } from '../rerun-within-band.js';
+import { rerunPairReadForRunDelta } from '../rerun-within-band.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapApprovalWords, applyOptionGapDeclarations } from '../unmodelled-mechanisms.js';
@@ -3243,10 +3243,12 @@ export function createAgentCapabilities(
       // gets Olumi's record too, so the model can say every change and that nothing proves one caused it.
       const modelCaseCheckedDown = delta !== undefined && (g.run_delta as { attribution_case?: unknown } | undefined)?.attribution_case === 'C1_attributable'
         && (delta as { attribution_case?: unknown }).attribution_case !== 'C1_attributable';
+      // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
+      // from the pair's own persisted Run facts (never on the wire). No read for a model delta shown as licensed.
+      const pairRead = delta !== undefined && !modelCaseCheckedDown ? undefined
+        : await rerunPairReadForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta);
       const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
-        [...optionNames.values()].map((a) => a.display),
-        // SD-1 interim: a link restated inside its band, named from the pair's own persisted Run facts (never on the wire).
-        delta !== undefined && !modelCaseCheckedDown ? [] : await withinBandMovesForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta));
+        [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks);
       return {
         ok: true,
         mutated: false,

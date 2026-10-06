@@ -68,6 +68,7 @@ import {
   type GraphV3Compact,
 } from '../../orchestrator/context/graph-compact.js';
 import { observedValueAuthorship } from '../../cee/transforms/provenance-display.js';
+import { heldLinkOf, withHeldUserLinks } from '../goal-target/held-user-links.js';
 
 /** How the projection was obtained. Reported in telemetry; never user-facing. */
 export type DecisionReviewGraphSource =
@@ -378,7 +379,10 @@ function projectEdgePreserving(raw: unknown): Record<string, unknown> | null {
   } else if (typeof edge.strength === 'number' && Number.isFinite(edge.strength)) {
     out.strength = edge.strength;
   }
-  if (typeof edge.exists_probability === 'number' && Number.isFinite(edge.exists_probability)) {
+  // Hold-at-1.0 (Codex r1 #2643): the reviewer reads the existence the Run USES for a held user link.
+  if (heldLinkOf(edge) !== null) {
+    out.exists = 1;
+  } else if (typeof edge.exists_probability === 'number' && Number.isFinite(edge.exists_probability)) {
     out.exists = edge.exists_probability;
   } else if (typeof edge.exists === 'number' && Number.isFinite(edge.exists)) {
     out.exists = edge.exists;
@@ -467,7 +471,8 @@ export function projectRunGraphForDecisionReview(
     const nodes = Array.isArray(enrichmentGraph.nodes) ? enrichmentGraph.nodes : [];
     const edges = Array.isArray(enrichmentGraph.edges) ? enrichmentGraph.edges : [];
     return {
-      graph: enrichmentGraph,
+      // Hold-at-1.0 (Codex r1 #2643): the same effective existence on the enrichment branch.
+      graph: withHeldUserLinks(enrichmentGraph),
       via: 'enrichment',
       node_count: nodes.length,
       edge_count: edges.length,

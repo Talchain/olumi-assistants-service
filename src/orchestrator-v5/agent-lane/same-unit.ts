@@ -317,7 +317,7 @@ export function nounUnitsAt(tail: string): readonly string[] {
     .trim()
     .split(/\s+/u)
     .map((word) => word.toLowerCase()) ?? [];
-  return ws.flatMap((_, start) => ws.slice(start).map((__, end) => ws.slice(start, end + 1).join(' ')));
+  return ws.flatMap((_, start) => ws.slice(start).map((__, end) => ws.slice(start, start + end + 1).join(' ')));
 }
 
 /**

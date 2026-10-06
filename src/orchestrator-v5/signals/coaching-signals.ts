@@ -182,7 +182,7 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   HIGH_SENSITIVITY_EDIT: ({ factorLabel }) =>
     `You're editing ${factorLabel ?? 'a factor'}, which was one of the strongest drivers in the last analysis. Rerunning will show how this changes the picture.`,
   FIRST_ANALYSIS_COMPLETE: () =>
-    'Your first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result.',
+    'Your first analysis is ready. Take a moment to explore the most-supported option and the factors shaping it before acting on the result.',
   // ⭐ The FIRST_ANALYSIS variant for a run whose admission caps DESIGNATION
   // (#1412). It is {@link FIRST_ANALYSIS_COMPLETE_PROVISIONAL_TEXT}, named and
   // exported below rather than inlined at its one call site, so specs can bind to

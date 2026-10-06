@@ -23,6 +23,9 @@ import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.j
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { buildRunInputSnapshot } from '../../tools/handlers/run-input-snapshot.js';
+import { diffRunInputs } from '../../coaching/run-input-changes.js';
+import { rerunExplanationPlan, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 
 type Rec = Record<string, any>;
 type Graph = { nodes: Rec[]; edges: Rec[] } & Rec;
@@ -458,5 +461,54 @@ describe('(vi-b) a figure stated per MONTH is never recorded as the per-QUARTER 
   it.fails('KNOWN GAP (the period untyped): unit "£" for "Our monthly revenue is £100,000." → never a card recording £100,000 per quarter', async () => {
     const built = await build(draft(), BRIEF);
     await levelRefused(built, D1_GOAL_ID, MONTHLY, { goal_label: 'Quarterly revenue', value: 100000, unit: '£' });
+  });
+});
+
+/**
+ * ⛔ (vi) THE LEVEL CARD RE-FRAMES THE USER'S LINK; S7 NEVER SAYS THE USER CHANGED IT (cut 6; Science d5 6009456901 Q3,
+ * DL 0df0e1). The level retires the normalising frame and β moves by F_old / F_new (row above) while the user's £5,000
+ * per customer stays put, so the link's band can move with no link write by anyone. A Run before and a Run after.
+ */
+describe('(vi) a Run pair across the level card: the re-framed link is never "You changed"', () => {
+  const KEY = `new_enterprise_customers->${D1_GOAL_ID}`;
+  const snap = (g: Graph) => buildRunInputSnapshot({ submittedOptions: [], rawObjectsPerOption: [], wirePerOption: [],
+    heldFactorIdsByOptionId: new Map(), optionsNotSent: [], wireGraph: g, plotPayload: { goal_node_id: D1_GOAL_ID, goal_direction: 'maximise' },
+    persistedEdges: g.edges } as never)!;
+  async function acrossTheLevel(): Promise<{ before: Graph; after: Graph }> {
+    const before = await build(draft(), BRIEF);
+    const { s, proposed } = await levelCarded(before);
+    await s.call('authorise_change', { proposal_id: proposed.proposal_id });
+    return { before, after: s.graph() };
+  }
+  const strengthRows = (rows: readonly Rec[]) => rows.filter((r) => r.entity_kind === 'link' && r.field === 'strength').map((r) => `${r.link.from}->${r.link.to}`);
+  const lineFor = (g: Graph, d: { rows: readonly Rec[]; complete: boolean }) => rerunExplanationPlan(
+    { input_changes: d.rows, input_coverage: d.complete ? 'complete' : 'partial', attribution_case: 'C2_unpaired' },
+    (id) => g.nodes.find((n) => n.id === id)?.label, [], false, [], [], new Set())!.codeLine;
+
+  it('PRECONDITION: the level moves that link\'s band; its natural size is byte-equal', async () => {
+    const { before, after } = await acrossTheLevel();
+    expect(strengthRows(diffRunInputs(snap(before) as never, snap(after) as never).rows)).toEqual([KEY]);
+    const ne = (g: Graph) => { const n = edgeInto(g, 'new_enterprise_customers').provenance.natural_effect;
+      return { amount: n.amount, amount_unit: n.amount_unit, per_source_change: n.per_source_change, per_source_change_unit: n.per_source_change_unit }; };
+    expect(ne(after)).toStrictEqual(ne(before));
+  });
+
+  it('⭐ no user link write in the pair → S7 names no link change: "Olumi can’t say what changed between these two runs." (c6 (1))', async () => {
+    const { before, after } = await acrossTheLevel();
+    const line = lineFor(after, diffRunInputs(snap(before) as never, snap(after) as never));
+    expect(line).not.toContain('You changed how much');
+    expect(line).toBe(RERUN_NO_CHANGE_LINES.unknown);
+  });
+
+  it('(2) with each Run\'s natural size recorded (the cut-7 member), the band move is no row at all', async () => {
+    const { before, after } = await acrossTheLevel();
+    const withNe = (g: Graph) => {
+      const s = structuredClone(snap(g)) as Rec;
+      const n = edgeInto(g, 'new_enterprise_customers').provenance.natural_effect;
+      const l = (s.links as Rec[]).find((x) => `${x.from}->${x.to}` === KEY)!;
+      l.natural_effect = { amount: n.amount, amount_unit: n.amount_unit, per_source_change: n.per_source_change, per_source_change_unit: n.per_source_change_unit };
+      return s;
+    };
+    expect(strengthRows(diffRunInputs(withNe(before) as never, withNe(after) as never).rows)).toEqual([]);
   });
 });
