@@ -106,13 +106,11 @@ describe('first_ask: the one step the placeholder withhold asks first, typed', (
     import.meta.url), 'utf8'))), { nodes: [], edges: [] }).graph as Rec;
   const GAUGE_PATH = [{ from: 'missed_appointment_fee', to: 'fee_related_patient_dissatisfaction' }, { from: 'fee_related_patient_dissatisfaction', to: 'no_shows' }];
 
-  it('DENTAL (RT-18 gate on): first_ask is never `gauge`; if anything is asked first it is a link the offer carries', () => {
+  it('DENTAL (RT-18 gate on): its only links are the gated gauge path → nothing is offered, so NO first_ask (never `gauge`)', () => {
     const w = placeholderGoalWarning(DENTAL(), [{ option_id: '20_no_show_fee', links: GAUGE_PATH }], 'GOAL_FIGURES_PLACEHOLDER_PATH') as Rec;
-    expect(w.first_ask?.kind).not.toBe('gauge');
-    if (w.first_ask !== undefined) {
-      expect(w.first_ask.kind).toBe('link');
-      expect(w.acceptable_links).toContainEqual({ from: w.first_ask.from, to: w.first_ask.to });
-    }
+    // Pinned by IDENTITY (DL): both named links are the gated gauge path, never offered one by one, so nothing is asked.
+    expect(w).not.toHaveProperty('first_ask');
+    expect(w.acceptable_links ?? []).toEqual([]);
   });
   it('the gated early return (`{ gaugeLinks }`) carries no `first`: the words ask nothing, so nothing is asked first', () => {
     const words = placeholderAskWords(DENTAL(), GAUGE_PATH);
