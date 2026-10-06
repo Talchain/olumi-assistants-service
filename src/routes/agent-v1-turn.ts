@@ -3947,6 +3947,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const nextLevelAsk = mode === 'full' ? currentLevelAskForAnswerRow({
       prior: levelAsk, next: deliveredLevelAsk, answered: levelAskAnswered,
       graph: readbackGraph, graphHash, nowMs: Date.parse(emittedAtIso),
+      typedByUser: typedByUser(body),
     }) : null;
     if (nextLevelAsk !== null) {
       // The question precedes lower-priority Run offers; never displace an approval or a live hold.
