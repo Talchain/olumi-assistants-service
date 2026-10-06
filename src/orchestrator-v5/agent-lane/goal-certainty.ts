@@ -535,9 +535,7 @@ export function placeholderGoalWarning(
   const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
-  // Codex r1 #2635 P1: the same when no named link can be ASKED (only a guessed link, or one from a node with no level): the
-  // AIQ rule says those are named, never asked, so the words invite nothing and `first_ask` is absent with them.
-  const said = productBlocks || asked.length === 0 ? unsizedLinkStatement : unsizedLinkSentence;
+  const said = productBlocks ? unsizedLinkStatement : unsizedLinkSentence;
   const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
@@ -554,8 +552,9 @@ export function placeholderGoalWarning(
     ...(asked.length > 0 && !productBlocks ? { acceptable_links: asked.map((l) => ({ from: l.from, to: l.to })) } : {}),
     // ⭐ D3 (DL 0df0e1, 6 Oct; Integrator 37): what `message` asks FIRST, typed, so every surface names the SAME next step
     // (the panel reads it by identity; it never picks a link of its own): the goal's level (A), the gauge's one end-to-end
-    // question (B), a link in its parent's unit (C), else the first link the sentence asks, nearest the goal. Nothing
-    // while a product blocks (the words invite nothing).
+    // question (B), a link in its parent's unit (C), else the first link the sentence names that the user CAN size, nearest
+    // the goal: one of `acceptable_links` (AIQ: a guessed or level-less link is named, never asked — the words' "Set them"
+    // is MC's ruled sentence, pinned by mc-p0-round6/round8). Nothing while a product blocks, or when the offer is empty.
     ...(firstAsk !== undefined ? { first_ask: firstAsk } : {}),
   };
 }

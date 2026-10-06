@@ -74,15 +74,14 @@ describe('first_ask: the one step the placeholder withhold asks first, typed', (
     expect(w.message.length).toBeLessThanOrEqual(400);
   });
 
-  it('Codex r1 P1 (guessed only): a link out of a limit-watched node into the goal is said, never asked — no invite, no first_ask', () => {
+  it('Codex r1 (guessed only): a link out of a limit-watched node into the goal is never OFFERED, so it is never the first ask', () => {
+    // The words keep MC's ruled sentence (mc-p0-round6/round8 pin "Set them" with nothing offered); the panel takes the offer.
     const g = { ...plainGraph(), goal_constraints: [{ node_id: 'price', operator: '<=', value: 0.8 }] };
     const w = warn(g, 'o-raise');
     expect(w).not.toHaveProperty('first_ask');
     expect(w).not.toHaveProperty('acceptable_links');
-    expect(w.message).toContain('nobody has set yet.');
-    expect(w.message).not.toMatch(/\bSet (it|them)\b/);
-    // CONTRAST: the same link with no limit watching its source is asked, and named first.
-    expect(warn(plainGraph(), 'o-raise').message).toMatch(/\bSet it\b/);
+    // CONTRAST: the same link with no limit watching its source is offered, and is the first ask.
+    expect(warn(plainGraph(), 'o-raise').first_ask).toEqual({ kind: 'link', from: 'price', to: 'mrr' });
   });
 
   it('Codex r1 P1 (mixed): first_ask is the first link the words name that the user CAN size — never the guessed one', () => {
