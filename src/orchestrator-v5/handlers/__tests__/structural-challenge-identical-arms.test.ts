@@ -52,6 +52,7 @@ import { createRegistry, resolveHandler } from '../../tools/registry.js';
 import { dispatchStructuralChallenge } from '../structural-challenge-dispatch.js';
 import { runArmsDistinct, runArmsIdentical } from '../../coaching/structural-challenge-compare.js';
 import { composeStructuralChallengeReply, structuralChallengePressId, structuralChallengeTurnFor } from '../../agent-lane/method-turn/structural-challenge-turn.js';
+import { goalChanceDisplayForAgent } from '../../goal-target/goal-chance-licence.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'fa027cf5-c5c9-4021-9578-ee79b15c6eb8';
@@ -314,10 +315,16 @@ describe('SCI-DEEP: Codex review 1 findings (a690458b)', () => {
         : { noise_verdict: 'signal', verdict: 'delta_only', basis: 'no_licensed_boundary' }) });
     result.claims = [...(result.claims as Rec[]).filter((c) => c.kind !== 'goal_probability'),
       goal('ai_reporting_module_sprint', null, null), goal('integration_bug_fix_sprint', null, null), goal('continue_current_plan', 0.5, 0.6)];
-    const reply = composeStructuralChallengeReply({ result: result as never, labels: h.turn.labels });
+    // Explicit synthetic goal-chance licences for the synthetic partial-availability claims above.
+    const display = (pct: number) => goalChanceDisplayForAgent({ enrichment: { inference_warnings: [{
+      code: 'GOAL_CHANCE_LICENSED', form: 'each', option_ids: ['continue_current_plan'],
+      pct_by_option: { continue_current_plan: pct }, display_rounding_by_option: { continue_current_plan: 'whole' },
+    }] } });
+    const reply = composeStructuralChallengeReply({ result: result as never, labels: h.turn.labels,
+      certainty: { baseline: [], alternative: [], baselineDisplay: display(50), alternativeDisplay: display(60) } });
     expect(reply).toContain('- How often AI Reporting Module Sprint and Integration Bug Fix Sprint reach the target isn\'t available in either version, so it isn\'t compared.');
     expect(reply).not.toContain('each option');
-    expect(reply).toContain('Continue Current Plan — baseline: Reaches the target in about 50% of model runs.');
+    expect(reply).toContain('Continue Current Plan — baseline: about 50% chance of meeting the goal, in this model, on current information.');
   });
 
   it('C5 (P2): stored certainty sentences are kept and the generic unavailable side is said once', async () => {

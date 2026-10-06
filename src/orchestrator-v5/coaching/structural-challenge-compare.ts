@@ -11,7 +11,7 @@
  *
  * MATERIALITY (PTL §6). A claim CHANGES only when the difference is signal-qualified AND it crosses that claim's own
  * licensed boundary: the leader; an EARNED exact-0/1 goal certainty (CEE's only licensed category for P(goal) — every
- * other figure is spoken as "in about N% of model runs"); the goal's declared level target; a constraint's side. With no
+ * other figure uses the Run's licensed goal-chance display); the goal's declared level target; a constraint's side. With no
  * licensed boundary the values travel as `delta_only`, with no verdict word.
  *
  * NOT COMPARED, by construction: structural influence, e-values, driver rank, robustness labels and fragile edges move
@@ -30,6 +30,7 @@ import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { normalizeRunGoalUnit } from '../context/run-goal-unit.js';
 import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../tools/handlers/run-goal-certainty.js';
+import { goalChanceDisplayForAgent } from '../goal-target/goal-chance-licence.js';
 import { mayPresentComparedRunLeader } from './compared-run-leader.js';
 import { deriveBuildsEquality, readRunEchoes, type RunEchoes } from './build-run-delta.js';
 import { leadNoise, meanChangeNoise, proportionChangeNoise } from './structural-challenge-noise.js';
@@ -159,6 +160,9 @@ function earnedCertainty(fact: HandlerFact, optionId: string, value: number): bo
 export interface StructuralChallengeCertainty {
   readonly baseline: StoredGoalCertainty | undefined;
   readonly alternative: StoredGoalCertainty | undefined;
+  /** Each bound Run's shared screen/Agent display, never reconstructed from comparison quantities. */
+  readonly baselineDisplay?: Readonly<Record<string, string>>;
+  readonly alternativeDisplay?: Readonly<Record<string, string>>;
 }
 
 function licensedTarget(fact: HandlerFact, graph: unknown, goalId: string, target: number | null): boolean {
@@ -488,6 +492,8 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   return { ok: true, pair_provenance, claims, certainty: {
     baseline: readStoredGoalCertainty((input.baselineFact as { result?: Rec }).result?.goal_certainty),
     alternative: readStoredGoalCertainty((input.candidateFact as { result?: Rec }).result?.goal_certainty),
+    baselineDisplay: goalChanceDisplayForAgent(input.baselineFact.result),
+    alternativeDisplay: goalChanceDisplayForAgent(input.candidateFact.result),
   }, ...identicalCarriers(candidateArmsIdentical && runArmsDistinct(input.baselineFact), candidateGroups),
   // Attribution is AFFIRMATIVE: only groups whose arms carry their valid-draw counts (Codex #2574 r3 P1).
   leader_same_as: leaderSameAs(input.baselineFact, claims, identicalArmGroups(individuallyUsableArms(input.candidateFact, true))) };
