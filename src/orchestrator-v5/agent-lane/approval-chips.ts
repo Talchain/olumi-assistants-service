@@ -387,6 +387,9 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
     } else if (item.via === 'definitional_part' && meetsReading(item.node_id === op.from ? e.per_source_change_unit : e.amount_unit, item.unit)) {
       // FA1 (Science d5, 6 Oct): the part's unit is read off its definition, said here for approval.
       mediated.push(`Olumi treats \u2018${end}\u2019 as part of \u2018${item.other_label}\u2019, so it\u2019s measured in ${item.unit}; correct that if it\u2019s wrong.`);
+    } else if (item.via === 'product' && meetsReading(item.node_id === op.from ? e.per_source_change_unit : e.amount_unit, item.unit)) {
+      // FA1-3 (DL, 6 Oct): a product's unit is read off its operands' units, said here for approval.
+      mediated.push(`Olumi measures \u2018${end}\u2019 in ${item.unit}, as ${item.other_label}; correct that if it\u2019s wrong.`);
     } else if (item.via === 'gauge' && item.node_id === op.to && meetsReading(e.amount_unit, item.unit) && through === undefined) {
       through = { child: item.other_label, mediator: end };
       mediated.push(`Olumi treats \u2018${end}\u2019 as part of how \u2018${labels.from}\u2019 moves \u2018${item.other_label}\u2019, so your answer sizes the whole path.`
