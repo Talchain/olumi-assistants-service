@@ -53,6 +53,8 @@ export function createMockSessionStore(
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
     readGuidanceHistory: async () => ({}),
+    // X4: the latest Agent answer's stored offers. Benign default = none stored.
+    readLatestAnswerOffers: async () => null,
     // Consistent with the empty `readRecent` above: no turns read, none
     // stored. Tests probing the beyond-window disclosure override it.
     countTurns: async () => 0,

@@ -699,6 +699,19 @@ function decisionReviewChips(turn: DecisionReviewTurn): OfferedAction[] {
 }
 /** Every press that runs a reasoning method (the selector withholds its rows on one): the next steps and Widen. */
 const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID, DECISION_REVIEW_PRESS_ID]);
+export { METHOD_PRESS_IDS };
+
+/**
+ * Only the plain-text reasoning presses a CURRENT Run offers use the durable offers carrier. The repair chips
+ * ("Suggest what it still needs", "Suggest starting assumptions", "Build it again") are not stored: a live turn offers
+ * them on a richer predicate than `stillValidOffers` re-checks, so a reload could offer one a turn would not.
+ */
+export function isDurableAnswerOffer(action: SuggestedAction): boolean {
+  return !('action_type' in action) && !('detail' in action)
+    && typedApprovalOf({ chip: { id: action.id } }) === undefined
+    && action.id !== RUN_OFFER_CHIP.id && !isRunExplanationChip(action.id)
+    && METHOD_PRESS_IDS.has(action.id);
+}
 
 /**
  * The next steps are offered only on a result that is current and that the canonical state lets chips build on
@@ -3977,6 +3990,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * no claim, no replay, no fence, exactly as before for everything else about an unnamed turn.
      */
     const answerGuidance = guidanceOnAnswer(wireBody.guidance as GuidanceWire | undefined, guidanceHistory, handledGuidancePress);
+    const answerOffers = ((wireBody.suggested_actions ?? []) as readonly SuggestedAction[])
+      .filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id, label, message }));
+    const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
+      ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
@@ -4008,6 +4025,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           userMessage: message,
           assistantMessage: String(wireBody.assistant_text ?? text),
           ...(answerGuidance !== undefined ? { agent_guidance: answerGuidance } : {}),
+          ...(answerOffers.length > 0 ? {
+            suggested_actions: answerOffers,
+            suggested_actions_run_key: answerOffersRunKey,
+          } : {}),
           // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
           // approval that reaches a restarted process, can still find them.
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
