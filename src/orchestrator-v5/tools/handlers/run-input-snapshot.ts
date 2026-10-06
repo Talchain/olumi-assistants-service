@@ -23,9 +23,10 @@
 
 import { createHash } from 'node:crypto';
 import { InterventionRangeSchema } from '@talchain/schemas';
-import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { RunInputLinkSchema, RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { naturalEffectDescribesEdge } from '../../../cee/magnitude/user-figure-held.js';
 import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
 import { factorAuthorshipDigest, linkAuthorshipDigest, residualDigest } from './run-input-residual.js';
 import { STATED_LEVEL_STD } from './stated-level-spread.js';
@@ -70,6 +71,27 @@ export function runIdFor(input: { scenarioId: string; turnId: string; graphHashA
 const optionIdOf = (opt: Rec): string | undefined => text(opt.option_id) ?? text(opt.id);
 
 const COMPARATORS = new Set(['>=', '<=', '>', '<']);
+
+/**
+ * 0.78.0 (SD-1 cut 6, #87 6008093205): the link's size in the user's terms, copied from the edge's own
+ * `provenance.natural_effect` on the graph this Run was built from. Recorded only while that size still DESCRIBES the
+ * edge (`naturalEffectDescribesEdge`, the F1 guard's own test), only when the Run was sent that edge's own mean, and only
+ * for a point size (a range end's text is free text, which the snapshot never holds). A size the contract refuses is left
+ * out for this link alone — never the whole snapshot.
+ */
+function naturalEffectAtRun(persisted: Rec, sentMean: number): { natural_effect?: NonNullable<RunInputSnapshot['links'][number]['natural_effect']> } {
+  const p = isRec(persisted.provenance) ? persisted.provenance : undefined;
+  const ne = p !== undefined && isRec(p.natural_effect) ? p.natural_effect : undefined;
+  const persistedMean = isRec(persisted.strength) ? persisted.strength.mean : undefined;
+  if (ne === undefined || ne.stated_range !== undefined || persistedMean !== sentMean || !naturalEffectDescribesEdge(persisted)) return {};
+  const parsed = RunInputLinkSchema.shape.natural_effect.safeParse({
+    amount: ne.amount,
+    amount_unit: ne.amount_unit,
+    per_source_change: ne.per_source_change,
+    per_source_change_unit: ne.per_source_change_unit,
+  });
+  return parsed.success && parsed.data !== undefined ? { natural_effect: parsed.data } : {};
+}
 
 export interface RunInputSnapshotInput {
   /** The options SUBMITTED to PLoT, in order (post gate + Olumi filter). */
@@ -263,6 +285,8 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
       // 0.72.0 (DL ruling #2482 r3): the link's authorship as the request carried it, so the diff can tell pairwise
       // whether an authorship change is the one a `sizing` row states (`run-input-residual.ts`).
       authorship_digest: linkAuthorshipDigest(e),
+      // 0.78.0: the link's size in the user's terms, while it is current (an `effect` row when it moves).
+      ...(persisted !== undefined ? naturalEffectAtRun(persisted, mean) : {}),
     }];
   });
 
