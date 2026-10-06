@@ -88,6 +88,7 @@ import { decisionInputLines, isDecisionInputAsk, textAtRest, withB3LinesAtRest, 
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
+import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct-link.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -3491,7 +3492,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // so the scanner-pinned second display call is a no-op after dedupe and placement.
     const scopedNarration = explainRobustnessCaveat === null ? scopedNarrationRaw
       : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat);
-    const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
+    // ⭐ RT-19 (DL ruling (A), #87 6009566552): a figure for two ends with NO direct link, and no link-effect door this turn →
+    // the door's own fixed words, never the Agent's improvised offer (a band for a new link the model would double-count).
+    const noDirectLink = fastPath === undefined ? noDirectLinkFigureReply(readbackGraph, message, result.tool_calls.map((c) => c.name)) : null;
+    const narrationText = noDirectLink ?? withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       && claimPermissionsFrom(analysisState, analysisReady, { requested: fastPath === 'run' }).leader_may_be_named
