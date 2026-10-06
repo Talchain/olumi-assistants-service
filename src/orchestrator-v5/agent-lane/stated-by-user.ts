@@ -1141,6 +1141,33 @@ export function linkEffectQuoteContextMiss(quote: string, userText: string): 'qu
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
 }
 /**
+ * A sentence that ENDS by denying any change at all: "It doesn't change.", "No, it doesn't really move.", "It has no effect
+ * at all.", "It makes no difference.", "It stays the same.", "No change." Anchored at the end, so a clause after it that
+ * asserts something ("It doesn't fall; it rises.") or sizes it ("It doesn't change much.") is no such sentence.
+ */
+const NO_CHANGE_SENTENCE = new RegExp(
+  "(?:^|[\\s,:;])(?:(?:does|do|did|will|would)\\s+not|(?:does|do|did|wo|would)n['\\u2019]?t)\\s+(?:really\\s+|actually\\s+)?(?:change|move|shift|budge|matter)"
+  + "|(?:^|[\\s,:;])(?:has|have|had|makes?|made)\\s+no\\s+(?:real\\s+)?(?:effect|difference|impact)"
+  + "|(?:^|[\\s,:;])(?:stays?|remains?|is)\\s+(?:the\\s+same|unchanged|flat)"
+  + "|(?:^|[\\s,:;])(?:no\\s+change|nothing\\s+changes)",
+  'i',
+);
+const endsDenyingAnyChange = (sentence: string): boolean => {
+  const body = sentence.trim().replace(/[\s.!\u201D\u2019"')]+$/u, '').replace(/\s+at\s+all$/iu, '');
+  const m = [...body.matchAll(new RegExp(NO_CHANGE_SENTENCE.source, 'gi'))].pop();
+  return m !== undefined && m.index! + m[0].length === body.length;
+};
+/**
+ * ⭐ FU-1 (Codex r1 + r2 on #2664 P1): the user's words say the link does not change at all, which closes the ask. Every
+ * sentence the quote sits in, and the quote itself, ends by denying any change (`NO_CHANGE_SENTENCE`) and writes no figure.
+ * Any other denial still gets its ask: a correction of size ("… loses us 50 paying subscribers, not 20") or of direction
+ * ("It doesn't fall; it rises."), or a denied figure ("… does not lose us 50").
+ */
+export function saysNoChange(quote: string, userText: string): boolean {
+  const around = enclosingSentences(userText, quote);
+  return [quote, ...around].every((words) => figuresWrittenIn(words) === 0 && endsDenyingAnyChange(words));
+}
+/**
  * RT-19 (the no-direct-link guard, no-direct-link.ts): whether ONE clause of the user's message states an EFFECT between two
  * labels, by the binder's own readers only: its whole sentence is no question or denial (`linkEffectQuoteContextMiss`), it
  * names both labels (`names`, the caller's label matcher), and it writes at least TWO figures as changes, by the binder's

@@ -84,7 +84,12 @@ export function bindStatedLinkSizes(
     return at;
   });
   const nodeById = new Map(nodes.map(n => [n.id, n]));
-  type Spans = { amount: { start: number; end: number }; per: { start: number; end: number } };
+  type Spans = {
+    amount: { start: number; end: number };
+    per: { start: number; end: number };
+    /** Set when a LEVEL CHANGE states the size (`stated-level-change.ts`): where its quantity is named. */
+    level?: { names: { start: number; end: number } };
+  };
   const pairs: { link: number; sentence: number; spans: Spans }[] = [];
   links.forEach((l, link) => {
     const d = l.natural_effect;
@@ -114,6 +119,10 @@ export function bindStatedLinkSizes(
     const spans = p.spans;
     if ([spans.amount, spans.per].some(span => excluded.some(e =>
       span.start + offsets[p.sentence]! < e.end && span.end + offsets[p.sentence]! > e.start))) return false;
+    // ⛔ A level change is the TARGET's only when the words it is written beside name the target (MC, bench §2a): "lift
+    // our enterprise win rate from 20% to about 30% and cut trial abandonment" never sizes ‘Trial abandonment’.
+    if (spans.level !== undefined
+      && !levelNamesTarget(l, sentences[p.sentence]!.slice(spans.level.names.start, spans.level.names.end))) return false;
     const d = l.natural_effect!;
     if (!sameUnit(d.amount_unit, nodeById.get(l.to)?.effect_unit ?? nodeById.get(l.to)?.unit)
       || (d.per_source_change_unit !== 'switch' && !sameUnit(d.per_source_change_unit, nodeById.get(l.from)?.change_unit ?? nodeById.get(l.from)?.unit))) return false;
@@ -144,7 +153,8 @@ export function bindStatedLinkSizes(
       if (typed !== undefined && typed.sign !== through.sign) return false;
       passThroughs?.push(through);
     }
-    const centre = centreRangeAt(sentences[p.sentence]!, spans.amount, d.amount, d.amount_unit);
+    // A range written around a level ("to about 30%, between 25% and 35%") is the LEVEL's, never a spread of the change.
+    const centre = spans.level === undefined ? centreRangeAt(sentences[p.sentence]!, spans.amount, d.amount, d.amount_unit) : undefined;
     if (centre !== undefined) centreRanges?.set(p.link, centre);
     return true;
   }).map(p => [p.link, sentences[p.sentence]! as string]));
@@ -175,6 +185,22 @@ export function bindStatedLinkSizes(
       return undefined;
     }
     return through;
+  }
+
+  /**
+   * ⛔ THE LEVEL'S QUANTITY IS THE LINK'S TARGET (MC, bench §2a). EVERY word of the target's label that no other node or
+   * option label shares is said in the clause the level is written in: "step" and "abandonment" of ‘Integration-step
+   * abandonment’ in "about 30% of trial users abandon at that step today" (‘Integration bug fixed’ and ‘Fix integration
+   * bug’ share "integration"). "Trial" alone, in "lift our trial conversion from 20% to 30%", never names ‘Trial
+   * abandonment’. A target with no word of its own is never named, so its level change is never credited.
+   */
+  function levelNamesTarget(l: StatedSizeBindingLink, clause: string): boolean {
+    const label = nodeById.get(l.to)?.label;
+    if (typeof label !== 'string') return false;
+    const others = nodes.filter(n => n.id !== l.to).flatMap(n => (typeof n.label === 'string' ? tokens(n.label) : []));
+    const own = tokens(label).filter(w => !others.some(o => sameWord(o, w)));
+    const said = tokens(clause);
+    return own.length > 0 && own.every(w => said.some(s => s === w || sameWord(s, w)));
   }
 
   /**
