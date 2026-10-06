@@ -130,12 +130,15 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(D1.body.analysis_state.leader_claim.permitted).toBe(false);
   });
 
-  it('ROW R1 (2 own options, leader withheld): the generic press asks which option, with NO model call', async () => {
+  it('ROW R1 RED (2 own options, leader withheld): the generic press runs a decision-level pre-mortem with ONE model call', async () => {
     const b = await generic();
-    expect(sent, 'no model call').toHaveLength(0);
-    expect(b.assistant_text).toBe('Which option do you want to stress-test?');
-    expect(b.suggested_actions.map((c) => c.id)).toEqual([planPickChipId('ai_reporting_module_sprint'), planPickChipId('integration_bug_fix_sprint'), 'agent-talk-it-through']);
-    expect(b.suggested_actions[0].label).toBe(q(label('ai_reporting_module_sprint')));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].instructions).toContain('Stress-test the whole decision.');
+    expect(sent[0].instructions).not.toContain('The plan to stress-test is');
+    expect(sent[0].tools).toEqual([]);
+    expect(b.assistant_text).toBe(GOOD);
+    expect(b.suggested_actions.map(c => c.id)).toContain('agent-talk-it-through');
+    expect(b.suggested_actions.some(c => c.id.startsWith('agent-premortem-plan:'))).toBe(false);
   });
 
   it('ROW R2: a pick runs ONE call; the directive rides in THIS turn\'s instructions, never the user\'s words; no proposing tool is offered', async () => {
@@ -210,11 +213,11 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
 
   /** DL follow-up on #2480 (5941358217): the answer row records the LLM calls the turn MADE, read off the provider ledger. */
   const callsOnRow = (turnId: string): number => rows.get(`${SCENARIO}:${turnId}`)!.llm_calls_used;
-  it('ROW R12 RED: a press that never calls the model records 0 calls on its answer row (the old estimate said 1)', async () => {
+  it('ROW R12 RED: a generic multi-option pre-mortem records the ONE model call it makes', async () => {
     const t = randomUUID();
     await press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?', t);
-    expect(sent, 'precondition: no model call').toHaveLength(0);
-    expect(callsOnRow(t)).toBe(0);
+    expect(sent).toHaveLength(1);
+    expect(callsOnRow(t)).toBe(1);
   });
   it('ROW R12 RED: the "can\'t run" reply (read failed) records 0 calls', async () => {
     failRead = true;
@@ -264,7 +267,7 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
    * ⭐ ROUND 3 (DL 5940698000): A RECOGNISED METHOD TURN IS TERMINAL. After the check the route returns exactly the checked text
    * and the method's own cards; no downstream composer (identity re-offer, write narration, other proposals or chips) runs.
    */
-  it('ROW R10 PAIR (round 3, P1 #1): on a model whose identity reading waits, the "can\'t run" reply and the plan buttons carry NO identity card; CONTROL: an ordinary question there re-offers it', async () => {
+  it('ROW R10 PAIR (round 3, P1 #1): on a model whose identity reading waits, the "can\'t run" reply and the decision pre-mortem carry NO identity card; CONTROL: an ordinary question there re-offers it', async () => {
     served = IDENTITY_NO_OPTIONS;
     const u = await generic();
     expect(sent, 'no model call').toHaveLength(0);
@@ -274,12 +277,15 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     served = IDENTITY;
     nextScenario();
     const c = await generic();
-    expect(c.assistant_text).toBe('Which option do you want to stress-test?');
-    expect(c._agent.tool_calls.map((x) => x.name)).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].instructions).toContain('Stress-test the whole decision.');
+    expect(c.assistant_text).toContain('Imagine this decision has gone badly.'); // D1 draft is ungrounded on this model
+    expect(c._agent.tool_calls.map((x) => x.name)).not.toContain('propose_identity');
     const ids = c.suggested_actions.map((x) => x.id);
-    expect(ids.filter((id) => id.startsWith('agent-approve-proposal:') || id === 'agent-amend-proposal')).toEqual([]);
+    expect(ids).not.toContain('agent-amend-proposal');
+    expect(ids.some(id => id.startsWith('agent-premortem-plan:'))).toBe(false);
     expect(ids.at(-1)).toBe('agent-talk-it-through');
-    expect(ids.length, 'one button per own option + Talk it through').toBeGreaterThan(2);
+    expect(ids.length, 'at most the method card and Talk it through').toBeLessThanOrEqual(2);
     nextScenario();
     reply = 'In the current model, the link matters.';
     const o = await ask('What do you make of this?');

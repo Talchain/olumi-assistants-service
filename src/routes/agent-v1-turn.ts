@@ -3084,7 +3084,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       log.info({
         scenario_id: scenarioId, dsk_protocol_id: methodTurn.context.dsk?.protocol_id ?? null,
-        dsk_not_cited: methodTurn.context.not_cited, plan_basis: methodTurn.context.plan.basis,
+        dsk_not_cited: methodTurn.context.not_cited, plan_basis: methodTurn.context.plan?.basis ?? null,
         passed: settled.passed, failed: settled.failed, target_kind: settled.target.kind,
         card: card?.tool ?? null, card_ok: issued?.ok === true, card_refusal: issued?.refusal,
       }, 'agent-lane: method turn settled');

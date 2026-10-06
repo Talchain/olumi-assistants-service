@@ -75,6 +75,8 @@ export interface GuidanceSignals {
   readonly 'user.explicit_request'?: PolicyId | null;
   /** The option the user picked on choose_plan, or named by pressing a pre-mortem row (#2466 `user_selected_option_id`). */
   readonly 'user.selected_option_id'?: string | null;
+  /** False for an option-naming press whose pick is no longer valid; absent means no option was named. */
+  readonly 'user.generic_method_press'?: boolean;
 }
 
 export interface RenderedCopy { readonly title: string | null; readonly why: string | null; readonly question: string | null }
@@ -90,13 +92,13 @@ export interface SelectedRow {
 }
 export type RowIdentity = Pick<SelectedRow, 'policy_id' | 'variant' | 'item' | 'target'>;
 export type SuppressionReason = 'decision_point' | 'request_1' | 'cooldown' | 'budget' | 'pending_signal' | 'not_eligible';
-export type MethodMode = 'honest_limit' | 'choose_plan';
+export type MethodMode = 'honest_limit' | 'choose_plan' | 'decision_plan';
 export interface Selection {
   readonly slot1?: SelectedRow;
   readonly slot2?: SelectedRow;
   /** Dispatch description only: the leaf never runs a method. */
   readonly runs_method?: PolicyId;
-  /** honest_limit: an asked What-changes with no measured factor; choose_plan: an asked pre-mortem with no plan. */
+  /** honest_limit: no measured factor; choose_plan: ask for an option; decision_plan: stress the whole decision. */
   readonly mode?: MethodMode;
   /** honest_limit only: the item the honest answer offers to firm up (Strengthen pick order S1, S3L, S3V). */
   readonly item?: string;
@@ -116,6 +118,8 @@ export interface SuppliedItem {
 /** Typed text-check inputs. No structured mechanism assertion is accepted here. */
 export interface MethodInputs {
   readonly plan_label?: string;
+  /** RC-PREMORTEM: the whole decision, with no single option selected. */
+  readonly decision_level?: boolean;
   readonly current_option_labels?: readonly string[];
   readonly current_risk_labels?: readonly string[];
   readonly current_factor_labels?: readonly string[];
