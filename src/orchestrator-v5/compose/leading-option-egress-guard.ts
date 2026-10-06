@@ -173,7 +173,7 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'winner', re: /\bwinners?\b/i },
   // DL 0df0e1 follow-up (#2639 family): the adverb slot ("is just / a little / still ahead") the band list could not
   // see, and "ahead of schedule / plan / time" — a timeline, never a contest — LEAVE here and in `band_ahead`.
-  { code: 'ahead', re: /\b(?:is|are|was|were)\s+(?:(?:[a-z]+ly|just|well|still|now|a\s+little|a\s+bit)\s+)?ahead\b(?!\s+of\s+(?:schedule|plan|time)\b)/i },
+  { code: 'ahead', re: /\b(?:is|are|was|were)\s+(?:(?:[a-z]+ly|just|well|still|now|a\s+little|a\s+bit)\s+)?ahead\b(?!\s+of\s+(?:schedule|plan|time)(?=\s*(?:[.,;:!?)]|$)))/i },
   { code: 'top_choice', re: /\btop\s+(?:choice|option)\b/i },
   /**
    * SECOND RECORDED DIVERGENCE from the walk's matcher — and the one that
@@ -289,7 +289,7 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    */
   {
     code: 'band_ahead',
-    re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b(?!\s+of\s+(?:schedule|plan|time)\b)/i,
+    re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b(?!\s+of\s+(?:schedule|plan|time)(?=\s*(?:[.,;:!?)]|$)))/i,
   },
   /**
    * ⚠⚠ THE GOAL-FRAMED VOCABULARY — added 2026-09-07, IN THE SAME COMMIT that
@@ -843,6 +843,9 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   // The `ahead` adverb slot (DL follow-up, r18's class).
   'Raise prices 10% is just ahead.',
   'Raise prices 10% is a little ahead.',
+  // The timeline exemption holds only where the noun CLOSES the phrase: an option named "Plan B" is a contest.
+  'Raise prices 10% is ahead of Plan B.',
+  'Raise prices 10% is slightly ahead of Plan B in this model.',
 ]);
 
 function assertEnforcerIsNarrowerThanAlarm(): void {

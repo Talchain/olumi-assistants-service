@@ -59,11 +59,21 @@ describe('LEAVE: "ahead of schedule / plan / time" is a timeline, not a contest'
     'We are slightly ahead of schedule.',
     'Hiring is just ahead of plan.',
     'The launch was well ahead of time.',
+    'Hiring is ahead of schedule; costs are flat.',
   ])('%s', (t) => {
     expect(both(t)).toEqual([false, false]);
   });
   it('CONTROL: "ahead of" another OPTION is still a contest', () => {
     expect(both('Raise prices 10% is slightly ahead of Hold Price.')).toEqual([true, true]);
+  });
+  it.each([
+    'Raise prices 10% is ahead of Plan B.',
+    'Raise prices 10% is slightly ahead of Plan B in this model.',
+    'Raise prices 10% is ahead of plan b.',
+    'Raise prices 10% is ahead of Time-Boxed Hiring.',
+    'We are ahead of schedule, and Raise prices 10% is ahead.',
+  ])('CATCH: the timeline noun is exempt only where it CLOSES the phrase — %s', (t) => {
+    expect(both(t)).toEqual([true, true]);
   });
 });
 
