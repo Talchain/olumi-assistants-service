@@ -35,15 +35,17 @@
  * hand-written samples. Keep it that way: add copy to the control list first,
  * watch it fail, then widen this.
  */
+// Cut 6 (WORDING BATCH; Science d5 #87 6008249324): the shipped copy now says "the most-supported option" where it said
+// "which option leads" / "the leading option". The old alternatives stay, so a reintroduced phrasing is still seen.
 const FLIP_CLAIM_CORE =
-  /\b(?:could|can|would|might|may)\s+(?:\w+\s+){0,3}?(?:change\s+which\s+option\s+leads|change\s+the\s+(?:order|result|ranking|outcome)|shift\s+which\s+option\s+leads|shift\s+it\b|shift\s+with\s+movement|tip\b|flip)/i;
+  /\b(?:could|can|would|might|may)\s+(?:\w+\s+){0,3}?(?:change\s+which\s+option\s+leads|(?:change|shift)\s+the\s+most[-\s]supported\s+option|change\s+the\s+(?:order|result|ranking|outcome)|shift\s+which\s+option\s+leads|shift\s+it\b|shift\s+with\s+movement|tip\b|flip)/i;
 
 /**
  * The same claim carried STRUCTURALLY, with no modal — "how far it can move
  * BEFORE the leading option changes" presupposes that it does.
  */
 const FLIP_CLAIM_STRUCTURAL =
-  /\bbefore\s+the\s+leading\s+option\s+changes\b|\btip\s+which\s+option\s+leads\b|\bflip\s+the\s+(?:outcome|result|decision)\b/i;
+  /\bbefore\s+the\s+(?:leading|most[-\s]supported)\s+option\s+changes\b|\btip\s+which\s+option\s+leads\b|\bflip\s+the\s+(?:outcome|result|decision)\b/i;
 
 /**
  * Constructions that DENY flippability while containing the claim's words.

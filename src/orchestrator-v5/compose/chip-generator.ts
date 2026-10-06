@@ -924,7 +924,7 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
       {
         id: 'chip_action_what_would_flip_decide',
         label: 'What would make this flip?',
-        message: 'What would make the leading option flip to another option?',
+        message: 'What would make the most-supported option flip to another option?',
         action_type: 'what_would_flip',
       },
       promptChip(

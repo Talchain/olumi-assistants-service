@@ -108,6 +108,39 @@ import {
 import { splitIntoRedactableUnits } from './redactable-units.js';
 
 /**
+ * Cut 6 (WORDING BATCH; DL 0df0e1 #2639 6008917488, after two Review Desk rounds): the run-share leader adjective.
+ *
+ * TRIGGER: most/best/more/better-supported (an -ly adverb or "well" may sit between: "most strongly supported", "most
+ * well-supported"), "the most support", "supported most". Any verb, any noun: "X remains the most supported", "Most supported: X", "the best-supported
+ * option", "X has the most support". Enumerating verb forms was whack-a-mole; this fails closed.
+ *
+ * LEAVE, and only these:
+ *   - a negated OPTION subject opens the same clause (or comma segment) and is the trigger's own subject: only a
+ *     copula, one optional adverb (clearly/really/currently/yet/now/still) and "the" sit between — "no option is the",
+ *     "no single option is", "none (of the options) is", "neither (option) is", "not one / not a single (option) is".
+ *     It must be an OPTION subject: "no single factor … would change the most-supported option" still presupposes a
+ *     leader, and a label such as "No New Hire" is not a negator.
+ *   - "there is / there's no (single|clear|one)" directly before the trigger.
+ * The adjective on another noun ("the most-supported assumption") is an accepted over-block: no CEE emitter or prompt
+ * uses it (grep at 37c9f0bf, in the PR body).
+ */
+const MOST_SUPPORTED_NEGATED_OPTION_SUBJECT =
+  String.raw`(?:no(?:\s+single)?\s+(?:option|one|choice)s?|none(?:\s+of\s+(?:the|them|these|those)(?:\s+(?:options|choices))?)?` +
+  String.raw`|neither(?:\s+(?:option|one|choice))?|not\s+(?:one|a\s+single)(?:\s+(?:option|choice))?)`;
+const MOST_SUPPORTED_LEADER_RE = new RegExp(
+  // The negated subject must be the trigger's own subject: clause-opening, then ONLY a copula and one optional adverb
+  // before it (DL #2639 6009295813). A wider span let "No option beats X as the most supported option" through.
+  String.raw`(?<!(?:^|[.;:!?,\n])\s*(?:[-*•]\s*)?${MOST_SUPPORTED_NEGATED_OPTION_SUBJECT}\s+(?:is|are|was|were)\s+` +
+    String.raw`(?:(?:clearly|really|currently|yet|now|still)\s+)?(?:the\s+)?)` +
+    String.raw`(?<!\bthere(?:['’]s|\s+(?:is|are|was|were))\s+no\s+(?:(?:single|clear|one)\s+)?)` +
+    // The span takes a following option noun, so the roster-aware reader's question and postfix-"if" checks see what
+    // comes after the whole phrase ("…the most-supported option?"), exactly as they do for "the leading option".
+    String.raw`\b(?:(?:most|best|more|better)[-\s]+(?:(?:[a-z]+ly|well)[-\s]+)?supported(?:\s+(?:options?|ones?|choices?))?` +
+    String.raw`|the\s+most\s+support|supported\s+most)\b`,
+  'i',
+);
+
+/**
  * Copy that NAMES or PRESUMES a leading option.
  *
  * Sourced from the G-CEE-1 walk's own matcher (`raw/matcher.py`), which is the
@@ -129,6 +162,10 @@ import { splitIntoRedactableUnits } from './redactable-units.js';
 const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegExp }> = [
   { code: 'leads', re: /\bleads\b/i },
   { code: 'leading_option', re: /\bleading\s+option/i },
+  // Cut 6 (Science d5 #87 6008249324): the copy now names the run-share leader as "the most-supported option". It
+  // presupposes a leader exactly as "the leading option" did, so the withheld gate must SEE it. DL 0df0e1 (#2639
+  // 6008917488): the ADJECTIVE is the trigger, not a noun or verb list — fail closed. See MOST_SUPPORTED_LEADER_RE.
+  { code: 'most_supported_option', re: MOST_SUPPORTED_LEADER_RE },
   { code: 'the_lead', re: /\bthe\s+lead\b/i },
   { code: 'which_option_leads', re: /\bwhich\s+option\s+leads\b/i },
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
@@ -753,6 +790,39 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   'Standardise on MacBook Pro comes out ahead, leading in 44% of simulations.',
   'Double Down on SMB is slightly ahead.',
   'Standardise on Dell XPS performs best, with a probability of 56%.',
+  // Cut 6 CATCH twin (d5): the new vocabulary, naming an option.
+  'Hire Marketing Manager is the most-supported option in this model.',
+  // Cut 6 Review Desk + DL (#2639): the adjective with any verb or noun.
+  'Hire Marketing Manager is the most supported in this model.',
+  'The two most-supported options are Hire Marketing Manager and Hold.',
+  'Hire Marketing Manager was the most-supported one.',
+  'The most supported is Hire Marketing Manager.',
+  'Hire Marketing Manager is most supported in this model.',
+  'Hire Marketing Manager remains the most supported.',
+  'Hire Marketing Manager comes out most supported.',
+  'Hire Marketing Manager comes out as the most supported.',
+  'Hire Marketing Manager ends up the most-supported.',
+  'Most supported: Hire Marketing Manager.',
+  'The most-supported choice is Hire Marketing Manager.',
+  'Hire Marketing Manager stays the most-supported choice.',
+  'The most supported here is Hire Marketing Manager.',
+  'Hire Marketing Manager is the best-supported option.',
+  'Hire Marketing Manager has the most support in this model.',
+  'Hire Marketing Manager is the more supported of the two.',
+  'Hire Marketing Manager is supported most often.',
+  'Hire Marketing Manager is now the most supported.',
+  'Of the options, Hire Marketing Manager is most supported.',
+  'Hire Marketing Manager is the most strongly supported option.',
+  'The option most supported by the runs is Hire Marketing Manager.',
+  "Hire Marketing Manager's the most supported.",
+  'No New Hire is the most supported in this model.',
+  // Review Desk round 3 (#2639 @1c3c70b6).
+  'No option beats Hire Marketing Manager as the most supported option.',
+  'Neither option changes much and Hire Marketing Manager is the most supported.',
+  'None of them come close so Hire Marketing Manager is the most supported.',
+  'Hire Marketing Manager is the most well supported option.',
+  'Hire Marketing Manager is the most well-supported option.',
+  'Hire Marketing Manager is better supported than Outsource.',
 ]);
 
 function assertEnforcerIsNarrowerThanAlarm(): void {

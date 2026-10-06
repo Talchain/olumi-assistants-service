@@ -180,7 +180,7 @@ describe('F1 at the HANDLER — the target may be the option that already won', 
         sonnetValid: true,
       }),
     );
-    expect(out.assistant_text).toContain('is already the leading option');
+    expect(out.assistant_text).toContain('is already the most-supported option');
     expect(out.assistant_text).not.toContain('in favour of');
     expect(out.assistant_text).not.toContain('Testing two or more factors together');
   });
@@ -198,7 +198,7 @@ describe('F1 at the HANDLER — the target may be the option that already won', 
     // Neither asserts it trails …
     expect(out.assistant_text).not.toContain('in favour of');
     // … nor confirms it leads.
-    expect(out.assistant_text).not.toContain('is already the leading option');
+    expect(out.assistant_text).not.toContain('is already the most-supported option');
     expect(out.assistant_text).toContain(
       'cannot say where Hire Two Senior Engineers Locally stands',
     );

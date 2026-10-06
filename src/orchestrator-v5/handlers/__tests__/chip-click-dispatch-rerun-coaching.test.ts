@@ -255,7 +255,7 @@ describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () 
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
     expect(out.analysisReady?.analysis_admission?.permitted_analysis_mode).toBe('comparative_leader');
     expect(out.response.assistant_text).toContain('first analysis');
-    expect(out.response.assistant_text).toContain('the leading option');
+    expect(out.response.assistant_text).toContain('the most-supported option');
   });
 
   it('chip RERUN: RERUN_ANALYSIS_COMPLETE text joins assistant_text and names the unchanged leader', async () => {
@@ -333,6 +333,7 @@ describe('chip-click admission caps designation, not the completed comparison', 
     } else {
       expect(out.response.assistant_text).toContain('Explore the comparison');
       expect(out.response.assistant_text).not.toContain('the leading option');
+      expect(out.response.assistant_text).not.toContain('the most-supported option');
     }
     expect(out.response.assistant_text).not.toContain('No single option can be put forward');
     const block = out.response.blocks?.find((item) => item.type === 'analysis_result');
@@ -356,7 +357,7 @@ describe('chip-click admission caps designation, not the completed comparison', 
     });
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
     expect(out.analysisReady).toBeUndefined();
-    expect(out.response.assistant_text).toContain('the leading option');
+    expect(out.response.assistant_text).toContain('the most-supported option');
     expect(out.response.assistant_text).toContain('62% of runs of this model');
   });
 

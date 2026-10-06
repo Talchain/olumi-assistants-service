@@ -125,10 +125,10 @@ function goalSide(value: number | null, optionId: string, decisions: StructuralC
 function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string, certainty?: StructuralChallengeCertainty, caveat = ''): string {
   const reason = BASIS_WORDS[c.basis] ?? '';
   if (c.kind === 'leader') {
-    if (c.baseline_option_id === null || c.alternative_option_id === null) return `Which option leads cannot be compared. ${reason}`;
+    if (c.baseline_option_id === null || c.alternative_option_id === null) return `Which option most runs support cannot be compared. ${reason}`;
     // A lead that is not clear in the model runs is never stated as a lead (contract C2/C3).
     if (c.verdict !== 'holds' && c.verdict !== 'changes') return c.basis === 'within_noise'
-      ? 'Which option leads is too close to call in at least one version.' : `Which option leads cannot be compared reliably. ${reason}`;
+      ? 'Which option most runs support is too close to tell apart in at least one version.' : `Which option most runs support cannot be compared reliably. ${reason}`;
     return c.baseline_option_id === c.alternative_option_id
       ? `${label(c.baseline_option_id)} leads in both versions${caveat}.`
       : `${label(c.alternative_option_id)} leads in the version without the link; ${label(c.baseline_option_id)} leads in the baseline${caveat}.`;
@@ -214,9 +214,9 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
   lines.push('What I tested: the same model and inputs, recomputed with only this link removed. The two Runs are separately sampled (unpaired). It compares these two model versions; it doesn\'t say which version of the model is right.');
   const bullet = (cs: readonly StructuralChallengeClaimV1[]) => cs.map((c) => `- ${claimLine(c, label, input.certainty, caveat)}`);
   const groupLines = (input.identicalArms === true ? [] : input.identicalGroups ?? []).map((g) =>
-    `- Without the link, ${listOf(g.map(label))} come out the same, so which option leads isn't compared for that version.`);
+    `- Without the link, ${listOf(g.map(label))} come out the same, so which option most runs support isn't compared for that version.`);
   const identicalLine = input.identicalArms === true
-    ? ['- Without the link, no option leads: every option comes out the same, so the choice between them makes no difference in that version.'] : [];
+    ? ['- Without the link, no option is the most supported: every option comes out the same, so the choice between them makes no difference in that version.'] : [];
   if (changes.length > 0 || identicalLine.length > 0) lines.push('', 'What changes:', ...identicalLine, ...bullet(changes));
   if (held.length > 0) lines.push('', 'What holds:', ...bullet(held));
   // A generic "unavailable" target frequency is said ONCE, naming whom it covers; stored certainty sentences stay.
@@ -258,7 +258,7 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
     : input.identicalArms === true
     ? `Next step: this link carries the whole difference between your options. Check the evidence for how ${from} affects ${to} before relying on ${named !== null ? `${label(named)}’s lead` : 'the comparison'}.`
     : changes.length > 0
-    ? `Next step: the two model versions differed in ${changes.map((c) => c.kind === 'leader' ? 'which option leads' : c.kind === 'goal_probability' ? `${label(c.option_id)}’s target certainty` : c.kind === 'outcome_level' ? `${label(c.option_id)}’s position relative to the target` : `${label(c.option_id)}’s frequency within ${label(c.constraint_id ?? '')}`).join('; ')}. What evidence do you have for the link from ${from} to ${to}? Review that evidence before deciding whether to keep the link.`
+    ? `Next step: the two model versions differed in ${changes.map((c) => c.kind === 'leader' ? 'which option most runs support' : c.kind === 'goal_probability' ? `${label(c.option_id)}’s target certainty` : c.kind === 'outcome_level' ? `${label(c.option_id)}’s position relative to the target` : `${label(c.option_id)}’s frequency within ${label(c.constraint_id ?? '')}`).join('; ')}. What evidence do you have for the link from ${from} to ${to}? Review that evidence before deciding whether to keep the link.`
     : open.length === 0 && held.length > 0
       ? `Next step: the tested conclusions held in these two model versions. Review the evidence for how ${from} affects ${to} before deciding whether to keep the link.`
       : `Next step: resolve the missing or unqualified evidence before drawing a conclusion about how ${from} affects ${to}.`);
