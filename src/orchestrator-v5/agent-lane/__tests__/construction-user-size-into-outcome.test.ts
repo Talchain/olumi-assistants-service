@@ -235,14 +235,19 @@ describe('A4f cascade is path independent (construction and the F4 card share it
     expect(edge(a, ...DEAL).provenance.natural_effect.amount).toBe(edge(b, ...DEAL).provenance.natural_effect.amount);
   });
 
-  // ⚠ NAMED RESIDUAL (MG #75, to R3): Olumi's drafted "+£1 per £1" outcome → goal link is typed `definitional` on the frameless
-  // build (the normalising frame holds it) but SET ASIDE when the brief states the target: the target's frame (£1m) cannot
-  // hold £3m at 1:1 when it is sized, before any refit, so B carries a placeholder there and the goal's frame differs. The
-  // same class as the pinned Olumi-estimate residual in `construction-goal-normalising-frame.test.ts`. Pinned so either side moving is seen.
-  it('RESIDUAL (pinned): the outcome → goal link is definitional on A, a placeholder on B (set aside at sizing)', async () => {
+  // ⚠ NAMED RESIDUAL (MG #75, to R3), CLOSED by G1b pass-through (CEE #2663): Olumi's drafted "+£1 per £1" outcome → goal
+  // link was typed `definitional` on the frameless build (the normalising frame holds it) but SET ASIDE when the brief states
+  // the target: the target's frame (£1m) could not hold £3m at 1:1 when it was sized, before any refit, so B carried a
+  // placeholder there. The part (an outcome) is now measured on its total's frame at sizing (`admit-model.ts`), so the
+  // definition is typed on both paths and the refit fits the user's chain around it. Pinned so either side moving is seen.
+  it('RESIDUAL CLOSED (#2663): the outcome → goal link is definitional on A AND on B, at £1 per £1, nothing cut', async () => {
+    const a = (await build(draft({ fundingMax: 3000000 }))).g;
     const b = (await build(draft({ fundingMax: 3000000, target: 1000000 }), `${PAUL} We need to raise at least £1m.`)).g;
-    const goalId = b.nodes.find((n: Rec) => n.kind === 'goal').id;
-    expect(edge(b, DEAL[1], goalId).provenance.definitional).toBeUndefined();
+    for (const g of [a, b]) {
+      const goalId = g.nodes.find((n: Rec) => n.kind === 'goal').id;
+      expect(edge(g, DEAL[1], goalId).provenance).toMatchObject({ definitional: true, natural_effect: { amount: 1, per_source_change: 1 } });
+      expect((g.edges as Rec[]).filter((e) => e.provenance?.clamped_from !== undefined || Math.abs(e.strength?.mean ?? 0) > 1)).toEqual([]);
+    }
   });
 });
 
