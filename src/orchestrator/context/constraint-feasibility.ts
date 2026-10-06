@@ -38,7 +38,7 @@ import {
 } from "@talchain/schemas/orchestrator";
 import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
-import { identityBoundWinProbabilities, readOptionResultSources } from "./option-result-source.js";
+import { GOAL_CHANCE_COMPANION_KEYS, identityBoundWinProbabilities, readOptionResultSources } from "./option-result-source.js";
 import {
   OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
@@ -255,7 +255,8 @@ const SUMMARY_LEADER_KEYS = ['goal_fit', 'win_probability', 'leading_option', 'r
 /**
  * ⛔ (S) THE GOAL FIGURES AN UNSIZED LINK MOVES ARE WITHHELD AT THE SOURCE (DL #75 5902570568; AIQ 5902548598). For each
  * option in `withheld` (`placeholderGoalPaths`), in EVERY option-result carrier (the `withholdOptionLimitScores` set):
- * `probability_of_goal`, `probability_of_joint_goal`, the outcome's centre and spread, and `downside`. An option not in
+ * `probability_of_goal` (with its precision and drivers, `GOAL_CHANCE_COMPANION_KEYS`), `probability_of_joint_goal`, the
+ * outcome's centre and spread, and `downside`. An option not in
  * it keeps its chance (the status quo's earned 0). A share of runs in which an option did best is a comparison with every
  * other option, so EVERY option's `win_probability` (and the brief's `rank`) goes, and with it the leader and every fact
  * built on it: PLoT's brief summary, headline, crown and tipping points, `robustness` to PLoT's own empty shape (its
@@ -281,6 +282,7 @@ export function withholdOptionGoalFigures<E>(
     const id = optionIdOf(r);
     if (id !== undefined && withheld.has(id)) {
       delete out.probability_of_goal;
+      for (const k of GOAL_CHANCE_COMPANION_KEYS) delete out[k];
       delete out.probability_of_joint_goal;
       // The downside figures (p05, cvar_10, regret) are in the goal's outcome units: they go with the target claims, as
       // before R2 (Codex r1 #2606: kept under P1/P5 they reached the Agent while the outcome was withheld).

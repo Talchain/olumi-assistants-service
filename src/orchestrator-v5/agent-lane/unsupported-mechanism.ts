@@ -302,6 +302,34 @@ export function costOffRevenueLine(costs: readonly CostOffRevenue[]): string {
   return said.join(' ');
 }
 
+/**
+ * ⭐ NEVER DROP WHAT THE USER SAID WITHOUT SAYING SO (G1b honesty; live witness 6 Oct: #2662's cost sentence went to
+ * `not_represented`, which is not on the wire, so the brief's "£6 a month in support" reached 0 of 20 drafts). One plain
+ * sentence per cost the BRIEF states that the cut took out of the model, in the user's own words, where the user sees it
+ * (`open_questions`, appended to the reply). A cost no brief sentence states (Olumi's own) is never said here: the
+ * challenge line covers what Olumi invented. A cost whose causal route stays in the model (`stillReaches`) keeps its
+ * figure, so it is not said. Never a leader word. Pure.
+ */
+export function droppedStatedCostLines(costs: readonly CostOffRevenue[], brief: string): string[] {
+  const out: string[] = [];
+  const quoted = new Set<string>();
+  for (const c of costs) {
+    if (c.stillReaches === true) continue;
+    // The user's sentence that states this cost AND a figure: the label's content words must be mostly in that ONE sentence.
+    const content = wordsOf(c.cost).filter((w) => !FILLER.has(w) && !TIME.has(w)).map(base);
+    const stated = sentencesOf(brief).filter((s) => /\d/u.test(s)).map((s) => {
+      const said = wordsOf(s).map(base);
+      return { s, share: content.length === 0 ? 0 : content.filter((w) => said.some((x) => sameWord(x, w))).length / content.length };
+    }).filter((x) => x.share > 0.5).sort((a, b) => b.share - a.share)[0];
+    if (stated === undefined) continue;
+    const words = stated.s.replace(/[.!?]+$/u, '');
+    if (quoted.has(words)) continue;
+    quoted.add(words);
+    out.push(`Olumi hasn’t put your ‘${words}’ into the model, because it doesn’t feed ‘${c.goal}’ directly. If it should, say how.`);
+  }
+  return out;
+}
+
 /** One collapsed user chain the repair retry is asked to draw as the user wrote it (d4; Science d5 (2), DL ruling 6 Oct). */
 export interface CollapsedChain {
   /** The drafted quantity that carries the product ("MRR lost to price-driven churn"). */

@@ -25,6 +25,7 @@
  */
 import type { CandidateModel } from './admit-model.js';
 import { unitsCompose } from './reconciling-product.js';
+import { readCount, readMoney } from './same-unit.js';
 import { figureTheUserWroteForSpan, sameWord, wordsOf } from './stated-by-user.js';
 import { canonicalLabel } from './model-primitives.js';
 
@@ -58,7 +59,15 @@ export function withRateCountProducts(candidate: CandidateModel, brief: string):
     // Both drawn positive, or the drafter's sign would be replaced by the product's.
     if (!into.every((l) => l.direction === 'positive')) continue;
     const [a, b] = parents as [string, string];
-    const composed = unitsCompose(candidate.goal.unit, candidate.goal.metric, { unit: unitOf(a), label: a }, { unit: unitOf(b), label: b });
+    const plain = unitsCompose(candidate.goal.unit, candidate.goal.metric, { unit: unitOf(a), label: a }, { unit: unitOf(b), label: b });
+    // ⭐ G1b price × count (2): "£ per STARTER subscriber per month" × ‘Starter subscribers’ counted in "subscribers" (3 of
+    // the bench's 23 price × count drafts) proved nothing twice over: the shared currency reader takes ONE word after "per"
+    // (`readCurrencyUnitWithQualifiers`), so the rate was not read as money at all, and the denominator's qualifier is in
+    // the count's LABEL, not its unit. Read again with both (`rateDenominatorAsOnePhrase`, `countQualifiedByLabel`):
+    // `unitsCompose`'s own rule still decides, so every word of the denominator must be in the count.
+    const readable = (part: string): unknown => countQualifiedByLabel(part, rateDenominatorAsOnePhrase(unitOf(part)));
+    const composed = plain.kind === 'proof' ? plain
+      : unitsCompose(candidate.goal.unit, candidate.goal.metric, { unit: readable(a), label: a }, { unit: readable(b), label: b });
     if (composed.kind !== 'proof') continue;
     // The count's range survives only through a link: an option that sets it to one figure is a point (Science (A)).
     if (levelsSet(composed.count).length > 0) continue;
@@ -93,6 +102,33 @@ export function withRateCountProducts(candidate: CandidateModel, brief: string):
     },
     minted,
   };
+}
+
+/**
+ * A money rate whose denominator is a PHRASE ("£ per starter subscriber per month"), read as one noun phrase ("£ per
+ * starter-subscriber per month"), only where that is what stops it reading as money. The words are unchanged (the
+ * hyphen splits again in `unitsCompose`'s reader), so the proof asks MORE of the count, never less. Anything else, and
+ * any unit that still does not read as money, is returned as it was.
+ */
+function rateDenominatorAsOnePhrase(unit: unknown): unknown {
+  if (typeof unit !== 'string' || readMoney(unit, '') !== null) return unit;
+  const joined = unit.replace(/(\bper\s+)([a-z]+(?:\s+[a-z]+)+?)(?=\s+per\b|\s*$)/giu, (_whole, per: string, phrase: string) => per + phrase.split(/\s+/u).join('-'));
+  return joined !== unit && readMoney(joined, '') !== null ? joined : unit;
+}
+
+/**
+ * A count's unit, QUALIFIED by its own label: the label ("Starter subscribers") where the unit reads as a count
+ * ("subscribers") and the label reads as a count of that SAME noun that keeps EVERY word of the unit, so the label only
+ * adds qualifiers and a rate "per starter subscriber" names it. Anything else keeps its unit: a money or unread unit, a
+ * label naming another noun (‘Starter subscribers’ counted in "customers"), or a unit whose own qualifier the label does
+ * not carry (‘Starter subscribers’ counted in "pro subscribers": Codex buddy r1 P1). `unitsCompose`'s own rule (the
+ * denominator's noun is the count's, every word of it in the count) then decides.
+ */
+function countQualifiedByLabel(label: string, unit: unknown): unknown {
+  const byUnit = readCount(unit);
+  const byLabel = readCount(label);
+  return byUnit !== null && byLabel !== null && byLabel[byLabel.length - 1] === byUnit[byUnit.length - 1]
+    && byUnit.every((w) => byLabel.includes(w)) ? label : unit;
 }
 
 /** Words that qualify nothing ("launch A new starter tier", "keep THE price"): never another entity's name. */

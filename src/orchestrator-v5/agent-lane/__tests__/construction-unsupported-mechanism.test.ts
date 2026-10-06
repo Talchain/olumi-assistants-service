@@ -21,6 +21,8 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js'
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import type { SessionStore } from '../../session/store.js';
+import { narrateWriteOutcome } from '../write-outcome.js';
+import { textAssertsLeadingOption, textNamesLeadingOption } from '../../compose/leading-option-egress-guard.js';
 
 type Rec = Record<string, any>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/g1-2644-invented-mechanisms.json', import.meta.url), 'utf8')) as Rec;
@@ -228,6 +230,40 @@ describe('rule 3: a cost quantity never enters a revenue goal as accounting; a c
     Object.assign(c.links.find((l: Rec) => l.from === 'Starter-tier support cost' && l.to === GOAL), { effect_amount: -0.5, effect_per_source_change: 1, effect_provenance: 'ai_proposed' });
     const { g } = await build(c);
     expect(g.edges.some((e: Rec) => e.from === 'starter_tier_support_cost' && e.to === 'monthly_recurring_revenue')).toBe(true);
+  });
+});
+
+describe('G1b honesty: a user-stated figure the build takes out is SAID, in the user\u2019s words, where the user sees it', () => {
+  const SAID = 'Olumi hasn’t put your ‘Each starter subscriber costs about £6 a month in support’ into the model, because it doesn’t feed ‘monthly recurring revenue’ directly. If it should, say how.';
+  const hasPut = (xs: readonly string[] | undefined): string[] => (xs ?? []).filter((x) => x.includes('hasn’t put your'));
+  const replyOf = (r: Rec): string => narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [r as { ok: boolean; mutated: boolean }]).status ?? '';
+  it('RED (T1b, real brief): the £6 support cost is named in the brief\u2019s words in open_questions AND the reply text', async () => {
+    const { r } = await build(FX['draft-2']);
+    expect(BRIEF).toContain('Each starter subscriber costs about £6 a month in support.');
+    expect(hasPut(r.open_questions)).toEqual([SAID]);
+    expect(replyOf(r)).toContain(SAID);
+    // The leader egress guards read it as no leader claim, and it carries no verdict word.
+    expect(textNamesLeadingOption(SAID)).toBe(false);
+    expect(textAssertsLeadingOption(SAID)).toBe(false);
+    expect(SAID).not.toMatch(/\b(best|winner|recommend\w*|leader|leads?)\b/iu);
+  });
+  it('CONTROL: an invented mechanism gets only the existing challenge line, not this one', async () => {
+    // (Without the support sentence: the served draft-1 also carries the brief's £6 cost, which is rightly said once, below.)
+    const { r } = await build(FX['draft-1'], { brief: BRIEF.replace('Each starter subscriber costs about £6 a month in support. ', '') });
+    expect(r.open_questions).toContain(challenge('Starter-tier service degradation'));
+    expect(hasPut(r.open_questions)).toEqual([]);
+    expect(hasPut((await build(FX['draft-1'])).r.open_questions)).toEqual([SAID]);
+  });
+  it('CONTROL: a brief with nothing dropped (profit goal keeps the cost) gets no line', async () => {
+    const c = structuredClone(FX['draft-2']);
+    c.goal = { ...c.goal, metric: 'monthly profit' };
+    c.links = c.links.map((l: Rec) => ({ ...l, to: l.to === GOAL ? 'monthly profit' : l.to, from: l.from === GOAL ? 'monthly profit' : l.from }));
+    const { r } = await build(c);
+    expect(hasPut(r.open_questions)).toEqual([]);
+  });
+  it('CONTROL: a cost the drafter invented (no brief sentence states it) is not said as the user\u2019s', async () => {
+    const { r } = await build(FX['draft-2'], { brief: BRIEF.replace('Each starter subscriber costs about £6 a month in support. ', '') });
+    expect(hasPut(r.open_questions)).toEqual([]);
   });
 });
 
