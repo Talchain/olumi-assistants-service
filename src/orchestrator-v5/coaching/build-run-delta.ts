@@ -76,7 +76,7 @@ import { validateAnalysisRunFactIdentity, type AnalysisRunFactIdentity } from '.
 // noise?" would be free to drift, and the prose one would drift silently
 // (CLAUDE.md trap #12). Behaviour here is unchanged by the move.
 import { noiseVerdictForProportions } from './win-probability-noise-band.js';
-import { diffRunInputs } from './run-input-changes.js';
+import { diffRunInputs, linksMovedWithinBand, type WithinBandLinkMove } from './run-input-changes.js';
 import { islDrawStructureKeyOfFact } from './draw-structure.js';
 
 /**
@@ -485,6 +485,30 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
     };
   }
   return { kind: 'not_recorded', members: { ...endpoints, input_coverage: 'not_recorded' } };
+}
+
+/**
+ * ⭐ SD-1 INTERIM (DL 0df0e1 ruling, 6 Oct, cut 5): the links whose size moved inside one band between the two Runs a
+ * `run_delta` names, read from THOSE Runs' own persisted facts, found by the delta's `endpoints` run ids. Internal: S7 names
+ * them; nothing here reaches the wire, and the delta's coverage stays `partial`. Fail closed (`[]`) when the delta is not a
+ * `partial` pair with both run ids, when either Run's fact or snapshot is missing, or when facts that share a run id
+ * disagree on its snapshot.
+ */
+export function withinBandLinkMovesForRunPair(facts: readonly HandlerFact[], runDelta: unknown): WithinBandLinkMove[] {
+  const d = asRecord(runDelta);
+  const endpoints = asRecord(d?.endpoints);
+  const priorId = asRecord(endpoints?.prior)?.run_id;
+  const currentId = asRecord(endpoints?.current)?.run_id;
+  if (d?.input_coverage !== 'partial' || typeof priorId !== 'string' || typeof currentId !== 'string' || priorId === currentId) return [];
+  const snapshotOf = (runId: string): ReturnType<typeof RunInputSnapshotSchema.parse> | null => {
+    const found = facts.map(readRunInputs).filter((r) => r.runId === runId);
+    if (found.length === 0 || found.some((r) => r.snapshot === null)) return null;
+    const first = JSON.stringify(found[0]!.snapshot);
+    return found.every((r) => JSON.stringify(r.snapshot) === first) ? found[0]!.snapshot : null;
+  };
+  const prior = snapshotOf(priorId);
+  const current = snapshotOf(currentId);
+  return prior === null || current === null ? [] : linksMovedWithinBand(prior, current);
 }
 
 /** Exact historical execution identity resolved by the selected-version binding. */

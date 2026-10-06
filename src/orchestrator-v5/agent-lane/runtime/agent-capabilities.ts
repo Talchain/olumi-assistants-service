@@ -20,6 +20,7 @@ import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
+import { withinBandMovesForRunDelta } from '../rerun-within-band.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapApprovalWords, applyOptionGapDeclarations } from '../unmodelled-mechanisms.js';
@@ -3159,7 +3160,9 @@ export function createAgentCapabilities(
       // what changed, so a typed "what changed since the last run?" is answered from the record. `undefined` for a licensed
       // model delta (context byte-unchanged) and for a first Run.
       const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined, g.nodes,
-        [...optionNames.values()].map((a) => a.display));
+        [...optionNames.values()].map((a) => a.display),
+        // SD-1 interim: a link restated inside its band, named from the pair's own persisted Run facts (never on the wire).
+        delta !== undefined ? [] : await withinBandMovesForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta));
       return {
         ok: true,
         mutated: false,
