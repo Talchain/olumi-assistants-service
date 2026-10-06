@@ -34,15 +34,15 @@ export function readFactorEnrichments(value: unknown): FactorEnrichmentT[] | und
 
 /** Runs inside the Agent turn's policy and ledger. A failed enrichment leaves the completed Run intact. */
 export async function agentFactorEnrichments(graph: unknown, sensitivity: unknown, requestId: string,
-  signal: AbortSignal): Promise<FactorEnrichmentT[] | undefined> {
+  signal: AbortSignal | undefined): Promise<FactorEnrichmentT[] | undefined> {
   // The caller's signal fires at the existing outer deadline, including time already spent awaiting PLoT.
-  if (signal.aborted || currentProviderPolicy()?.route !== 'agent_v1_turn') return undefined;
+  if (signal?.aborted || currentProviderPolicy()?.route !== 'agent_v1_turn') return undefined;
   const rows = factorReviewSensitivity(sensitivity);
   if (rows.length === 0) return undefined;
   try {
     const result = await enrichFactors(graph as GraphT, rows, { requestId, signal,
       modelOverride: AGENT_LANE_ENRICH_MODEL, timeoutMs: AGENT_FACTOR_REVIEW_TIMEOUT_MS });
-    if (signal.aborted || !result.success) return undefined;
+    if (signal?.aborted || !result.success) return undefined;
     // The engine owns rank and identity, never the model's response.
     const enrichments = result.enrichments.filter((e) => rows.some((r) => r.factor_id === e.factor_id && r.rank === e.sensitivity_rank));
     return enrichments.length === 0 ? undefined : enrichments;
