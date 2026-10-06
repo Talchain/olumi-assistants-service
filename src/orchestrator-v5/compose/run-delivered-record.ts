@@ -25,6 +25,7 @@ import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schema
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { BLOCK_PROSE_FIELDS, textAssertsLeadingOption } from './leading-option-egress-guard.js';
 import { sanitiseOlumiResponseForEgress } from './output-safety.js';
+import { optionRosterFromAnalysisReady, optionRosterFromGraph } from './leading-option-wire-enforcement.js';
 import type { AnalysisReadyPayload } from './analysis-ready-emit.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -66,10 +67,10 @@ const omitted = (reason: DeliveredRecordOmitReason): DeliveredRecordOutcome => (
  * `Team leads`). So each roster is checked separately; empty rosters are skipped.
  */
 function rostersOf(graph: GraphV3T | null, analysisReady: AnalysisReadyPayload | null | undefined): string[][] {
-  const labelsOf = (items: unknown[], keep: (r: Rec) => boolean) => [...new Set(items.filter(isRec).filter(keep)
-    .map((r) => r.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''))];
-  const graphRoster = labelsOf(isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [], (n) => n.kind === 'option');
-  const readyRoster = labelsOf(isRec(analysisReady) && Array.isArray(analysisReady.options) ? analysisReady.options : [], () => true);
+  // The wire's OWN roster readers (they trim and length-gate labels), never a second reading of them (buddy r2 P1 on
+  // #2645: an untrimmed " Team " binds nothing where the wire's "Team" binds and rewords).
+  const graphRoster = [...new Set(optionRosterFromGraph(graph))];
+  const readyRoster = [...new Set(optionRosterFromAnalysisReady(analysisReady))];
   return [graphRoster, readyRoster, [...new Set([...graphRoster, ...readyRoster])]].filter((r) => r.length > 0);
 }
 

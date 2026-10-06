@@ -187,6 +187,18 @@ describe('buddy r1 on #2645: what else can make the stored bytes differ from the
     expect(build([card('Team leads in 60% of runs.')], { graph, analysisReady: ready })).toEqual({ kind: 'omitted', reason: 'asserts_leader' });
   });
 
+  it('⭐ r2 P1: labels the wire trims (" Team ") are the wire\'s labels too → omitted, asserts_leader', () => {
+    const graph = { nodes: [{ id: 'opt_team', kind: 'option', label: ' Team ' }, { id: 'opt_solo', kind: 'option', label: 'Solo' }], edges: [] } as never;
+    const ready = { status: 'ready', goal_node_id: 'out_rev', options: [
+      { option_id: 'opt_team', label: ' Team ', status: 'ready', interventions: {} },
+      { option_id: 'opt_solo', label: 'Solo', status: 'ready', interventions: {} },
+    ] } as never;
+    // PRECONDITION: the real wire rewords it under a withheld licence (it trims its rosters).
+    expect(enforceLeadingOptionClaimsAtWire(response([card('Team leads in 60% of runs.')]), { requestId: 'r', exitPath: 't',
+      mayNameLeadingOption: false, separationEstablished: false, graph, analysisReady: ready } as never).changed).toBe(true);
+    expect(build([card('Team leads in 60% of runs.')], { graph, analysisReady: ready })).toEqual({ kind: 'omitted', reason: 'asserts_leader' });
+  });
+
   it('⭐ P1-2: a sanitiser pass that would change the text again (an id whose label is another id) → omitted, sanitise_unstable', () => {
     const graph = { nodes: [{ id: 'factor_analysis', kind: 'factor', label: 'factor_value' }, { id: 'factor_value', kind: 'factor', label: 'Revenue' }], edges: [] } as never;
     const opts = { graph, requestId: 'r', exitPath: 't', userMessage: null, mayNameLeadingOption: false };
