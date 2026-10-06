@@ -13,7 +13,7 @@
  *   `deadlineMs` names nothing (buddy r1: never strand the chip on a pending read).
  */
 import { loadScenarioAnalysisFactsForRead } from '../build-turn-context.js';
-import { userWrittenLinksForRunPair, withinBandLinkMovesForRunPair } from '../coaching/build-run-delta.js';
+import { frameRefitLinksForRunPair, userWrittenLinksForRunPair, withinBandLinkMovesForRunPair } from '../coaching/build-run-delta.js';
 import type { WithinBandLinkMove } from '../coaching/run-input-changes.js';
 import { isScenarioAnalysisReasoningAuthority } from '../context/reconcile-scenario-analysis-facts.js';
 
@@ -27,9 +27,11 @@ export const WITHIN_BAND_READ_DEADLINE_MS = 1500;
 export interface RerunPairRead {
   readonly withinBand: WithinBandLinkMove[];
   readonly userWrittenLinks: ReadonlySet<string>;
+  /** S5t-W: the links only a frame refit moved between the two Runs (`frameRefitLinksForRunPair`): never said, never counted. */
+  readonly frameRefitLinks: ReadonlySet<string>;
 }
 
-const NOTHING: RerunPairRead = { withinBand: [], userWrittenLinks: new Set() };
+const NOTHING: RerunPairRead = { withinBand: [], userWrittenLinks: new Set(), frameRefitLinks: new Set() };
 
 export async function rerunPairReadForRunDelta(
   scenarioId: string,
@@ -50,6 +52,7 @@ export async function rerunPairReadForRunDelta(
     return {
       withinBand: withinBandLinkMovesForRunPair(factSet.facts, runDelta, receipts),
       userWrittenLinks: new Set(userWrittenLinksForRunPair(factSet.facts, runDelta, receipts)),
+      frameRefitLinks: new Set(frameRefitLinksForRunPair(factSet.facts, runDelta, receipts)),
     };
   })().catch((): RerunPairRead => NOTHING);
   try {

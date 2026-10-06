@@ -15,7 +15,9 @@
  *    Only the superlative and every-option forms need every option: with any option withheld the form is `each`.
  *  · `form` — which of c6's ruled sentences applies, decided HERE on the DISPLAYED whole percentages:
  *      `highest`                    the top clears the next by ≥ 10 points (Science's interim rule until each option's
- *                                   informative-draw count arrives, step 2b) and is at least 1%;
+ *                                   informative-draw count arrives, step 2b) and is at least 1%; once the records carry
+ *                                   their precision, the top's 95% Wilson interval also overlaps no other option's
+ *                                   (G4/G5 ruling 6; otherwise `similar`);
  *      `highest_all_likely_to_miss` that, and every option is at or under 40%;
  *      `all_likely_to_miss`         every option at or under 40%, no superlative;
  *      `similar`                    H2 (DL 0df0e1 6 Oct, d5 interim rule: below 10 points; c6 words "similar chances"):
@@ -28,6 +30,10 @@ import { readOptionResultSources } from '../../orchestrator/context/option-resul
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { heldLinkOf, isUserStatedLink } from './held-user-links.js';
+import {
+  displayedPctAt, displayRoundingFor, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
+  type GoalChanceDisplayRounding, type GoalChanceDriver, type GoalChanceNoDriverReason, type GoalChancePrecision,
+} from './goal-chance-driver.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -73,13 +79,26 @@ export interface GoalChanceLicence {
    * the headline.
    */
   readonly summary_withheld?: { readonly cause: 'olumi_existence_assumption'; readonly form: Exclude<GoalChanceForm, 'each'> };
+  /**
+   * ⭐ G4/G5 phase 2 (DL ruling 5): the step each LICENSED option's `pct_by_option` was displayed at — `whole` while its 95%
+   * Wilson half-width is ≤ 2.5 points, else `nearest_5`. Present only for options whose record carries a well-formed
+   * `probability_of_goal_precision`; an option without one is displayed whole, as before.
+   */
+  readonly display_rounding_by_option?: Readonly<Record<string, GoalChanceDisplayRounding>>;
+  /**
+   * ⭐ G4/G5 phase 2 (DL rulings 1–4): once the Run's records carry `probability_of_goal_drivers`, every LICENSED option is in
+   * exactly ONE of these: its main driver (`goal-chance-driver.ts`), or the typed reason it has none. Never on a withheld
+   * option. Absent when no licensed record carries a driver block (today's Runs: the record is unchanged).
+   */
+  readonly driver_by_option?: Readonly<Record<string, GoalChanceDriver>>;
+  readonly no_driver_by_option?: Readonly<Record<string, GoalChanceNoDriverReason>>;
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
 
 /** The DISPLAYED whole percentage of a chance: the figure the user reads, and the one Science's gap is tested on. */
 export function displayedGoalPct(p: number): number {
-  return Math.round(Math.max(0, Math.min(1, p)) * 100);
+  return displayedPctAt(p, 'whole');
 }
 
 /**
@@ -105,6 +124,9 @@ export function goalChanceLicenceOf(
   const licensed: string[] = [];
   const withheld: string[] = [];
   const pct: Record<string, number> = {};
+  const recordOf = new Map<string, Rec>();
+  const precisionOf = new Map<string, GoalChancePrecision>();
+  const rounding: Record<string, GoalChanceDisplayRounding> = {};
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
@@ -115,7 +137,14 @@ export function goalChanceLicenceOf(
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
     if (!Number.isFinite(p) || p < 0 || p > 1) return null;
     licensed.push(id);
-    pct[id] = displayedGoalPct(p);
+    recordOf.set(id, r);
+    // ⭐ Ruling 5: the displayed step follows the figure's own precision; no precision block → whole, as before.
+    const precision = goalChancePrecisionOf(r);
+    if (precision !== null) {
+      precisionOf.set(id, precision);
+      rounding[id] = displayRoundingFor(precisionHalfWidthPoints(precision));
+    }
+    pct[id] = displayedPctAt(p, rounding[id] ?? 'whole');
   }
   if (option_ids.length < 2 || licensed.length === 0) return null;
 
@@ -123,11 +152,19 @@ export function goalChanceLicenceOf(
   const complete = withheld.length === 0;
   const ranked = [...licensed].sort((a, b) => pct[b]! - pct[a]!);
   const [leader, next] = ranked as [string, string];
-  const superlative = complete && pct[leader]! >= 1 && pct[leader]! - pct[next]! >= SUPERLATIVE_GAP_POINTS;
+  // ⭐ Ruling 6 (S1): once the records carry their precision, the leader's Wilson interval must also be DISTINCT from every
+  // other option's; one licensed record without a well-formed block when others carry one → no superlative (fail closed).
+  // No record carrying a block (today's Runs) keeps the interim 10-point rule alone.
+  const precisionCarried = licensed.some((id) => recordOf.get(id)!.probability_of_goal_precision !== undefined);
+  const precisionKnown = licensed.every((id) => precisionOf.has(id));
+  const indistinct = (a: string, b: string): boolean => precisionKnown && !intervalsDistinct(precisionOf.get(a)!, precisionOf.get(b)!);
+  const separated = !precisionCarried || (precisionKnown && licensed.every((id) => id === leader || !indistinct(leader, id)));
+  const superlative = complete && pct[leader]! >= 1 && pct[leader]! - pct[next]! >= SUPERLATIVE_GAP_POINTS && separated;
   const allLikelyToMiss = complete && licensed.every((id) => pct[id]! <= MORE_LIKELY_TO_MISS_PCT);
-  // H2: every option quoted and no superlative → the options within 10 points of the top have similar chances.
+  // H2: every option quoted and no superlative → the options within 10 points of the top, or whose interval overlaps the
+  // top's (ruling 6), have similar chances.
   const same = complete && !superlative && !allLikelyToMiss
-    ? licensed.filter((id) => pct[leader]! - pct[id]! < SUPERLATIVE_GAP_POINTS) : [];
+    ? licensed.filter((id) => pct[leader]! - pct[id]! < SUPERLATIVE_GAP_POINTS || indistinct(leader, id)) : [];
   const summary: GoalChanceForm = superlative
     ? (allLikelyToMiss ? 'highest_all_likely_to_miss' : 'highest')
     : allLikelyToMiss ? 'all_likely_to_miss' : same.length >= 2 ? 'similar' : 'each';
@@ -136,6 +173,16 @@ export function goalChanceLicenceOf(
   const priorOnPath = summary !== 'each' && olumiExistenceOnGoalPath(graph, goalId, option_ids);
   const form: GoalChanceForm = priorOnPath ? 'each' : summary;
   const existence = userLinkExistenceOn(graph, goalId, licensed);
+  // ⭐ Rulings 1–4: each licensed option's main driver, or why it has none, once the producer emits driver blocks.
+  const drivers: Record<string, GoalChanceDriver> = {};
+  const noDrivers: Record<string, GoalChanceNoDriverReason> = {};
+  if (licensed.some((id) => recordOf.get(id)!.probability_of_goal_drivers !== undefined)) {
+    for (const id of licensed) {
+      const claim = goalChanceDriverOf(recordOf.get(id)!, id, graph, envelope);
+      if ('driver' in claim) drivers[id] = claim.driver;
+      else noDrivers[id] = claim.no_driver;
+    }
+  }
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
@@ -149,6 +196,9 @@ export function goalChanceLicenceOf(
     target: { comparator, value: target.value, unit: target.unit },
     ...(existence !== undefined ? { user_link_existence: existence } : {}),
     ...(priorOnPath ? { summary_withheld: { cause: 'olumi_existence_assumption' as const, form: summary as Exclude<GoalChanceForm, 'each'> } } : {}),
+    ...(Object.keys(rounding).length > 0 ? { display_rounding_by_option: rounding } : {}),
+    ...(Object.keys(drivers).length > 0 ? { driver_by_option: drivers } : {}),
+    ...(Object.keys(noDrivers).length > 0 ? { no_driver_by_option: noDrivers } : {}),
   };
 }
 
@@ -235,6 +285,27 @@ export function withGoalChanceLicence<E>(
   if (licence === null || !isRec(envelope)) return envelope;
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
   return { ...envelope, inference_warnings: [...warnings, licence] } as E;
+}
+
+/**
+ * ⭐ (9) CHAT AND PANEL QUOTE THE SAME FIGURE (DL 0df0e1, 6 Oct): for each option the Run's licence displays at `nearest_5`
+ * (ruling 5), its DISPLAYED chance as a fraction (`pct_by_option` / 100). Every place the Agent is handed that option's
+ * `probability_of_goal` hands it this instead (`saved_run_options`, the run result's option rows), so it never says 43%
+ * beside a panel showing 45%. Read only from a record `goalChanceLicenceForAgent` accepts; a whole-step option is absent
+ * (its own figure already rounds to the panel's). Empty when there is nothing to replace.
+ */
+export function nearestFiveGoalChancesForAgent(result: unknown): ReadonlyMap<string, number> {
+  const out = new Map<string, number>();
+  if (!isRec(result) || goalChanceLicenceForAgent(result) === undefined) return out;
+  const r = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
+    .flatMap((w) => (Array.isArray(w) ? w : [])).find((w): w is Rec => isRec(w) && w.code === GOAL_CHANCE_LICENSED)!;
+  const steps = isRec(r.display_rounding_by_option) ? r.display_rounding_by_option : {};
+  const pct = isRec(r.pct_by_option) ? r.pct_by_option : {};
+  for (const [id, step] of Object.entries(steps)) {
+    const shown = pct[id];
+    if (step === 'nearest_5' && typeof shown === 'number' && Number.isInteger(shown) && shown >= 0 && shown <= 100) out.set(id, shown / 100);
+  }
+  return out;
 }
 
 /**

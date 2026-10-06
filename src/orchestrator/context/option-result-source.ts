@@ -122,6 +122,13 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
  */
 export const GOAL_CHANCE_COMPANION_KEYS = ['probability_of_goal_precision', 'probability_of_goal_drivers'] as const;
 
+/**
+ * ⛔ G4/G5 PHASE 2 (DL 0df0e1, design-g4g6 Q3): the `GOAL_CHANCE_LICENSED` record's main-driver claims
+ * (`goal-chance-licence.ts`). Like the blocks they are read from, they never reach the Agent: it reads the licence's form
+ * and ids (`goalChanceLicenceForAgent`), and no ruled Agent sentence about a "main driver" exists.
+ */
+export const GOAL_CHANCE_DRIVER_RECORD_KEYS = ['driver_by_option', 'no_driver_by_option'] as const;
+
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

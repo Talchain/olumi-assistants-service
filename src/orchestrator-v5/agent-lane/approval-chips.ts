@@ -398,12 +398,15 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
   }
   // Through a gauge the user sized the PATH: the record names the quantity it reaches, through the mediator.
   const reached = through === undefined ? `"${labels.to}"` : `"${through.child}" through "${through.mediator}"`;
-  const words = `${e.per_source_change < 0 ? 'lowering' : 'raising'} "${labels.from}" by ${unsigned(e.per_source_change, e.per_source_change_unit)} `
+  // G1b answer door: a switch (the sizer's "switch", ±1) is turned on or off, never "raised by 1 switch".
+  const turning = e.per_source_change_unit === 'switch' && Math.abs(e.per_source_change) === 1
+    ? `${e.per_source_change < 0 ? 'turning off' : 'turning on'} "${labels.from}"` : undefined;
+  const words = `${turning ?? `${e.per_source_change < 0 ? 'lowering' : 'raising'} "${labels.from}" by ${unsigned(e.per_source_change, e.per_source_change_unit)}`} `
     + `${e.amount < 0 ? 'lowers' : 'raises'} ${reached} by ${unsigned(e.amount, e.amount_unit)}`;
   const levels = linkEffectSourceLevels(op.quote, namesSourceOf({ source: labels.from, target: labels.to }));
   const transition = levels !== undefined && levels.change === e.per_source_change
     ? ` Source change: ${levels.from}% \u2192 ${levels.to}% = ${signed(levels.change, levels.unit)}.` : '';
-  const head = `${reversal}Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in ${reached}: ${words}.${transition}`;
+  const head = `${reversal}Record: ${turning ?? `${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}"`} \u2192 ${signed(e.amount, e.amount_unit)} in ${reached}: ${words}.${transition}`;
   if (op.unit_readings !== undefined && (!Array.isArray(op.unit_readings) || op.unit_readings.length > 2)) return undefined;
   const disclosures: string[] = [];
   const seen = new Set<string>();
