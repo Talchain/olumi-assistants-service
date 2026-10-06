@@ -133,6 +133,9 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
       // C3/C4 (#488): public_label + public_message are REQUIRED on this
       // variant (brief_seed/redraft optional) — mirror route-v2's emitter.
       return { ...base, action: { kind, public_label: 'Build the model', public_message: 'Build the model?' } };
+    case 'elicit_goal_current_level':
+      return { ...base, action: { kind, goal_id: 'goal_revenue', goal_label: 'Revenue', user_id: null,
+        question: 'What is revenue today?' } };
     case 'set_factor_value':
       return { ...base, action: { kind, factor_id: 'fac_x', value: 1, operator: 'set' } };
     case 'edit_graph_add_risk':

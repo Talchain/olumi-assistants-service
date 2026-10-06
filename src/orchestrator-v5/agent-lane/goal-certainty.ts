@@ -494,7 +494,7 @@ export function placeholderGoalPaths(
 
 /** What a placeholder withhold asks FIRST (D3, 6 Oct): the goal's level, one gauge question, or one link. */
 export type PlaceholderFirstAsk =
-  | { readonly kind: 'goal_level'; readonly node_id: string }
+  | { readonly kind: 'goal_level'; readonly node_id: string; readonly question?: string }
   | { readonly kind: 'gauge'; readonly from: string; readonly through: string; readonly to: string }
   | { readonly kind: 'link'; readonly from: string; readonly to: string };
 
@@ -626,7 +626,8 @@ export function noDeadEndAsks(
     // ⛔ THE ASK ALWAYS SURVIVES (Codex r1 #2635 P1): `first` names it, so the statement compacts WITH it and is dropped
     // only when even compacted it leaves no room. Long labels used to keep the statement and drop the question.
     const both = fitted(() => `${statementOf()} ${askOf()}`);
-    return { message: both.length <= 400 ? both : fitted(askOf), gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id) } };
+    const message = both.length <= 400 ? both : fitted(askOf);
+    return { message, gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id), question: askOf() } };
   }
   const readings = mediatorReadings(graph);
   const unitOfNode = (id: unknown): string | undefined => { const v = view.get(id as string); return v === undefined ? undefined : unitOf(v); };
