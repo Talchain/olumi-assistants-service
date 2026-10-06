@@ -194,8 +194,8 @@ describe('MC factor review served from the persisted Agent Run', () => {
     expect(extractionSpy).not.toHaveBeenCalled(); expect(sdk.openai).not.toHaveBeenCalled(); expect(sdk.anthropic).not.toHaveBeenCalled();
   });
 
-  it.each(['What is best in this model?', 'What would you recommend in this model?', 'What does elasticity 0.62 show in this model?'])
-  ('(f) MUST-FAIL: the guarded press withholds unsafe question %s', async (question) => {
+  it.each(['What is best in this model?', 'What would you recommend in this model?', 'What does elasticity 0.62 show in this model?'])(
+    '(f) MUST-FAIL: the guarded press withholds unsafe question %s', async (question) => {
     sdk.openai.mockImplementation(async () => ({ choices: [{ message: { content: JSON.stringify({ enrichments: [enrichment(question)] }) } }] }));
     await runAndPersist(); const read = await readStored();
     expect(read.factorEnrichments).toEqual([enrichment(question)]);
