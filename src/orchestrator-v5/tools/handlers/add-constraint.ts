@@ -1070,9 +1070,12 @@ export function createAddConstraintHandler(): HandlerFn {
       // the card's row, so the pair had no one row to read): the card's row is kept once. A card that retires one is never
       // a no-op.
       const goalCard = invocation.holdsGoalDirection === true && targetNode.kind === 'goal';
-      const ownTarget = (c: { node_id: string; deadline_metadata?: unknown }): boolean =>
-        goalCard && c.node_id === targetId && c.deadline_metadata === undefined;
-      const retiresOtherTarget = (c: { node_id: string; operator: string; deadline_metadata?: unknown }): boolean =>
+      // A TARGET row only: the goal's own level-frame (or unframed) row. A deadline, or a limit stated as a CHANGE on the
+      // goal (`change_abs` "growth at most £50k a quarter"), is an independent limit and stays (Codex buddy r2 F2, #2618).
+      const ownTarget = (c: { node_id: string; deadline_metadata?: unknown; value_frame?: unknown }): boolean =>
+        goalCard && c.node_id === targetId && (c.deadline_metadata === undefined || c.deadline_metadata === null)
+        && (c.value_frame === undefined || c.value_frame === 'level');
+      const retiresOtherTarget = (c: { node_id: string; operator: string; deadline_metadata?: unknown; value_frame?: unknown }): boolean =>
         ownTarget(c) && c.operator !== operator;
       const ownRows = (graph.goal_constraints ?? []).filter(ownTarget);
       const retiresATarget = ownRows.some(retiresOtherTarget) || ownRows.filter((c) => c.operator === operator).length > 1;

@@ -299,6 +299,15 @@ describe('D3 step 1 — a goal ceiling is scored as ONE pair (threshold + minimi
     expect(pairOf(moved)).toMatchObject({ raw: 450, cap: 650, direction: '<=' });
   });
 
+  it('buddy r2 F2: a limit stated as a CHANGE on the goal is an independent limit — a target card never retires it', async () => {
+    const withLimit = clone(RT10B.graph_with_target);
+    withLimit.goal_constraints = [...withLimit.goal_constraints!,
+      { constraint_id: 'gc-growth', node_id: GOAL, operator: '<=', value: 50, unit: UNIT, label: 'growth', provenance: 'explicit', value_frame: 'change_abs' }];
+    const g = await targetCard(withLimit, 'at_least', 300);
+    expect(ownRows(g)).toEqual(expect.arrayContaining([expect.objectContaining({ constraint_id: 'gc-growth', value_frame: 'change_abs' })]));
+    expect(ownRows(g).filter((r) => r.value_frame !== 'change_abs')).toEqual([expect.objectContaining({ operator: '>=', value: 300 })]); // CONTROL: the level ceiling row goes
+  });
+
   it('buddy r1 F1 (writer): a held ceiling with no ONE row to pair clears the channel — an earlier figure is never left beside it', () => {
     const g = clone(RT10B.graph_with_target);
     Object.assign(goalOf(g), { goal_threshold_raw: 300, goal_threshold: 300 / 650, goal_threshold_cap: 650, success_threshold: 300, threshold_source: 'user' });

@@ -5,8 +5,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { withholdUnusableGoalChances, goalChanceTargetCause } from '../goal-chance-gate.js';
-import { GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_WITHHELD_CODES } from '../../../orchestrator/context/option-result-source.js';
+import { withholdUnusableGoalChances, goalChanceTargetCause, GOAL_FIT_UNUSABLE, GOAL_FIGURES_NO_STATED_TARGET } from '../goal-chance-gate.js';
+import { GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 
 type Json = Record<string, any>;
 const RT10B = JSON.parse(readFileSync(new URL('../../tools/handlers/__tests__/fixtures/bprime-rt10b.json', import.meta.url), 'utf8')) as {
@@ -54,18 +54,29 @@ describe('D3 step 1 — the goal-chance seam gate', () => {
     expect(out.decision_brief.analysis_summary.leading_option).toBe('a');
   });
 
-  it('RED row MISSING TARGET: every option\'s chance and goal_fit are withheld, typed no_stated_target', () => {
+  it('RED row MISSING TARGET: every option\'s chance and goal_fit go, typed no_stated_target — ONLY those (nothing else moves)', () => {
     const out = withholdUnusableGoalChances(envelope(0.15), RT10B.graph_without_target, GOAL) as Json;
     for (const id of ['a', 'b']) expect(rowOf(out, id)).not.toHaveProperty('probability_of_goal');
-    expect(gateWarning(out)?.causes).toEqual([{ option_id: 'a', cause: 'no_stated_target' }, { option_id: 'b', cause: 'no_stated_target' }]);
     expect(out.decision_brief.analysis_summary).not.toHaveProperty('goal_fit');
+    expect((out.inference_warnings as Json[])).toEqual([expect.objectContaining({
+      code: GOAL_FIGURES_NO_STATED_TARGET, severity: 'info', option_ids: ['a', 'b'], cause: 'no_stated_target', goal_fit_removed: true })]);
+    // Every other figure stays (shares, outcome, the leader), and no reader is told a target "could not be tested".
+    expect(rowOf(out, 'a')).toMatchObject({ win_probability: 0.7, outcome: { mean: 0.5, p10: 0.4, p90: 0.6 } });
+    expect(out.decision_brief.analysis_summary.leading_option).toBe('a');
+    expect(GOAL_FIGURES_WITHHELD_CODES.has(GOAL_FIGURES_NO_STATED_TARGET)).toBe(false);
+    expect(runWithheldGoalFigures(out)).toBe(false);
   });
 
   it('goal_fit ALONE unusable (1.3) with every option valid: goal_fit is withheld with its cause, every option keeps its chance', () => {
     const out = withholdUnusableGoalChances(envelope(0.15, 1.3), RT10B.graph_with_target, GOAL) as Json;
     expect(rowOf(out, 'a').probability_of_goal).toBe(0.15);
     expect(out.decision_brief.analysis_summary).not.toHaveProperty('goal_fit');
-    expect((out.inference_warnings as Json[])).toEqual([expect.objectContaining({ code: GOAL_FIGURES_PROBABILITY_UNUSABLE, goal_fit_cause: 'outside_unit_interval' })]);
+    expect((out.inference_warnings as Json[])).toEqual([expect.objectContaining({ code: GOAL_FIT_UNUSABLE, goal_fit_cause: 'outside_unit_interval' })]);
+    // Codex buddy r2 F1: no option's figure was withheld, so the run's option records are NOT read as withheld.
+    expect(GOAL_FIGURES_WITHHELD_CODES.has(GOAL_FIT_UNUSABLE)).toBe(false);
+    expect(runWithheldGoalFigures(out)).toBe(false);
+    // CONTROL: a per-option withhold IS read as withheld.
+    expect(runWithheldGoalFigures(withholdUnusableGoalChances(envelope(1.2), RT10B.graph_with_target, GOAL) as Json)).toBe(true);
   });
 
   it('a held ceiling the run did NOT minimise (no proof of its sense) is not a chance of meeting it: ceiling_not_minimised', () => {
@@ -75,10 +86,19 @@ describe('D3 step 1 — the goal-chance seam gate', () => {
     expect(gateWarning(out)?.causes[0]).toEqual({ option_id: 'a', cause: 'ceiling_not_minimised' });
   });
 
+  it('the threshold CEE holds on the goal (raw figure absent on an older graph) is the target the Run scored; NONE is not', () => {
+    const held = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR', goal_threshold: 0.8, goal_threshold_unit: '£/month' }], edges: [] };
+    expect(goalChanceTargetCause(held, 'goal')).toBeNull();
+    const none = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR' }], edges: [] }; // PLoT's synthesised target only
+    expect(goalChanceTargetCause(none, 'goal')).toBe('no_stated_target');
+  });
+
   it('a target with no stated direction, or no unit, is not a stated target either', () => {
     const noDirection = { nodes: [{ id: 'goal', kind: 'goal', label: 'Revenue', goal_threshold_raw: 400, goal_threshold_unit: '£' }], edges: [] };
     const noUnit = { nodes: [{ id: 'goal', kind: 'goal', label: 'Revenue', goal_direction: '>=', goal_threshold_raw: 400 }], edges: [] };
-    expect(goalChanceTargetCause(noDirection, 'goal')).toBe('no_stated_direction');
+    // ⏸ `no_stated_direction` ships in STEP 2 with its one-click invitation (DL 0df0e1; c6): until then the Run's own sense
+    // stands and the headline's assumption line says so. Pinned so it cannot start withholding without the invitation.
+    expect(goalChanceTargetCause(noDirection, 'goal')).toBeNull();
     expect(goalChanceTargetCause(noUnit, 'goal')).toBe('no_target_unit');
   });
 });

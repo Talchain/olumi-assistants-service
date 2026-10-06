@@ -94,10 +94,17 @@ describe('B′ — the target tail and the target-only licence', () => {
   });
 
   it('(b) ALONE: the gap is named and nothing is asked', () => {
-    const g = heldStrict(paulTestable());
+    // ⭐ RE-PINNED, D3 step 1 (Science #87 6006079049 (2); Codex buddy r1 F4 on #2618): a "<" the goal HOLDS beside its
+    // threshold, on a run that minimises, is now scored strictly (`goal_threshold_strict`) — testable, no gap.
+    expect(targetTestabilityOf(heldStrict(paulTestable())).kind).toBe('testable');
+    // The gap stays where "<" is NOT scored strictly: stated only on the goal's own row, the node holding no comparator.
+    const g = paulTestable();
+    const goal = g.nodes.find((n: Json) => n.kind === 'goal');
+    delete goal.goal_direction;
+    const row = g.goal_constraints.find((c: Json) => c.node_id === goal.id);
+    Object.assign(row, { operator: '<=', operator_as_stated: '<' });
     const v = targetTestabilityOf(g);
     expect(v.kind === 'not_testable' ? v.failures.map((f) => f.case) : v.kind).toEqual(['b']);
-    const goal = g.nodes.find((n: Json) => n.kind === 'goal');
     const fig = sayFigure(goal.goal_threshold_raw, goal.goal_threshold_unit);
     expect(tailOf(g)).toBe(`I can't yet say how likely any option is to keep securing funding below ${fig}: Olumi can't yet test a '< ${fig}' target.`);
   });

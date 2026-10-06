@@ -3954,7 +3954,8 @@ export function createAgentCapabilities(
       // (`add-constraint.ts`), so the card names what it replaces, in the row's own words and units.
       const chosenOperator = type === 'at_most' ? '<=' : '>=';
       const replaced = ((g.raw as { goal_constraints?: unknown }).goal_constraints as Array<Record<string, unknown>> | undefined ?? [])
-        .filter((c) => c !== null && typeof c === 'object' && c.node_id === goal.id && c.deadline_metadata === undefined
+        .filter((c) => c !== null && typeof c === 'object' && c.node_id === goal.id && (c.deadline_metadata === undefined || c.deadline_metadata === null)
+          && (c.value_frame === undefined || c.value_frame === 'level')
           && (c.operator === '<=' || c.operator === '>=') && c.operator !== chosenOperator && typeof c.value === 'number' && Number.isFinite(c.value))
         .map((c) => `${c.operator_as_stated === '<' ? 'below' : c.operator_as_stated === '>' ? 'above' : c.operator === '<=' ? 'at most' : 'at least'} `
           + targetFigure(c.value as number, typeof c.unit === 'string' && c.unit.trim() !== '' ? c.unit : unit));

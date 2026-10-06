@@ -29,9 +29,20 @@ export type GoalChanceUnusable =
 export function goalChanceTargetCause(graph: unknown, goalId: unknown): GoalChanceUnusable | null {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
-  const target = goal === undefined ? null : statedGoalTargetOf(graph as Rec, goal);
+  // The target the Run scored: the goal's stated one, else the normalised threshold CEE itself holds on the goal (written
+  // only from the user's target; its raw figure may be absent on older graphs). NO threshold on the goal at all is a
+  // target the user never set — e.g. PLoT's synthesised `auto_goal_threshold` — and no chance of meeting it is shown.
+  const stated = goal === undefined ? null : statedGoalTargetOf(graph as Rec, goal);
+  const heldThreshold = goal !== undefined && typeof goal.goal_threshold === 'number' && Number.isFinite(goal.goal_threshold);
+  const target = stated ?? (heldThreshold ? {
+    ...(typeof goal!.goal_threshold_unit === 'string' ? { unit: goal!.goal_threshold_unit } : {}),
+    ...(typeof goal!.goal_direction === 'string' ? { held: goal!.goal_direction } : {}),
+  } : null);
   if (target === null) return 'no_stated_target';
-  if (target.held === undefined) return 'no_stated_direction';
+  // ⏸ `no_stated_direction` (a target figure with no comparator held or stated: 22% of targeted goals, DL measured 6 Oct)
+  // ships in STEP 2, WITH the one-click "at least / at most {target}?" invitation that resolves it (DL 0df0e1; c6). Withheld
+  // here alone it would be a dead end for those users between the two cuts. Until then the Run's own sense stands (the
+  // label's, else ISL's unattested maximiser) and the headline's assumption line says so, exactly as today.
   if (typeof target.unit !== 'string' || target.unit.trim() === '') return 'no_target_unit';
   // A ceiling is a chance of staying AT OR BELOW it only where the run minimised; otherwise ISL scored P(goal ≥ X).
   if ((target.held === '<=' || target.held === '<') && resolveGoalDirection(graph, goalId)?.direction !== 'minimise') return 'ceiling_not_minimised';
@@ -44,6 +55,60 @@ export function goalChanceValueCause(p: unknown): GoalChanceUnusable | null {
   return p < 0 || p > 1 ? 'outside_unit_interval' : null;
 }
 
+/**
+ * The brief's `goal_fit` ALONE unusable, every option's chance kept: its own code, deliberately NOT in
+ * `GOAL_FIGURES_WITHHELD_CODES` (Codex buddy r2 F1, #2618) — no per-option figure was withheld, so no reader may treat
+ * the run's option records as withheld.
+ */
+export const GOAL_FIT_UNUSABLE = 'GOAL_FIT_UNUSABLE';
+
+/**
+ * NO STATED TARGET: no chance is a chance of meeting one (PLoT scored a target the user never set, e.g. its synthesised
+ * `auto_goal_threshold`). ONLY `probability_of_goal` and `goal_fit` go — every other figure (shares, outcome, downside)
+ * stays exactly as today — typed `info` with its own code, NOT in `GOAL_FIGURES_WITHHELD_CODES`: there is no target to
+ * have tested, so no reader may say the run "could not test" one. The words for a goal with no target are step 4's
+ * question (c6). Most served Runs have no target (red team #87 6005077996: 22 of 26), so this leaves their prose untouched.
+ */
+export const GOAL_FIGURES_NO_STATED_TARGET = 'GOAL_FIGURES_NO_STATED_TARGET';
+
+function stripGoalChancesWithNoTarget(env: Rec): Rec {
+  const removed: string[] = [];
+  const strip = (rows: unknown): unknown => (!Array.isArray(rows) ? rows : rows.map((row) => {
+    if (!isRec(row) || !('probability_of_goal' in row)) return row;
+    const { probability_of_goal: _gone, ...kept } = row;
+    const id = typeof row.option_id === 'string' ? row.option_id : typeof row.id === 'string' ? row.id : undefined;
+    if (id !== undefined && !removed.includes(id)) removed.push(id);
+    return kept;
+  }));
+  const out: Rec = { ...env };
+  if ('option_comparison' in env) out.option_comparison = strip(env.option_comparison);
+  if (Array.isArray(env.results)) out.results = strip(env.results);
+  else if (isRec(env.results)) {
+    const nested: Rec = { ...env.results };
+    for (const k of ['option_comparison', 'options', 'option_results'] as const) if (k in nested) nested[k] = strip(nested[k]);
+    out.results = nested;
+  }
+  let fitRemoved = false;
+  if (isRec(env.decision_brief)) {
+    const brief: Rec = { ...env.decision_brief };
+    if ('options' in brief) brief.options = strip(brief.options);
+    if (isRec(brief.analysis_summary) && 'goal_fit' in brief.analysis_summary) {
+      const { goal_fit: _fit, ...kept } = brief.analysis_summary;
+      brief.analysis_summary = kept;
+      fitRemoved = true;
+    }
+    out.decision_brief = brief;
+  }
+  if (removed.length === 0 && !fitRemoved) return env;
+  const warnings = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
+  out.inference_warnings = [...warnings, {
+    code: GOAL_FIGURES_NO_STATED_TARGET, severity: 'info',
+    message: 'The goal has no stated target, so no option has a chance of meeting one to show.',
+    option_ids: removed, cause: 'no_stated_target' satisfies GoalChanceUnusable, ...(fitRemoved ? { goal_fit_removed: true } : {}),
+  }];
+  return out;
+}
+
 const MESSAGE = 'Not shown. The chance of meeting your goal could not be read as a probability of meeting a stated target, so it is held back.';
 
 /**
@@ -53,6 +118,7 @@ const MESSAGE = 'Not shown. The chance of meeting your goal could not be read as
 export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goalId: unknown): E {
   if (!isRec(envelope)) return envelope;
   const targetCause = goalChanceTargetCause(graph, goalId);
+  if (targetCause === 'no_stated_target') return stripGoalChancesWithNoTarget(envelope) as E;
   const causes = new Map<string, GoalChanceUnusable>();
   for (const record of readOptionResultSources(envelope).flat()) {
     if (!isRec(record) || !('probability_of_goal' in record) || record.probability_of_goal === undefined) continue;
@@ -81,7 +147,7 @@ export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goal
     const { goal_fit: _dropped, ...kept } = outSummary;
     out = { ...out, decision_brief: { ...outBrief, analysis_summary: kept } };
     const warnings = Array.isArray(out.inference_warnings) ? out.inference_warnings : [];
-    out = { ...out, inference_warnings: [...warnings, { code: GOAL_FIGURES_PROBABILITY_UNUSABLE, message: MESSAGE, severity: 'warning', goal_fit_cause: fitCause }] };
+    out = { ...out, inference_warnings: [...warnings, { code: GOAL_FIT_UNUSABLE, message: MESSAGE, severity: 'warning', goal_fit_cause: fitCause }] };
   }
   return out as E;
 }
