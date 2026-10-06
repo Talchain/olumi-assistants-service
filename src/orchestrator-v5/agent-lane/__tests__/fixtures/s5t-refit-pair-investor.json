@@ -1,0 +1,495 @@
+{
+ "_provenance": "Generated 6 Oct 2026 from CEE #2631 @41a5fc5303760367ca732f4118745ed1fe1c15f3: applyLinkEffectEdit(frameRefit) on the Integrator S5t fixture graphs (pd integrator/github-26 @82c575b6, output/integrator/s5t-crossrun-probe-20261006.test.ts.txt), then buildRunInputSnapshot on the graph before (s1) and after (s2). natural_effects: each edge provenance.natural_effect on both graphs, from->to: [before, after].",
+ "edited": "enterprise_win_rate->quarterly_revenue",
+ "labels": {
+  "decision_quarterly_revenue": "Decision: quarterly revenue",
+  "quarterly_revenue": "quarterly revenue",
+  "build_ai_reporting_module": "Build AI Reporting Module",
+  "fix_integration_step_bug": "Fix Integration-Step Bug",
+  "current_roadmap": "Current Roadmap",
+  "ai_reporting_development_effort": "AI reporting development effort",
+  "ai_reporting_module_availability": "AI reporting module availability",
+  "enterprise_win_rate": "Enterprise win rate",
+  "integration_step_bug_fixed": "Integration-step bug fixed",
+  "integration_step_abandonment_rate": "Integration-step abandonment rate",
+  "quarterly_revenue_lost_to_roadmap_displacement": "Quarterly revenue lost to roadmap displacement"
+ },
+ "s1": {
+  "snapshot_version": 1,
+  "sent_digest": "f49277c22c67fb6cc8d01dba4d26c07858e1b2cbfb1695bc151f162765c316d8",
+  "goal": {
+   "node_id": "quarterly_revenue",
+   "label": "quarterly revenue",
+   "target_raw": 2800000,
+   "unit": "GBP/quarter",
+   "operator": ">=",
+   "direction": "maximise",
+   "frame": "level"
+  },
+  "options": [],
+  "options_not_sent": [],
+  "factors": [
+   {
+    "factor_id": "ai_reporting_development_effort",
+    "label": "AI reporting development effort",
+    "raw": 0,
+    "unit": "% engineering capacity",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+   },
+   {
+    "factor_id": "ai_reporting_module_availability",
+    "label": "AI reporting module availability",
+    "unit": "0-1",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+   },
+   {
+    "factor_id": "enterprise_win_rate",
+    "label": "Enterprise win rate",
+    "raw": 20,
+    "unit": "%",
+    "encoded": 0.2,
+    "source": "brief_extraction",
+    "authorship_digest": "8b68306de1726bbc83ef219020861a0356e3788027bcfab8df85749aec703490"
+   },
+   {
+    "factor_id": "integration_step_bug_fixed",
+    "label": "Integration-step bug fixed",
+    "unit": "0-1",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+   },
+   {
+    "factor_id": "integration_step_abandonment_rate",
+    "label": "Integration-step abandonment rate",
+    "raw": 30,
+    "unit": "%",
+    "encoded": 0.3,
+    "source": "brief_extraction",
+    "authorship_digest": "8b68306de1726bbc83ef219020861a0356e3788027bcfab8df85749aec703490"
+   }
+  ],
+  "constraints": [],
+  "links": [
+   {
+    "from": "decision_quarterly_revenue",
+    "to": "build_ai_reporting_module",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "decision_quarterly_revenue",
+    "to": "fix_integration_step_bug",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "decision_quarterly_revenue",
+    "to": "current_roadmap",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "build_ai_reporting_module",
+    "to": "ai_reporting_development_effort",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "fix_integration_step_bug",
+    "to": "integration_step_bug_fixed",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "current_roadmap",
+    "to": "ai_reporting_development_effort",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+   },
+   {
+    "from": "current_roadmap",
+    "to": "integration_step_bug_fixed",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+   },
+   {
+    "from": "ai_reporting_development_effort",
+    "to": "ai_reporting_module_availability",
+    "mean": 0.55,
+    "std": 0.275,
+    "exists_probability": 0.8,
+    "band": "strong",
+    "sizing": "user",
+    "authorship_digest": "bf73dc0b2b7e85a37d00fe4631f65b4e9a708e4e5e89ff81185bcccae2b8c7fc"
+   },
+   {
+    "from": "ai_reporting_development_effort",
+    "to": "quarterly_revenue_lost_to_roadmap_displacement",
+    "mean": 0.55,
+    "std": 0.1375,
+    "exists_probability": 0.8,
+    "band": "strong",
+    "sizing": "user",
+    "authorship_digest": "bf73dc0b2b7e85a37d00fe4631f65b4e9a708e4e5e89ff81185bcccae2b8c7fc"
+   },
+   {
+    "from": "ai_reporting_module_availability",
+    "to": "enterprise_win_rate",
+    "mean": 0.1,
+    "std": 0.05,
+    "exists_probability": 0.8,
+    "band": "slight",
+    "sizing": "olumi_estimate",
+    "authorship_digest": "65fadce33ba6350226b8afe8067c82f2d9b6ee6c5cae8da26d471bbf29604560"
+   },
+   {
+    "from": "enterprise_win_rate",
+    "to": "quarterly_revenue",
+    "mean": 0.5714285714285714,
+    "std": 0.2857142857142857,
+    "exists_probability": 0.8,
+    "band": "strong",
+    "sizing": "olumi_estimate",
+    "authorship_digest": "ac61fb278fd8ca68d1a74083e9ced35ae1c52a4dd635a93c46d9b4c825ad4f14"
+   },
+   {
+    "from": "integration_step_bug_fixed",
+    "to": "integration_step_abandonment_rate",
+    "mean": -0.15,
+    "std": 0.075,
+    "exists_probability": 0.8,
+    "band": "slight",
+    "sizing": "olumi_estimate",
+    "authorship_digest": "87b2a36077bcc126117b0edf53d4a5b6fd345db561a6d65ee9dcd6ad434a4120"
+   },
+   {
+    "from": "integration_step_abandonment_rate",
+    "to": "quarterly_revenue",
+    "mean": -0.2857142857142857,
+    "std": 0.14285714285714285,
+    "exists_probability": 0.8,
+    "band": "moderate",
+    "sizing": "olumi_estimate",
+    "authorship_digest": "3258d73a040c19234d7f5811e146c32ec2488c735089e07aca45c523c38c714b"
+   },
+   {
+    "from": "quarterly_revenue_lost_to_roadmap_displacement",
+    "to": "quarterly_revenue",
+    "mean": -0.08571428571428572,
+    "std": 0.04285714285714286,
+    "exists_probability": 0.8,
+    "band": "slight",
+    "sizing": "olumi_estimate",
+    "authorship_digest": "0eee246f3a95dfa984390cf7f845720735acbdb782a5c2d1ae007a410160743c"
+   }
+  ]
+ },
+ "s2": {
+  "snapshot_version": 1,
+  "sent_digest": "f49277c22c67fb6cc8d01dba4d26c07858e1b2cbfb1695bc151f162765c316d8",
+  "goal": {
+   "node_id": "quarterly_revenue",
+   "label": "quarterly revenue",
+   "target_raw": 2800000,
+   "unit": "GBP/quarter",
+   "operator": ">=",
+   "direction": "maximise",
+   "frame": "level"
+  },
+  "options": [],
+  "options_not_sent": [],
+  "factors": [
+   {
+    "factor_id": "ai_reporting_development_effort",
+    "label": "AI reporting development effort",
+    "raw": 0,
+    "unit": "% engineering capacity",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+   },
+   {
+    "factor_id": "ai_reporting_module_availability",
+    "label": "AI reporting module availability",
+    "unit": "0-1",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+   },
+   {
+    "factor_id": "enterprise_win_rate",
+    "label": "Enterprise win rate",
+    "raw": 20,
+    "unit": "%",
+    "encoded": 0.2,
+    "source": "brief_extraction",
+    "authorship_digest": "8b68306de1726bbc83ef219020861a0356e3788027bcfab8df85749aec703490"
+   },
+   {
+    "factor_id": "integration_step_bug_fixed",
+    "label": "Integration-step bug fixed",
+    "unit": "0-1",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "228981f6907f0736b9065a76f45b55f0b00ad4599e42b2f8a1348464d099661d"
+   },
+   {
+    "factor_id": "integration_step_abandonment_rate",
+    "label": "Integration-step abandonment rate",
+    "raw": 30,
+    "unit": "%",
+    "encoded": 0.3,
+    "source": "brief_extraction",
+    "authorship_digest": "8b68306de1726bbc83ef219020861a0356e3788027bcfab8df85749aec703490"
+   }
+  ],
+  "constraints": [],
+  "links": [
+   {
+    "from": "decision_quarterly_revenue",
+    "to": "build_ai_reporting_module",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "decision_quarterly_revenue",
+    "to": "fix_integration_step_bug",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "decision_quarterly_revenue",
+    "to": "current_roadmap",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "build_ai_reporting_module",
+    "to": "ai_reporting_development_effort",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "fix_integration_step_bug",
+    "to": "integration_step_bug_fixed",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "current_roadmap",
+    "to": "ai_reporting_development_effort",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+   },
+   {
+    "from": "current_roadmap",
+    "to": "integration_step_bug_fixed",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+   },
+   {
+    "from": "ai_reporting_development_effort",
+    "to": "ai_reporting_module_availability",
+    "mean": 0.55,
+    "std": 0.275,
+    "exists_probability": 0.8,
+    "band": "strong",
+    "sizing": "user",
+    "authorship_digest": "bf73dc0b2b7e85a37d00fe4631f65b4e9a708e4e5e89ff81185bcccae2b8c7fc"
+   },
+   {
+    "from": "ai_reporting_development_effort",
+    "to": "quarterly_revenue_lost_to_roadmap_displacement",
+    "mean": 0.55,
+    "std": 0.1375,
+    "exists_probability": 0.8,
+    "band": "strong",
+    "sizing": "user",
+    "authorship_digest": "bf73dc0b2b7e85a37d00fe4631f65b4e9a708e4e5e89ff81185bcccae2b8c7fc"
+   },
+   {
+    "from": "ai_reporting_module_availability",
+    "to": "enterprise_win_rate",
+    "mean": 0.1,
+    "std": 0.05,
+    "exists_probability": 0.8,
+    "band": "slight",
+    "sizing": "olumi_estimate",
+    "authorship_digest": "65fadce33ba6350226b8afe8067c82f2d9b6ee6c5cae8da26d471bbf29604560"
+   },
+   {
+    "from": "enterprise_win_rate",
+    "to": "quarterly_revenue",
+    "mean": 0.7999999999999999,
+    "std": 0.39999999999999997,
+    "exists_probability": 0.8,
+    "band": "very_strong",
+    "sizing": "user",
+    "authorship_digest": "fa8bc978ae6f369d6128189633c4f2415033f119330970f66b8059284daa47dd"
+   },
+   {
+    "from": "integration_step_bug_fixed",
+    "to": "integration_step_abandonment_rate",
+    "mean": -0.15,
+    "std": 0.075,
+    "exists_probability": 0.8,
+    "band": "slight",
+    "sizing": "olumi_estimate",
+    "authorship_digest": "87b2a36077bcc126117b0edf53d4a5b6fd345db561a6d65ee9dcd6ad434a4120"
+   },
+   {
+    "from": "integration_step_abandonment_rate",
+    "to": "quarterly_revenue",
+    "mean": -0.19999999999999998,
+    "std": 0.09999999999999999,
+    "exists_probability": 0.8,
+    "band": "slight",
+    "sizing": "olumi_estimate",
+    "authorship_digest": "281d84e31de5608515a75bf7e8178782fc0dd18b54812d388b4483fd46cb9d83"
+   },
+   {
+    "from": "quarterly_revenue_lost_to_roadmap_displacement",
+    "to": "quarterly_revenue",
+    "mean": -0.06,
+    "std": 0.03,
+    "exists_probability": 0.8,
+    "band": "slight",
+    "sizing": "olumi_estimate",
+    "authorship_digest": "eef5b88d70bafeaa26796f2c97caf448f8d46a20fdc0b30d4751d83ebc007ba2"
+   }
+  ]
+ },
+ "natural_effects": {
+  "ai_reporting_module_availability->enterprise_win_rate": [
+   {
+    "amount": 10,
+    "amount_unit": "percentage points",
+    "per_source_change": 1,
+    "per_source_change_unit": "switch"
+   },
+   {
+    "amount": 10,
+    "amount_unit": "percentage points",
+    "per_source_change": 1,
+    "per_source_change_unit": "switch"
+   }
+  ],
+  "enterprise_win_rate->quarterly_revenue": [
+   {
+    "amount": 20000,
+    "amount_unit": "GBP/quarter",
+    "per_source_change": 1,
+    "per_source_change_unit": "%"
+   },
+   {
+    "amount": 40000,
+    "amount_unit": "GBP/quarter",
+    "per_source_change": 1,
+    "per_source_change_unit": "%"
+   }
+  ],
+  "integration_step_abandonment_rate->quarterly_revenue": [
+   {
+    "amount": -10000,
+    "amount_unit": "GBP/quarter",
+    "per_source_change": 1,
+    "per_source_change_unit": "%"
+   },
+   {
+    "amount": -10000,
+    "amount_unit": "GBP/quarter",
+    "per_source_change": 1,
+    "per_source_change_unit": "%"
+   }
+  ],
+  "integration_step_bug_fixed->integration_step_abandonment_rate": [
+   {
+    "amount": -15,
+    "amount_unit": "percentage points",
+    "per_source_change": 1,
+    "per_source_change_unit": "switch"
+   },
+   {
+    "amount": -15,
+    "amount_unit": "percentage points",
+    "per_source_change": 1,
+    "per_source_change_unit": "switch"
+   }
+  ],
+  "quarterly_revenue_lost_to_roadmap_displacement->quarterly_revenue": [
+   {
+    "amount": -1,
+    "amount_unit": "GBP/quarter",
+    "per_source_change": 1,
+    "per_source_change_unit": "GBP/quarter"
+   },
+   {
+    "amount": -1,
+    "amount_unit": "GBP/quarter",
+    "per_source_change": 1,
+    "per_source_change_unit": "GBP/quarter"
+   }
+  ]
+ }
+}

@@ -13,12 +13,53 @@
  *   `deadlineMs` names nothing (buddy r1: never strand the chip on a pending read).
  */
 import { loadScenarioAnalysisFactsForRead } from '../build-turn-context.js';
-import { withinBandLinkMovesForRunPair } from '../coaching/build-run-delta.js';
+import { userWrittenLinksForRunPair, withinBandLinkMovesForRunPair } from '../coaching/build-run-delta.js';
 import type { WithinBandLinkMove } from '../coaching/run-input-changes.js';
 import { isScenarioAnalysisReasoningAuthority } from '../context/reconcile-scenario-analysis-facts.js';
 
 export const WITHIN_BAND_READ_DEADLINE_MS = 1500;
 
+/**
+ * What S7 reads from the pair's own persisted Run facts: the within-band moves (SD-1 interim, above) and the links of the
+ * delta's `strength` rows the USER wrote between the two Runs (cut 6 truth floor: a band row says "You changed" only for
+ * these; `userWrittenLinksForRunPair`). Read only when the delta is `partial` or carries a `strength` row.
+ */
+export interface RerunPairRead {
+  readonly withinBand: WithinBandLinkMove[];
+  readonly userWrittenLinks: ReadonlySet<string>;
+}
+
+const NOTHING: RerunPairRead = { withinBand: [], userWrittenLinks: new Set() };
+
+export async function rerunPairReadForRunDelta(
+  scenarioId: string,
+  requestId: string,
+  runDelta: unknown,
+  deadlineMs: number = WITHIN_BAND_READ_DEADLINE_MS,
+): Promise<RerunPairRead> {
+  const d = runDelta !== null && typeof runDelta === 'object' ? runDelta as { input_coverage?: unknown; input_changes?: unknown } : undefined;
+  const hasStrengthRow = Array.isArray(d?.input_changes) && d.input_changes.some((r) =>
+    r !== null && typeof r === 'object' && (r as { entity_kind?: unknown }).entity_kind === 'link' && (r as { field?: unknown }).field === 'strength');
+  if (d?.input_coverage !== 'partial' && !hasStrengthRow) return NOTHING;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<RerunPairRead>((resolve) => { timer = setTimeout(() => resolve(NOTHING), deadlineMs); });
+  const read = (async (): Promise<RerunPairRead> => {
+    const { factSet, priorFactsWithTurn } = await loadScenarioAnalysisFactsForRead(scenarioId, requestId);
+    if (!isScenarioAnalysisReasoningAuthority(factSet)) return NOTHING;
+    const receipts = priorFactsWithTurn.map((f) => ({ fact: f.fact, created_at: f.fact_created_at }));
+    return {
+      withinBand: withinBandLinkMovesForRunPair(factSet.facts, runDelta, receipts),
+      userWrittenLinks: new Set(userWrittenLinksForRunPair(factSet.facts, runDelta, receipts)),
+    };
+  })().catch((): RerunPairRead => NOTHING);
+  try {
+    return await Promise.race([read, late]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** The within-band moves alone (the SD-1 interim read, kept for its callers and its loader test). */
 export async function withinBandMovesForRunDelta(
   scenarioId: string,
   requestId: string,
@@ -27,17 +68,5 @@ export async function withinBandMovesForRunDelta(
 ): Promise<WithinBandLinkMove[]> {
   const d = runDelta !== null && typeof runDelta === 'object' ? runDelta as { input_coverage?: unknown } : undefined;
   if (d?.input_coverage !== 'partial') return [];
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<WithinBandLinkMove[]>((resolve) => { timer = setTimeout(() => resolve([]), deadlineMs); });
-  const read = (async (): Promise<WithinBandLinkMove[]> => {
-    const { factSet, priorFactsWithTurn } = await loadScenarioAnalysisFactsForRead(scenarioId, requestId);
-    if (!isScenarioAnalysisReasoningAuthority(factSet)) return [];
-    return withinBandLinkMovesForRunPair(factSet.facts, runDelta,
-      priorFactsWithTurn.map((f) => ({ fact: f.fact, created_at: f.fact_created_at })));
-  })().catch((): WithinBandLinkMove[] => []);
-  try {
-    return await Promise.race([read, late]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+  return (await rerunPairReadForRunDelta(scenarioId, requestId, runDelta, deadlineMs)).withinBand;
 }
