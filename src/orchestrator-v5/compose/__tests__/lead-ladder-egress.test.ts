@@ -151,6 +151,57 @@ describe.each(Object.entries(CLASSES))('CATCH: %s', (_cls, rows) => {
   });
 });
 
+// Desk/DL follow-up rows (F1/F2, DL 6 Oct).
+const F1_F2_CLAIMS = [
+  'Raise to £59 has the highest-revenue path.',
+  'Hire a marketing manager gives the lowest-churn route.',
+  ...['revenue', 'MRR', 'ARR', 'margin', 'profit', 'return', 'growth', 'churn', 'retention', 'sales', 'income', 'conversion', 'cost']
+    .map((metric) => `Raise to £59 gives the lowest-${metric} path.`),
+  ...['best', 'top', 'greatest', 'largest', 'biggest', 'strongest'].flatMap((word) => [
+    `Hire a marketing manager ends up with the ${word} MRR.`,
+    `Both hires end up with the ${word} MRR.`,
+    `Hire a marketing manager and Raise to £59 end up with the ${word} MRR.`,
+    `The ${word} MRR is what Raise to £59 ends up with.`,
+    `With the ${word} MRR, Raise to £59 comes out ahead.`,
+    `The ${word} MRR came from Raise to £59.`,
+    `The ${word} MRR was produced by Raise to £59.`,
+    `MRR is ${word} with Raise to £59.`,
+    `The ${word} MRR came from Raise to £59 in 62% of runs.`,
+  ]),
+  'Both hires end with the highest MRR.',
+  'Raise to £59 ends with the highest MRR.',
+  'Raise to £59 ended with the highest MRR.',
+  'Raise to £59 is ending with the highest MRR.',
+  'Both hires finish with the highest MRR.',
+  'Raise to £59 finishes with the highest MRR.',
+  'Raise to £59 finished with the highest MRR.',
+  'Raise to £59 is finishing with the highest MRR.',
+];
+const F1_F2_PLANNING = [
+  'That is the best guess we have.',
+  'In the best case, churn stays flat.',
+  'The top priority is pricing.',
+  'This ends with a question for you.',
+  'Start with the lowest-risk path.',
+  'Start with the lowest-effort step.',
+  'The highest-cost assumption is the hiring cost.',
+  ...['assumption', 'estimate', 'input', 'setting']
+    .map((head) => `We ended up with the highest-cost ${head}.`),
+  ...['best', 'top', 'greatest', 'largest', 'biggest', 'strongest'].flatMap((word) =>
+    ['guess', 'case', 'estimate', 'practice', 'scenario', 'way', 'next step', 'question']
+      .map((noun) => `We ended up with the ${word} ${noun}.`)),
+];
+describe('F1/F2: result claims and planning contrasts', () => {
+  it.each(F1_F2_CLAIMS)('CATCH: %s', (text) => {
+    expect(both(text)).toEqual([true, true]);
+    expect(textAssertsLeadingOption(text, { optionLabels: ['Hire a marketing manager', 'Raise to £59'] })).toBe(true);
+  });
+  it.each(F1_F2_PLANNING)('LEAVE: %s', (text) => {
+    expect(both(text)).toEqual([false, false]);
+    expect(textAssertsLeadingOption(text, { optionLabels: ['Hire a marketing manager', 'Raise to £59'] })).toBe(false);
+  });
+});
+
 describe('LEAVE: the contrast rows the paraphrase classes must not take', () => {
   it.each([
     'You want the lowest churn you can get.',

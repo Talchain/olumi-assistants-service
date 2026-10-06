@@ -1499,6 +1499,60 @@ describe('a sentence naming ONE option as separated ranks the options', () => {
  * ⭐ THE LADDER VERB'S PARAPHRASE CLASSES on the SERVED agent lane (Review Desk 6b + DL, #2646). `highest` is bare here,
  * so the gap was `lowest` (bound to gave/came out only) and "came top": a minimise leader claim with no share passed.
  */
+// Desk/DL follow-up rows (F1/F2, DL 6 Oct).
+const F1_F2_CLAIMS = [
+  'Raise to £59 has the highest-revenue path.',
+  'Hire a marketing manager gives the lowest-churn route.',
+  ...['revenue', 'MRR', 'ARR', 'margin', 'profit', 'return', 'growth', 'churn', 'retention', 'sales', 'income', 'conversion', 'cost']
+    .map((metric) => `Raise to £59 gives the lowest-${metric} path.`),
+  ...['best', 'top', 'greatest', 'largest', 'biggest', 'strongest'].flatMap((word) => [
+    `Hire a marketing manager ends up with the ${word} MRR.`,
+    `Both hires end up with the ${word} MRR.`,
+    `Hire a marketing manager and Raise to £59 end up with the ${word} MRR.`,
+    `The ${word} MRR is what Raise to £59 ends up with.`,
+    `With the ${word} MRR, Raise to £59 comes out ahead.`,
+    `The ${word} MRR came from Raise to £59.`,
+    `The ${word} MRR was produced by Raise to £59.`,
+    `MRR is ${word} with Raise to £59.`,
+    `The ${word} MRR came from Raise to £59 in 62% of runs.`,
+  ]),
+  'Both hires end with the highest MRR.',
+  'Raise to £59 ends with the highest MRR.',
+  'Raise to £59 ended with the highest MRR.',
+  'Raise to £59 is ending with the highest MRR.',
+  'Both hires finish with the highest MRR.',
+  'Raise to £59 finishes with the highest MRR.',
+  'Raise to £59 finished with the highest MRR.',
+  'Raise to £59 is finishing with the highest MRR.',
+];
+const F1_F2_PLANNING = [
+  'That is the best guess we have.',
+  'In the best case, churn stays flat.',
+  'The top priority is pricing.',
+  'This ends with a question for you.',
+  'Start with the lowest-risk path.',
+  'Start with the lowest-effort step.',
+  // ⛔ The withheld path keeps its BLANKET best / highest / strongest / top bans (DL review 6 Oct): "Raise to £59 has the
+  // highest impact on MRR" and "The best way forward is option B" are leader claims a noun exemption would let through.
+  // So planning phrases with those four words are rowed only against the ladder (lead-ladder-egress.test.ts); here only
+  // the NEW ladder superlatives are rowed.
+  ...['greatest', 'largest', 'biggest'].flatMap((word) =>
+    ['guess', 'case', 'estimate', 'practice', 'scenario', 'way', 'next step', 'question']
+      .map((noun) => `We ended up with the ${word} ${noun}.`)),
+];
+describe('F1/F2: the agent ladder recognises claims and keeps planning', () => {
+  it.each(F1_F2_CLAIMS)('CATCH and drop: %s', (text) => {
+    expect(sentenceRanksOptions(text)).toBe(true);
+    expect(dropRankingSentences(text)).toEqual({ text: '', droppedSentences: 1 });
+    // Pin this lane's ladder too: broad inherited words must not mask a missing synonym or modifier carve-out.
+    if (!text.includes('comes out ahead')) expect(rankingCodesIn(text)).toContain('lowest');
+  });
+  it.each(F1_F2_PLANNING)('LEAVE byte-identical: %s', (text) => {
+    expect(sentenceRanksOptions(text)).toBe(false);
+    expect(dropRankingSentences(text)).toEqual({ text, droppedSentences: 0 });
+  });
+});
+
 describe('ladder paraphrase classes (Desk 6b + DL, #2646)', () => {
   // Bound by IDENTITY: the agent lane's OWN code fires, not merely the shared vocabulary it also consults.
   it.each([
@@ -1534,5 +1588,17 @@ describe('ladder paraphrase classes (Desk 6b + DL, #2646)', () => {
     'The team topped up the budget.',
   ])('LEAVE: %s', (s) => {
     expect(sentenceRanksOptions(s)).toBe(false);
+  });
+});
+
+// ⛔ DL review (6 Oct): the withheld path's blanket bans are deliberate. A noun exemption on `best` / `highest` would let
+// these leader claims through, so they are pinned here.
+describe('withheld path: blanket best / highest bans stay', () => {
+  it.each([
+    ['Raise to £59 has the highest impact on MRR.', 'highest'],
+    ['The best way forward is option B.', 'best'],
+  ] as const)('CATCH: %s', (text, code) => {
+    expect(rankingCodesIn(text)).toContain(code);
+    expect(sentenceRanksOptions(text)).toBe(true);
   });
 });

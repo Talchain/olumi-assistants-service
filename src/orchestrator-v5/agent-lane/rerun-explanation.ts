@@ -129,6 +129,17 @@ const value = (v: unknown): string | undefined => {
 };
 
 /**
+ * ⭐ S5t-W (e7 #87 6011176086: "moderate → very_strong" reached the chat): a `strength` row's ends are the contract's band
+ * literals; they are said in the canvas pill's words (`CANVAS_BAND_WORD`, the one mapper the within-band line uses).
+ */
+const STRENGTH_BAND_LITERALS: ReadonlySet<string> = new Set(['very_strong', 'strong', 'moderate', 'slight']);
+const bandWord = (v: unknown): string | undefined => {
+  const raw = text(rec(v)?.raw);
+  return raw !== undefined && STRENGTH_BAND_LITERALS.has(raw)
+    ? CANVAS_BAND_WORD[edgeBandFromStrengthBand(raw as Parameters<typeof edgeBandFromStrengthBand>[0])] : value(v);
+};
+
+/**
  * The change sentences: one per link (its sizing + strength rows together), one per other row. `skipped` counts rows no
  * template can name (unknown link ends, a link `presence` row, a row with no label): those changes happened but go unsaid,
  * so the line never says "Nothing else changed" beside them (Codex pre-review e1c7c788 P2).
@@ -137,7 +148,9 @@ const value = (v: unknown): string | undefined => {
  * `strength` row with no sizing row says "You changed" only for a link in `userWritten` (a recorded user link write between
  * the two Runs, for the pair's own means). Any other band move goes unsaid and counts as skipped: never "You changed".
  */
-function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string | undefined, userWritten: ReadonlySet<string>): {
+function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string | undefined, userWritten: ReadonlySet<string>,
+  /** S5t-W: links whose whole move between the Runs is a frame refit's rescale (`frameRefitLinksForRunPair`). */
+  frameRefit: ReadonlySet<string> = new Set()): {
   sentences: string[]; skipped: number; effects: Map<string, Rec>; saidLinks: Set<string>;
 } {
   let skipped = 0;
@@ -172,7 +185,7 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
     if (l === undefined) return s;
     saidLinks.add(s);
     const sizedTo = text(rec(l.sizing?.after)?.raw);
-    const band = l.strength !== undefined ? { before: value(l.strength.before), after: value(l.strength.after) } : undefined;
+    const band = l.strength !== undefined ? { before: bandWord(l.strength.before), after: bandWord(l.strength.after) } : undefined;
     if (sizedTo === 'user') {
       return band?.before !== undefined && band.after !== undefined ? ownEstimateMoved(l.from, l.to, band.before, band.after) : ownEstimate(l.from, l.to);
     }
@@ -183,6 +196,9 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
     }
     if (band?.before !== undefined && band.after !== undefined && userWritten.has(s)) return strengthMoved(l.from, l.to, band.before, band.after);
     saidLinks.delete(s);
+    // ⛔ S5t-W (Science Q2 6009456901; e7 #87 6011176086): a band the refit alone moved is the frame's, not a change: unsaid
+    // AND uncounted, so the line never says "Other things also differed" for it.
+    if (l.sizing === undefined && frameRefit.has(s)) return undefined;
     skipped += 1;
     return undefined;
   }).filter((s): s is string => s !== undefined);
@@ -214,11 +230,13 @@ export function rerunExplanationPlan(
   withinBand: readonly WithinBandLinkMove[] = [],
   /** Cut 6 truth floor: the `from->to` links the user wrote between the two Runs (`userWrittenLinksForRunPair`). */
   userWrittenLinks: ReadonlySet<string> = new Set(),
+  /** S5t-W: the `from->to` links only a frame refit moved between the two Runs (`frameRefitLinksForRunPair`). */
+  frameRefitLinks: ReadonlySet<string> = new Set(),
 ): RerunExplanationPlan | null {
   const d = rec(runDelta);
   if (d === undefined) return null;
   const rows = Array.isArray(d.input_changes) ? d.input_changes.map(rec).filter((r): r is Rec => r !== undefined) : [];
-  const typed = changeSentences(rows, labelOf, userWrittenLinks);
+  const typed = changeSentences(rows, labelOf, userWrittenLinks, frameRefitLinks);
   // c6: one sentence per link, after the typed rows and inside the cap; a link that already has a sizing or strength row
   // is said by that row's sentence, never twice. A link whose ends have no label goes unsaid (coverage is partial anyway).
   const linkWithRow = new Set(rows.filter((r) => r.entity_kind === 'link' && (r.field === 'sizing' || r.field === 'strength'))
@@ -399,13 +417,14 @@ export function rerunRecordForModel(
   optionDisplayLabels: readonly string[] = [],
   withinBand: readonly WithinBandLinkMove[] = [],
   userWrittenLinks: ReadonlySet<string> = new Set(),
+  frameRefitLinks: ReadonlySet<string> = new Set(),
 ): RerunRecordForModel | undefined {
   if (modelDeltaShown) return undefined;
   const labelled = nodes.filter((n): n is NodeLike & { id: string; label: string } =>
     typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '');
   const labelOf = (id: string): string | undefined => labelled.find((n) => n.id === id)?.label;
   const optionLabels = [...new Set([...labelled.filter((n) => n.kind === 'option').map((n) => n.label), ...optionDisplayLabels])];
-  const plan = rerunExplanationPlan(wireDelta, labelOf, optionLabels, false, labelled.map((n) => n.label), withinBand, userWrittenLinks);
+  const plan = rerunExplanationPlan(wireDelta, labelOf, optionLabels, false, labelled.map((n) => n.label), withinBand, userWrittenLinks, frameRefitLinks);
   if (plan === null) return undefined;
   return {
     code_line: leaksPairLeaderOrShare(plan.codeLine, wireDelta) ? RERUN_NO_CHANGE_LINES.unknown : plan.codeLine,
