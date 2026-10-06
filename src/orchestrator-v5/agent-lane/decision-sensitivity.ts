@@ -26,6 +26,7 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
+import { nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
@@ -158,10 +159,12 @@ export function analysisResultForAgent(result: unknown): unknown {
     const { factor_sensitivity: _structural, ...rest } = enrichment;
     const withheld = runWithheldGoalFigures(enrichment);
     const outcomeHidden = keptOutcomeOptionIds(enrichment);
+    // ⭐ (9) chat and panel quote the same figure: a chance the licence displays at the nearest 5 reaches the Agent as displayed.
+    const shown = nearestFiveGoalChancesForAgent(block);
     const brief = recordOf(rest.decision_brief);
     let limitsRenamed = false;
     const rows = (value: unknown): unknown => {
-      const projected = optionRowsForAgent(value, withheld, outcomeHidden);
+      const projected = optionRowsForAgent(value, withheld, outcomeHidden, shown);
       if (projected.renamed) limitsRenamed = true;
       return projected.rows;
     };
@@ -210,7 +213,9 @@ export function analysisResultForAgent(result: unknown): unknown {
  * together — never the goal's target) becomes `all_limits_hold_probability`; under #416's withhold no row keeps a
  * `probability_of_goal`. Not an array → unchanged.
  */
-function optionRowsForAgent(value: unknown, withheld: boolean, outcomeHidden: ReadonlySet<string> = new Set()): { rows: unknown; renamed: boolean } {
+function optionRowsForAgent(
+  value: unknown, withheld: boolean, outcomeHidden: ReadonlySet<string> = new Set(), shown: ReadonlyMap<string, number> = new Map(),
+): { rows: unknown; renamed: boolean } {
   if (!Array.isArray(value)) return { rows: value, renamed: false };
   let renamed = false;
   const rows = value.map((row) => {
@@ -238,6 +243,9 @@ function optionRowsForAgent(value: unknown, withheld: boolean, outcomeHidden: Re
     if (withheld && 'probability_of_goal' in next) {
       const { probability_of_goal: _withheld, ...others } = next;
       next = others;
+    }
+    if (!withheld && id !== undefined && shown.has(id) && typeof next.probability_of_goal === 'number') {
+      next = { ...next, probability_of_goal: shown.get(id)! };
     }
     // ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal chance's precision and drivers NEVER reach the Agent, withheld or not —
     // no ruled Agent sentence exists, and free prose about a "main driver" passes no guard. It reads the licence record only.

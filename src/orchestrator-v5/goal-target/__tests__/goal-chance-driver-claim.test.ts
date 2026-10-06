@@ -15,6 +15,8 @@ import { displayedPctAt, wilsonHalfWidthPoints } from '../goal-chance-driver.js'
 import { analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
 import { keyDesignatesLeadingOption, textNamesLeadingOption, textAssertsLeadingOption } from '../../compose/leading-option-egress-guard.js';
 import { keyDesignatesOrdinalPosition } from '../../compose/withheld-claim-projection.js';
+import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
+import { ProposalStore } from '../../agent-lane/proposal.js';
 
 type Json = Record<string, any>;
 const RT10B = JSON.parse(readFileSync(new URL('../../tools/handlers/__tests__/fixtures/bprime-rt10b.json', import.meta.url), 'utf8')) as {
@@ -261,5 +263,54 @@ describe('P2b — every new word passes the leader guards; the Agent never reads
     const e = env(opt('a', 0.62, { probability_of_goal_drivers: driversBlock([factorRow()]) }), opt('b', 0.41));
     const stored = (withGoalChanceLicence(e, G, GOAL) as Json).inference_warnings.find((w: Json) => w.code === GOAL_CHANCE_LICENSED);
     expect(stored.driver_by_option.a).toMatchObject({ side: 'low', cut_value: 7000 });
+  });
+});
+
+describe('DL follow-ups (6 Oct): (b) PLoT #440 invalid rows; (9) chat and panel quote the same figure', () => {
+  it('(b) RED: PLoT dropped invalid driver rows (invalid_rows_dropped 2) → no_driver invalid_rows; the surviving top row is NOT claimed', () => {
+    const block = { ...driversBlock([factorRow()]), invalid_rows_dropped: 2 };
+    const l = licence(env(opt('a', 0.62, { probability_of_goal_drivers: block }), opt('b', 0.41)));
+    expect(l.no_driver_by_option).toMatchObject({ a: 'invalid_rows' });
+    expect(l).not.toHaveProperty('driver_by_option');
+  });
+
+  it('(b) CONTROL: the same block with no invalid_rows_dropped (PLoT omits it at 0) → that top row is the driver', () => {
+    const l = licence(env(opt('a', 0.62, { probability_of_goal_drivers: driversBlock([factorRow()]) }), opt('b', 0.41)));
+    expect(l.driver_by_option.a).toMatchObject({ quantity_id: 'active_customers', side: 'low' });
+    const zero = licence(env(opt('a', 0.62, { probability_of_goal_drivers: { ...driversBlock([factorRow()]), invalid_rows_dropped: 0 } }), opt('b', 0.41)));
+    expect(zero.driver_by_option.a).toMatchObject({ quantity_id: 'active_customers' });
+  });
+
+  it('(9) RED: half-width 2.6, raw 43% → the Agent\'s run-result row says 45%, the same as pct_by_option; a whole-step option keeps its own', () => {
+    const stored = withGoalChanceLicence(env(opt('a', 0.43, { probability_of_goal_precision: precision(0.43, 0.404, 0.456) }),
+      opt('b', 0.20, { probability_of_goal_precision: precision(0.20, 0.19, 0.21) })), G, GOAL) as Json;
+    const l = stored.inference_warnings.find((w: Json) => w.code === GOAL_CHANCE_LICENSED);
+    expect(l).toMatchObject({ display_rounding_by_option: { a: 'nearest_5', b: 'whole' }, pct_by_option: { a: 45, b: 20 } });
+    const rows = (analysisResultForAgent({ type: 'analysis_result', enrichment: stored }) as Json).enrichment.option_comparison as Json[];
+    expect(rows.find((r) => r.option_id === 'a')!.probability_of_goal).toBe(l.pct_by_option.a / 100);
+    expect(rows.find((r) => r.option_id === 'b')!.probability_of_goal).toBe(0.2); // CONTROL: whole step, its own figure
+    expect(stored.option_comparison[0].probability_of_goal).toBe(0.43); // the user-facing record is untouched
+  });
+
+  it('(9) RED: the canonical state hands the Agent the DISPLAYED 45% in saved_run_options, beside goal_chance_licence; CONTROL whole → raw', async () => {
+    const SERVED = JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url), 'utf8')) as Json;
+    const ctx = { scenario_id: '520aab46-9ed5-4819-9d7f-498d16603943', authenticated_user_id: null, request_id: 'goal-chance-shown' };
+    const stateWith = async (step: 'nearest_5' | 'whole'): Promise<Json> => {
+      const read = JSON.parse(JSON.stringify(SERVED)) as Json;
+      const e = read.analysis_result.enrichment;
+      e.option_comparison.find((r: Json) => r.option_id === 'raise_to_59').probability_of_goal = 0.43;
+      e.inference_warnings = [...(Array.isArray(e.inference_warnings) ? e.inference_warnings : []), {
+        code: GOAL_CHANCE_LICENSED, severity: 'info', message: 'licensed', form: 'each',
+        option_ids: ['raise_to_59', 'keep_49_price', 'raise_to_54'], withheld_option_ids: ['keep_49_price', 'raise_to_54'],
+        pct_by_option: { raise_to_59: step === 'nearest_5' ? 45 : 43 }, display_rounding_by_option: { raise_to_59: step },
+        target: { comparator: 'at_least', value: 20000, unit: '£' } }];
+      const dispatch: InternalDispatch = async (path) => path.endsWith('/graph') ? { status: 200, json: read } : { status: 500, json: {} };
+      return createAgentCapabilities(dispatch, new ProposalStore()).getCanonicalState(ctx) as Promise<Json>;
+    };
+    const shown = (state: Json): unknown => (state.analysis.saved_run_options as Json[]).find((r) => r.option_id === 'raise_to_59')?.probability_of_goal;
+    const nearest = await stateWith('nearest_5');
+    expect(nearest.analysis.goal_chance_licence).toMatchObject({ form: 'each' });
+    expect(shown(nearest)).toBe(0.45);
+    expect(shown(await stateWith('whole'))).toBe(0.43);
   });
 });

@@ -8,7 +8,8 @@
  *    100 for a chance strictly between them (it would read as a certainty the Run did not earn).
  *  · MAIN DRIVER (ruling 1): only the TOP row (largest `spread`; ties by `kind`, then `quantity_id`, ISL's own order), and
  *    only when it is `resolved`, not `correlated`, not a factor the option itself sets, and has what its words need.
- *    Otherwise `no_driver` with the typed reason. NEVER the next row: "most" would then be false.
+ *    Otherwise `no_driver` with the typed reason. NEVER the next row: "most" would then be false. A block from which
+ *    PLoT dropped invalid rows (`invalid_rows_dropped` > 0, #440) has no main driver at all (`invalid_rows`).
  *  · SIDE (ruling 2): the side where the chance FALLS (the lower `p_goal_if_*`).
  *  · LINK STRENGTH (ruling 3): carries NO number (never a β, never a cut); only whether the chance falls when the link is
  *    weaker or stronger than its assumed size, read from the sign of that size on the Run's graph.
@@ -93,7 +94,8 @@ export const intervalsDistinct = (a: GoalChancePrecision, b: GoalChancePrecision
 
 export type GoalChanceDriverKind = 'factor_value' | 'link_strength' | 'link_existence';
 export type GoalChanceDriverSide = 'low' | 'high' | 'absent' | 'present';
-export type GoalChanceNoDriverReason = 'below_resolution' | 'correlated' | 'set_by_option' | 'no_cut_value' | 'none';
+export type GoalChanceNoDriverReason =
+  'invalid_rows' | 'below_resolution' | 'correlated' | 'set_by_option' | 'no_cut_value' | 'none';
 export type GoalChanceAuthor = 'user' | 'olumi' | 'unattributed';
 
 export interface GoalChanceDriver {
@@ -194,6 +196,10 @@ function groupPct(p: number, n: number): { pct_if_side: number; pct_if_side_roun
  * (`graphForAnalysis`), `envelope` the Run's own result (for `factor_evppi`). Pure.
  */
 export function goalChanceDriverOf(record: Rec, optionId: string, graph: unknown, envelope: unknown): GoalChanceDriverClaim {
+  // ⛔ PLoT #440: `invalid_rows_dropped` (present only when > 0) counts driver rows PLoT refused. The row it dropped may
+  // have been the top one, so no surviving row can be called the main driver. Any value but 0 fails closed.
+  const block = record.probability_of_goal_drivers;
+  if (isRec(block) && 'invalid_rows_dropped' in block && block.invalid_rows_dropped !== 0) return none('invalid_rows');
   const top = topDriverRow(record);
   if (top === null || !KINDS.has(top.kind as string)) return none('none');
   if (top.status === 'below_resolution') return none('below_resolution');

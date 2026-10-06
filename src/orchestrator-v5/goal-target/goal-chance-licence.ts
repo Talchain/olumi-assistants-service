@@ -288,6 +288,27 @@ export function withGoalChanceLicence<E>(
 }
 
 /**
+ * ⭐ (9) CHAT AND PANEL QUOTE THE SAME FIGURE (DL 0df0e1, 6 Oct): for each option the Run's licence displays at `nearest_5`
+ * (ruling 5), its DISPLAYED chance as a fraction (`pct_by_option` / 100). Every place the Agent is handed that option's
+ * `probability_of_goal` hands it this instead (`saved_run_options`, the run result's option rows), so it never says 43%
+ * beside a panel showing 45%. Read only from a record `goalChanceLicenceForAgent` accepts; a whole-step option is absent
+ * (its own figure already rounds to the panel's). Empty when there is nothing to replace.
+ */
+export function nearestFiveGoalChancesForAgent(result: unknown): ReadonlyMap<string, number> {
+  const out = new Map<string, number>();
+  if (!isRec(result) || goalChanceLicenceForAgent(result) === undefined) return out;
+  const r = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
+    .flatMap((w) => (Array.isArray(w) ? w : [])).find((w): w is Rec => isRec(w) && w.code === GOAL_CHANCE_LICENSED)!;
+  const steps = isRec(r.display_rounding_by_option) ? r.display_rounding_by_option : {};
+  const pct = isRec(r.pct_by_option) ? r.pct_by_option : {};
+  for (const [id, step] of Object.entries(steps)) {
+    const shown = pct[id];
+    if (step === 'nearest_5' && typeof shown === 'number' && Number.isInteger(shown) && shown >= 0 && shown <= 100) out.set(id, shown / 100);
+  }
+  return out;
+}
+
+/**
  * ⭐ DL 0df0e1 ruling C (6 Oct): the Run's stored licence as the Agent may read it — `form` and option ids only, read by
  * its code where the Run carries it (`enrichment.inference_warnings`) or where a kept Run moved it (`inference_warnings`).
  * No percentage travels: the Agent quotes each option's `probability_of_goal` from its own row. `undefined` when the Run
