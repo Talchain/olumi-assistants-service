@@ -244,8 +244,12 @@ describe('Codex r2 #2643: history recorded before the hold still validates; fres
   it('a model version hashed BEFORE the hold (pre-hold projection) is still that version; the live hash differs (stale)', async () => {
     const { computeAnalysisAffectingGraphHashSha256, computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     const { matchesHistoricalAnalysisIdentity } = await import('../../context/graph-identity.js');
+    // Codex r2's shape: a held link AND an option with an unresolved target (admission gaps), so the frozen legacy
+    // projection differs from the pre-hold one and cannot validate it by accident.
     const g = graphWith(userLink('price', 'subs', ranged(20, 40)));
+    g.nodes.push({ id: 'o1', kind: 'option', label: 'Raise', interventions: { price: { value: 0.6 } }, unresolved_targets: ['subs'] });
     const recordedBeforeHold = computeAnalysisAffectingGraphHashSha256(g as never, 'pre_hold')!;
+    expect(computeAnalysisAffectingGraphHashSha256(g as never, 'legacy')).not.toBe(recordedBeforeHold); // PRECONDITION
     expect(recordedBeforeHold).not.toBe(computeAnalysisAffectingGraphHashSha256(g as never));
     expect(matchesHistoricalAnalysisIdentity(g as never, recordedBeforeHold)).toBe(true);
     // Freshness reads the CURRENT projection only: a pre-hold Run on this graph is stale.
