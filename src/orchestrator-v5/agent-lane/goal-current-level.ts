@@ -59,7 +59,8 @@ import { admitStatedGoalLevel, admitStatedGoalLevelOnScale } from './admit-model
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { retireNormalisingGoalFrame, rederiveGoalInLinks } from './normalising-goal-frame.js';
 import { frameOf } from './refit-frames.js';
-import { figureTheUserWrote } from './stated-by-user.js';
+import { figureTheUserWrote, unitDenominatorWords } from './stated-by-user.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 import { isAmountStatedInBrief, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
 import { unitPhraseFamily, unitPhraseHead, unitPhraseTail } from './unit-conflict.js';
@@ -532,6 +533,54 @@ function noteAdoptedUnit(goalLabel: string, stored: string | undefined, adopted:
       `${adopted}, the currency the user wrote`;
 }
 
+/** The goal's unit as the USER read it: the NodeV3 `unit_reading` carrier, always theirs here. */
+export type UserUnitReading = { readonly unit: string; readonly source: 'user_stated'; readonly source_quote: string };
+
+const NOT_IN_D = /^(?:are|is|was|were|will|would|could|should|have|has|had|do|does|did|while|and|but|or|which|that|who|when|if|as|so|for|than|to|this|these|those|next|last|each|every|per|a|an|in|on|at|by|with|from|today|now|currently|still|already)$/i;
+const DETERMINER = /^(?:the|our|their|its|your|my|all)$/i;
+
+/** The sentence `index` sits in, verbatim with its closing mark (a decimal point never ends one), at most 500 characters. */
+function sentenceAt(text: string, index: number): string {
+  let start = 0;
+  for (const b of text.slice(0, index).matchAll(/[.?!](?=\s)|\n/g)) start = b.index! + 1;
+  const endRel = text.slice(index).search(/[.?!](?=\s|$)|\n/);
+  const end = endRel === -1 ? text.length : index + endRel + (text[index + endRel] === '\n' ? 0 : 1);
+  return text.slice(start, end).trim().slice(0, 500);
+}
+
+/**
+ * ⭐ THE USER'S OWN "OF WHAT" FOR A GOAL KEPT IN A BARE % (DL 0df0e1 ruling (a′) on RT-18; Science #87 6008791322).
+ * "About 8% of appointments are no-shows today" on a goal stored in "%" reads the goal in "% of appointments": the user's
+ * words, kept as the goal's `unit_reading` — a READING (schema 0.67.0): no value, level, target, unit or cap moves, so
+ * the goal's scale (cap 100 for "%") and every number the analysis reads stay byte-identical. Only when the goal's unit is
+ * a bare percent, the user wrote THIS figure as "N% of D" with ONE D (one to four words, ending at its clause), and D fits
+ * the carrier. Anything else: no reading, never a guess (the binder then asks for the change in the goal itself).
+ */
+export function statedPercentOfReading(goalUnit: string | undefined, raw: number, userText: string | undefined): UserUnitReading | undefined {
+  if (goalUnit === undefined || unitPhraseFamily(goalUnit) !== 'percent' || unitDenominatorWords(goalUnit).length > 0) return undefined;
+  const text = userText ?? '';
+  const found = new Map<string, string>();
+  for (const m of text.matchAll(/(?<![\d.,])(\d[\d,]*(?:\.\d+)?)\s*(?:%|percent\b|per\s+cent\b)\s+of\s+([\p{L}][\p{L}'\u2019-]*(?:\s+[\p{L}][\p{L}'\u2019-]*){0,6})/giu)) {
+    if (Number(m[1]!.replace(/,/g, '')) !== raw) continue;
+    const words: string[] = [];
+    for (const w of m[2]!.split(/\s+/)) { if (NOT_IN_D.test(w)) break; words.push(w); }
+    const d = words.filter(w => !DETERMINER.test(w)).map(w => w.toLowerCase());
+    const unit = `% of ${d.join(' ')}`;
+    if (d.length === 0 || d.length > 4 || unit.length > 40) continue;
+    found.set(unit, sentenceAt(text, m.index!));
+  }
+  if (found.size !== 1) return undefined;
+  const [unit, quote] = [...found][0]!;
+  return { unit, source: 'user_stated', source_quote: quote };
+}
+
+/** The goal's own reading by the USER, if it holds one (an Olumi reading is not theirs). */
+function usersReadingOf(goal: unknown): UserUnitReading | undefined {
+  const r = (goal as { unit_reading?: unknown } | undefined)?.unit_reading;
+  const parsed = NodeV3.shape.unit_reading.safeParse(r);
+  return parsed.success && parsed.data !== undefined && parsed.data.source === 'user_stated' ? parsed.data as UserUnitReading : undefined;
+}
+
 /**
  * Prepare the change: every admission question, then ONE held proposal. Writes nothing.
  */
@@ -625,6 +674,17 @@ export async function proposeGoalCurrentLevel(
   const statedUnit = inWords.statedUnit;
   if (isChange && args.goal_scope !== undefined) return refuse('scope_frame_unresolved', 'Clarify the level of the total goal before recording its scope. Nothing was prepared.');
   if (isChange) return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit, adoptedUnit, storedUnit);
+
+  // ── THE USER'S "OF WHAT", kept as the goal's reading (`statedPercentOfReading`). One they already gave is kept; a
+  // different one is never silently replaced.
+  const statedReading = statedPercentOfReading(goalUnit, raw, ctx.user_text);
+  const heldReading = usersReadingOf(goal);
+  if (statedReading !== undefined && heldReading !== undefined && heldReading.unit !== statedReading.unit) {
+    return refuse('unit_mismatch',
+      `"${goal.label}" is already read as ${heldReading.unit}, as the user wrote earlier ("${heldReading.source_quote}"), and ` +
+      `${raw}${statedReading.unit.slice(1)} names another base. Nothing was prepared. Ask the user which one "${goal.label}" is a percentage of.`);
+  }
+  const unitReading = statedReading !== undefined && heldReading === undefined ? statedReading : undefined;
 
   let normalisedLevel: number;
   let levelCap: number;
@@ -732,6 +792,7 @@ export async function proposeGoalCurrentLevel(
         ...(withdrawal ? { identity_withdrawal: withdrawal } : {}),
         ...(rederived !== null ? { rederived_part: rederived } : {}),
         ...(adoptedUnit !== undefined ? { adopted_unit: adoptedUnit } : {}),
+        ...(unitReading !== undefined ? { unit_reading: unitReading } : {}),
       },
     }],
     provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
@@ -742,6 +803,7 @@ export async function proposeGoalCurrentLevel(
       (replaces !== undefined ? `${sayFigureRead(replaces, storedUnit ?? '')} → ${figure}` : figure) +
       (num(target) ? ` (target ${withUnit(target)})` : '') +
       sayAdoptedUnit(goal.label, adoptedUnit) +
+      (unitReading !== undefined ? `, read as ${unitReading.unit}, as you wrote it` : '') +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
       (earlierHeld !== null ? earlierHeld.label : '') +
       (scope ? `. Goal scope: ${scope.modelled}${scope.component?.share !== undefined ? `; ${scope.component.label} contributes ${scope.component.share * 100}%` : ''}${scope.component?.count_basis ? `; count means ${scope.component.count_basis}` : ''}${scope.component ? (scope.component.basis === 'unknown' ? '; the count population and billing basis remain unresolved' : `; revenue share and rate/count are on ${scope.component.basis === 'different' ? 'different' : 'the same'} billing bases`) : ''}.` : '') +
@@ -776,6 +838,7 @@ export async function proposeGoalCurrentLevel(
           'target appears once they set one; never name a target they have not given'
         : '') +
       noteAdoptedUnit(goal.label, storedUnit, adoptedUnit) +
+      (unitReading !== undefined ? `, and that "${goal.label}" is read as ${unitReading.unit}, in the user's own words` : '') +
       ', and call authorise_change with this proposal_id only once they agree.',
   };
 }
@@ -1055,6 +1118,21 @@ export async function applyGoalCurrentLevel(
     return notApplied(`The unit this level of "${goal.label}" was prepared in no longer fits the goal, so nothing was written. Read the model again and propose afresh.`);
   }
 
+  /**
+   * ⛔ THE USER'S READING (`statedPercentOfReading`) IS RE-CHECKED AT APPLY TIME: the carrier exactly (strict NodeV3), the
+   * user's own, on a goal whose unit is still a bare percent, and holding no reading of theirs already. Anything else
+   * writes nothing. It is written beside the level, never into it: no unit, value or cap moves.
+   */
+  const carriedReading = (op.value as { unit_reading?: unknown } | undefined)?.unit_reading;
+  const unitReading = carriedReading === undefined ? undefined : NodeV3.shape.unit_reading.safeParse(carriedReading);
+  if (carriedReading !== undefined && (unitReading === undefined || !unitReading.success || unitReading.data === undefined
+    || unitReading.data.source !== 'user_stated' || stableStringify(unitReading.data) !== stableStringify(carriedReading)
+    || now.goal_threshold_unit === null || unitPhraseFamily(now.goal_threshold_unit) !== 'percent'
+    || unitDenominatorWords(now.goal_threshold_unit).length > 0 || usersReadingOf(goal) !== undefined)) {
+    return notApplied(`How "${goal.label}" is read changed after this was prepared, so nothing was written. Read the model again and propose afresh.`);
+  }
+  const readingToWrite = unitReading?.success === true ? unitReading.data : undefined;
+
   // ⛔ THE RE-DERIVED ESTIMATE IS RE-DERIVED AT APPLY TIME, and must come out exactly as the user approved it — or,
   // when none was approved, still none: the approval text said what would change, and nothing else is written.
   const carried = (op.value as { rederived_part?: RederivedPart } | undefined)?.rederived_part ?? null;
@@ -1090,6 +1168,7 @@ export async function applyGoalCurrentLevel(
       ...(reframedCap !== undefined ? { goal_threshold_cap: reframedCap } : {}),
       // The goal is measured in the adopted unit from this write on — its target too — in the SAME registration as its level.
       ...(adoptedUnit !== undefined ? { goal_threshold_unit: adoptedUnit } : {}),
+      ...(readingToWrite !== undefined ? { unit_reading: readingToWrite } : {}),
     };
     // Olumi's reading of the replaced figure is refreshed from the user's words, or goes when they could not be read.
     if (carriedOp !== undefined && 'level_reading' in carriedOp) {
@@ -1155,6 +1234,8 @@ export async function applyGoalCurrentLevel(
   // An adopted unit is read back byte for byte, on the goal and on its level.
   const unitHeld = adoptedUnit === undefined || (held?.unit === adoptedUnit &&
     (after?.nodes.find((n) => n.id === op.path) as { goal_threshold_unit?: unknown } | undefined)?.goal_threshold_unit === adoptedUnit);
+  const readingHeld = readingToWrite === undefined
+    || stableStringify((after?.nodes.find((n) => n.id === op.path) as { unit_reading?: unknown } | undefined)?.unit_reading) === stableStringify(readingToWrite);
   const scopeHeld = !scope || (after !== null && stableStringify(goalScopeMeaning((after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.goal_scope)) === stableStringify(goalScopeMeaning(scope))
     && (!withdrawal || !(after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.nonlinear_identity));
   // The ceiling's pair is read back too: its figure, its cap and its threshold, exactly as this write carried them.
@@ -1164,7 +1245,7 @@ export async function applyGoalCurrentLevel(
   const pairWritten = writtenGoal as Pair | undefined;
   const pairHeld = !ceilingPaired || (pairNow !== undefined && pairWritten !== undefined
     && (['goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold', 'goal_direction', 'goal_threshold_frame'] as const).every((k) => pairNow[k] === pairWritten[k]));
-  const landed = scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
+  const landed = readingHeld && scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {

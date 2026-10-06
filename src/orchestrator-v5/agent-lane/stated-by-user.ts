@@ -1071,14 +1071,29 @@ export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_st
  * "of <denominator>" the target's own unit; the Agent's proposed unit alone never does (Integrator, #2632).
  */
 type LinkEffectScope = { readonly quantities: readonly string[]; readonly link_selected?: boolean; readonly target_units?: readonly string[] };
-/** A stored node's own units: its data unit, its level's unit, its goal threshold unit, and a unit the USER stated. */
+/**
+ * A stored node's own units, the USER's stated reading FIRST (Science #87 6008791322 (2)), then its data unit, its
+ * level's unit and its goal threshold unit. An Olumi-written reading is never one of them.
+ */
 export function ownUnitsOf(node: unknown): string[] {
   const n = (typeof node === 'object' && node !== null ? node : {}) as Record<string, unknown>;
   const field = (o: unknown, key: string): unknown => (typeof o === 'object' && o !== null ? (o as Record<string, unknown>)[key] : undefined);
   const reading = n.unit_reading;
-  return [field(n.data, 'unit'), field(n.observed_state, 'unit'), n.goal_threshold_unit,
-    field(reading, 'source') === 'user_stated' ? field(reading, 'unit') : undefined]
+  return [field(reading, 'source') === 'user_stated' ? field(reading, 'unit') : undefined,
+    field(n.data, 'unit'), field(n.observed_state, 'unit'), n.goal_threshold_unit]
     .filter((u): u is string => typeof u === 'string' && u.trim() !== '');
+}
+/** The ONE denominator of a list of units in priority order: the words after "of" in the first unit that has them. */
+export function denominatorOfUnits(units: readonly string[]): string[] {
+  return units.map(unitDenominatorWords).find(words => words.length > 0) ?? [];
+}
+/**
+ * ⭐ THE ONE "OF WHAT" OF A QUANTITY'S LEVEL (Science #87 6008791322 (2)): from the user's stated reading first ("% of
+ * appointments", written by the level card from "About 8% of appointments…"), else from the stored unit's denominator.
+ * [] when neither has one. The link-effect binder and the points-or-share rule (U3) both read D here, never apart.
+ */
+export function levelDenominatorOf(node: unknown): string[] {
+  return denominatorOfUnits(ownUnitsOf(node));
 }
 /** Keep the exact sentence, including its terminal punctuation, for the approval and provenance quote. */
 const sentencesOf = (q: string): string[] => (q.match(/(?:[^.!?;:\n]|(?<=\d)\.(?=\d))+[.!?;:]?/g) ?? [])
@@ -1254,7 +1269,7 @@ function wordFigureCountsAnotherUnit(q: string, figure: StatedAmount, ends: { re
 }
 
 /** The words after a unit's "of" ("% of appointments" → appointments), determiners dropped; [] when it has none. */
-function unitDenominatorWords(unit: string): string[] {
+export function unitDenominatorWords(unit: string): string[] {
   const tail = /\bof\s+(.+)$/iu.exec(unit)?.[1];
   return tail === undefined ? [] : [...tail.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase())
     .filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
@@ -1313,7 +1328,7 @@ function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: 
   // denominator only the Agent's unit carries ("percentage points of net margin" on "gross margin"; Integrator, #2632).
   const sameWords = (a: readonly string[]): boolean => a.length === content.length && a.every((w, i) => w === content[i]);
   const proposed = unitDenominatorWords(amountUnit);
-  if (targetUnits.some(u => sameWords(unitDenominatorWords(u))) && (proposed.length === 0 || sameWords(proposed))
+  if (sameWords(denominatorOfUnits(targetUnits)) && (proposed.length === 0 || sameWords(proposed))
     && /^\s*(?:$|[.,;:!)\u2013\u2014]|-\s|(?:that|this)\s+way\b)/iu.test(after.slice(m[0].length))) return undefined;
   return run;
 }
@@ -1345,7 +1360,10 @@ export function linkEffectFigureNotAChange(
     if (otherOwner !== undefined && amount.every(f => targetFigureOfAnotherQuantity(q, f, ends.target, effect.amount_unit, targetUnits) !== undefined)) {
       const said = q.slice(amount[0]!.index, amount[0]!.index + amount[0]!.matchedText.length).trim();
       const unit = /^\s*(?:percentage\s+points?|pp|points?|percent|per\s+cent)/i.exec(q.slice(amount[0]!.index + amount[0]!.matchedText.length))?.[0] ?? '';
-      return { miss: 'figure_of_another_quantity', question: `Is ${said}${unit} of ${otherOwner} a change in \u201c${ends.target}\u201d?` };
+      // ⛔ Never a yes/no: a "Yes" restates the same figure of another quantity, which is refused again (DL 0df0e1, RT-18:
+      // never ASK a confirmation whose "Yes" cannot be recorded). The user is asked for the change in the target itself.
+      return { miss: 'figure_of_another_quantity',
+        question: `What is that as a change in \u201c${ends.target}\u201d? ${said}${unit} of ${otherOwner} reads as a figure for ${otherOwner}.` };
     }
     if (amount.length > 0 && amount.every(f => figureIsALevel(q, f, ends.target))) {
       return { miss: 'target_figure_a_level', question: `Is ${amount[0]!.matchedText.trim()} a change in “${ends.target}”, or its level today?` };
