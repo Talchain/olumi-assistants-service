@@ -88,6 +88,7 @@ import { decisionInputLines, isDecisionInputAsk, textAtRest, withB3LinesAtRest, 
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
+import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct-link.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -3490,8 +3491,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Display first, while the raw ask is intact. With no IDs the replacement is identical;
     // otherwise the id-free form cannot recreate the raw ask. The caveat cannot contain it,
     // so the scanner-pinned second display call is a no-op after dedupe and placement.
-    const scopedNarration = explainRobustnessCaveat === null ? scopedNarrationRaw
-      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat);
+    // ⭐ RT-19 (DL ruling (A), #87 6009566552): a figure for two ends with NO direct link, and no link-effect door this turn →
+    // the door's own fixed words, never the Agent's improvised offer (a band for a new link the model would double-count).
+    // They stand in for the narration before the display call, so every owed line below composes with them unchanged.
+    const awaitingApproval = offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
+      || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined;
+    const noDirectLink = fastPath === undefined ? noDirectLinkFigureReply(readbackGraph, message, {
+      tools: result.tool_calls.map((c) => c.name), awaitingApproval, scopeQuestionOwed: rawScopeQuestion !== null }) : null;
+    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
+      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
@@ -3511,8 +3519,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
-      awaitingApproval: offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
-        || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined,
+      awaitingApproval,
       // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
       builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
         || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)
