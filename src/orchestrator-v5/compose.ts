@@ -970,6 +970,27 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   // withheld leader. Both claim projections already pass unknown keys through.
   // Its members avoid INTERNAL_ENRICHMENT_KEYS by construction (no hash member).
   'run_provenance',
+  // schemas 0.80.0 (science census 6 Oct 2026, §2d C3/C5) — PLoT's dominant
+  // factor and its tipping-point status. PLoT emits all three top-level on
+  // every /v2/run (`dominant_factor` from `trust/factor-dominance.ts`: rank 1
+  // of its canonical driver order, only when that factor clears the dominance
+  // rule; the status pair classifies the post-denormalised `flip_thresholds[]`),
+  // and this list was where they died. The DGAI readers already exist on the
+  // served route: `useResultsSectionData` reads `report.dominant_factor` (the
+  // Reasoning tab's "<factor> dominates the model" insight) and
+  // `report.flip_thresholds_status` / `_reason` (the tornado's status note and
+  // the tipping-point gate).
+  //
+  // Withheld ruling `pass_through` for all three: none names an option. The
+  // dominant factor is a claim about the MODEL, ranked by STRUCTURAL influence
+  // (it can survive a goal-identity withhold, and can disagree with a
+  // sensitivity-ranked Driver 1), so the CONSUMER gates it on its own driver
+  // authority before calling a factor dominant (DGAI: the card's clear Driver
+  // 1). The status note's own copy says "the comparison", not "the leading
+  // option", on a withheld run (DGAI `flipThresholdStatusNote`).
+  'dominant_factor',
+  'flip_thresholds_status',
+  'flip_thresholds_status_reason',
 ] as const;
 
 // POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
