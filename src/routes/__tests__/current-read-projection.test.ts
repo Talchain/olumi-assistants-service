@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AnalysisStateV1, OlumiResponse, RunDelta } from '@talchain/schemas/boundary';
+import type { AnalysisStateV1, OlumiResponse, RunDelta, RunDeliveredRecord } from '@talchain/schemas/boundary';
 import { projectCurrentRead } from '../current-read-projection.js';
 
 const runHash = '0123456789abcdef';
@@ -61,6 +61,25 @@ describe('the internal current-read producer projection', () => {
       analysisResult: null, runDelta,
     });
     expect(noBlock).not.toHaveProperty('run_delta');
+  });
+
+  it('⭐ 0.79 Slice R: the Run\'s id and DELIVERED record ride only under complete_current, verbatim (never a copy)', () => {
+    const deliveredRecord = { record_version: 1, run_id: 'run-b', graph_hash: runHash, phase3_blocks: [] } as unknown as RunDeliveredRecord;
+    const at = '2026-09-30T12:00:00.000Z';
+    const input = (kind: 'complete_current' | 'complete_stale', analysisResult: typeof result | null) => ({
+      analysisState: state({ kind, ...(kind === 'complete_stale' ? { cause: 'graph_changed' } : {}), computed_at: at } as AnalysisStateV1['run_state']),
+      derivation: { graph_hash_at_run: runHash, current_graph_hash: kind === 'complete_current' ? runHash : currentHash },
+      analysisResult, runId: 'run-b', deliveredRecord,
+    });
+    const current = projectCurrentRead(input('complete_current', result));
+    expect(current.delivered_record).toBe(deliveredRecord);
+    expect(current.run_id).toBe('run-b');
+    const stale = projectCurrentRead(input('complete_stale', result));
+    expect(stale).not.toHaveProperty('delivered_record');
+    expect(stale).not.toHaveProperty('run_id');
+    const noBlock = projectCurrentRead(input('complete_current', null));
+    expect(noBlock).not.toHaveProperty('delivered_record');
+    expect(noBlock).not.toHaveProperty('run_id');
   });
 
   it('distinguishes an authoritative never-run from an unreadable or absent read', () => {

@@ -59,7 +59,12 @@ import { loadMostRecentPendingActionsIntegrityStrict } from '../orchestrator-v5/
  * ═══════════════════════════════════════════════════════════════════════════
  * WHAT IT DELIBERATELY DOES **NOT** RETURN, and why each absence is the point
  *
- * NO PROSE. No `assistant_text`, no coaching, no review cards, no chips. The
+ * NO PROSE — EXCEPT THE RUN'S OWN DELIVERED RECORD (amended 6 Oct, DL ruling #87, SD-1 Slice R). No `assistant_text`,
+ * no chips, and no coaching or review cards COMPOSED HERE. The one exception is `current_read.delivered_record`: the
+ * Phase 3 blocks the selected Run's turn already DELIVERED, recorded as that Run's `run_delivery` fact (schemas 0.79),
+ * served verbatim or not at all (serve-or-omit under this read's own licence; never re-worded, never re-composed). The
+ * original rule, for everything else:
+ * No `assistant_text`, no coaching, no review cards, no chips. The
  * V5 leader-claim wire gate enforces over `WIRE_ENFORCED_PROSE_FIELDS =
  * ['assistant_text', 'framing_question']` and lives inside `sendFinalised200`,
  * which is a route-local function bound to a Fastify reply and is not callable
@@ -541,6 +546,50 @@ export async function readScenarioAnalysis(
     const boundResult = builtResult === null ? null
       : ((licensed.blocks as unknown[] | undefined)?.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as typeof builtResult | undefined) ?? null;
     const runDelta = licensed.run_delta as typeof builtRunDelta;
+    // ⭐ 0.79 SD-1 Slice R (DL ruling #87, option A): what the selected Run's turn DELIVERED (its Phase 3 blocks and
+    // `analysis_ready` options), so a reload or a second device says what the Run's turn said. The agent lane records it
+    // as a `run_delivery` fact after its final egress; the NEWEST one for this Run is read. Served only for the same
+    // delivered fact as `run_delta` (no newer Run withholding), only while the Run is current, only while bound to THIS
+    // fact (its run_id and the graph it ran against), and only if this read's own licence leaves every block unchanged.
+    // SERVE OR OMIT: a failed read, a corrupt row or a re-licensed block omits it; the read never ships a re-worded copy.
+    const deliveredRecord = await (async () => {
+      // A selected `fact` is already a FRESH Run (`selected` above); `current_read` re-gates on `complete_current`.
+      if (fact === null || boundResult === null || newerClaimWithholds) return undefined;
+      const runId = fact.result.run_id;
+      if (runId === undefined || store.readNewestRunDeliveryFor === undefined) return undefined;
+      let delivery: Awaited<ReturnType<NonNullable<typeof store.readNewestRunDeliveryFor>>>;
+      try {
+        delivery = await store.readNewestRunDeliveryFor(params.scenarioId, runId);
+      } catch (err) {
+        log.warn(
+          {
+            event: 'v5.scenario_graph.run_delivery_read_failed',
+            request_id: params.requestId,
+            scenario_id: params.scenarioId,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'Scenario graph read — the Run\'s delivered record could not be read; omitted',
+        );
+        return undefined;
+      }
+      const rec = delivery?.result.record;
+      if (rec === undefined || rec.run_id !== runId || rec.graph_hash !== fact.result.graph_hash_at_run) return undefined;
+      const gated = enforceLeaderLicenceAtFinalEgress<Record<string, unknown>>(
+        { blocks: rec.phase3_blocks as unknown[] },
+        {
+          requestId: params.requestId,
+          exitPath: 'scenario_graph_read',
+          licence: leaderLicenceFromState(analysisState, analysisReady),
+          mayNameLeadingOption: claim?.permitted === true,
+          separationEstablished: claim?.separation === 'separated',
+          ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
+          graph: params.graph,
+          analysisReady,
+          noEarlierGate: true,
+        },
+      ).response;
+      return JSON.stringify(gated.blocks) === JSON.stringify(rec.phase3_blocks) ? rec : undefined;
+    })();
     const permissions = claimPermissionsFrom(analysisState, analysisReady, { requested: true });
     params.onCurrentnessRead?.({ ...currentnessRead,
       ...(analysisReady === undefined || scopeInput.status === 'unavailable' ? {} : { permissions }) });
@@ -563,6 +612,8 @@ export async function readScenarioAnalysis(
               selectedFact: fact?.result ?? null,
             }),
             ...(runDelta !== undefined ? { runDelta } : {}),
+            ...(fact?.result.run_id !== undefined ? { runId: fact.result.run_id } : {}),
+            ...(deliveredRecord !== undefined ? { deliveredRecord } : {}),
           }),
       analysis_state: analysisState,
       analysis_result: boundResult,

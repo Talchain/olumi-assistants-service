@@ -33,6 +33,7 @@ import {
   HandlerFactSchema,
   SessionTurnSchema,
   type HandlerFact,
+  type RunDeliveryHandlerFact,
   type V5ActionType,
 } from '@talchain/schemas/orchestrator';
 
@@ -2339,6 +2340,50 @@ export class SupabaseSessionStore implements SessionStore {
       throw new SessionReadError(
         `readNewestAnalysisFactFor(${scenarioId}): payload failed HandlerFactSchema — ${parsed.error.message}`,
         { cause: parsed.error },
+      );
+    }
+    return parsed.data;
+  }
+
+  /**
+   * 0.79 (SD-1 Slice R on the agent lane; DL ruling #87, option A): what THIS Run's turn delivered. The agent lane
+   * records it as an append-only `run_delivery` fact on its answer row, after its final egress, so a Run can carry
+   * several; the NEWEST wins. Filtered in SQL to this scenario, this fact type and this Run, so no other fact is read.
+   * Same row hydration and strict parse as every other fact read here; a row that parses as another member, or names
+   * another Run, is corrupt (`run_delivery_corrupt`), never served.
+   */
+  async readNewestRunDeliveryFor(scenarioId: string, runId: string): Promise<RunDeliveryHandlerFact | null> {
+    const { data, error } = await abortableAnalysisRead(this.client
+      .from('v5_handler_facts')
+      .select('payload, noop')
+      .eq('scenario_id', scenarioId)
+      .eq('handler_id', 'run_delivery')
+      .eq('noop', false)
+      .eq('payload->result->>run_id', runId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1));
+
+    if (error) {
+      throw new SessionReadError(
+        `readNewestRunDeliveryFor(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    const row = ((data ?? []) as Array<{ payload: unknown; noop?: unknown }>)[0];
+    if (!row) return null;
+
+    const payloadObj =
+      row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+        ? (row.payload as Record<string, unknown>)
+        : {};
+    const noop = typeof row.noop === 'boolean' ? row.noop : false;
+    const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop });
+    if (!parsed.success || parsed.data.fact_type !== 'run_delivery' || parsed.data.result.run_id !== runId) {
+      throw new SessionReadError(
+        `readNewestRunDeliveryFor(${scenarioId}): row is not a run_delivery for this Run`
+          + (parsed.success ? '' : ` — ${parsed.error.message}`),
+        { ...(parsed.success ? {} : { cause: parsed.error }), code: 'run_delivery_corrupt' },
       );
     }
     return parsed.data;

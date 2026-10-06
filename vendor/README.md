@@ -7,7 +7,28 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.78.0.tgz` ← **THE CURRENT PIN** (SD-1 cut 6: READER first; DL 0df0e1 6 Oct)
+### `talchain-schemas-0.79.0.tgz` ← **THE CURRENT PIN** (SD-1 Slice R on the agent lane: READER first; DL ruling #87 option A, 6 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.79.0/fad0e0ad5476e89a56a9a33de7f8adf8c57cb573`; registry gitHead
+`483cd0e0cb3b87ee84ee4ee19f3f59af7ca15313` (olumi-schemas `main` after #90, DL merge; publish run 37420869388).
+**839,015 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  fad0e0ad5476e89a56a9a33de7f8adf8c57cb573   (the registry download id)
+integrity (sha512) sha512-Skb46DmDdFCtBxQBf6Y/bpF1J/dkzqwJQzQtGWzw2398WAMt1eucbc+lzfRLD/TeEWd9UvczOsOoyIaRKGjmZA==
+sha256             f3efc0d02000bcdd75221d188bad99d4eafb357d6781a7c065c3d0d94777332c   (the .sha256 sidecar)
+```
+
+0.79.0 appends ONE member to the closed `HandlerFactSchema` union: `run_delivery` {run_id, record: RunDeliveredRecord},
+what a Run's turn delivered, recorded by the agent lane's ANSWER row after its final egress (the served Run commits its
+`run_analysis` fact before the blocks exist). ⛔ ORDER: this PR is the READER (the scenario read serves the newest
+`run_delivery` for the selected Run; nothing writes one). The WRITER (label `writer-after-prod-0.79`) lands only once
+staging AND prod CEE serve 0.79: a CEE on 0.78 that reads a prior turn carrying the fact loses that turn's whole
+prior-facts window (`readFactsWithTurnFor` strict parse → `SessionReadDegraded`). Known accepted-degraded readers on the
+same database (DL 6 Oct): cee-native-context-trial (0.73) and cee-demo (0.23).
+
+### `talchain-schemas-0.78.0.tgz` (historical — no longer vendored as of 0.79.0) (SD-1 cut 6: READER first; DL 0df0e1 6 Oct)
 
 **Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
 `https://npm.pkg.github.com/download/@talchain/schemas/0.78.0/29c008b0e8ee596fa5ce6a02c79271a86d3dae7c`
