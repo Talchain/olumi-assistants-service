@@ -493,11 +493,14 @@ describe('(vi) a Run pair across the level card: the re-framed link is never "Yo
     expect(ne(after)).toStrictEqual(ne(before));
   });
 
-  it('⭐ no user link write in the pair → S7 names no link change: "Olumi can’t say what changed between these two runs." (c6 (1))', async () => {
+  it('⭐ no user link write in the pair → S7 names no link change; it names the level the user recorded (c6 (1); Harness #2679)', async () => {
     const { before, after } = await acrossTheLevel();
     const line = lineFor(after, diffRunInputs(snap(before) as never, snap(after) as never));
     expect(line).not.toContain('You changed how much');
-    expect(line).toBe(RERUN_NO_CHANGE_LINES.unknown);
+    expect(line).not.toMatch(/\blink|how strongly|You changed/i);
+    // The level card IS a user-approved change: the receipt now says so (the snapshot keeps the goal's level).
+    expect(line).toContain('Today\'s level of ‘Quarterly revenue’ was recorded');
+    expect(line).not.toBe(RERUN_NO_CHANGE_LINES.unknown);
   });
 
   it('(2) with each Run\'s natural size recorded (the cut-7 member), the band move is no row at all', async () => {
