@@ -10,7 +10,7 @@
  *   · the record's rule never frames the next link as a value-of-information choice (d5 (c): none was computed).
  */
 import { describe, expect, it } from 'vitest';
-import { rerunExplanationPlan, rerunRecordForModel, TYPED_RERUN_RECORD_RULE, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
+import { NO_MATCHED_FIGURES_RULE, rerunExplanationPlan, rerunRecordForModel, TYPED_RERUN_RECORD_RULE, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 
 const NODES = [
   { id: 'current_plan_mrr', kind: 'factor', label: 'Current-plan monthly recurring revenue' },
@@ -59,7 +59,8 @@ describe('the typed loop\'s rerun record: Olumi\'s own line, leader-free', () =>
       for (const id of LEADER_IDS) expect(said, `${field} carries option id ${id}`).not.toContain(id);
       expect(said, `${field} names a leader`).not.toMatch(/leader|leading_option/i);
       expect(said, `${field} carries a win probability`).not.toMatch(/win_probabilit/i);
-      expect(said, `${field} carries a share`).not.toMatch(/\d\s?%|0\.41|0\.79/);
+      // A share is THIS pair's win share (41% / 79%), not any percentage: a user's input in % is a change, not a share.
+      expect(said, `${field} carries a win share`).not.toMatch(/(?<![\d.])(?:41|79)\s?%|0\.41|0\.79/);
     }
   });
 
@@ -81,6 +82,39 @@ describe('the typed loop\'s rerun record: Olumi\'s own line, leader-free', () =>
   it('a display alias counts as an option label for the plan\'s checks, never as a change', () => {
     const record = rerunRecordForModel(SERVED_PAIR, false, NODES, ['Starter tier (new)'])!;
     expect(record.code_line).toBe(`${SAID} ${RERUN_NO_CHANGE_LINES.unwithheld} ${RERUN_FALLBACK_LINES.C2}`);
+  });
+});
+
+describe('leader-free is CHECKED against the pair\'s own leader and shares (Codex buddy r1 on d70025a9, P1)', () => {
+  const withRow = (row: Record<string, unknown>) => ({ ...SERVED_PAIR, input_changes: [row] });
+  it('RED: a change row whose label IS a leading option\'s id → the neutral line, never the id', () => {
+    const record = rerunRecordForModel(withRow({ entity_kind: 'option_setting', entity_id: 'f', option_id: 'opt_starter', field: 'value',
+      label_before: 'opt_starter', label_after: 'opt_starter', before: { raw: 1 }, after: { raw: 2 }, change: 'changed' }), false, NODES)!;
+    expect(record.code_line).toBe(RERUN_NO_CHANGE_LINES.unknown);
+    expect(record.code_line).not.toContain('opt_starter');
+  });
+  it('RED: an input written as one of this pair\'s win shares (79 %) → the neutral line, never the share', () => {
+    const record = rerunRecordForModel(withRow({ entity_kind: 'factor_value', entity_id: 'conversion', field: 'value',
+      label_before: 'Conversion', label_after: 'Conversion', before: { raw: 41, unit: '%' }, after: { raw: 79, unit: '%' }, change: 'changed' }), false, NODES)!;
+    expect(record.code_line).toBe(RERUN_NO_CHANGE_LINES.unknown);
+  });
+  it('CONTROL: an input percentage that is NOT one of the pair\'s shares is still named (the check is not blanket)', () => {
+    const record = rerunRecordForModel(withRow({ entity_kind: 'factor_value', entity_id: 'churn', field: 'value',
+      label_before: 'Monthly churn', label_after: 'Monthly churn', before: { raw: 3, unit: '%' }, after: { raw: 5, unit: '%' }, change: 'changed' }), false, NODES)!;
+    expect(record.code_line).toContain('You changed Monthly churn: 3 % → 5 %.');
+  });
+});
+
+describe('the chip\'s movement guard travels with the record (Codex buddy r1 on d70025a9, P2)', () => {
+  it('RED: no option has figures in both Runs (empty win_probabilities, not prior-withheld) → the rule forbids any movement', () => {
+    const record = rerunRecordForModel({ ...SERVED_PAIR, attribution_case: 'C1_attributable', win_probabilities: [], win_probabilities_unavailable: undefined }, false, NODES)!;
+    expect(record.prior_withheld).toBe(false);
+    expect(record.use).toBe(`${TYPED_RERUN_RECORD_RULE}${NO_MATCHED_FIGURES_RULE}`);
+    expect(NO_MATCHED_FIGURES_RULE).toContain('never say anything rose, fell or moved');
+  });
+  it('CONTROL: matched figures in both Runs → the plain rule', () => {
+    const record = rerunRecordForModel({ ...SERVED_PAIR, win_probabilities_unavailable: undefined }, false, NODES)!;
+    expect(record.use).toBe(TYPED_RERUN_RECORD_RULE);
   });
 });
 

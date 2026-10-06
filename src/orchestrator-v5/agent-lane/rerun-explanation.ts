@@ -261,6 +261,33 @@ export const TYPED_RERUN_RECORD_RULE =
 
 type NodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown };
 
+/** The chip's no-matched-figures guard, appended to the typed rule when it holds. */
+export const NO_MATCHED_FIGURES_RULE = ' No option has figures in both Runs, so never say anything rose, fell or moved.';
+
+/**
+ * ⛔ LEADER-FREE IS CHECKED, NOT ASSUMED (Codex buddy r1 on d70025a9, P1): the code line interpolates row labels, values
+ * and units verbatim, so a label that IS a leading option's id, or an input written as one of this pair's win shares,
+ * would carry it. The forbidden set is THIS delta's own: every option id in its leader block and win_probabilities,
+ * and every share it records, as said ("79%" or "79 %"). Any hit → the neutral "can't say" line (fail closed: a
+ * coincidental input value costs the named change, never a leaked share).
+ */
+function leaksPairLeaderOrShare(line: string, wireDelta: unknown): boolean {
+  const d = rec(wireDelta);
+  if (d === undefined) return false;
+  const ids = new Set<string>();
+  const leader = rec(d.leader);
+  for (const [k, v] of Object.entries(leader ?? {})) if (/option_id$/u.test(k) && typeof v === 'string' && v.trim() !== '') ids.add(v);
+  const shares: number[] = [];
+  for (const row of Array.isArray(d.win_probabilities) ? d.win_probabilities : []) {
+    const r = rec(row);
+    if (r === undefined) continue;
+    if (typeof r.option_id === 'string' && r.option_id.trim() !== '') ids.add(r.option_id);
+    for (const v of Object.values(r)) if (typeof v === 'number' && v >= 0 && v <= 1) shares.push(Math.round(v * 100));
+  }
+  if ([...ids].some((id) => line.includes(id))) return true;
+  return shares.some((pct) => new RegExp(`(?<![\\d.])${pct}\\s?%`, 'u').test(line));
+}
+
 /** The record for the typed Agent loop, or `undefined` when there is no wire delta (a first Run). Never for a licensed model delta. */
 export function rerunRecordForModel(
   wireDelta: unknown,
@@ -276,10 +303,11 @@ export function rerunRecordForModel(
   const plan = rerunExplanationPlan(wireDelta, labelOf, optionLabels, false, labelled.map((n) => n.label));
   if (plan === null) return undefined;
   return {
-    code_line: plan.codeLine,
+    code_line: leaksPairLeaderOrShare(plan.codeLine, wireDelta) ? RERUN_NO_CHANGE_LINES.unknown : plan.codeLine,
     prior_withheld: plan.inputs.prior_withheld === true,
     attribution_case: plan.inputs.attribution_case ?? 'C2_unpaired',
-    use: TYPED_RERUN_RECORD_RULE,
+    // The chip's own movement guard travels too (Codex buddy r1, P2): no option has figures in both Runs → no movement.
+    use: plan.inputs.no_matched_figures === true ? `${TYPED_RERUN_RECORD_RULE}${NO_MATCHED_FIGURES_RULE}` : TYPED_RERUN_RECORD_RULE,
   };
 }
 

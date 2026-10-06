@@ -339,6 +339,12 @@ describe('the composer: the code line first, then the model\'s sentences that pa
     expect(composeRerunExplanation('The shift happened because of your change.', p).failed).toContain('RX-NO-CAUSE-UNPAIRED');
   });
 
+  it('RED (d5 6005682972 (4)): an engine-drift pair (C3, builds differ) never credits the change, even with ONE change', () => {
+    const p = plan({ ...PAIRED, attribution_case: 'C3_engine_drift', input_changes: [AI] })!;
+    expect(p.inputs.attribution_case).toBe('C2_unpaired');
+    expect(composeRerunExplanation('The shift happened because of your change.', p).failed).toContain('RX-NO-CAUSE-UNPAIRED');
+  });
+
   it('the UNWITHHELD line is not this gate: two Accepts on a C1 prior-withheld pair keep the investor-moment line and its check case', () => {
     const p = plan(UNWITHHELD)!;
     expect(p.inputs.attribution_case).toBe('C1_attributable');
