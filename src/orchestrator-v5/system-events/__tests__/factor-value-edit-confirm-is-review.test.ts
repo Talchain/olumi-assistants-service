@@ -76,8 +76,11 @@ describe('factor_value_edit — a confirm is review, a typed figure is authorshi
     await expectReview({ value: 3.2 });
   });
 
+  // RE-PINNED (SD-1, Codex #2617 r1): this row sent the bare user-unit figure (`value: 3.2`, no raw, no unit) — the
+  // alias that also let `{value:.1}` ratify a stored `{.2, raw .1}`. It now sends what DGAI's Confirm sends for this
+  // stored shape (the set builder on the shown 3.2 %); the bare alias is refused below.
   it('confirm_current + the same value is review', async () => {
-    await expectReview({ intent: 'confirm_current', value: 3.2 });
+    await expectReview({ intent: 'confirm_current', value: 3.2, raw_value: 3.2, unit: '%' });
   });
 
   it('absent intent + a DIFFERENT value is a set: user_override, and the hash MOVES', async () => {
@@ -180,10 +183,21 @@ describe('factor_value_edit confirm_current: review of the persisted figure, by 
     ['a moved value-only figure', { value: 0.1, source: 'cee_inference' }, { value: 0.2 }],
     ['a moved raw beside a matching value', { unit: '%', value: 0.032, source: 'cee_inference', raw_value: 3.2 }, { value: 0.032, raw_value: 3.5 }],
     ['another unit', { unit: '%', value: 0.032, source: 'cee_inference', raw_value: 3.2 }, { value: 3.2, raw_value: 3.2, unit: '£' }],
+    ['r1: a bare value equal to the stored RAW of a different model value', { value: 0.2, raw_value: 0.1, cap: 0.5, source: 'cee_inference' }, { value: 0.1 }],
+    ['r1: the user-unit form without the stored unit', { unit: '%', value: 0.032, source: 'cee_inference', raw_value: 3.2 }, { value: 3.2, raw_value: 3.2 }],
+    ['the bare user-unit alias (no raw, no unit) on a stored percent', { unit: '%', value: 0.032, source: 'cee_inference', raw_value: 3.2 }, { value: 3.2 }],
   ])('REFUSED as confirm_value_moved, nothing written: %s', async (_name, observed, event) => {
     const r = await edit({ intent: 'confirm_current', ...event }, withFactor(observed));
     expect(r.kind).toBe('refused');
     if (r.kind === 'refused') expect(r.reason).toBe('confirm_value_moved');
+  });
+
+  it('r1: a GOAL node carrying an observed_state is never stamped by a confirm (factor-only)', async () => {
+    const base = servedGraph() as { nodes: Array<Record<string, unknown>> };
+    base.nodes[0]!.observed_state = { value: 0.5, source: 'cee_inference' };
+    const r = await edit({ intent: 'confirm_current', value: 0.5, target_id: 'mrr' }, base);
+    expect(r.kind).toBe('refused');
+    if (r.kind === 'refused') expect(r.reason).toBe('confirm_not_a_factor');
   });
 
   it('CONTRAST: the user\'s own figure keeps its bytes and gains no review (reviewOnly\'s rule)', async () => {
