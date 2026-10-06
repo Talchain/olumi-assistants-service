@@ -736,6 +736,17 @@ const POST_ANALYSIS_LABEL_INTERCEPT_SITES: Readonly<Record<string, RegisteredSit
  * domain test caught it on its first run, which is the mechanism working.
  */
 const FACTOR_VALUE_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
+  'review.assistant_text': {
+    stance: 'structural',
+    why:
+      'SD-1 (#2617): the confirm_current branch\'s receipt, from `recordFactorReview` in ' +
+      'tools/handlers/set-factor-value.ts — `formatFactorValueUnchanged` over the ONE reviewed ' +
+      'factor\'s label and its stored user-unit figure ("X is already set to …"), or the constant-shaped ' +
+      '"X is unchanged." when no figure resolves. Deterministic, no LLM call (`llm_calls_used: 0`). ' +
+      'IT CANNOT ASSERT A LEADER: the branch refuses any non-factor target (`confirm_not_a_factor`, ' +
+      '`SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`), so the interpolated label is never an option\'s, and ' +
+      'the sentence carries no comparison, ordering, probability or margin. No analysis runs on this path.',
+  },
   'outcome.assistant_text': {
     stance: 'structural',
     why:
@@ -1243,7 +1254,8 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // site; the old regex keys it too, so the comparison includes that site.
     // #1859 goal_target_edit: 46 -> 47. ONE added file (system-events/goal-target-edit.ts)
     // with the same `confirmation: outcome.assistant_text` site as factor-value-edit.ts.
-    expect(compared, 'the re-key comparison compared nothing').toBe(47);
+    // SD-1 (#2617): 47 -> 48. ONE added site in the already-scanned factor-value-edit.ts (`review.assistant_text`).
+    expect(compared, 'the re-key comparison compared nothing').toBe(48);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1478,8 +1490,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // (system-events/goal-target-edit.ts), registered `structural` with its derivation
     // (GOAL_TARGET_EDIT_SITES). This ledger failed `pnpm test:required` on the commit
     // that created the site — the guard found it, not a human.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(53);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(49);
+    // SD-1 (#2617): 53 -> 54 sites, 49 -> 50 keys — `review.assistant_text` in factor-value-edit.ts, registered structural.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(54);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(50);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',
