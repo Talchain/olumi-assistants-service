@@ -143,8 +143,9 @@ function factorAuthorshipExplained(
  *   (A band move is a `strength` row; a sign flip is a direction change this sentence must not call a size change.)
  * - `author` picks S7's words (c6's three lines):
  *   - `user`: the pair's persisted record shows the USER wrote this link between the two Runs: user-sized now
- *     (`sizing: 'user'`) AND its authorship (`authorship_digest`) differs between the Runs. A move on a user-sized link that
- *     kept its authorship is not one (DL: "you changed" only on a user write);
+ *     (`sizing: 'user'`), its authorship (`authorship_digest`) differs between the Runs, AND `userWroteLink` finds the
+ *     write's own persisted receipt for exactly this move (buddy r1: a moved digest proves metadata changed, not who wrote
+ *     it). Without a receipt it is never `user` (DL: "you changed" only on a user write);
  *   - `olumi`: Olumi-sized now (`olumi_estimate`, `olumi_accepted`, `placeholder`), so the figure is said to be Olumi's;
  *   - `unknown`: anything else (no user write recorded, `unmarked`, sizing not recorded): no author is claimed.
  */
@@ -157,7 +158,12 @@ export interface WithinBandLinkMove {
 
 const OLUMI_SIZED: ReadonlySet<string> = new Set(['olumi_estimate', 'olumi_accepted', 'placeholder']);
 
-export function linksMovedWithinBand(prior: RunInputSnapshot, current: RunInputSnapshot): WithinBandLinkMove[] {
+export function linksMovedWithinBand(
+  prior: RunInputSnapshot,
+  current: RunInputSnapshot,
+  /** The persisted receipt of a user write that moved `from → to` from `priorMean` to `currentMean`; absent = none. */
+  userWroteLink: (from: string, to: string, priorMean: number, currentMean: number) => boolean = () => false,
+): WithinBandLinkMove[] {
   const key = (l: { from: string; to: string }) => `${l.from}->${l.to}`;
   const pL = byId(prior.links, key);
   const cL = byId(current.links, key);
@@ -168,7 +174,8 @@ export function linksMovedWithinBand(prior: RunInputSnapshot, current: RunInputS
     if (pl === undefined || pl.band === undefined || cl.band === undefined || pl.band !== cl.band) continue;
     if (pl.mean === cl.mean || Math.sign(pl.mean) !== Math.sign(cl.mean)) continue;
     const userWrite = cl.sizing === 'user'
-      && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined && pl.authorship_digest !== cl.authorship_digest;
+      && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined && pl.authorship_digest !== cl.authorship_digest
+      && userWroteLink(cl.from, cl.to, pl.mean, cl.mean);
     const author = userWrite ? 'user' : cl.sizing !== undefined && OLUMI_SIZED.has(cl.sizing) ? 'olumi' : 'unknown';
     out.push({ from: cl.from, to: cl.to, band: cl.band, author });
   }

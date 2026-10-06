@@ -146,6 +146,8 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
 
 /** Recorded changes past the cap are disclosed, never dropped from the record (CODEX CEE BUDDY CR 5940970957). */
 const moreChangesLine = (n: number) => `You also made ${n} other change${n === 1 ? '' : 's'}.`;
+/** SD-1 interim (buddy r1; words c6, verbatim): the overflow line when an overflowed item has no recorded user write. */
+const moreRecordedLine = (n: number) => (n === 1 ? 'One other input also differs between the two Runs.' : `${n} other inputs also differ between the two Runs.`);
 
 type CheckCase = 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
 /** The wire case → the check's three (C3–C5 are not attributable: judged as C2, said with their own fallback line). */
@@ -179,9 +181,11 @@ export function rerunExplanationPlan(
     if (linkWithRow.has(`${m.from}->${m.to}`)) return [];
     const from = labelOf(m.from); const to = labelOf(m.to);
     if (from === undefined || to === undefined) return [];
-    return [WITHIN_BAND_LINES[m.author](from, to, CANVAS_BAND_WORD[edgeBandFromStrengthBand(m.band)])];
+    return [{ text: WITHIN_BAND_LINES[m.author](from, to, CANVAS_BAND_WORD[edgeBandFromStrengthBand(m.band)]), yours: m.author === 'user' }];
   });
-  const sentences = [...typed.sentences, ...withinBandSentences];
+  const sentences = [...typed.sentences, ...withinBandSentences.map((w) => w.text)];
+  // "You also made N other changes" only when every change past the cap is a typed row or a recorded user write.
+  const overflowNotYours = withinBandSentences.slice(Math.max(0, MAX_NAMED_CHANGES - typed.sentences.length)).some((w) => !w.yours);
   const changes = sentences.slice(0, MAX_NAMED_CHANGES);
   const more = sentences.length - changes.length;
   // ⛔ Partial or unrecorded coverage never licenses "same inputs" or a cause (CODEX CEE BUDDY preflight 5939219187): other
@@ -226,7 +230,7 @@ export function rerunExplanationPlan(
       : wireCase === 'C2_unpaired' ? RERUN_FALLBACK_LINES.C2
         : differenceUnknown ? RERUN_FALLBACK_LINES.unverified : RERUN_FALLBACK_LINES.other;
   const codeLine = changes.length > 0
-    ? `${changes.join(' ')}${more > 0 ? ` ${moreChangesLine(more)}` : ''} ${!priorWithheld ? caseLine
+    ? `${changes.join(' ')}${more > 0 ? ` ${overflowNotYours ? moreRecordedLine(more) : moreChangesLine(more)}` : ''} ${!priorWithheld ? caseLine
       : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.unwithheld
         : `${RERUN_NO_CHANGE_LINES.unwithheld} ${caseLine}`}`
     : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;

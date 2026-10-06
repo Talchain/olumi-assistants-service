@@ -494,7 +494,12 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
  * `partial` pair with both run ids, when either Run's fact or snapshot is missing, or when facts that share a run id
  * disagree on its snapshot.
  */
-export function withinBandLinkMovesForRunPair(facts: readonly HandlerFact[], runDelta: unknown): WithinBandLinkMove[] {
+export function withinBandLinkMovesForRunPair(
+  facts: readonly HandlerFact[],
+  runDelta: unknown,
+  /** Where the user-write receipts are looked for (`adjust_edge_strength`, both user link-edit paths). Default: `facts`. */
+  receiptFacts: readonly HandlerFact[] = facts,
+): WithinBandLinkMove[] {
   const d = asRecord(runDelta);
   const endpoints = asRecord(d?.endpoints);
   const priorId = asRecord(endpoints?.prior)?.run_id;
@@ -508,7 +513,24 @@ export function withinBandLinkMovesForRunPair(facts: readonly HandlerFact[], run
   };
   const prior = snapshotOf(priorId);
   const current = snapshotOf(currentId);
-  return prior === null || current === null ? [] : linksMovedWithinBand(prior, current);
+  return prior === null || current === null ? [] : linksMovedWithinBand(prior, current, (from, to, priorMean, currentMean) =>
+    receiptFacts.some((f) => userLinkWriteReceiptMatches(f, from, to, priorMean, currentMean)));
+}
+
+/**
+ * Is `fact` the persisted receipt of a user link write that moved `from → to` from exactly `priorMean` to `currentMean`?
+ * Both user paths record it as an applied, non-noop `adjust_edge_strength` (`link-effect-edit.ts` — the stated figure,
+ * `set_link_effect` — and `adjust-edge-strength.ts`, the band/strength edit), keyed `from→to`, with the strength before and
+ * after. Bound by the pair's own two means, so a receipt for another move of the same link never counts.
+ */
+function userLinkWriteReceiptMatches(fact: HandlerFact, from: string, to: string, priorMean: number, currentMean: number): boolean {
+  const f = fact as { fact_type?: unknown; noop?: unknown; result?: unknown };
+  if (f.fact_type !== 'adjust_edge_strength' || f.noop === true) return false;
+  const result = asRecord(f.result);
+  if (result === null || result.status !== 'applied' || result.target_id !== `${from}→${to}`) return false;
+  const meanOf = (side: unknown) => asRecord(asRecord(side)?.strength)?.mean;
+  const same = (a: unknown, b: number) => typeof a === 'number' && Number.isFinite(a) && Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(b));
+  return same(meanOf(result.before), priorMean) && same(meanOf(result.after), currentMean);
 }
 
 /** Exact historical execution identity resolved by the selected-version binding. */

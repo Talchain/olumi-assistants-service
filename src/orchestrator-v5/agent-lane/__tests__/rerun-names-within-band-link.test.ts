@@ -67,6 +67,15 @@ const fact = (runId: string, at: string, hash: string, snapshot: RunInputSnapsho
   },
 } as unknown as HandlerFact);
 
+/** The user write's own persisted receipt (`link-effect-edit.ts`: an applied `adjust_edge_strength`, keyed `from→to`). */
+const receipt = (beforeMean: number, afterMean: number, from = FROM, to = TO): HandlerFact => ({
+  fact_type: 'adjust_edge_strength',
+  fact_version: 1,
+  noop: false,
+  result: { target_id: `${from}→${to}`, status: 'applied', before: { from, to, strength: { mean: beforeMean, std: 0.2 } },
+    after: { from, to, strength: { mean: afterMean, std: 0.3 } } },
+} as unknown as HandlerFact);
+
 const T1 = '2026-10-06T01:10:30.878Z';
 const T2 = '2026-10-06T01:13:09.266Z';
 const PRIOR_RUN = '3f7b2f1af0062d70a6940a7f4c4c53bc32fe744e602b8548220cf34a1aec8fc8';
@@ -74,6 +83,7 @@ const CURRENT_RUN = '5731955b7bb4b30cf97b1dbcf369724d45a7e4fa9aa08b86870f8341ca8
 /** rehearsal10's pair: the user's restatement moves the mean in band AND its authorship (natural_effect lives there). */
 const REHEARSAL10_FACTS = [
   fact(CURRENT_RUN, T2, 'h-2', snap(link({ mean: 0.6, std: 0.3, authorship_digest: EDIT_DIGEST }), 'd'.repeat(64))),
+  receipt(0.4, 0.6),
   fact(PRIOR_RUN, T1, 'h-1', snap(link({}), 'c'.repeat(64))),
 ];
 /** turn-008's `run_delta`, verbatim (cut5-rehearsal10-t1b/wire/turn-008-1791249198396.json). */
@@ -122,27 +132,42 @@ describe('the producer → S7 chain on rehearsal10’s pair', () => {
   });
 });
 
-describe('who changed it: the pair’s persisted record, never a guess (DL; c6 words)', () => {
-  const plan = (prior: Link, current: Link) => {
-    const moves = linksMovedWithinBand(snap(prior, 'c'.repeat(64)), snap(current, 'd'.repeat(64)));
+describe('who changed it: the pair’s persisted record, never a guess (DL; c6 words; buddy r1)', () => {
+  const plan = (prior: Link, current: Link, receipts: readonly HandlerFact[] = []) => {
+    const facts = [fact(CURRENT_RUN, T2, 'h-2', snap(current, 'd'.repeat(64))), fact(PRIOR_RUN, T1, 'h-1', snap(prior, 'c'.repeat(64)))];
+    const moves = withinBandLinkMovesForRunPair(facts, WIRE_DELTA, [...facts, ...receipts]);
     return rerunExplanationPlan(WIRE_DELTA, labelOf, [], true, Object.values(LABELS), moves)!.codeLine;
   };
-  it('user-sized now AND its authorship moved (a recorded user write): "You changed …"', () => {
-    expect(plan(link({}), link({ mean: 0.6, authorship_digest: EDIT_DIGEST }))).toContain(NAMED_USER);
+  const edited = link({ mean: 0.6, authorship_digest: EDIT_DIGEST });
+  it('user-sized now, authorship moved, AND the write’s receipt for exactly 0.4 → 0.6: "You changed …"', () => {
+    expect(plan(link({}), edited, [receipt(0.4, 0.6)])).toContain(NAMED_USER);
   });
-  it('user-sized but the authorship did NOT move (e.g. an Olumi repair of the number): no author is claimed', () => {
-    const line = plan(link({}), link({ mean: 0.6 }));
+  it('the same move with NO receipt (a moved digest proves metadata changed, not who wrote it): no author', () => {
+    const line = plan(link({}), edited);
+    expect(line).toContain(NAMED_NEUTRAL);
+    expect(line).not.toContain('You changed');
+  });
+  it('a receipt for ANOTHER move of the same link (0.4 → 0.5), or another link, never counts', () => {
+    expect(plan(link({}), edited, [receipt(0.4, 0.5)])).toContain(NAMED_NEUTRAL);
+    expect(plan(link({}), edited, [receipt(0.4, 0.6, FROM, 'other_node')])).toContain(NAMED_NEUTRAL);
+  });
+  it('a noop or refused receipt never counts', () => {
+    const noop = { ...(receipt(0.4, 0.6) as Record<string, unknown>), noop: true } as unknown as HandlerFact;
+    expect(plan(link({}), edited, [noop])).toContain(NAMED_NEUTRAL);
+  });
+  it('user-sized, receipt present, but the authorship did NOT move: no author', () => {
+    const line = plan(link({}), link({ mean: 0.6 }), [receipt(0.4, 0.6)]);
     expect(line).toContain(NAMED_NEUTRAL);
     expect(line).not.toContain('You changed');
   });
   it.each(['olumi_estimate', 'olumi_accepted', 'placeholder'] as const)('Olumi-sized now (%s): the figure is said to be Olumi’s', (sizing) => {
-    expect(plan(link({ sizing }), link({ mean: 0.6, sizing, authorship_digest: EDIT_DIGEST }))).toContain(NAMED_OLUMI);
+    expect(plan(link({ sizing }), link({ mean: 0.6, sizing, authorship_digest: EDIT_DIGEST }), [receipt(0.4, 0.6)])).toContain(NAMED_OLUMI);
   });
   it('unmarked, or sizing not recorded: no author', () => {
     expect(plan(link({ sizing: 'unmarked' }), link({ mean: 0.6, sizing: 'unmarked' }))).toContain(NAMED_NEUTRAL);
     const { sizing: _a, ...noSizingPrior } = link({});
     const { sizing: _b, ...noSizingCurrent } = link({ mean: 0.6, authorship_digest: EDIT_DIGEST });
-    expect(plan(noSizingPrior as Link, noSizingCurrent as Link)).toContain(NAMED_NEUTRAL);
+    expect(plan(noSizingPrior as Link, noSizingCurrent as Link, [receipt(0.4, 0.6)])).toContain(NAMED_NEUTRAL);
   });
 });
 
@@ -194,5 +219,53 @@ describe('c6: one sentence per link, after the typed rows, inside the cap', () =
   it('an unlabelled link goes unsaid (coverage is partial anyway)', () => {
     const moves = [{ from: 'ghost_a', to: 'ghost_b', band: 'strong' as const, author: 'user' as const }];
     expect(rerunExplanationPlan(WIRE_DELTA, labelOf, [], true, [], moves)!.codeLine).toBe(RERUN_NO_CHANGE_LINES.unknown);
+  });
+});
+
+
+describe('the overflow line past the cap (buddy r1 FAIL; words c6)', () => {
+  const ids = ['a', 'b', 'c', 'd'];
+  const labels: Record<string, string> = Object.fromEntries(ids.flatMap((x) => [[`f_${x}`, `From ${x}`], [`t_${x}`, `To ${x}`]]));
+  const four = (author: 'user' | 'olumi' | 'unknown') => ids.map((x) => ({ from: `f_${x}`, to: `t_${x}`, band: 'strong' as const, author }));
+  const line = (moves: ReturnType<typeof four>) =>
+    rerunExplanationPlan(WIRE_DELTA, (id) => labels[id], [], true, Object.values(labels), moves)!.codeLine;
+  it('four moves with no recorded user write: three named, then "One other input also differs between the two Runs."', () => {
+    const l = line(four('unknown'));
+    expect(l).toContain('One other input also differs between the two Runs.');
+    expect(l).not.toContain('You also made');
+  });
+  it('an Olumi move past the cap is never "You also made …"', () => {
+    expect(line(four('olumi'))).toContain('One other input also differs between the two Runs.');
+  });
+  it('CONTROL: four receipt-backed user writes keep "You also made 1 other change."', () => {
+    expect(line(four('user'))).toContain('You also made 1 other change.');
+  });
+});
+
+describe('rehearsal12: a band edit AND a figure restated in band, on two links (DL required row)', () => {
+  const R12_LABELS: Record<string, string> = {
+    price_rise_from_current_price: 'Price rise from current price', customers_lost_to_price_rise: 'Customers lost to price rise',
+    starter_monthly_price: 'Starter monthly price', starter_tier_mrr: 'Starter-tier MRR',
+  };
+  const R12_DELTA = { ...WIRE_DELTA, input_changes: [
+    { entity_kind: 'link', entity_id: 'starter_monthly_price->starter_tier_mrr', link: { from: 'starter_monthly_price', to: 'starter_tier_mrr' },
+      field: 'strength', before: { raw: 'strong' }, after: { raw: 'moderate' }, change: 'changed' },
+    { entity_kind: 'link', entity_id: 'starter_monthly_price->starter_tier_mrr', link: { from: 'starter_monthly_price', to: 'starter_tier_mrr' },
+      field: 'sizing', before: { raw: 'olumi_estimate' }, after: { raw: 'user' }, change: 'changed' },
+  ] };
+  const chatFigure = { from: 'price_rise_from_current_price', to: 'customers_lost_to_price_rise', band: 'strong' as const, author: 'user' as const };
+  it('⭐ S7 names BOTH changes and says it can’t confirm nothing else differed — never that one edit caused it', () => {
+    const plan = rerunExplanationPlan(R12_DELTA, (id) => R12_LABELS[id], [], true, Object.values(R12_LABELS), [chatFigure])!;
+    expect(plan.codeLine).toBe('You gave your own estimate for how much Starter monthly price changes Starter-tier MRR: strong → moderate. '
+      + 'You changed how much Price rise from current price changes Customers lost to price rise; it is still strong. '
+      + RERUN_FALLBACK_LINES.unverified);
+    expect(plan.inputs.attribution_case).not.toBe('C1_attributable');
+    const nodes = Object.entries(R12_LABELS).map(([id, label]) => ({ id, label, kind: 'factor' }));
+    expect(rerunRecordForModel(R12_DELTA, false, nodes, [], [chatFigure])?.attribution_case).toBe('C2_unpaired');
+  });
+  it('CONTROL (as served): without the in-band move, S7 names only the band edit — but still never a cause', () => {
+    const plan = rerunExplanationPlan(R12_DELTA, (id) => R12_LABELS[id], [], true, Object.values(R12_LABELS))!;
+    expect(plan.codeLine).toContain(RERUN_FALLBACK_LINES.unverified);
+    expect(plan.codeLine).not.toContain('Price rise from current price');
   });
 });
