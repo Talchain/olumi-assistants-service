@@ -1,8 +1,10 @@
 -- S1-E: refuse version save/round mint when the captured head or working
 -- graph moved. Version-only writes stay in their existing atomic RPC.
+-- Base: LIVE July definition (20260705120000), CAS BEFORE no-op dedupe.
+-- 20260920220000 is present in the repo but unapplied on the shared database.
 -- Replace the old signature, do not leave a PostgREST overload.
--- Existing uninstrumented callers retain the optional head-hash contract.
--- No-op dedupe still precedes head CAS; working-model CAS precedes dedupe.
+-- Both new checks are gated by p_base_known and precede dedupe.
+-- Old-11-argument callers retain the live optional head-hash CAS-before-dedupe.
 BEGIN;
 
 DROP FUNCTION public.create_model_version(
@@ -96,13 +98,23 @@ BEGIN
     SELECT * INTO v_head FROM public.model_versions WHERE id = v_head_id;
   END IF;
 
-  -- ⛔ DEDUPE IS DECIDED BEFORE CAS (moved here 2026-09-20 — see this
-  -- migration's header). A dedupe match means the head ALREADY IS the state the
-  -- caller is asking for, so NO WRITE WILL HAPPEN and there is no lost update for
-  -- CAS to prevent. Testing the caller's expected BASE against a head that has
-  -- since become the caller's own TARGET asks a question about a write that is
-  -- not pending — and refusing it is precisely the post-commit retry this
-  -- function's own header promises to make idempotent.
+  -- Optional in-transaction CAS against the head version's stored hash.
+  IF p_expected_graph_identity_hash IS NOT NULL THEN
+    IF v_head_id IS NULL OR v_head.id IS NULL
+       OR v_head.graph_identity_hash <> p_expected_graph_identity_hash THEN
+      RAISE EXCEPTION 'create_model_version: expected head hash % does not match current head', p_expected_graph_identity_hash
+        USING ERRCODE = 'MV409';
+    END IF;
+  END IF;
+
+  -- Known NULL is a first-version base, not permission to overwrite a head.
+  -- Check before dedupe: a moved captured head refuses even a same-target pin.
+  IF p_base_known IS TRUE
+     AND v_head_id IS DISTINCT FROM p_expected_head_version_id THEN
+    RAISE EXCEPTION 'create_model_version: head moved since the base read'
+      USING ERRCODE = 'MV409';
+  END IF;
+
   -- No-op dedupe: identical identity envelope at the head → return head.
   IF v_head_id IS NOT NULL AND v_head.id IS NOT NULL
      AND v_head.graph_identity_hash = p_graph_identity_hash
@@ -116,23 +128,6 @@ BEGIN
       'deduped', true,
       'event_id', NULL
     );
-  END IF;
-
-  -- Known NULL is a first-version base, not permission to overwrite a head.
-  -- Keep the no-write dedupe above this check for post-commit retries.
-  IF p_base_known IS TRUE
-     AND v_head_id IS DISTINCT FROM p_expected_head_version_id THEN
-    RAISE EXCEPTION 'create_model_version: head moved since the base read'
-      USING ERRCODE = 'MV409';
-  END IF;
-
-  -- Optional in-transaction CAS against the head version's stored hash.
-  IF p_expected_graph_identity_hash IS NOT NULL THEN
-    IF v_head_id IS NULL OR v_head.id IS NULL
-       OR v_head.graph_identity_hash <> p_expected_graph_identity_hash THEN
-      RAISE EXCEPTION 'create_model_version: expected head hash % does not match current head', p_expected_graph_identity_hash
-        USING ERRCODE = 'MV409';
-    END IF;
   END IF;
 
   SELECT COALESCE(MAX(version_number), 0) + 1
@@ -206,12 +201,12 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.create_model_version(
   uuid, jsonb, text, text, text, text, text, text, text, text, text, boolean, uuid, text
 ) FROM PUBLIC, anon, authenticated;
+
 GRANT EXECUTE ON FUNCTION public.create_model_version(
   uuid, jsonb, text, text, text, text, text, text, text, text, text, boolean, uuid, text
 ) TO service_role;
 
-
--- PostgREST resolves RPCs from its schema cache; reload so callers see the new signature at once.
+-- PostgREST resolves RPCs from its schema cache; reload after signature replacement.
 NOTIFY pgrst, 'reload schema';
 
 COMMIT;

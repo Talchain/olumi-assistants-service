@@ -87,6 +87,12 @@ function persistenceClient(): SupabaseClient {
           scenario.graph_identity_hash !== args.p_expected_working_graph_identity_hash)
       )) return conflict();
       const head = versions.find(v => v.id === scenario.current_model_version_id);
+      // Preserve the live optional hash CAS before no-op dedupe. Omitted
+      // legacy arguments default to NULL in PostgreSQL.
+      if (args.p_expected_graph_identity_hash != null &&
+        head?.graph_identity_hash !== args.p_expected_graph_identity_hash) return conflict();
+      if (args.p_base_known === true &&
+        scenario.current_model_version_id !== args.p_expected_head_version_id) return conflict();
       if (head && head.graph_identity_hash === args.p_graph_identity_hash &&
         head.identity_projection_version === args.p_projection_version &&
         head.identity_normaliser_version === args.p_normaliser_version &&
@@ -94,10 +100,6 @@ function persistenceClient(): SupabaseClient {
         return { data: { version_id: head.id, version_number: head.version_number,
           graph_identity_hash: head.graph_identity_hash, deduped: true, event_id: null }, error: null };
       }
-      if (args.p_base_known === true &&
-        scenario.current_model_version_id !== args.p_expected_head_version_id) return conflict();
-      if (args.p_expected_graph_identity_hash !== null &&
-        head?.graph_identity_hash !== args.p_expected_graph_identity_hash) return conflict();
       const row = addVersion(args.p_graph as ReturnType<typeof graph>);
       return { data: { version_id: row.id, version_number: row.version_number,
         graph_identity_hash: row.graph_identity_hash, deduped: false, event_id: `event_${row.id}` }, error: null };
@@ -236,14 +238,40 @@ describe('S1-E read-to-write base through the real commit doors', () => {
       }
     });
 
-    it(`${writer}: same-target peer commit dedupes before head CAS`, async () => {
-      beforeWrite = () => { addVersion(scenario.graph as ReturnType<typeof graph>); };
+    it(`${writer}: same-target peer commit refuses a moved captured head before dedupe`, async () => {
+      let peerState: unknown;
+      beforeWrite = () => {
+        addVersion(scenario.graph as ReturnType<typeof graph>);
+        peerState = copy(scenario);
+      };
+      if (writer === 'save') {
+        const saved = await http('POST', '/save', {});
+        expect(saved.statusCode).toBe(409);
+        expect(saved.json().details.code).toBe('VERSION_STALE');
+      } else await expect(mint()).rejects.toThrow('(conflict)');
+      expect(scenario).toEqual(peerState);
+      expect(versions).toHaveLength(2);
+      expect(rounds).toEqual([]);
+      expect(events).toEqual([]);
+      resetModelManagementServiceForTests();
+      resetSessionStoreForTests();
+      const cold = await http('POST', '', {});
+      expect(cold.statusCode).toBe(200);
+      expect(cold.json().versions.map((v: { version_id: string }) => v.version_id))
+        .toEqual(versions.slice().reverse().map(v => v.id));
+      expect(cold.json().current_version_id).toBe(scenario.current_model_version_id);
+    });
+
+    it(`${writer}: unchanged captured head and working graph still dedupe`, async () => {
+      addVersion(scenario.graph as ReturnType<typeof graph>);
+      const prior = copy(scenario);
       if (writer === 'save') {
         const saved = await http('POST', '/save', {});
         expect(saved.statusCode).toBe(200);
         expect(saved.json().version.deduped).toBe(true);
       } else expect((await mint()).graph_version_ref).toBe(scenario.current_model_version_id);
       expect(versions).toHaveLength(2);
+      expect(scenario).toEqual(prior);
     });
   }
 
@@ -251,6 +279,16 @@ describe('S1-E read-to-write base through the real commit doors', () => {
     const response = await http('POST', '/save', { expected_graph_identity_hash: 'f'.repeat(64) });
     expect(response.statusCode).toBe(409);
     expect(versions).toHaveLength(1);
+  });
+
+  it('caller head-hash mismatch refuses even when the target matches the head', async () => {
+    addVersion(scenario.graph as ReturnType<typeof graph>);
+    const prior = copy(scenario);
+    const response = await http('POST', '/save', { expected_graph_identity_hash: 'f'.repeat(64) });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().details.code).toBe('VERSION_STALE');
+    expect(versions).toHaveLength(2);
+    expect(scenario).toEqual(prior);
   });
 
   it('a stale working graph cannot dedupe to an old saved head', async () => {
@@ -262,7 +300,7 @@ describe('S1-E read-to-write base through the real commit doors', () => {
 });
 
 describe('S1-E SQL transaction guards (authored, not executed)', () => {
-  it('latest definition locks before working CAS, dedupes before head CAS, checks before insert', () => {
+  it('latest definition locks, checks working and both head bases before dedupe and insert', () => {
     // Resolve from repository root rather than a pinned historic migration.
     const root = new URL('../../../', import.meta.url);
     const migrations = new URL('supabase/migrations/', root);
@@ -272,11 +310,14 @@ describe('S1-E SQL transaction guards (authored, not executed)', () => {
     expect(latest).toBeDefined();
     const sql = latest!;
     const markers = ['FOR UPDATE;', 'v_working_graph IS DISTINCT FROM p_graph',
-      "'deduped', true", 'v_head_id IS DISTINCT FROM p_expected_head_version_id',
+      'IF p_expected_graph_identity_hash IS NOT NULL',
+      'v_head_id IS DISTINCT FROM p_expected_head_version_id', "'deduped', true",
       'INSERT INTO public.model_versions'];
     const positions = markers.map(marker => sql.indexOf(marker));
     expect(positions.every(position => position >= 0)).toBe(true);
     expect(positions).toEqual(positions.slice().sort((a, b) => a - b));
+    expect(sql).toContain('IF p_base_known IS TRUE THEN');
+    expect(sql).toContain('IF p_base_known IS TRUE\n     AND v_head_id IS DISTINCT FROM p_expected_head_version_id');
     expect(sql).toContain('v_working_identity_hash IS DISTINCT FROM p_expected_working_graph_identity_hash');
     expect(sql).toContain("USING ERRCODE = 'MV409'");
     expect(sql).toContain('DROP FUNCTION public.create_model_version(');

@@ -1,10 +1,8 @@
 -- S1-E rollback artifact. DO NOT APPLY automatically.
 -- Shared Supabase serves staging and production. Coordinate application rollback
 -- before removing the parameters used by the new application.
--- The forward migration has 14 arguments (11 old + 3 new), not 15.
--- Function definition below is copied VERBATIM from 20260920220000.
--- That migration preserved the ACL; REVOKE/GRANT below are copied VERBATIM
--- from 20260705120000, where the previous signature's ACL was established.
+-- Restore the LIVE CAS-before-dedupe definition VERBATIM from 20260705120000.
+-- REVOKE/GRANT below are copied VERBATIM from the same migration.
 -- Only create_model_version is restored; restore_model_version is untouched.
 BEGIN;
 
@@ -80,13 +78,15 @@ BEGIN
     SELECT * INTO v_head FROM public.model_versions WHERE id = v_head_id;
   END IF;
 
-  -- ⛔ DEDUPE IS DECIDED BEFORE CAS (moved here 2026-09-20 — see this
-  -- migration's header). A dedupe match means the head ALREADY IS the state the
-  -- caller is asking for, so NO WRITE WILL HAPPEN and there is no lost update for
-  -- CAS to prevent. Testing the caller's expected BASE against a head that has
-  -- since become the caller's own TARGET asks a question about a write that is
-  -- not pending — and refusing it is precisely the post-commit retry this
-  -- function's own header promises to make idempotent.
+  -- Optional in-transaction CAS against the head version's stored hash.
+  IF p_expected_graph_identity_hash IS NOT NULL THEN
+    IF v_head_id IS NULL OR v_head.id IS NULL
+       OR v_head.graph_identity_hash <> p_expected_graph_identity_hash THEN
+      RAISE EXCEPTION 'create_model_version: expected head hash % does not match current head', p_expected_graph_identity_hash
+        USING ERRCODE = 'MV409';
+    END IF;
+  END IF;
+
   -- No-op dedupe: identical identity envelope at the head → return head.
   IF v_head_id IS NOT NULL AND v_head.id IS NOT NULL
      AND v_head.graph_identity_hash = p_graph_identity_hash
@@ -100,15 +100,6 @@ BEGIN
       'deduped', true,
       'event_id', NULL
     );
-  END IF;
-
-  -- Optional in-transaction CAS against the head version's stored hash.
-  IF p_expected_graph_identity_hash IS NOT NULL THEN
-    IF v_head_id IS NULL OR v_head.id IS NULL
-       OR v_head.graph_identity_hash <> p_expected_graph_identity_hash THEN
-      RAISE EXCEPTION 'create_model_version: expected head hash % does not match current head', p_expected_graph_identity_hash
-        USING ERRCODE = 'MV409';
-    END IF;
   END IF;
 
   SELECT COALESCE(MAX(version_number), 0) + 1
@@ -187,8 +178,7 @@ GRANT EXECUTE ON FUNCTION public.create_model_version(
   uuid, jsonb, text, text, text, text, text, text, text, text, text
 ) TO service_role;
 
-
--- PostgREST resolves RPCs from its schema cache; reload so callers see the new signature at once.
+-- PostgREST resolves RPCs from its schema cache; reload after signature replacement.
 NOTIFY pgrst, 'reload schema';
 
 COMMIT;
