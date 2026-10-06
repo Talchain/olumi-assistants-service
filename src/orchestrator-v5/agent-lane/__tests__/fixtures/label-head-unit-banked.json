@@ -1,0 +1,2086 @@
+{
+  "mealkit-14": {
+    "bank_case": "acc__witness-cc281ac8_w-mealkit-14__291c855a",
+    "origin": "/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/6f3beaa3-b2e8-41bf-b29d-ae1df9ba66bd/scratchpad/lvl-mc/arm-base/bank/acc__witness-cc281ac8_w-mealkit-14__291c855a/graph.json",
+    "graph": {
+      "nodes": [
+        {
+          "id": "decision_monthly_cancellations",
+          "kind": "decision",
+          "label": "Decision: monthly cancellations",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "monthly_cancellations",
+          "kind": "goal",
+          "label": "monthly cancellations",
+          "provenance": "from_brief",
+          "goal_threshold_frame": "level",
+          "goal_deadline_as_stated": "6 months"
+        },
+        {
+          "id": "carry_on_as_now",
+          "kind": "option",
+          "label": "Carry on as now",
+          "provenance": "ai_inferred",
+          "is_baseline": true
+        },
+        {
+          "id": "pause_instead_of_cancel",
+          "kind": "option",
+          "label": "Pause Instead of Cancel",
+          "provenance": "from_brief",
+          "interventions": {
+            "pause_option_availability": {
+              "value": 1,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "pause_option_availability",
+                "match_type": "exact_id",
+                "confidence": "high"
+              }
+            }
+          }
+        },
+        {
+          "id": "six_month_loyalty_discount",
+          "kind": "option",
+          "label": "Six-Month Loyalty Discount",
+          "provenance": "from_brief",
+          "interventions": {
+            "loyalty_discount_after_6_months": {
+              "value": 0.15,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "loyalty_discount_after_6_months",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 15,
+              "unit": "%"
+            }
+          }
+        },
+        {
+          "id": "reliable_courier_switch",
+          "kind": "option",
+          "label": "Reliable Courier Switch",
+          "provenance": "from_brief",
+          "interventions": {
+            "annual_courier_cost": {
+              "value": 0.492,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "annual_courier_cost",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 2460000,
+              "unit": "GBP/year"
+            },
+            "courier_on_time_delivery_rate": {
+              "value": 0.97,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "courier_on_time_delivery_rate",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 97,
+              "unit": "%"
+            }
+          }
+        },
+        {
+          "id": "pause_option_availability",
+          "kind": "factor",
+          "label": "Pause option availability",
+          "provenance": "ai_inferred",
+          "category": "controllable"
+        },
+        {
+          "id": "loyalty_discount_after_6_months",
+          "kind": "factor",
+          "label": "Loyalty discount after 6 months",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "%",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 100
+        },
+        {
+          "id": "courier_on_time_delivery_rate",
+          "kind": "factor",
+          "label": "Courier on-time delivery rate",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0.92,
+            "raw_value": 92,
+            "unit": "%",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 100
+        },
+        {
+          "id": "annual_courier_cost",
+          "kind": "factor",
+          "label": "Annual courier cost",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0.48,
+            "raw_value": 2400000,
+            "unit": "GBP/year",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 5000000
+        },
+        {
+          "id": "late_deliveries",
+          "kind": "risk",
+          "label": "Late deliveries",
+          "provenance": "from_brief",
+          "scale_frame": 5000
+        },
+        {
+          "id": "courier_cost_pressure",
+          "kind": "risk",
+          "label": "Courier cost pressure",
+          "provenance": "ai_inferred"
+        }
+      ],
+      "edges": [
+        {
+          "from": "decision_monthly_cancellations",
+          "to": "carry_on_as_now",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_monthly_cancellations",
+          "to": "pause_instead_of_cancel",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_monthly_cancellations",
+          "to": "six_month_loyalty_discount",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_monthly_cancellations",
+          "to": "reliable_courier_switch",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "pause_instead_of_cancel",
+          "to": "pause_option_availability",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "six_month_loyalty_discount",
+          "to": "loyalty_discount_after_6_months",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "reliable_courier_switch",
+          "to": "annual_courier_cost",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "reliable_courier_switch",
+          "to": "courier_on_time_delivery_rate",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "carry_on_as_now",
+          "to": "pause_option_availability",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "origin": "repair"
+        },
+        {
+          "from": "carry_on_as_now",
+          "to": "loyalty_discount_after_6_months",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "origin": "repair"
+        },
+        {
+          "from": "carry_on_as_now",
+          "to": "annual_courier_cost",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "origin": "repair"
+        },
+        {
+          "from": "carry_on_as_now",
+          "to": "courier_on_time_delivery_rate",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "origin": "repair"
+        },
+        {
+          "from": "pause_option_availability",
+          "to": "monthly_cancellations",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "loyalty_discount_after_6_months",
+          "to": "monthly_cancellations",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "courier_on_time_delivery_rate",
+          "to": "late_deliveries",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "late_deliveries",
+          "to": "monthly_cancellations",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "brief_extraction",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "annual_courier_cost",
+          "to": "courier_cost_pressure",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "courier_cost_pressure",
+          "to": "monthly_cancellations",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        }
+      ]
+    }
+  },
+  "consult-12": {
+    "bank_case": "acc__witness-cc281ac8_w-consult-12__caae966d",
+    "origin": "/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/6f3beaa3-b2e8-41bf-b29d-ae1df9ba66bd/scratchpad/lvl-mc/arm-base/bank/acc__witness-cc281ac8_w-consult-12__caae966d/graph.json",
+    "graph": {
+      "nodes": [
+        {
+          "id": "decision_annual_gross_profit",
+          "kind": "decision",
+          "label": "Decision: annual gross profit",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "annual_gross_profit",
+          "kind": "goal",
+          "label": "annual gross profit",
+          "provenance": "from_brief",
+          "goal_threshold_unit": "£/year",
+          "goal_threshold_frame": "level",
+          "goal_threshold_raw": 1400000,
+          "goal_threshold_cap": 1750000,
+          "goal_threshold_cap_provenance": "target_derived_headroom",
+          "goal_threshold": 0.8,
+          "threshold_source": "brief_extraction",
+          "goal_direction": ">",
+          "goal_horizon_months": 12,
+          "observed_state": {
+            "value": 0.6285714285714286,
+            "baseline": 0.6285714285714286,
+            "unit": "£/year",
+            "source": "brief_extraction",
+            "raw_value": 1100000,
+            "cap": 1750000
+          },
+          "unit_reading": {
+            "unit": "GBP",
+            "source": "olumi_reading",
+            "source_quote": "We are a 25-person software consultancy with annual gross profit of £1.1m"
+          }
+        },
+        {
+          "id": "hire_3_senior_consultants",
+          "kind": "option",
+          "label": "Hire 3 senior consultants",
+          "provenance": "from_brief",
+          "interventions": {
+            "additional_senior_consultants": {
+              "value": 0.15,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "additional_senior_consultants",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 3,
+              "unit": "consultants"
+            },
+            "annual_compensation_per_additional_senior": {
+              "value": 0.475,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "annual_compensation_per_additional_senior",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 95000,
+              "unit": "£/consultant/year"
+            }
+          }
+        },
+        {
+          "id": "launch_security_audit_product",
+          "kind": "option",
+          "label": "Launch security audit product",
+          "provenance": "from_brief",
+          "interventions": {
+            "security_audit_price": {
+              "value": 0.16,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "security_audit_price",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 8000,
+              "unit": "£/audit"
+            },
+            "security_audits_completed": {
+              "value": 0.2,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "security_audits_completed",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 40,
+              "unit": "audits/year"
+            },
+            "security_audit_gross_margin": {
+              "value": 0.5,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "security_audit_gross_margin",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 50,
+              "unit": "%"
+            }
+          }
+        },
+        {
+          "id": "raise_day_rate",
+          "kind": "option",
+          "label": "Raise day rate",
+          "provenance": "from_brief",
+          "interventions": {
+            "day_rate": {
+              "value": 0.5,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "day_rate",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 1000,
+              "unit": "£/billable day"
+            },
+            "annual_billable_days": {
+              "value": 0.38,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "annual_billable_days",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 1900,
+              "unit": "billable days/year"
+            }
+          }
+        },
+        {
+          "id": "additional_senior_consultants",
+          "kind": "factor",
+          "label": "Additional senior consultants",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "consultants",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 20
+        },
+        {
+          "id": "billable_days_per_senior_consultant",
+          "kind": "factor",
+          "label": "Billable days per senior consultant",
+          "provenance": "from_brief",
+          "category": "observable",
+          "observed_state": {
+            "value": 0.6,
+            "raw_value": 150,
+            "cap": 250,
+            "declared_scale": "unit_interval",
+            "unit": "billable days/consultant/year",
+            "source": "brief_extraction"
+          }
+        },
+        {
+          "id": "annual_compensation_per_additional_senior",
+          "kind": "factor",
+          "label": "Annual compensation per additional senior",
+          "provenance": "from_brief",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0.475,
+            "raw_value": 95000,
+            "unit": "£/consultant/year",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 200000
+        },
+        {
+          "id": "annual_billable_days",
+          "kind": "factor",
+          "label": "Annual billable days",
+          "provenance": "ai_inferred",
+          "category": "observable",
+          "observed_state": {
+            "value": 0.4,
+            "raw_value": 2000,
+            "unit": "billable days/year",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 5000
+        },
+        {
+          "id": "day_rate",
+          "kind": "factor",
+          "label": "Day rate",
+          "provenance": "from_brief",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0.45,
+            "raw_value": 900,
+            "cap": 2000,
+            "declared_scale": "unit_interval",
+            "unit": "£/billable day",
+            "source": "brief_extraction"
+          }
+        },
+        {
+          "id": "security_audits_completed",
+          "kind": "factor",
+          "label": "Security audits completed",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "audits/year",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 200
+        },
+        {
+          "id": "security_audit_price",
+          "kind": "factor",
+          "label": "Security audit price",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "£/audit",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 50000
+        },
+        {
+          "id": "security_audit_gross_margin",
+          "kind": "factor",
+          "label": "Security audit gross margin",
+          "provenance": "ai_inferred",
+          "category": "observable",
+          "observed_state": {
+            "value": 0.5,
+            "raw_value": 50,
+            "unit": "%",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 100
+        },
+        {
+          "id": "audit_delivery_overrun_loss",
+          "kind": "risk",
+          "label": "Audit delivery overrun loss",
+          "provenance": "ai_inferred",
+          "scale_frame": 200000
+        },
+        {
+          "id": "additional_senior_billable_days",
+          "kind": "outcome",
+          "label": "Additional senior billable days",
+          "provenance": "ai_inferred",
+          "scale_frame": 3000
+        },
+        {
+          "id": "additional_senior_payroll",
+          "kind": "outcome",
+          "label": "Additional senior payroll",
+          "provenance": "ai_inferred",
+          "scale_frame": 2000000
+        },
+        {
+          "id": "security_audit_gross_profit",
+          "kind": "outcome",
+          "label": "Security audit gross profit",
+          "provenance": "ai_inferred",
+          "scale_frame": 1000000,
+          "nonlinear_identity": {
+            "operation": "product",
+            "factor_ids": [
+              "security_audits_completed",
+              "security_audit_price",
+              "security_audit_gross_margin"
+            ],
+            "stated_in_brief": false
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "decision_annual_gross_profit",
+          "to": "hire_3_senior_consultants",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_annual_gross_profit",
+          "to": "launch_security_audit_product",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_annual_gross_profit",
+          "to": "raise_day_rate",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "hire_3_senior_consultants",
+          "to": "additional_senior_consultants",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "hire_3_senior_consultants",
+          "to": "annual_compensation_per_additional_senior",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "launch_security_audit_product",
+          "to": "security_audit_price",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "launch_security_audit_product",
+          "to": "security_audits_completed",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "launch_security_audit_product",
+          "to": "security_audit_gross_margin",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "raise_day_rate",
+          "to": "day_rate",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "raise_day_rate",
+          "to": "annual_billable_days",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "additional_senior_consultants",
+          "to": "additional_senior_billable_days",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "billable_days_per_senior_consultant",
+          "to": "additional_senior_billable_days",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "brief_extraction",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "additional_senior_billable_days",
+          "to": "annual_gross_profit",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "brief_extraction",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "additional_senior_consultants",
+          "to": "additional_senior_payroll",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "annual_compensation_per_additional_senior",
+          "to": "additional_senior_payroll",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "additional_senior_payroll",
+          "to": "annual_gross_profit",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "annual_billable_days",
+          "to": "annual_gross_profit",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "brief_extraction",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "day_rate",
+          "to": "annual_gross_profit",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "security_audits_completed",
+          "to": "security_audit_gross_profit",
+          "strength": {
+            "mean": 0.8,
+            "std": 0.4
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 4000,
+              "amount_unit": "£/year",
+              "per_source_change": 1,
+              "per_source_change_unit": "audits/year",
+              "strength_mean": 0.8,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "security_audit_price",
+          "to": "security_audit_gross_profit",
+          "strength": {
+            "mean": 1,
+            "std": 0.5
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 20,
+              "amount_unit": "£/year",
+              "per_source_change": 1,
+              "per_source_change_unit": "£/audit",
+              "strength_mean": 1,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "security_audit_gross_margin",
+          "to": "security_audit_gross_profit",
+          "strength": {
+            "mean": 0.32,
+            "std": 0.16
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 3200,
+              "amount_unit": "£/year",
+              "per_source_change": 1,
+              "per_source_change_unit": "%",
+              "strength_mean": 0.32,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "security_audit_gross_profit",
+          "to": "annual_gross_profit",
+          "strength": {
+            "mean": 0.5714285714285714,
+            "std": 0.2857142857142857
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 1,
+              "amount_unit": "£/year",
+              "per_source_change": 1,
+              "per_source_change_unit": "£/year",
+              "strength_mean": 0.5714285714285714,
+              "strength_mean_frame": "edge_strength"
+            },
+            "definitional": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "security_audits_completed",
+          "to": "audit_delivery_overrun_loss",
+          "strength": {
+            "mean": 1,
+            "std": 0.5
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 1000,
+              "amount_unit": "£/year",
+              "per_source_change": 1,
+              "per_source_change_unit": "audits/year",
+              "strength_mean": 1,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "audit_delivery_overrun_loss",
+          "to": "annual_gross_profit",
+          "strength": {
+            "mean": -0.11428571428571427,
+            "std": 0.057142857142857134
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": -1,
+              "amount_unit": "£/year",
+              "per_source_change": 1,
+              "per_source_change_unit": "£/year",
+              "strength_mean": -0.11428571428571427,
+              "strength_mean_frame": "edge_strength"
+            },
+            "definitional": true
+          },
+          "defaulted": true
+        }
+      ]
+    }
+  },
+  "dental-4": {
+    "bank_case": "acc__witness-cc281ac8_w-dental-4__fdc0f82d",
+    "origin": "/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/6f3beaa3-b2e8-41bf-b29d-ae1df9ba66bd/scratchpad/lvl-mc/arm-base/bank/acc__witness-cc281ac8_w-dental-4__fdc0f82d/graph.json",
+    "graph": {
+      "nodes": [
+        {
+          "id": "decision_no_shows",
+          "kind": "decision",
+          "label": "Decision: no-shows",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "no_shows",
+          "kind": "goal",
+          "label": "no-shows",
+          "provenance": "from_brief",
+          "goal_threshold_frame": "level"
+        },
+        {
+          "id": "48_hour_text_reminders",
+          "kind": "option",
+          "label": "48-hour text reminders",
+          "provenance": "from_brief",
+          "interventions": {
+            "48_hour_text_reminder_coverage": {
+              "value": 1,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "48_hour_text_reminder_coverage",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 100,
+              "unit": "% of scheduled appointments"
+            }
+          }
+        },
+        {
+          "id": "20_missed_appointment_fee",
+          "kind": "option",
+          "label": "£20 missed-appointment fee",
+          "provenance": "from_brief",
+          "interventions": {
+            "missed_appointment_fee": {
+              "value": 0.2,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "missed_appointment_fee",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 20,
+              "unit": "GBP per missed appointment"
+            }
+          }
+        },
+        {
+          "id": "online_self_rescheduling",
+          "kind": "option",
+          "label": "Online self-rescheduling",
+          "provenance": "from_brief",
+          "interventions": {
+            "online_self_rescheduling_coverage": {
+              "value": 1,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "online_self_rescheduling_coverage",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 100,
+              "unit": "% of scheduled appointments"
+            }
+          }
+        },
+        {
+          "id": "carry_on_as_now",
+          "kind": "option",
+          "label": "Carry on as now",
+          "provenance": "ai_inferred",
+          "is_baseline": true
+        },
+        {
+          "id": "48_hour_text_reminder_coverage",
+          "kind": "factor",
+          "label": "48-hour text reminder coverage",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "% of scheduled appointments",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 100
+        },
+        {
+          "id": "missed_appointment_fee",
+          "kind": "factor",
+          "label": "Missed-appointment fee",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "GBP per missed appointment",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 100
+        },
+        {
+          "id": "online_self_rescheduling_coverage",
+          "kind": "factor",
+          "label": "Online self-rescheduling coverage",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "% of scheduled appointments",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 100
+        },
+        {
+          "id": "no_shows_from_fee_dissatisfaction",
+          "kind": "risk",
+          "label": "No-shows from fee dissatisfaction",
+          "provenance": "ai_inferred",
+          "scale_frame": 20
+        },
+        {
+          "id": "appointments_cancelled_or_rescheduled_in_advance",
+          "kind": "outcome",
+          "label": "Appointments cancelled or rescheduled in advance",
+          "provenance": "ai_inferred",
+          "scale_frame": 100
+        }
+      ],
+      "edges": [
+        {
+          "from": "decision_no_shows",
+          "to": "48_hour_text_reminders",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_no_shows",
+          "to": "20_missed_appointment_fee",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_no_shows",
+          "to": "online_self_rescheduling",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_no_shows",
+          "to": "carry_on_as_now",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "48_hour_text_reminders",
+          "to": "48_hour_text_reminder_coverage",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "20_missed_appointment_fee",
+          "to": "missed_appointment_fee",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "online_self_rescheduling",
+          "to": "online_self_rescheduling_coverage",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "carry_on_as_now",
+          "to": "48_hour_text_reminder_coverage",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "origin": "repair"
+        },
+        {
+          "from": "carry_on_as_now",
+          "to": "missed_appointment_fee",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "origin": "repair"
+        },
+        {
+          "from": "carry_on_as_now",
+          "to": "online_self_rescheduling_coverage",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+          },
+          "origin": "repair"
+        },
+        {
+          "from": "48_hour_text_reminder_coverage",
+          "to": "appointments_cancelled_or_rescheduled_in_advance",
+          "strength": {
+            "mean": 0.08,
+            "std": 0.04
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 8,
+              "amount_unit": "% of scheduled appointments",
+              "per_source_change": 100,
+              "per_source_change_unit": "% of scheduled appointments",
+              "strength_mean": 0.08,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "missed_appointment_fee",
+          "to": "appointments_cancelled_or_rescheduled_in_advance",
+          "strength": {
+            "mean": 0.19999999999999998,
+            "std": 0.09999999999999999
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 4,
+              "amount_unit": "% of scheduled appointments",
+              "per_source_change": 20,
+              "per_source_change_unit": "GBP per missed appointment",
+              "strength_mean": 0.19999999999999998,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "online_self_rescheduling_coverage",
+          "to": "appointments_cancelled_or_rescheduled_in_advance",
+          "strength": {
+            "mean": 0.06,
+            "std": 0.03
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 6,
+              "amount_unit": "% of scheduled appointments",
+              "per_source_change": 100,
+              "per_source_change_unit": "% of scheduled appointments",
+              "strength_mean": 0.06,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "appointments_cancelled_or_rescheduled_in_advance",
+          "to": "no_shows",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "missed_appointment_fee",
+          "to": "no_shows_from_fee_dissatisfaction",
+          "strength": {
+            "mean": 0.25,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "olumi_estimate",
+            "natural_effect": {
+              "amount": 1,
+              "amount_unit": "% of scheduled appointments",
+              "per_source_change": 20,
+              "per_source_change_unit": "GBP per missed appointment",
+              "strength_mean": 0.25,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "no_shows_from_fee_dissatisfaction",
+          "to": "no_shows",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        }
+      ]
+    }
+  },
+  "bakery-6": {
+    "bank_case": "acc__witness-cc281ac8_w-bakery-6__3ac71bcb",
+    "origin": "/private/tmp/claude-502/-Users-paulslee-Documents-GitHub/6f3beaa3-b2e8-41bf-b29d-ae1df9ba66bd/scratchpad/lvl-mc/arm-base/bank/acc__witness-cc281ac8_w-bakery-6__3ac71bcb/graph.json",
+    "graph": {
+      "nodes": [
+        {
+          "id": "decision_gross_margin",
+          "kind": "decision",
+          "label": "Decision: gross margin",
+          "provenance": "ai_inferred"
+        },
+        {
+          "id": "gross_margin",
+          "kind": "goal",
+          "label": "gross margin",
+          "provenance": "from_brief",
+          "goal_threshold_unit": "%",
+          "goal_threshold_frame": "level",
+          "goal_threshold_raw": 60,
+          "goal_threshold_cap": 100,
+          "goal_threshold_cap_provenance": "metric_scale",
+          "goal_threshold": 0.6,
+          "threshold_source": "brief_extraction",
+          "goal_direction": ">",
+          "goal_horizon_months": 12,
+          "observed_state": {
+            "value": 0.54,
+            "baseline": 0.54,
+            "unit": "%",
+            "source": "brief_extraction",
+            "raw_value": 54,
+            "cap": 100
+          }
+        },
+        {
+          "id": "raise_bread_prices",
+          "kind": "option",
+          "label": "Raise Bread Prices",
+          "provenance": "from_brief",
+          "interventions": {
+            "bread_price_change": {
+              "value": 0.08,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "bread_price_change",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 8,
+              "unit": "%"
+            }
+          }
+        },
+        {
+          "id": "central_kitchen_consolidation",
+          "kind": "option",
+          "label": "Central Kitchen Consolidation",
+          "provenance": "from_brief",
+          "interventions": {
+            "waste_rate": {
+              "value": 0.06,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "waste_rate",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 6,
+              "unit": "% of output"
+            },
+            "shops_closed": {
+              "value": 0.14285714285714285,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "shops_closed",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 2,
+              "unit": "shops"
+            },
+            "central_kitchen_fit_out_cost": {
+              "value": 0.5,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "central_kitchen_fit_out_cost",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 250000,
+              "unit": "GBP"
+            }
+          }
+        },
+        {
+          "id": "wholesale_subscription_launch",
+          "kind": "option",
+          "label": "Wholesale Subscription Launch",
+          "provenance": "from_brief",
+          "interventions": {
+            "monthly_subscription_price": {
+              "value": 0.3,
+              "source": "cee_hypothesis",
+              "target_match": {
+                "node_id": "monthly_subscription_price",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 300,
+              "unit": "GBP/café/month"
+            },
+            "wholesale_subscribing_caf_s": {
+              "value": 0.3,
+              "source": "brief_extraction",
+              "target_match": {
+                "node_id": "wholesale_subscribing_caf_s",
+                "match_type": "exact_id",
+                "confidence": "high"
+              },
+              "raw_value": 60,
+              "unit": "cafés"
+            }
+          }
+        },
+        {
+          "id": "bread_price_change",
+          "kind": "factor",
+          "label": "Bread price change",
+          "provenance": "from_brief",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "%",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 100
+        },
+        {
+          "id": "shops_closed",
+          "kind": "factor",
+          "label": "Shops closed",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "shops",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 14
+        },
+        {
+          "id": "central_kitchen_fit_out_cost",
+          "kind": "factor",
+          "label": "Central kitchen fit-out cost",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "GBP",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 500000
+        },
+        {
+          "id": "waste_rate",
+          "kind": "factor",
+          "label": "Waste rate",
+          "provenance": "from_brief",
+          "category": "observable",
+          "observed_state": {
+            "value": 0.12,
+            "raw_value": 12,
+            "cap": 100,
+            "declared_scale": "unit_interval",
+            "unit": "% of output",
+            "source": "brief_extraction"
+          }
+        },
+        {
+          "id": "wholesale_subscribing_caf_s",
+          "kind": "factor",
+          "label": "Wholesale subscribing cafés",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "cafés",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 200
+        },
+        {
+          "id": "monthly_subscription_price",
+          "kind": "factor",
+          "label": "Monthly subscription price",
+          "provenance": "ai_inferred",
+          "category": "controllable",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "GBP/café/month",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 1000
+        },
+        {
+          "id": "staff_hours_change",
+          "kind": "factor",
+          "label": "Staff hours change",
+          "provenance": "from_brief",
+          "category": "external",
+          "observed_state": {
+            "value": 0,
+            "raw_value": 0,
+            "unit": "hours/week",
+            "source": "cee_inference",
+            "extractionType": "inferred"
+          },
+          "scale_frame": 10000
+        },
+        {
+          "id": "footfall_change",
+          "kind": "outcome",
+          "label": "Footfall change",
+          "provenance": "from_brief",
+          "scale_frame": 100
+        },
+        {
+          "id": "annual_weak_shop_losses_avoided",
+          "kind": "outcome",
+          "label": "Annual weak-shop losses avoided",
+          "provenance": "from_brief",
+          "scale_frame": 500000
+        },
+        {
+          "id": "wholesale_subscription_revenue",
+          "kind": "outcome",
+          "label": "Wholesale subscription revenue",
+          "provenance": "ai_inferred",
+          "scale_frame": 200000
+        }
+      ],
+      "edges": [
+        {
+          "from": "decision_gross_margin",
+          "to": "raise_bread_prices",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_gross_margin",
+          "to": "central_kitchen_consolidation",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "decision_gross_margin",
+          "to": "wholesale_subscription_launch",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "raise_bread_prices",
+          "to": "bread_price_change",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "central_kitchen_consolidation",
+          "to": "waste_rate",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "central_kitchen_consolidation",
+          "to": "shops_closed",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "central_kitchen_consolidation",
+          "to": "central_kitchen_fit_out_cost",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "wholesale_subscription_launch",
+          "to": "monthly_subscription_price",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "wholesale_subscription_launch",
+          "to": "wholesale_subscribing_caf_s",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis"
+          }
+        },
+        {
+          "from": "bread_price_change",
+          "to": "footfall_change",
+          "strength": {
+            "mean": -0.625,
+            "std": 0.3125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "brief_extraction",
+            "magnitude": "user_stated",
+            "natural_effect": {
+              "amount": -5,
+              "amount_unit": "percentage points",
+              "per_source_change": 8,
+              "per_source_change_unit": "%",
+              "strength_mean": -0.625,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "bread_price_change",
+          "to": "gross_margin",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "footfall_change",
+          "to": "gross_margin",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "shops_closed",
+          "to": "annual_weak_shop_losses_avoided",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "brief_extraction",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "annual_weak_shop_losses_avoided",
+          "to": "gross_margin",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "central_kitchen_fit_out_cost",
+          "to": "waste_rate",
+          "strength": {
+            "mean": -0.12,
+            "std": 0.06
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "brief_extraction",
+            "magnitude": "user_stated",
+            "natural_effect": {
+              "amount": -6,
+              "amount_unit": "% of output",
+              "per_source_change": 250000,
+              "per_source_change_unit": "GBP",
+              "strength_mean": -0.12,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "waste_rate",
+          "to": "gross_margin",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "wholesale_subscribing_caf_s",
+          "to": "wholesale_subscription_revenue",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.15
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "magnitude": "user_stated",
+            "natural_effect": {
+              "amount": 300,
+              "amount_unit": "GBP/month",
+              "per_source_change": 1,
+              "per_source_change_unit": "cafés",
+              "strength_mean": 0.3,
+              "strength_mean_frame": "edge_strength"
+            }
+          },
+          "defaulted": true
+        },
+        {
+          "from": "monthly_subscription_price",
+          "to": "wholesale_subscription_revenue",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "wholesale_subscription_revenue",
+          "to": "gross_margin",
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "positive",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        },
+        {
+          "from": "staff_hours_change",
+          "to": "gross_margin",
+          "strength": {
+            "mean": -0.5,
+            "std": 0.125
+          },
+          "exists_probability": 0.8,
+          "effect_direction": "negative",
+          "provenance": {
+            "source": "cee_hypothesis",
+            "mean_projected": true
+          },
+          "defaulted": true
+        }
+      ],
+      "goal_constraints": [
+        {
+          "constraint_id": "agent-lane:staff_hours_change:>=",
+          "node_id": "staff_hours_change",
+          "operator": ">=",
+          "value": 0,
+          "label": "Staff hours change",
+          "unit": "hours/week",
+          "provenance": "explicit"
+        }
+      ]
+    }
+  }
+}

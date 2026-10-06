@@ -6,6 +6,7 @@ import { centreRangeAt, sameWord, sentenceNamesOtherQuantity } from './stated-by
 export { centreRangeAt };
 import { sameUnit } from './same-unit.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { canAdoptLabelUnit, labelHeadUnit, type LabelHeadReading } from './label-head-unit.js';
 
 export interface StatedSizeBindingLink {
   readonly from: string;
@@ -20,6 +21,7 @@ export interface StatedSizeBindingNode {
   readonly change_unit?: string;
   readonly label?: string;
   readonly kind?: string;
+  readonly observed_state?: unknown;
   readonly goal_threshold_raw?: number;
   readonly goal_threshold_unit?: string;
 }
@@ -70,6 +72,8 @@ export function bindStatedLinkSizes(
     readonly signRefused?: { readonly through: PassThroughBinding; readonly said: 1 | -1 | null }[];
     /** Filled with every DIRECT bind refused because its drawn sign is the other way from the sentence (`directSignTheSentenceSays`). */
     readonly directSignRefused?: { readonly link: number; readonly sentence: string }[];
+    /** Only units attested by a uniquely bound sentence, to be persisted by admission. */
+    readonly labelUnits?: Map<string, LabelHeadReading>;
   } = {},
 ): Map<number, string> {
   const { passThroughs, settersOf = new Map<string, readonly string[]>(), centreRanges, signRefused, directSignRefused } = extras;
@@ -90,7 +94,8 @@ export function bindStatedLinkSizes(
     /** Set when a LEVEL CHANGE states the size (`stated-level-change.ts`): where its quantity is named. */
     level?: { names: { start: number; end: number } };
   };
-  const pairs: { link: number; sentence: number; spans: Spans }[] = [];
+  const pairs: { link: number; sentence: number; spans: Spans; detail: StatedEffectDetail;
+    readings: Map<string, LabelHeadReading> }[] = [];
   links.forEach((l, link) => {
     const d = l.natural_effect;
     if (d == null) return;
@@ -100,10 +105,26 @@ export function bindStatedLinkSizes(
     // source is never said per 'switch', so it never binds as one (Science 6008844683 (a)).
     const isSwitch = d.per_source_change_unit === 'switch';
     sentences.forEach((sentence, index) => {
+      const readings = new Map<string, LabelHeadReading>();
+      const readEnd = (id: string, otherId: string, value: number, source: boolean): string | undefined => {
+        const node = nodeById.get(id);
+        if (node?.label === undefined || (source && isSwitch)) return undefined;
+        const r = labelHeadUnit(sentence, value, node.label, nodeById.get(otherId)?.label ?? '', source);
+        if (r === undefined) return undefined;
+        const otherUnits = links.flatMap((x, i) => i === link || x.natural_effect == null ? []
+          : x.to === id ? [x.natural_effect.amount_unit] : x.from === id ? [x.natural_effect.per_source_change_unit] : []);
+        if (!canAdoptLabelUnit(node, otherUnits, r.unit)) return undefined;
+        readings.set(id, r); return r.unit;
+      };
+      const targetUnit = readEnd(l.to, l.from, d.amount, false);
+      const sourceUnit = readEnd(l.from, l.to, d.per_source_change, true);
+      const detail = { ...d, ...(targetUnit !== undefined ? { amount_unit: targetUnit } : {}),
+        ...(sourceUnit !== undefined ? { per_source_change_unit: sourceUnit } : {}) };
+      const ends = readings.size > 0 ? { source: nodeById.get(l.from)?.label ?? '', target: nodeById.get(l.to)?.label ?? '' } : undefined;
       let spans: Spans | undefined;
-      if (statedEffectQuoteMatches(sentence, d, located => { spans = located; })
-        || (isSwitch && statedSwitchEffectQuoteMatches(sentence, d, located => { spans = located; }) && namesSwitchAndTarget(l, sentence))) {
-        pairs.push({ link, sentence: index, spans: spans! });
+      if (statedEffectQuoteMatches(sentence, detail, located => { spans = located; }, ends)
+        || (isSwitch && statedSwitchEffectQuoteMatches(sentence, detail, located => { spans = located; }, ends) && namesSwitchAndTarget(l, sentence))) {
+        pairs.push({ link, sentence: index, spans: spans!, detail, readings });
       }
     });
   });
@@ -123,9 +144,12 @@ export function bindStatedLinkSizes(
     // our enterprise win rate from 20% to about 30% and cut trial abandonment" never sizes ‘Trial abandonment’.
     if (spans.level !== undefined
       && !levelNamesTarget(l, sentences[p.sentence]!.slice(spans.level.names.start, spans.level.names.end))) return false;
-    const d = l.natural_effect!;
-    if (!sameUnit(d.amount_unit, nodeById.get(l.to)?.effect_unit ?? nodeById.get(l.to)?.unit)
-      || (d.per_source_change_unit !== 'switch' && !sameUnit(d.per_source_change_unit, nodeById.get(l.from)?.change_unit ?? nodeById.get(l.from)?.unit))) return false;
+    const d = p.detail;
+    // A shared end cannot adopt two different units from otherwise valid sentences.
+    if ([...p.readings].some(([id, r]) => pairs.some(other => other !== p && other.readings.has(id)
+      && !sameUnit(r.unit, other.readings.get(id)!.unit)))) return false;
+    if (!sameUnit(d.amount_unit, p.readings.get(l.to)?.unit ?? nodeById.get(l.to)?.effect_unit ?? nodeById.get(l.to)?.unit)
+      || (d.per_source_change_unit !== 'switch' && !sameUnit(d.per_source_change_unit, p.readings.get(l.from)?.unit ?? nodeById.get(l.from)?.change_unit ?? nodeById.get(l.from)?.unit))) return false;
     const target = [nodeById.get(l.from)?.label, nodeById.get(l.to)?.label].filter((s): s is string => typeof s === 'string');
     const others = nodes.filter(n => n.id !== l.from && n.id !== l.to && n.kind !== 'option' && n.kind !== 'decision')
       .flatMap(n => typeof n.label === 'string' ? [n.label] : []);
@@ -156,6 +180,7 @@ export function bindStatedLinkSizes(
     // A range written around a level ("to about 30%, between 25% and 35%") is the LEVEL's, never a spread of the change.
     const centre = spans.level === undefined ? centreRangeAt(sentences[p.sentence]!, spans.amount, d.amount, d.amount_unit) : undefined;
     if (centre !== undefined) centreRanges?.set(p.link, centre);
+    for (const [id, reading] of p.readings) extras.labelUnits?.set(id, reading);
     return true;
   }).map(p => [p.link, sentences[p.sentence]! as string]));
 

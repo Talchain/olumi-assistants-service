@@ -1919,7 +1919,8 @@ export async function buildModelFromBrief(
   const unitReading = goalUnitReading(candidate.goal, brief, statedGoal.held.target);
   const goalNodes = deadlineHeld || unitReading !== undefined
     ? statedGoal.nodes.map((n) => (n.kind === 'goal'
-      ? { ...n, ...(deadlineHeld ? { goal_deadline_as_stated: deadlineWords } : {}), ...(unitReading !== undefined ? { unit_reading: unitReading } : {}) }
+      ? { ...n, ...(deadlineHeld ? { goal_deadline_as_stated: deadlineWords } : {}),
+        ...(unitReading !== undefined && n.unit_reading?.source !== 'user_stated' ? { unit_reading: unitReading } : {}) }
       : n))
     : statedGoal.nodes;
 
