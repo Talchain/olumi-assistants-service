@@ -30,8 +30,9 @@ import { olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
 import { edgeBandFromStrengthBand, edgeBandStd } from '../format/edge-strength-bands.js';
 import { valueWriteAuthorshipDigests } from '../tools/handlers/run-input-residual.js';
 
-type Value = { raw: number | string | boolean; unit?: string };
 type Row = RunDeltaInputChange;
+/** One end of a row, as the contract types it (0.78: an `effect` end also carries `per`). */
+type Value = NonNullable<Row['before']>;
 
 const valueOf = (raw: number | string | boolean | undefined, unit: string | undefined): Value | null =>
   raw === undefined ? null : unit !== undefined ? { raw, unit } : { raw };
@@ -314,6 +315,17 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
       if (pl.sizing !== cl.sizing) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
     } else if (pl.sizing !== cl.sizing) {
       complete = false;
+    }
+    // ⭐ 0.78.0 (SD-1 cut 6, #87 6008093205): the link's SIZE in the user's terms moved — an `effect` row, both ends the
+    // snapshots' own figures, only when both Runs recorded a current point size per the SAME source change (a size on one
+    // Run only, or per a different change, is no pair). Coverage is unchanged by it: whether an effect row states the
+    // mean move is Science's ruling, so a mean move inside one band stays partial below.
+    const pe = pl.natural_effect;
+    const ce = cl.natural_effect;
+    if (pe !== undefined && ce !== undefined
+      && pe.per_source_change === ce.per_source_change && pe.per_source_change_unit === ce.per_source_change_unit) {
+      const per = { amount: ce.per_source_change, unit: ce.per_source_change_unit };
+      push(changeRow({ ...linkBase, field: 'effect' }, { raw: pe.amount, unit: pe.amount_unit, per }, { raw: ce.amount, unit: ce.amount_unit, per }));
     }
     // A band row states the move of the MEAN and nothing else (DL ruling #2482, P1 #1): the band never absorbs a sign
     // flip or a spread the move does not explain. Either is a change no row states → partial.
