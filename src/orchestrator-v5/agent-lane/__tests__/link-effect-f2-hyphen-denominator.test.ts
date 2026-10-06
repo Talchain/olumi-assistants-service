@@ -107,6 +107,17 @@ describe('an end whose every word is the other end\'s is named only outside the 
   it('"…in the no-show charge raises no-shows…" names both → BINDS', () => {
     expect(said('Each £1 rise in the no-show charge raises no-shows by about 0.05% of appointments.', 'No-show charge', 'no-shows', '% of appointments', '£', 0.05, DENTAL)).toBe('BINDS');
   });
+  it.each([
+    ['served (Acceptance r15/r17): "Price rise" inside "Customers lost to price rise"', 'Price rise'],
+    ['contrast: "Existing-customer price rise" (words of its own)', 'Existing-customer price rise'],
+  ])('%s → BINDS', (_n, source) => {
+    expect(said(`Each 1% ${source} increases Customers lost to price rise by about 3 customers.`, source, 'Customers lost to price rise', 'customers', '%', 3))
+      .toBe('BINDS');
+  });
+  it('twin: "Price rise" said only inside "Customers lost to price rise" → end_not_named', () => {
+    expect(said('Each 1% rise increases Customers lost to price rise by about 3 customers.', 'Price rise', 'Customers lost to price rise', 'customers', '%', 3))
+      .toBe('end_not_named');
+  });
   it('twin: "…in No-show charge would raise them…" never names "no-shows" → end_not_named', () => {
     expect(said('A £1 rise in No-show charge would raise them by about 0.05% of appointments.', 'No-show charge', 'no-shows', '% of appointments', '£', 0.05, DENTAL)).toBe('end_not_named');
   });
