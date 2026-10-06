@@ -66,6 +66,8 @@ export interface SetAsideLink {
   readonly to: string;
   /** A link from the shared name to itself: said, never asked (it is no question either could answer). */
   readonly self: boolean;
+  /** DL #2655 (6010980882): held across a retry that renamed the quantity with no single new name. Said, never asked. */
+  readonly unasked?: true;
 }
 
 export interface NotToldApart {
@@ -183,6 +185,7 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
 
 /** What is said for a link set aside (`not_represented`, suffix `.link_set_aside`). */
 export function setAsideLinkLine(a: SetAsideLink): string {
+  if (a.unasked === true) return `The link from "${a.option}" to "${a.to}" was set aside: it is not in the model.`;
   return a.self
     ? `A link from "${a.option}" to itself was set aside: it is not in the model.`
     : `The link from "${a.option}" to "${a.to}" could be the option's own or "${a.renamed}"'s, so it is set aside and not in the model yet.`;
@@ -191,7 +194,7 @@ export function setAsideLinkLine(a: SetAsideLink): string {
 /** The one question asked for it (`open_questions`), never for a self-link. */
 export function setAsideLinkQuestion(a: SetAsideLink): string | null {
   // ⛔ No promise to draw it (DL pre-check #2655): the link door asks for the user's own strength and direction first.
-  return a.self ? null : `Does "${a.option}" change "${a.to}" directly, or through "${a.renamed}"? Until you say, that link is not in the model.`;
+  return a.self || a.unasked === true ? null : `Does "${a.option}" change "${a.to}" directly, or through "${a.renamed}"? Until you say, that link is not in the model.`;
 }
 
 /**
@@ -205,8 +208,8 @@ export function setAsideLinkQuestion(a: SetAsideLink): string | null {
  *     would not have been set aside): that action is removed, so admission never draws the link the words say is absent;
  *   · the retry RENAMES the quantity (only a compaction can: a repair that sheds an action is never adopted,
  *     `keepsEveryAction`): the hold follows it when the option sets exactly ONE quantity the first draft did not name (said
- *     and asked under the new name); otherwise no question can be put in the retry's names, and the option's own link to
- *     that end is still never drawn.
+ *     and asked under the new name); otherwise no question can be put in the retry's names, so the option's own link to
+ *     that end is still never drawn, and that is SAID, never asked (DL #2655 6010980882).
  */
 export function holdAcrossRetry(
   model: CandidateModel,
@@ -235,7 +238,7 @@ export function holdAcrossRetry(
     && (a.self ? canon(l.to) === canon(l.from) : canon(l.to) === canon(a.to)))
     || optionOnly.some((a) => canon(l.from) === canon(a.option) && canon(l.to) === canon(a.to));
   const heldEnd = (option: string, f: string): boolean => held.some((a) => !a.self && canon(a.option) === canon(option) && canon(a.to) === canon(f));
-  const setAside = [...held];
+  const setAside: SetAsideLink[] = [...held, ...optionOnly.map((a) => ({ ...a, unasked: true as const }))];
   for (const a of own.setAside) if (!setAside.some((b) => canon(b.option) === canon(a.option) && canon(b.to) === canon(a.to))) setAside.push(a);
   const renamed = [...own.renamed];
   for (const k of first.renamed) {

@@ -234,7 +234,7 @@ describe('Codex r1 #2655: what is set aside stays true to the registered model',
   it('r2 P1 (rename, no single new name): a compaction retry whose option sets two new quantities never draws its own link to the held end', async () => {
     const c = withLockIn();
     for (let i = 1; i <= 12; i += 1) { c.outcomes.push({ label: `Extra outcome ${i}`, provenance: 'inferred' }); c.links.push(L(`Extra outcome ${i}`, c.goal.metric)); }
-    const { edges, trace } = await run(c, FX.brief, (x) => {
+    const { edges, trace, said, asked } = await run(c, FX.brief, (x) => {
       x.outcomes = x.outcomes.filter((o: Rec) => !String(o.label).startsWith('Extra outcome'));
       x.links = x.links.filter((l: Rec) => !String(l.from).startsWith('Extra outcome'));
       const rename = (v: string): string => (v === 'Enterprise discount level' ? 'Negotiated discount rate' : v);
@@ -247,6 +247,10 @@ describe('Codex r1 #2655: what is set aside stays true to the registered model',
     });
     expect(trace).toMatchObject({ retried: true, outcome: 'adopted' });
     expect(edges).not.toContainEqual(['enterprise_discount', 'provider_lock_in']);
+    // DL #2655 (6010980882): never silent. Said, never asked, no promise.
+    expect(said).toContain('The link from "Enterprise discount" to "Provider lock-in" was set aside: it is not in the model.');
+    expect(asked.filter((x) => x.includes('"Enterprise discount"') && x.includes('"Provider lock-in"'))).toEqual([]);
+    expect(JSON.stringify([...said, ...asked])).not.toContain('draw');
   });
 
   it('r2 P1 (a spelling admission merges): "Monthly  churn" beside the limited "Monthly churn" is re-kinded with it — its link is set aside, never re-sourced', async () => {
