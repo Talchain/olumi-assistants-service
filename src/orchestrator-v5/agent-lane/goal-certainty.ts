@@ -561,7 +561,7 @@ export function placeholderAskWords(graph: unknown, links: ReadonlyArray<{ from:
  * ⭐ THE NO-DEAD-END ASKS (MC 21; Science d5): the words a withheld path's links are asked in, when a level-less mediator or
  * a frameless goal would otherwise leave the user nothing they can answer. `undefined` when none applies, so every other
  * withhold keeps its words byte for byte.
- *   (A) a goal with no frame: its level first, in the served P5 question ("What's today's level of …?"); the existing card
+ *   (A) a goal with no frame: its level first, with Science's bridge ("To size it, I first need today’s level of …"); the existing card
  *       records it, and the next Run asks the links.
  *   (B) a gauge mediator: ONE end-to-end question (6006425419), never its two links apart; both leave the one-click offer.
  *   (C) a mediator measured in its sized parent's unit: asked in that unit, the estimate named (6006548763).
@@ -597,7 +597,9 @@ export function noDeadEndAsks(
   if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {
     const unit = unitOf(goalView);
     const statement = unsizedLinkStatement(links.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
-    const ask = fitted(() => `What's today's level of ${q(String(goal.id))}${unit !== undefined ? `, in ${unit}` : ''}?`);
+    // Science d5 #87 6007354826: the bridge says WHY the level comes first (the link question needs the goal's unit).
+    const ask = fitted(() => `To size ${links.length > 1 ? 'them' : 'it'}, I first need today\u2019s level of ${q(String(goal.id))}.`
+      + ` What is it${unit !== undefined ? `, in ${unit}` : ''}?`);
     return { message: fit([statement, ask]) || ask, gaugeLinks: new Set() };
   }
   const readings = mediatorReadings(graph);

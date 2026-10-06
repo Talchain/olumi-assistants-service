@@ -368,12 +368,12 @@ describe('THE WORDS: the card and the withhold ask', () => {
     const g = sizedParentGraph('weeks');
     expect(W(g, [{ from: 'cost', to: 'mrr' }], 'o-spend').message).toContain('Roughly how much does each 1 week of');
   });
-  it("(A) withhold: a goal with no frame is asked today's level first (the served P5 question)", () => {
+  it("(A) withhold: a goal with no frame is asked today's level first, with d5's bridge (#87 6007354826)", () => {
     const g = gaugeGraph();
     const goal = g.nodes.find((n: Rec) => n.id === 'mrr');
     delete goal.observed_state;
     goal.goal_threshold_unit = '£/month';
-    expect(W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).toMatch(/What's today's level of ‘MRR’, in £\/month\?$/);
+    expect(W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).toMatch(/whose strengths nobody has set yet\. To size them, I first need today’s level of ‘MRR’\. What is it, in £\/month\?$/);
   });
   it('CONTROL: a withhold with no mediator and a framed goal keeps its words byte for byte', () => {
     const g = gaugeGraph();
