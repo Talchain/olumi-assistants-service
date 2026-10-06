@@ -238,6 +238,7 @@ describe('withoutAskedQuestion (the one rule)', async () => {
     ['won\'t ask it again, in quotes', `I won’t ask “${QUESTION}” again.`],
     ['shouldn\'t keep asking it, quoted at the end', `I shouldn’t keep asking “${QUESTION}”`],
     ['the words inside another word', `Something${QUESTION}`],
+    ['in single quotes (not counted as a quotation span; the opening mark itself)', `I shouldn\u2019t keep asking \u2018${QUESTION}\u2019`],
     ['quoted across a sentence break (Codex r2 on #2664 P1)', `I won\u2019t ask \u201cI need a size for that link. ${QUESTION}\u201d`],
     ['quoted across a sentence break, straight quotes', `I won't ask "I need a size for that link. ${QUESTION}" again.`],
   ] as const)('⭐ never asked, only mentioned (%s) → the question is still asked', (_n, reply) => {
