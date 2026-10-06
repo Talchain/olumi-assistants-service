@@ -1,4 +1,4 @@
-import { refreshScopePending } from '../agent-lane/goal-scope.js';
+import { refreshScopePending, scopeIssueBlocks } from '../agent-lane/goal-scope.js';
 import type { PendingAction } from '../session/pending-action.js';
 import type { GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 
@@ -15,7 +15,8 @@ export function goalScopeClaimInput(
 ): GoalScopeClaimInput {
   const issues = pending.flatMap(p => {
     const current = refreshScopePending(p, graph);
-    return current?.action.kind === 'reconcile_goal_scope' ? [current.action] : [];
+    // An untyped drafter question is not a scope issue for claims (`scopeIssueBlocks`): the goal reads as the total.
+    return current?.action.kind === 'reconcile_goal_scope' && scopeIssueBlocks(current.action) ? [current.action] : [];
   });
   return { status: issues.length === 0 ? 'clear' : 'unresolved', issues };
 }

@@ -43,6 +43,7 @@ import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { bindStatedLinkSizes } from './stated-size-binding.js';
+import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 export { bindStatedLinkSizes } from './stated-size-binding.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 export { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
@@ -1250,6 +1251,38 @@ function metricNamesScope(metric: string, modelled: string, alternative: string)
   const own = [...mine].filter((w) => !other.has(w));
   const theirs = [...other].filter((w) => !mine.has(w));
   return own.length > 0 && own.every((w) => said.has(w)) && !theirs.some((w) => said.has(w));
+}
+
+/** Words that say the WHOLE ("total", "all", "across every plan"). Folded exactly as a metric is ('across' → 'acros'). */
+const WHOLE_WORDS = scopeWords(['total', 'all', 'every', 'overall', 'whole', 'entire', 'combined', 'across', 'together'].join(' '));
+/**
+ * Words that say WHICH quantity a goal is, never which part of it: the measure and its money. Its PERIOD ("monthly",
+ * "MRR", "year") is read from the one unit alphabet (`periodNoun` / `periodAdverb`), never a list of its own.
+ */
+const MEASURE_WORDS = scopeWords([
+  'revenue', 'recurring', 'income', 'sale', 'turnover', 'profit', 'margin', 'ebitda', 'cash', 'cost', 'spend',
+  'bookings', 'booking', 'billing', 'subscription', 'subscriber', 'customer', 'user', 'member', 'client', 'account',
+  'churn', 'retention', 'growth', 'gross', 'net', 'value', 'order', 'conversion', 'signup', 'gbp', 'usd', 'eur', 'k', 'm', 'bn',
+].join(' '));
+const isPeriodWord = (w: string): boolean => periodNoun(w) !== null || periodAdverb(w) !== null;
+/**
+ * The generic part-nouns a whole is made of. They say the whole only beside a whole word ("across all plans"); alone they
+ * may name one part ("Product revenue", "Channel revenue": Codex buddy r2 P1).
+ */
+const PART_NOUNS = scopeWords(['plan', 'tier', 'product', 'segment', 'stream', 'source', 'line', 'channel', 'region', 'market'].join(' '));
+
+/**
+ * ⭐ A GOAL THAT NAMES NO PART READS AS THE TOTAL (Science d5 #87 6006584860 / 6007341975; DL 6 Oct). True when every word
+ * of the metric is a measure/period/money word, a whole word, or a part-noun beside a whole word: "MRR", "Total MRR",
+ * "monthly recurring revenue", "total revenue across all plans". Anything else may name a part ("Starter MRR", "Business
+ * customer MRR", "Product revenue", "… net of refunds …") and keeps C46's question (ask (a), non-blocking): asking is the
+ * safe side, and an untyped question never withholds (`scopeIssueBlocks`). PURE.
+ */
+export function metricReadsAsPlainTotal(metric: string): boolean {
+  const said = [...scopeWords(metric)];
+  const whole = said.some((w) => WHOLE_WORDS.has(w));
+  return said.length > 0 && said.every((w) => MEASURE_WORDS.has(w) || isPeriodWord(w) || WHOLE_WORDS.has(w) || (whole && PART_NOUNS.has(w))
+    || /^\d+(k|m|bn)?$/.test(w));
 }
 
 /** `"A"`, `"A" and "B"`, `"A", "B" and "C"` — words, never ids. */
