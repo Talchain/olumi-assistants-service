@@ -250,6 +250,8 @@ export const WIRE_WITHHELD_LEADER_REPLACEMENT = WITHHELD_EXPLANATION_NO_DISCLOSU
  * to exist is a scope that widens or narrows without anyone noticing.
  */
 export const WIRE_ENFORCED_PROSE_FIELDS = ['assistant_text', 'framing_question'] as const;
+/** A block's chip: rendered together or not at all, so a leader claim in its prompt omits all three. */
+const CHIP_FIELDS = ['action_prompt', 'action_label', 'action_intent'] as const;
 type WireEnforcedProseField = (typeof WIRE_ENFORCED_PROSE_FIELDS)[number];
 
 /** How the designation was removed. Bounded — this is the telemetry cardinality. */
@@ -662,6 +664,12 @@ function projectBlocksForWithheldClaim(
       next[key] = value;
       changed = true;
     };
+    const omit = (key: string): void => {
+      if (!(key in source)) return;
+      next ??= { ...source };
+      delete next[key];
+      changed = true;
+    };
 
     // (1) STRUCTURED DESIGNATIONS — no roster needed. A key whose whole job is
     //     to name the leader designates one whatever its value says.
@@ -708,14 +716,21 @@ function projectBlocksForWithheldClaim(
     //     establish, and deleting prose on a guess is the over-suppression this
     //     module weights equally with the leak.
     if (roster.length > 0) {
+      let omitChip = false;
       for (const field of BLOCK_PROSE_FIELDS) {
         const value = source[field];
         if (typeof value !== 'string') continue;
         const result = projectField(value, roster);
         if (result === null) continue;
         escalate(result.mode);
-        write(field, result.text);
+        // ⭐ A CHIP PROMPT IS SENT AS THE USER'S OWN WORDS (DL 0df0e1 6010662486, #87 6010674597): a claim in it omits
+        // the whole chip, never a rewritten prompt put in the user's mouth.
+        if (field === 'action_prompt') omitChip = true;
+        else write(field, result.text);
       }
+      // After the loop, so a rewritten `action_label` cannot come back. The chip's three fields render together or not
+      // at all (phase3-blocks), so none is left orphaned, and `body` was projected in this same pass: never divergent.
+      if (omitChip) for (const key of CHIP_FIELDS) omit(key);
     }
 
     return next ?? block;

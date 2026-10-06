@@ -58,8 +58,9 @@ describe('0.79 · a delivered record is served only within the read\'s leader li
     expect(within(record(), 'withheld')).toBe(true);
   });
 
-  it('⭐ a claim only the AGENT lane\'s vocabulary sees ("…ends up with the highest MRR") is not served under a withheld licence', () => {
-    const highest = `${HIRE} ends up with the highest MRR.`;
+  it('⭐ a claim only the AGENT lane\'s vocabulary sees ("…comes out with the highest MRR") is not served under a withheld licence', () => {
+    // Re-picked: #2660 widened the v5 ladder to "ends up with", so the original phrase is now caught by the bare guard.
+    const highest = `${HIRE} comes out with the highest MRR.`;
     // Precondition (Desk 6b): the v5 leader patterns miss it, bare and rostered — only the agent lane's catches it.
     expect(textAssertsLeadingOption(highest)).toBe(false);
     expect(textAssertsLeadingOption(highest, { optionLabels: [HIRE, 'Hold headcount'] })).toBe(false);
