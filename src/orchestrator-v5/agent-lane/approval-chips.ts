@@ -26,6 +26,16 @@ import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
 import { linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf } from './stated-by-user.js';
+import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
+
+/**
+ * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
+ * link-effect-edit.ts), so "percentage points" meets a "%" reading. Without it the card for a points answer through a %
+ * gauge was never built, and the prepared change had no Approve.
+ */
+const POINTS_SAID: readonly string[] = [...POINTS_SPELLINGS, 'points'];
+const meetsReading = (stated: unknown, reading: string): boolean => stated === reading
+  || (reading.trim() === '%' && typeof stated === 'string' && POINTS_SAID.includes(stated.trim().toLowerCase().replace(/\s+/g, ' ')));
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -368,9 +378,9 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
       || Object.keys(item).some((k) => !['node_id', 'via', 'unit', 'other_label', 'replaces'].includes(k))
       || (item.replaces !== undefined && (item.replaces !== true || item.via !== 'gauge'))) return undefined;
     const end = item.node_id === op.from ? labels.from : labels.to;
-    if (item.via === 'sized_parents' && (item.node_id === op.from ? e.per_source_change_unit : e.amount_unit) === item.unit) {
+    if (item.via === 'sized_parents' && meetsReading(item.node_id === op.from ? e.per_source_change_unit : e.amount_unit, item.unit)) {
       mediated.push(`Olumi measures \u2018${end}\u2019 in ${item.unit}, from its own estimate of the link from \u2018${item.other_label}\u2019; correct that if it\u2019s wrong.`);
-    } else if (item.via === 'gauge' && item.node_id === op.to && e.amount_unit === item.unit && through === undefined) {
+    } else if (item.via === 'gauge' && item.node_id === op.to && meetsReading(e.amount_unit, item.unit) && through === undefined) {
       through = { child: item.other_label, mediator: end };
       mediated.push(`Olumi treats \u2018${end}\u2019 as part of how \u2018${labels.from}\u2019 moves \u2018${item.other_label}\u2019, so your answer sizes the whole path.`
         + (item.replaces === true ? ` Your answer replaces Olumi\u2019s own estimate for the link from \u2018${labels.from}\u2019 to \u2018${end}\u2019.` : ''));
