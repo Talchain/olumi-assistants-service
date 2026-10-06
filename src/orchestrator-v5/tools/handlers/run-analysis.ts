@@ -1168,6 +1168,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ R1 S4 (B) (#72 5879602608): a HELD strict floor ("MRR above £85k") is scored strictly past its target — ISL
     // `goal_threshold_strict` (ISL #209), forwarded by PLoT. Only where the run maximises and the goal carries a
     // threshold (`resolveGoalThresholdStrict`, the rule admission reads too); otherwise no key, byte-identical.
+    // ⭐ D3 step 1: and a held strict CEILING ("below 400") where the run minimises, strictly below its threshold.
     if (resolveGoalThresholdStrict(graphForAnalysis, snapshot.goal_node_id)) {
       plotPayload.goal_threshold_strict = true;
     }

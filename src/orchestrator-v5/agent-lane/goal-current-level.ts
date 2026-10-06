@@ -71,6 +71,7 @@ import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
 import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
+import { holdsPairableCeiling, pairGoalCeiling } from '../goal-target/goal-ceiling-pair.js';
 import { isUnnamedCurrencyUnit, unitAlreadyOnGoal, unitNamingCurrency } from './unnamed-currency.js';
 import { scopeOf, identityConflictsWithScope, scopeSourcesAreUserWords, goalScopeCheck, scopeCanRecord, SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWithdrawalReading } from '../system-events/identity-confirm-edit.js';
@@ -595,7 +596,12 @@ export async function proposeGoalCurrentLevel(
   // the node). Whether the goal HAS a target is the one reader's answer: "at most 5%" set through the goal panel lives on
   // the goal's own limit row, so the approval never tells the user that goal "has no target yet".
   const targetStated = statedGoalTargetOf(g.raw, goal as Record<string, unknown>) !== null;
-  if (!isChange && !noTargetYet && (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level')) {
+  // ⭐ D3 step 1 (Science #87 6005138341): a goal CEILING is scored on the goal's own level frame, so today's level is read
+  // on ITS OWN frame here too — the apply then (re)pairs the ceiling on that frame in the same write. A paired ceiling's
+  // earlier cap is today's earlier level's frame: a new level renormalises it, never refused against the old one.
+  const ceilingTakesTheLevelFrame = !isChange && node.goal_threshold_frame === 'level' && holdsPairableCeiling(g.raw, goal.id);
+  const levelOnItsOwnFrame = noTargetYet || ceilingTakesTheLevelFrame;
+  if (!isChange && !levelOnItsOwnFrame && (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level')) {
     return refuse(
       'no_target',
       `"${goal.label}" has no stated target to measure its current level against, so there is no chance of reaching ` +
@@ -621,7 +627,7 @@ export async function proposeGoalCurrentLevel(
 
   let normalisedLevel: number;
   let levelCap: number;
-  if (noTargetYet) {
+  if (levelOnItsOwnFrame) {
     /**
      * ⭐ THE LEVEL ON ITS OWN FRAME (DL #85 5930770727): the one cap rule, given the level as its only figure — the cap a
      * construction would give a goal whose only figure is this one. No comparator and no target are read: there are none.
@@ -1090,6 +1096,10 @@ export async function applyGoalCurrentLevel(
    */
   const unretired = { ...approved.raw, nodes } as Record<string, unknown> & { nodes: typeof nodes };
   const graph = retireNormalisingGoalFrame(unretired);
+  // ⭐ D3 step 1: a goal ceiling is (re)paired on the level this write carries, in this same write (Science #87
+  // 6005138341): the ceiling came first (rt10b's order) or an earlier level framed it, so the new level renormalises it.
+  const ceilingPaired = holdsPairableCeiling(graph, op.path)
+    && pairGoalCeiling(graph, op.path) === 'paired';
   const retired = graph !== unretired;
   const writtenGoal = (graph.nodes as readonly Record<string, unknown>[]).find((n) => n.id === op.path);
   const writtenOs = (writtenGoal?.observed_state ?? os) as { baseline?: unknown };
@@ -1128,7 +1138,12 @@ export async function applyGoalCurrentLevel(
     (after?.nodes.find((n) => n.id === op.path) as { goal_threshold_unit?: unknown } | undefined)?.goal_threshold_unit === adoptedUnit);
   const scopeHeld = !scope || (after !== null && stableStringify(goalScopeMeaning((after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.goal_scope)) === stableStringify(goalScopeMeaning(scope))
     && (!withdrawal || !(after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.nonlinear_identity));
-  const landed = scopeHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
+  // The ceiling's pair is read back too: its figure, its cap and its threshold, exactly as this write carried them.
+  const pairNow = after?.nodes.find((n) => n.id === op.path) as { goal_threshold_raw?: unknown; goal_threshold_cap?: unknown; goal_threshold?: unknown } | undefined;
+  const pairWritten = writtenGoal as { goal_threshold_raw?: unknown; goal_threshold_cap?: unknown; goal_threshold?: unknown } | undefined;
+  const pairHeld = !ceilingPaired || (pairNow !== undefined && pairNow.goal_threshold_raw === pairWritten?.goal_threshold_raw
+    && pairNow.goal_threshold_cap === pairWritten?.goal_threshold_cap && pairNow.goal_threshold === pairWritten?.goal_threshold);
+  const landed = scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {

@@ -55,6 +55,12 @@ export const GOAL_THRESHOLD_CAP_PROVENANCE = [
    * choice of units, every link's natural size and the raw target held. Typed for audit; nothing the user sees moves.
    */
   'stated_effect_fit',
+  /**
+   * D3 step 1 (Science #87 6005138341): a goal CEILING is scored on the goal's own LEVEL frame — the cap the today's-level
+   * card gave today's level (`goal-ceiling-pair.ts`). Never derived from the ceiling: a ceiling below today's level would
+   * put today off its own scale.
+   */
+  'level_frame',
 ] as const;
 
 export type GoalThresholdCapProvenance =
