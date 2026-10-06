@@ -23,7 +23,7 @@ import { projectOptionForCanonicalBuilder } from '../../orchestrator/tools/analy
 import { computeAnalysisReadyStatusWithReason } from '../../cee/transforms/option-status.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION as VOCABULARY } from '@talchain/schemas/boundary';
-import { endsOfGraph, heldLinkOf, UNVALIDATED_ENDS, type LinkEnds } from '../goal-target/held-user-links.js';
+import { endsOfGraph, heldLinkBeforeValidatedDefinition, heldLinkOf } from '../goal-target/held-user-links.js';
 import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
@@ -171,9 +171,12 @@ export function computeAnalysisAffectingGraphHashSha256(
   }
 
   const factorIds = new Set(nodes.filter((node) => node != null && node.kind === 'factor').map((node) => node.id));
-  // d5 6011224941: a VALIDATED definition holds whoever flagged it; the labels and each end's unit come from this graph.
-  // 'pre_definition' (history only) reads no ends, so it is the user-only hold a version recorded before that rule hashed.
-  const endsOf = projection === 'pre_definition' ? (): LinkEnds => UNVALIDATED_ENDS : endsOfGraph(graph);
+  // The hold this projection hashes (`EdgeHold`): the current one reads this graph's ends (d5 6011224941: a VALIDATED
+  // definition holds whoever flagged it); 'pre_definition' is the user-only hold of #2643/#2653; 'pre_hold' none (history).
+  const endsOf = endsOfGraph(graph);
+  const hold: EdgeHold = projection === 'pre_hold' ? () => null
+    : projection === 'pre_definition' ? heldLinkBeforeValidatedDefinition
+      : (edge) => heldLinkOf(edge, endsOf(edge));
   const mirroredOptions = Array.isArray(options)
     ? options.map((option) => projectOptionForCanonicalBuilder(option, factorIds))
         .filter((option) => option !== null)
@@ -195,7 +198,7 @@ export function computeAnalysisAffectingGraphHashSha256(
       return { ...projectNode(node), ...projectAdmissionGaps(option, nodeOption?.unresolved_targets) };
     }).sort((a, b) => a.id.localeCompare(b.id)),
     edges: edges
-      .map((edge) => projectEdge(edge, projection !== 'pre_hold', endsOf(edge)))
+      .map((edge) => projectEdge(edge, hold))
       .sort((a, b) => {
         const fromCmp = a.from.localeCompare(b.from);
         return fromCmp !== 0 ? fromCmp : a.to.localeCompare(b.to);
@@ -384,10 +387,13 @@ interface EdgeProjection {
 }
 
 /**
- * `applyHold` false is the PRE-HOLD current projection (Codex r2 #2643): identical but for hold-at-1.0, so a model version
- * or Run recorded before the hold still validates as IMMUTABLE history. Never used for freshness.
+ * The hold a projection applies to one edge. The current projection's is `heldLinkOf` with the graph's ends. A HISTORY
+ * projection's is the hold of its day: none for 'pre_hold' (Codex r2 #2643), the user-only hold for 'pre_definition'
+ * (d5 #87 6011224941), so a model version or Run recorded then still validates as IMMUTABLE history. Never freshness.
  */
-function projectEdge(raw: unknown, applyHold: boolean, ends: LinkEnds): EdgeProjection {
+type EdgeHold = (edge: unknown) => { readonly std: number } | null;
+
+function projectEdge(raw: unknown, hold: EdgeHold): EdgeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const out: EdgeProjection = {
     from: typeof r.from === 'string' ? r.from : '',
@@ -421,7 +427,7 @@ function projectEdge(raw: unknown, applyHold: boolean, ends: LinkEnds): EdgeProj
   // ⭐ HOLD-AT-1.0 (d5 #87 6008807178; Codex r1 #2643 P1): the analysis-affecting identity of a HELD link is what the Run
   // is SENT — existence 1 and its range's spread — through the same fields (no new key), so a range edit is an input change
   // and a Run computed before the hold is not "fresh". Only a graph with a held link hashes differently.
-  const held = applyHold ? heldLinkOf(r, ends) : null;
+  const held = hold(r);
   if (held !== null) {
     out.exists_probability = 1;
     out.strength = { ...(out.strength as Record<string, unknown> | undefined), std: held.std };
