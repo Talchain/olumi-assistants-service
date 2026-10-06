@@ -6,6 +6,7 @@ import { SessionLRUCache } from '../../orchestrator-v5/session/cache.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import { runExplanationChip, RUN_EXPLANATION_PREFIX } from '../../orchestrator-v5/agent-lane/run-explanation.js';
 import { agentProposals } from '../../orchestrator-v5/agent-lane/held-approval-offers.js';
+import { parseAnswerOffers } from '../../orchestrator-v5/agent-lane/answer-offers-envelope.js';
 import { createProposal } from '../../orchestrator-v5/agent-lane/proposal.js';
 import { proposalPendingAction } from '../../orchestrator-v5/agent-lane/durable-proposal.js';
 import { parsePendingAction, type PendingAction } from '../../orchestrator-v5/session/pending-action.js';
@@ -242,12 +243,33 @@ describe('X4 real commit door → cold graph-read door', () => {
     expect(clean(failed)).toEqual(clean(body));
     for (const turn of failed.conversation_turns) expect(Object.keys(turn).sort()).toEqual(['assistant_message', 'created_at', 'turn_id', 'user_message']);
   });
-  it('null Run binding drops method presses; repair offers retain their original order and words while valid', async () => {
+  it('row 10 (buddy r1 P1): an unexpired approval in the latest carrier withholds next steps on a COLD worker that cannot recover its card', async () => {
+    await positive();
+    const proposal = createProposal({ scenario_id: scenario, user_id: OWNER, base_graph_identity_hash: HASH,
+      operations: [{ op: 'add_edge', path: 'f1::o1', value: 0.4 }], provenance: { authored_by: 'model_proposed' },
+      validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'The held change' });
+    const chip = { id: `agent-approve-proposal:${proposal.proposal_id}`, label: 'Record this link', message: 'Yes, record that.', detail: 'The exact offered card.' };
+    const pa = parsePendingAction(proposalPendingAction(proposal, chip, { scenario_id: scenario, emitted_at_iso: new Date().toISOString() }))!;
+    expect(pa).not.toBeNull();
+    // Cold worker: the proposal is not in this process, and NO answer row carries its card.
+    agentProposals.discard(proposal.proposal_id); latest = [pa]; coldStore();
+    const waiting = await read(); noOffers(waiting);
+    expect(waiting.held_proposal_offers ?? []).toEqual([]); // no card is recoverable: the field is empty or absent
+    // Positive twin in the same state minus the carrier: the next steps are served again.
+    latest = []; coldStore();
+    expect((await read()).conversation_turns.at(-1).suggested_actions).toEqual(EXPECTED);
+  });
+  it('the envelope refuses the Run chip id, as the migration does (buddy r1 #2)', () => {
+    expect(parseAnswerOffers([{ id: 'agent-run-analysis', label: 'Run analysis', message: 'Run analysis.' }])).toBeNull();
+    expect(parseAnswerOffers(EXPECTED)).toEqual(EXPECTED);
+  });
+  it('null Run binding restores nothing; the repair chips are never durable (buddy r1 #3)', async () => {
     await positive(); table.find(r => r.turn_id === 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1')!.suggested_actions_run_key = null; coldStore(); noOffers(await read());
     const repairs = [REBUILD_AFTER_TOO_LARGE_CHIP, NEXT_STEP_AFTER_BLOCKED_RUN_CHIP, SUGGEST_STARTING_ASSUMPTIONS_CHIP];
     const stored = { turn_id: 'repairs', run_key: null, suggested_actions: [...EXPECTED, ...repairs] };
     expect(answerOffersForReload(stored, scenario, { graphHash: HASH, analysisState: { run_state: { kind: 'none' } },
-      analysisReady: { status: 'blocked', may_run: false }, analysisResult: null, outstandingProposalIds: new Set(), modelExists: false })).toEqual(repairs);
-    expect(repairs.every(isDurableAnswerOffer)).toBe(true);
+      analysisReady: { status: 'blocked', may_run: false }, analysisResult: null, outstandingProposalIds: new Set(), modelExists: false })).toEqual([]);
+    expect(repairs.some(isDurableAnswerOffer)).toBe(false);
+    expect(EXPECTED.every(isDurableAnswerOffer)).toBe(true);
   });
 });

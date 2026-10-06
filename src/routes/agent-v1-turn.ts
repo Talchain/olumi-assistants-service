@@ -701,13 +701,16 @@ function decisionReviewChips(turn: DecisionReviewTurn): OfferedAction[] {
 const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID, DECISION_REVIEW_PRESS_ID]);
 export { METHOD_PRESS_IDS };
 
-/** Only the final answer's plain-text reasoning/repair controls use the durable offers carrier. */
+/**
+ * Only the plain-text reasoning presses a CURRENT Run offers use the durable offers carrier. The repair chips
+ * ("Suggest what it still needs", "Suggest starting assumptions", "Build it again") are not stored: a live turn offers
+ * them on a richer predicate than `stillValidOffers` re-checks, so a reload could offer one a turn would not.
+ */
 export function isDurableAnswerOffer(action: SuggestedAction): boolean {
   return !('action_type' in action) && !('detail' in action)
     && typedApprovalOf({ chip: { id: action.id } }) === undefined
     && action.id !== RUN_OFFER_CHIP.id && !isRunExplanationChip(action.id)
-    && (METHOD_PRESS_IDS.has(action.id) || action.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id
-      || action.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id || action.id === REBUILD_AFTER_TOO_LARGE_CHIP.id);
+    && METHOD_PRESS_IDS.has(action.id);
 }
 
 /**

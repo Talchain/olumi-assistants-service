@@ -145,6 +145,8 @@ describe('X4 migration boundaries (static, no database required)', () => {
     expect(sql).toContain('jsonb_array_length(p_suggested_actions) NOT BETWEEN 1 AND 8');
     expect(sql).toContain("(v_action - 'id' - 'label' - 'message') <> '{}'::jsonb");
     expect(sql).toContain("'^agent-[a-z0-9-]{1,80}$'"); expect(sql).toContain("'^[0-9a-f]{16}$'");
+    // The Run offer keeps its own carrier: the database boundary refuses its id, not only the reader (buddy r1 #2).
+    expect(sql).toContain("OR (v_action->>'id') = 'agent-run-analysis'");
     expect(sql).toContain('char_length(v_action->>\'label\') NOT BETWEEN 1 AND 80');
     expect(sql).toContain('char_length(v_action->>\'message\') NOT BETWEEN 1 AND 400');
     expect(sql).not.toMatch(/p_handler_facts IS DISTINCT/);

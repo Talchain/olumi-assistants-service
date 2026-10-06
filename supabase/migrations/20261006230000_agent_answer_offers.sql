@@ -50,6 +50,7 @@ BEGIN
       OR jsonb_typeof(v_action->'message') IS DISTINCT FROM 'string'
       OR (v_action - 'id' - 'label' - 'message') <> '{}'::jsonb
       OR (v_action->>'id') !~ '^agent-[a-z0-9-]{1,80}$'
+      OR (v_action->>'id') = 'agent-run-analysis'
       OR char_length(v_action->>'label') NOT BETWEEN 1 AND 80
       OR char_length(v_action->>'message') NOT BETWEEN 1 AND 400 THEN
       RAISE EXCEPTION 'invalid plain-text answer offer';

@@ -8,6 +8,7 @@ export function parseAnswerOffers(value: unknown): SuggestedAction[] | null {
     if (item === null || typeof item !== 'object' || Array.isArray(item)
       || Object.keys(item).sort().join(',') !== 'id,label,message'
       || typeof item.id !== 'string' || /^agent-[a-z0-9-]{1,80}$/.exec(item.id)?.[0] !== item.id
+      || item.id === 'agent-run-analysis' // the Run offer keeps its own carrier; the migration refuses it too
       || typeof item.label !== 'string' || [...item.label].length < 1 || [...item.label].length > 80
       || typeof item.message !== 'string' || [...item.message].length < 1 || [...item.message].length > 400) return null;
     actions.push({ id: item.id, label: item.label, message: item.message });

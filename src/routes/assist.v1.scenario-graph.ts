@@ -364,7 +364,7 @@ async function readConversationTurns(
           const outstandingProposalIds = new Set(heldOffers.map(offer => offer.proposal_id));
           const waiting = executableWaitingProposal(scenarioId, authority.userId, authority.graphHash);
           if (waiting !== undefined) outstandingProposalIds.add(waiting);
-          const actions = answerOffersForReload(stored, scenarioId, { ...authority, outstandingProposalIds });
+          const actions = answerOffersForReload(stored, scenarioId, { ...authority, latestPending: authority.latest, outstandingProposalIds });
           if (actions.length > 0) turns[turns.length - 1] = { ...last, suggested_actions: actions };
         }
       } catch { /* Offers unavailable: retain the existing response. */ }
