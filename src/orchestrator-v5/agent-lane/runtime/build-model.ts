@@ -1872,10 +1872,14 @@ export async function buildModelFromBrief(
   if (readsAsTotal && candidate.goal.scope) {
     // The drafter's own restatement of the part-or-whole question (Codex buddy r1 P2: it carried the C46 "… for the Pro plan
     // only. Which did you mean?" through `unknowns`): the goal now reads as the total, so it is not asked beside the reading.
-    const [modelled, alternative] = [candidate.goal.scope.modelled, candidate.goal.scope.alternative].map((t) => t.trim().toLowerCase());
+    // A restatement names the goal AND both readings AND asks which: an evidence question about the two populations ("can
+    // the Pro plan only estimate apply to all plans together?") names no goal and stays (Codex buddy r2 P2).
+    const [modelled, alternative, metric] = [candidate.goal.scope.modelled, candidate.goal.scope.alternative, candidate.goal.metric]
+      .map((t) => t.trim().toLowerCase());
     for (let i = openQuestions.length - 1; i >= 0; i--) {
       const q = openQuestions[i]!.toLowerCase();
-      if (modelled !== '' && alternative !== '' && q.includes(modelled) && q.includes(alternative)) openQuestions.splice(i, 1);
+      if (modelled !== '' && alternative !== '' && metric !== '' && q.includes(modelled) && q.includes(alternative) && q.includes(metric)
+        && /\b(or|whether|which)\b/.test(q)) openQuestions.splice(i, 1);
     }
   }
   const untypedScopeWords = scopeAsked !== null ? scopeAsked.question

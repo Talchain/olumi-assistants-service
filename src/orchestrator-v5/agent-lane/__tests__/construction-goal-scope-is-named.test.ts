@@ -264,7 +264,7 @@ describe('an unstated scope is named in the goal and asked, never silently picke
   });
 
   it('(b): only a metric made of whole/measure/period words reads as the total — each is neither asked nor assumed', async () => {
-    for (const metric of ['MRR', 'Total MRR', 'monthly recurring revenue', 'Total monthly recurring revenue across all plans', '£20k MRR']) {
+    for (const metric of ['MRR', 'Total MRR', 'monthly recurring revenue', 'Total monthly recurring revenue across all plans', '£20k MRR', 'Total revenue across every product']) {
       const { out } = await build(pricing(metric, AMBIGUOUS));
       expect(questions(out), JSON.stringify(allQuestions(out))).toEqual([]);
       expect(notRepresented(out).filter((l) => l.includes('assumption')), metric).toEqual([]);
@@ -277,6 +277,16 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     expect(questions(out)).toEqual(['How price-sensitive are current Pro subscribers?']);
     // Contrast: with no declared scope the drafter's question is its own, and it stays.
     expect(questions((await build(pricing('MRR', null, [restated]))).out)).toEqual([restated]);
+    // Codex buddy r2 P2: an evidence question naming both populations but not the goal is not a restatement, and stays.
+    const evidence = 'What evidence supports the Pro plan only price-elasticity estimate, and can it be applied to all plans together?';
+    expect(questions((await build(pricing('MRR', AMBIGUOUS, [evidence]))).out)).toEqual([evidence]);
+  });
+
+  it('ask (a) (Codex buddy r2 P1): a part-noun or qualifier without a whole word may name ONE part — still asked', async () => {
+    for (const metric of ['Business customer MRR', 'Product revenue', 'Channel revenue']) {
+      const { out } = await build(pricing(metric, AMBIGUOUS));
+      expect(questions(out), metric).toEqual([SCOPE_QUESTION.replace('"MRR"', `"${metric}"`)]);
+    }
   });
 
   it('RED (a): a COMPLEMENT metric — the part the model does NOT measure — never counts as the modelled scope stated', async () => {
