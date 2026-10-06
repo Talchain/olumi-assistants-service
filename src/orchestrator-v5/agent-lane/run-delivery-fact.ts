@@ -29,7 +29,7 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
 const DELIVERED_PHASE3_TYPES: ReadonlySet<string> = new Set(['review_card', 'coaching', 'evidence', 'exercise']);
 
 export type RunDeliveryOmitReason =
-  | 'no_run_this_turn' | 'run_not_current' | 'not_this_turns_run' | 'record_refused' | 'outside_licence' | 'fact_refused' | 'threw';
+  | 'guidance_row' | 'no_run_this_turn' | 'run_not_current' | 'not_this_turns_run' | 'record_refused' | 'outside_licence' | 'fact_refused' | 'threw';
 
 export type RunDeliveryOutcome =
   | { readonly kind: 'recorded'; readonly fact: HandlerFact; readonly record: RunDeliveredRecord }
@@ -49,6 +49,27 @@ export interface RunDeliveryInput {
 }
 
 const omitted = (reason: RunDeliveryOmitReason): RunDeliveryOutcome => ({ kind: 'omitted', reason });
+
+/**
+ * The automatic first analysis (construction → Run) reports no tool result of its own; its identity is its OWN run turn's
+ * analysis_result block (`computed_against_hash`) and `run_state.computed_at` (Codex r1 P2 on #2657). Shaped as a run tool
+ * result so the writer reads every Run of the turn one way.
+ */
+export function firstAnalysisRunReceipt(outcome: unknown): Rec | undefined {
+  if (!isRec(outcome) || outcome.ran !== true || !Array.isArray(outcome.blocks)) return undefined;
+  const block = outcome.blocks.find((b) => isRec(b) && b.type === 'analysis_result');
+  const graphHashAtRun = isRec(block) ? block.computed_against_hash : undefined;
+  const state = isRec(outcome.analysisState) ? outcome.analysisState : undefined;
+  const computedAt = isRec(state?.run_state) ? state.run_state.computed_at : undefined;
+  if (typeof graphHashAtRun !== 'string' || graphHashAtRun === '' || typeof computedAt !== 'string' || computedAt === '') return undefined;
+  return { ok: true, mutated: false, ran: true, run_identity: { graph_hash_at_run: graphHashAtRun, computed_at: computedAt } };
+}
+
+/** Every Run receipt of the turn, in order: the automatic first analysis (it runs before any Agent tool call), then the tools'. */
+export function turnRunReceipts(firstAnalysisOutcome: unknown, toolResults: readonly unknown[]): readonly unknown[] {
+  const first = firstAnalysisRunReceipt(firstAnalysisOutcome);
+  return [...(first !== undefined ? [first] : []), ...toolResults];
+}
 
 /** The identity of the Run THIS turn made: the last run tool result that produced one. */
 function thisTurnsRun(toolResults: readonly unknown[]): { graphHashAtRun: string; computedAt: string } | undefined {

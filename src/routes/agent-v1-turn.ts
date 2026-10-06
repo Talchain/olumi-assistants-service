@@ -115,7 +115,7 @@ import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js'
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
 import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
-import { runDeliveryFactFor } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
+import { runDeliveryFactFor, turnRunReceipts, type RunDeliveryOutcome } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
 import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
@@ -3828,15 +3828,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * reassignment precedes this line). Bound to the Run THIS turn made (its run_identity = the readback's current Run),
      * and only within the readback's licence; any doubt omits, and the row is written exactly as before.
      */
-    const runDelivery = runDeliveryFactFor({
+    // ⛔ A GUIDANCE ROW CARRIES NO FACTS (Codex r1 P1 on #2657): `appendThroughRpc` and the SQL wrapper
+    // `append_agent_answer_with_guidance` both refuse a guidance answer with facts, so the WHOLE answer would not be
+    // recorded. Until that guard admits run_delivery (a DB decision, DL), a guidance row records no delivery.
+    const runDelivery: RunDeliveryOutcome = answerGuidance !== undefined ? { kind: 'omitted', reason: 'guidance_row' } : runDeliveryFactFor({
       sentBody: wireBody,
-      toolResults: result.tool_results,
+      // The automatic first analysis is this turn's Run too (Codex r1 P2); a later Run in the turn wins.
+      toolResults: turnRunReceipts(fa, result.tool_results),
       currentRun: finalRead.currentRun,
       licence: leaderLicenceFromState(analysisState, analysisReady),
       graph: readbackGraph ?? null,
       analysisReady,
     });
-    if (runDelivery.kind === 'recorded' || runDelivery.reason !== 'no_run_this_turn') {
+    if (runDelivery.kind === 'recorded' || (runDelivery.reason !== 'no_run_this_turn' && (runDelivery.reason !== 'guidance_row' || ranAnalysisThisTurn))) {
       log.info({
         event: 'v5.run_delivery', request_id: String(req.id), scenario_id: scenarioId,
         ...(runDelivery.kind === 'recorded'
