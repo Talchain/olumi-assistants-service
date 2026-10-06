@@ -2109,8 +2109,8 @@ function composeImprovement(
       verdict.stability_category === 'stable'
         ? " The result is effectively tied, and each option's own score is individually stable, so this is a genuine dead heat rather than noise in the estimates."
         : noFlip
-          ? ' The result is effectively tied, so the order rests on a fine margin — though no single factor we tested would change which option leads on its own.'
-          : ' The result is effectively tied, so smaller adjustments could change which option leads.';
+          ? ' The result is effectively tied, so the order rests on a fine margin — though no single factor we tested would change the most-supported option on its own.'
+          : ' The result is effectively tied, so smaller adjustments could change the most-supported option.';
   } else if (
     stabilityPhrase !== null
     && (verdict.stability_category === 'stable' || verdict.stability_category === 'moderate')
@@ -2449,8 +2449,8 @@ function composeExplainResults(
     // same evidence, different voice.
     sentences.push(
       noFlip
-        ? 'The picture appears fragile, so the size of the gap is sensitive to the strongest factor — though no single factor we tested would change which option leads on its own.'
-        : 'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
+        ? 'The picture appears fragile, so the size of the gap is sensitive to the strongest factor — though no single factor we tested would change the most-supported option on its own.'
+        : 'The picture appears fragile, so even small adjustments to the strongest factor could change the most-supported option.',
     );
   } else if (nearTie) {
     if (verdict.stability_category === 'stable') {
@@ -2703,7 +2703,8 @@ function composeWhatWouldFlip(
     const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
     if (stabilityPhrase !== null && verdict.stability_category === 'stable') {
       sentences.push(
-        `This result looks ${stabilityPhrase}, so smaller changes are unlikely to change which option leads.`,
+        // Science d5 (#87 6008249324): what was tested, not a probability ("unlikely").
+        `This result looks ${stabilityPhrase}, so the smaller changes we tested did not change the most-supported option.`,
       );
     }
   }

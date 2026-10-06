@@ -129,6 +129,10 @@ import { splitIntoRedactableUnits } from './redactable-units.js';
 const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegExp }> = [
   { code: 'leads', re: /\bleads\b/i },
   { code: 'leading_option', re: /\bleading\s+option/i },
+  // Cut 6 (Science d5 #87 6008249324): the copy now names the run-share leader as "the most-supported option". It
+  // presupposes a leader exactly as "the leading option" did, so the withheld gate must SEE it. "no option is the most
+  // supported" and "which option most runs support" carry no `option` after the adjective and stay LEAVE.
+  { code: 'most_supported_option', re: /\bmost[-\s]supported\s+option\b/i },
   { code: 'the_lead', re: /\bthe\s+lead\b/i },
   { code: 'which_option_leads', re: /\bwhich\s+option\s+leads\b/i },
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
@@ -753,6 +757,8 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   'Standardise on MacBook Pro comes out ahead, leading in 44% of simulations.',
   'Double Down on SMB is slightly ahead.',
   'Standardise on Dell XPS performs best, with a probability of 56%.',
+  // Cut 6 CATCH twin (d5): the new vocabulary, naming an option.
+  'Hire Marketing Manager is the most-supported option in this model.',
 ]);
 
 function assertEnforcerIsNarrowerThanAlarm(): void {

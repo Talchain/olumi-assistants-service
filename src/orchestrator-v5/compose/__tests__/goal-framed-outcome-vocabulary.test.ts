@@ -233,7 +233,7 @@ describe('goal-framed outcome vocabulary — the instrument', () => {
     // ⚠ CONTRAST CONTROL for the exclusion documented above: bare "leading
     // option" must NOT be a hit, or this file has quietly taken on the
     // Glossary job it declines in its own header.
-    expect(hits('Take a moment to explore the leading option and the factors shaping it.')).toEqual([]);
+    expect(hits('Take a moment to explore the most-supported option and the factors shaping it.')).toEqual([]);
 
     // NEGATIVE CONTROL — the replacement copy must be clean, or this whole
     // file would be unsatisfiable and the "fix" would be to weaken it.

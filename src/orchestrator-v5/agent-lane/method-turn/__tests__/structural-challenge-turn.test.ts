@@ -121,7 +121,7 @@ describe('SCI-DEEP reply', () => {
   it('a lead that is not clear is never stated as a lead', () => {
     const close: StructuralChallengeResultV1 = { ...changed, claims: [{ ...changed.claims[0], noise_verdict: 'within_noise', verdict: 'delta_only', basis: 'within_noise' } as StructuralChallengeClaimV1, ...changed.claims.slice(1)] };
     const reply = composeStructuralChallengeReply({ result: close, labels: LABELS });
-    expect(reply).toContain('Which option leads is too close to call in at least one version.');
+    expect(reply).toContain('Which option most runs support is too close to tell apart in at least one version.');
     expect(reply).not.toContain('leads in both versions');
     expect(reply).not.toContain('still leads');
   });
@@ -507,7 +507,7 @@ describe('repeated structural challenge licence adaptation only narrows', () => 
     expect(first.result?.claims.find((claim) => claim.kind === 'leader')).toMatchObject({
       baseline_option_id: null, alternative_option_id: null, verdict: 'not_comparable', basis: 'withheld_on_one_side',
     });
-    expect(first.reply).toContain('Which option leads cannot be compared. At least one run withheld this claim.');
+    expect(first.reply).toContain('Which option most runs support cannot be compared. At least one run withheld this claim.');
     if (provisional) expect(first.reply).toContain(disclosure);
     const second = structuralChallengeTurnUnderLicence(first, finalRead());
     expect(second.result?.claims.find((claim) => claim.kind === 'leader')).toEqual(first.result?.claims.find((claim) => claim.kind === 'leader'));

@@ -813,7 +813,7 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
  * exists: they reach this slot by one path.
  */
 const LEADING_OPTION_LANGUAGE: readonly RegExp[] = [
-  /explore the leading option/i,
+  /explore the most-supported option/i,
   /\bstill leads\b/i,
   /\bnow leads\b/i,
   /\bled before\b/i,
@@ -881,7 +881,7 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
       plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
-        expect(turn.coaching).toMatch(/explore the leading option/i);
+        expect(turn.coaching).toMatch(/explore the most-supported option/i);
       });
     });
 
@@ -1419,7 +1419,7 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
         expect(turn.raw).not.toContain('currently leads');
         expect(turn.raw).not.toContain('scored highest');
         expect(turn.raw).not.toContain('is slightly ahead');
-        expect(turn.raw).not.toContain('could change which option leads');
+        expect(turn.raw).not.toContain('could change the most-supported option');
         expect(turn.raw).not.toContain('slightly_ahead');
       });
 

@@ -1125,7 +1125,7 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
   };
 
   const RAW_FRAGILE: RawRobustnessSignals = { level: 'fragile', near_tie_is_tie: false };
-  const CONTRADICTORY = /could shift which option leads/i;
+  const CONTRADICTORY = /could change the most-supported option/i;
   const NAMES_FRAGILITY = /picture appears fragile/i;
   const HONEST_NO_FLIP = /no single factor on its own reached a tipping point/i;
 
@@ -1160,7 +1160,9 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
     };
     const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, concrete);
     expectNaturalProse(text);
-    expect(text).toMatch(/Engineering Capacity is the most likely single factor to change which option leads/i);
+    expect(text).toMatch(/Of the factors we tested, Engineering Capacity has a tipping point on its own that would change the most-supported option/i);
+    // Science d5 (#87 6008424994): no superlative ranking of factors on this path.
+    expect(text).not.toMatch(/\bmost likely\b|\bclosest\b/i);
     expect(text).toMatch(/clearest one to test/i);
     expect(text).not.toMatch(HONEST_NO_FLIP);
   });

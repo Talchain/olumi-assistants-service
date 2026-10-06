@@ -213,7 +213,7 @@ describe('SCI-DEEP: the candidate is licensed on the baseline admission and its 
     expect(h.turn.result?.status).toBe('completed');
     StructuralChallengeResultV1Schema.parse(h.turn.result);
     const reply = h.turn.reply;
-    expect(reply).not.toContain('Which option leads cannot be compared');
+    expect(reply).not.toContain('Which option most runs support cannot be compared');
     expect(reply).toContain('Without the link from Enterprise prospect signing likelihood to Quarterly revenue, your options all come out the same');
     expect(reply).toContain('AI Reporting Module Sprint’s lead rests entirely on this link');
     // Never a named candidate leader: the typed claim names the baseline leader only.
@@ -227,7 +227,7 @@ describe('SCI-DEEP: the candidate is licensed on the baseline admission and its 
     expect(h.turn.candidateLeaderLicence).toBe('withheld');
     expect(h.turn.identicalArms).toBe(true);
     expect(h.turn.reply).toContain('AI Reporting Module Sprint’s lead rests entirely on this link');
-    expect(h.turn.reply).not.toContain('Which option leads cannot be compared');
+    expect(h.turn.reply).not.toContain('Which option most runs support cannot be compared');
     expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
   });
 
@@ -237,7 +237,7 @@ describe('SCI-DEEP: the candidate is licensed on the baseline admission and its 
     const reply = h.turn.reply;
     expect(reply).not.toContain('rests entirely');
     expect(reply).not.toContain('come out the same');
-    expect(reply).not.toContain('Which option leads cannot be compared');
+    expect(reply).not.toContain('Which option most runs support cannot be compared');
     expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: LEADER, verdict: 'holds', basis: 'leader_same' });
     // The headline never contradicts a licensed lead that holds.
     expect(reply.split('\n')[0]).toBe('Without the link from Revenue lost to trial abandonment to Quarterly revenue, AI Reporting Module Sprint still leads. The other figures don\'t establish a conclusion either way.');
@@ -346,7 +346,7 @@ describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candida
     expect(leaderClaim(h.turn.result)).toMatchObject({ baseline_option_id: LEADER, alternative_option_id: null });
     expect(h.turn.reply.split('\n')[0]).toBe('Without the link from Enterprise prospect signing likelihood to Quarterly revenue, AI Reporting Module Sprint comes out the same as Continue Current Plan, so its edge over it rests entirely on this link.');
     expect(h.turn.reply).toContain('- Without the link, AI Reporting Module Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
-    expect(h.turn.reply).not.toContain('Which option leads cannot be compared');
+    expect(h.turn.reply).not.toContain('Which option most runs support cannot be compared');
     expect(h.turn.reply).not.toContain('your options all come out the same');
   });
 
@@ -361,7 +361,7 @@ describe('SCI-DEEP: DL #2575 P1 — a PARTIAL identical group blocks the candida
     expect(h.turn.reply).not.toContain('leads in the version without the link');
     expect(h.turn.reply).not.toContain('rests entirely');
     expect(h.turn.reply).toContain('- Without the link, Integration Bug Fix Sprint and Continue Current Plan come out the same, so which option leads isn\'t compared for that version.');
-    expect(h.turn.reply).not.toContain('Which option leads cannot be compared');
+    expect(h.turn.reply).not.toContain('Which option most runs support cannot be compared');
   });
 
   it('C6 (Codex review 3 P1): an unrelated arm without valid-draw counts never hides the pair', async () => {
