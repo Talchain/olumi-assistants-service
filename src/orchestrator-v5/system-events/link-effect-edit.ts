@@ -525,7 +525,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // child's units AS IT ALREADY MOVES IT, and the user's END-TO-END figure E sizes lever→M = E × g. Every other link into or
   // out of M keeps its meaning (a +1 gauge would silently flip them), and the ordinary sign check below is the PATH's.
   const gaugeSign = gaugeEdge === undefined ? 1 : storedGaugeSign(gaugeEdge);
-  const stated = linkEffectGaugeStatement(params.persistedGraph, from, to, effect);
+  // Read the same prospective units as consent and sizing: an adopted own-noun unit removes an unwritten gauge.
+  // Stored gauges still govern, and the direction check below still refuses an undisclosed reversal.
+  const stated = linkEffectGaugeStatement(graph, from, to, effect);
   if (gaugeEdge !== undefined && stated.amount !== effect.amount * gaugeSign) return refuse('unit_mismatch');
   const direction = Math.sign(stated.amount) * Math.sign(stated.per_source_change) < 0 ? 'negative' : 'positive';
   const storedDirection = directionOf(edge);

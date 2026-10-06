@@ -153,6 +153,7 @@ import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrat
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { claimPermissionsFrom, type ClaimPermissions } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
+import { readRunRecordingMarker, type RunRecordingMarker } from '../orchestrator-v5/run-recording.js';
 import { deliveredRecordWithinLicence } from './delivered-record-licence.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { log } from '../utils/telemetry.js';
@@ -161,6 +162,8 @@ import { projectSelectedRunFigures, readSelectedGoalFigureContext } from './sele
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
+  /** Missing secondary captures for this persisted Run; omitted on the successful path. */
+  readonly run_recording?: RunRecordingMarker;
   /** Internal opt-in for the Agent review press; never forwarded by the graph route. */
   readonly factor_enrichments?: FactorEnrichmentT[];
   /** Internal joined projection; not published by the graph route yet. */
@@ -605,6 +608,9 @@ export async function readScenarioAnalysis(
       const licence = leaderLicenceFromState(analysisState, analysisReady);
       return deliveredRecordWithinLicence(rec, { licence, graph: params.graph, analysisReady }) ? rec : undefined;
     })();
+    const recording = historical?.fact.fact_type === 'run_analysis'
+      ? await readRunRecordingMarker(store, params.scenarioId, historical.fact as RunAnalysisHandlerFact)
+      : undefined;
     const permissions = claimPermissionsFrom(analysisState, analysisReady, { requested: true });
     params.onCurrentnessRead?.({ ...currentnessRead,
       ...(analysisReady === undefined || scopeInput.status === 'unavailable' ? {} : { permissions }) });
@@ -628,6 +634,7 @@ export async function readScenarioAnalysis(
       graphHash,
     ) as AnalysisReadyPayload;
     return {
+      ...(recording === undefined ? {} : { run_recording: recording }),
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })
         : projectCurrentRead({

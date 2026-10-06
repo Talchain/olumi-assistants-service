@@ -87,6 +87,7 @@ import {
 import type { ModelVersionMutationReceiptV1Local } from './model-management/mutation-receipt.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
 import { recordBriefProvenanceForCommit } from './brief-provenance/capture.js';
+import { awaitRunRecording } from './run-recording.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isProviderAllowed } from '../adapters/llm/provider-policy.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
@@ -2086,72 +2087,26 @@ export async function commitDirectAnswer(
     );
   }
 
-  // ROADMAP 3.1 (CEE half) — decision-record capture hook
-  // (UNCONDITIONAL — see the NO-DARK-LAUNCH note below). Fires ONLY after
-  // the durable append succeeded AND this commit carries a successful
-  // (non-noop) run_analysis fact — which covers BOTH producers (the routed
-  // turn-executor path and chip-click run_analysis funnel through this
-  // commit seam). Fire-and-forget under the same non-blocking contract as
-  // the MM hook above: any capture failure logs and NEVER affects the turn
-  // result. No qualifying fact ⇒ byte-identical commit path (no store
-  // construction, no env reads —
-  // pinned by commit-decision-record-hook.test.ts). The record's
-  // graph_hash is the fact's OWN `graph_hash_at_run` (aag_v1-prefixed) —
-  // the hash the handler computed from the exact snapshot the analysis ran
-  // against (PR #411 object-identity discipline; no re-read, no re-hash).
-  // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_DECISION_RECORD_CAPTURE deleted (was
-  // live `true` on staging); capture now runs whenever the qualifying fact exists.
-  const decisionRecordFact = metadata.handler_facts.find(
+  // Both independent secondary writes remain AFTER the checked durable append.
+  // One bounded concurrent wait closes the reload race on the normal path;
+  // failure/timeout logs a typed outcome and never changes the turn's success.
+  // The shared eligibility predicate and each hook's skips/payloads are unchanged.
+  const recordingFact = metadata.handler_facts.find(
     (f): f is RunAnalysisHandlerFact => isSuccessfulRunAnalysisFact(f),
   );
-  if (decisionRecordFact !== undefined) {
-    void recordDecisionRecordForCommit({
+  if (recordingFact !== undefined) {
+    await awaitRunRecording({
       scenarioId: metadata.scenario_id,
       turnId: metadata.turn_id,
       persistedRowId,
-      fact: decisionRecordFact,
-      // Guest pre-check reads scenarios.user_id via the store's optional
-      // getScenarioOwner (structural ScenarioOwnerReader slice — keeps
-      // the SessionStore import surface at its declared three files).
-      sessionStore: store,
-    });
-  }
-
-  // ROADMAP 2.1229 (CEE half) — brief + analysis-provenance capture hook.
-  //
-  // THE USER OUTCOME: a person who has run an analysis can send their model
-  // to a colleague, and the colleague opens the link and sees it. Today
-  // `create_shared_brief` raises 'No brief to share - generate a brief
-  // first' on every real share, because `scenarios.brief` is NULL on 14,157
-  // of 14,158 rows. The DB-side producers were always correct — they lost
-  // their CALLER when the direct browser→PLoT `/v2/run` path was retired
-  // (ROADMAP 2.1229). CEE already mints all four required values on every
-  // run and writes them only to the telemetry table `v5_handler_facts`;
-  // this hook forwards them to the row the share path actually reads.
-  //
-  // SIBLING of the decision-record hook above and deliberately INDEPENDENT
-  // of it: same predicate, same fire-and-forget contract, its own `find` and
-  // its own failure handling, so neither can silently change the other's
-  // firing condition (two hooks answering two questions — they are not one
-  // concept with two writes). Fires ONLY after the durable append succeeded
-  // AND this commit carries a successful (non-noop) run_analysis fact; the
-  // predicate already excludes 'refused' attempts, which carry no brief.
-  // Any failure logs and NEVER affects the turn result. No qualifying fact
-  // ⇒ byte-identical commit path (no store construction, no env reads —
-  // pinned by commit-brief-provenance-hook.test.ts, which asserts the
-  // store-construction COUNT rather than merely that the RPC went uncalled).
-  // The hook needs no session store: `store_brief_and_provenance` runs with
-  // the SERVICE ROLE and updates `scenarios` by id, so there is no guest
-  // pre-check to do and no SessionStore import to add.
-  const briefProvenanceFact = metadata.handler_facts.find(
-    (f): f is RunAnalysisHandlerFact => isSuccessfulRunAnalysisFact(f),
-  );
-  if (briefProvenanceFact !== undefined) {
-    void recordBriefProvenanceForCommit({
-      scenarioId: metadata.scenario_id,
-      turnId: metadata.turn_id,
-      persistedRowId,
-      fact: briefProvenanceFact,
+      decision: () => recordDecisionRecordForCommit({
+        scenarioId: metadata.scenario_id, turnId: metadata.turn_id, persistedRowId,
+        fact: recordingFact, sessionStore: store,
+      }),
+      brief: () => recordBriefProvenanceForCommit({
+        scenarioId: metadata.scenario_id, turnId: metadata.turn_id, persistedRowId,
+        fact: recordingFact,
+      }),
     });
   }
 
@@ -2159,8 +2114,8 @@ export async function commitDirectAnswer(
   // the durable append, off the turn path, on EVERY commit — UNCONDITIONAL
   // since the O-2 activation (2026-07-20; the CEE_ROLLING_SUMMARY flag is
   // DELETED per the no-dark-launches ruling — rollback = code revert).
-  // Fire-and-forget under the same non-blocking contract as the MM /
-  // decision-record hooks above: every failure — store construction, RPC
+  // Fire-and-forget with the same failure isolation as the bounded Run
+  // recording above: every failure — store construction, RPC
   // error, summariser model timeout — is caught and logged; NOTHING
   // propagates to the turn result (pinned by
   // commit-rolling-summary-hook.test.ts). The summariser reads the FULL

@@ -20,7 +20,7 @@
  *      run_analysis HandlerFact into the `store_brief_and_provenance`
  *      payload, or a typed skip. No I/O, no clock reads, fully
  *      unit-testable.
- *   2. `recordBriefProvenanceForCommit` — the fire-and-forget hook invoked
+ *   2. `recordBriefProvenanceForCommit` — the bounded post-append hook invoked
  *      from commit.ts AFTER the durable append succeeded, whenever the
  *      commit carries a successful (non-noop) run_analysis fact.
  *      Non-blocking contract (mirrors the decision-record hook verbatim):
@@ -87,6 +87,7 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { getBriefProvenanceStore } from './index.js';
+import type { RunCaptureOutcome } from '../run-recording.js';
 import type { StoreBriefAndProvenanceWrite } from './store-adapter.js';
 
 export type BriefProvenanceSkipReason =
@@ -158,12 +159,11 @@ export interface RecordBriefProvenanceArgs {
 }
 
 /**
- * Fire-and-forget commit-seam hook. Never throws, never returns anything the
- * turn depends on.
+ * Post-append capture outcome. Failure is disclosed without failing the turn.
  */
 export async function recordBriefProvenanceForCommit(
   args: RecordBriefProvenanceArgs,
-): Promise<void> {
+): Promise<RunCaptureOutcome> {
   try {
     const built = buildBriefProvenanceWrite(args.fact, args.scenarioId);
     if (built.kind === 'skip') {
@@ -172,7 +172,7 @@ export async function recordBriefProvenanceForCommit(
         'BriefProvenance — skipped (the fact carries no complete brief envelope; designed skip, not a fault)',
       );
       emitStoredEvent(args, { status: 'skipped', skip_reason: built.reason });
-      return;
+      return { status: 'not_applicable', reason: 'missing_input' };
     }
 
     // Store construction happens HERE and nowhere earlier: a commit that
@@ -190,9 +190,10 @@ export async function recordBriefProvenanceForCommit(
         'BriefProvenance — store_brief_and_provenance wrote no row (no matching scenario, or a null reached the RPC); the share path will still refuse for this scenario',
       );
       emitStoredEvent(args, { status: 'not_stored' });
-      return;
+      return { status: 'not_recorded', reason: 'no_row' };
     }
     emitStoredEvent(args, { status: 'ok' });
+    return { status: 'recorded' };
   } catch (err) {
     log.warn(
       {
@@ -206,6 +207,7 @@ export async function recordBriefProvenanceForCommit(
       status: 'error',
       error_name: err instanceof Error ? err.name : 'unknown',
     });
+    return { status: 'not_recorded', reason: 'write_failed' };
   }
 }
 
@@ -213,7 +215,7 @@ export async function recordBriefProvenanceForCommit(
  * Content-free capture telemetry (frozen-registry member
  * `v5.brief_provenance.stored`). Correlation ids, a closed-enum status and a
  * closed-enum skip reason ONLY — never brief text, hashes or seeds. A
- * telemetry fault inside the error path must not escape the fire-and-forget
+ * telemetry fault inside the error path must not escape the failure-isolation
  * contract, so emit failures degrade to a debug log.
  */
 function emitStoredEvent(

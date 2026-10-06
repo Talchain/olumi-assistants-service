@@ -150,6 +150,10 @@ export function createMockSessionStore(
       userId: null, graph: null, briefText: null, analysisInvalidatedAt: null,
     }),
     readRunCurrentness: async () => null,
+    // Same unowned, empty scenario as readExistingScenario; no fabricated capture success.
+    readRunRecordingRows: async () => ({
+      brief: null, analysisProvenance: null, guest: true, decisionRecordPresent: false,
+    }),
     // ACCOUNTS "Invite a colleague" (#2514): the drift alarm fired here, as designed. Benign default = nobody is a
     // viewer member, so every existing suite keeps its owner-or-guest access exactly as before.
     isScenarioMember: async () => false,

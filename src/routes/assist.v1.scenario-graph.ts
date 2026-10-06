@@ -786,6 +786,7 @@ export default async function route(app: FastifyInstance) {
           goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
         } : {}),
         analysis_result: analysis.analysis_result,
+        ...(analysis.run_recording === undefined ? {} : { run_recording: analysis.run_recording }),
         // CURRENT-READ-v1: one selected Run's canonical freshness and typed
         // figures. The raw graph_hash above remains the edit/CAS token; the
         // projection's hashes are the analysis selector's separate domain.

@@ -45,6 +45,7 @@ import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { bindStatedLinkSizes, type PassThroughBinding } from './stated-size-binding.js';
+import type { LabelHeadReading } from './label-head-unit.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 export { bindStatedLinkSizes } from './stated-size-binding.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
@@ -424,6 +425,8 @@ function constructedLevel(
 }
 
 export interface AdmittedNode {
+  /** A unit attested by this end's own noun in a bound user sentence; strict NodeV3 carrier. */
+  unit_reading?: { unit: string; source: 'user_stated' | 'olumi_reading'; source_quote: string };
   /** The full text, when the label had to be shortened to stay editable. */
   description?: string;
   /**
@@ -3817,7 +3820,7 @@ function admitOnce(
    */
   // Fi is an ADDED door: the strict label-based sizeWritten check below is unchanged (its retirement is its own PR).
   // The candidate effect fields are defined in each endpoint's own unit (D1).
-  // Read those same units for C1; no unit is inferred from the brief.
+  // Read those same units for C1; a unitless end may adopt only its own stated label-head unit below.
   const magnitudeNodeFor = (n: AdmittedNode): MagnitudeNode => ({
     label: n.label, kind: n.kind, scale_frame: n.scale_frame,
     observed_state: n.observed_state as MagnitudeNode['observed_state'],
@@ -3829,14 +3832,21 @@ function admitOnce(
   // Validate the converter's prospective STORED tuple, including percentage points.
   const prospectiveEffects = resolvable.map(l => {
     const source = nodeOf.get(l.from), target = nodeOf.get(l.to);
-    return source === undefined || target === undefined || l.direction === 'unknown' ? undefined
-      : sizeLink({ direction: l.direction, effect_amount: l.effect_amount,
+    if (source === undefined || target === undefined || l.direction === 'unknown') return undefined;
+    const sized = sizeLink({ direction: l.direction, effect_amount: l.effect_amount,
           effect_per_source_change: l.effect_per_source_change, user_stated: true },
         magnitudeNodeFor(source), magnitudeNodeFor(target)).natural_effect;
+    // Unit adoption needs a typed raw tuple even when the missing unit/frame kept the sizer from emitting one.
+    // No value or frame is inferred; final sizing still owns conversion and any unresolved-frame question.
+    return sized ?? (typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number'
+      ? { amount: l.effect_amount, amount_unit: naturalAmountUnitOf(magnitudeNodeFor(target)),
+        per_source_change: l.effect_per_source_change,
+        per_source_change_unit: sourceUnitWords(magnitudeNodeFor(source), resolveMagnitudeFrame(magnitudeNodeFor(source))) } : undefined);
   });
   const bindingNodes = nodes.map(n => {
     const own = n.observed_state?.unit ?? (n.kind === 'goal' ? n.goal_threshold_unit : undefined) ?? unitById.get(n.id);
-    return { id: n.id, label: n.label, kind: n.kind, goal_threshold_raw: n.goal_threshold_raw, goal_threshold_unit: n.goal_threshold_unit, unit: own,
+    return { id: n.id, label: n.label, kind: n.kind, observed_state: n.observed_state,
+      goal_threshold_raw: n.goal_threshold_raw, goal_threshold_unit: n.goal_threshold_unit, unit: own,
       ...(typeof own === 'string' ? { effect_unit: naturalAmountUnitOf(magnitudeNodeFor(n)),
         change_unit: sourceUnitWords(magnitudeNodeFor(n), resolveMagnitudeFrame(magnitudeNodeFor(n))) } : {}) };
   });
@@ -3853,9 +3863,15 @@ function admitOnce(
   const centreRanges = new Map<number, StatedRangeEnd>();
   const signRefused: { readonly through: PassThroughBinding; readonly said: 1 | -1 | null }[] = [];
   const directSignRefused: { readonly link: number; readonly sentence: string }[] = [];
+  const labelUnits = new Map<string, LabelHeadReading>();
   const boundSizeSentences = bindStatedLinkSizes(resolvable.map((l, i) => ({
     from: l.from, to: l.to, effect_direction: l.direction, natural_effect: prospectiveEffects[i],
-  })), bindingNodes, brief, claimedLevelSpans, { passThroughs, settersOf, centreRanges, signRefused, directSignRefused });
+  })), bindingNodes, brief, claimedLevelSpans, { passThroughs, settersOf, centreRanges, signRefused, directSignRefused, labelUnits });
+  for (const [id, reading] of labelUnits) {
+    unitById.set(id, reading.unit);
+    const node = nodeOf.get(id);
+    if (node !== undefined) node.unit_reading = { unit: reading.unit, source: 'user_stated', source_quote: reading.source_quote };
+  }
   // ⛔ A direct bind drawn the other way from the user's sentence is never theirs, and that is SAID (DL #2644 pilot).
   for (const r of directSignRefused) {
     const link = resolvable[r.link]!;
@@ -4039,10 +4055,12 @@ function admitOnce(
   for (const [link, sentence] of boundByLink) {
     if (link.provenance_source === 'user_specified') continue;
     const edge = linkResult.edges.find(e => e.from === link.from && e.to === link.to);
+    const ends = labelUnits.has(link.from) || labelUnits.has(link.to)
+      ? { source: nodeOf.get(link.from)?.label ?? '', target: nodeOf.get(link.to)?.label ?? '' } : undefined;
     if (edge?.provenance?.magnitude === 'user_stated'
       && edge.provenance.natural_effect !== undefined
-      && (statedEffectQuoteMatches(sentence, edge.provenance.natural_effect)
-        || statedSwitchEffectQuoteMatches(sentence, edge.provenance.natural_effect))) edge.provenance.source_quote = sentence;
+      && (statedEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends)
+        || statedSwitchEffectQuoteMatches(sentence, edge.provenance.natural_effect, undefined, ends))) edge.provenance.source_quote = sentence;
   }
 
   // decision -> option edges are TOPOLOGY, not causal belief. They use the

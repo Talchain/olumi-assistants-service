@@ -1,5 +1,6 @@
 import { findStatedAmounts, readUnit, type StatedAmount } from "./stated-amounts.js";
 import { levelChangeStating } from "./stated-level-change.js";
+import { labelHeadUnit } from '../../orchestrator-v5/agent-lane/label-head-unit.js';
 import {
   carrierCompatible,
   nounUnitsAt,
@@ -37,6 +38,25 @@ export interface StatedEffectDetail {
 interface LocatedAmount extends StatedAmount {
   readonly units: readonly string[];
   readonly implicitSource?: true;
+  /** The label reader uses the scanner's raw magnitude (40k is already 40,000). */
+  readonly labelMagnitude?: true;
+}
+
+/** Opt-in for binding, and for a stored user-stated unit receipt; other provenance readers keep their literal grammar. */
+function amountsForEnds(quote: string, detail: StatedEffectDetail, ends?: { source: string; target: string }): LocatedAmount[] {
+  const amounts = locatedAmounts(quote);
+  if (ends === undefined) return amounts;
+  for (const [value, label, other, source] of [[detail.amount, ends.target, ends.source, false],
+    [detail.per_source_change, ends.source, ends.target, true]] as const) {
+    const r = labelHeadUnit(quote, value, label, other, source);
+    if (r === undefined) continue;
+    const at = amounts.findIndex(a => a.index === r.amount.start);
+    if (at >= 0) amounts[at] = { ...amounts[at]!, labelMagnitude: true, units: [...amounts[at]!.units, r.unit] };
+    else amounts.push({ magnitude: Math.abs(value), kind: readUnit(quote.slice(r.amount.start, r.amount.end)).kind,
+      labelMagnitude: true, matchedText: quote.slice(r.amount.start, r.amount.end),
+      index: r.amount.start, units: [r.unit], ...(r.implicit === true ? { implicitSource: true as const } : {}) });
+  }
+  return amounts;
 }
 
 // ⭐ The tail reader that used to live here (`unitsAt`, `nounUnitsAt`, a private month/year `PERIOD_WORDS`) moved into
@@ -58,7 +78,8 @@ function locatedAmounts(quote: string): LocatedAmount[] {
   return amounts;
 }
 
-function magnitudeMatches(expected: number, amount: StatedAmount): boolean {
+function magnitudeMatches(expected: number, amount: LocatedAmount): boolean {
+  if (amount.labelMagnitude === true) return expected === amount.magnitude;
   const reading = readUnit(amount.matchedText);
   return expected === amount.magnitude * reading.multiplier
     || Math.abs(expected - amount.magnitude * reading.multiplier)
@@ -114,10 +135,11 @@ export function statedEffectSpansInText(
   text: string,
   quote: string,
   detail: StatedEffectDetail,
+  ends?: { source: string; target: string },
 ): { target: { start: number; end: number }; source: { start: number; end: number } | null } | null {
   const at = text.indexOf(quote);
   if (at < 0 || text.indexOf(quote, at + 1) >= 0) return null;
-  const amounts = locatedAmounts(quote);
+  const amounts = amountsForEnds(quote, detail, ends);
   const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false, quote, detail.per_source_change_unit);
   if (target === undefined) return null;
   const source = oneMatchingAmount(amounts, detail.per_source_change, detail.per_source_change_unit, true);
@@ -144,10 +166,11 @@ export function statedSwitchEffectQuoteMatches(
     per: { start: number; end: number };
     level?: { names: { start: number; end: number } };
   }) => void,
+  ends?: { source: string; target: string },
 ): boolean {
   if (quote.trim().length === 0 || detail.per_source_change !== 1 || detail.per_source_change_unit !== "switch") return false;
   if (!Number.isFinite(detail.amount) || detail.amount === 0 || detail.amount_unit.trim().length === 0) return false;
-  const target = oneMatchingAmount(locatedAmounts(quote).filter((a) => a.implicitSource !== true), detail.amount, detail.amount_unit, false, quote);
+  const target = oneMatchingAmount(amountsForEnds(quote, detail, ends).filter((a) => a.implicitSource !== true), detail.amount, detail.amount_unit, false, quote);
   if (target === undefined) {
     const level = levelChangeStating(quote, detail.amount, detail.amount_unit);
     if (level === undefined) return false;
@@ -169,11 +192,12 @@ export function statedEffectQuoteMatches(
   quote: string,
   detail: StatedEffectDetail,
   onMatch?: (spans: { amount: { start: number; end: number }; per: { start: number; end: number } }) => void,
+  ends?: { source: string; target: string },
 ): boolean {
   if (quote.trim().length === 0) return false;
   if (![detail.amount, detail.per_source_change].every((value) => Number.isFinite(value) && value !== 0)) return false;
   if (![detail.amount_unit, detail.per_source_change_unit].every((unit) => typeof unit === "string" && unit.trim().length > 0)) return false;
-  const amounts = locatedAmounts(quote);
+  const amounts = amountsForEnds(quote, detail, ends);
   const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false, quote, detail.per_source_change_unit);
   const source = oneMatchingAmount(amounts, detail.per_source_change, detail.per_source_change_unit, true);
   if (target !== undefined && source !== undefined && target.index !== source.index) onMatch?.({

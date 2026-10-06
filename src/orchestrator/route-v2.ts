@@ -156,6 +156,8 @@ import {
   type DispatchSystemEventResult,
 } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
+import { GraphStaleWriteError } from '../orchestrator-v5/build-turn-context.js';
+import type { GraphConflictFailureDetails } from '../orchestrator-v5/graph-conflict-recovery-keys.js';
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
 // handed to the transport; see the draft_graph branch below).
 import { scheduleAutoRunAfterFreshDraft } from '../orchestrator-v5/handlers/auto-run-after-draft.js';
@@ -5640,6 +5642,24 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         }
         return sentDraft;
       } catch (err) {
+        if (err instanceof GraphStaleWriteError) {
+          const recovery = {
+            phase: 'commit',
+            recovery_action: 'refresh_and_reconfirm',
+            conflict_category: err.conflict_category,
+            expected_base_graph_hash: err.expected_base_graph_hash ?? null,
+          } satisfies GraphConflictFailureDetails;
+          const { phase: _phase, ...recoveryKeys } = recovery;
+          return reply.code(409).send(buildCommitFailureBoundaryError({
+            validator: 'turn_commit',
+            reason: 'graph_write_conflict',
+            retryable: false,
+            requestId,
+            stage: ingress.stage,
+            errorCode: 'GRAPH_DIVERGED',
+            preStageExtras: { failure_type: 'GRAPH_DIVERGED', ...recoveryKeys },
+          }));
+        }
         // The unified pipeline threw — surface a typed BoundaryError. The
         // dispatcher already logged the details; re-log here with the
         // route-level correlation context.
