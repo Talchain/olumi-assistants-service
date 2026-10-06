@@ -16,6 +16,7 @@ import { z } from "zod";
 import {
   getRuntimeEnv,
   getRuntimeEnvResolution,
+  isProductionDeployment,
   type RuntimeEnv,
   type RuntimeEnvSource,
 } from "./env-resolver.js";
@@ -130,6 +131,14 @@ const booleanString = z
  * @param settingName - Name of the setting for logging
  * @param allowStaging - Whether to allow true in staging environment (default: true)
  */
+/**
+ * Settings the production-DEPLOYMENT lockdown (`isProductionDeployment`) leaves alone.
+ * The production LABEL (`getRuntimeEnv() === "prod"`) still locks every setting, these included.
+ * - CEE_MODEL_VERSIONS_ENABLED: versions are on in every deployment by ruling; an explicit
+ *   false remains the deploy-free off switch.
+ */
+const DEPLOYMENT_LOCKDOWN_EXEMPT: ReadonlySet<string> = new Set(["CEE_MODEL_VERSIONS_ENABLED"]);
+
 function createEnvEnforcedBoolean(
   defaultValue: boolean,
   settingName: string,
@@ -154,8 +163,9 @@ function createEnvEnforcedBoolean(
         requestedValue = parsed;
       }
 
-      // Prod: always false, warn if override attempted
-      if (env === "prod") {
+      // Prod: always false, warn if override attempted. "Prod" is the production label OR the
+      // declared production deployment (`isProductionDeployment`), unless the setting is exempt.
+      if (env === "prod" || (!DEPLOYMENT_LOCKDOWN_EXEMPT.has(settingName) && isProductionDeployment())) {
         if (requestedValue === true) {
           console.warn(`[SECURITY] ${settingName} cannot be enabled in production (forced to false)`);
           configOverrideEvents.push({

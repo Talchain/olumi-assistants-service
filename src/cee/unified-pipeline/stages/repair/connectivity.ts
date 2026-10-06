@@ -19,13 +19,14 @@ import { detectEdgeFormat } from "../../utils/edge-format.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import type { EdgeT } from "../../../../schemas/graph.js";
 import { isProduction } from "../../../../config/index.js";
+import { isProductionDeployment } from "../../../../config/env-resolver.js";
 import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
 
 export function runConnectivity(ctx: StageContext): void {
   if (!ctx.graph) return;
 
-  // Fault injection (dev-only)
-  if (!isProduction()) {
+  // Fault injection (dev-only): never on a production label or the declared production deployment.
+  if (!isProduction() && !isProductionDeployment()) {
     const forceMissingHeader = (ctx.request.headers as any)["x-debug-force-missing-kinds"];
     if (typeof forceMissingHeader === "string" && forceMissingHeader.length > 0) {
       const kindsToStrip = forceMissingHeader.split(",").map((k: string) => k.trim().toLowerCase());
