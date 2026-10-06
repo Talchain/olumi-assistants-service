@@ -17,7 +17,7 @@ import {
 import { readMayNameLeadingOptionVerdictForFact } from '../../context/claim-safety-read.js';
 import { goalFiguresLeaderWithheldWithoutConstraintCause } from '../unsized-path-cause.js';
 import { agentNoLeaderSentence, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../withheld-leader-fail-closed.js';
-import { goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../goal-chance-withheld.js';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
@@ -211,5 +211,24 @@ describe('(f) a placeholder path beside an untestable target: the chat asks the 
   it('CONTROL: a target-only withhold that kept the shares keeps its own tail (no placeholder words appear)', () => {
     const target = (D1.analysis_result.enrichment.inference_warnings as Rec[]).filter((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
     expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: target } })!.say).not.toContain('nobody has set yet');
+  });
+});
+
+describe('Codex buddy r2', () => {
+  it('P1: a later Run WITHOUT a result clears an earlier identity ask (the operand was set in between)', () => {
+    expect(identityAskLineOwed([{ ran: true, identity_ask_say: SERVED_ASK }, { ran: false }], 'Ready.')).toBeNull();
+    // Control: the ask stands when no later Run came.
+    expect(identityAskLineOwed([{ ran: true, identity_ask_say: SERVED_ASK }, { ok: true, mutated: true }], 'Ready.')).toBe(SERVED_ASK);
+  });
+
+  it('P2: the Agent already quoted the placeholder\'s ask → only the opening is owed, never the ask twice', () => {
+    const D1 = JSON.parse(readFileSync(new URL('./fixtures/served-g1b501-draft1-placeholder-target.json', import.meta.url), 'utf8')) as Rec;
+    const chance = goalChanceWithheldForAgent(D1.analysis_result)!;
+    const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
+    const run = { ran: true, goal_chance: chance };
+    expect(goalChanceLineOwed([run], `Here is the run. ${placeholder.message}`)).toBe('This run doesn’t show how often each option reaches the goal’s target.');
+    expect(goalChanceLineOwed([run], `This run doesn’t show how often each option reaches the goal’s target. ${placeholder.message}`)).toBeNull();
+    // Control: a reply that says neither owes the whole line.
+    expect(goalChanceLineOwed([run], 'Here is the run.')).toBe(chance.say);
   });
 });

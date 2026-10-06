@@ -208,7 +208,13 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
  */
 export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
   const say = goalChanceSayFromThisTurn(toolResults);
-  return say !== null && !sameWordsIn(replyText, say) ? say : null;
+  if (say === null || sameWordsIn(replyText, say)) return null;
+  // MC D1 (Codex buddy r2 P2): a composite line (the opening + a warning's own words) owes only what the reply does not
+  // already carry — the Agent quoting the placeholder's "Set them …" must not get it a second time.
+  if (say.startsWith(OPENING) && say.length > OPENING.length && sameWordsIn(replyText, say.slice(OPENING.length).trim())) {
+    return sameWordsIn(replyText, OPENING) ? null : OPENING;
+  }
+  return say;
 }
 
 /** The latest Run this turn's typed sentence; a later Run without a warning clears an earlier one. */
@@ -259,7 +265,9 @@ export function identityAskLineOwed(toolResults: readonly unknown[], replyText: 
   for (const r of toolResults) {
     const rec = recordOf(r);
     if (typeof rec?.identity_ask_say === 'string' && rec.identity_ask_say.trim() !== '') say = rec.identity_ask_say;
-    else if (rec?.ran === true) say = undefined;
+    // Any later Run clears it — one with a result or one without (Codex buddy r2 P1: a no-result Run after the operand
+    // was set must not repeat the earlier "is 0 today … how many …?").
+    else if (typeof rec?.ran === 'boolean') say = undefined;
   }
   return say !== undefined && !sameWordsIn(replyText, say) ? say : null;
 }
