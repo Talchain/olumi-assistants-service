@@ -108,6 +108,35 @@ import {
 import { splitIntoRedactableUnits } from './redactable-units.js';
 
 /**
+ * Cut 6 (WORDING BATCH; DL 0df0e1 #2639 6008917488, after two Review Desk rounds): the run-share leader adjective.
+ *
+ * TRIGGER: most/best/more-supported (an -ly adverb may sit between: "most strongly supported"), "the most support",
+ * "supported most". Any verb, any noun: "X remains the most supported", "Most supported: X", "the best-supported
+ * option", "X has the most support". Enumerating verb forms was whack-a-mole; this fails closed.
+ *
+ * LEAVE, and only these:
+ *   - a negated OPTION subject opens the same clause (or comma segment) with no comma before the trigger — "no option",
+ *     "no single option", "no one", "none (of the options)", "neither (option)", "not one / not a single (option)".
+ *     It must be an OPTION subject: "no single factor … would change the most-supported option" still presupposes a
+ *     leader, and a label such as "No New Hire" is not a negator.
+ *   - "there is / there's no (single|clear|one)" directly before the trigger.
+ * The adjective on another noun ("the most-supported assumption") is an accepted over-block: no CEE emitter or prompt
+ * uses it (grep at 37c9f0bf, in the PR body).
+ */
+const MOST_SUPPORTED_NEGATED_OPTION_SUBJECT =
+  String.raw`(?:no(?:\s+single)?\s+(?:option|one|choice)s?|none(?:\s+of\s+(?:the|them|these|those)(?:\s+(?:options|choices))?)?` +
+  String.raw`|neither(?:\s+(?:option|one|choice))?|not\s+(?:one|a\s+single)(?:\s+(?:option|choice))?)`;
+const MOST_SUPPORTED_LEADER_RE = new RegExp(
+  String.raw`(?<!(?:^|[.;:!?,\n])\s*(?:[-*•]\s*)?${MOST_SUPPORTED_NEGATED_OPTION_SUBJECT}\b[^.;:!?,\n]*)` +
+    String.raw`(?<!\bthere(?:['’]s|\s+(?:is|are|was|were))\s+no\s+(?:(?:single|clear|one)\s+)?)` +
+    // The span takes a following option noun, so the roster-aware reader's question and postfix-"if" checks see what
+    // comes after the whole phrase ("…the most-supported option?"), exactly as they do for "the leading option".
+    String.raw`\b(?:(?:most|best|more)[-\s]+(?:[a-z]+ly[-\s]+)?supported(?:\s+(?:options?|ones?|choices?))?` +
+    String.raw`|the\s+most\s+support|supported\s+most)\b`,
+  'i',
+);
+
+/**
  * Copy that NAMES or PRESUMES a leading option.
  *
  * Sourced from the G-CEE-1 walk's own matcher (`raw/matcher.py`), which is the
@@ -130,14 +159,9 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'leads', re: /\bleads\b/i },
   { code: 'leading_option', re: /\bleading\s+option/i },
   // Cut 6 (Science d5 #87 6008249324): the copy now names the run-share leader as "the most-supported option". It
-  // presupposes a leader exactly as "the leading option" did, so the withheld gate must SEE it — and the whole class,
-  // not one noun (Review Desk #2639): "most-supported option(s)/one(s)", "the most supported is/was X", and
-  // "X is/was the most supported". A negated subject ("no option is", "none is", "neither is") names no leader and
-  // stays LEAVE; so does "which option most runs support" (no adjective) and the adjective on another noun.
-  {
-    code: 'most_supported_option',
-    re: /\bmost[-\s]supported\s+(?:options?|ones?)\b|\bthe\s+most[-\s]supported\s+(?:is|are|was|were)\b|(?<!\b(?:no(?:\s+single)?\s+(?:option|one)|none|neither(?:\s+option)?)\s+)\b(?:is|are|was|were)\s+the\s+most[-\s]supported\b/i,
-  },
+  // presupposes a leader exactly as "the leading option" did, so the withheld gate must SEE it. DL 0df0e1 (#2639
+  // 6008917488): the ADJECTIVE is the trigger, not a noun or verb list — fail closed. See MOST_SUPPORTED_LEADER_RE.
+  { code: 'most_supported_option', re: MOST_SUPPORTED_LEADER_RE },
   { code: 'the_lead', re: /\bthe\s+lead\b/i },
   { code: 'which_option_leads', re: /\bwhich\s+option\s+leads\b/i },
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
@@ -764,11 +788,30 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   'Standardise on Dell XPS performs best, with a probability of 56%.',
   // Cut 6 CATCH twin (d5): the new vocabulary, naming an option.
   'Hire Marketing Manager is the most-supported option in this model.',
-  // Cut 6 Review Desk (#2639): the same claim without the noun "option" after the adjective.
+  // Cut 6 Review Desk + DL (#2639): the adjective with any verb or noun.
   'Hire Marketing Manager is the most supported in this model.',
   'The two most-supported options are Hire Marketing Manager and Hold.',
   'Hire Marketing Manager was the most-supported one.',
   'The most supported is Hire Marketing Manager.',
+  'Hire Marketing Manager is most supported in this model.',
+  'Hire Marketing Manager remains the most supported.',
+  'Hire Marketing Manager comes out most supported.',
+  'Hire Marketing Manager comes out as the most supported.',
+  'Hire Marketing Manager ends up the most-supported.',
+  'Most supported: Hire Marketing Manager.',
+  'The most-supported choice is Hire Marketing Manager.',
+  'Hire Marketing Manager stays the most-supported choice.',
+  'The most supported here is Hire Marketing Manager.',
+  'Hire Marketing Manager is the best-supported option.',
+  'Hire Marketing Manager has the most support in this model.',
+  'Hire Marketing Manager is the more supported of the two.',
+  'Hire Marketing Manager is supported most often.',
+  'Hire Marketing Manager is now the most supported.',
+  'Of the options, Hire Marketing Manager is most supported.',
+  'Hire Marketing Manager is the most strongly supported option.',
+  'The option most supported by the runs is Hire Marketing Manager.',
+  "Hire Marketing Manager's the most supported.",
+  'No New Hire is the most supported in this model.',
 ]);
 
 function assertEnforcerIsNarrowerThanAlarm(): void {
