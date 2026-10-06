@@ -41,6 +41,9 @@ import { unitPhraseFamily } from './unit-conflict.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
+// A function the module calls only inside functions: `stated-size-binding.ts` imports this module back, which is safe here.
+import { centreRangeAt } from './stated-size-binding.js';
+import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -1416,19 +1419,58 @@ export function linkEffectFigureNotAChange(
   return undefined;
 }
 
+type LinkEffectFigures = { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
+
+/** The written amounts of ONE sentence that are the stated `value` in `unit`: literal raw amounts, never a fraction fallback. */
+function literalLinkAmounts(sentence: string, amounts: readonly StatedAmount[], value: number, unit: string): StatedAmount[] {
+  return amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), sentence)
+    && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
+}
+
+/**
+ * ⭐ THE USER'S FIGURE INSIDE THE RANGE THEY WROTE, AS AN ANSWER (G1b answer door; construction's own reading,
+ * `centreRangeAt`: Science d5 #87 6009282279, a8's shape ruling). "The starter tier would win about 150 new subscribers,
+ * between 80 and 250" states ONE figure, 150, and the range around it. From a brief, construction binds it with the range
+ * (`natural_effect.stated_range`, `end: 'centre'`); as an ANSWER the door refused it as "a range" and asked "What single
+ * change … rather than a range?", the figure the user had just given (served g1-2633t d1 @c787820). Read only where
+ * construction reads it: the ONE written figure that IS the stated amount, the sentence's ONE "between a and b" written
+ * after it (`centreRangeAt`), and no other range shape left once that range is set aside ("about 150 or 200, between 80
+ * and 250" still asks). Its `at` is where the range text starts in the sentence. Pure.
+ */
+function centreRangeInSentence(sentence: string, effect: LinkEffectFigures): { readonly range: StatedRangeEnd; readonly at: number } | undefined {
+  const own = literalLinkAmounts(sentence, findLinkEffectAmounts(sentence), effect.amount, effect.amount_unit);
+  if (own.length !== 1) return undefined;
+  const after = own[0]!.index + own[0]!.matchedText.length;
+  const range = centreRangeAt(sentence, { end: after }, effect.amount, effect.amount_unit);
+  const at = range === undefined ? -1 : sentence.indexOf(range.text, after);
+  if (range === undefined || at < 0) return undefined;
+  const setAside = sentence.slice(0, at) + ' '.repeat(range.text.length) + sentence.slice(at + range.text.length);
+  return hasLinkEffectRange(setAside) ? undefined : { range, at };
+}
+
+/**
+ * The range the user wrote around their figure in the statement a link-effect card quotes (`centreRangeInSentence`, the
+ * door's own reading), for the writer to carry exactly as construction carries it; undefined when no sentence, or more
+ * than one, writes one.
+ */
+export function centreRangeOfQuote(quote: string, effect: LinkEffectFigures): StatedRangeEnd | undefined {
+  const found = sentencesOf(quote.trim()).flatMap(s => { const c = centreRangeInSentence(s, effect); return c === undefined ? [] : [c.range]; });
+  return found.length === 1 ? found[0] : undefined;
+}
+
 function linkEffectInOneSentence(
   q: string,
-  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  effect: LinkEffectFigures,
   ends: { readonly source: string; readonly target: string },
   scope: LinkEffectScope,
 ): LinkEffectStatementMiss | null {
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
   if (negatedOutsideEnds(q, ends)) return 'denied';
-  if (hasLinkEffectRange(q)) return 'unclear_figure';
+  const centre = hasLinkEffectRange(q) ? centreRangeInSentence(q, effect) : undefined;
+  if (hasLinkEffectRange(q) && centre === undefined) return 'unclear_figure';
   const amounts = findLinkEffectAmounts(q);
   // Link magnitudes are literal raw amounts, never the fraction fallback used for other node readers.
-  const literalAmount = (value: number, unit: string) => amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), q)
-    && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
+  const literalAmount = (value: number, unit: string) => literalLinkAmounts(q, amounts, value, unit);
   const amountFigures = literalAmount(effect.amount, effect.amount_unit);
   const perFigures = literalAmount(effect.per_source_change, effect.per_source_change_unit);
   const levels = linkEffectSourceLevels(q, namesSourceOf(ends));
@@ -1436,9 +1478,27 @@ function linkEffectInOneSentence(
     && Math.abs(levels.change) === Math.abs(effect.per_source_change);
   const oneAt = perFigures.length === 0 && Math.abs(effect.per_source_change) === 1
     ? distributiveOneAt(q, ends, effect.per_source_change_unit) : -1;
+  /**
+   * ⭐ A SWITCH'S EFFECT IS ITS TARGET FIGURE ALONE (Science 6008844683; construction's own reading of the same sentence,
+   * `statedSwitchEffectQuoteMatches`). Turning something on is never written per a source figure: "The starter tier would
+   * win about 150 new subscribers" sizes ‘Starter tier launched’ → ‘Starter subscribers’ at +150 per switch, and the door
+   * answered it "How much does … move …, in figures?". Only:
+   *  · the 'switch' unit at ±1, which the writer admits only for a source the SIZER types binary (`linkEffectEndUnits`:
+   *    `sourceUnitWords` says "switch" only at frame 1 with every level 0 or 1) — never the Agent's word on a continuous
+   *    source, and the door dry-runs that writer before any card;
+   *  · ONE figure written outside the user's own range, and it is the amount: "lift our win rate from 20% to about 30%"
+   *    writes two, and its change (10 points) is a level change's to read, never a 30-point switch effect;
+   *  · a figure written as money or a percentage only in a target unit of that kind: "costs about £6 a month" is never
+   *    6 subscribers, even on a link the user selected (a unit nobody classifies takes any kind elsewhere, `amountIs`).
+   */
+  const outsideRange = amounts.filter(a => centre === undefined || a.index < centre.at || a.index >= centre.at + centre.range.text.length);
+  const kindFits = (a: StatedAmount): boolean => (a.kind !== 'currency' || unitPhraseFamily(effect.amount_unit) === 'currency')
+    && (a.kind !== 'percent' || unitPhraseFamily(effect.amount_unit) === 'percent');
+  const switchOne = perFigures.length === 0 && effect.per_source_change_unit === 'switch' && Math.abs(effect.per_source_change) === 1
+    && amountFigures.length === 1 && outsideRange.length === 1 && outsideRange[0] === amountFigures[0] && kindFits(amountFigures[0]!);
   const bothWritten = amountFigures.some(amount => writtenChange
     ? amount.index < levels!.from_index || amount.index >= levels!.end_index
-    : oneAt >= 0 || perFigures.some(per => per.index !== amount.index));
+    : oneAt >= 0 || switchOne || perFigures.some(per => per.index !== amount.index));
   if (!bothWritten) return 'figures_not_in_statement';
   // The target is checked even when the source change is distributive or written as levels (Codex r2 HIGH).
   const notAChange = linkEffectFigureNotAChange(q, effect, ends, scope.target_units ?? []);
