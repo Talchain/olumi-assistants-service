@@ -109,7 +109,7 @@ describe('the real Agent route and level door', () => {
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
-    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: RequestInit) => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: globalThis.RequestInit) => {
       const req = JSON.parse(String(init.body)) as { tool_choice?: { name: string } };
       choices.push(req.tool_choice);
       const call = req.tool_choice?.name === CURRENT_LEVEL_TOOL || (direct && calls === 0);
