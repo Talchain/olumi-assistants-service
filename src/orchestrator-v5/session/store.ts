@@ -29,6 +29,7 @@ import type { CoachingStateSnapshot } from '../coaching/coaching-state-snapshot.
 import type { SessionTurnWithContent } from './conversation-content.js';
 import type { AnswerGuidance } from '../agent-lane/turn-context/guidance-history.js';
 import type { GuidanceState } from '../agent-lane/guidance/index.js';
+import type { SuggestedAction } from '../compose/types.js';
 // Type-only, and deliberately so: `turn-fence.ts` imports
 // `StateCommitFailedError` from THIS file, and a value import here would close
 // that into a runtime cycle. `import type` is erased entirely.
@@ -214,6 +215,9 @@ export interface SessionTurnWrite {
   readonly coaching_state?: CoachingState | null;
   /** Content-free post-egress guidance events, atomically committed with this Agent answer. */
   readonly agent_guidance?: AnswerGuidance;
+  /** The plain-text controls this final answer actually offered, bound to its selected Run. */
+  readonly suggested_actions?: readonly SuggestedAction[];
+  readonly suggested_actions_run_key?: string | null;
   /**
    * V5 Conversation Context Reliability: the user's verbatim turn message
    * (boundary `payload.message`), persisted to
@@ -282,8 +286,16 @@ export interface CommittedTurnRecord {
   readonly pending_actions?: readonly PendingAction[];
 }
 
+export interface AnswerOffersRead {
+  readonly turn_id: string;
+  readonly suggested_actions: readonly SuggestedAction[];
+  readonly run_key: string | null;
+}
+
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
+  /** Uncached latest-answer offers only; absent/malformed/unavailable reads are null. */
+  readLatestAnswerOffers?(scenarioId: string): Promise<AnswerOffersRead | null>;
   /** Uncached, scenario-scoped bounded answer history. Read failure throws; absent capability is unknown. */
   readGuidanceHistory?(scenarioId: string): Promise<GuidanceState>;
   // V5 Conversation Context Reliability: returns the content-bearing superset

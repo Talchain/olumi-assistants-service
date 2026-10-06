@@ -45,6 +45,7 @@ import {
   SessionReadError,
   StateCommitFailedError,
   type AtomicCommittedModelVersionReceipt,
+  type AnswerOffersRead,
   type CommittedTurnRecord,
   type GraphWriteFailureDisclosure,
   type PendingActionReadOptions,
@@ -52,6 +53,7 @@ import {
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
+import { parseAnswerOffers } from '../agent-lane/answer-offers-envelope.js';
 import {
   categoriseGraphCasWrite,
   computeExpectedGraphCasHashes,
@@ -371,6 +373,12 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   private async appendThroughRpc(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
+    if (Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0
+      && (write.graph != null || write.modelVersion !== undefined || write.briefText != null
+        || write.coaching_state != null || write.turn_class !== 'direct_answer' || write.handler_id !== null
+        || !write.response_emitted || write.turn_id.endsWith(TURN_CLAIM_SUFFIX) || !isAgentAnswerRow(write))) {
+      throw new StateCommitFailedError('Suggested actions require a final Agent answer without a graph write');
+    }
     if (write.agent_guidance !== undefined && (parseAnswerGuidance(write.agent_guidance) === null
       || write.graph != null || write.modelVersion !== undefined || write.briefText != null
       || write.coaching_state != null || write.handler_facts.length !== 0
@@ -507,8 +515,10 @@ export class SupabaseSessionStore implements SessionStore {
     rpcMode: GraphCasRpcMode,
   ): Promise<SessionAppendOutcome> {
     const useV3 = rpcMode !== 'off' && write.graph != null;
+    const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
     const rpcName = useV3 ? 'append_turn_atomic_v3'
-      : write.agent_guidance !== undefined ? 'append_agent_answer_with_guidance' : 'append_turn_atomic_v2';
+      : withOffers ? 'append_agent_answer_with_offers'
+        : write.agent_guidance !== undefined ? 'append_agent_answer_with_guidance' : 'append_turn_atomic_v2';
     const { data, error } = useV3
       ? await this.client.rpc('append_turn_atomic_v3', {
           ...baseRpcArgs,
@@ -528,9 +538,20 @@ export class SupabaseSessionStore implements SessionStore {
       : await this.client.rpc(rpcName, {
           ...baseRpcArgs,
           ...(write.agent_guidance !== undefined ? { p_agent_guidance: write.agent_guidance } : {}),
+          ...(withOffers ? {
+            p_agent_guidance: write.agent_guidance ?? null,
+            p_suggested_actions: write.suggested_actions,
+            p_suggested_actions_run_key: write.suggested_actions_run_key ?? null,
+          } : {}),
         });
 
     if (error) {
+      if (withOffers && (errCode(error) === 'PGRST202' || errCode(error) === '42883')) {
+        log.warn({ scenario_id: write.scenario_id, rpc_code: errCode(error) },
+          'Answer offers RPC is unavailable; recording the answer through its existing delegate');
+        const { suggested_actions: _offers, suggested_actions_run_key: _runKey, ...withoutOffers } = write;
+        return this.dispatchCheckedAppend(withoutOffers, baseRpcArgs, rpcMode);
+      }
       // v3 atomic CAS conflict → typed 409-class refusal, NEVER a silent
       // clobber. The whole transaction (turn row included) rolled back in the
       // DB, so no partial state survives; surface GraphStaleWriteError so the
@@ -554,7 +575,7 @@ export class SupabaseSessionStore implements SessionStore {
         { cause: error, rpc_code: errCode(error) },
       );
     }
-    if (write.agent_guidance !== undefined) {
+    if (withOffers || write.agent_guidance !== undefined) {
       if (data === null || typeof data !== 'object' || Array.isArray(data) || typeof data.id !== 'string'
         || typeof data.replayed_prior_turn !== 'boolean' || typeof data.prior_turn_conflict !== 'boolean'
         || (data.replayed_prior_turn && data.prior_turn_conflict)) {
@@ -1611,6 +1632,26 @@ export class SupabaseSessionStore implements SessionStore {
     const history = guidanceHistoryOf(data.map(row => row.agent_guidance));
     if (history === null) throw new SessionReadError('Guidance history malformed');
     return history;
+  }
+
+  async readLatestAnswerOffers(scenarioId: string): Promise<AnswerOffersRead | null> {
+    try {
+      const { data, error } = await this.client.from('v5_conversation_turns')
+        .select('turn_id, request_hash, suggested_actions, suggested_actions_run_key')
+        .eq('scenario_id', scenarioId).eq('turn_class', 'direct_answer').is('handler_id', null)
+        .eq('response_emitted', true).like('request_hash', 'agent_turn:%')
+        .not('turn_id', 'like', NOT_A_CLAIM_PATTERN)
+        .order('created_at', { ascending: false }).order('turn_id', { ascending: false })
+        .limit(1).abortSignal(AbortSignal.timeout(ANALYSIS_REREAD_TIMEOUT_MS));
+      if (error || !Array.isArray(data) || data.length !== 1) return null;
+      const row = data[0];
+      if (row === null || typeof row !== 'object' || typeof row.turn_id !== 'string'
+        || row.turn_id.endsWith(TURN_CLAIM_SUFFIX) || !isAgentAnswerRow(row)) return null;
+      const actions = parseAnswerOffers(row.suggested_actions);
+      const runKey = row.suggested_actions_run_key;
+      if (actions === null || (runKey !== null && (typeof runKey !== 'string' || runKey.length !== 16 || !/^[0-9a-f]{16}$/.test(runKey)))) return null;
+      return { turn_id: row.turn_id, suggested_actions: actions, run_key: runKey };
+    } catch { return null; }
   }
 
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {

@@ -230,6 +230,10 @@ import { projectAnalysisAdmission } from './analysis-admission-projection.js';
 import { readExecutableHeldProposalOffers, type HeldProposalOfferRead } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import type { PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { isAgentAnswerRow } from "../orchestrator-v5/session/conversation-as-seen.js";
+import type { AnswerOffersRead } from '../orchestrator-v5/session/store.js';
+import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
+import { answerOffersForReload } from '../orchestrator-v5/agent-lane/answer-offers-reload.js';
+import { executableWaitingProposal } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_SCHEMA = "scenario_graph.v1" as const;
@@ -297,6 +301,7 @@ export interface ConversationTurnRead {
   readonly created_at: string;
   readonly user_message: string | null;
   readonly assistant_message: string | null;
+  readonly suggested_actions?: readonly SuggestedAction[];
 }
 
 function wantsConversationTurns(body: unknown): boolean {
@@ -330,16 +335,17 @@ export { AGENT_ANSWER_REQUEST_HASH_PREFIX } from "../orchestrator-v5/session/con
  * `null` and the graph read stands.
  */
 async function readConversationTurns(
-  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; request_hash?: string; user_message?: string | null; assistant_message?: string | null }[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null> },
+  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; request_hash?: string; user_message?: string | null; assistant_message?: string | null }[]>; readCommittedTurn?: (scenarioId: string, turnId: string) => Promise<{ pending_actions?: readonly unknown[] } | null>; readLatestAnswerOffers?: (scenarioId: string) => Promise<AnswerOffersRead | null> },
   scenarioId: string,
   requestId: string,
-  authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[] },
+  authority: { userId: string | null; graphHash: string | undefined; latest: readonly PendingAction[];
+    analysisState: unknown; analysisResult: unknown; analysisReady: unknown; modelExists: boolean },
 ): Promise<{ turns: ConversationTurnRead[]; heldOffers: HeldProposalOfferRead[] } | null> {
   try {
     const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
     const answers = rows.filter(isAgentAnswerRow)
       .filter(r => typeof r.user_message === "string" || typeof r.assistant_message === "string").slice(0, CONVERSATION_TURNS_CAP);
-    const turns = [...answers].reverse()
+    const turns: ConversationTurnRead[] = [...answers].reverse()
       .map((r) => ({
         turn_id: r.turn_id,
         created_at: r.created_at,
@@ -348,7 +354,22 @@ async function readConversationTurns(
       }))
       .filter((t) => t.user_message !== null || t.assistant_message !== null)
       .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
-    return { turns, heldOffers: await readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers, store }) };
+    const heldOffers = await readExecutableHeldProposalOffers({ scenarioId, ...authority, rows: answers, store });
+    if (typeof store.readLatestAnswerOffers === 'function') {
+      // This optional leg must never change the graph, held cards or text if it fails.
+      try {
+        const stored = await store.readLatestAnswerOffers(scenarioId);
+        const last = turns[turns.length - 1];
+        if (stored !== null && last !== undefined && last.turn_id === stored.turn_id) {
+          const outstandingProposalIds = new Set(heldOffers.map(offer => offer.proposal_id));
+          const waiting = executableWaitingProposal(scenarioId, authority.userId, authority.graphHash);
+          if (waiting !== undefined) outstandingProposalIds.add(waiting);
+          const actions = answerOffersForReload(stored, scenarioId, { ...authority, outstandingProposalIds });
+          if (actions.length > 0) turns[turns.length - 1] = { ...last, suggested_actions: actions };
+        }
+      } catch { /* Offers unavailable: retain the existing response. */ }
+    }
+    return { turns, heldOffers };
   } catch (err) {
     log.warn(
       {
@@ -693,6 +714,12 @@ export default async function route(app: FastifyInstance) {
           // EXACTLY the graph_hash the Agent turn reads from this route, not identity.v1's different projection.
           graphHash: (graphPresent ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress) : null) ?? undefined,
           latest: latestPending,
+          analysisState: analysis.analysis_state,
+          analysisResult: analysis.analysis_result,
+          analysisReady: analysis.current_read.analysis_ready,
+          modelExists: graphPresent && typeof graph === 'object'
+            && ['nodes', 'edges'].some(key => Array.isArray((graph as Record<string, unknown>)[key])
+              && ((graph as Record<string, unknown>)[key] as unknown[]).length > 0),
         }) : undefined;
       const conversationTurns = conversationRead === undefined ? undefined : conversationRead?.turns ?? null;
       const heldOffers = conversationRead?.heldOffers;
