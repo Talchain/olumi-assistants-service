@@ -47,6 +47,9 @@ describe('D3 step 2 — goalChanceLicenceOf', () => {
     expect(l.pct_by_option).not.toHaveProperty('c');
     expect(goalChanceLicenceOf(env(['a', 0.62], ['b', 0.41], ['c', 0.2]), G, GOAL)).not.toHaveProperty('withheld_option_ids'); // CONTROL
     expect(goalChanceLicenceOf(env(['a', 0.62], ['b', 0.41], ['c', 0.2]), G, GOAL)?.form).toBe('highest'); // CONTROL: all three
+    // Both licensed options under 40% with one withheld: "every option is more likely to miss" would speak for the withheld one.
+    expect(goalChanceLicenceOf({ option_comparison: [{ option_id: 'a', probability_of_goal: 0.35 }, { option_id: 'b', probability_of_goal: 0.31 },
+      { option_id: 'c' }] }, G, GOAL)?.form).toBe('each');
     // Every option withheld: nothing to say.
     expect(goalChanceLicenceOf({ option_comparison: [{ option_id: 'a' }, { option_id: 'b' }] }, G, GOAL)).toBeNull();
   });
