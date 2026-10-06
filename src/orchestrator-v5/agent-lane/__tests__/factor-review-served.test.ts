@@ -94,7 +94,7 @@ async function runAndPersist(withSensitivity = true, agent = true, timing: { sig
     const result = await handler({ ...call, signal: timing.signal ?? call.signal });
     await commitDirectAnswer({ response_version: 2, assistant_text: result.assistant_text, blocks: [], insights: [],
       suggested_actions: [], stage_indicator: 'analyse' } as OlumiResponse,
-    { scenario_id: SCENARIO, turn_id: randomUUID(), turn_class: 'decide', handler_id: 'run_analysis',
+    { scenario_id: SCENARIO, turn_id: randomUUID(), turn_class: 'handler', handler_id: 'run_analysis',
       request_hash: 'mc-factor-review', llm_calls_used: result.llm_calls_used, duration_ms: 1, handler_facts: result.handler_facts }, store as never);
     return result;
   };
