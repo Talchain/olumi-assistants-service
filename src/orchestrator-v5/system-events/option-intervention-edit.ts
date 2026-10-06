@@ -84,6 +84,7 @@ import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
 import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { mediatorReadings } from '../agent-lane/mediator-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
@@ -587,6 +588,7 @@ const LINK_WRITER_OWNED_EDGE_MEMBERS = ['strength', 'effect_direction', 'provena
 /**
  * ⛔ ONLY THE DECLARED LINKS MAY CHANGE, and on each only what the link writer owns. The size-by-chat door additionally
  * owns exactly each approved end's unit_reading: no other node field, other link, order or top-level field may move.
+ * The one exception is the GAUGE a declared link's answer writes (#2623 (B); below), admitted by identity.
  */
 export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unknown,
   links: readonly { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }[]): boolean {
@@ -614,11 +616,25 @@ export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unk
     if (Object.hasOwn(was[0]!, 'unit_reading')) now[0]!.unit_reading = structuredClone(was[0]!.unit_reading);
     else delete now[0]!.unit_reading;
   }
+  // ⭐ #2623 (B) AT THE DOOR (Codex r1 on #2631; DL 0df0e1 ruling): one end-to-end answer through a level-less mediator also
+  // writes the GAUGE (M → child = ±1, `sized_by_identity: {op:'gauge'}`, Science 6006425419). Admitted ONLY for the child edge
+  // `mediatorReadings` names for a declared link's TARGET on the stored graph, only when that was not already the stored
+  // gauge, and only when the postimage reads it back as the intact stored gauge; on it, as on a declared link, only what
+  // the link writer owns may move. Any other edge that changed still refuses.
+  const gauges = new Set<string>();
+  const readBefore = mediatorReadings(before);
+  const readAfter = mediatorReadings(after);
+  for (const link of links) {
+    const was = readBefore.get(link.to);
+    if (was?.via !== 'gauge' || was.stored === true) continue;
+    const now = readAfter.get(link.to);
+    if (now?.via === 'gauge' && now.child === was.child && now.stored === true) gauges.add(`${link.to}::${was.child}`);
+  }
   for (let i = 0; i < restored.edges.length; i += 1) {
     const now = restored.edges[i]! as Record<string, unknown> & { from: string; to: string };
     const was = before.edges[i]! as Record<string, unknown> & { from: string; to: string };
     if (now.from !== was.from || now.to !== was.to) return false;
-    if (!links.some(l => l.from === was.from && l.to === was.to)) continue;
+    if (!links.some(l => l.from === was.from && l.to === was.to) && !gauges.has(`${was.from}::${was.to}`)) continue;
     for (const member of LINK_WRITER_OWNED_EDGE_MEMBERS) {
       if (Object.hasOwn(was, member)) now[member] = structuredClone(was[member]);
       else delete now[member];
