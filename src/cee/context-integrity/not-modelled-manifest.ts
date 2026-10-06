@@ -49,7 +49,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
-import { statedEffectQuoteMatches, statedEffectSpansInText, statedTargetAmountSpans } from "../provenance/stated-effect.js";
+import { statedEffectQuoteMatches, statedEffectSpansInText, statedSwitchEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
 import { readUnitParts } from "../../orchestrator-v5/agent-lane/same-unit.js";
 import {
   classifyValueSource,
@@ -1547,12 +1547,19 @@ function collectBriefNaturalEffectCandidates(
       quote !== null &&
       typeof perSourceChange === "number" &&
       typeof perSourceChangeUnit === "string" &&
-      statedEffectQuoteMatches(quote, {
+      // A switch's quote writes its target figure only ("would win about 150 new subscribers"): the same matcher the
+      // binder stored it by (Codex buddy r1 F7, #2644).
+      (statedEffectQuoteMatches(quote, {
         amount,
         amount_unit: amountUnit,
         per_source_change: perSourceChange,
         per_source_change_unit: perSourceChangeUnit,
-      });
+      }) || statedSwitchEffectQuoteMatches(quote, {
+        amount,
+        amount_unit: amountUnit,
+        per_source_change: perSourceChange,
+        per_source_change_unit: perSourceChangeUnit,
+      }));
     // ⛔ A RESIZE IN CHAT KEEPS THE OLD EVIDENCE (Codex r1 on #2610, P2): `link-effect-edit.ts` replaces `natural_effect`
     // and keeps the rest of the provenance, so a Fi link resized from £1,200 to £2,000 still carries the £1,200 sentence.
     // That sentence no longer describes the link's size. On a chat-sized link it is stale, never a veto: the link binds

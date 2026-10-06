@@ -1,4 +1,5 @@
 import { linkList } from '../agent-lane/unsized-path-cause.js';
+import { evaluatedIdentityCarriers } from './identity-evaluations.js';
 /**
  * ⭐ IS THE GOAL'S TARGET TESTABLE, BEFORE ANY RUN (DECISION-REPRESENTATION-v1 row 4; PTL A #77 5912737934).
  *
@@ -131,8 +132,8 @@ export function targetVerdictWithholdsTargetClaims(verdict: TargetTestability): 
  * raw target only the row stating that figure; Codex r1 #2606), never by operator. A deadline row on the goal (DR row 3),
  * a different-figure row beside a raw target, every other node's limit, and a testable target: null, nothing moves.
  */
-export function untestableGoalTargetRowId(input: unknown): string | null {
-  const verdict = targetTestabilityOf(input);
+export function untestableGoalTargetRowId(input: unknown, identityEvaluations?: readonly unknown[]): string | null {
+  const verdict = targetTestabilityOf(input, identityEvaluations);
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable' || !isRec(input) || !Array.isArray(input.nodes)) return null;
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
   const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && n.id === verdict.goal_id);
@@ -165,7 +166,7 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
       toGoal.add(e.from); grew = true;
     }
   }
-  const evaluated = new Set((identityEvaluations ?? []).filter(isRec).filter(e => e.evaluated === true).map(e => e.node_id));
+  const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
   const exactLinks = new Set(edges.filter(e => {
     if (isRec(e.provenance) && e.provenance.definitional === true) return true;
     const to = byId.get(e.to);
@@ -208,7 +209,15 @@ export function goalOrderedLinks(graph: unknown, links: readonly { from: string;
       || edges.findIndex(e => e.from === a.from && e.to === a.to) - edges.findIndex(e => e.from === b.from && e.to === b.to));
 }
 
-export function targetTestabilityOf(input: unknown): TargetTestability {
+export function targetTestabilityOf(
+  input: unknown,
+  /**
+   * THIS Run's `identity_evaluations` (ISL via PLoT, top level of the response). An inferred identity the Run evaluated
+   * carries its operand links exactly, as the licence's own walk reads them (`reachedGoalPaths` `exactLinks`; Science
+   * d5 ruling for #2644). Omitted (before a Run) = none attested: only a confirmed identity counts.
+   */
+  identityEvaluations?: readonly unknown[],
+): TargetTestability {
   if (!isRec(input) || !Array.isArray(input.nodes)) return { kind: 'no_goal' };
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
   const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && typeof n.id === 'string');
@@ -248,13 +257,21 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
+    const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
     const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.stated_in_brief !== false).map((n) => n.id));
+    // An inferred identity THIS Run evaluated carries only its OWN operand links exactly, as the licence reads them
+    // (`reachedGoalPaths` exactLinks); any other link into it stays a guess (Codex buddy r1 F2, #2644).
+    const evaluatedOperand = (e: Record<string, unknown>): boolean => {
+      const to = nodes.find((n) => n.id === e.to);
+      const identity = isRec(to?.nonlinear_identity) ? to!.nonlinear_identity : undefined;
+      return identity !== undefined && evaluated.has(to!.id) && Array.isArray(identity.factor_ids) && identity.factor_ids.includes(e.from);
+    };
     // A link Olumi sized (R3 #2371 5914745577: an `olumi_*` magnitude, or a plain `defaulted: true` size — m1's churn →
     // subscribers-at-12-months) that does not hold by definition: B6's ONE test (`olumiGuessedLink`), so the goal and a
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
     const guesses = edges.filter((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
-      && olumiGuessedGoalLink(e, unitOf));
+      && !evaluatedOperand(e) && olumiGuessedGoalLink(e, unitOf));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     // ⭐ T1b (Science d5, 6 Oct, RT-18 class Q1): the user's sizes on both sides of a level-less mediator size the path (M's
