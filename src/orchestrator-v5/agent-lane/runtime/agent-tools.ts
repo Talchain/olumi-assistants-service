@@ -699,7 +699,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     parameters: obj({
       goal_label: { type: 'string' },
       value: { type: 'number', description: 'The figure the user stated, in their units (12000 for £12,000; never scaled).' },
-      unit: { type: 'string', description: 'The unit the user stated, if any (e.g. GBP).' },
+      unit: { type: 'string', maxLength: 40, description: 'The unit the user stated, if any (e.g. GBP); at most 40 characters, e.g. "small-update equivalents per sprint".' },
       goal_is: {
         type: 'string', enum: ['at_least', 'above', 'at_most', 'below'],
         description: 'ONLY when the user has said how the goal’s target is put: reach at least it, get strictly above it, stay at most it, or stay strictly below it. Otherwise leave it out: today’s level is a fact about today and is recorded on its own, with or without a target, and you never ask for a target first. Never guess it.',

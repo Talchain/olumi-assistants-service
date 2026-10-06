@@ -308,6 +308,75 @@ export function nearestFiveGoalChancesForAgent(result: unknown): ReadonlyMap<str
   return out;
 }
 
+/** Screen copy (goalChanceCopy.ts): the licence's displayed percentage, including its non-certainty edge words. */
+export function goalChanceDisplayForAgent(result: unknown): Readonly<Record<string, string>> | undefined {
+  const licence = agentLicenceRecordOf(result);
+  if (licence === undefined) return undefined;
+  const pct = isRec(licence.pct_by_option) ? licence.pct_by_option : {};
+  const withheld = new Set(Array.isArray(licence.withheld_option_ids) ? licence.withheld_option_ids : []);
+  const out: Record<string, string> = {};
+  for (const id of licence.option_ids as string[]) {
+    const shown = pct[id];
+    if (withheld.has(id) || typeof shown !== 'number' || !Number.isInteger(shown) || shown < 0 || shown > 100) continue;
+    out[id] = shown === 0 ? 'less than 1%' : shown === 100 ? 'more than 99%' : `about ${shown}%`;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+export interface GoalChanceDriverAvailability {
+  readonly scope: 'per_option_goal_chance';
+  readonly source: 'GOAL_CHANCE_LICENSED';
+  readonly status: 'available' | 'none_licensed' | 'not_recorded';
+  readonly options: readonly {
+    readonly option_id: string;
+    readonly status: 'available' | 'none_licensed' | 'not_recorded';
+    readonly reason?: GoalChanceNoDriverReason;
+  }[];
+}
+
+/** Availability only, never a driver identity/ranking or decision sensitivity; no reconstruction from structural rows. */
+export function goalChanceDriverAvailabilityForAgent(result: unknown): GoalChanceDriverAvailability | undefined {
+  const licence = agentLicenceRecordOf(result);
+  const displays = goalChanceDisplayForAgent(result);
+  if (licence === undefined || displays === undefined) return undefined;
+  const drivers = isRec(licence.driver_by_option) ? licence.driver_by_option : {};
+  const absent = isRec(licence.no_driver_by_option) ? licence.no_driver_by_option : {};
+  const reasons: readonly string[] = ['invalid_rows', 'below_resolution', 'correlated', 'set_by_option', 'no_cut_value', 'none'];
+  const options = Object.keys(displays).map((option_id): GoalChanceDriverAvailability['options'][number] => {
+    const driver = isRec(drivers[option_id]) ? drivers[option_id] : undefined;
+    const reason = absent[option_id];
+    // Only the stored licence speaks. A conflicting or unreadable entry licenses neither presence nor absence.
+    if (driver !== undefined && reason === undefined && isLicensedDriver(driver)) return { option_id, status: 'available' };
+    if (drivers[option_id] === undefined && typeof reason === 'string' && reasons.includes(reason)) {
+      return { option_id, status: 'none_licensed', reason: reason as GoalChanceNoDriverReason };
+    }
+    return { option_id, status: 'not_recorded' };
+  });
+  return {
+    scope: 'per_option_goal_chance', source: GOAL_CHANCE_LICENSED,
+    status: options.some((o) => o.status === 'available') ? 'available'
+      : options.every((o) => o.status === 'none_licensed') ? 'none_licensed' : 'not_recorded',
+    options,
+  };
+}
+
+function isLicensedDriver(d: Rec): boolean {
+  if (typeof d.quantity_id !== 'string' || d.quantity_id === '' || !['user', 'olumi', 'unattributed'].includes(String(d.authored_by))) return false;
+  if (d.kind === 'factor_value') return typeof d.factor_id === 'string' && d.factor_id !== ''
+    && (d.side === 'low' || d.side === 'high') && typeof d.cut_value === 'number' && Number.isFinite(d.cut_value)
+    && typeof d.pct_if_side === 'number' && Number.isInteger(d.pct_if_side) && d.pct_if_side >= 0 && d.pct_if_side <= 100;
+  if (typeof d.from !== 'string' || d.from === '' || typeof d.to !== 'string' || d.to === '') return false;
+  if (d.kind === 'link_strength') return (d.side === 'low' && d.strength === 'weaker') || (d.side === 'high' && d.strength === 'stronger');
+  return d.kind === 'link_existence' && (d.side === 'absent' || d.side === 'present')
+    && typeof d.pct_if_side === 'number' && Number.isInteger(d.pct_if_side) && d.pct_if_side >= 0 && d.pct_if_side <= 100;
+}
+
+function agentLicenceRecordOf(result: unknown): Rec | undefined {
+  if (!isRec(result) || goalChanceLicenceForAgent(result) === undefined) return undefined;
+  return [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
+    .flatMap((w) => Array.isArray(w) ? w : []).find((w): w is Rec => isRec(w) && w.code === GOAL_CHANCE_LICENSED);
+}
+
 /**
  * ⭐ DL 0df0e1 ruling C (6 Oct): the Run's stored licence as the Agent may read it — `form` and option ids only, read by
  * its code where the Run carries it (`enrichment.inference_warnings`) or where a kept Run moved it (`inference_warnings`).

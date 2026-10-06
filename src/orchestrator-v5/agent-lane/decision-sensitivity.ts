@@ -26,7 +26,7 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
-import { nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
+import { goalChanceDisplayForAgent, goalChanceDriverAvailabilityForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
@@ -204,6 +204,13 @@ export function analysisResultForAgent(result: unknown): unknown {
     if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
   out.decision_sensitivity = decisionSensitivityOf(enrichment);
+  // CEE-owned facts stay outside enrichment's producer-prose filter. The licence, not EVPPI, owns this claim scope.
+  if (!runWithheldGoalFigures(block) && (enrichment === undefined || !runWithheldGoalFigures(enrichment))) {
+    const display = goalChanceDisplayForAgent(block);
+    const availability = goalChanceDriverAvailabilityForAgent(block);
+    if (display !== undefined) out.goal_chance_display = display;
+    if (availability !== undefined) out.goal_chance_driver_availability = availability;
+  }
   out.tipping_point = tippingPointOf(enrichment);
   return out;
 }
