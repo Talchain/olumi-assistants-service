@@ -117,7 +117,9 @@ describe('(A) a rate × count drawn as two added links is Olumi\'s product of th
   });
 
   it('CONTROL (Science mutant: a point option level): Launch SETS the subscribers to one figure — no product; the range must survive', async () => {
-    const { node } = await build(draft7({ pointCount: true }));
+    // MC range carry: this control must state a BARE point. Its old ranged brief is the new positive row.
+    const brief = T1B.replace('about 150 new subscribers, between 80 and 250', 'about 150 new subscribers');
+    const { node } = await build(draft7({ pointCount: true }), brief);
     expect(node('Starter-tier MRR').nonlinear_identity).toBeUndefined();
   });
 

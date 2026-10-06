@@ -63,13 +63,76 @@ import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } fr
 import { clampForPersist, refitFramesForStatedEffects } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
-import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { centreRangeAt, creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, figureTheUserWroteForSpan, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, sameWord, timesTheUserWrote, withdrawUnstatedBaselineStamps, wordsOf } from '../stated-by-user.js';
+import { readCount, sameUnit } from '../same-unit.js';
+import { admitInterventionRange, type StoredInterventionRangeT } from '../../intervention-range.js';
 import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedRange } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
+
+/**
+ * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
+ * strip any such field and rebuild the receipt from one named user sentence. Reuses the link centre-range reader,
+ * but no link spread, ignorance prior or plausible_max is evidence for an option's count range.
+ */
+export function withCountInterventionRanges(model: CandidateModel, brief: string): CandidateModel {
+  const quantities = [model.goal.metric, ...model.factors.map(f => f.label), ...model.outcomes.map(o => o.label), ...(model.risks ?? []).map(r => r.label)];
+  const sentences = brief.split(/(?<=[.!?])\s+|\n+/u).map(s => s.trim()).filter(Boolean);
+  return { ...model, options: model.options.map(option => ({ ...option, ...(option.interventions === undefined ? {} : {
+    interventions: option.interventions.map(intervention => {
+      const { range: _untrusted, ...point } = intervention;
+      const factors = model.factors.filter(f => canonicalLabel(f.label) === canonicalLabel(point.factor_label));
+      const factor = factors.length === 1 ? factors[0] : undefined;
+      const unit = factor?.unit;
+      const noun = readCount(unit);
+      if (noun === null || typeof unit !== 'string' || point.value <= 0 || !Number.isFinite(point.value)
+        || (point.unit !== undefined && !sameUnit(point.unit, unit))
+        || (point as typeof point & { value_kind?: string }).value_kind === 'additional'
+        || (point as typeof point & { derived_total?: boolean }).derived_total === true) return point;
+      const others = quantities.filter(q => canonicalLabel(q) !== canonicalLabel(point.factor_label));
+      // A money rate cannot own the count's point. Its distinct words still veto a wrong owner, but its shared
+      // "starter tier" words must not disown "starter tier ... 150 new subscribers" as the existing scoped reader allows.
+      const rivals = [...model.factors, ...model.outcomes, ...(model.risks ?? [])]
+        .filter(f => others.includes(f.label) && readCount(f.unit) !== null).map(f => f.label);
+      const scope = { target: [point.factor_label, option.label], others, rivals, strict: true as const, requireNamed: true as const };
+      const qualifiers = wordsOf(point.factor_label).filter(w => !wordsOf(unit).some(u => sameWord(u, w)));
+      // Only a count phrase may sit between the point and range, or follow the range. No intervening subject, verb,
+      // conjunction or another count noun can move the receipt to a second quantity (including one absent from the model).
+      const countPhrase = (text: string): boolean => {
+        const phrase = text.replace(/^[\s,]+|[\s,.!]+$/gu, '');
+        if (phrase === '') return true;
+        const read = readCount(phrase);
+        const own = wordsOf(`${point.factor_label} ${unit}`);
+        return read !== null && read[read.length - 1] === noun[noun.length - 1]
+          && wordsOf(phrase).every(w => w === 'new' || w === 'paying' || own.some(o => sameWord(o, w)));
+      };
+      const receipts: StoredInterventionRangeT[] = [];
+      for (const sentence of sentences) {
+        const said = wordsOf(sentence);
+        if (sentence.includes('?') || /\b(?:min(?:imum)?|max(?:imum)?|confidence|credible|guaranteed|worst|best)\b/iu.test(sentence)
+          || !said.some(w => sameWord(w, noun[noun.length - 1]!))
+          || !qualifiers.every(q => said.some(w => sameWord(w, q)))) continue;
+        const span = figureTheUserWroteForSpan(point.value, unit, sentence, scope);
+        if (span === null) continue;
+        // An exact statement for this same count and point overrides any potential range receipt elsewhere.
+        if (/\bexact(?:ly)?\b/iu.test(sentence)) return point;
+        if (findStatedAmounts(sentence).filter(a => a.magnitude === point.value).length !== 1) continue;
+        const range = centreRangeAt(sentence, span, point.value, unit);
+        if (range === undefined) continue;
+        const at = sentence.indexOf(range.text, span.end);
+        if (!countPhrase(sentence.slice(span.end, at)) || !countPhrase(sentence.slice(at + range.text.length))) continue;
+        const verdict = admitInterventionRange({ ...point, range: {
+          low: range.low, high: range.high, meaning: 'likely_range', source: 'brief_extraction', source_quote: sentence,
+        } });
+        if (verdict !== undefined && 'range' in verdict) receipts.push(verdict.range);
+      }
+      return receipts.length === 1 ? { ...point, range: receipts[0] } : point;
+    }),
+  }) })) };
+}
 
 /** The construction contract: the banked schema plus typed interventions. */
 /**
@@ -1460,7 +1523,7 @@ export async function buildModelFromBrief(
   // Desk 6b (lease check): every outcome and operand of an identity the mint WILL make (`mintOrFold`'s two product mints,
   // dry-run here, pure) is kept by the mechanism rule, so it never drops a part a product multiplies.
   const mintedLater = (c: CandidateModel) => {
-    const ids = withReconcilingProductIdentity(withRateCountProducts(c, brief).model, brief).identities ?? [];
+    const ids = withReconcilingProductIdentity(withRateCountProducts(withCountInterventionRanges(c, brief), brief).model, brief).identities ?? [];
     const named = new Set(ids.flatMap((i) => [canonicalLabel(i.outcome), ...i.factors.map(canonicalLabel)]));
     return (label: string): boolean => named.has(canonicalLabel(label));
   };
@@ -1487,7 +1550,7 @@ export async function buildModelFromBrief(
     const c = gap?.model ?? c1;
     const residual = gap?.residual ?? null;
     // (A) A rate × count drawn as two added links into an outcome is Olumi's product of the two (Science 6008551439 (A)).
-    const products = withRateCountProducts(c, brief).model;
+    const products = withRateCountProducts(withCountInterventionRanges(c, brief), brief).model;
     const minted = withReconcilingProductIdentity(products, brief);
     return minted !== products ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(products, brief), dropped, residual };
   };

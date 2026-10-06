@@ -1,0 +1,22 @@
+# build-2663: MC stand-in (G1b price × count + pass-through), REVIEW-READY, not merged
+
+- **PR:** CEE #2663 (draft, base staging). Head **1d89af58fe5baefa3a78f06f977c77729cf8acc5**, confirmed with ls-remote and gh api, 40/40. 0 behind staging f07a8c19. mergeable_state clean.
+- **Plain bench** (`run-bench.sh`): base 5a586cb9 11/77 → head a6dbfa65 11/77, 0 PASS→FAIL. This bench is blind to construction changes, as expected.
+- **Construction arm** (DL construct.mts): **23/77 → 30/77, 0 PASS→FAIL.**
+  - pass-through 11→0 · price×count 17→14 · cost-mediator 14→12 · all other classes unchanged.
+  - Raw drafter draws 1/9 → 2/9, with 8/9 graphs byte-identical.
+  - Evidence: `bench/runs/a6dbfa65…/construction-arm/`.
+- **Wrong builds:** 0/3. All 3 new products are on T1b brief 40e6cd53dd36, which states £49 and 150 (80–250).
+  - The 13 new definitions are all part→total links on MRR. 0 new clamps, 0 new placeholders.
+  - firstask-4's invented ‘MRR lost to support strain’ is now challenged by #2662's cut, which is intended.
+- **Pass-through STAYED IN.** #2662 does not fix it: it only edited a CONTROL in `construction-pass-through-binding.test.ts`.
+- **Point-set price × count (14 of 23) is NOT built.** Science (A) #87 6008551439 rules out a point count without the user's range ("a point 150 gives Starter 100%").
+  - The diagnosis prototype's whole +14 came from exactly that.
+  - Its unitsCompose hunk minted 0 of its 3 drafts. The real cause was the currency reader taking one word after "per".
+  - The range carry is NOT small, so it stays a follow-up. It needs a writer plus a PLoT/ISL row showing Starter inside (0, 1). Whether ISL samples a count's likely_range for the goal chance is UNVERIFIED.
+- **Required at 1d89af58, by name:** all green.
+  - Typecheck Drift (ratchet), Lint/TypeCheck/Unit Tests, Required lint/typecheck/guards, tests 1/5–5/5.
+  - Shard 3 was red on a6dbfa65, on the A4f named residual pin in `construction-user-size-into-outcome.test.ts`. This PR closes that residual, so the pin was flipped (46b1c10c). With the fix reverted, the row is RED.
+- **Codex buddy** (gpt-6.1-sol, high): r1 CHANGES (2 P1 + 2 P2), all fixed (14ae7c80); r2 **PASS**. Residual P2 is a follow-up: a goal-as-part row.
+- **Tests:** real-draft rows. RED 4/8 on base src → GREEN 11/11. 7 mutants, each killed by its intended row.
+- **Blockers:** none. A DL verdict is needed (HIGH), then e8's train GO. PR comments: 6014881554 (measures), 6015709074 (REVIEW-READY).
