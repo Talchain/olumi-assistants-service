@@ -219,18 +219,23 @@ describe('checkCoachingOutput — stale results presented as fresh', () => {
     );
   });
 
-  it('stale + the Run headline\'s number-free floor ("scored highest in this model", wording batch 5 Oct) with no caveat degrades', () => {
+  it('the lead ladder\'s verb is a result; "the highest priority" is a weighting (Codex buddy #2646 r1 F4)', () => {
+    expectViolation(checkCoachingOutput('Option A gave the highest monthly revenue.', STALE), 'stale_presented_as_fresh');
+    expect(checkCoachingOutput('The team gave the highest priority to testing Option A.', STALE).safe).toBe(true);
+  });
+
+  it('stale + the Run headline\'s number-free floor ("was supported by the most runs of this model", wording batch 5 Oct) with no caveat degrades', () => {
     // Codex buddy on CEE #2588: the floor used to read "currently leads" (caught by `leads?`); the new words carry no
     // digit and no lead verb, so the reader gains the producer's own verb.
     expectViolation(
-      checkCoachingOutput('Option A scored highest in this model.', STALE),
+      checkCoachingOutput('Option A was supported by the most runs of this model.', STALE),
       'stale_presented_as_fresh',
     );
   });
 
   it('CONTROL: the same words WITH a staleness caveat are allowed', () => {
     expect(
-      checkCoachingOutput('Option A scored highest in this model, though this may be out of date — re-run to refresh.', STALE).safe,
+      checkCoachingOutput('Option A was supported by the most runs of this model, though this may be out of date — re-run to refresh.', STALE).safe,
     ).toBe(true);
   });
 

@@ -367,31 +367,30 @@ export function composeRobustnessVerdict(
   let margin_clause: string | null = null;
   if (leading && runner) {
     const runnerP = runner.probability;
-    const runnerPFragment =
-      typeof runnerP === 'number' && Number.isFinite(runnerP)
-        ? `, with a probability of ${formatProbability(runnerP)}`
-        : '';
-    // Principle audit (5 Oct): the runner-up's own share in the headline's verb, never "second place".
-    const runnerStanding =
-      typeof runnerP === 'number' && Number.isFinite(runnerP)
-        ? ` scored highest in ${formatProbability(runnerP)} of runs`
-        : ' came next';
+    // ⭐ Science d5 (#87, 6 Oct; WORDING c6): the runner-up's own share in the lead ladder's verb, never "a probability"
+    // (a run share is not a chance), never "most likely contender" or "overtake". These lines live only in the PERMITTED
+    // voice: on a withheld turn the gate sees "supported by … runs" (`runs_supported`) and the withheld voice replaces
+    // the reply wholesale, so "the next most runs" is said only where the leader is licensed.
+    const hasRunnerP = typeof runnerP === 'number' && Number.isFinite(runnerP);
+    const runnerNextMost =
+      `In this model, ${quoteLabel(runner.label)} was supported by the next most runs${hasRunnerP ? ` (${formatProbability(runnerP)})` : ''}.`;
+    const runnerStanding = hasRunnerP ? ` was supported by ${formatProbability(runnerP)} of runs` : ' came next';
     if (marginCat === 'near_tie') {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied, so the lead is too close to call without firming up the key assumptions.`
+          ? `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied, so they are too close to tell apart without firming up the key assumptions.`
           : `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied.`;
     } else if (marginCat === 'clear' && finiteMargin !== null) {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)}${runnerStanding}, so the lead is meaningful rather than marginal.`
-          : `${quoteLabel(runner.label)} is the most likely contender to overtake it${runnerPFragment}.`;
+          ? `${quoteLabel(runner.label)}${runnerStanding}, so the two are clearly separated in this model.`
+          : runnerNextMost;
     } else {
       // indeterminate: no finite margin and not a near-tie.
       margin_clause =
         mode === 'explain'
           ? `${quoteLabel(runner.label)}${runnerStanding}.`
-          : `${quoteLabel(runner.label)} is the most likely contender to overtake it.`;
+          : runnerNextMost;
     }
   }
 
@@ -565,7 +564,8 @@ export function composeExplainResultsFallback(
 
   sentences.push(
     // Principle audit (5 Oct): a finding about this model in the Run headline's verb, never "performs best".
-    `In this model, ${leading.label} scored highest in ${formatProbability(leading.probability)} of runs.`,
+    // The lead ladder's run-share words (Science d5 #87 6008589328), as the runner-up line beside it says them.
+    `In this model, ${leading.label} was supported by ${formatProbability(leading.probability)} of runs.`,
   );
 
   if (verdict.margin_clause !== null) {
@@ -674,7 +674,7 @@ export function composeWhatWouldFlipFallback(
   // is set on the projection.
 
   sentences.push(
-    `In this model, ${quoteLabel(leading.label)} scored highest in ${formatProbability(leading.probability)} of runs.`,
+    `In this model, ${quoteLabel(leading.label)} was supported by ${formatProbability(leading.probability)} of runs.`,
   );
 
   // Margin sentence (near-tie "effectively tied" / clear "would need to close"

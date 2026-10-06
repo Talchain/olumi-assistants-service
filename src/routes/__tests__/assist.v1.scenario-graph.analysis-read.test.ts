@@ -44,7 +44,8 @@
  *     read THROWS must still return the graph, with both new keys null.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { maximalCoachingBlock, maximalReviewCardBlock } from '@talchain/schemas/fixtures';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -944,5 +945,146 @@ describe('SC-24 future goal-unit snapshot joins the cold read', () => {
       expect(rerun.analysis_result).not.toBeNull();
       expect(rerun.analysis_state.run_state.computed_at).toBe('2026-08-17T09:16:50.000Z');
     } finally { await app.close(); }
+  });
+});
+
+// ─── 0.79 SD-1 Slice R: the Run's OWN delivered record, from its `run_delivery` fact (DL ruling #87, option A) ─────────
+// J1 record 4b (run 37402501132): after a reload the Run's "Olumi model review" cards were gone — composed for the Run's
+// turn and stored nowhere. The served Run is the agent lane, which composes those blocks AFTER the Run's fact is
+// committed, so the agent's answer row records them as a `run_delivery` fact (writer: `writer-after-prod-0.79`). This
+// read serves the NEWEST one for the selected Run: only while current, only bound to THAT Run, and only if this read's
+// own licence leaves every block unchanged (serve-or-omit, never a re-worded copy).
+describe("0.79 Slice R — current_read.delivered_record from the Run's run_delivery fact", () => {
+  const RUN_ID = "run_slice_r_1";
+  const card = (body: string) => ({ ...(maximalReviewCardBlock as Record<string, unknown>), body });
+  const record = (over: Record<string, unknown> = {}) => ({
+    record_version: 1,
+    run_id: RUN_ID,
+    graph_hash: GRAPH_HASH,
+    phase3_blocks: [card("Most of this result rests on a single factor. Arguing the case against it shows whether it survives.")],
+    analysis_ready_options: [{ option_id: "opt_hire", label: "Hire a marketing manager", status: "ready", interventions: { fac_spend: 1 } }],
+    ...over,
+  });
+  const delivery = (rec: Record<string, unknown>) =>
+    ({ fact_type: "run_delivery", fact_version: 1, noop: false, result: { run_id: RUN_ID, record: rec } });
+  const runFact = (graphHash: string, mayName: boolean, runId: string | null = RUN_ID) => {
+    const f = runAnalysisFact({ graphHash, mayName });
+    if (runId !== null) (f.result as Record<string, unknown>).run_id = runId;
+    return f;
+  };
+  const readNewestRunDeliveryFor = vi.fn();
+  beforeEach(() => { (store as Record<string, unknown>).readNewestRunDeliveryFor = readNewestRunDeliveryFor; });
+  afterEach(() => { delete (store as Record<string, unknown>).readNewestRunDeliveryFor; });
+
+  const readOnce = async (fact: Record<string, unknown>) => {
+    readFactsFor.mockResolvedValue([fact]);
+    const app = await buildApp();
+    try { return (await read(app)).json() as { current_read: Record<string, unknown>; analysis_result: unknown }; }
+    finally { await app.close(); }
+  };
+
+  it("⭐ RED: a FRESH Run serves its newest run_delivery record VERBATIM, with its run_id, read for THAT Run", async () => {
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record()));
+    const body = await readOnce(runFact(GRAPH_HASH, true));
+    expect(body.current_read.delivered_record).toStrictEqual(record());
+    expect(body.current_read.run_id).toBe(RUN_ID);
+    expect(readNewestRunDeliveryFor).toHaveBeenCalledTimes(1);
+    expect(readNewestRunDeliveryFor).toHaveBeenCalledWith(SCENARIO, RUN_ID);
+  });
+
+  it("⭐ a SECOND DEVICE (a fresh app, the same stored row) reads the delivered record byte-identical to what was stored", async () => {
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record()));
+    const first = await readOnce(runFact(GRAPH_HASH, true));
+    const second = await readOnce(runFact(GRAPH_HASH, true));
+    expect(JSON.stringify(first.current_read.delivered_record)).toBe(JSON.stringify(record()));
+    expect(JSON.stringify(second.current_read.delivered_record)).toBe(JSON.stringify(first.current_read.delivered_record));
+  });
+
+  it("STALE (the graph changed since the Run) → no delivered record, no run_id, and no delivery read at all", async () => {
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record({ graph_hash: PRE_EDIT_GRAPH_HASH })));
+    const body = await readOnce(runFact(PRE_EDIT_GRAPH_HASH, true));
+    expect(body.current_read).not.toHaveProperty("delivered_record");
+    expect(body.current_read).not.toHaveProperty("run_id");
+    expect(readNewestRunDeliveryFor).not.toHaveBeenCalled();
+    // CONTROL (buddy r1): the same stored delivery for a FRESH Run is read and served, so the omission is staleness.
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record()));
+    const fresh = await readOnce(runFact(GRAPH_HASH, true));
+    expect(fresh.current_read.delivered_record).toStrictEqual(record());
+  });
+
+  it.each([
+    ["another Run's record (record.run_id differs)", { run_id: "run_other" }],
+    ["a record for another graph (graph_hash differs)", { graph_hash: PRE_EDIT_GRAPH_HASH }],
+  ])("not bound to THIS Run: %s → not served", async (_name, over) => {
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record(over)));
+    const body = await readOnce(runFact(GRAPH_HASH, true));
+    expect(body.current_read).not.toHaveProperty("delivered_record");
+    // CONTROL: the Run itself is still served — the omission is the binding, not the read.
+    expect(body.current_read.run_id).toBe(RUN_ID);
+  });
+
+  it("serve-or-omit: a card naming the leader under a WITHHELD licence is not served — never a projected copy", async () => {
+    readNewestRunDeliveryFor.mockResolvedValue(
+      delivery(record({ phase3_blocks: [card("Hire a marketing manager leads on the current model; test it before you act.")] })),
+    );
+    const withheld = await readOnce(runFact(GRAPH_HASH, false));
+    expect(withheld.current_read).not.toHaveProperty("delivered_record");
+    // CONTROL: the same Run without a leader-naming card is served, so the omission is the licence, not the record.
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record()));
+    const neutral = await readOnce(runFact(GRAPH_HASH, false));
+    expect(neutral.current_read.delivered_record).toStrictEqual(record());
+  });
+
+  it.each([
+    ["none recorded", () => readNewestRunDeliveryFor.mockResolvedValue(null)],
+    ["the delivery read fails", () => readNewestRunDeliveryFor.mockRejectedValue(new Error("run_delivery_corrupt"))],
+  ])("%s → omitted, and the rest of the read stands", async (_name, arrange) => {
+    arrange();
+    const body = await readOnce(runFact(GRAPH_HASH, true));
+    expect(body.current_read).not.toHaveProperty("delivered_record");
+    expect(body.current_read.run_id).toBe(RUN_ID);
+    expect(body.analysis_result).not.toBeNull();
+  });
+
+  it("a Run fact with no run_id → nothing to bind to: no delivery read, no record", async () => {
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record()));
+    const body = await readOnce(runFact(GRAPH_HASH, true, null));
+    expect(body.current_read).not.toHaveProperty("delivered_record");
+    expect(readNewestRunDeliveryFor).not.toHaveBeenCalled();
+    // CONTROL (buddy r1): the same Run WITH its run_id is read and served, so the omission is the missing identity.
+    const identified = await readOnce(runFact(GRAPH_HASH, true));
+    expect(identified.current_read.delivered_record).toStrictEqual(record());
+    expect(readNewestRunDeliveryFor).toHaveBeenCalledTimes(1);
+  });
+
+  // Buddy r1 (P1 ×2): the licence gate sees only its own prose fields, so a leader claim in ANY other string of the
+  // record must also omit it under a withheld licence — a coaching `action_prompt`, or an option's own strings.
+  it.each([
+    ["a coaching action_prompt", { phase3_blocks: [{ ...(maximalCoachingBlock as Record<string, unknown>), action_prompt: "Hire a marketing manager leads on the current model; test it before you act." }] }],
+    ["an option's status", { analysis_ready_options: [{ option_id: "opt_hire", label: "Hire a marketing manager", status: "Hire a marketing manager leads on the current model", interventions: { fac_spend: 1 } }] }],
+  ])("a leader claim in %s under a WITHHELD licence → not served", async (_name, over) => {
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record(over)));
+    const withheld = await readOnce(runFact(GRAPH_HASH, false));
+    expect(withheld.current_read).not.toHaveProperty("delivered_record");
+  });
+
+  it("a claim only a ROSTER sees (option 'Team': 'Team leads in 60% of runs.') under a WITHHELD licence → not served", async () => {
+    // Precondition (from #2645 P1-1): the roster-free reader misses it; the record's own option label exposes it.
+    const { textAssertsLeadingOption } = await import("../../orchestrator-v5/compose/leading-option-egress-guard.js");
+    expect(textAssertsLeadingOption("Team leads in 60% of runs.")).toBe(false);
+    expect(textAssertsLeadingOption("Team leads in 60% of runs.", { optionLabels: ["Team"] })).toBe(true);
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record({
+      phase3_blocks: [card("Team leads in 60% of runs.")],
+      analysis_ready_options: [{ option_id: "opt_team", label: "Team", status: "ready", interventions: { fac_spend: 1 } }],
+    })));
+    const withheld = await readOnce(runFact(GRAPH_HASH, false));
+    expect(withheld.current_read).not.toHaveProperty("delivered_record");
+  });
+
+  it("CONTROL: the same coaching block with a neutral action_prompt under the same WITHHELD licence is served", async () => {
+    const neutral = record({ phase3_blocks: [{ ...(maximalCoachingBlock as Record<string, unknown>), action_prompt: "Argue the case against the single factor this result rests on, and see whether it survives." }] });
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(neutral));
+    const body = await readOnce(runFact(GRAPH_HASH, false));
+    expect(body.current_read.delivered_record).toStrictEqual(neutral);
   });
 });

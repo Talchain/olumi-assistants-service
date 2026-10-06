@@ -227,7 +227,7 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
     // resolvable). The locked DEFAULT template is still produced by the
     // handler when winner data is too thin; the regression-fixture test
     // below ("template fallback when winner data is missing") covers that.
-    expect(response.assistant_text).toMatch(/^Option A scored highest against your goal in/);
+    expect(response.assistant_text).toMatch(/^Option A was supported by/);
     expect(telemetry.response_emitted).toBe(true);
     expect(telemetry.failure_type).toBeNull();
     expect(telemetry.llm_calls_used).toBe(1); // classifier only

@@ -20,6 +20,10 @@
  *   · `definitional_part` (FA1, Science d5 6 Oct): M's one goal-path out-link is a definition (±1 per 1, one unit at both
  *     ends) into a total that has that unit, so M is measured in it. Only where no other reading applies; never from a
  *     non-definitional link. It lets (C) ask, and the writer take, a link INTO such a part.
+ *   · `product` (FA1-3, DL ruling 6 Oct; MC 21 diagnosis #87 6010874426): M carries a product identity (`nonlinear_identity`
+ *     op 'product', two operands) whose operands' units PROVE the product (`unitsCompose` 'proof': the rate's denominator
+ *     names the count, in the goal's money per period), so M is measured in that composed unit. Only where no other reading
+ *     applies. It lets (C) ask, and the writer take, the link OUT of such a product; the card says the reading.
  *
  * Common conditions: M is a factor, risk or outcome on a goal path, not the goal; it has no unit and no level; it has
  * exactly ONE child on the goal path. A unit-bearing label (a currency token, %, a points spelling, or "per <noun>") is
@@ -35,6 +39,7 @@ import { currentDefinitionalCarrier } from '../goal-target/held-user-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { unitsCompose } from './reconciling-product.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -49,7 +54,9 @@ export type MediatorReading =
     readonly replaces?: string;
   }
   /** FA1 (Science d5, 6 Oct): M is a definitional part of its one child, so it is measured in that total's unit. */
-  | { readonly via: 'definitional_part'; readonly unit: string; readonly child: string };
+  | { readonly via: 'definitional_part'; readonly unit: string; readonly child: string }
+  /** FA1-3 (DL, 6 Oct): M is the product of its two identity operands (ids, rate first), measured in their composed unit. */
+  | { readonly via: 'product'; readonly unit: string; readonly child: string; readonly operands: readonly [string, string] };
 
 /** The provenance marker of a gauge link (Science 6006425419). */
 export const GAUGE_OP = 'gauge' as const;
@@ -269,6 +276,42 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
       .map(e => ((e.provenance as Rec).natural_effect as Rec).amount_unit);
     if (parentUnits.some(u => typeof u !== 'string' || (u !== unit && !sameUnit(unit, u)))) continue;
     out.set(id, { via: 'definitional_part', unit, child: childId });
+  }
+  // ⭐ FA1-3 (DL ruling, 6 Oct): a PRODUCT takes its operands' composed unit. M meets the common conditions, has its own
+  // frame (the writer converts an answer into it), no other reading, and a product identity on exactly two operands whose
+  // units prove the product in the goal's money per period (`unitsCompose` 'proof'; a rate with no denominator is only
+  // 'confirm', never a reading). Read off the hashed identity and operand units, so a corrected operand unit re-derives it.
+  const goalView = view.get(goal.id);
+  const goalUnit = goalView === undefined ? undefined : unitOf(goalView);
+  for (const m of nodes) {
+    const id = m.id;
+    if (goalUnit === undefined) break;
+    if (typeof id !== 'string' || out.has(id) || !['factor', 'risk', 'outcome'].includes(String(m.kind)) || !reaches.has(id)) continue;
+    const mv = view.get(id);
+    if (mv === undefined || unitOf(mv) !== undefined || hasLevel(m) || resolveMagnitudeFrame(mv) === undefined) continue;
+    const identity = isRec(m.nonlinear_identity) ? m.nonlinear_identity : undefined;
+    const operands = Array.isArray(identity?.factor_ids) ? identity!.factor_ids : [];
+    if (identity?.operation !== 'product' || operands.length !== 2 || operands.some((o) => typeof o !== 'string' || o === id)) continue;
+    const [a, b] = operands as [string, string];
+    const part = (o: string): { unit: unknown; label: string } => {
+      const v = view.get(o);
+      return { unit: v === undefined ? undefined : unitOf(v), label: o };
+    };
+    const composed = unitsCompose(goalUnit, String(goal.label ?? ''), part(a), part(b));
+    if (composed.kind !== 'proof') continue;
+    const kids = edges.filter(e => e.from === id && reaches.has(e.to));
+    if (kids.length !== 1 || typeof kids[0]!.to !== 'string') continue;
+    const parts = readUnitParts(goalUnit);
+    if (parts === null) continue;
+    const label = labelUnitParts(m.label);
+    if (label !== null && !labelFitsUnit(label, parts)) continue;
+    const periods = labelPeriods(m.label);
+    if (periods.size > 1 || (periods.size === 1 && parts.period !== null && !periods.has(parts.period))) continue;
+    // A sized parent that states M in another unit is a conflict, never a choice.
+    const parentUnits = edges.filter(e => e.to === id && walkable(e.from) && isRec(e.provenance) && isRec(e.provenance.natural_effect))
+      .map(e => ((e.provenance as Rec).natural_effect as Rec).amount_unit);
+    if (parentUnits.some(u => typeof u !== 'string' || (u !== goalUnit && !sameUnit(goalUnit, u)))) continue;
+    out.set(id, { via: 'product', unit: goalUnit, child: kids[0]!.to as string, operands: [composed.rate, composed.count] });
   }
   return out;
 }

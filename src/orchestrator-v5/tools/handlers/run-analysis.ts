@@ -184,7 +184,7 @@ import {
   decideAnalysisScaleBlock,
 } from '../plot-intervention-scale.js';
 import { wireInterventionRangePlan } from '../../intervention-range.js';
-import { optionIdOf } from '../../../orchestrator/context/placeholder-parts.js';
+import { nodeUnitOf, optionIdOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isRecommendableOption } from './recommendable-option.js';
 import { detectIdenticalArms } from './identical-arms.js';
 import {
@@ -2430,6 +2430,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // off the very payload PLoT received (`plotPayload.goal_direction`, set once above), never re-derived.
       ...(plotPayload.goal_direction === 'minimise'
         ? { minimised_goal_label: readGoalLabel(graphForAnalysis, snapshot.goal_node_id) ?? undefined } : {}),
+      // ⭐ LEAD LADDER (Science d5 #87 6008589328): the goal's label and unit off the graph this Run used. With a unit the
+      // lead names the goal's QUANTITY ("gave the highest {quantity}"); without one it says the share ("was supported by").
+      goal_label: readGoalLabel(graphForAnalysis, snapshot.goal_node_id) ?? undefined,
+      goal_unit: (() => {
+        const nodes = (graphForAnalysis as { nodes?: unknown })?.nodes;
+        return Array.isArray(nodes) ? nodeUnitOf(nodes)(snapshot.goal_node_id) : undefined;
+      })(),
       // T1: withhold the confident "{X} currently leads" claim while any
       // ratified condition is unchecked. A recommendation must not exist
       // unless every user-ratified hard constraint is decision-grade.
