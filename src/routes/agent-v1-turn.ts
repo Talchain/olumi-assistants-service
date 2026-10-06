@@ -3844,7 +3844,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           : { outcome: 'omitted', reason: runDelivery.reason }),
       }, 'agent-lane: run_delivery');
     }
-    const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
+    // A recorded Run delivery is durable too (Desk 6b on #2657): the same minted id as an offer, so an unnamed turn never
+    // drops the record the reload and the second device read.
+    const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined || runDelivery.kind === 'recorded' ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
         // Through the SHARED persistence floor, like every turn row: the one

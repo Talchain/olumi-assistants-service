@@ -113,6 +113,18 @@ describe('0.79 · the agent answer row records what the Run\'s turn delivered (l
     expect(facts).toStrictEqual([]);
   });
 
+  it('⭐ a Run turn the client did NOT name still writes its answer row, with the delivery (Desk 6b: no turn_id)', async () => {
+    const before = rows.length;
+    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+    } });
+    expect(res.statusCode, res.body).toBe(200);
+    const written = rows.slice(before);
+    const withDelivery = written.filter((r) => ((r.handler_facts ?? []) as Array<{ fact_type?: string }>).some((f) => f.fact_type === 'run_delivery'));
+    expect(withDelivery, JSON.stringify(written.map((r) => r.turn_id))).toHaveLength(1);
+    expect(typeof withDelivery[0]!.turn_id).toBe('string');
+  });
+
   it('a turn that ran nothing writes its row exactly as before (no facts)', async () => {
     const turnId = randomUUID();
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { turn_id: turnId, scenario_id: SCENARIO, message: 'What matters most here?' } });
