@@ -97,11 +97,13 @@ import { COACHING_BLOCK_BODY_MAX } from '../coaching/fragile-edge-offer-text.js'
 
 /**
  * The lead-clause grammar. Deliberately the SAME wording the deterministic
- * headline owns (`analysis-result-headline.ts` — "scored highest against your
- * goal in N% of runs of this model"), so a user reading the card and the
- * headline on one screen reads one claim in one voice.
+ * headline owns (`analysis-result-headline.ts`, rung 3 of the lead ladder —
+ * "was supported by N% of runs of this model"; Science d5 #87 6008589328), so a
+ * user reading the card and the headline on one screen reads one claim in one
+ * voice. This card has no goal unit to name a quantity with, so it is always
+ * rung 3, which is true of every Run.
  */
-const LEAD_CLAUSE_OPENING = 'scored highest against your goal in';
+const LEAD_CLAUSE_OPENING = 'was supported by';
 
 /** Disclosure sentence. Names the fault as Olumi's without blaming the model. */
 const SUBSTITUTION_NOTICE =
@@ -159,7 +161,7 @@ function buildWinnerNamingLead(winner: StoredWinner): string {
   const pct =
     typeof p === 'number' && Number.isFinite(p) && p > 0 && p <= 1 ? Math.round(p * 100) : null;
   return pct === null || pct < 1
-    ? `${label} is the option the stored result for this run records as scoring highest.`
+    ? `${label} is the option the stored result for this run records as supported by the most runs.`
     : `${label} ${LEAD_CLAUSE_OPENING} ${pct}% of runs of this model.`;
 }
 
@@ -258,8 +260,8 @@ export function applyWinnerNamingEgressGuard<T extends Record<string, unknown>>(
       fault: 'olumi',
       request_id: requestId,
       readable:
-        'The written summary for this analysis did not name the option the model actually ' +
-        'scored highest. Olumi replaced it with the stored result.',
+        'The written summary for this analysis did not name the option most runs of the model ' +
+        'supported. Olumi replaced it with the stored result.',
       reason: WINNER_NAMING_REASON,
       winner_label: label,
     },

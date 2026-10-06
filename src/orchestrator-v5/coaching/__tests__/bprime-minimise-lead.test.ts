@@ -1,6 +1,7 @@
 /**
- * RT-10 B′ (DL e8 condition 1; Science d5's words): a Run that SENT minimise leads with "{option} came out lowest for
- * {goal} in N% of runs of this model" — the statistic ISL computed at that direction, said in the goal's own words.
+ * RT-10 B′ (DL e8 condition 1), under the LEAD LADDER (Science d5 #87 6008589328): a Run that SENT minimise, on a goal
+ * with a unit, leads with "{option} gave the lowest {quantity} in N% of runs of this model" — the statistic ISL computed
+ * at that direction, said in the goal's own words. Without a unit it is rung 3 ("was supported by"), true either way.
  *
  * WHAT THIS FILE PINS (the headline builder only; the served rt10b Run 2 through the real handler is pinned in
  * `tools/handlers/__tests__/bprime-run-own-direction.test.ts`):
@@ -31,10 +32,15 @@ const SERVED_WARNINGS = ((T2.blocks[0]!['enrichment'] as Json)['inference_warnin
 const warningFor = (code: string): Json => SERVED_WARNINGS.find((w) => w['code'] === code)!;
 
 const GOAL = 'monthly cancellations';
-const GOAL_FRAMED = 'scored highest against your goal in';
-const PLAIN = 'scored highest in this model';
-const MIN_LEAD = `came out lowest for ${GOAL} in`;
-const MIN_PLAIN = `came out lowest for ${GOAL} in this model`;
+const UNIT = 'cancellations/month';
+/** Rung 3, the lead without a quantity, and its number-free form (the retired goal-framed lead's successors). */
+const GOAL_FRAMED = 'was supported by';
+const PLAIN = 'was supported by the most runs of this model';
+const MIN_LEAD = `gave the lowest ${GOAL} in`;
+const MIN_PLAIN = `gave the lowest ${GOAL} in the most runs of this model`;
+/** Each site's cap, moved from the retired opening's reference length (35 / 28) exactly as the builder moves it. */
+const LEAD_CAP = MAX_HEADLINE_CHARS + (GOAL_FRAMED.length - 35);
+const PLAIN_CAP = MAX_HEADLINE_CHARS + (PLAIN.length - 28);
 const DISCLOSURE = ' The model could not test whether any option reaches your goal.';
 const DIRECTION_ASSUMED = ' In this model I’ve assumed a higher value is better for your goal.';
 
@@ -88,14 +94,15 @@ const labelFor = (site: Site, target: number): string => {
 const inputs = (site: Site, label: string, extra: Partial<AnalysisResultHeadlineInput> = {}, warnings: Json[] = []) => {
   const enrichment: Json = { results: site.records(label), ...(site.extra ?? {}), ...(warnings.length > 0 ? { inference_warnings: warnings } : {}) };
   const base: AnalysisResultHeadlineInput = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok', ...extra };
-  return { clean: base, minimised: { ...base, minimised_goal_label: GOAL } };
+  return { clean: base, minimised: { ...base, minimised_goal_label: GOAL, goal_unit: UNIT } };
 };
-const toMinimise = (text: string): string => text.replace(GOAL_FRAMED, MIN_LEAD).replace(PLAIN, MIN_PLAIN);
+const toMinimise = (text: string): string => text.replace(PLAIN, MIN_PLAIN).replace(`${GOAL_FRAMED} `, `${MIN_LEAD} `);
 
 describe('L1 — the minimise lead never moves the leader permission', () => {
   for (const site of [...LEAD_CAP_SITES, ...PLAIN_SITES]) {
-    it(`${site.site}: AT the cap, the same descriptor; the minimise text is the goal-framed one in the minimise words`, () => {
-      const label = labelFor(site, MAX_HEADLINE_CHARS);
+    const cap = PLAIN_SITES.includes(site) ? PLAIN_CAP : LEAD_CAP;
+    it(`${site.site}: AT the cap, the same descriptor; the minimise text is the rung-3 one in the minimise words`, () => {
+      const label = labelFor(site, cap);
       const { clean, minimised } = inputs(site, label);
       const cleanText = buildAnalysisResultHeadline(clean);
       expect(cleanText).toBe(site.candidate(label));
@@ -107,7 +114,7 @@ describe('L1 — the minimise lead never moves the leader permission', () => {
     });
 
     it(`${site.site}: 5 OVER the cap, the same outcome and case, in the minimise words`, () => {
-      const label = labelFor(site, MAX_HEADLINE_CHARS + 5);
+      const label = labelFor(site, cap + 5);
       const { clean, minimised } = inputs(site, label);
       const cleanText = buildAnalysisResultHeadline(clean);
       expect(describeAnalysisHeadline(minimised)).toEqual(describeAnalysisHeadline(clean));
@@ -121,55 +128,63 @@ describe('L2/L3 — the words, and where they never ride', () => {
   const at = (extra: Partial<AnalysisResultHeadlineInput>, warnings: Json[] = []): string | null =>
     buildAnalysisResultHeadline({ ...inputs(site, '15% Loyalty Discount', {}, warnings).clean, ...extra });
 
-  it('the served instance: "15% Loyalty Discount came out lowest for monthly cancellations in 62% of runs of this model."', () => {
-    expect(at({ minimised_goal_label: GOAL })).toBe('15% Loyalty Discount came out lowest for monthly cancellations in 62% of runs of this model.');
+  it('the served instance: "15% Loyalty Discount gave the lowest monthly cancellations in 62% of runs of this model."', () => {
+    expect(at({ minimised_goal_label: GOAL, goal_unit: UNIT })).toBe('15% Loyalty Discount gave the lowest monthly cancellations in 62% of runs of this model.');
   });
 
-  it('CONTRAST: no label (the Run did not send minimise) → the goal-framed lead, unchanged', () => {
-    expect(at({})).toBe('15% Loyalty Discount scored highest against your goal in 62% of runs of this model.');
+  it('CONTRAST: no label (the Run did not send minimise) → rung 3', () => {
+    expect(at({})).toBe('15% Loyalty Discount was supported by 62% of runs of this model.');
+  });
+
+  it('a minimise Run on a goal with NO unit → rung 3 (the ladder needs a quantity)', () => {
+    expect(at({ minimised_goal_label: GOAL })).toBe(at({}));
   });
 
   it('beside the untested sentence (the target could not be tested) the minimise lead rides, and the cage admits it', () => {
-    const text = at({ minimised_goal_label: GOAL }, [warningFor('GOAL_THRESHOLD_NOT_CONVERTIBLE')]);
-    expect(text).toBe(`15% Loyalty Discount came out lowest for monthly cancellations in 62% of runs of this model.${DISCLOSURE}`);
+    const text = at({ minimised_goal_label: GOAL, goal_unit: UNIT }, [warningFor('GOAL_THRESHOLD_NOT_CONVERTIBLE')]);
+    expect(text).toBe(`15% Loyalty Discount gave the lowest monthly cancellations in 62% of runs of this model.${DISCLOSURE}`);
     expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
   });
 
-  it('never beside a sentence that says the direction was ASSUMED: the lead is the one this module emitted before', () => {
-    const text = at({ minimised_goal_label: GOAL }, [warningFor('GOAL_DIRECTION_UNATTESTED')]);
-    expect(text).not.toMatch(/came out lowest/);
+  it('never beside a sentence that says the direction was ASSUMED: rung 3, as without the label', () => {
+    const text = at({ minimised_goal_label: GOAL, goal_unit: UNIT }, [warningFor('GOAL_DIRECTION_UNATTESTED')]);
+    expect(text).not.toMatch(/lowest/);
     expect(text).toBe(at({}, [warningFor('GOAL_DIRECTION_UNATTESTED')]));
   });
 
+  it('rung 2: a label that OPENS with an aim verb rides with the verb stripped (never "lowest reduce …")', () => {
+    expect(at({ minimised_goal_label: 'Reduce monthly cancellations', goal_unit: UNIT }))
+      .toBe('15% Loyalty Discount gave the lowest monthly cancellations in 62% of runs of this model.');
+  });
+
   it.each([
-    ['states an aim, not the quantity', 'Reduce monthly cancellations'],
     ['longer than the budget (49 characters)', 'm'.repeat(49)],
     ['fails the content defences (an internal id)', 'fac_monthly_cancellations'],
     ['empty', '  '],
-  ])('a goal label that %s → the goal-framed lead, unchanged', (_why, label) => {
-    expect(at({ minimised_goal_label: label })).toBe(at({}));
+  ])('a goal label that %s → rung 3', (_why, label) => {
+    expect(at({ minimised_goal_label: label, goal_unit: UNIT })).toBe(at({}));
   });
 
   it('a 48-character goal label still rides at every leadCap site at the cap, and the cage admits the longest', () => {
     const long = 'q'.repeat(48);
     for (const s of LEAD_CAP_SITES) {
-      const label = labelFor(s, MAX_HEADLINE_CHARS);
-      const text = buildAnalysisResultHeadline({ ...inputs(s, label).clean, minimised_goal_label: long });
-      expect(text, s.site).toContain(`came out lowest for ${long} in`);
+      const label = labelFor(s, LEAD_CAP);
+      const text = buildAnalysisResultHeadline({ ...inputs(s, label).clean, minimised_goal_label: long, goal_unit: UNIT });
+      expect(text, s.site).toContain(`gave the lowest ${long} in`);
       expect(isAllowedRunAnalysisAssistantText(text), s.site).toBe(true);
     }
   });
 });
 
 describe('L4 — the cage', () => {
-  const lead = '15% Loyalty Discount came out lowest for monthly cancellations in 71% of runs of this model.';
+  const lead = '15% Loyalty Discount gave the lowest monthly cancellations in 71% of runs of this model.';
   it('admits the minimise lead alone and beside the untested sentence', () => {
     expect(isAllowedRunAnalysisAssistantText(lead)).toBe(true);
     expect(isAllowedRunAnalysisAssistantText(`${lead}${DISCLOSURE}`)).toBe(true);
-    expect(isAllowedRunAnalysisAssistantText('15% Loyalty Discount came out lowest for monthly cancellations in this model.')).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText('15% Loyalty Discount gave the lowest monthly cancellations in the most runs of this model.')).toBe(true);
   });
   it('REJECTS it beside a sentence that says the direction was assumed (both forms)', () => {
     expect(isAllowedRunAnalysisAssistantText(`${lead}${DIRECTION_ASSUMED}`)).toBe(false);
-    expect(isAllowedRunAnalysisAssistantText(`15% Loyalty Discount came out lowest for monthly cancellations in this model.${DIRECTION_ASSUMED}`)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(`15% Loyalty Discount gave the lowest monthly cancellations in the most runs of this model.${DIRECTION_ASSUMED}`)).toBe(false);
   });
 });

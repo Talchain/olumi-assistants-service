@@ -214,7 +214,7 @@ function writtenWithALetter(a: { readonly magnitude: number; readonly matchedTex
 }
 
 /** A money unit's own magnitude letter ("£k/month" → 1000, "£m" → 1e6); 1 for a unit with none, or one not money. */
-function moneyUnitScale(unit: unknown): number {
+export function moneyUnitScale(unit: unknown): number {
   if (typeof unit !== 'string') return 1;
   const reading = readCurrencyUnitWithQualifiers(unit);
   return reading.kind === 'currency' && Number.isFinite(reading.multiplier) && reading.multiplier > 0 ? reading.multiplier : 1;
@@ -1138,6 +1138,19 @@ export function linkEffectQuoteContextMiss(quote: string, userText: string): 'qu
     ? 'question' as const : NEGATOR.test(sentence) ? 'denied' as const : null);
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
 }
+/**
+ * RT-19 (the no-direct-link guard, no-direct-link.ts): whether ONE clause of the user's message states an EFFECT between two
+ * labels, by the binder's own readers only: its whole sentence is no question or denial (`linkEffectQuoteContextMiss`), it
+ * names both labels (`names`, the caller's label matcher), and it writes at least TWO figures as changes, by the binder's
+ * own change words ("each 10 point RISE", "BY about 1 point", "A £1 RISE"). A level ("coverage is 60%"), a span ("over 12
+ * months", "a 12 month study") or a sum ("£500 to investigate", "a £500 budget") is no change (Codex r1 + r2 on the guard). Negative evidence only: it can stop that
+ * guard, never make a card.
+ */
+export function clauseStatesTwoChanges(message: string, labelA: string, labelB: string,
+  names: (text: string, label: string) => boolean): boolean {
+  return sentencesOf(message.trim()).some((c) => linkEffectQuoteContextMiss(c, message) === null && names(c, labelA) && names(c, labelB)
+    && findLinkEffectAmounts(c).filter((f) => figureWrittenAsAChange(c, f)).length >= 2);
+}
 export function linkEffectTheUserStated(
   quote: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
@@ -1235,6 +1248,21 @@ const CHANGE_NOUN_OF = /^(?:rise|increase|cut|drop|fall|jump|change|reduction|de
 /** Anywhere in the sentence: SOMETHING changes (presence only; the Agent's args carry the direction, B2). */
 const CHANGE_STATED = /\b(?:ris(?:e|es|ing)|rose|rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|decreas(?:e|es|ed|ing)|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|cut(?:s|ting)?|los(?:e|es|ing|t)|loss|gain(?:s|ed|ing)?|wins?|winning|won|add(?:s|ed|ing)?|cost(?:s|ing)?|bring(?:s|ing)?|brought|knocks?|knocked|push(?:es|ed|ing)?|lift(?:s|ed|ing)?|lower(?:s|ed|ing)?|reduc(?:e|es|ed|ing)|boost(?:s|ed|ing)?|grow(?:s|ing|n)?|grew|shrink(?:s|ing)?|halv(?:e|es|ed|ing)|doubl(?:e|es|ed|ing)|clos(?:e|es|ed|ing)|shut(?:s|ting)?|spend(?:s|ing)?|spent|trim(?:s|med|ming)?|sav(?:e|es|ed|ing)|worth|up|down|off|more|less|fewer|extra|additional|every|each|per|by|jumps?|chang(?:e|es|ed|ing)|mov(?:e|es|ed|ing)|means?|shed(?:s|ding)?|put(?:s|ting)?)\b/i;
 
+/** Before a figure, ALONE enough to make it a change for the RT-19 guard: a distributive word or "by" ("each 10", "by about 1").
+ * The binder's own `CHANGE_BEFORE` also takes "a"/"an"/"one"/"extra", where a link is already named; here "a £500 budget for
+ * a 12 month study" would read as two changes (Codex r2 on the guard), so those need a change word AFTER the figure. */
+const CHANGE_BEFORE_ALONE = /^(?:every|each|per|by)$/i;
+/** A figure written AS a change: a change word straight after it (the binder's `CHANGE_AFTER`), or `CHANGE_BEFORE_ALONE`
+ * before it (hedges skipped). */
+function figureWrittenAsAChange(q: string, figure: StatedAmount): boolean {
+  if (CHANGE_AFTER.test(q.slice(figure.index + figure.matchedText.length))) return true;
+  const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
+  const words = [...(q.slice(0, start).split(/[,;:.!?]/).pop() ?? '').matchAll(/[\p{L}]+/gu)].map(m => m[0]);
+  while (words.length > 0 && HEDGE.test(words[words.length - 1]!)) words.pop();
+  const last = words[words.length - 1];
+  return last !== undefined && CHANGE_BEFORE_ALONE.test(last);
+}
+
 function figureIsALevel(q: string, figure: StatedAmount, endLabel: string): boolean {
   const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
   if (CHANGE_AFTER.test(q.slice(figure.index + figure.matchedText.length))) return false;
@@ -1269,10 +1297,24 @@ function wordFigureCountsAnotherUnit(q: string, figure: StatedAmount, ends: { re
 }
 
 /** The words after a unit's "of" ("% of appointments" → appointments), determiners dropped; [] when it has none. */
+/**
+ * The words dropped before a denominator is compared, on BOTH sides (the stored unit's and the user's "of …"): U3 (Science
+ * d5 #87 6008156781 (1)) adds "all" ("0.05% of all appointments" is the level's own denominator).
+ */
+export const DENOMINATOR_DETERMINER = /^(?:all|our|the|their|its|your|my|a|an)$/;
+/**
+ * The ONE tokeniser for a denominator's words: letters only, lower-cased, a determiner dropped only when it stands
+ * alone (Codex r1 on #2651: "all-hands meetings" keeps "all", so it never reads as "hands meetings").
+ */
+export function denominatorWords(text: string): string[] {
+  return [...text.matchAll(/[\p{L}]+/gu)].filter((w) => {
+    const joined = text[w.index! - 1] === '-' || text[w.index! + w[0].length] === '-';
+    return joined || !DENOMINATOR_DETERMINER.test(w[0].toLowerCase());
+  }).map((w) => w[0].toLowerCase());
+}
 export function unitDenominatorWords(unit: string): string[] {
   const tail = /\bof\s+(.+)$/iu.exec(unit)?.[1];
-  return tail === undefined ? [] : [...tail.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase())
-    .filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
+  return tail === undefined ? [] : denominatorWords(tail);
 }
 
 /**
@@ -1318,7 +1360,7 @@ function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: 
   // makes the end's name the OWNER of another quantity, never that quantity (Codex step-4 buddy r1/r2 HIGH).
   const owned = /^(['’])(s?)((?:\s+(?!(?:while|and|but|which|that|when|if|as|so|for|than|to)\b)[\p{L}-]+){1,6})/iu.exec(after.slice(m[0].length));
   if (owned !== null) return `${run}${owned[1]}${owned[2]}${owned[3]}`;
-  const content = [...run.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase()).filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
+  const content = denominatorWords(run);
   if (content.length === 0 || content.every(w => wordsOf(target).some(t => sameWord(t, w)))) return undefined;
   // The TARGET's own unit's denominator ("0.05% of appointments" on a target kept in "% of appointments"; red-team F2,
   // #87 6007779166): that run is the target's unit, not another quantity, but ONLY when its words ARE the denominator of

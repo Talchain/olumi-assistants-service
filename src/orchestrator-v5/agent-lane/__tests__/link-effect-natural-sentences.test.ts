@@ -345,7 +345,7 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     const row = { ...NATURAL_SENTENCE_ROWS[0]!, quote: 'Each 1% rise in production waste rate cuts gross margin by about 0.5 percentage points.' };
     const w = world(row); const before = w.graph(); const result = await propose(w, row);
     // Science F1: the example uses the user's own level (brief_extraction 12% of output), never a generic one.
-    oneQuestion(result, 'Is that a 1-point rise in “Production waste rate” (12% → 13%), or 1% of today’s 12%, i.e. 12.12%?');
+    oneQuestion(result, 'Is that a 1-point rise in “Production waste rate” (12% → 13%), or 1% of today’s 12% (a 0.12-point rise: 12% → 12.12%)?');
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
   });
   it('F1 on the served graph: when Bread price change\'s 0 is the USER\'s, only Footfall (Olumi\'s level) is asked', async () => {

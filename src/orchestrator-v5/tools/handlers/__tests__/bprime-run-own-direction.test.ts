@@ -102,12 +102,12 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(leaderOf(F.plot_body_at_least)).toBe('more_reliable_courier');
   });
 
-  it('row 1 (served Run 2, "at most 400"): every share is the minimise body\'s, by option id, and the lead says "came out lowest"', async () => {
+  it('row 1 (served Run 2, "at most 400"): every share is the minimise body\'s, by option id, and the lead says "gave the lowest"', async () => {
     const { result } = await runOn(F.graph_with_target);
     expect(resultShares(result)).toEqual(sharesById(F.plot_body_minimise.option_comparison));
     expect(result.leading_option_id).toBe('15_loyalty_discount');
     const headline = headlineOf(result.summary);
-    expect(headline).toBe('15% Loyalty Discount came out lowest for monthly cancellations in 71% of runs of this model, but treat this as provisional: the result is sensitive to Pauses taken instead of cancellations.');
+    expect(headline).toBe('15% Loyalty Discount gave the lowest monthly cancellations in 71% of runs of this model, but treat this as provisional: the result is sensitive to Pauses taken instead of cancellations.');
     // The egress cage admits it, and the leader detectors see it (so a withheld leader cannot leave through this verb).
     expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
     expect(textNamesLeadingOption(headline)).toBe(true);
@@ -157,7 +157,7 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
   it('MAXIMISE CONTRAST ("at least 400"): the shares are the at-least body\'s, and the lead never says "came out lowest"', async () => {
     const { result } = await runOn(atLeast());
     expect(resultShares(result)).toEqual(sharesById(F.plot_body_at_least.option_comparison));
-    expect(result.summary).not.toMatch(/came out lowest/);
+    expect(result.summary).not.toMatch(/came out lowest|gave the lowest/);
     expect(goalChanceKeys(result)).toBe(0);
   });
 
@@ -169,7 +169,10 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(withoutTarget.result.leading_option_id).toBe('15_loyalty_discount');
     expect(withTarget.result.leading_option_id).toBe(withoutTarget.result.leading_option_id);
     expect(textNamesLeadingOption(headlineOf(withTarget.result.summary))).toBe(true);
-    // A label that states the AIM is not the quantity: the lead keeps the goal-framed words.
-    expect(withTarget.result.summary).not.toMatch(/came out lowest/);
+    // Ladder rung 2 (Science d5 #87 6008589328): an aim-verb label ("Reduce monthly cancellations") has its verb
+    // stripped, so the lead names the quantity on BOTH graphs, and never carries the verb.
+    expect(withTarget.result.summary).toMatch(/gave the lowest monthly cancellations in \d{1,3}% of runs of this model/);
+    expect(withoutTarget.result.summary).toMatch(/gave the lowest monthly cancellations in \d{1,3}% of runs of this model/);
+    expect(withTarget.result.summary).not.toMatch(/lowest reduce|came out lowest/i);
   });
 });

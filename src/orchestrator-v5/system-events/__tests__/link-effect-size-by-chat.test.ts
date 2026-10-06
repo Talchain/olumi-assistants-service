@@ -607,7 +607,7 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     });
     it.each([
       ['user-stated 30%: the example is the user\'s own level', { value: 0.3, raw_value: 30, cap: 100, unit: '%', source: 'user_override' },
-        'Is that a 5-point rise in “Footfall loss from price rise” (30% → 35%), or 5% of today’s 30%, i.e. 31.5%?'],
+        'Is that a 5-point rise in “Footfall loss from price rise” (30% → 35%), or 5% of today’s 30% (a 1.5-point rise: 30% → 31.5%)?'],
       ['Olumi-estimated 0 (cee_inference): no typed zero, generic example', { value: 0, raw_value: 0, cap: 100, unit: '%', source: 'cee_inference' },
         'Is that a 5-point rise in “Footfall loss from price rise” (say 10% → 15%), or 5% of today’s level?'],
       ['a 0 with no source: no typed zero, generic example', { value: 0, raw_value: 0, cap: 100, unit: '%' },

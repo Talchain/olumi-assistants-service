@@ -19,6 +19,7 @@ import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRe
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
+import { reframedNodeIds } from '../refit-frames.js';
 import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../rerun-within-band.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -905,6 +906,7 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 
 /** One internal dispatch, so every path is the product's own. */
 import { reconcileGoalScope } from '../reconcile-goal-scope.js';
+import { noSuchLinkUserWords } from '../no-direct-link.js';
 import { goalScopeCheck, scopeIssueBlocks, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
 import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
@@ -1469,50 +1471,23 @@ function stillReadUnitReadings(graph: unknown, item: { readonly from: string; re
 }
 
 /**
+ * ⭐ S5t: the receipt's one sentence for a refit (Science d5 #87 6009444385, verbatim; DL adopted; c6 checks the guards).
+ * A frame is a choice of units, so every other link means the same; a band word read off β may not (cut-7 follow-up).
+ */
+export function frameRefitReceipt(nodes: readonly string[]): string {
+  const named = nodes.map((n) => `‘${n}’`);
+  const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return `Olumi rescaled ${list} so your figure fits. Your other links mean the same as before, though some strength words may read differently.`;
+}
+
+/**
  * ⭐ RT-18 (DL 0df0e1, cut 5): the words for a link the model does NOT hold. Never a click route to that link (the canvas
  * does not show it); always a next step the user can take. If the source reaches the target through other links, the
  * FIRST of them is named with its own canvas route (a link the canvas shows). Otherwise Olumi offers to add the link for
  * approval (`propose_model_change`, add_edge), after which the figure can size it.
  */
 function linkEffectNoSuchLinkWords(raw: unknown, from: { id: string; label: string }, to: { id: string; label: string }): string {
-  const g = raw as { nodes?: unknown[]; edges?: unknown[] } | null;
-  const nodes = (Array.isArray(g?.nodes) ? g.nodes : []) as Array<{ id?: unknown; kind?: unknown; label?: unknown }>;
-  const edges = (Array.isArray(g?.edges) ? g.edges : []) as Array<{ from?: unknown; to?: unknown; edge_type?: unknown }>;
-  const kind = new Map(nodes.map((n) => [n.id, n.kind] as const));
-  const walk = edges.filter((e) => e.edge_type !== 'bidirected' && kind.get(e.from) !== 'option' && kind.get(e.from) !== 'decision');
-  const reaches = (start: unknown): boolean => {
-    const seen = new Set<unknown>([start]);
-    for (const queue = [start]; queue.length > 0;) {
-      const at = queue.shift();
-      if (at === to.id) return true;
-      for (const e of walk) if (e.from === at && !seen.has(e.to)) { seen.add(e.to); queue.push(e.to); }
-    }
-    return false;
-  };
-  // Codex r2 on #2641: the named first link must be one the canvas edit can take: ONE edge of any type on that pair, and
-  // both ends one entity each that is not an option or the decision (else the strength edit refuses it as ambiguous).
-  const one = (id: unknown): boolean => nodes.filter((n) => n.id === id).length === 1;
-  const editable = (a: unknown, b: unknown): boolean => one(a) && one(b) && edges.filter((e) => e.from === a && e.to === b).length === 1
-    && !['option', 'decision'].includes(String(nodes.find((n) => n.id === b)?.kind));
-  const first = walk.find((e) => e.from === from.id && e.to !== to.id && editable(e.from, e.to) && reaches(e.to));
-  const via = first === undefined ? undefined : nodes.find((n) => n.id === first.to);
-  if (via !== undefined) {
-    const v = typeof via.label === 'string' && via.label.trim() !== '' ? via.label : String(via.id);
-    return 'Nothing was prepared. Tell the user exactly this: '
-      + `"The model has no direct link from \u201c${from.label}\u201d to \u201c${to.label}\u201d: \u201c${from.label}\u201d moves \u201c${to.label}\u201d through \u201c${v}\u201d. `
-      + `You can set how strong that first link is now: on the canvas, click the link from \u201c${from.label}\u201d to \u201c${v}\u201d, and under `
-      + '\u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, not your figure."';
-  }
-  // Codex r2 on #2641: a pair the model already holds as a SHARED CAUSE (bidirected) cannot take an added link
-  // (`propose_model_change` refuses already_present), so that offer is never made for it.
-  if (edges.some((e) => e.from === from.id && e.to === to.id)) {
-    return 'Nothing was prepared. Tell the user exactly this: '
-      + `"The model holds \u201c${from.label}\u201d and \u201c${to.label}\u201d as moved by a shared cause, not one moving the other, so there is `
-      + 'no effect to record. If you meant two other factors, name them and I\u2019ll check."';
-  }
-  return 'Nothing was prepared. Tell the user exactly this: '
-    + `"The model has no link from \u201c${from.label}\u201d to \u201c${to.label}\u201d, so there is no effect to record yet. `
-    + `If \u201c${from.label}\u201d does move \u201c${to.label}\u201d, I can add that link for you to approve; your figure can then size it."`;
+  return `Nothing was prepared. Tell the user exactly this: "${noSuchLinkUserWords(raw, from, to)}"`;
 }
 
 function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string },
@@ -1586,7 +1561,10 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
       return `Nothing was prepared: the user's figure is more than the analysis can represent on the range the model uses for "${from.label}"`
         + `${rangeOf(from.id)} and "${to.label}"${rangeOf(to.id)}, so it would be cut short. Repeat their figure in their own words, and say `
         + 'plainly that it is that range, not their figure, that stops it being used here. Never ask them to change their figure first, '
-        + 'and never shrink it yourself. That range cannot be changed from this conversation yet, so do not offer to change it.';
+        + 'and never shrink it yourself. Nothing was recorded. Then give them the one route that works today (S5t: never a refusal '
+        + 'with no way forward), in exactly these words: "You can set how strong this link is now: on the canvas, click the link from '
+        + `\u201c${from.label}\u201d to \u201c${to.label}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. `
+        + 'That records how strong you judge the link, not your figure."';
     }
     case 'out_of_domain':
       return `Nothing was prepared: across the options, the user's figure would take "${to.label}" outside the range it can hold. Repeat `
@@ -2809,6 +2787,8 @@ export function createAgentCapabilities(
         expected: { graph_hash: expectedHash, edge_token: item.edge_token }, quote: item.quote, reading_token: item.reading_token,
         ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}),
         ...(item.reversal !== undefined ? { reversal: item.reversal } : {}), ...(item.link_selected ? { link_selected: true } : {}),
+        // S5t: a frame refit only where the door admits one — ONE approved link goes to the `link_effect` door (below).
+        ...(approvedEffects.length === 1 ? { frameRefit: true as const } : {}),
         lastRunIdentityUse: approvedRead.identity_run_use ?? null });
       if (dry.kind === 'refused') {
         const from = { id: item.from, label: approvedRead.nodes.find((n) => n.id === item.from)?.label ?? item.from };
@@ -2878,11 +2858,14 @@ export function createAgentCapabilities(
         detail: 'These link sizes were sent, but reading the model back did not show all of them as recorded. Say exactly that; never say they were recorded or not recorded.' };
     }
     proposals.markApplied(parent.proposal_id, receipts);
+    // ⭐ S5t (Science d5 #87 6009444385, DL adopted): a frame the refit widened is said ONCE, in Science's words — read off
+    // the model before approval and the read-back above, never the writer's own account. Only the one-link door refits.
+    const reframed = approvedEffects.length === 1 ? reframedNodeIds(approvedRead.raw, check?.raw) : [];
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       follow_up: approvedEffects.length === 1
-        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'} Any earlier result is now out of date.`
+        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'}${reframed.length > 0 ? ` ${frameRefitReceipt(reframed.map(labelOf))}` : ''} Any earlier result is now out of date.`
         : `Recorded your figures for ${approvedEffects.length} links, from your words, as you confirmed. Any earlier result is now out of date.`,
     };
   };
@@ -3550,7 +3533,9 @@ export function createAgentCapabilities(
           const dry = applyLinkEffectEdit({ persistedGraph: working, from: from.id, to: to.id, effect,
             expected: { graph_hash: expectedHash, edge_token: edgeToken }, quote: said,
             ...unitReadings, ...consent,
-            reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null });
+            reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null,
+            // S5t: a group of ONE is approved through the one-link door, the only door that admits a frame refit.
+            ...(grouped.length === 1 ? { frameRefit: true as const } : {}) });
           if (dry.kind === 'refused') {
             const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(working, from.id, to.id, g.identity_run_use ?? null) : null;
             fail(dry.reason, definition !== null ? `${definitionalLinkRefusalText(working, definition)} Tell the user exactly this.`
@@ -3674,7 +3659,8 @@ export function createAgentCapabilities(
         expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said,
         ...unitReadings, ...consent,
         // A dry run of the reading the card will show: its own token, so every refusal it returns is about the write.
-        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null });
+        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null,
+        frameRefit: true });
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,

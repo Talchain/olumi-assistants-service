@@ -26,6 +26,7 @@ import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.j
 import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testability.js';
 export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { userSizedLevelLessLinks } from './mediator-reading.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from './say-figure.js';
 import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
@@ -151,10 +152,13 @@ export function goalCertaintyDecisions(
               : undefined;
   // #2473 CR P2 (CODEX_CLI_OVERFLOW 5937437431): the same unit-less-limit-node reading as every other sized reader.
   const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints));
+  // ⭐ T1b (Science d5, 6 Oct; Codex r1 on #2648): the user's sizes on both sides of a level-less mediator size that path
+  // here too, by the ONE reader P5 uses, so a certainty through it is never called "isn't sized".
+  const userChain = userSizedLevelLessLinks(graph);
   const exact = (e: Rec): boolean => {
     const to = byId.get(e.to);
     const id = isRec(to?.nonlinear_identity) && evaluated(to!.id) ? to!.nonlinear_identity : undefined;
-    return (Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from)) || sized(e);
+    return (Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from)) || sized(e) || userChain.has(`${String(e.from)}→${String(e.to)}`);
   };
   const good = goodSign(goal.goal_direction);
   const out: GoalCertaintyDecision[] = [];
@@ -665,7 +669,10 @@ export function noDeadEndAsks(
   for (const l of links) {
     const r = readings.get(l.from);
     if (r?.via !== 'sized_parents' || r.child !== l.to || covered.has(key(l.from, l.to)) || guessed(l)) continue;
-    const childUnit = unitOfNode(l.to);
+    // FA1 (Science d5): a child with no unit of its own that is a definitional part of its total is asked in that unit,
+    // the same reading the writer takes the answer in.
+    const partOf = readings.get(l.to);
+    const childUnit = unitOfNode(l.to) ?? (partOf?.via === 'definitional_part' ? partOf.unit : undefined);
     if (childUnit === undefined) continue;
     first ??= { kind: 'link', from: l.from, to: l.to };
     sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
