@@ -456,12 +456,27 @@ describe('every reader that shows existence reads the SAME validated hold (serve
     expect(serialised.find((e) => e.from === 'starter_tier_monthly_price' && e.to === 'starter_tier_mrr')?.exists_probability).toBe(0.8);
     expect((editCompactGraph(g as never).edges as Rec[]).find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL)?.exists_probability).toBe(0.8);
   });
-  it('the decision reviewer\'s fallback projection reads exists 1 for the definition, 0.8 for the causal control', async () => {
-    const g = await servedGraph('fa1');
+  it('the decision reviewer reads exists 1 for the definition, 0.8 for the causal control, on all three branches', async () => {
     const { projectRunGraphForDecisionReview } = await import('../../coaching/decision-review-graph-projection.js');
-    const edges = (projectRunGraphForDecisionReview({}, g) as Rec).graph.edges as Rec[];
-    expect(edges.find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL)).toMatchObject({ exists: 1 });
-    expect(edges.find((e) => e.from === 'starter_tier_monthly_price' && e.to === 'starter_tier_mrr')).toMatchObject({ exists: 0.8 });
+    const definition = (edges: Rec[]): Rec | undefined => edges.find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL);
+    const control = (edges: Rec[]): Rec | undefined => edges.find((e) => e.from === 'starter_tier_monthly_price' && e.to === 'starter_tier_mrr');
+    // 1. The Run snapshot, strict (graph-compact).
+    const strict = projectRunGraphForDecisionReview({}, await servedGraph('fa1')) as Rec;
+    expect(strict.via).toBe('run_snapshot_strict');
+    expect(definition(strict.graph.edges)).toMatchObject({ exists: 1 });
+    expect(control(strict.graph.edges)).toMatchObject({ exists: 0.8 });
+    // 2. The Run snapshot, preserving (a node the strict schema refuses sends it down the field-preserving arm).
+    const odd = await servedGraph('fa1');
+    nodeOf(odd, 'decision_monthly_recurring_revenue').kind = 'not_a_kind';
+    const preserving = projectRunGraphForDecisionReview({}, odd) as Rec;
+    expect(preserving.via, 'PRECONDITION: the preserving arm').toBe('run_snapshot_preserving');
+    expect(definition(preserving.graph.edges)).toMatchObject({ exists: 1 });
+    expect(control(preserving.graph.edges)).toMatchObject({ exists: 0.8 });
+    // 3. The enrichment graph (the held copy).
+    const enrichment = projectRunGraphForDecisionReview(await servedGraph('fa1'), null) as Rec;
+    expect(enrichment.via).toBe('enrichment');
+    expect(definition(enrichment.graph.edges)?.exists_probability).toBe(1);
+    expect(control(enrichment.graph.edges)?.exists_probability).toBe(0.8);
   });
   it('the licence: with every causal goal-path link at 1, the definitions are no longer Olumi\'s existence doubt; at 0.8 the control still is', async () => {
     const g = await servedGraph('fa1');
