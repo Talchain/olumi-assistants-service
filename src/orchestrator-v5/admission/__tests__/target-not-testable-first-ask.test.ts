@@ -57,6 +57,28 @@ describe('the target warning types the link its question asks', () => {
     expect(w.say).toContain('roughly how much Gross margin in % does a change in Price bring?'); // PRECONDITION: the words ask it
     expect(w).not.toHaveProperty('first_ask');
   });
+  it('⛔ Codex r2 P1: an upstream target with no unit of its own but an ADOPTED one (the writer takes it) keeps its `first_ask`', () => {
+    const g: Rec = { goal_node_id: 'rev',
+      nodes: [
+        { id: 'rev', kind: 'goal', label: 'Revenue', observed_state: { value: 0.5, raw_value: 50, baseline: 0.5, cap: 100, unit: 'GBP/month', source: 'user_override' },
+          goal_threshold_raw: 80, goal_threshold_unit: 'GBP/month', goal_threshold: 0.8, goal_direction: '>=' },
+        { id: 'budget', kind: 'factor', label: 'Budget', observed_state: { value: 0.5, raw_value: 50, cap: 100, unit: 'GBP', source: 'user_override' } },
+        { id: 'sales', kind: 'factor', label: 'Monthly sales', observed_state: { value: 0.5, raw_value: 50, cap: 100, source: 'user_override' } },
+        { id: 'o', kind: 'option', label: 'Spend more', interventions: { budget: { value: 0.6, raw_value: 60 } } },
+      ],
+      edges: [
+        { from: 'o', to: 'budget', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive', provenance: { source: 'cee_hypothesis' } },
+        { from: 'budget', to: 'sales', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive',
+          provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1, amount_unit: 'GBP/month', per_source_change: 1,
+            per_source_change_unit: 'GBP', strength_mean: 0.6, strength_mean_frame: 'edge_strength' } } },
+        { from: 'sales', to: 'rev', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive',
+          provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 1, amount_unit: 'GBP/month', per_source_change: 1,
+            per_source_change_unit: 'GBP/month', strength_mean: 0.5, strength_mean_frame: 'edge_strength' } } },
+      ] };
+    const w = targetNotTestableWarning(g, targetTestabilityOf(g), ['o'], CODE)!;
+    expect(w.say).toContain('Roughly how much does Monthly sales change when Budget changes?'); // PRECONDITION: the upstream question
+    expect(w.first_ask).toEqual({ kind: 'link', from: 'budget', to: 'sales' });
+  });
   it('TWIN (DL): when the words ask today\'s level first, they ask no link, so there is no `first_ask`', () => {
     const g = singleBand();
     delete g.nodes.find((n: Rec) => n.kind === 'goal').observed_state;

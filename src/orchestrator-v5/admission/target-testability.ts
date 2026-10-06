@@ -418,7 +418,8 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
     asked: askingCase === 'c' && failingLink?.link !== undefined ? { from: failingLink.link.from, to: failingLink.link.to } : null,
     askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
-      : (linkEffectEndUnits(graph, upstream.from, upstream.to)?.target.own[0] ?? null),
+      // ⛔ Codex r2 #2659 P1: the writer also takes an end's ADOPTED unit (the link's own stored size), so read it here too.
+      : ((ends) => ends?.target.own[0] ?? ends?.target.adopted ?? null)(linkEffectEndUnits(graph, upstream.from, upstream.to)),
   };
 }
 
