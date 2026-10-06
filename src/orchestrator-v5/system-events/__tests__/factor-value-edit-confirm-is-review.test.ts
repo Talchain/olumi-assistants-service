@@ -165,6 +165,10 @@ describe('factor_value_edit confirm_current: review of the persisted figure, by 
     );
   });
 
+  it('r2: a stored BLANK unit is no unit — DGAI omits it, and the confirm is reviewed', async () => {
+    await expectKeptAndReviewed({ value: 0.1, raw_value: 0.1, unit: '', source: 'cee_inference' }, { value: 0.1, raw_value: 0.1 });
+  });
+
   it('3. equal-pair percent (3.2 / 3.2 / %): reviewed, not refused as a scale change', async () => {
     await expectKeptAndReviewed(
       { value: 3.2, raw_value: 3.2, unit: '%', source: 'cee_inference' },

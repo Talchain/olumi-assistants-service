@@ -125,17 +125,20 @@ function confirmMatchesPersisted(
   if (typeof persisted?.value !== 'number' || !Number.isFinite(persisted.value)) return false;
   const storedValue = persisted.value;
   const storedRaw = typeof persisted.raw_value === 'number' ? persisted.raw_value : undefined;
-  const storedUnit = typeof persisted.unit === 'string' ? persisted.unit : undefined;
+  // A BLANK unit is no unit, on either side: the schema admits `unit: ''` and DGAI's builder omits it (Codex #2617 r2).
+  const unitOf = (u: unknown): string | undefined => (typeof u === 'string' && u.trim() !== '' ? u : undefined);
+  const storedUnit = unitOf(persisted.unit);
+  const eventUnit = unitOf(event.unit);
   const sameUnit = (a: string, b: string): boolean => canonicaliseUnitForDisplay(a) === canonicaliseUnitForDisplay(b);
   if (event.raw_value === undefined) {
     return sameStoredNumber(event.value, storedValue)
-      && (event.unit === undefined || (storedUnit !== undefined && sameUnit(event.unit, storedUnit)));
+      && (eventUnit === undefined || (storedUnit !== undefined && sameUnit(eventUnit, storedUnit)));
   }
   const rawAgrees = sameStoredNumber(event.raw_value, storedRaw ?? storedValue);
   const valueAgrees = sameStoredNumber(event.value, storedValue) || sameStoredNumber(event.value, event.raw_value);
   const unitAgrees = storedUnit === undefined
-    ? event.unit === undefined
-    : event.unit !== undefined && sameUnit(event.unit, storedUnit);
+    ? eventUnit === undefined
+    : eventUnit !== undefined && sameUnit(eventUnit, storedUnit);
   return rawAgrees && valueAgrees && unitAgrees;
 }
 
