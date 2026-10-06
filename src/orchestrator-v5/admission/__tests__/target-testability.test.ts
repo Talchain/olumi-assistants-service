@@ -93,11 +93,14 @@ describe('the verdict (0 LLM)', () => {
     expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_unsized']);
   });
 
-  it('N1: (a), (b) and (c) all named; the question is (a)\'s ((b) is never asked)', () => {
+  it('N1: (a) and (c) named; the question is (a)\'s — (b) no longer fails: its held "<" is scored strictly (D3 step 1)', () => {
     const v = targetTestabilityOf(FIX.n1);
-    expect(v.kind === 'not_testable' && v.failures.map((f) => f.case)).toEqual(['a', 'b', 'c']);
+    // ⭐ RE-PINNED, D3 step 1 (Science #87 6006079049 (2); Codex buddy r1 F4 on #2618): N1 holds "<" beside its threshold
+    // and the run minimises, so the wire sends `goal_threshold_strict` and ISL scores "below" exactly — P3 (b) passes.
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.case)).toEqual(['a', 'c']);
     const said = notTargetTestableSentence(FIX.n1, v)!;
-    expect(said).toContain("because it needs today's level of median first-response time, it can't yet test a '<");
+    expect(said).toContain("because it needs today's level of median first-response time and a size for the link");
+    expect(said).not.toContain("can't yet test a '<"); // the comparator clause went with (b)
     // RE-PINNED, RT-10 B′ (Science's question edit): the question is still (a)'s.
     expect(said.endsWith("What's today's level of median first-response time?")).toBe(true);
   });

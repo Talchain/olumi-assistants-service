@@ -96,6 +96,13 @@ export const GOAL_FIGURES_TARGET_NOT_TESTABLE = 'GOAL_FIGURES_TARGET_NOT_TESTABL
  */
 export const GOAL_FIGURES_OPTIONS_IDENTICAL = 'GOAL_FIGURES_OPTIONS_IDENTICAL';
 
+/**
+ * ⭐ D3 step 1 (DL 0df0e1, PL rec 5): a goal chance that is not a finite probability in [0, 1] of meeting a STATED target
+ * (target, direction, unit; a ceiling scored minimised). Written by `run_analysis` (`goal-chance-gate.ts`) for the
+ * options it names, each with its typed cause; the ordering and the outcome stay (the target claims only).
+ */
+export const GOAL_FIGURES_PROBABILITY_UNUSABLE = 'GOAL_FIGURES_PROBABILITY_UNUSABLE';
+
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
@@ -104,6 +111,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_OPTIONS_IDENTICAL,
+  GOAL_FIGURES_PROBABILITY_UNUSABLE,
 ]);
 
 function readRecord(value: unknown): Record<string, unknown> | null {

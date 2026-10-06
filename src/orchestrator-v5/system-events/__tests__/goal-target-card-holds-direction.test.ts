@@ -142,11 +142,14 @@ describe('DR row 1: the approved card holds the goal\'s direction on the goal no
     const floor = GraphV3.parse(await card(graphWith(), 'at_least', 1_200_000));
     expect(goalOf(floor).goal_direction, 'PRECONDITION: the floor held').toBe('>=');
     const out = await card(floor, 'at_most', 1_400_000);
-    expect(goalOf(out).goal_direction).toBeUndefined();
-    expect(out.goal_constraints).toEqual(expect.arrayContaining([expect.objectContaining({ node_id: GOAL, operator: '<=', value: 1_400_000 })]));
-    // The threshold channel carries floors only (route-v2-goal-target-edit (c)): the ceiling stamps nothing, so no
-    // ceiling number can be scored as a floor; the Run re-reads the changed direction (the analysis hash moves).
-    expect(goalOf(out).goal_threshold_raw).toBe(goalOf(floor).goal_threshold_raw);
+    // ⭐ D3 step 1 (Science #87 6005138341 + 6006079049 (1)): the ceiling is the goal's ONE target. It holds its direction,
+    // the floor's `>=` row is retired in the same write, and (no today's level, a £ unit: no frame) it is UNPAIRED, so the
+    // floor's £1.2m leaves the channel — never minimised against, never scored as a floor. The hash moves.
+    expect(goalOf(out).goal_direction).toBe('<=');
+    expect(out.goal_constraints.filter((c: Json) => c.node_id === GOAL)).toEqual([expect.objectContaining({ node_id: GOAL, operator: '<=', value: 1_400_000 })]);
+    expect(goalOf(out).goal_threshold_raw).toBeUndefined();
+    expect(goalOf(out).goal_threshold).toBeUndefined();
+    expect(resolveGoalDirection(out, GOAL)).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
     expect(computeAnalysisAffectingGraphHash(out as never)).not.toBe(computeAnalysisAffectingGraphHash(floor as never));
   });
 
@@ -179,7 +182,8 @@ describe('DR row 1: the approved card holds the goal\'s direction on the goal no
     ['no target figure', { label: 'Monthly churn' }, 2, true],
     ['a level 2% target, shown as 2%', level(2, 2), 2, true],
     ['a level 2% target with no user stamp, shown as 2%', level(2, null), 2, true],
-    ['a level 2% target SHOWN as 3% (the user stamp diverged)', level(2, 3), 3, false],
+    // ⭐ D3 step 1: the "at most 3%" now replaces the held 2% (one target per goal), so the door re-orders here too.
+    ['a level 2% target SHOWN as 3% (the user stamp diverged)', level(2, 3), 3, true],
   ] as const)('RT-10 B′ promise ⟺ door: %s', async (_name, goal, shown, promised) => {
     const before = graphWith(goal);
     expect(goalDirectionCorrectableByTarget(before, GOAL)).toBe(promised);

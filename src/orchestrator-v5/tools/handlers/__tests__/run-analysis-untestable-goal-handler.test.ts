@@ -270,12 +270,15 @@ const ROWS: ReadonlyArray<[string, DataShape, Codes, string]> = [
   [L, 'joint', 'none', `${FRAMED_LEAD}${ARM_A_FRAMED}`],
   // ── DIRECTION alone: the direction clause always; combined without data ───
   [M, 'none', 'D', `${WITHDRAWN_LEAD}${COMBINED}`],
-  [M, 'contradicted', 'D', `${WITHDRAWN_LEAD}${DIRECTION_ASSUMED}`],
-  [M, 'agrees', 'D', `${WITHDRAWN_LEAD}${DIRECTION_ASSUMED}`],
+  // ⭐ RE-PINNED, D3 step 1 (DL 0df0e1 #87 6006078553, PL rec 5 — RED row "missing target"): these goals state NO target, so
+  // the goal chances PLoT scored (against a target the user never set) no longer reach the composer — 'contradicted' and
+  // 'agrees' say what 'none' says (the joint figure is a limits claim and is untouched). Was: `${DIRECTION_ASSUMED}`.
+  [M, 'contradicted', 'D', `${WITHDRAWN_LEAD}${COMBINED}`],
+  [M, 'agrees', 'D', `${WITHDRAWN_LEAD}${COMBINED}`],
   [M, 'joint', 'D', `${WITHDRAWN_LEAD}${DIRECTION_ASSUMED}`],
   [L, 'none', 'D', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
-  [L, 'contradicted', 'D', `${WITHDRAWN_LEAD}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`],
-  [L, 'agrees', 'D', `${WITHDRAWN_LEAD}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`],
+  [L, 'contradicted', 'D', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
+  [L, 'agrees', 'D', `${WITHDRAWN_LEAD}${COMBINED}${ARM_A_UNFRAMED}`],
   [L, 'joint', 'D', `${WITHDRAWN_LEAD}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`],
   // ── THRESHOLD alone: could not test; no direction clause ──────────────────
   [M, 'none', 'T', `${WITHDRAWN_LEAD}${COULD_NOT_TEST}`],
@@ -330,15 +333,21 @@ describe('⭐ R3-3 — the EXECUTED run_analysis handler composes the untestable
   }
 });
 
-describe('R3-3 CONTRAST (R3 #75 5916385251; AIQ 5916386753): where the compared exact 0 IS earned, the attainment arm stays', () => {
-  it('PRECONDITION: in the re-pinned rows the Run records Hold\'s 0 as UNEARNED (it moves price on an unsized link)', async () => {
-    for (const goal of [M, L]) expect((await runHandler(goal, [], 'contradicted')).holdEarned, goal).toBe(false);
+// ⭐ RE-PINNED, D3 step 1 (DL 0df0e1 #87 6006078553, PL rec 5 — RED row "missing target"): these goals state NO target,
+// so no option's goal chance (nor Hold's 0, earned or not) is a chance of meeting one: none reaches the composer and the
+// Run decides no certainty. The attainment arm ("(48% against 0%)") is said only beside a stated target now. Was: Hold's
+// 0 recorded UNEARNED (moves price) / EARNED (moves nothing), and the earned one said "(48% against 0%)".
+describe('R3-3 CONTRAST, D3 step 1: with NO stated target there is no attainment arm and no certainty, earned or not', () => {
+  it('PRECONDITION (was: Hold\'s 0 recorded UNEARNED): no certainty is decided for a goal with no stated target', async () => {
+    for (const goal of [M, L]) expect((await runHandler(goal, [], 'contradicted')).holdEarned, goal).toBeUndefined();
   });
 
-  it('Hold holds today\'s level (moves nothing) → the Run records its 0 as EARNED → "(48% against 0%)" is said', async () => {
+  it('Hold holds today\'s level (moves nothing): still no certainty and no "(48% against 0%)" — there is no target to meet', async () => {
     const r = await runHandler(M, [], 'contradicted', true);
-    expect(r.holdEarned).toBe(true);
-    expect(r.summary).toBe(`${FRAMED_LEAD}${ARM_B_FRAMED}`);
+    expect(r.holdEarned).toBeUndefined();
+    expect(r.summary).toBe(FRAMED_LEAD);
+    expect(r.summary).not.toContain(ARM_B_FRAMED.trim()); // the attainment arm this row used to pin
+    expect(r.summary).not.toContain('against 0%');
     expect(isAllowedRunAnalysisAssistantText(r.summary), `egress rejected: ${r.summary}`).toBe(true);
   });
 });
