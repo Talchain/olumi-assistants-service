@@ -36,7 +36,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
+import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
@@ -1419,6 +1419,7 @@ export async function buildModelFromBrief(
   candidate = creditStatedFactorLevels(apart.model, brief);
   let keptApart = apart.renamed;
   let notToldApart = apart.ambiguous;
+  let linksSetAside = apart.setAside;
   const firstCandidate = candidate;
   let preparation = prepareProvisionalCandidate(candidate);
   candidate = preparation.candidate;
@@ -1566,8 +1567,9 @@ export async function buildModelFromBrief(
       });
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
+        const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: keptApart, setAside: linksSetAside }, retryApart);
         const retryRaw = keepLimitedQuantityAuthor(
-          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryApart.model, brief), firstCandidate, preparation.baseline_gaps),
+          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryHeld.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
@@ -1628,8 +1630,9 @@ export async function buildModelFromBrief(
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
           gapResidual = retryIdentity.residual;
-          keptApart = retryApart.renamed;
+          keptApart = retryHeld.renamed;
           notToldApart = retryApart.ambiguous;
+          linksSetAside = retryHeld.setAside;
           size = retrySize;
           // ⛔ An adopted retry must not erase what the first pass had to disclose
           // (review 5822933692, B3): a retry that echoes the prepared candidate
@@ -1731,11 +1734,14 @@ export async function buildModelFromBrief(
       }) as AdmittedModel['loss'][number])],
     };
   }
-  if (keptApart.length > 0) {
+  if (keptApart.length > 0 || linksSetAside.length > 0) {
     admitted = {
       ...admitted,
       loss: [...admitted.loss, ...keptApart.map((k) => ({
         field_path: `nodes[${slugId(k.to)}].label_kept_apart`, before: k.from, after: k.to, reason: keptApartLine(k), severity: 'info',
+      }) as AdmittedModel['loss'][number]), ...linksSetAside.map((a) => ({
+        field_path: `edges[${slugId(a.option)}->${slugId(a.to)}].link_set_aside`, before: { from: a.option, to: a.to }, after: null,
+        reason: setAsideLinkLine(a), severity: 'warn',
       }) as AdmittedModel['loss'][number])],
     };
   }
@@ -1817,6 +1823,8 @@ export async function buildModelFromBrief(
   openQuestions.unshift(...unlevelledProductQuestions(admitted));
   // AIQ 5888943993 (1)(c): the carrier folded into the goal, and any Olumi addition left out, said where the user sees it.
   if (foldedCarrier !== null) openQuestions.unshift(...foldedCarrierLines(foldedCarrier));
+  // ⭐ DL (dental): a link set aside between an option and its renamed namesake is asked where the user always sees it.
+  openQuestions.unshift(...linksSetAside.flatMap((a) => setAsideLinkQuestion(a) ?? []));
   /**
    * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
    * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
@@ -2148,7 +2156,8 @@ export async function buildModelFromBrief(
         // `pass_through_sign`: the user's sentence not recorded through Olumi's mediator, because the drawn path runs the
         // other way from it (Desk 6b #2644 Q3, `stated-size-binding.ts`): said, with what to check.
         // `stated_sign`: the user's sentence not recorded on a link drawn the other way from it (DL #2644 pilot): said.
-        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `link_set_aside`: a link an option could hold, set aside beside its renamed namesake and asked (DL, dental).
+        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
