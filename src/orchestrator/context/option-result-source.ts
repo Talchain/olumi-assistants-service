@@ -323,3 +323,12 @@ export function winnerOptionResultSource(
   }
   return sources[0] ?? [];
 }
+
+/** Append a structured producer warning without letting string composers read its carrier. */
+export function appendInferenceWarning<E>(envelope: E, warning: Record<string, unknown>): E {
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const current = envelope as Record<string, unknown>;
+  return { ...current, inference_warnings: [
+    ...(Array.isArray(current.inference_warnings) ? current.inference_warnings : []), warning,
+  ] } as E;
+}

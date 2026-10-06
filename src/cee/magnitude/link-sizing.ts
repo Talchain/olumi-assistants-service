@@ -87,7 +87,10 @@ export function approvalSizes(edge: unknown): boolean {
  * store. `edge` is the link as stored BEFORE this write.
  */
 export function sizedByApproval<P extends object>(provenance: P, edge: unknown): P {
-  return approvalSizes(edge) ? { ...provenance, magnitude: ESTIMATE_MAGNITUDE } : provenance;
+  if (!approvalSizes(edge)) return provenance;
+  // R8 hash safety: approval changes magnitude; confirm-only review keeps the carrier.
+  const { mean_projected: _projectedMean, ...kept } = provenance as P & { mean_projected?: unknown };
+  return { ...kept, magnitude: ESTIMATE_MAGNITUDE } as P;
 }
 
 /**
@@ -118,4 +121,20 @@ export function optionsRestingOnAcceptedOlumiSizes(graph: unknown, optionIds: re
     }
     return edges.some((e) => reached.has(e.from) && kindOf.get(e.from) !== 'option' && toGoal.has(e.to) && isAcceptedOlumiSize(e));
   });
+}
+
+/** R8 writer guard: the carrier is outside the analysis hash; an unchanged size cannot change it on re-register. */
+export function keepMeanProjectionWhenSizeUnchanged<E extends object>(before: unknown, after: E): E {
+  if (!isRec(before) || !isRec(after)) return after;
+  const oldSize = isRec(before.strength) ? before.strength : {};
+  const newSize = isRec(after.strength) ? after.strength : {};
+  const oldProvenance = isRec(before.provenance) ? before.provenance : {};
+  const newProvenance = isRec(after.provenance) ? after.provenance : {};
+  if (!Object.hasOwn(oldProvenance, 'mean_projected') && !Object.hasOwn(newProvenance, 'mean_projected')) return after;
+  if (oldSize.mean !== newSize.mean || oldProvenance.magnitude !== newProvenance.magnitude) return after;
+  // Copy the old carrier opaquely at this write boundary; only the licence interprets its value.
+  const { mean_projected: _proposed, ...kept } = newProvenance;
+  const carrier = Object.fromEntries(Object.entries(oldProvenance).filter(([key]) => key === 'mean_projected'));
+  if (!isRec(before.provenance) && !isRec(after.provenance)) return after;
+  return { ...after, provenance: { ...kept, ...carrier } };
 }

@@ -1,3 +1,4 @@
+import { unsizedPathLeaderWithheld } from '../agent-lane/unsized-path-cause.js';
 /**
  * AN ANALYSIS NOBODY ASKED FOR MAY NOT ASSERT A QUANTIFIED RESULT.
  *
@@ -262,13 +263,17 @@ type AnalysisResultBlock = Extract<OlumiResponse['blocks'][number], { type: 'ana
  * for; the remedy is ONE shared admission every consumer reads.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * TWO INPUTS, STILL NAMED APART — that is what makes this a composition
+ * INPUTS NAMED APART — that is what makes this a composition
  *
  *   `mayNameLeadingOptionForFact` — "does the persisted CONSTRAINT VERDICT
  *       permit a leader claim?" Unchanged, still the sole reader of
  *       `result.constraint_verdict`, still exported and still callable on its
  *       own by anything that genuinely wants only that question answered.
  *   {@link wasAnalysisRequestedByUser} — "did anybody ASK for this analysis?"
+ *
+ * R7 adds the Run’s existing typed unsized-path licence withhold as a further remove-only conjunct,
+ * read off this SAME fact. Its constraint permission stays intact, and the stated cause rides beside the
+ * overall permission into compose; no graph walk occurs here.
  *
  * The two questions keep their own names and their own defaults. What is shared
  * is the ANSWER to the third question the surfaces actually ask, which is
@@ -282,7 +287,8 @@ type AnalysisResultBlock = Extract<OlumiResponse['blocks'][number], { type: 'ana
  * docstrings say they exist to avoid.
  */
 export function mayPresentLeaderClaimForFact(fact: RunAnalysisHandlerFact): boolean {
-  return mayNameLeadingOptionForFact(fact) && wasAnalysisRequestedByUser(fact);
+  return mayNameLeadingOptionForFact(fact) && wasAnalysisRequestedByUser(fact)
+    && !unsizedPathLeaderWithheld(fact.result);
 }
 
 /**

@@ -12,7 +12,7 @@
 import {
   NEAR_ZERO_INFLUENCE_THRESHOLD,
 } from '../../../format/influence-bands.js';
-import { edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
 import type { PendingAction } from '../../../session/pending-action.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../../../agent-lane/limit-operator-words.js';
 import { sayLimitInFrame } from '../../../agent-lane/limit-frame.js';
@@ -725,6 +725,8 @@ export function formatEdgeStrengthConfirmed(input: {
 function describeBandWithDirection(mean: number): string {
   const abs = Math.abs(mean);
   if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return 'no material influence';
-  const band = edgeBandFromMagnitude(abs);
+  // ONE word per band, the canvas's (DL D4 row; served s7-d4: this turn said "weak" where the canvas and the rerun line say
+  // "slight"). The enum keeps `weak`; every word a user reads is CANVAS_BAND_WORD's.
+  const band = CANVAS_BAND_WORD[edgeBandFromMagnitude(abs)];
   return mean < 0 ? `${band} (negative)` : band;
 }

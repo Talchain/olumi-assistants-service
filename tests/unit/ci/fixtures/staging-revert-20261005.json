@@ -1,0 +1,167 @@
+{
+ "_source": "REAL. Render API GET /v1/services/srv-d4slpaili9vc73eiq4og/deploys (cee-staging), read 2026-10-05 ~17:5xZ; GitHub GET /repos/Talchain/olumi-assistants-service/activity?ref=refs/heads/staging, read ~18:3xZ. Unedited, filtered to 15:30\u201318:00Z. CI OPTIMISER E21.",
+ "_note": "The ed245a15\u2192147c6630 push appears twice in `ref_activity` (GitHub's duplicate push event). Render's second new_commit deploy of 147c6630 (created 17:31:24) went live 17:35:25 over b02a3cc1.",
+ "render_deploys": [
+  {
+   "createdAt": "2026-10-05T15:49:38.651418Z",
+   "commit": "8f92516b94dccaa826f0161a078a5e1431e24d82",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T15:49:38.625922Z",
+   "finishedAt": "2026-10-05T15:51:41.081356Z",
+   "commitAt": "2026-10-05T15:49:35Z"
+  },
+  {
+   "createdAt": "2026-10-05T15:59:52.833926Z",
+   "commit": "77b6432508ddcfcc1e78792b76c7b6144e7873d5",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T15:59:52.806389Z",
+   "finishedAt": "2026-10-05T16:02:29.995029Z",
+   "commitAt": "2026-10-05T15:59:50Z"
+  },
+  {
+   "createdAt": "2026-10-05T16:03:19.640433Z",
+   "commit": "9d5560653411fb7361f738789f4ef0f801a98ea9",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T16:03:19.604274Z",
+   "finishedAt": "2026-10-05T16:05:22.552965Z",
+   "commitAt": "2026-10-05T16:03:16Z"
+  },
+  {
+   "createdAt": "2026-10-05T16:22:10.294078Z",
+   "commit": "16c5397b9194b015763fe1cc620671727722b5ae",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T16:22:10.26322Z",
+   "finishedAt": "2026-10-05T16:24:00.069262Z",
+   "commitAt": "2026-10-05T16:22:07Z"
+  },
+  {
+   "createdAt": "2026-10-05T16:30:30.840705Z",
+   "commit": "7b1d8414466519cd9d4d710615645c013858ad7a",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T16:30:30.80766Z",
+   "finishedAt": "2026-10-05T16:33:14.045809Z",
+   "commitAt": "2026-10-05T16:30:28Z"
+  },
+  {
+   "createdAt": "2026-10-05T16:59:28.819877Z",
+   "commit": "a52ccce7d69298196c485085c83f8e4bb27b6bf9",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T16:59:28.790481Z",
+   "finishedAt": "2026-10-05T17:01:51.405708Z",
+   "commitAt": "2026-10-05T16:59:26Z"
+  },
+  {
+   "createdAt": "2026-10-05T17:06:34.586521Z",
+   "commit": "ed245a1572c0ecf9b2c51079e0250c5614758d38",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T17:06:34.556385Z",
+   "finishedAt": "2026-10-05T17:08:22.186954Z",
+   "commitAt": "2026-10-05T17:06:32Z"
+  },
+  {
+   "createdAt": "2026-10-05T17:21:18.271591Z",
+   "commit": "147c6630028fb323049e24415bf9b74b730fef36",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T17:21:18.213397Z",
+   "finishedAt": "2026-10-05T17:23:10.908063Z",
+   "commitAt": "2026-10-05T17:21:14Z"
+  },
+  {
+   "createdAt": "2026-10-05T17:31:08.266517Z",
+   "commit": "b02a3cc12940a3e3842504288947eac9f52130f6",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T17:31:08.227807Z",
+   "finishedAt": "2026-10-05T17:33:19.533079Z",
+   "commitAt": "2026-10-05T17:31:05Z"
+  },
+  {
+   "createdAt": "2026-10-05T17:31:24.44404Z",
+   "commit": "147c6630028fb323049e24415bf9b74b730fef36",
+   "trigger": "new_commit",
+   "status": "deactivated",
+   "startedAt": "2026-10-05T17:33:19.871268Z",
+   "finishedAt": "2026-10-05T17:35:25.354397Z",
+   "commitAt": "2026-10-05T17:21:14Z"
+  },
+  {
+   "createdAt": "2026-10-05T17:39:58.06918Z",
+   "commit": "b02a3cc12940a3e3842504288947eac9f52130f6",
+   "trigger": "api",
+   "status": "live",
+   "startedAt": "2026-10-05T17:39:58.030962Z",
+   "finishedAt": "2026-10-05T17:41:50.404619Z",
+   "commitAt": "2026-10-05T17:31:05Z"
+  }
+ ],
+ "ref_activity": [
+  {
+   "activity_type": "pr_merge",
+   "after": "8f92516b94dccaa826f0161a078a5e1431e24d82",
+   "before": "43e510508b2992aa0c63182bf1d2c45f758c7fb1",
+   "timestamp": "2026-10-05T15:49:35Z"
+  },
+  {
+   "activity_type": "pr_merge",
+   "after": "77b6432508ddcfcc1e78792b76c7b6144e7873d5",
+   "before": "8f92516b94dccaa826f0161a078a5e1431e24d82",
+   "timestamp": "2026-10-05T15:59:50Z"
+  },
+  {
+   "activity_type": "pr_merge",
+   "after": "9d5560653411fb7361f738789f4ef0f801a98ea9",
+   "before": "77b6432508ddcfcc1e78792b76c7b6144e7873d5",
+   "timestamp": "2026-10-05T16:03:16Z"
+  },
+  {
+   "activity_type": "pr_merge",
+   "after": "16c5397b9194b015763fe1cc620671727722b5ae",
+   "before": "9d5560653411fb7361f738789f4ef0f801a98ea9",
+   "timestamp": "2026-10-05T16:22:07Z"
+  },
+  {
+   "activity_type": "pr_merge",
+   "after": "7b1d8414466519cd9d4d710615645c013858ad7a",
+   "before": "16c5397b9194b015763fe1cc620671727722b5ae",
+   "timestamp": "2026-10-05T16:30:28Z"
+  },
+  {
+   "activity_type": "pr_merge",
+   "after": "a52ccce7d69298196c485085c83f8e4bb27b6bf9",
+   "before": "7b1d8414466519cd9d4d710615645c013858ad7a",
+   "timestamp": "2026-10-05T16:59:26Z"
+  },
+  {
+   "activity_type": "pr_merge",
+   "after": "ed245a1572c0ecf9b2c51079e0250c5614758d38",
+   "before": "a52ccce7d69298196c485085c83f8e4bb27b6bf9",
+   "timestamp": "2026-10-05T17:06:32Z"
+  },
+  {
+   "activity_type": "pr_merge",
+   "after": "147c6630028fb323049e24415bf9b74b730fef36",
+   "before": "ed245a1572c0ecf9b2c51079e0250c5614758d38",
+   "timestamp": "2026-10-05T17:21:14Z"
+  },
+  {
+   "activity_type": "pr_merge",
+   "after": "147c6630028fb323049e24415bf9b74b730fef36",
+   "before": "ed245a1572c0ecf9b2c51079e0250c5614758d38",
+   "timestamp": "2026-10-05T17:21:14Z"
+  },
+  {
+   "activity_type": "pr_merge",
+   "after": "b02a3cc12940a3e3842504288947eac9f52130f6",
+   "before": "147c6630028fb323049e24415bf9b74b730fef36",
+   "timestamp": "2026-10-05T17:31:05Z"
+  }
+ ]
+}

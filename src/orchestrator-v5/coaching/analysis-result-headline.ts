@@ -2681,7 +2681,20 @@ const OBJECTIVE_CONTRADICTION_BOUND_RE_SRC =
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
 // in the run_analysis handler.
-const TAIL_PATTERN = `(?:${GOAL_FRAME_WITHDRAWN_RE_SRC})?(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_BOUND_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?(?:${IDENTICAL_ARMS_DISCLOSURE_RE_SRC})?`;
+/** R8 Science legacy disclosure, immediately after a named leader sentence. */
+const LEGACY_FIGURES_DISCLOSURE_RE_SRC = " Olumi supplied the figures for the links? from ‘[^’]+’ to ‘[^’]+’(?:(?:, | and )from ‘[^’]+’ to ‘[^’]+’){0,2}(?: and [1-9][0-9]* more)?\\. Set your own to see how much (?:it matters|they matter)\\.";
+const TAIL_PATTERN = `(?:${LEGACY_FIGURES_DISCLOSURE_RE_SRC})?(?:${GOAL_FRAME_WITHDRAWN_RE_SRC})?(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_BOUND_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?(?:${INFERRED_VALUE_DISCLOSURE_RE_SRC})?(?:${IDENTICAL_ARMS_DISCLOSURE_RE_SRC})?`;
+
+/** Insert after the leader sentence, before the headline's already-composed caution/status tails. */
+export function appendLegacyFiguresAfterLeaderSentence(headline: string, disclosure: string): string {
+  if (disclosure === '') return headline;
+  const tail = new RegExp(`${TAIL_PATTERN}$`).exec(headline)?.[0] ?? '';
+  const base = headline.slice(0, headline.length - tail.length);
+  const followup = ' Run the follow-up checks before treating this as final.';
+  return base.endsWith(followup)
+    ? `${base.slice(0, -followup.length)}${disclosure}${followup}${tail}`
+    : `${base}${disclosure}${tail}`;
+}
 
 /** One disclosure family admitted on the locked-template (withheld) branch. */
 export interface TemplateSuffixDisclosureGrammar {
@@ -2968,38 +2981,41 @@ const LEAD_CLAUSE_RE_SRC =
 const PLAIN_LEAD_RE_SRC =
   `(?:${SCORED_HIGHEST_PLAIN}|${MINIMISED_LEAD_PREFIX} .+? in this model(?!.*${GOAL_DIRECTION_ASSUMED_RE_SRC}))`;
 
-const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
+function headlineGrammarRegexes(legacyFiguresDisclosure = ''): RegExp[] {
+  const legacyPattern = legacyFiguresDisclosure === '' ? LEGACY_FIGURES_DISCLOSURE_RE_SRC : escapeForRegex(legacyFiguresDisclosure);
+  const tailPattern = TAIL_PATTERN.replace(LEGACY_FIGURES_DISCLOSURE_RE_SRC, () => legacyPattern);
+  return [
   // Case A: winner + margin + provisional caution naming the fragile reason.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${tailPattern}$`,
   ),
   // Case C: provisional caution naming the fragile reason, no margin.
   new RegExp(
-    `^.+? ${PLAIN_LEAD_RE_SRC}, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${TAIL_PATTERN}$`,
+    `^.+? ${PLAIN_LEAD_RE_SRC}, but treat this as provisional: ${CAUTION_REASON_PATTERN}\\.${tailPattern}$`,
   ),
   // Case B (with margin): winner + margin + driver.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC} because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC} because .+? is the strongest driver\\.${tailPattern}$`,
   ),
   // Case B (no margin): winner + driver.
   new RegExp(
-    `^.+? ${PLAIN_LEAD_RE_SRC} because .+? is the strongest driver\\.${TAIL_PATTERN}$`,
+    `^.+? ${PLAIN_LEAD_RE_SRC} because .+? is the strongest driver\\.${tailPattern}$`,
   ),
   // Case D (margin only): winner + margin.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}\\.${tailPattern}$`,
   ),
   // Case D (probability): winner + integer-percentage probability + nudge.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}\\. Run the follow-up checks before treating this as final\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}\\.(?:${legacyPattern})? Run the follow-up checks before treating this as final\\.${tailPattern}$`,
   ),
   // Case NT (close): small but real lead, flagged as close.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the options are close\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the options are close\\.${tailPattern}$`,
   ),
   // Case NT (tied): effectively tied, no margin number.
   new RegExp(
-    `^.+? was supported by only fractionally more runs of this model, so the options are effectively tied\\.${TAIL_PATTERN}$`,
+    `^.+? was supported by only fractionally more runs of this model, so the options are effectively tied\\.${tailPattern}$`,
   ),
   // Case NT (override tie): a WIDER gap the raw near_tie.is_tie override still
   // flagged as a tie — the winner is nominally ahead but the analysis treats it
@@ -3026,7 +3042,7 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // this alternation must be widened to `(?:${LEAD_CLAUSE_RE_SRC}|currently
   // leads)` in the same commit.
   new RegExp(
-    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the analysis treats this as a close call\\.${TAIL_PATTERN}$`,
+    `^.+? ${LEAD_CLAUSE_RE_SRC}, but the analysis treats this as a close call\\.${tailPattern}$`,
   ),
   // Doctrine D-W (ROADMAP 2.52): leader-trails-argmax honest disambiguation —
   // "{leader} leads overall, though {runner-up} has marginally better raw
@@ -3034,20 +3050,24 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // banned vocabulary, so the ordinary forbidden-vocab / ID / decimal defences
   // (applied after the grammar match) still bite on a leaky slot.
   new RegExp(
-    `^In this model, .+? was supported by marginally more runs than .+? \\(\\d{1,3}% against \\d{1,3}%\\), so the two are close\\. Change a figure you’re unsure about to see what separates them\\.${TAIL_PATTERN}$`,
+    `^In this model, .+? was supported by marginally more runs than .+? \\(\\d{1,3}% against \\d{1,3}%\\), so the two are close\\. Change a figure you’re unsure about to see what separates them\\.${tailPattern}$`,
   ),
   // Case E (link-safe floor): minimal "{label} currently leads.{suffix}".
-  // MUST stay last — the trailing `\\.${TAIL_PATTERN}$` anchor is
+  // MUST stay last — the trailing `\\.${tailPattern}$` anchor is
   // strictly less specific than the other cases and would not match their
   // outputs (those extend "leads" with " by N percentage points", "because",
   // ", but", "with N% probability", or " is currently only fractionally
   // ahead" before the terminal period), so ordering is for clarity rather
   // than correctness.
-  new RegExp(`^.+? ${PLAIN_LEAD_RE_SRC}\\.${TAIL_PATTERN}$`),
+  new RegExp(`^.+? ${PLAIN_LEAD_RE_SRC}\\.${tailPattern}$`),
 ];
+}
 
-function matchesHeadlineGrammar(text: string): boolean {
-  for (const re of HEADLINE_GRAMMAR_REGEXES) {
+const HEADLINE_GRAMMAR_REGEXES = headlineGrammarRegexes();
+
+function matchesHeadlineGrammar(text: string, legacyFiguresDisclosure = ''): boolean {
+  const grammars = legacyFiguresDisclosure === '' ? HEADLINE_GRAMMAR_REGEXES : headlineGrammarRegexes(legacyFiguresDisclosure);
+  for (const re of grammars) {
     if (re.test(text)) return true;
   }
   return false;
@@ -3082,7 +3102,7 @@ function matchesHeadlineGrammar(text: string): boolean {
  *        - no ID-prefix tokens (opt_, fac_, …)
  *        - no raw decimal numbers (only integer % allowed)
  */
-export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail = ''): boolean {
+export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail = '', legacyFiguresDisclosure = ''): boolean {
   if (typeof text !== 'string') return false;
   // ⭐ OLUMI'S GOAL READINGS, BY EXACT EQUALITY (AIQ 5895590866 (2); DL lease 5895635885): `goalReadingTail` is the
   // forwarder's own rebuild of `buildGoalReadingDisclosure` for the graph this Run analysed. The reply may carry that
@@ -3092,8 +3112,8 @@ export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail
     const at = text.indexOf(goalReadingTail);
     if (at > 0 && text.indexOf(goalReadingTail, at + 1) === -1) {
       const base = text.slice(0, at);
-      return isAllowedRunAnalysisAssistantText(base)
-        && isAllowedRunAnalysisAssistantText(base + text.slice(at + goalReadingTail.length))
+      return isAllowedRunAnalysisAssistantText(base, '', legacyFiguresDisclosure)
+        && isAllowedRunAnalysisAssistantText(base + text.slice(at + goalReadingTail.length), '', legacyFiguresDisclosure)
         && passesAssistantTextContentDefences(goalReadingTail);
     }
   }
@@ -3119,7 +3139,12 @@ export function isAllowedRunAnalysisAssistantText(text: unknown, goalReadingTail
       return passesAssistantTextContentDefences(text);
     }
   }
-  if (!matchesHeadlineGrammar(text)) return false;
+  // The forwarder rebuilds this exact Science sentence from the Run's graph
+  // and complete link list. Labels may contain either quotation mark; they are
+  // escaped as literal strings, never widened into arbitrary prose slots.
+  if (legacyFiguresDisclosure !== '' && (text.indexOf(legacyFiguresDisclosure) < 0
+    || text.indexOf(legacyFiguresDisclosure, text.indexOf(legacyFiguresDisclosure) + 1) !== -1)) return false;
+  if (!matchesHeadlineGrammar(text, legacyFiguresDisclosure)) return false;
   // Defence-in-depth: grammar-shaped but content-leaky strings still
   // fail. A slot filler that happens to contain forbidden vocabulary
   // or an internal ID is caught here even though the surrounding

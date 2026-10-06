@@ -131,6 +131,8 @@ import type { FreshnessDerivation } from './freshness.js';
  * same turn. One read, one context, one derivation, carried together.
  */
 export interface TurnExitStamp {
+  readonly leaderWithheldBecauseUnrequested?: boolean;
+  readonly leaderWithheldBecauseUnsizedPath?: import('../agent-lane/unsized-path-cause.js').UnsizedPathLeaderCause;
   readonly mayNameLeadingOption: boolean;
   readonly mayNameLeadingOptionProvenance: MayNameLeadingOptionVerdict['provenance'];
   /**
@@ -316,6 +318,8 @@ export function createTurnClaimSafetyResolver(
       const resolved = await memo;
       return {
         mayNameLeadingOption: resolved.verdict.may_name_leading_option,
+        ...(resolved.verdict.unsized_path_cause === undefined ? {} : { leaderWithheldBecauseUnsizedPath: resolved.verdict.unsized_path_cause,
+          leaderWithheldBecauseUnrequested: resolved.verdict.unsized_path_unrequested }),
         mayNameLeadingOptionProvenance: resolved.verdict.provenance,
         // Spread conditionally: an exit with no derivation carries NO key, so
         // "not read" stays distinguishable from every derived verdict.

@@ -81,7 +81,9 @@ function unsizedGraph(): Json {
 }
 
 /** Serialized bytes are the store boundary; no writer or commit function is replaced. */
-function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead?: string; useInProcessDoor?: boolean } = {}) {
+function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead?: string; useInProcessDoor?: boolean;
+  /** Changes the stored graph after approval's dry run, just before the real commit re-reads it (Codex r2 timing). */
+  beforeCommit?: (graph: Json) => Json } = {}) {
   let graphJson = JSON.stringify(initial);
   const proposals = new ProposalStore();
   const attempts: SessionTurnWrite[] = [];
@@ -112,6 +114,7 @@ function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead
   const commits: CommitOptionLevelsInput[] = [];
   const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
     commits.push(input);
+    if (options.beforeCommit !== undefined) graphJson = JSON.stringify(options.beforeCommit(graph()));
     if (options.useInProcessDoor === true) {
       session.store = store;
       try { return await commitOptionLevelsInProcess(input, 'rt6-real-in-process-door'); }
@@ -687,8 +690,11 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
       const r = await propose(w);
       expect(r, JSON.stringify(r)).toMatchObject({ ok: false, refusal: 'unit_mismatch' });
       // Never a dead end: an end step 2 may not adopt keeps step 1's Science-checked canvas route, verbatim.
+      // RE-PINNED (DL 0df0e1 item 3 on red team #87 6004429045): the sentence's "2 percentage points of gross margin" WAS
+      // read for the target, so only the source has no unit; the old words called both ends unitless, which was false.
+      expect(prepared.unit_readings.some(item => item.node_id === TARGET)).toBe(true);
       expect(String(r.detail)).toBe('Nothing was prepared. Tell the user exactly this: "'
-        + `\u201c${FOOTFALL}\u201d and \u201c${MARGIN}\u201d have no unit or scale in this model yet, so I can\u2019t record your figure from chat, `
+        + `\u201c${FOOTFALL}\u201d has no unit or scale in this model yet, so I can\u2019t record your figure from chat, `
         + `and nothing was recorded. You can set how strong this link is now: on the canvas, click the link from \u201c${FOOTFALL}\u201d `
         + `to \u201c${MARGIN}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. `
         + 'That records how strong you judge the link, not your figure."');
@@ -787,6 +793,40 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(result).toMatchObject({ kind: 'refused' });
     expect(nodeOf(now, SOURCE).unit_reading).toEqual(reading('GBP', 'Each £5'));
     expect(linkOf(now).provenance).not.toHaveProperty('natural_effect');
+  });
+
+  // Codex r1 on the RT-6 row-1 fix: the refusal's words read the writer's view, but ONLY readings a fresh read still
+  // makes. The source's approved % went stale (it now reads GBP, the analysis hash unchanged), the writer refused it,
+  // and the words must name what the model now holds, never put the refused % back.
+  it('stale adoption THROUGH APPROVAL: the refusal names the reading the model now holds, never the refused one', async () => {
+    const w = world();
+    const proposed = await propose(w);
+    expect(proposed, JSON.stringify(proposed)).toMatchObject({ ok: true });
+    const now = w.graph();
+    nodeOf(now, SOURCE).unit_reading = reading('GBP', 'Each £5');
+    expect(hashOf(now)).toBe(hashOf(w.graph()));
+    w.replace(now);
+    const { out } = await approve(w, proposed);
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false });
+    expect(String(out.detail)).not.toContain(`"${FOOTFALL}" in %`);
+    expect(String(out.detail)).toContain(`"${FOOTFALL}" in GBP`);
+    expect(String(out.detail)).not.toMatch(/no unit or scale/);
+    expect(w.attempts).toEqual([]);
+  });
+
+  // Codex r2: the same stale reading, arriving AFTER approval's dry run and before the real commit re-reads the graph.
+  // Whatever door answers (the commit's refusal, or its stale check), the words never put the refused % back.
+  it('stale adoption AT COMMIT: the words read the graph the commit refused on, never the refused %', async () => {
+    const w = world(unsizedGraph(), { beforeCommit: (g) => { nodeOf(g, SOURCE).unit_reading = reading('GBP', 'Each £5'); return g; } });
+    const proposed = await propose(w);
+    expect(proposed, JSON.stringify(proposed)).toMatchObject({ ok: true });
+    const { out } = await approve(w, proposed);
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false });
+    expect(w.commits).toHaveLength(1);
+    expect(String(out.detail)).not.toContain(`"${FOOTFALL}" in %`);
+    expect(String(out.detail)).toContain(`"${FOOTFALL}" in GBP`);
+    expect(String(out.detail)).not.toMatch(/no unit or scale/);
+    expect(linkOf(w.graph()).provenance).not.toHaveProperty('natural_effect');
   });
 
   it('readback checks each adopted unit by node id before reporting an applied approval', async () => {

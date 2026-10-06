@@ -666,6 +666,25 @@ describe('R3 gap (a) · prior_withheld from the withholder\'s own record that it
     expect(reason([CURRENT(), prior(env)])).toEqual([0, 'no_matched_option']);
   });
 
+  it('a marked path withhold with retained matching shares lends no prior leader or numeric comparison', () => {
+    const env = { ...envelope(SHARES, '111'),
+      inference_warnings: [{ code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'm', severity: 'warning', win_shares_withheld: true }] };
+    const out = buildRunDelta({ priorFacts: [CURRENT(), prior(env)], mayNameLeadingOption: true });
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(out.delta.win_probabilities).toEqual([]);
+    expect(out.delta.win_probabilities_unavailable).toBeUndefined();
+    expect(out.delta.leader).not.toHaveProperty('prior_leading_option_id');
+  });
+
+  it('retained disjoint shares under a marked path withhold do not override the prior constraint refusal', () => {
+    const env = { ...envelope([{ option_id: 'opt-c', win_probability: 0.6 }, { option_id: 'opt-d', win_probability: 0.4 }], '111'),
+      inference_warnings: [{ code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'm', severity: 'warning', win_shares_withheld: true }] };
+    const denied = prior(env);
+    if (denied.fact_type !== 'run_analysis') throw new Error('the prior is not a Run');
+    denied.result.constraint_verdict = { may_name_leading_option: false, constraint_verdict_state: 'evaluated_infeasible' };
+    expect(reason([CURRENT(), denied])).toEqual([0, 'prior_withheld']);
+  });
+
   it('CONTROL: THIS Run withheld too → no reason (nothing can be compared yet)', () => {
     const current = fact(withhold(envelope(SHARES, '222'), GOAL_FIGURES_PLACEHOLDER_PATH), 'run-b', 'hash-b', at('7'));
     expect(reason([current, prior(withhold(envelope(SHARES, '111'), GOAL_FIGURES_PLACEHOLDER_PATH))])).toEqual([0, undefined]);

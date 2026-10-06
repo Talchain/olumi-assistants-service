@@ -346,6 +346,7 @@ describe('R3-3 CONTRAST, D3 step 1: with NO stated target there is no attainment
     const r = await runHandler(M, [], 'contradicted', true);
     expect(r.holdEarned).toBeUndefined();
     expect(r.summary).toBe(FRAMED_LEAD);
+    expect(r.summary).not.toContain(ARM_B_FRAMED.trim()); // the attainment arm this row used to pin
     expect(r.summary).not.toContain('against 0%');
     expect(isAllowedRunAnalysisAssistantText(r.summary), `egress rejected: ${r.summary}`).toBe(true);
   });
