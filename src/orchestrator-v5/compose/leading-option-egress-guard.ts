@@ -130,9 +130,14 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'leads', re: /\bleads\b/i },
   { code: 'leading_option', re: /\bleading\s+option/i },
   // Cut 6 (Science d5 #87 6008249324): the copy now names the run-share leader as "the most-supported option". It
-  // presupposes a leader exactly as "the leading option" did, so the withheld gate must SEE it. "no option is the most
-  // supported" and "which option most runs support" carry no `option` after the adjective and stay LEAVE.
-  { code: 'most_supported_option', re: /\bmost[-\s]supported\s+option\b/i },
+  // presupposes a leader exactly as "the leading option" did, so the withheld gate must SEE it — and the whole class,
+  // not one noun (Review Desk #2639): "most-supported option(s)/one(s)", "the most supported is/was X", and
+  // "X is/was the most supported". A negated subject ("no option is", "none is", "neither is") names no leader and
+  // stays LEAVE; so does "which option most runs support" (no adjective) and the adjective on another noun.
+  {
+    code: 'most_supported_option',
+    re: /\bmost[-\s]supported\s+(?:options?|ones?)\b|\bthe\s+most[-\s]supported\s+(?:is|are|was|were)\b|(?<!\b(?:no(?:\s+single)?\s+(?:option|one)|none|neither(?:\s+option)?)\s+)\b(?:is|are|was|were)\s+the\s+most[-\s]supported\b/i,
+  },
   { code: 'the_lead', re: /\bthe\s+lead\b/i },
   { code: 'which_option_leads', re: /\bwhich\s+option\s+leads\b/i },
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
@@ -759,6 +764,11 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   'Standardise on Dell XPS performs best, with a probability of 56%.',
   // Cut 6 CATCH twin (d5): the new vocabulary, naming an option.
   'Hire Marketing Manager is the most-supported option in this model.',
+  // Cut 6 Review Desk (#2639): the same claim without the noun "option" after the adjective.
+  'Hire Marketing Manager is the most supported in this model.',
+  'The two most-supported options are Hire Marketing Manager and Hold.',
+  'Hire Marketing Manager was the most-supported one.',
+  'The most supported is Hire Marketing Manager.',
 ]);
 
 function assertEnforcerIsNarrowerThanAlarm(): void {

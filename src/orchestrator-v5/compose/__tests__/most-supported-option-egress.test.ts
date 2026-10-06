@@ -16,10 +16,15 @@ import {
   ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE,
 } from '../../tools/handlers/explanation-fallback.js';
 
-describe('LEAVE: the new adjective without "option" after it does not trip the gate', () => {
+describe('LEAVE: the adjective in a negated or non-option clause does not trip the gate', () => {
   it.each([
     ['structural: identical arms', '- Without the link, no option is the most supported: every option comes out the same, so the choice between them makes no difference in that version.'],
     ['the leader-free no-flip line (derived)', ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE],
+    // The widened class keeps its negated twins: no option is named as the most supported.
+    ['negated: no single option', 'In that version, no single option is the most supported.'],
+    ['negated: none', 'None is the most supported once the link is removed.'],
+    // The adjective on a non-option noun names no leader.
+    ['another noun', 'The most-supported assumption in your model is the delivery estimate.'],
   ])('%s', (_name, text) => {
     expect(textNamesLeadingOption(text), text).toBe(false);
     expect(textAssertsLeadingOption(text), text).toBe(false);
@@ -49,6 +54,11 @@ describe('CATCH: an option named as the most-supported one is blocked on a withh
   it.each([
     'Hire Marketing Manager is the most-supported option in this model.',
     'Hire Marketing Manager is the most supported option in this model.',
+    // Review Desk (#2639 @7bb08501): the same claim without "option" after the adjective passed the gate.
+    'Hire Marketing Manager is the most supported in this model.',
+    'The two most-supported options are Hire Marketing Manager and Hold.',
+    'Hire Marketing Manager was the most-supported one.',
+    'The most supported is Hire Marketing Manager.',
   ])('%s', (text) => {
     expect(textNamesLeadingOption(text)).toBe(true);
     expect(textAssertsLeadingOption(text)).toBe(true);
