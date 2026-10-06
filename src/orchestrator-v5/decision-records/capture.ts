@@ -6,7 +6,7 @@
  *      run_analysis HandlerFact into the exact `create_decision_record`
  *      payload (or a typed skip). No I/O, no clock reads (review_date
  *      derives from the fact's own computed_at), fully unit-testable.
- *   2. `recordDecisionRecordForCommit` — the fire-and-forget hook invoked
+ *   2. `recordDecisionRecordForCommit` — the bounded post-append hook invoked
  *      from commit.ts AFTER the durable append succeeded, whenever the
  *      commit carries a successful (non-noop) run_analysis fact
  *      (UNCONDITIONAL since #539 deleted CEE_DECISION_RECORD_CAPTURE —
@@ -76,6 +76,7 @@ import {
   AUTO_CAPTURE_RECORD_ID_NAMESPACE,
   deterministicRecordUuid,
 } from './record-id.js';
+import type { RunCaptureOutcome } from '../run-recording.js';
 import { getDecisionRecordStore } from './index.js';
 import { DecisionRecordSignInRequiredError } from './store-adapter.js';
 import type { ChosenOptionDecisionWrite, CreateDecisionRecordWrite } from './store-adapter.js';
@@ -347,13 +348,11 @@ export interface RecordDecisionRecordArgs {
 
 /**
  * Capture one decision record after a successful run_analysis commit.
- * Fire-and-forget: callers `void` the promise; every failure is logged and
- * swallowed — the turn result is NEVER affected and no error can surface
- * to any user (guest or owner).
+ * Returns a typed recording outcome; capture failure never fails the committed turn.
  */
 export async function recordDecisionRecordForCommit(
   args: RecordDecisionRecordArgs,
-): Promise<void> {
+): Promise<RunCaptureOutcome> {
   // ⭐ THE CLAIM VERDICT, STAMPED AT CAPTURE — read from the SAME fact the
   // record is projected from, at the one moment we still hold it.
   //
@@ -396,7 +395,7 @@ export async function recordDecisionRecordForCommit(
         'DecisionRecords — capture skipped (fact carries no recordable decision; designed skip, not a fault)',
       );
       emitCaptureEvent(args, claimVerdict, { status: 'skipped', skip_reason: built.reason });
-      return;
+      return { status: 'not_applicable', reason: 'missing_input' };
     }
     if (built.analysisSummaryDropped) {
       log.debug(
@@ -419,7 +418,7 @@ export async function recordDecisionRecordForCommit(
             { scenario_id: args.scenarioId, turn_id: args.turnId },
             'DecisionRecords — capture skipped pre-emptively (guest scenario, sign-in required; expected, not a fault)',
           );
-          return;
+          return { status: 'not_applicable', reason: 'guest' };
         }
       } catch (precheckErr) {
         log.debug(
@@ -439,6 +438,7 @@ export async function recordDecisionRecordForCommit(
       status: outcome.deduped ? 'deduped' : 'ok',
       record_id: outcome.record_id,
     });
+    return { status: 'recorded' };
   } catch (err) {
     if (err instanceof DecisionRecordSignInRequiredError) {
       // The RPC's authoritative DR001 on the fail-open path — the DESIGNED
@@ -448,7 +448,7 @@ export async function recordDecisionRecordForCommit(
         'DecisionRecords — create_decision_record refused (guest scenario, DR001; expected, not a fault)',
       );
       emitCaptureEvent(args, claimVerdict, { status: 'guest_refused' });
-      return;
+      return { status: 'not_applicable', reason: 'guest' };
     }
     log.warn(
       {
@@ -462,13 +462,14 @@ export async function recordDecisionRecordForCommit(
       status: 'error',
       error_name: err instanceof Error ? err.name : 'unknown',
     });
+    return { status: 'not_recorded', reason: 'write_failed' };
   }
 }
 
 /**
  * Content-free capture telemetry (frozen-registry member
  * `v5.decision_records.record_captured`). Best-effort: a telemetry fault
- * inside the error path must not escape the fire-and-forget contract, so
+ * inside the error path must not escape the failure-isolation contract, so
  * emit failures degrade to a debug log.
  */
 function emitCaptureEvent(
@@ -506,7 +507,7 @@ function emitCaptureEvent(
         turn_id: args.turnId,
         err: emitErr instanceof Error ? emitErr.message : String(emitErr),
       },
-      'DecisionRecords — capture telemetry emit failed (swallowed; fire-and-forget contract)',
+      'DecisionRecords — capture telemetry emit failed (swallowed; failure-isolation contract)',
     );
   }
 }

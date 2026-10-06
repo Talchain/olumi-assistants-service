@@ -651,6 +651,8 @@ export interface SessionStore {
     readonly briefText: string | null;
     readonly analysisInvalidatedAt: string | null;
   } | null>;
+  /** Scoped durable rows for the selected Run's additive recording disclosure. */
+  readRunRecordingRows?(scenarioId: string, decisionRecordId: string | null): Promise<import('../run-recording.js').RunRecordingRows>;
   /**
    * ⛔ A READ GRANT, AND ONLY FOR THE GRAPH-READ ROUTE (`assist.v1.scenario-graph`). Whether `userId` (a VERIFIED token
    * subject) is a viewer member of this owned scenario: DGAI `share_scenario` / `scenario_members`, resolved by the

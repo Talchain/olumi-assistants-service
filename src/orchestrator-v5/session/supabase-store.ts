@@ -2444,6 +2444,30 @@ export class SupabaseSessionStore implements SessionStore {
     return parseExistingScenarioRow(data, scenarioId);
   }
 
+  /** Read actual capture rows; no process-local status and no capped history lookup. */
+  async readRunRecordingRows(scenarioId: string, decisionRecordId: string | null): Promise<import('../run-recording.js').RunRecordingRows> {
+    const [scenario, decision] = await Promise.all([
+      abortableAnalysisRead(this.client.from('scenarios')
+        .select('id, user_id, brief, analysis_provenance').eq('id', scenarioId).maybeSingle()),
+      decisionRecordId === null ? Promise.resolve({ data: null, error: null })
+        : abortableAnalysisRead(this.client.from('decision_records').select('id, scenario_id')
+          .eq('scenario_id', scenarioId).eq('id', decisionRecordId).maybeSingle()),
+    ]);
+    if (scenario.error || decision.error || !scenario.data || scenario.data.id !== scenarioId) {
+      throw new SessionReadError('Run recording rows could not be read', { cause: scenario.error ?? decision.error });
+    }
+    // A malformed owner is unknown, never silently interpreted as an owned row.
+    if (scenario.data.user_id !== null && typeof scenario.data.user_id !== 'string') {
+      throw new SessionReadError('Run recording owner is unreadable');
+    }
+    return {
+      brief: scenario.data.brief, analysisProvenance: scenario.data.analysis_provenance,
+      guest: scenario.data.user_id === null,
+      decisionRecordPresent: decisionRecordId !== null && decision.data?.id === decisionRecordId
+        && decision.data?.scenario_id === scenarioId,
+    };
+  }
+
   /** Viewer membership (READ grant for the graph-read route only; see the port). Throws on a store failure. */
   async isScenarioMember(scenarioId: string, userId: string): Promise<boolean> {
     const { data, error } = await abortableAnalysisRead(this.client.rpc('is_scenario_member', { p_scenario_id: scenarioId, p_user_id: userId }));
