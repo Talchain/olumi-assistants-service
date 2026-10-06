@@ -107,6 +107,27 @@ describe('⭐ F1: propose_link_strength never prepares a move that drops the use
     expect(puts).toEqual([]);
   });
 
+  it('BUDDY r2 #1: a shared END never binds the replace — “on Pro plan price to MRR” is not Cost overrun risk → MRR’s', async () => {
+    const msg = 'Replace my figure on Pro plan price to MRR with slight. Make Cost overrun risk to MRR weak too, keeping my figure.';
+    const { r, puts } = await call('propose_link_strength', { ...LINK, strength: 'weak', rationale: msg }, msg, withFigure('user_stated'));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, refusal: 'user_figure_held' }));
+    expect(puts).toEqual([]);
+  });
+
+  it('BUDDY r2 #2: “Do not, e.g., replace my figure …” through the real tool is no replace', async () => {
+    const msg = 'Do not, e.g., replace my figure with slight. Make Cost overrun risk to MRR weak.';
+    const { r, puts } = await call('propose_link_strength', { ...LINK, strength: 'weak', rationale: msg }, msg, withFigure('user_stated'));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, refusal: 'user_figure_held' }));
+    expect(puts).toEqual([]);
+  });
+
+  it('the replace binds to the band ITS clause states: “… weak. Then replace my figure with strong.” replaces nothing at slight', async () => {
+    const msg = 'Make the link from Cost overrun risk to MRR weak. Then replace my figure with strong.';
+    const { r, puts } = await call('propose_link_strength', { ...LINK, strength: 'weak', rationale: msg }, msg, withFigure('user_stated'));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, refusal: 'user_figure_held' }));
+    expect(puts).toEqual([]);
+  });
+
   it('CONTROL — naming the band the link already sits in is a confirm: prepared, figure kept (review), no replace carried', async () => {
     const msg = 'The link from Cost overrun risk to MRR is strong.';
     const { r, puts } = await call('propose_link_strength', { ...LINK, strength: 'strong', rationale: msg }, msg, withFigure('user_stated'));

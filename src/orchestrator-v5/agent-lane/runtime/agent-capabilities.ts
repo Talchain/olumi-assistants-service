@@ -3302,16 +3302,22 @@ export function createAgentCapabilities(
        * drop that figure. Nothing is prepared, and the user hears their figure quoted — unless THIS turn's own words ask
        * to replace it, which the approval then carries to the writer in-process. A confirm keeps the figure (review), so
        * it is never refused.
-       * The ask binds to ONE link and ONE band (buddy r1 #3): its clause (`replaceClauseOf`, un-negated, #2) states this
-       * band and names an end of this link — or names no other node, the bare "replace my figure with slight" the
-       * refusal invites. Decided BEFORE confirm: a replace in the band the link already sits in is still a replace (#4).
+       * The ask binds to ONE link and ONE band (buddy r1 #3, r2 #1): its clause (`replaceClauseOf`, un-negated, #2)
+       * states this band and names no other node — only this link's ends, or none: the bare "replace my figure with
+       * slight" the refusal invites. Decided BEFORE confirm: a replace in the band the link already sits in is still a replace (#4).
        * A replace keeps the sign (d5; #5): one that would also reverse the link is refused.
        */
       const heldNow = userFigureHeld(edge);
       const replaceClause = heldNow === null ? null : replaceClauseOf(ctx.user_turn_text);
       const otherLabels = g.nodes.map((n) => String(n.label ?? '')).filter((l) => l !== from.label && l !== to.label);
-      const replacesFigure = replaceClause !== null && bandTheUserWrote(band, replaceClause)
-        && ([from.label, to.label].some((l) => mentionsLabel(replaceClause, l)) || !otherLabels.some((l) => mentionsLabel(replaceClause, l)));
+      // Bound to THIS link (buddy r2 #1): the clause names no other node — the bare ask, or only this link's own ends. A
+      // shared end never binds it to a link it does not name ("Replace my figure on Pro plan price to MRR" names Pro plan
+      // price, so it is not Cost overrun risk → MRR's). A node whose label sits inside one of this link's ends ("Price"
+      // in "Pro plan price") is that end, not another node.
+      const ownEnds = [from.label, to.label];
+      const namesAnotherNode = replaceClause !== null && otherLabels.some((l) => mentionsLabel(replaceClause, l)
+        && !ownEnds.some((end) => mentionsLabel(replaceClause, end) && mentionsLabel(end, l)));
+      const replacesFigure = replaceClause !== null && bandTheUserWrote(band, replaceClause) && !namesAnotherNode;
       if (replacesFigure && reverses) {
         return { ok: false, mutated: false, refusal: 'replace_keeps_direction',
           detail: `Nothing was prepared. Tell the user exactly this: "${REPLACE_KEEPS_DIRECTION_TEXT}"` };

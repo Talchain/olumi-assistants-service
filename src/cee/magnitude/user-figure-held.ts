@@ -81,7 +81,10 @@ export function replaceClauseOf(turnText: unknown): string | null {
   if (typeof turnText !== 'string') return null;
   const m = REPLACE_WORDS.exec(turnText);
   if (m === null) return null;
-  const breaks = /[.!?;\n]/gu;
+  // A break is a semicolon, a sentence end (".", "!", "?" before a capital or the end of the text) or a blank line —
+  // never an abbreviation's period ("Do not, e.g., replace…") or a single line break ("Do not\nreplace…"), which would
+  // cut a negation off its ask (buddy r2 #2).
+  const breaks = /;|[.!?](?=\s+\p{Lu}|\s*$)|\n\s*\n/gu;
   let start = 0;
   let end = turnText.length;
   for (let b = breaks.exec(turnText); b !== null; b = breaks.exec(turnText)) {

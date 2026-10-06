@@ -78,6 +78,9 @@ describe('replaceFigureTheUserWrote — only the user’s own, un-negated ask', 
     // BUDDY r1 #2: a negator anywhere earlier in the clause, however far back.
     'I don\u2019t want you to replace my figure. Make it weak.',
     'Rather than replace my figure, make the link weak.',
+    // BUDDY r2 #2: an abbreviation's period or a single line break never cuts the negation off its ask.
+    'Do not, e.g., replace my figure with slight.',
+    'Do not\nreplace my figure with slight',
     'Please do not, under any circumstances, replace my figure',
     'my figure is fine, replace nothing',
     undefined,
