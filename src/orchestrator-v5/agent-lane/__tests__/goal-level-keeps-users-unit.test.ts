@@ -153,6 +153,8 @@ describe('the level card keeps the user\'s "of what" as the goal\'s reading, thr
     ['a phrase with no demonstrated end', 'About 8% of appointments booked online this week are no-shows.'],
     ['a second, numbered base for the same figure', 'About 8% of appointments are no-shows, and 8% of our 200 patients are late.'],
     ['the sentence never names the goal', 'About 8% of appointments are missed.'],
+    ['a time word inside the base', 'About 8% of appointments today are no-shows.'],
+    ['a goal word inside the base', 'About 8% of no-show appointments are missed.'],
   ])('twin: %s → no reading carried or written', async (_n, said) => {
     const { op, applied, stored } = await proposeAndApprove(said);
     expect(op.value as Record<string, unknown>).not.toHaveProperty('unit_reading');
