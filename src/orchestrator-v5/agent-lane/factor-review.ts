@@ -41,7 +41,7 @@ export async function agentFactorEnrichments(graph: unknown, sensitivity: unknow
   if (rows.length === 0) return undefined;
   try {
     const result = await enrichFactors(graph as GraphT, rows, { requestId, signal,
-      modelOverride: AGENT_LANE_ENRICH_MODEL, timeoutMs: AGENT_FACTOR_REVIEW_TIMEOUT_MS });
+      factorScope: 'sensitive', modelOverride: AGENT_LANE_ENRICH_MODEL, timeoutMs: AGENT_FACTOR_REVIEW_TIMEOUT_MS });
     if (signal?.aborted || !result.success) return undefined;
     // The engine owns rank and identity, never the model's response.
     const enrichments = result.enrichments.filter((e) => rows.some((r) => r.factor_id === e.factor_id && r.rank === e.sensitivity_rank));
