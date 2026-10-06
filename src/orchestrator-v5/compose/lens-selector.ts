@@ -1386,11 +1386,11 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
 
 export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   FLIP_RISK_ISOLATED:
-    'The result leans on a single factor that could tip which option leads on its own — a small change to it alone could flip the outcome. Asking what would flip the result shows how much room for error you have.',
+    'The result leans on a single factor that could change the most-supported option on its own — a small change to it alone could flip the outcome. Asking what would flip the result shows how much room for error you have.',
   FLIP_RISK_CORRELATED:
-    'No single factor is decisive here, but the right combination of factors could tip which option leads — the outcome is more finely balanced than it first looks. Asking what would flip the result shows which factors move together.',
+    'No single factor is decisive here, but the right combination of factors could change the most-supported option — the outcome is more finely balanced than it first looks. Asking what would flip the result shows which factors move together.',
   DOMINANT_DRIVER:
-    'One factor is doing most of the work in this result. A sensitivity check shows how far it can move before the leading option changes.',
+    'One factor is doing most of the work in this result. A sensitivity check shows how far it can move before the most-supported option changes.',
   CONFIDENCE_NEEDS_WORK:
     'The analysis is usable but not yet solid. A pre-mortem — imagining the choice went wrong and asking why — surfaces the weak points worth shoring up first.',
   TOP_FACTOR_LOW_CONFIDENCE:
@@ -1434,7 +1434,7 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   DOMINANT_FACTOR_DISSENT:
     'Most of this result rests on a single factor. Arguing the case against that factor — that it is overstated, less certain than it looks, or outweighed by something outside the model — shows quickly whether the result would survive honest dissent.',
   WHATIF_EXPLORE_DRIVER:
-    'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the leading option changes as it moves — shows how much the choice hangs on it.',
+    'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the most-supported option changes as it moves — shows how much the choice hangs on it.',
   // ── ROADMAP 2.278 — the attested-no-flip counterparts ──────────────────────
   // What is TRUE on these turns and what is NOT, because the copy turns on it:
   // the robustness Monte Carlo reports the result is not stable (`is_robust:

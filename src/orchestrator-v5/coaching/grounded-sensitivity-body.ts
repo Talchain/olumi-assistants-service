@@ -248,8 +248,8 @@ const SUBSTITUTION_BY_RATIONALE: Partial<
   // `isolated` category means. "Leans on" is coloured by that clause rather
   // than asserting an independent magnitude ranking — so no rank requirement.
   FLIP_RISK_ISOLATED: {
-    expectedOpening: 'The result leans on a single factor that could tip which option leads on its own',
-    ground: (l) => `The result leans on ${l}, which could tip which option leads on its own`,
+    expectedOpening: 'The result leans on a single factor that could change the most-supported option on its own',
+    ground: (l) => `The result leans on ${l}, which could change the most-supported option on its own`,
     requiresTopInfluence: false,
     // "could tip which option leads on its own" IS the `isolated` category.
     requiresCategory: 'isolated',

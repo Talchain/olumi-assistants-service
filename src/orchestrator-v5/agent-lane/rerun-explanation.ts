@@ -56,6 +56,35 @@ export const WITHIN_BAND_LINES = {
   unknown: (from: string, to: string, band: string) => `How much ${from} changes ${to} changed; it is still ${band}.`,
 } as const;
 
+/**
+ * ⭐ SD-1 cut 6 (schemas 0.78, #87 6008093205): the same move WITH the user's figures, when the pair carries an `effect`
+ * row for that link (both Runs recorded a current point size, per the same source change). Same author rule; still no
+ * cause. WORDS c6, accepted verbatim (DM 6 Oct 03:1xZ, re #87 6008146719), on c6's condition: `{band}` is the canvas
+ * pill's word (`CANVAS_BAND_WORD`, the one mapper the edit turn and interpret use), and an author that is not typed is the
+ * unknown-author line, never inferred.
+ */
+export const WITHIN_BAND_FIGURE_LINES = {
+  user: (from: string, to: string, before: string, after: string, band: string) =>
+    `You changed how much ${from} changes ${to} from ${before} to ${after}; it is still ${band}.`,
+  olumi: (from: string, to: string, before: string, after: string, band: string) =>
+    `Olumi’s estimate for how much ${from} changes ${to} changed from ${before} to ${after}; it is still ${band}.`,
+  unknown: (from: string, to: string, before: string, after: string, band: string) =>
+    `How much ${from} changes ${to} changed from ${before} to ${after}; it is still ${band}.`,
+} as const;
+
+/**
+ * One end of an `effect` row, said as the served natural-size display (`grouped-link-sizing.ts`):
+ * `{amount} {amount_unit} per {per_source_change} {per_source_change_unit}`. No new number formatting.
+ */
+const effectEnd = (v: unknown): string | undefined => {
+  const r = rec(v);
+  const per = rec(r?.per);
+  const unit = text(r?.unit);
+  const perUnit = text(per?.unit);
+  if (typeof r?.raw !== 'number' || typeof per?.amount !== 'number' || unit === undefined || perUnit === undefined) return undefined;
+  return `${r.raw} ${unit} per ${per.amount} ${perUnit}`;
+};
+
 /** RC's fallback case lines (policy `fallback`); C3–C5 never say "a new draw" (it may be the engine that differed). */
 export const RERUN_FALLBACK_LINES = {
   unwithheld: 'That was what held the comparison back, so Olumi can now compare the options.',
@@ -104,12 +133,22 @@ const value = (v: unknown): string | undefined => {
  * template can name (unknown link ends, a link `presence` row, a row with no label): those changes happened but go unsaid,
  * so the line never says "Nothing else changed" beside them (Codex pre-review e1c7c788 P2).
  */
-function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string | undefined): { sentences: string[]; skipped: number } {
+function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string | undefined): {
+  sentences: string[]; skipped: number; effects: Map<string, Rec>; saidLinks: Set<string>;
+} {
   let skipped = 0;
   const out: string[] = [];
   const links = new Map<string, { from: string; to: string; sizing?: Rec; strength?: Rec }>();
+  // 0.78: an `effect` row is said by its link's band/sizing sentence or by the within-band line (with its figures), never
+  // alone; one that neither says is counted as skipped by the plan, so nothing claims it did not happen.
+  const effects = new Map<string, Rec>();
+  const saidLinks = new Set<string>();
   for (const row of rows) {
     const link = rec(row.link);
+    if (row.entity_kind === 'link' && link !== undefined && row.field === 'effect') {
+      effects.set(`${String(link.from)}->${String(link.to)}`, row);
+      continue;
+    }
     if (row.entity_kind === 'link' && link !== undefined && (row.field === 'sizing' || row.field === 'strength')) {
       const from = labelOf(String(link.from)); const to = labelOf(String(link.to));
       if (from === undefined || to === undefined) { skipped += 1; continue; }
@@ -127,6 +166,7 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
   const sentences = out.map((s) => {
     const l = links.get(s);
     if (l === undefined) return s;
+    saidLinks.add(s);
     const sizedTo = text(rec(l.sizing?.after)?.raw);
     const band = l.strength !== undefined ? { before: value(l.strength.before), after: value(l.strength.after) } : undefined;
     if (sizedTo === 'user') {
@@ -138,10 +178,11 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
         ? `You accepted Olumi's estimate for how much ${l.from} changes ${l.to}: ${band.before} → ${band.after}.` : acceptedEstimate(l.from, l.to);
     }
     if (band?.before !== undefined && band.after !== undefined) return strengthMoved(l.from, l.to, band.before, band.after);
+    saidLinks.delete(s);
     skipped += 1;
     return undefined;
   }).filter((s): s is string => s !== undefined);
-  return { sentences, skipped };
+  return { sentences, skipped, effects, saidLinks };
 }
 
 /** Recorded changes past the cap are disclosed, never dropped from the record (CODEX CEE BUDDY CR 5940970957). */
@@ -172,17 +213,30 @@ export function rerunExplanationPlan(
   if (d === undefined) return null;
   const rows = Array.isArray(d.input_changes) ? d.input_changes.map(rec).filter((r): r is Rec => r !== undefined) : [];
   const typed = changeSentences(rows, labelOf);
-  const skipped = typed.skipped;
   // c6: one sentence per link, after the typed rows and inside the cap; a link that already has a sizing or strength row
   // is said by that row's sentence, never twice. A link whose ends have no label goes unsaid (coverage is partial anyway).
   const linkWithRow = new Set(rows.filter((r) => r.entity_kind === 'link' && (r.field === 'sizing' || r.field === 'strength'))
     .map((r) => rec(r.link)).filter((l): l is Rec => l !== undefined).map((l) => `${String(l.from)}->${String(l.to)}`));
+  const saidByWithinBand = new Set<string>();
   const withinBandSentences = withinBand.flatMap((m) => {
-    if (linkWithRow.has(`${m.from}->${m.to}`)) return [];
+    const key = `${m.from}->${m.to}`;
+    if (linkWithRow.has(key)) return [];
     const from = labelOf(m.from); const to = labelOf(m.to);
     if (from === undefined || to === undefined) return [];
-    return [{ text: WITHIN_BAND_LINES[m.author](from, to, CANVAS_BAND_WORD[edgeBandFromStrengthBand(m.band)]), yours: m.author === 'user' }];
+    const band = CANVAS_BAND_WORD[edgeBandFromStrengthBand(m.band)];
+    // 0.78: the pair's `effect` row for this link gives the user's own figures; without one, the c6 line as served.
+    const effect = typed.effects.get(key);
+    const before = effectEnd(effect?.before); const after = effectEnd(effect?.after);
+    if (effect !== undefined && before !== undefined && after !== undefined) saidByWithinBand.add(key);
+    const line = before !== undefined && after !== undefined
+      ? WITHIN_BAND_FIGURE_LINES[m.author](from, to, before, after, band)
+      : WITHIN_BAND_LINES[m.author](from, to, band);
+    return [{ text: line, yours: m.author === 'user' }];
   });
+  // An `effect` row no sentence says (its ends unlabelled, or no band/sizing row and no within-band move names its link)
+  // happened unsaid: counted with the other unnamed rows, so the line never says nothing else changed.
+  const effectsUnsaid = [...typed.effects.keys()].filter((k) => !typed.saidLinks.has(k) && !saidByWithinBand.has(k)).length;
+  const skipped = typed.skipped + effectsUnsaid;
   const sentences = [...typed.sentences, ...withinBandSentences.map((w) => w.text)];
   // "You also made N other changes" only when every change past the cap is a typed row or a recorded user write.
   const overflowNotYours = withinBandSentences.slice(Math.max(0, MAX_NAMED_CHANGES - typed.sentences.length)).some((w) => !w.yours);

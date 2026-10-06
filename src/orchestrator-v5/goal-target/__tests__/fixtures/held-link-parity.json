@@ -1,0 +1,1123 @@
+{
+ "_about": "Held-link parity fixture (D3 cut 6; DL 0df0e1 condition 2). Byte-identical in CEE (src/orchestrator-v5/goal-target/__tests__/fixtures/held-link-parity.json) and DGAI (src/canvas/domain/__tests__/fixtures/held-link-parity.json); each repo pins its sha256 (check: \"held-link parity fixture digest\"). Edit BOTH, re-pin BOTH.",
+ "rows": [
+  {
+   "name": "R17 served decision_monthly_recurring_revenue->raise_prices_10",
+   "edge": {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "raise_prices_10",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served decision_monthly_recurring_revenue->launch_starter_tier",
+   "edge": {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "launch_starter_tier",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served decision_monthly_recurring_revenue->keep_pricing_as_is",
+   "edge": {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "keep_pricing_as_is",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served raise_prices_10->price_rise",
+   "edge": {
+    "from": "raise_prices_10",
+    "to": "price_rise",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served launch_starter_tier->starter_tier_availability",
+   "edge": {
+    "from": "launch_starter_tier",
+    "to": "starter_tier_availability",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served keep_pricing_as_is->price_rise",
+   "edge": {
+    "from": "keep_pricing_as_is",
+    "to": "price_rise",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served keep_pricing_as_is->starter_tier_availability",
+   "edge": {
+    "from": "keep_pricing_as_is",
+    "to": "starter_tier_availability",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served price_rise->monthly_recurring_revenue",
+   "edge": {
+    "from": "price_rise",
+    "to": "monthly_recurring_revenue",
+    "strength": {
+     "std": 0.38095238095238093,
+     "mean": 0.7619047619047619
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": 1200,
+      "amount_unit": "£/month",
+      "strength_mean": 0.7619047619047619,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served price_rise->customers_lost_to_price_rise",
+   "edge": {
+    "from": "price_rise",
+    "to": "customers_lost_to_price_rise",
+    "strength": {
+     "std": 0.5,
+     "mean": 1
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": 2,
+      "amount_unit": "customers",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served customers_lost_to_price_rise->monthly_recurring_revenue",
+   "edge": {
+    "from": "customers_lost_to_price_rise",
+    "to": "monthly_recurring_revenue",
+    "strength": {
+     "std": 0.19047619047619047,
+     "mean": -0.38095238095238093
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": -300,
+      "amount_unit": "£/month",
+      "strength_mean": -0.38095238095238093,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "customers"
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served starter_tier_availability->starter_subscribers",
+   "edge": {
+    "from": "starter_tier_availability",
+    "to": "starter_subscribers",
+    "strength": {
+     "std": 0.15,
+     "mean": 0.3
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 150,
+      "amount_unit": "subscribers",
+      "strength_mean": 0.3,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "switch"
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "R17 served starter_subscribers->monthly_recurring_revenue",
+   "edge": {
+    "from": "starter_subscribers",
+    "to": "monthly_recurring_revenue",
+    "strength": {
+     "std": 0.07777777777777778,
+     "mean": 0.15555555555555556
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": 49,
+      "amount_unit": "£/month",
+      "strength_mean": 0.15555555555555556,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "subscribers"
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "held: user-sized, 20 to 40",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": true
+  },
+  {
+   "name": "held: negative range -40 to -20",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": -0.8,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": -40,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": -0.8,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": -40,
+       "high": -20,
+       "text": "-40 to -20",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": true
+  },
+  {
+   "name": "held: MC centred 150 (80 to 250)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.45,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 150,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.45,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 80,
+       "high": 250,
+       "text": "80 to 250",
+       "end": "centre"
+      }
+     }
+    }
+   },
+   "held": true
+  },
+  {
+   "name": "held: brief WITH quote, magnitude user_stated",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": true
+  },
+  {
+   "name": "held: brief WITH quote, magnitude olumi_estimate (class clause 2)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_estimate",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": true
+  },
+  {
+   "name": "held: magnitude user_stated, no source",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": true
+  },
+  {
+   "name": "held: source user_specified, NO magnitude (source clause alone)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": true
+  },
+  {
+   "name": "held: source user_specified, magnitude olumi_estimate (source wins)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": true
+  },
+  {
+   "name": "held: stored CLAMP of the stated beta (mean 1, clamped_from = beta)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 1,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "clamped_from": 4.61,
+     "natural_effect": {
+      "amount": 49,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 4.61,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 49,
+       "high": 69,
+       "text": "49 to 69",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": true
+  },
+  {
+   "name": "not: STALE carrier (mean 0.8, natural beta 0.4; a writer kept natural_effect)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.8,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_estimate",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: clamp marker that does not match the stated beta",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 1,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "clamped_from": 3.0,
+     "natural_effect": {
+      "amount": 49,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 4.61,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 49,
+       "high": 69,
+       "text": "49 to 69",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: clamp with the opposite sign",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": -1,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "clamped_from": 4.61,
+     "natural_effect": {
+      "amount": 49,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 4.61,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 49,
+       "high": 69,
+       "text": "49 to 69",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: range touching zero 0 to 10",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.2,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 10,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.2,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 0,
+       "high": 10,
+       "text": "0 to 10",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: range straddling zero -5 to 10",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.2,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 10,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.2,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": -5,
+       "high": 10,
+       "text": "-5 to 10",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: one-ended range (high missing)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "text": "at least 20",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: no range",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: missing class (no source, no magnitude)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: Olumi-sourced with a range",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: brief with EMPTY quote, magnitude olumi_estimate",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "olumi_estimate",
+     "source_quote": "  ",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: amount 0",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 0,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: strength_mean 0",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: degenerate range 20 to 20",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 20,
+       "text": "20 to 20",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: no natural_effect",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated"
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: amount is a STRING \"20\"",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": "20",
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: strength_mean is a STRING \"0.4\"",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": "0.4",
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: range low is a STRING \"20\"",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 0.4,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": "20",
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: no strength on the edge",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 0.4,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: UNDERFLOW (beta = Number.MIN_VALUE; the spread rounds to 0)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 5e-324,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 5e-324,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: OVERFLOW (range 1 to 1.7e308 at beta 1e10 per unit; the spread is Infinity)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 10000000000.0,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 10000000000.0,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 1,
+       "high": 1.7e+308,
+       "text": "1 to 1.7e+308",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  }
+ ]
+}

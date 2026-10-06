@@ -13,6 +13,7 @@
 import { Redis, type RedisOptions } from "ioredis";
 import { log } from "../utils/telemetry.js";
 import { config, isProduction } from "../config/index.js";
+import { isProductionDeployment } from "../config/env-resolver.js";
 
 /**
  * Singleton Redis client instance
@@ -27,6 +28,14 @@ let initializationError: Error | null = null;
 let lastReconnectLogTime = 0;
 let reconnectAttemptsSinceLastLog = 0;
 const RECONNECT_LOG_INTERVAL_MS = 30000; // Log at most every 30s during reconnect storms
+
+/**
+ * Verify the Redis TLS certificate in production: the production label OR the declared
+ * production deployment (`isProductionDeployment`). Unset, this is the label alone, as before.
+ */
+export function shouldVerifyRedisTls(): boolean {
+  return isProduction() || isProductionDeployment();
+}
 
 /**
  * Get Redis configuration from centralized config
@@ -76,7 +85,7 @@ function getRedisConfig(): RedisOptions | null {
     // TLS
     ...(enableTLS && {
       tls: {
-        rejectUnauthorized: isProduction(),
+        rejectUnauthorized: shouldVerifyRedisTls(),
       },
     }),
 

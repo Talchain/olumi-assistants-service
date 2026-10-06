@@ -18,7 +18,7 @@ import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
-import { sayFigure } from '../agent-lane/say-figure.js';
+import { isTwoStateSource, sayFigure, sourceChangeWords } from '../agent-lane/say-figure.js';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../format/edge-strength-bands.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 import { userSizedLevelLessLinks } from '../agent-lane/mediator-reading.js';
@@ -350,7 +350,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     const [fromUnit, toUnit] = [ends?.source.own[0], ends?.target.own[0]];
     const to = failingLink?.link_to ?? upstream.to;
     return fromUnit !== undefined && toUnit !== undefined
-      ? `Roughly how much does ${to} change, in ${toUnit}, when ${lever} rises by ${sayFigure(1, fromUnit)}?`
+      ? `Roughly how much does ${to} change, in ${toUnit}, ${sourceChangeWords(lever ?? 'what the options change', fromUnit, isTwoStateSource(Array.isArray((graph as { nodes?: unknown })?.nodes) ? (graph as { nodes: unknown[] }).nodes : [], upstream.from, fromUnit)).when}?`
       : `Roughly how much does ${to} change when ${lever} changes?`;
   };
   /**
