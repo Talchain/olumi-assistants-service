@@ -1180,6 +1180,8 @@ export function clauseStatesTwoChanges(message: string, labelA: string, labelB: 
   return sentencesOf(message.trim()).some((c) => linkEffectQuoteContextMiss(c, message) === null && names(c, labelA) && names(c, labelB)
     && findLinkEffectAmounts(c).filter((f) => figureWrittenAsAChange(c, f)).length >= 2);
 }
+/** The clauses the binders read (`clauseStatesTwoChanges`): split at . ! ? ; : and line breaks, never inside a decimal. */
+export const clausesOf = (message: string): string[] => sentencesOf(message.trim());
 export function linkEffectTheUserStated(
   quote: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
