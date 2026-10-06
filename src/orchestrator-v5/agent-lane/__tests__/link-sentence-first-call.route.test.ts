@@ -80,7 +80,7 @@ let forcedArgs: Record<string, unknown> | undefined;
 const sent: Record<string, unknown>[] = [];
 const prose = (text: string): Record<string, unknown> => ({ type: 'message', role: 'assistant', id: `msg_${randomUUID()}`, status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] });
 
-type Turn = { first: Record<string, unknown>; body: { assistant_text: string; _agent?: { tool_calls?: { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[] } } };
+type Turn = { first: Record<string, unknown>; body: { assistant_text: string; _agent?: { tool_calls?: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[] } } };
 
 describe('the REAL turn route: a typed link-strength sentence forces propose_link_strength, and only then', () => {
   let app: FastifyInstance;
@@ -123,30 +123,38 @@ describe('the REAL turn route: a typed link-strength sentence forces propose_lin
   };
   const FORCED = { type: 'function', name: LINK_SENTENCE_TOOL };
 
-  /** [source, words, graph, from, to, band the stub fills] */
-  const MUST_FIRE: readonly [string, string, () => Graph, string, string, string][] = [
-    ['CAPTURED (pre-restriction) r3 f5 user_message', 'Actually AI reporting module availability has only a slight effect on Enterprise prospect signing likelihood — change that link to slight.', () => g('ai_reporting'), 'AI reporting module availability', 'Enterprise prospect signing likelihood', 'weak'],
-    ['CAPTURED (pre-restriction) r3 crn-final2 user_message', 'I think AI reporting module availability has a much stronger effect on Enterprise prospect signing likelihood than Olumi assumed — make that link strong.', () => g('ai_reporting_rs1'), 'AI reporting module availability', 'Enterprise prospect signing likelihood', 'strong'],
-    ['CAPTURED (pre-restriction) red-team f1-fix req', 'Make the Customers lost to price rise to MRR lost to price churn link weak.', () => g('customers_lost_f1fix'), 'Customers lost to price rise', 'MRR lost to price churn', 'weak'],
-    ['CAPTURED (pre-restriction) red-team f1-fix req, on the DL-corpus g1 graph', 'Make the Customers lost to price rise to MRR lost to price churn link weak.', () => g('customers_lost_g1'), 'Customers lost to price rise', 'MRR lost to price churn', 'weak'],
-    ['CAPTURED (pre-restriction) red-team f1-ui req', 'Make the Customer losses from price rise to monthly recurring revenue link weak.', () => g('customer_losses_f1ui'), 'Customer losses from price rise', 'monthly recurring revenue', 'weak'],
-    ['CAPTURED (pre-restriction) red-team f1-ui req; "Price rise" is a node AND sits inside the longer label', 'Make the Customer losses from price rise to monthly recurring revenue link weak.', () => g('customer_losses_j4'), 'Customer losses from price rise', 'monthly recurring revenue', 'weak'],
-    ['CAPTURED (pre-restriction) red-team f1-ui req', 'Make the Customer losses from price rise to monthly recurring revenue link weak.', () => g('customer_losses_rt17'), 'Customer losses from price rise', 'monthly recurring revenue', 'weak'],
-    ['CAPTURED (pre-restriction) acceptance F8 req', 'I am confident about one link: the Pro plan price has a strong effect on MRR. Please record that link as strong, as my own estimate.', () => g('pro_plan_f8'), 'Pro plan price', 'MRR', 'strong'],
-    ['CAPTURED (pre-restriction) acceptance F8 req', 'I am confident about one link: the Pro plan price has a strong effect on MRR. Please record that link as strong, as my own estimate.', () => g('pro_plan_pj0928'), 'Pro plan price', 'MRR', 'strong'],
-    ['AUTHORED (the brief)', 'Price affects churn quite strongly.', () => AUTHORED, 'Price', 'Churn', 'strong'],
-    ['AUTHORED (the brief)', 'Marketing spend has only a weak effect on sign-ups.', () => AUTHORED, 'Marketing spend', 'Sign-ups', 'weak'],
-    ['AUTHORED (the prompt’s own example form)', 'Pro plan price barely affects MRR.', () => g('pro_plan_f8'), 'Pro plan price', 'MRR', 'weak'],
-    ['AUTHORED (named target first, very strong)', 'Monthly churn is very strongly driven by Price sensitivity.', () => g('pro_plan_f8'), 'Price sensitivity', 'Monthly churn', 'very strong'],
+  /**
+   * [source, words, graph, from, to, band the stub fills, what the DOOR answers]. The door decides, never the route: a
+   * link holding the user's own figure is refused `user_figure_held` (F1: a band would drop their figure, so they hear it
+   * quoted), and that refusal is the right answer to the sentence. Either way nothing is written.
+   */
+  const MUST_FIRE: readonly [string, string, () => Graph, string, string, string, 'card' | 'user_figure_held'][] = [
+    ['CAPTURED (pre-restriction) r3 f5 user_message', 'Actually AI reporting module availability has only a slight effect on Enterprise prospect signing likelihood — change that link to slight.', () => g('ai_reporting'), 'AI reporting module availability', 'Enterprise prospect signing likelihood', 'weak', 'card'],
+    ['CAPTURED (pre-restriction) r3 crn-final2 user_message', 'I think AI reporting module availability has a much stronger effect on Enterprise prospect signing likelihood than Olumi assumed — make that link strong.', () => g('ai_reporting_rs1'), 'AI reporting module availability', 'Enterprise prospect signing likelihood', 'strong', 'card'],
+    ['CAPTURED (pre-restriction) red-team f1-fix req', 'Make the Customers lost to price rise to MRR lost to price churn link weak.', () => g('customers_lost_f1fix'), 'Customers lost to price rise', 'MRR lost to price churn', 'weak', 'user_figure_held'],
+    ['CAPTURED (pre-restriction) red-team f1-fix req, on the DL-corpus g1 graph', 'Make the Customers lost to price rise to MRR lost to price churn link weak.', () => g('customers_lost_g1'), 'Customers lost to price rise', 'MRR lost to price churn', 'weak', 'user_figure_held'],
+    ['CAPTURED (pre-restriction) red-team f1-ui req', 'Make the Customer losses from price rise to monthly recurring revenue link weak.', () => g('customer_losses_f1ui'), 'Customer losses from price rise', 'monthly recurring revenue', 'weak', 'card'],
+    ['CAPTURED (pre-restriction) red-team f1-ui req; "Price rise" is a node AND sits inside the longer label', 'Make the Customer losses from price rise to monthly recurring revenue link weak.', () => g('customer_losses_j4'), 'Customer losses from price rise', 'monthly recurring revenue', 'weak', 'user_figure_held'],
+    ['CAPTURED (pre-restriction) red-team f1-ui req', 'Make the Customer losses from price rise to monthly recurring revenue link weak.', () => g('customer_losses_rt17'), 'Customer losses from price rise', 'monthly recurring revenue', 'weak', 'user_figure_held'],
+    ['CAPTURED (pre-restriction) acceptance F8 req', 'I am confident about one link: the Pro plan price has a strong effect on MRR. Please record that link as strong, as my own estimate.', () => g('pro_plan_f8'), 'Pro plan price', 'MRR', 'strong', 'card'],
+    ['CAPTURED (pre-restriction) acceptance F8 req', 'I am confident about one link: the Pro plan price has a strong effect on MRR. Please record that link as strong, as my own estimate.', () => g('pro_plan_pj0928'), 'Pro plan price', 'MRR', 'strong', 'card'],
+    ['AUTHORED (the brief)', 'Price affects churn quite strongly.', () => AUTHORED, 'Price', 'Churn', 'strong', 'card'],
+    ['AUTHORED (the brief)', 'Marketing spend has only a weak effect on sign-ups.', () => AUTHORED, 'Marketing spend', 'Sign-ups', 'weak', 'card'],
+    ['AUTHORED (the prompt’s own example form)', 'Pro plan price barely affects MRR.', () => g('pro_plan_f8'), 'Pro plan price', 'MRR', 'weak', 'card'],
+    ['AUTHORED (named target first, very strong)', 'Monthly churn is very strongly driven by Price sensitivity.', () => g('pro_plan_f8'), 'Price sensitivity', 'Monthly churn', 'very strong', 'card'],
   ];
 
-  for (const [source, words, graph, from, to, band] of MUST_FIRE) {
-    it(`MUST FIRE · ${source}: "${words}"`, async () => {
+  for (const [source, words, graph, from, to, band, door] of MUST_FIRE) {
+    it(`MUST FIRE · ${source} → ${door}: "${words}"`, async () => {
       const { first, body } = await turn(graph(), words, {}, { from_label: from, to_label: to, strength: band, rationale: words, whole_request: true });
       expect(first['tool_choice'], 'the first Agent call is forced to the link-strength door').toEqual(FORCED);
       const call = body._agent?.tool_calls?.find((c) => c.name === LINK_SENTENCE_TOOL);
-      expect(call, JSON.stringify(body._agent?.tool_calls)).toMatchObject({ ok: true, mutated: false });
-      expect(call?.proposal_id, 'a held card awaits the user’s approval').toMatch(/^prop_/);
+      if (door === 'card') {
+        expect(call, JSON.stringify(body._agent?.tool_calls)).toMatchObject({ ok: true, mutated: false });
+        expect(call?.proposal_id, 'a held card awaits the user’s approval').toMatch(/^prop_/);
+      } else {
+        expect(call, JSON.stringify(body._agent?.tool_calls)).toMatchObject({ ok: false, mutated: false, refusal: 'user_figure_held' });
+      }
     });
   }
 

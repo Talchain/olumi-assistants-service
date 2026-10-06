@@ -89,6 +89,7 @@ import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/age
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct-link.js';
+import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-sentence-route.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -2864,6 +2865,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       let canonicalContext: Parameters<typeof runAgentTurn>[0]['canonicalContext'];
       let hostFirstCall: Parameters<typeof runAgentTurn>[0]['hostFirstCall'];
+      let linkSentenceTool: string | undefined;
       // RT-1: a failed state read leaves the selection unchecked (`could_not_check`), never silently dropped.
       selectionContext = agentSelectionContext(selectedElements, undefined);
       try {
@@ -2932,6 +2934,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const r = await readingWithin(reading, BRIEF_ROUTE_WAIT_MS);
           if (r !== null && r.build === true && (r.goal !== null || r.options.length > 0)) hostFirstCall = { name: 'build_model_from_brief', args: { brief: message } };
         }
+        // AI Harness: a TYPED sentence saying how strong ONE existing link is forces that link's door first (link-sentence-route.ts).
+        linkSentenceTool = linkSentenceFirstCall(st, typedNow, hostFirstCall !== undefined || methodTurn !== null || widenTurn !== null);
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
       }
@@ -2954,6 +2958,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             // Widen: ONE call, and its ONLY tool is the add-option door (forced below), so the turn ends in one card or none.
             : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
           ...(methodTurn?.kind === 'run' || widenRun !== undefined ? { maxHops: 1 } : {}),
+          // Before the widen and chip forcings below, which win if both were ever set.
+          ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
           ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
