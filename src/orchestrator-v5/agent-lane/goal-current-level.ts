@@ -73,6 +73,7 @@ import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
 import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
+import { isPercentageLevelUnit } from '../../cee/magnitude/link-effect.js';
 import { goalCeilingRow, holdsPairableCeiling, pairGoalCeiling } from '../goal-target/goal-ceiling-pair.js';
 import { isUnnamedCurrencyUnit, unitAlreadyOnGoal, unitNamingCurrency } from './unnamed-currency.js';
 import { scopeOf, identityConflictsWithScope, scopeSourcesAreUserWords, goalScopeCheck, scopeCanRecord, SCOPE_APPROVE_PREFIX } from './goal-scope.js';
@@ -536,8 +537,6 @@ function noteAdoptedUnit(goalLabel: string, stored: string | undefined, adopted:
 /** The goal's unit as the USER read it: the NodeV3 `unit_reading` carrier, always theirs here. */
 export type UserUnitReading = { readonly unit: string; readonly source: 'user_stated'; readonly source_quote: string };
 
-/** The words that close D: "8% of appointments ARE no-shows". Anything else after D, or none, is no demonstrated end. */
-const CLOSES_D = /^(?:are|is|was|were)$/i;
 const DETERMINER = /^(?:the|our|their|its|your|my|all)$/i;
 /** Never a word of D: a clause, time or verb word means the phrase is not a plain base ("this week", "become", "today"). */
 const NOT_IN_D = /^(?:will|would|could|should|have|has|had|do|does|did|become|becomes|became|get|gets|got|while|and|but|or|which|that|who|when|if|as|so|for|than|to|this|these|those|next|last|each|every|per|a|an|in|on|at|by|with|from|today|now|currently|still|already|week|weeks|month|months|year|years|day|days|quarter|quarters)$/i;
@@ -551,39 +550,63 @@ function sentenceAt(text: string, index: number): string {
   return text.slice(start, end).trim().slice(0, 500);
 }
 
+/** The first `n` label-words of `text` (as `wordsOf` reads them) are the goal's own, in order. */
+function opensWithGoal(text: string, goalWords: readonly string[]): boolean {
+  const got = wordsOf(text).slice(0, goalWords.length);
+  return got.length === goalWords.length && goalWords.every((g, i) => sameWord(g, got[i]!));
+}
+/** The last `n` label-words of `text` are the goal's own, in order. */
+function closesWithGoal(text: string, goalWords: readonly string[]): boolean {
+  const got = wordsOf(text).slice(-goalWords.length);
+  return got.length === goalWords.length && goalWords.every((g, i) => sameWord(g, got[i]!));
+}
+const HEDGE_WORD = '(?:about|around|roughly|approximately|nearly|almost|just|the)';
+const plainBaseWord = (w: string, goalWords: readonly string[]): boolean => /^[\p{L}][\p{L}'\u2019-]*$/u.test(w) && !NOT_IN_D.test(w)
+  && !wordsOf(w).some(x => goalWords.some(g => sameWord(g, x)));
+
 /**
  * ⭐ THE USER'S OWN "OF WHAT" FOR A GOAL KEPT IN "%" (DL 0df0e1 ruling (a′) on RT-18; Science #87 6008791322).
  * "About 8% of appointments are no-shows today" on a goal stored in "%" reads the goal as "% of appointments": the user's
  * words, kept as the goal's `unit_reading`, a READING (schema 0.67.0) where no value, level, target, unit or cap moves.
  * ONLY when every one of these holds; otherwise no reading, never a guess (the binder then asks for the change itself):
- *   · the goal's unit is exactly "%" (the unit the cap rule scales on 100; a points or rate unit is not a level share,
- *     and a reading there would change how the link writer reads that end — Codex r1 P1 on #2642);
+ *   · the goal is kept in exactly "%" on the 100 frame (`isPercentageLevelUnit`): the link writer already reads such an
+ *     end as a percentage level, so the reading changes nothing it reads (Codex r1/r2 P1 on #2642: "percentage points",
+ *     or "%" on a cap of 200, would gain points spellings there);
  *   · the user wrote THIS figure as a percentage exactly ONCE in the conversation (two would leave which one unsaid);
- *   · that sentence names the goal, and the figure is followed by "of D";
- *   · D ENDS where it is demonstrated: at "are/is/was/were", or at the clause's end. One to four plain words, none a
- *     goal word, a number, or a clause, time or verb word ("8% of appointments become no-shows", "…booked online this
- *     week are…", "8% of our 200 patients" all abstain).
+ *   · the figure IS the goal's, in one of two demonstrated shapes, the goal named right beside it (Codex r2: a goal named
+ *     elsewhere in the sentence, "No-shows are falling; 8% of patients are late", is not the figure's owner):
+ *       A. "8% of D are/is/was/were <goal>", D one to four plain words;
+ *       B. "<goal> are/is/was/were [about] 8% of D", D ONE plain word ending the clause (a longer tail may be a predicate:
+ *          "8% of patients miss appointments");
+ *   · a plain word is never a goal word, a number, or a clause, time or verb word.
  */
-export function statedPercentOfReading(goal: { readonly label: string; readonly unit: string | undefined }, raw: number, userText: string | undefined): UserUnitReading | undefined {
-  if (goal.unit?.trim() !== '%') return undefined;
+export function statedPercentOfReading(goal: { readonly label: string; readonly unit: string | undefined }, raw: number, userText: string | undefined, levelFrame: number | undefined): UserUnitReading | undefined {
+  if (goal.unit?.trim() !== '%' || !isPercentageLevelUnit(goal.unit, levelFrame)) return undefined;
   const text = userText ?? '';
+  const goalWords = wordsOf(goal.label);
+  if (goalWords.length === 0) return undefined;
   const occurrences = [...text.matchAll(/(?<![\d.,])(\d[\d,]*(?:\.\d+)?)\s*(?:%|percent\b|per\s+cent\b)/giu)]
     .filter(m => Number(m[1]!.replace(/,/g, '')) === raw);
   if (occurrences.length !== 1) return undefined;
   const occ = occurrences[0]!;
-  const sentence = sentenceAt(text, occ.index!);
-  const goalWords = wordsOf(goal.label);
-  const sentenceWords = wordsOf(sentence);
-  if (goalWords.length === 0 || !goalWords.some(g => sentenceWords.some(w => sameWord(g, w)))) return undefined;
-  const of = /^\s+of\s+([^.,;:!?\n]*)/iu.exec(text.slice(occ.index! + occ[0].length));
-  if (of === null) return undefined;
-  const words = of[1]!.trim().split(/\s+/).filter(w => w !== '');
-  const closeAt = words.findIndex(w => CLOSES_D.test(w));
-  const run = (closeAt === -1 ? words : words.slice(0, closeAt)).filter(w => !DETERMINER.test(w));
-  if (run.length === 0 || run.length > 4) return undefined;
-  if (run.some(w => !/^[\p{L}][\p{L}'\u2019-]*$/u.test(w) || NOT_IN_D.test(w) || wordsOf(w).some(x => goalWords.some(g => sameWord(g, x))))) return undefined;
-  const unit = `% of ${run.join(' ').toLowerCase()}`;
-  return unit.length > 40 ? undefined : { unit, source: 'user_stated', source_quote: sentence };
+  const before = text.slice(0, occ.index!);
+  const after = text.slice(occ.index! + occ[0].length);
+  let base: string[] | undefined;
+  // A. "8% of D are no-shows": D up to the linking verb, the goal named right after it.
+  const a = new RegExp(`^\\s+of\\s+([^.,;:!?\\n]*?)\\s+(?:are|is|was|were)\\s+(?:${HEDGE_WORD}\\s+)?([^.,;:!?\\n]+)`, 'iu').exec(after);
+  if (a !== null && opensWithGoal(a[2]!, goalWords)) {
+    const run = a[1]!.trim().split(/\s+/).filter(w => w !== '' && !DETERMINER.test(w));
+    if (run.length >= 1 && run.length <= 4 && run.every(w => plainBaseWord(w, goalWords))) base = run;
+  }
+  // B. "No-shows are about 8% of appointments.": the goal right before the linking verb, D one word ending the clause.
+  if (base === undefined) {
+    const lead = new RegExp(`(?:are|is|was|were)\\s+(?:${HEDGE_WORD}\\s+)?$`, 'iu').exec(before);
+    const b = /^\s+of\s+(?:(?:the|our|their|its|your|my|all)\s+)?([\p{L}][\p{L}'\u2019-]*)\s*(?:[.,;:!?\n]|$)/iu.exec(after);
+    if (lead !== null && b !== null && closesWithGoal(before.slice(0, lead.index), goalWords) && plainBaseWord(b[1]!, goalWords)) base = [b[1]!];
+  }
+  if (base === undefined) return undefined;
+  const unit = `% of ${base.join(' ').toLowerCase()}`;
+  return unit.length > 40 ? undefined : { unit, source: 'user_stated', source_quote: sentenceAt(text, occ.index!) };
 }
 
 /** The goal's own reading by the USER, if it holds one (an Olumi reading is not theirs). */
@@ -687,16 +710,6 @@ export async function proposeGoalCurrentLevel(
   if (isChange && args.goal_scope !== undefined) return refuse('scope_frame_unresolved', 'Clarify the level of the total goal before recording its scope. Nothing was prepared.');
   if (isChange) return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit, adoptedUnit, storedUnit);
 
-  // ── THE USER'S "OF WHAT", kept as the goal's reading (`statedPercentOfReading`). One they already gave is kept; a
-  // different one is never silently replaced.
-  const statedReading = statedPercentOfReading({ label: goal.label, unit: goalUnit }, raw, ctx.user_text);
-  const heldReading = usersReadingOf(goal);
-  if (statedReading !== undefined && heldReading !== undefined && heldReading.unit !== statedReading.unit) {
-    return refuse('unit_mismatch',
-      `"${goal.label}" is already read as ${heldReading.unit}, as the user wrote earlier ("${heldReading.source_quote}"), and ` +
-      `${raw}${statedReading.unit.slice(1)} names another base. Nothing was prepared. Ask the user which one "${goal.label}" is a percentage of.`);
-  }
-  const unitReading = statedReading !== undefined && heldReading === undefined ? statedReading : undefined;
 
   let normalisedLevel: number;
   let levelCap: number;
@@ -752,6 +765,17 @@ export async function proposeGoalCurrentLevel(
     levelCap = cap;
     normalisedLevel = verdict.normalised;
   }
+
+  // ── THE USER'S "OF WHAT", kept as the goal's reading (`statedPercentOfReading`), on the frame this level is written on.
+  // One they already gave is kept; a different one is never silently replaced.
+  const statedReading = statedPercentOfReading({ label: goal.label, unit: goalUnit }, raw, ctx.user_text, levelCap);
+  const heldReading = usersReadingOf(goal);
+  if (statedReading !== undefined && heldReading !== undefined && heldReading.unit !== statedReading.unit) {
+    return refuse('unit_mismatch',
+      `"${goal.label}" is already read as ${heldReading.unit}, as the user wrote earlier ("${heldReading.source_quote}"), and ` +
+      `${raw}${statedReading.unit.slice(1)} names another base. Nothing was prepared. Ask the user which one "${goal.label}" is a percentage of.`);
+  }
+  const unitReading = statedReading !== undefined && heldReading === undefined ? statedReading : undefined;
 
   const existing = goal.observed_state;
   const existingRaw = num(existing?.raw_value) ? existing!.raw_value as number : undefined;
@@ -1139,7 +1163,8 @@ export async function applyGoalCurrentLevel(
   const unitReading = carriedReading === undefined ? undefined : NodeV3.shape.unit_reading.safeParse(carriedReading);
   if (carriedReading !== undefined && (unitReading === undefined || !unitReading.success || unitReading.data === undefined
     || unitReading.data.source !== 'user_stated' || stableStringify(unitReading.data) !== stableStringify(carriedReading)
-    || now.goal_threshold_unit?.trim() !== '%' || usersReadingOf(goal) !== undefined)) {
+    || now.goal_threshold_unit?.trim() !== '%' || !isPercentageLevelUnit(os.unit, typeof os.cap === 'number' ? os.cap : undefined)
+    || usersReadingOf(goal) !== undefined)) {
     return notApplied(`How "${goal.label}" is read changed after this was prepared, so nothing was written. Read the model again and propose afresh.`);
   }
   const readingToWrite = unitReading?.success === true ? unitReading.data : undefined;

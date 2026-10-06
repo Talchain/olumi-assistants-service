@@ -155,6 +155,12 @@ describe('the level card keeps the user\'s "of what" as the goal\'s reading, thr
     ['the sentence never names the goal', 'About 8% of appointments are missed.'],
     ['a time word inside the base', 'About 8% of appointments today are no-shows.'],
     ['a goal word inside the base', 'About 8% of no-show appointments are missed.'],
+    // Codex r2 (#2642): the goal named elsewhere in the sentence is not the figure's owner; a tail may be a predicate.
+    ['the goal named in another clause', 'No-shows are falling; 8% of patients are late.'],
+    ['the goal named before, then a predicate', 'No-shows: 8% of patients miss appointments.'],
+    ['the goal in the same clause but not the figure\'s owner', 'No-shows are falling and 8% of patients are late.'],
+    ['the goal before, then more than one word of base', 'No-shows are about 8% of patients missing slots.'],
+    ['a linking verb before, but not after the goal', 'Late patients are about 8% of appointments.'],
   ])('twin: %s → no reading carried or written', async (_n, said) => {
     const { op, applied, stored } = await proposeAndApprove(said);
     expect(op.value as Record<string, unknown>).not.toHaveProperty('unit_reading');
@@ -184,6 +190,15 @@ describe('the level card keeps the user\'s "of what" as the goal\'s reading, thr
     const r = await h.call('propose_goal_current_level', LEVEL) as Proposed;
     if (r.ok) expect(h.proposals.get(String(r.proposal_id))!.operations[0]!.value as Record<string, unknown>).not.toHaveProperty('unit_reading');
     else expect(r).not.toHaveProperty('proposal_id');
+  });
+
+  it('a goal kept in "%" off the 100 frame (target 5, cap 200) never takes a reading (Codex r2 P1: the link writer reads it)', async () => {
+    const wide = clone(SERVED);
+    Object.assign(goalOf(wide), { goal_threshold_raw: 5, goal_threshold_cap: 200, goal_threshold: 0.025, goal_threshold_frame: 'level' });
+    const h = await harness(wide, SAID);
+    const r = await h.call('propose_goal_current_level', LEVEL) as Proposed;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(h.proposals.get(String(r.proposal_id))!.operations[0]!.value as Record<string, unknown>).not.toHaveProperty('unit_reading');
   });
 
   it('a different reading the user gave earlier is never replaced: unit_mismatch, nothing prepared', async () => {
