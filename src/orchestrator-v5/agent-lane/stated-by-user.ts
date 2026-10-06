@@ -214,7 +214,7 @@ function writtenWithALetter(a: { readonly magnitude: number; readonly matchedTex
 }
 
 /** A money unit's own magnitude letter ("£k/month" → 1000, "£m" → 1e6); 1 for a unit with none, or one not money. */
-function moneyUnitScale(unit: unknown): number {
+export function moneyUnitScale(unit: unknown): number {
   if (typeof unit !== 'string') return 1;
   const reading = readCurrencyUnitWithQualifiers(unit);
   return reading.kind === 'currency' && Number.isFinite(reading.multiplier) && reading.multiplier > 0 ? reading.multiplier : 1;

@@ -309,7 +309,15 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     // Still partial, never a row: a mean/spread move INSIDE one band (or with a band unrecorded on either Run), any
     // existence-probability move, and sizing recorded on one Run only (whether it changed cannot be known).
     const linkBase = { entity_kind: 'link' as const, entity_id: id, link: { from: ends.from, to: ends.to } };
-    const bandMoved = pl.band !== undefined && cl.band !== undefined && pl.band !== cl.band;
+    const pe = pl.natural_effect;
+    const ce = cl.natural_effect;
+    // ⛔ A FRAME CHANGE ALONE IS NEVER A CHANGE ROW (Science d5 on #2631, 6 Oct; DL 0df0e1): the band is read on the frames,
+    // which Olumi refits (#2631) or a goal's level re-frames (`normalising-goal-frame.ts`), while the link's natural size
+    // stays put. When both Runs recorded that size and it is the same (amount, unit and the same source change), the band
+    // move is the frame's, never a `strength` row. The mean move it carries stays partial below (coverage unchanged).
+    const sameNaturalEffect = pe !== undefined && ce !== undefined && pe.amount === ce.amount && pe.amount_unit === ce.amount_unit
+      && pe.per_source_change === ce.per_source_change && pe.per_source_change_unit === ce.per_source_change_unit;
+    const bandMoved = !sameNaturalEffect && pl.band !== undefined && cl.band !== undefined && pl.band !== cl.band;
     if (bandMoved) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
     if (pl.sizing !== undefined && cl.sizing !== undefined) {
       if (pl.sizing !== cl.sizing) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
@@ -320,8 +328,6 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     // snapshots' own figures, only when both Runs recorded a current point size per the SAME source change (a size on one
     // Run only, or per a different change, is no pair). Coverage is unchanged by it: whether an effect row states the
     // mean move is Science's ruling, so a mean move inside one band stays partial below.
-    const pe = pl.natural_effect;
-    const ce = cl.natural_effect;
     if (pe !== undefined && ce !== undefined
       && pe.per_source_change === ce.per_source_change && pe.per_source_change_unit === ce.per_source_change_unit) {
       const per = { amount: ce.per_source_change, unit: ce.per_source_change_unit };
@@ -331,8 +337,14 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     // flip or a spread the move does not explain. Either is a change no row states → partial.
     if (pl.mean !== cl.mean && !bandMoved) complete = false;
     if (Math.sign(pl.mean) !== Math.sign(cl.mean)) complete = false;
-    if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std)) complete = false;
-    if (pl.exists_probability !== cl.exists_probability) complete = false;
+    // ⭐ HOLD-AT-1.0 (Science d5 #87 6008807178; Review Desk 6b on #2643): the user's own size with a range that excludes
+    // zero holds the link at existence exactly 1 with the range's spread on the Run input. The sizing row that moved TO the
+    // user's states both moves; no writer sets a user link's existence, so the hold is the only source of that 1. Any other
+    // existence or spread move stays partial.
+    const heldBySizing = pl.sizing !== undefined && pl.sizing !== 'user' && cl.sizing === 'user'
+      && cl.exists_probability === 1 && typeof pl.exists_probability === 'number' && pl.exists_probability < 1;
+    if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std) && !heldBySizing) complete = false;
+    if (pl.exists_probability !== cl.exists_probability && !heldBySizing) complete = false;
     if (!authorshipExplained(pl, cl)) complete = false;
   }
 

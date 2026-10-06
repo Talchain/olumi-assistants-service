@@ -122,3 +122,48 @@ export function pluraliseUnit(unit: string, value: number): string {
   }
   return unit;
 }
+
+/** One of a unit, said singular ("1 week", never "1 weeks"; "£1" as `sayFigure` says it). Moved from goal-certainty. */
+export function sayOneOf(unit: string): string {
+  return sayFigure(1, unit).replace(/^1 (\p{L}+)\b/u, (_, w: string) => `1 ${w.endsWith('ies') ? `${w.slice(0, -3)}y`
+    : /(?:ss|sh|ch|x|z)es$/.test(w) ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w}`);
+}
+
+/**
+ * ⭐ A TWO-STATE SOURCE IS SAID AS THE SWITCH, NEVER AS A RISE (DL 0df0e1; red team 19 #87 6009566552: served T1b
+ * a7d034ae asked "…when Starter tier launched rises by 1 0 / 1?").
+ *
+ * Two-state: typed so ("0/1", "binary", "yes/no", "on/off", "true/false"), or a switch the options create — the source
+ * has no unit of its own and every option that sets it sets 0 or 1. A unit of its own ("hires") keeps it a count, so
+ * "0 or 1 hire" still asks per hire.
+ */
+const TWO_STATE_UNIT_RE = /^\s*(?:0\s*\/\s*1|binary|bool(?:ean)?|yes\s*\/\s*no|on\s*\/\s*off|true\s*\/\s*false)\s*$/i;
+const isRec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+export function isTwoStateSource(nodes: readonly unknown[], id: unknown, unit: unknown): boolean {
+  if (typeof unit === 'string' && TWO_STATE_UNIT_RE.test(unit)) return true;
+  if (typeof unit === 'string' && unit.trim() !== '') return false;
+  const set: number[] = [];
+  for (const n of nodes) {
+    if (!isRec(n) || n.kind !== 'option') continue;
+    const ivs = isRec(n.interventions) ? n.interventions : isRec(n.data) && isRec(n.data.interventions) ? n.data.interventions : undefined;
+    const iv = ivs !== undefined && typeof id === 'string' ? ivs[id] : undefined;
+    const v = typeof iv === 'number' ? iv : isRec(iv) && typeof iv.value === 'number' ? iv.value : undefined;
+    if (v !== undefined) set.push(v);
+  }
+  return set.length > 0 && set.every((v) => v === 0 || v === 1);
+}
+
+/**
+ * THE ONE PLACE an ask says a one-unit change in a SOURCE, so no site can say "rises by 1 0 / 1". `source` is said as
+ * the site says it (quoted or bare). A two-state source is the switch itself: "with X", or X as the subject.
+ */
+export function sourceChangeWords(source: string, unit: string, twoState: boolean): {
+  /** "a 1 week rise in X" | "X" */ readonly aRiseIn: string;
+  /** "each 1 week of X" | "X" */ readonly eachOf: string;
+  /** "when X rises by 1 week" | "with X" */ readonly when: string;
+} {
+  return twoState
+    ? { aRiseIn: source, eachOf: source, when: `with ${source}` }
+    : { aRiseIn: `a ${sayOneOf(unit)} rise in ${source}`, eachOf: `each ${sayOneOf(unit)} of ${source}`, when: `when ${source} rises by ${sayFigure(1, unit)}` };
+}

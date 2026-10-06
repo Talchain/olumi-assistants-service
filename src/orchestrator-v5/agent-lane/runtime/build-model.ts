@@ -53,6 +53,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
+import { withRateCountProducts } from '../rate-count-product.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -1441,8 +1442,10 @@ export async function buildModelFromBrief(
     const gap = withoutGapResidual(c1, brief);
     const c = gap?.model ?? c1;
     const residual = gap?.residual ?? null;
-    const minted = withReconcilingProductIdentity(c, brief);
-    return minted !== c ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(c, brief), dropped, residual };
+    // (A) A rate × count drawn as two added links into an outcome is Olumi's product of the two (Science 6008551439 (A)).
+    const products = withRateCountProducts(c, brief).model;
+    const minted = withReconcilingProductIdentity(products, brief);
+    return minted !== products ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(products, brief), dropped, residual };
   };
   const firstIdentity = mintOrFold(candidate);
   let foldedCarrier = firstIdentity.folded;
@@ -2142,7 +2145,10 @@ export async function buildModelFromBrief(
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
         // `created_part_zero`: a stated product's part an option creates, held at 0 today as Olumi's reading (Science
         // 6007736377 (i), `admit-model.ts`): said once here, so the user can correct it.
-        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `pass_through_sign`: the user's sentence not recorded through Olumi's mediator, because the drawn path runs the
+        // other way from it (Desk 6b #2644 Q3, `stated-size-binding.ts`): said, with what to check.
+        // `stated_sign`: the user's sentence not recorded on a link drawn the other way from it (DL #2644 pilot): said.
+        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
