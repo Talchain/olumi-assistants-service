@@ -41,6 +41,8 @@ import { unitPhraseFamily } from './unit-conflict.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
+import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
+import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -1139,6 +1141,33 @@ export function linkEffectQuoteContextMiss(quote: string, userText: string): 'qu
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
 }
 /**
+ * A sentence that ENDS by denying any change at all: "It doesn't change.", "No, it doesn't really move.", "It has no effect
+ * at all.", "It makes no difference.", "It stays the same.", "No change." Anchored at the end, so a clause after it that
+ * asserts something ("It doesn't fall; it rises.") or sizes it ("It doesn't change much.") is no such sentence.
+ */
+const NO_CHANGE_SENTENCE = new RegExp(
+  "(?:^|[\\s,:;])(?:(?:does|do|did|will|would)\\s+not|(?:does|do|did|wo|would)n['\\u2019]?t)\\s+(?:really\\s+|actually\\s+)?(?:change|move|shift|budge|matter)"
+  + "|(?:^|[\\s,:;])(?:has|have|had|makes?|made)\\s+no\\s+(?:real\\s+)?(?:effect|difference|impact)"
+  + "|(?:^|[\\s,:;])(?:stays?|remains?|is)\\s+(?:the\\s+same|unchanged|flat)"
+  + "|(?:^|[\\s,:;])(?:no\\s+change|nothing\\s+changes)",
+  'i',
+);
+const endsDenyingAnyChange = (sentence: string): boolean => {
+  const body = sentence.trim().replace(/[\s.!\u201D\u2019"')]+$/u, '').replace(/\s+at\s+all$/iu, '');
+  const m = [...body.matchAll(new RegExp(NO_CHANGE_SENTENCE.source, 'gi'))].pop();
+  return m !== undefined && m.index! + m[0].length === body.length;
+};
+/**
+ * ⭐ FU-1 (Codex r1 + r2 on #2664 P1): the user's words say the link does not change at all, which closes the ask. Every
+ * sentence the quote sits in, and the quote itself, ends by denying any change (`NO_CHANGE_SENTENCE`) and writes no figure.
+ * Any other denial still gets its ask: a correction of size ("… loses us 50 paying subscribers, not 20") or of direction
+ * ("It doesn't fall; it rises."), or a denied figure ("… does not lose us 50").
+ */
+export function saysNoChange(quote: string, userText: string): boolean {
+  const around = enclosingSentences(userText, quote);
+  return [quote, ...around].every((words) => figuresWrittenIn(words) === 0 && endsDenyingAnyChange(words));
+}
+/**
  * RT-19 (the no-direct-link guard, no-direct-link.ts): whether ONE clause of the user's message states an EFFECT between two
  * labels, by the binder's own readers only: its whole sentence is no question or denial (`linkEffectQuoteContextMiss`), it
  * names both labels (`names`, the caller's label matcher), and it writes at least TWO figures as changes, by the binder's
@@ -1416,19 +1445,91 @@ export function linkEffectFigureNotAChange(
   return undefined;
 }
 
+/**
+ * ⭐ THE RANGE THE USER WROTE AROUND THEIR FIGURE (Science d5 #87 6009282279; a8's shape ruling). "Each 1% price rise
+ * loses about 2 customers, between 1 and 4" and "the starter tier would win about 150 new subscribers, between 80 and
+ * 250" write the size as a point INSIDE a range: `{ low, high, text, end: 'centre' }`, the amount kept as the stated point.
+ * Read only from the sentence that bound the link, at the bound amount:
+ *  · the sentence's ONE "between a and b", written AFTER the amount, with no other figure between the two;
+ *  · low < |amount| < high, strictly: an amount that IS an end is A4's (`writtenRangeFor`), never a centre;
+ *  · both ends bare, or in pounds when the amount is money (read in the amount's own scale), and no other kind of unit
+ *    written after the range ("between 1 and 4 months" is a time);
+ * Nothing else writes a spread: no range written, none carried (never a default ±k around the point).
+ */
+export function centreRangeAt(sentence: string, amountSpan: { readonly end: number }, amount: number, amountUnit: string): StatedRangeEnd | undefined {
+  if ((sentence.match(/\bbetween\b/giu) ?? []).length !== 1) return undefined;
+  const tail = sentence.slice(amountSpan.end);
+  const range = extractStatedLikelyRange(tail);
+  if (range === undefined) return undefined;
+  const at = tail.indexOf(range.text);
+  if (at < 0 || /\d/u.test(tail.slice(0, at))) return undefined;
+  // A range in ANOTHER kind of unit is not the size's ("between 1 and 4 months after launch": a time, never a count of
+  // customers; Codex buddy r1 F3): the word after its high end must not name a different family.
+  // Up to three words after it, to the next punctuation ("between 1 and 4 calendar months"; Codex buddy r2 F3).
+  const afterWords = tail.slice(at + range.text.length).match(/^[^.,;:!?\n]*/u)?.[0].match(/[A-Za-z%]+/gu)?.slice(0, 3) ?? [];
+  if (afterWords.some((w) => { const f = unitPhraseFamily(w); return f !== null && f !== unitPhraseFamily(amountUnit); })) return undefined;
+  const pounds = range.text.includes('£');
+  if (pounds && unitPhraseFamily(amountUnit) !== 'currency') return undefined;
+  const scale = pounds ? moneyUnitScale(amountUnit) : 1;
+  const low = range.low / scale;
+  const high = range.high / scale;
+  const point = Math.abs(amount);
+  if (!(low < point && point < high)) return undefined;
+  return { low, high, text: range.text, end: 'centre' };
+}
+
+type LinkEffectFigures = { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
+
+/** The written amounts of ONE sentence that are the stated `value` in `unit`: literal raw amounts, never a fraction fallback. */
+function literalLinkAmounts(sentence: string, amounts: readonly StatedAmount[], value: number, unit: string): StatedAmount[] {
+  return amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), sentence)
+    && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
+}
+
+/**
+ * ⭐ THE USER'S FIGURE INSIDE THE RANGE THEY WROTE, AS AN ANSWER (G1b answer door; construction's own reading,
+ * `centreRangeAt`: Science d5 #87 6009282279, a8's shape ruling). "The starter tier would win about 150 new subscribers,
+ * between 80 and 250" states ONE figure, 150, and the range around it. From a brief, construction binds it with the range
+ * (`natural_effect.stated_range`, `end: 'centre'`); as an ANSWER the door refused it as "a range" and asked "What single
+ * change … rather than a range?", the figure the user had just given (served g1-2633t d1 @c787820). Read only where
+ * construction reads it: the ONE written figure that IS the stated amount, the sentence's ONE "between a and b" written
+ * after it (`centreRangeAt`), and no other range shape left once that range is set aside ("about 150 or 200, between 80
+ * and 250" still asks). Its `at` is where the range text starts in the sentence. Pure.
+ */
+function centreRangeInSentence(sentence: string, effect: LinkEffectFigures): { readonly range: StatedRangeEnd; readonly at: number } | undefined {
+  const own = literalLinkAmounts(sentence, findLinkEffectAmounts(sentence), effect.amount, effect.amount_unit);
+  if (own.length !== 1) return undefined;
+  const after = own[0]!.index + own[0]!.matchedText.length;
+  const range = centreRangeAt(sentence, { end: after }, effect.amount, effect.amount_unit);
+  const at = range === undefined ? -1 : sentence.indexOf(range.text, after);
+  if (range === undefined || at < 0) return undefined;
+  const setAside = sentence.slice(0, at) + ' '.repeat(range.text.length) + sentence.slice(at + range.text.length);
+  return hasLinkEffectRange(setAside) ? undefined : { range, at };
+}
+
+/**
+ * The range the user wrote around their figure in the statement a link-effect card quotes (`centreRangeInSentence`, the
+ * door's own reading), for the writer to carry exactly as construction carries it; undefined when no sentence, or more
+ * than one, writes one.
+ */
+export function centreRangeOfQuote(quote: string, effect: LinkEffectFigures): StatedRangeEnd | undefined {
+  const found = sentencesOf(quote.trim()).flatMap(s => { const c = centreRangeInSentence(s, effect); return c === undefined ? [] : [c.range]; });
+  return found.length === 1 ? found[0] : undefined;
+}
+
 function linkEffectInOneSentence(
   q: string,
-  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  effect: LinkEffectFigures,
   ends: { readonly source: string; readonly target: string },
   scope: LinkEffectScope,
 ): LinkEffectStatementMiss | null {
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
   if (negatedOutsideEnds(q, ends)) return 'denied';
-  if (hasLinkEffectRange(q)) return 'unclear_figure';
+  const centre = hasLinkEffectRange(q) ? centreRangeInSentence(q, effect) : undefined;
+  if (hasLinkEffectRange(q) && centre === undefined) return 'unclear_figure';
   const amounts = findLinkEffectAmounts(q);
   // Link magnitudes are literal raw amounts, never the fraction fallback used for other node readers.
-  const literalAmount = (value: number, unit: string) => amounts.filter(a => amountIs(a, Math.abs(value), unit, unitPhraseFamily(unit), q)
-    && a.magnitude === Math.abs(value) * (a.kind === 'currency' ? moneyUnitScale(unit) : 1));
+  const literalAmount = (value: number, unit: string) => literalLinkAmounts(q, amounts, value, unit);
   const amountFigures = literalAmount(effect.amount, effect.amount_unit);
   const perFigures = literalAmount(effect.per_source_change, effect.per_source_change_unit);
   const levels = linkEffectSourceLevels(q, namesSourceOf(ends));
@@ -1436,9 +1537,27 @@ function linkEffectInOneSentence(
     && Math.abs(levels.change) === Math.abs(effect.per_source_change);
   const oneAt = perFigures.length === 0 && Math.abs(effect.per_source_change) === 1
     ? distributiveOneAt(q, ends, effect.per_source_change_unit) : -1;
+  /**
+   * ⭐ A SWITCH'S EFFECT IS ITS TARGET FIGURE ALONE (Science 6008844683; construction's own reading of the same sentence,
+   * `statedSwitchEffectQuoteMatches`). Turning something on is never written per a source figure: "The starter tier would
+   * win about 150 new subscribers" sizes ‘Starter tier launched’ → ‘Starter subscribers’ at +150 per switch, and the door
+   * answered it "How much does … move …, in figures?". Only:
+   *  · the 'switch' unit at ±1, which the writer admits only for a source the SIZER types binary (`linkEffectEndUnits`:
+   *    `sourceUnitWords` says "switch" only at frame 1 with every level 0 or 1) — never the Agent's word on a continuous
+   *    source, and the door dry-runs that writer before any card;
+   *  · ONE figure written outside the user's own range, and it is the amount: "lift our win rate from 20% to about 30%"
+   *    writes two, and its change (10 points) is a level change's to read, never a 30-point switch effect;
+   *  · a figure written as money or a percentage only in a target unit of that kind: "costs about £6 a month" is never
+   *    6 subscribers, even on a link the user selected (a unit nobody classifies takes any kind elsewhere, `amountIs`).
+   */
+  const outsideRange = amounts.filter(a => centre === undefined || a.index < centre.at || a.index >= centre.at + centre.range.text.length);
+  const kindFits = (a: StatedAmount): boolean => (a.kind !== 'currency' || unitPhraseFamily(effect.amount_unit) === 'currency')
+    && (a.kind !== 'percent' || unitPhraseFamily(effect.amount_unit) === 'percent');
+  const switchOne = perFigures.length === 0 && effect.per_source_change_unit === 'switch' && Math.abs(effect.per_source_change) === 1
+    && amountFigures.length === 1 && outsideRange.length === 1 && outsideRange[0] === amountFigures[0] && kindFits(amountFigures[0]!);
   const bothWritten = amountFigures.some(amount => writtenChange
     ? amount.index < levels!.from_index || amount.index >= levels!.end_index
-    : oneAt >= 0 || perFigures.some(per => per.index !== amount.index));
+    : oneAt >= 0 || switchOne || perFigures.some(per => per.index !== amount.index));
   if (!bothWritten) return 'figures_not_in_statement';
   // The target is checked even when the source change is distributive or written as levels (Codex r2 HIGH).
   const notAChange = linkEffectFigureNotAChange(q, effect, ends, scope.target_units ?? []);

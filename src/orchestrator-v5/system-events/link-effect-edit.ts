@@ -38,6 +38,7 @@ import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitio
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
+import { centreRangeOfQuote } from '../agent-lane/stated-by-user.js';
 import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
 import { GAUGE_OP, mediatorReadings, storedGaugesKept, withMediatorReading } from '../agent-lane/mediator-reading.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
@@ -534,8 +535,13 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (storedDirection !== null && storedDirection !== direction && params.reversal === undefined) return refuse('sign_conflict');
 
   // ── THE CONSTRUCTION PATH'S OWN SIZING ────────────────────────────────────────────────────────────────────────────
+  // ⭐ G1b answer door: the range the user wrote around their figure in the quoted sentence (`centreRangeOfQuote`, the
+  // door's own reading, bound by the reading token through the quote) is carried exactly as construction carries the same
+  // sentence from a brief (`natural_effect.stated_range`, `end: 'centre'`), so the chat and the brief size it alike.
+  const centre = centreRangeOfQuote(params.quote, effect);
   const sizing = sizeLink(
-    { direction, effect_amount: stated.amount, effect_per_source_change: stated.per_source_change, user_stated: true },
+    { direction, effect_amount: stated.amount, effect_per_source_change: stated.per_source_change, user_stated: true,
+      ...(centre !== undefined ? { stated_range: centre } : {}) },
     sourceNode,
     targetNode,
   );
@@ -615,6 +621,19 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     if (!storedGaugesKept(refitFrom, written)) return refuse('not_representable');
   }
   const writtenEdge = (written.edges as Rec[]).find(e => e.from === from && e.to === to && isDirectedEdge(e as never)) ?? edge;
+  // ⭐ S5t-W (e7 #87 6011176086; Science Q2 6009456901: a frame change is never narrated as a change): the links the refit
+  // RESCALED (β = b·F_s/F_t, natural size unchanged), each with its persisted mean before and after, recorded on this
+  // write's own receipt so S7 can tell them from an Olumi re-estimate (`frameRefitMove`, build-run-delta.ts). Only links
+  // this write did not itself change: the user's link is the receipt's target, and a gauge the answer sized is a sizing.
+  const persistedMean = (g: unknown, e: Rec): unknown => (isRec(g) && Array.isArray(g.edges)
+    ? (g.edges as Rec[]).find(x => x.from === e.from && x.to === e.to && isDirectedEdge(x as never))?.strength as Rec | undefined : undefined)?.mean;
+  const frameRefit = refitFrom === undefined ? [] : (written.edges as Rec[]).flatMap((e) => {
+    if (!isDirectedEdge(e as never) || (e.from === from && e.to === to)) return [];
+    const before = persistedMean(params.persistedGraph, e);
+    const after = (e.strength as Rec | undefined)?.mean;
+    return finite(before) && finite(after) && before !== after && persistedMean(refitFrom, e) === before
+      ? [{ from: String(e.from), to: String(e.to), before_mean: before, after_mean: after }] : [];
+  });
   const parsed = GraphV3.safeParse(written);
   if (!parsed.success) return refuse('invalid_graph');
   // `.catch(undefined)` can make the graph parse succeed after dropping a malformed reading. Never report the card's
@@ -629,7 +648,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
       target_id: `${from}→${to}`,
       status: 'applied',
       before,
-      after: { from, to, strength: { ...(writtenEdge.strength as Rec) }, effect_direction: direction, provenance: writtenEdge.provenance, stated_quote: params.quote },
+      after: { from, to, strength: { ...(writtenEdge.strength as Rec) }, effect_direction: direction, provenance: writtenEdge.provenance, stated_quote: params.quote,
+        ...(frameRefit.length > 0 ? { frame_refit: frameRefit } : {}) },
     },
   });
   return { kind: 'mutated', mutatedGraph: written, graph: parsed.data, handlerFacts: [fact as HandlerFact],

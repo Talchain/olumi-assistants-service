@@ -1,0 +1,900 @@
+{
+ "_source": "Acceptance G1b draft 4 (fresh guest), the served rerun Run on CEE 5f8f24ce; first_run_reply = the first Run's reply; shouldnt_keep_asking_reply = the Agent's reply to the third answer.",
+ "graph_hash": "6a318483a64f6ed2",
+ "blocks": [
+  {
+   "type": "analysis_result",
+   "summary": "No single option can be put forward yet. The result is not yet robust — small changes could flip it. 'Keep pricing as it is' was analysed as no change — the factors it compares against were held at the values your model records today. I supplied 4 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies.",
+   "leading_option_id": null,
+   "win_probabilities": {
+    "Raise prices 10%": 0.49833333333333285,
+    "Launch starter tier": 0.4677333333333335,
+    "Keep pricing as it is": 0.033933333333333295
+   },
+   "enrichment": {
+    "option_comparison": [
+     {
+      "id": "raise_prices_10",
+      "label": "Raise prices 10%",
+      "status": "computed",
+      "outcome": {
+       "n_samples": 10000,
+       "validity_ratio": 1,
+       "n_valid_samples": 10000,
+       "percentiles_source": "samples"
+      },
+      "option_id": "raise_prices_10",
+      "option_label": "Raise prices 10%",
+      "win_probability": 0.49833333333333285
+     },
+     {
+      "id": "launch_starter_tier",
+      "label": "Launch starter tier",
+      "status": "computed",
+      "outcome": {
+       "n_samples": 10000,
+       "validity_ratio": 1,
+       "n_valid_samples": 10000,
+       "percentiles_source": "samples"
+      },
+      "option_id": "launch_starter_tier",
+      "option_label": "Launch starter tier",
+      "win_probability": 0.4677333333333335
+     },
+     {
+      "id": "keep_pricing_as_it_is",
+      "label": "Keep pricing as it is",
+      "status": "computed",
+      "outcome": {
+       "n_samples": 10000,
+       "validity_ratio": 1,
+       "n_valid_samples": 10000,
+       "percentiles_source": "samples"
+      },
+      "option_id": "keep_pricing_as_it_is",
+      "option_label": "Keep pricing as it is",
+      "win_probability": 0.033933333333333295
+     }
+    ],
+    "factor_sensitivity": [
+     {
+      "source": "graph",
+      "direction": "positive",
+      "factor_id": "price_rise",
+      "confidence": 0.3,
+      "elasticity": 0,
+      "zero_reason": "intervention_override",
+      "driver_label": "biggest",
+      "factor_label": "Price rise",
+      "value_source": "cee_inference",
+      "influence_rank": 1,
+      "rank_flip_rate": 0,
+      "importance_rank": 1,
+      "influence_basis": "isl_structural",
+      "influence_score": 1,
+      "importance_basis": "isl_structural",
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "sensitivity_score": 0,
+      "flip_risk_category": "isolated",
+      "value_of_information": 0,
+      "attribution_stability": "negligible",
+      "confidence_components": {
+       "sampling_stability": 0,
+       "structural_certainty": 0.5
+      },
+      "confidence_provenance": {
+       "input_quality": "standard",
+       "is_provisional": true,
+       "formula_version": "plot_unified_v3",
+       "calibration_status": "provisional_pending_pilot_calibration",
+       "computation_source": "plot_unified_from_isl_bootstrap"
+      },
+      "range_derivation_source": "explicit_cap"
+     },
+     {
+      "source": "graph",
+      "direction": "positive",
+      "factor_id": "starter_tier_subscribers",
+      "confidence": 0.3,
+      "elasticity": 0,
+      "zero_reason": "intervention_override",
+      "driver_label": "strong",
+      "factor_label": "Starter-tier subscribers",
+      "value_source": "cee_inference",
+      "influence_rank": 2,
+      "rank_flip_rate": 0,
+      "importance_rank": 2,
+      "influence_basis": "isl_structural",
+      "influence_score": 0.6805555555555555,
+      "importance_basis": "isl_structural",
+      "confidence_source": "plot_unified_from_isl_bootstrap",
+      "sensitivity_score": 0,
+      "flip_risk_category": "negligible",
+      "value_of_information": 0,
+      "attribution_stability": "negligible",
+      "confidence_components": {
+       "sampling_stability": 0,
+       "structural_certainty": 0.5
+      },
+      "confidence_provenance": {
+       "input_quality": "standard",
+       "is_provisional": true,
+       "formula_version": "plot_unified_v3",
+       "calibration_status": "provisional_pending_pilot_calibration",
+       "computation_source": "plot_unified_from_isl_bootstrap"
+      },
+      "range_derivation_source": "explicit_cap"
+     }
+    ],
+    "robustness": {
+     "level": "very_low",
+     "near_tie": {
+      "gap": 0.03059999999999935,
+      "is_tie": true,
+      "threshold": 0.1
+     },
+     "is_robust": false,
+     "confidence": 0.49833333333333285,
+     "robust_edges": [],
+     "fragile_edges": [
+      {
+       "to_id": "monthly_recurring_revenue",
+       "edge_id": "price_rise->monthly_recurring_revenue",
+       "from_id": "price_rise",
+       "visible": true,
+       "severity": "critical",
+       "to_label": "monthly recurring revenue",
+       "from_label": "Price rise",
+       "switch_probability": 0.8484,
+       "alternative_winner_id": "launch_starter_tier",
+       "alternative_winner_label": "Launch starter tier",
+       "marginal_switch_probability": 0.53
+      },
+      {
+       "to_id": "monthly_recurring_revenue",
+       "edge_id": "mrr_lost_to_price_driven_churn->monthly_recurring_revenue",
+       "from_id": "mrr_lost_to_price_driven_churn",
+       "visible": true,
+       "severity": "error",
+       "to_label": "monthly recurring revenue",
+       "from_label": "MRR lost to price-driven churn",
+       "switch_probability": 0.578,
+       "alternative_winner_id": "launch_starter_tier",
+       "alternative_winner_label": "Launch starter tier",
+       "marginal_switch_probability": 0.43
+      },
+      {
+       "to_id": "mrr_lost_to_price_driven_churn",
+       "edge_id": "price_rise->mrr_lost_to_price_driven_churn",
+       "from_id": "price_rise",
+       "visible": true,
+       "severity": "warning",
+       "to_label": "MRR lost to price-driven churn",
+       "from_label": "Price rise",
+       "switch_probability": 0.3284,
+       "alternative_winner_id": "launch_starter_tier",
+       "alternative_winner_label": "Launch starter tier",
+       "marginal_switch_probability": 0.5
+      }
+     ],
+     "display_verdict": "fragile",
+     "confidence_basis": "recommendation_stability_uncalibrated",
+     "display_verdict_reason": "small changes to your assumptions could change the most-supported option",
+     "recommended_option_compliance": "not_applicable",
+     "recommended_option_compliance_reason": "no limits were set for this decision"
+    },
+    "option_comparison_status": "computed",
+    "edge_e_values": [
+     {
+      "to_id": "monthly_recurring_revenue",
+      "e_value": 1.0125,
+      "edge_id": "price_rise::monthly_recurring_revenue",
+      "from_id": "price_rise",
+      "to_label": "monthly recurring revenue",
+      "flip_mean": 121500.0675,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": 154184.94,
+       "band_min": 56854.5075,
+       "band_width": 97330.4325,
+       "band_median": 112045.0275,
+       "n_seeds_flipped": 5,
+       "seed_flip_means": [
+        154184.94,
+        null,
+        null,
+        103760.37000000001,
+        null,
+        123050.97,
+        56854.5075,
+        null,
+        null,
+        112045.0275
+       ]
+      },
+      "from_label": "Price rise",
+      "current_mean": 120000,
+      "flip_direction": "increase"
+     },
+     {
+      "to_id": "mrr_lost_to_price_driven_churn",
+      "e_value": 1,
+      "edge_id": "price_rise::mrr_lost_to_price_driven_churn",
+      "from_id": "price_rise",
+      "to_label": "MRR lost to price-driven churn",
+      "flip_mean": 76289.0625,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": 153384.21,
+       "band_min": 31392.427499999998,
+       "band_width": 121991.7825,
+       "band_median": 115407.81,
+       "n_seeds_flipped": 5,
+       "seed_flip_means": [
+        31392.427499999998,
+        123898.00499999999,
+        null,
+        153384.21,
+        91988.3475,
+        null,
+        null,
+        115407.81,
+        null,
+        null
+       ]
+      },
+      "from_label": "Price rise",
+      "current_mean": 78750,
+      "flip_direction": "decrease"
+     },
+     {
+      "to_id": "monthly_recurring_revenue",
+      "e_value": 1,
+      "edge_id": "mrr_lost_to_price_driven_churn::monthly_recurring_revenue",
+      "from_id": "mrr_lost_to_price_driven_churn",
+      "to_label": "monthly recurring revenue",
+      "flip_mean": -116249.9625,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": 61968.847499999996,
+       "band_min": -94212.72,
+       "band_width": 156181.5675,
+       "band_median": -16122.015,
+       "n_seeds_flipped": 2,
+       "seed_flip_means": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        61968.847499999996,
+        -94212.72,
+        null,
+        null
+       ]
+      },
+      "from_label": "MRR lost to price-driven churn",
+      "current_mean": -120000,
+      "flip_direction": "increase"
+     },
+     {
+      "to_id": "monthly_recurring_revenue",
+      "e_value": 1,
+      "edge_id": "starter_tier_subscribers::monthly_recurring_revenue",
+      "from_id": "starter_tier_subscribers",
+      "to_label": "monthly recurring revenue",
+      "flip_mean": 48000.015,
+      "stability": {
+       "n_seeds": 10,
+       "band_max": 118987.155,
+       "band_min": 0,
+       "band_width": 118987.155,
+       "band_median": 34117.1775,
+       "n_seeds_flipped": 9,
+       "seed_flip_means": [
+        118852.65,
+        118987.155,
+        114180.885,
+        null,
+        0,
+        61911.5175,
+        0,
+        0,
+        0,
+        34117.1775
+       ]
+      },
+      "from_label": "Starter-tier subscribers",
+      "current_mean": 49000,
+      "flip_direction": "decrease"
+     }
+    ],
+    "inference_warnings": [
+     {
+      "code": "FACTOR_EVPPI_NOT_COMPUTED",
+      "field": "factor_evppi",
+      "message": "Value-of-information ran but produced no rows. The reason is not known at this layer and has deliberately not been inferred.",
+      "severity": "info"
+     },
+     {
+      "say": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Price rise to MRR lost to price-driven churn. Roughly how much does MRR lost to price-driven churn change, in £/month, when Price rise rises by 1%?",
+      "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
+      "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the link from Price rise to MRR lost to price-driven churn. Roughly how much does MRR lost to price-driven churn change, in £/month, when Price rise rises by 1%?",
+      "node_ids": [
+       "monthly_recurring_revenue"
+      ],
+      "severity": "warning",
+      "option_ids": [
+       "raise_prices_10",
+       "launch_starter_tier",
+       "keep_pricing_as_it_is"
+      ],
+      "withheld_claims": [
+       "goal_probability",
+       "joint_probability",
+       "outcome",
+       "downside"
+      ]
+     },
+     {
+      "code": "GOAL_HORIZON_NOT_TESTED",
+      "message": "This model doesn't yet say whether any option gets there within 9 months.",
+      "node_ids": [
+       "monthly_recurring_revenue"
+      ],
+      "severity": "info"
+     }
+    ],
+    "confidence_tier": "fair",
+    "flip_thresholds": [],
+    "decision_brief": {
+     "options": [
+      {
+       "label": "Keep pricing as it is",
+       "option_id": "keep_pricing_as_it_is",
+       "win_probability": 0.033933333333333295
+      },
+      {
+       "label": "Launch starter tier",
+       "option_id": "launch_starter_tier",
+       "win_probability": 0.4677333333333335
+      },
+      {
+       "label": "Raise prices 10%",
+       "option_id": "raise_prices_10",
+       "win_probability": 0.49833333333333285
+      }
+     ],
+     "version": "1",
+     "brief_id": "e6a68880-980f-4a01-92aa-4f6626762ceb",
+     "warnings": [
+      {
+       "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+       "message": "Option 'Keep pricing as it is' has zero variance — intervention may have no causal path to goal",
+       "severity": "warning"
+      },
+      {
+       "code": "M2_UNAVAILABLE",
+       "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+       "severity": "warning"
+      }
+     ],
+     "created_at": "2026-10-06T06:49:39.223Z",
+     "robustness": "fragile",
+     "top_drivers": [],
+     "warning_codes": [],
+     "key_assumptions": [],
+     "analysis_summary": {
+      "robustness_band": "fragile"
+     },
+     "what_would_change": [
+      "MRR lost to price-driven churn → monthly recurring revenue"
+     ],
+     "defaulted_assumptions": []
+    },
+    "decision_evpi": 0.02387106065458608,
+    "p_win_sensitivity": [
+     {
+      "method": "p_win_delta_at_mean_v1",
+      "status": "below_resolution",
+      "clamped": false,
+      "factor_id": "starter_tier_subscribers",
+      "n_samples": 2000,
+      "metric_type": "p_win_recommended",
+      "noise_floor": 0.03099,
+      "p_win_delta": 0.006667,
+      "current_metric": 0.504917,
+      "perfect_metric": 0.511583,
+      "labelling_doctrine": "provisional_doctrine_v0",
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "p_win_delta_percentage_points": 0.67
+     },
+     {
+      "method": "p_win_delta_at_mean_v1",
+      "status": "below_resolution",
+      "clamped": true,
+      "factor_id": "price_rise",
+      "n_samples": 2000,
+      "metric_type": "p_win_recommended",
+      "noise_floor": 0.03099,
+      "p_win_delta": 0,
+      "current_metric": 0.504917,
+      "perfect_metric": 0.498,
+      "labelling_doctrine": "provisional_doctrine_v0",
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "p_win_delta_percentage_points": 0
+     }
+    ],
+    "critiques": [
+     {
+      "id": "critique_40c49252abac",
+      "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+      "severity": "warning",
+      "source": "isl",
+      "blocks_analysis": false,
+      "user_message": "One of your options produces the same result in every simulation, so nothing in your model makes its outcome uncertain. If you expected it to move, review the factors it changes and the ranges set on them."
+     }
+    ],
+    "conditional_winners": []
+   },
+   "computed_against_hash": "6a318483a64f6ed2"
+  }
+ ],
+ "analysis_state": {
+  "run_state": {
+   "kind": "complete_current",
+   "computed_at": "2026-10-06T06:49:36.073Z"
+  },
+  "readiness": {
+   "status": "ready",
+   "blockers": []
+  },
+  "leader_claim": {
+   "permitted": false,
+   "withheld_reason": "options_do_not_separate",
+   "separation": "near_tie"
+  },
+  "robustness": {
+   "aggregate_level": "very_low"
+  },
+  "usable_for_prose": true,
+  "usable_for_chips": true,
+  "usable_for_followup": true,
+  "requires_rerun": false,
+  "blocked_unusable": false,
+  "contradictions": []
+ },
+ "analysis_ready": {
+  "options": [
+   {
+    "option_id": "raise_prices_10",
+    "label": "Raise prices 10%",
+    "status": "ready",
+    "interventions": {
+     "price_rise": 0.1
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "price_rise": {
+      "display_value": "10%",
+      "normalised_value": 0.1,
+      "raw_value": 10,
+      "unit": "%"
+     }
+    },
+    "raw_interventions": {
+     "price_rise": 10
+    },
+    "status_reason": "1 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "launch_starter_tier",
+    "label": "Launch starter tier",
+    "status": "ready",
+    "interventions": {
+     "starter_tier_subscribers": 0.15
+    },
+    "is_baseline": false,
+    "intervention_details": {
+     "starter_tier_subscribers": {
+      "display_value": "150 subscribers",
+      "normalised_value": 0.15,
+      "raw_value": 150,
+      "unit": "subscribers"
+     }
+    },
+    "raw_interventions": {
+     "starter_tier_subscribers": 150
+    },
+    "status_reason": "1 intervention(s) ready for analysis"
+   },
+   {
+    "option_id": "keep_pricing_as_it_is",
+    "label": "Keep pricing as it is",
+    "status": "ready",
+    "interventions": {},
+    "is_baseline": true,
+    "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed"
+   }
+  ],
+  "goal_node_id": "monthly_recurring_revenue",
+  "status": "ready",
+  "goal_threshold": 0.8,
+  "goal_threshold_raw": 126000,
+  "goal_threshold_unit": "£/month",
+  "goal_threshold_cap": 157500,
+  "goal_threshold_cap_provenance": "target_derived_headroom",
+  "bias_findings": [],
+  "may_run": true,
+  "analysis_admission": {
+   "structurally_analysable": true,
+   "missing_important_inputs": [],
+   "semantic_quality_sufficient": true,
+   "permitted_analysis_mode": "comparative_leader",
+   "reasons": [
+    {
+     "field": "structurally_analysable",
+     "code": "READY_TO_COMPARE",
+     "message": "Analysis can run on this model as it stands."
+    },
+    {
+     "field": "semantic_quality_sufficient",
+     "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+     "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+    },
+    {
+     "field": "permitted_analysis_mode",
+     "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+     "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+    }
+   ],
+   "graph_hash": "6a318483a64f6ed25224c25b2261a16e5bafcd22752af38edaf3d48bf11e5230",
+   "semantic_signals": {
+    "confidence_parameters_total": 8,
+    "confidence_parameters_user_stated": 3,
+    "confidence_parameters_machine_authored": 4,
+    "confidence_parameters_unattributed": 1,
+    "material_parameters_total": 6,
+    "material_parameters_user_stated": 2,
+    "intervened_factor_baselines_total": 2,
+    "intervened_factor_baselines_user_stated": 0,
+    "material_parameters_awaiting_user_node_ids": [
+     "price_rise",
+     "starter_tier_subscribers"
+    ],
+    "goal_target_stated": true
+   }
+  },
+  "freshness": "fresh",
+  "freshness_reason": "agent_readback_run_state_current",
+  "graph_hash_at_run": "6a318483a64f6ed2",
+  "current_graph_hash": "6a318483a64f6ed2",
+  "computed_at": "2026-10-06T06:49:36.073Z"
+ },
+ "draft_graph": {
+  "nodes": [
+   {
+    "id": "decision_monthly_recurring_revenue",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "Decision: monthly recurring revenue",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "monthly_recurring_revenue",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "monthly recurring revenue",
+    "provenance": "from_brief",
+    "unit_reading": {
+     "unit": "GBP",
+     "source": "user_stated",
+     "source_quote": "Goal: reach at least £126,000 monthly recurring revenue within 9 months"
+    },
+    "goal_direction": ">=",
+    "goal_threshold": 0.8,
+    "observed_state": {
+     "cap": 157500,
+     "unit": "£/month",
+     "value": 0.7619047619047619,
+     "source": "brief_extraction",
+     "baseline": 0.7619047619047619,
+     "raw_value": 120000
+    },
+    "threshold_source": "brief_extraction",
+    "goal_threshold_cap": 157500,
+    "goal_threshold_raw": 126000,
+    "goal_horizon_months": 9,
+    "goal_threshold_unit": "£/month",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+   },
+   {
+    "id": "raise_prices_10",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Raise prices 10%",
+    "provenance": "from_brief",
+    "interventions": {
+     "price_rise": {
+      "unit": "%",
+      "value": 0.1,
+      "source": "brief_extraction",
+      "raw_value": 10,
+      "target_match": {
+       "node_id": "price_rise",
+       "confidence": "high",
+       "match_type": "exact_id"
+      },
+      "value_confidence": "medium"
+     }
+    }
+   },
+   {
+    "id": "launch_starter_tier",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Launch starter tier",
+    "provenance": "from_brief",
+    "interventions": {
+     "starter_tier_subscribers": {
+      "unit": "subscribers",
+      "value": 0.15,
+      "source": "brief_extraction",
+      "raw_value": 150,
+      "target_match": {
+       "node_id": "starter_tier_subscribers",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "keep_pricing_as_it_is",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Keep pricing as it is",
+    "provenance": "from_brief",
+    "is_baseline": true
+   },
+   {
+    "id": "price_rise",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Price rise",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 100,
+     "unit": "%",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "starter_tier_subscribers",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Starter-tier subscribers",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 1000,
+     "unit": "subscribers",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "mrr_lost_to_price_driven_churn",
+    "ref": "R1",
+    "kind": "risk",
+    "label": "MRR lost to price-driven churn",
+    "provenance": "ai_inferred",
+    "scale_frame": 120000
+   }
+  ],
+  "edges": [
+   {
+    "to": "raise_prices_10",
+    "from": "decision_monthly_recurring_revenue",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "launch_starter_tier",
+    "from": "decision_monthly_recurring_revenue",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "keep_pricing_as_it_is",
+    "from": "decision_monthly_recurring_revenue",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "price_rise",
+    "from": "raise_prices_10",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "starter_tier_subscribers",
+    "from": "launch_starter_tier",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "price_rise",
+    "from": "keep_pricing_as_it_is",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "starter_tier_subscribers",
+    "from": "keep_pricing_as_it_is",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "monthly_recurring_revenue",
+    "from": "price_rise",
+    "strength": {
+     "std": 0.38095238095238093,
+     "mean": 0.7619047619047619
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn.",
+     "natural_effect": {
+      "amount": 1200,
+      "amount_unit": "£/month",
+      "strength_mean": 0.7619047619047619,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "mrr_lost_to_price_driven_churn",
+    "from": "price_rise",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 600,
+      "amount_unit": "£/month",
+      "strength_mean": 0.5,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_recurring_revenue",
+    "from": "mrr_lost_to_price_driven_churn",
+    "strength": {
+     "std": 0.38095238095238093,
+     "mean": -0.7619047619047619
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": -1,
+      "amount_unit": "£/month",
+      "strength_mean": -0.7619047619047619,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "£/month"
+     }
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_recurring_revenue",
+    "from": "starter_tier_subscribers",
+    "strength": {
+     "std": 0.15555555555555556,
+     "mean": 0.3111111111111111
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "Each starter subscriber adds £49 a month to monthly recurring revenue.",
+     "natural_effect": {
+      "amount": 49,
+      "amount_unit": "£/month",
+      "strength_mean": 0.3111111111111111,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "subscribers"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   }
+  ],
+  "node_count": 8,
+  "edge_count": 11
+ },
+ "first_run_reply": "Your results are ready. You can view them now or ask me to explain them.\n\nI can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Price rise to MRR lost to price-driven churn. Roughly how much does MRR lost to price-driven churn change, in £/month, when Price rise rises by 1%?\n\nThis model doesn't yet say whether any option gets there within 9 months.",
+ "shouldnt_keep_asking_reply": "You’ve already answered the churn question; I shouldn’t keep asking it.\n\nYour estimate is **about 2 customers lost per 1% price rise, between 1 and 4**. The model has no customer-loss quantity, so the available recording tool cannot capture that relationship directly.\n\nUsing your £300 per customer, simple arithmetic gives **£600/month lost per 1% rise**, ranging from **£300–£1,200**—not an analysis result.\n\nThe remaining gap is recording the money-based relationship, not collecting more churn data."
+}
