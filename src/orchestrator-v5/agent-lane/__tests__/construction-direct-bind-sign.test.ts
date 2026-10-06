@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { EdgeV3 } from '../../../schemas/cee-v3.js';
+import { bindStatedLinkSizes } from '../stated-size-binding.js';
 
 const LOSES = 'Each 1% price rise loses about 2 customers, between 1 and 4.';
 const T1B = 'We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. '
@@ -131,5 +132,26 @@ describe('Codex r1 F5 + r2 P1: the verb is read against the target\'s change, an
     expect(edge.provenance.source_quote).toBeUndefined();
     expect(out.not_represented).toContain(`“${said}” is not recorded as your figure for ‘Price’ → ‘Subscribers’: that link is drawn to `
       + 'run the other way from what you wrote. Check which way it runs.');
+  });
+});
+
+/**
+ * Desk 6b (r2): a down-word in the SOURCE's own name ("Loyalty DISCOUNT", "Price CUT", "Cost REDUCTION") is that
+ * quantity's name, never the way the sentence moves it. The served option label ‘Loyalty discount’ is one of them.
+ */
+describe('the source\'s own name never says which way it moves', () => {
+  const rows: [string, string, string, string, string, number, number, 'positive' | 'negative', string][] = [
+    ['Each 1% loyalty discount reduces churn by 0.5 percentage points.', 'Loyalty discount', '%', 'Churn', 'percentage points', -0.5, 1, 'negative', '%'],
+    ['Each extra £1 of price cut adds 2 subscribers.', 'Price cut', '£', 'Subscribers', 'subscribers', 2, 1, 'positive', 'subscribers'],
+    ['Every 1 point of cost reduction raises margin by £5,000.', 'Cost reduction', 'points', 'Margin', '£', 5000, 1, 'positive', '£'],
+  ];
+  it.each(rows)('CONTROL: "%s" binds as the user\'s (source ‘%s’ moved UP)', (sentence, source, su, target, au, amount, per, dir, tu) => {
+    const refused: { link: number; sentence: string }[] = [];
+    const bound = bindStatedLinkSizes(
+      [{ from: 's', to: 't', effect_direction: dir, natural_effect: { amount, amount_unit: au, per_source_change: per, per_source_change_unit: su } }],
+      [{ id: 's', label: source, unit: su, change_unit: su, kind: 'factor' }, { id: 't', label: target, unit: tu, effect_unit: au, kind: 'outcome' }],
+      sentence, [], { directSignRefused: refused });
+    expect([...bound]).toEqual([[0, sentence]]);
+    expect(refused).toEqual([]);
   });
 });

@@ -132,7 +132,8 @@ export function bindStatedLinkSizes(
     // ⛔ A direct bind carries the user's quote, so its drawn sign must not be the other way from the sentence (DL #2644 pilot).
     // Against the TARGET's change for the stated source change (its signed amount), never the coefficient (Codex r1 F5).
     const saysOnTarget = through === undefined ? directSignTheSentenceSays(sentences[p.sentence]!, nodeById.get(l.to)?.label) : null;
-    if (saysOnTarget !== null && (saysOnTarget !== Math.sign(d.amount) || sourceDirectionSaid(sentences[p.sentence]!) !== Math.sign(d.per_source_change))) {
+    if (saysOnTarget !== null && (saysOnTarget !== Math.sign(d.amount)
+      || sourceDirectionSaid(sentences[p.sentence]!, nodeById.get(l.from)?.label) !== Math.sign(d.per_source_change))) {
       directSignRefused?.push({ link: p.link, sentence: sentences[p.sentence]! });
       return false;
     }
@@ -168,7 +169,7 @@ export function bindStatedLinkSizes(
     // The verb says how Q moves for the source change the sentence states: the target's own change (its amount, signed),
     // never the coefficient, so "a £1 price REDUCTION increases …" reads + (Codex buddy r1 F5).
     const said = signTheSentenceSays(sentence);
-    if (said !== Math.sign(d.amount) * through.sign || sourceDirectionSaid(sentence) !== Math.sign(d.per_source_change)) {
+    if (said !== Math.sign(d.amount) * through.sign || sourceDirectionSaid(sentence, nodeById.get(l.from)?.label) !== Math.sign(d.per_source_change)) {
       signRefused?.push({ through, said });
       return undefined;
     }
@@ -276,11 +277,15 @@ export function directSignTheSentenceSays(sentence: string, targetLabel: string 
  * ⛔ WHICH WAY THE SENTENCE MOVES ITS SOURCE (Codex buddy r2 P1, #2644). The quote matcher reads a source's numeral, never
  * its polarity, so "A £1 price RISE adds 2 subscribers" matched a link drawn per −£1. Before the verb, a word that says
  * the source goes DOWN ("reduction", "cut", "lower", "lowering", "decrease", "drop", "fall", "discount") is −1; anything
- * else, a counting "each"/"every" or a "rise", is +1. Read before the verb only, so "… lowers churn" is the target's.
+ * else, a counting "each"/"every" or a "rise", is +1. Read before the verb only, so "… lowers churn" is the target's, and
+ * never in the SOURCE's own name: "each 1% loyalty DISCOUNT reduces churn" moves ‘Loyalty discount’ UP (Desk 6b, r2).
  */
 const SOURCE_GOES_DOWN = /\b(?:reductions?|cut|cutting|lower|lowering|decrease|decreasing|drop|fall|discount)\b/iu;
 const VERB_AT = new RegExp(`${SAYS_ADDS.source}|${SAYS_REMOVES.source}|\\b(?:loses|(?:would|will)\\s+lose)\\b`, 'iu');
-export function sourceDirectionSaid(sentence: string): 1 | -1 {
+export function sourceDirectionSaid(sentence: string, sourceLabel?: string): 1 | -1 {
   const verb = sentence.search(VERB_AT);
-  return SOURCE_GOES_DOWN.test(verb === -1 ? sentence : sentence.slice(0, verb)) ? -1 : 1;
+  const own = (sourceLabel ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
+  const before = (verb === -1 ? sentence : sentence.slice(0, verb)).split(/([^\p{L}\p{N}]+)/u)
+    .map((w) => (own.includes(w.toLowerCase()) ? ' ' : w)).join('');
+  return SOURCE_GOES_DOWN.test(before) ? -1 : 1;
 }
