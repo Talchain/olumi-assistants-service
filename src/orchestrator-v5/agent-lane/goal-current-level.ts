@@ -1285,7 +1285,7 @@ export async function applyGoalCurrentLevel(
   };
   const changeReading = fromChange ? NodeV3.shape.unit_reading.safeParse(carriedChange?.adopted_unit_reading) : undefined;
   const changeAdoptionHolds = (unit: string): boolean => {
-    const again = levelUnitForChangeGoal(unit, goal as unknown as Record<string, unknown>, approved.raw);
+    const again = levelUnitForChangeGoal(unit, goal, approved.raw);
     const frame = firstFrameFor(unit);
     return again.ok && again.adopted === unit && frame !== undefined && os.cap === frame.goal_threshold_cap
       && stableStringify(frame) === stableStringify(carriedChange?.first_frame)
