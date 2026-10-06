@@ -188,7 +188,7 @@ const F1_F2_PLANNING = [
   ...['assumption', 'estimate', 'input', 'setting']
     .map((head) => `We ended up with the highest-cost ${head}.`),
   ...['best', 'top', 'greatest', 'largest', 'biggest', 'strongest'].flatMap((word) =>
-    ['guess', 'case', 'estimate', 'practice', 'scenario', 'way', 'option to test', 'next step', 'question']
+    ['guess', 'case', 'estimate', 'practice', 'scenario', 'way', 'next step', 'question']
       .map((noun) => `We ended up with the ${word} ${noun}.`)),
 ];
 describe('F1/F2: result claims and planning contrasts', () => {

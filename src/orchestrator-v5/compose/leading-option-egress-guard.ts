@@ -149,7 +149,7 @@ const LADDER_PASSIVE_SRC = String.raw`(?:given|produced|delivered|yielded|genera
 // ("highest-cost assumption"). The same non-result nouns guard every ladder superlative.
 const RESULT_METRIC_MODIFIER_SRC = String.raw`(?:revenue|mrr|arr|margin|profit|return|growth|churn|retention|sales|income|conversion)\b|cost\s+(?!(?:assumptions?|inputs?|estimates?|settings?)\b)`;
 const LADDER_SUPERLATIVE_SRC = String.raw`(?:highest|lowest|best|top|greatest|largest|biggest|strongest)`;
-const NOT_A_RESULT_SRC = String.raw`(?!-(?!${RESULT_METRIC_MODIFIER_SRC})[a-z]+\s+(?:paths?|routes?|steps?|checklists?|assumptions?|inputs?|estimates?|settings?|tests?)\b|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds|assumptions?|inputs?|estimates?|guess(?:es)?|cases?|practices?|scenarios?|ways?|option\s+to\s+test|next\s+steps?|questions?)\b)`;
+const NOT_A_RESULT_SRC = String.raw`(?!-(?!${RESULT_METRIC_MODIFIER_SRC})[a-z]+\s+(?:paths?|routes?|steps?|checklists?|assumptions?|inputs?|estimates?|settings?|tests?)\b|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds|assumptions?|inputs?|estimates?|guess(?:es)?|cases?|practices?|scenarios?|ways?|next\s+steps?|questions?)\b)`;
 /**
  * A STATISTIC comparison ("produced the highest average outcome", "has the lowest modelled median") is v6 class C2 when
  * the sentence names its metric scope, and the served agent lane keeps it by that scope (`blankScopedMetricComparison`).
@@ -167,7 +167,8 @@ const GAVE_THE_EXTREME_RE = new RegExp(
     // "the most|least {q}", only with a run share: "X gave the most MRR in 62% of runs".
     String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:most|least)\b[^.;:!?\n]{0,60}?${RUN_SHARE_SRC}`,
     // Fronted with a run share: "The highest {q} came from X in 81% of runs".
-    String.raw`\b${LADDER_SUPERLATIVE_SRC}\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,80}?${RUN_SHARE_SRC}`,
+    // highest/lowest keep their unguarded run-share form (DL review 6 Oct); only the NEW superlatives take the noun guard.
+    String.raw`\b(?:(?:highest|lowest)\b|(?:best|top|greatest|largest|biggest|strongest)\b${NOT_A_RESULT_SRC})[^.;:!?\n]{0,80}?${RUN_SHARE_SRC}`,
     // Fronted, no share: "The lowest churn came from X" / "The highest MRR was produced by X" / "The most MRR came from X".
     String.raw`\bthe\s+(?:${LADDER_SUPERLATIVE_SRC}|(?:most|least)(?!\s+(?:of|runs?|support)\b))\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+${LADDER_PASSIVE_SRC}\s+by)\b`,
     // Predicative result first: "The best MRR is what X ends up with".
@@ -216,13 +217,13 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'the_lead', re: /\bthe\s+lead\b/i },
   { code: 'which_option_leads', re: /\bwhich\s+option\s+leads\b/i },
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
-  { code: 'best_option', re: /\bbest\s+option\b(?!\s+to\s+test\b)/i },
+  { code: 'best_option', re: /\bbest\s+option\b/i },
   { code: 'winner', re: /\bwinners?\b/i },
   // DL 0df0e1 follow-up (#2639 family): the adverb slot ("is just / a little / still ahead") the band list could not
   // see. NO timeline exemption ("ahead of schedule / plan / time"): a context-free reader cannot tell an option named
   // "Plan" from a plan (Codex buddy #2646 r1 F3), so those stay caught exactly as on the base.
   { code: 'ahead', re: /\b(?:is|are|was|were)\s+(?:(?:[a-z]+ly|just|well|still|now|a\s+little|a\s+bit)\s+)?ahead\b/i },
-  { code: 'top_choice', re: /\btop\s+(?:choice|option)\b(?!\s+to\s+test\b)/i },
+  { code: 'top_choice', re: /\btop\s+(?:choice|option)\b/i },
   /**
    * SECOND RECORDED DIVERGENCE from the walk's matcher — and the one that
    * makes this list able to see the defect it was extended for.

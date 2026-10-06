@@ -68,7 +68,7 @@ const F1_F2_PLANNING = [
   // So planning phrases with those four words are rowed only against the ladder (lead-ladder-egress.test.ts); here only
   // the NEW ladder superlatives are rowed.
   ...['greatest', 'largest', 'biggest'].flatMap((word) =>
-    ['guess', 'case', 'estimate', 'practice', 'scenario', 'way', 'option to test', 'next step', 'question']
+    ['guess', 'case', 'estimate', 'practice', 'scenario', 'way', 'next step', 'question']
       .map((noun) => `We ended up with the ${word} ${noun}.`)),
 ];
 
