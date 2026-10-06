@@ -231,4 +231,41 @@ describe('withoutAskedQuestion (the one rule)', async () => {
     const line = 'Is that per month? I need a size. What is it?';
     expect(withoutAskedQuestion(line, ['What is it?'])).toBe('Is that per month? I need a size.');
   });
+
+  // Codex r1 on #2664 P1: a reply that MENTIONS the question in quotes did not ask it. CONTROL: the same words asked.
+  it.each([
+    ['avoids asking it, in quotes', `I will avoid asking “${QUESTION}” until we agree the units.`],
+    ['won\'t ask it again, in quotes', `I won’t ask “${QUESTION}” again.`],
+    ['shouldn\'t keep asking it, quoted at the end', `I shouldn’t keep asking “${QUESTION}”`],
+    ['the words inside another word', `Something${QUESTION}`],
+  ] as const)('⭐ never asked, only mentioned (%s) → the question is still asked', (_n, reply) => {
+    expect(withoutAskedQuestion(SAY, [reply])).toBe(SAY);
+  });
+  it.each([
+    ['asked as its own sentence', `I need a size for that link. ${QUESTION}`],
+    ['asked after a colon', `One question: ${QUESTION}`],
+    ['asked on its own line, in bold', `Thanks.\n**${QUESTION}**`],
+  ] as const)('CONTROL: asked (%s) → not asked again', (_n, reply) => {
+    expect(withoutAskedQuestion(SAY, [reply])).toBe(REASON);
+  });
+
+  // Codex r1 on #2664 P2: a reason in the question's own sentence (the identity ask) is still said once the question was.
+  const IDENTITY = 'I can’t put “Churned customers” on the same scale as “MRR lost to price-driven churn”: what unit is it in?';
+  it('⭐ a colon-joined ask, asked before → its reason is still said, as its own sentence', () => {
+    expect(withoutAskedQuestion(IDENTITY, [`Your results are ready. ${IDENTITY}`]))
+      .toBe('I can’t put “Churned customers” on the same scale as “MRR lost to price-driven churn”.');
+  });
+  it('CONTROL: the colon-joined ask not asked before → the line unchanged', () => {
+    expect(withoutAskedQuestion(IDENTITY, ['Your results are ready.'])).toBe(IDENTITY);
+  });
+
+  // Codex r1 on #2664 P2: a dotted abbreviation in a label is not a sentence end, so the question is never cut to a fragment.
+  const US_QUESTION = 'Roughly how much does U.S. MRR change, in £/month, when Price rise rises by 1%?';
+  it('⭐ a label holding "U.S.": ANOTHER MRR question asked before → the line unchanged (no fragment matched)', () => {
+    const other = 'Roughly how much does EU MRR change, in £/month, when Price rise rises by 1%?';
+    expect(withoutAskedQuestion(`${REASON} ${US_QUESTION}`, [other])).toBe(`${REASON} ${US_QUESTION}`);
+  });
+  it('CONTROL: the same "U.S." question asked before → the reason alone, nothing left dangling', () => {
+    expect(withoutAskedQuestion(`${REASON} ${US_QUESTION}`, [US_QUESTION])).toBe(REASON);
+  });
 });

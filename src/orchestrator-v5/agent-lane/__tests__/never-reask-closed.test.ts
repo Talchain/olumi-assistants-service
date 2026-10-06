@@ -38,8 +38,17 @@ const grouped = (said: string, quote: string) => world(C).caps.proposeLinkEffect
 const DENIALS = [
   ['the no-change answer', 'It doesn’t change.', 'It doesn’t change'],
   ['a straight-quote no-change answer', "It doesn't change.", "It doesn't change"],
-  ['a denied figure (PR Review\'s row)', 'Every £1 on the Pro price does not lose us 50 paying subscribers.', 'Every £1 on the Pro price does not lose us 50 paying subscribers'],
 ] as const;
+/**
+ * Codex r1 on #2664 P1: a denial that WRITES A FIGURE is a correction or a denied figure, not "it doesn't change". It closes
+ * nothing: it keeps its ask, exactly as before FU-1. PRECONDITION on each: the binder still reads a denial.
+ */
+const FIGURED_DENIALS = [
+  ['a corrected figure', 'Every £1 on the Pro price loses us 50 paying subscribers, not 20.', 'Every £1 on the Pro price loses us 50 paying subscribers, not 20'],
+  ['a denied figure (PR Review\'s row)', 'Every £1 on the Pro price does not lose us 50 paying subscribers.', 'Every £1 on the Pro price does not lose us 50 paying subscribers'],
+  ['figure-free words quoted out of a correction', 'It doesn’t change by 50, more like 20.', 'It doesn’t change'],
+] as const;
+const FIGURES_ASK = 'How much does “Pro plan price” move “Pro plan paying subscribers”, using the figures you wrote?';
 
 describe('FU-1: a denial ends the ask — nothing recorded, nothing asked, the link stays', () => {
   it.each(DENIALS)('single link: %s → the stays words, no question', async (_n, said, quote) => {
@@ -61,6 +70,20 @@ describe('FU-1: a denial ends the ask — nothing recorded, nothing asked, the l
 });
 
 describe('CONTROLS: what the user has NOT closed still gets its ask', () => {
+  it.each(FIGURED_DENIALS)('⭐ single link: %s → still asked, never "stays as it is"', async (_n, said, quote) => {
+    const r = await single(said, quote);
+    expect(r.ok, JSON.stringify(r)).toBe(false);
+    expect(r.why, 'precondition: the binder reads a denial').toBe('denied');
+    expect(String(r.detail)).toContain(FIGURES_ASK);
+    expect(String(r.detail)).not.toContain('stays as it is');
+  });
+  it.each(FIGURED_DENIALS)('⭐ links: [one]: %s → still asked, never "stays as it is"', async (_n, said, quote) => {
+    const r = await grouped(said, quote);
+    expect(r.ok, JSON.stringify(r)).toBe(false);
+    expect(r.refusal).toBe('not_the_users_statement');
+    expect(String(r.detail)).toContain(FIGURES_ASK);
+    expect(String(r.detail)).not.toContain('stays as it is');
+  });
   it.each([
     ['a question (single)', single, 'Does every £1 on the Pro price lose us 50 paying subscribers?', 'Does every £1 on the Pro price lose us 50 paying subscribers'],
     ['a question (links)', grouped, 'Does every £1 on the Pro price lose us 50 paying subscribers?', 'Does every £1 on the Pro price lose us 50 paying subscribers'],

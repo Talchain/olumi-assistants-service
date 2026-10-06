@@ -2021,6 +2021,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // MC D1 (c): the same #416 ask the live Run turn said, from the same readback.
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           if (askNow !== null) owedNow.push(askNow);
+          // ⭐ NEVER RE-ASK (G1b d4): the live Run turn's own rule, on the answers before the turn being replayed, at the live
+          // turn's own stage: before the root line and the basis, which the live turn adds after it (Codex r1 on #2664 P2).
+          askEachOnce(owedNow, await repliesToCheckAsks(owedNow, store, scenarioId, turnId));
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
           const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
           if (rootNow !== null) owedNow.push(rootNow);
@@ -2030,8 +2033,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               analysedOptionIds: analysedOptionIds(state.analysisResult) });
             if (basis !== null) owedNow.push(basis);
           }
-          // ⭐ NEVER RE-ASK (G1b d4): the live Run turn's own rule, on the answers before the turn being replayed.
-          askEachOnce(owedNow, await repliesToCheckAsks(owedNow, store, scenarioId, turnId));
           const withoutAsks = withDisclosures(RUN_RESULT_READY_TEXT, owedNow);
           const lines = await decisionLinesAskedOnce(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks }, store, scenarioId, turnId);
           let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow, ...lines]);

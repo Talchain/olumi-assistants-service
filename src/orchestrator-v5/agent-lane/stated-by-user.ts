@@ -1139,6 +1139,14 @@ export function linkEffectQuoteContextMiss(quote: string, userText: string): 'qu
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
 }
 /**
+ * ⭐ FU-1 (Codex r1 on #2664 P1): a DENIAL that writes no figure, in the quote or in the user's sentence around it, is a
+ * no-change answer ("It doesn't change."), which closes the ask. A denial that writes one is a correction ("… loses us 50
+ * paying subscribers, not 20") or a denied figure ("… does not lose us 50"), and still gets its ask.
+ */
+export function deniesWithoutAFigure(quote: string, userText: string): boolean {
+  return figuresWrittenIn(quote) === 0 && enclosingSentences(userText, quote).every((sentence) => figuresWrittenIn(sentence) === 0);
+}
+/**
  * RT-19 (the no-direct-link guard, no-direct-link.ts): whether ONE clause of the user's message states an EFFECT between two
  * labels, by the binder's own readers only: its whole sentence is no question or denial (`linkEffectQuoteContextMiss`), it
  * names both labels (`names`, the caller's label matcher), and it writes at least TWO figures as changes, by the binder's
