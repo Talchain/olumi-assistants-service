@@ -1,4 +1,4 @@
-import { unsizedPathLeaderWithheld } from '../agent-lane/unsized-path-cause.js';
+import { goalFiguresLeaderWithheld } from '../../orchestrator/context/option-result-source.js';
 /**
  * AN ANALYSIS NOBODY ASKED FOR MAY NOT ASSERT A QUANTIFIED RESULT.
  *
@@ -288,7 +288,7 @@ type AnalysisResultBlock = Extract<OlumiResponse['blocks'][number], { type: 'ana
  */
 export function mayPresentLeaderClaimForFact(fact: RunAnalysisHandlerFact): boolean {
   return mayNameLeadingOptionForFact(fact) && wasAnalysisRequestedByUser(fact)
-    && !unsizedPathLeaderWithheld(fact.result);
+    && !goalFiguresLeaderWithheld(fact.result);
 }
 
 /**

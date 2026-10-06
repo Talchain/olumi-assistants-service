@@ -8,6 +8,10 @@
 import { describe, expect, it } from 'vitest';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
+import { readFileSync } from 'node:fs';
+import { placeholderAskWords } from '../goal-certainty.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { assignEntityRefs } from '../../graph/entity-refs.js';
 
 type Rec = Record<string, any>;
 const GOAL = { id: 'mrr', kind: 'goal', label: 'MRR', observed_state: { value: 0.5, raw_value: 100000, cap: 200000, unit: '£/month', source: 'user_override' } };
@@ -32,12 +36,12 @@ function sizedParentGraph(): Rec {
       per_source_change: 1000, per_source_change_unit: '£/month', strength_mean: beta, strength_mean_frame: 'edge_strength' } } },
   placeholder('cost', 'mrr', -0.3)] };
 }
-const warn = (g: Rec, option: string, productBlocks = false): Rec =>
-  placeholderGoalWarning(g, unsizedLeaderGoalPaths(g, [option]), 'GOAL_FIGURES_PLACEHOLDER_PATH', productBlocks) as Rec;
+const warn = (g: Rec, option: string, productBlocks = false, opts: { gaugeAsk?: true } = {}): Rec =>
+  placeholderGoalWarning(g, unsizedLeaderGoalPaths(g, [option]), 'GOAL_FIGURES_PLACEHOLDER_PATH', productBlocks, opts) as Rec;
 
 describe('first_ask: the one step the placeholder withhold asks first, typed', () => {
-  it('(B) gauge (Integrator 37\'s graph): the end-to-end question price → MRR through strain — never strain → MRR alone', () => {
-    const w = warn(gaugeGraph(), 'o-raise');
+  it('(B) gauge, where its ask is lifted (RT-18 opts.gaugeAsk; cut-6 lift path): the end-to-end question price → MRR through strain', () => {
+    const w = warn(gaugeGraph(), 'o-raise', false, { gaugeAsk: true });
     expect(w.first_ask).toEqual({ kind: 'gauge', from: 'price', through: 'strain', to: 'mrr' });
     expect(w.links[0]).not.toEqual({ from: 'price', to: 'strain' }); // the nearest-goal link the panel used to name is strain → MRR
   });
@@ -94,5 +98,29 @@ describe('first_ask: the one step the placeholder withhold asks first, typed', (
     expect(w.first_ask).toEqual({ kind: 'link', from: 'price', to: 'mrr' });
     expect(w.acceptable_links).toEqual([{ from: 'price', to: 'mrr' }]);
     expect(w.message).toContain('\u2018Pro plan price\u2019');
+  });
+
+  // ⭐ DL 0df0e1 CR on #2635 (6008994949) + Review Desk 6b: rebased on RT-18 (#2641), the gauge question is gated OFF by
+  // default, so the panel must never name a gauge step the chat does not ask. `first` is set only AFTER the gate.
+  const DENTAL = (): Rec => assignEntityRefs(projectGraphForPersistence(JSON.parse(readFileSync(new URL('./fixtures/rt18-dental-74cc7aea-graph.json',
+    import.meta.url), 'utf8'))), { nodes: [], edges: [] }).graph as Rec;
+  const GAUGE_PATH = [{ from: 'missed_appointment_fee', to: 'fee_related_patient_dissatisfaction' }, { from: 'fee_related_patient_dissatisfaction', to: 'no_shows' }];
+
+  it('DENTAL (RT-18 gate on): first_ask is never `gauge`; if anything is asked first it is a link the offer carries', () => {
+    const w = placeholderGoalWarning(DENTAL(), [{ option_id: '20_no_show_fee', links: GAUGE_PATH }], 'GOAL_FIGURES_PLACEHOLDER_PATH') as Rec;
+    expect(w.first_ask?.kind).not.toBe('gauge');
+    if (w.first_ask !== undefined) {
+      expect(w.first_ask.kind).toBe('link');
+      expect(w.acceptable_links).toContainEqual({ from: w.first_ask.from, to: w.first_ask.to });
+    }
+  });
+  it('the gated early return (`{ gaugeLinks }`) carries no `first`: the words ask nothing, so nothing is asked first', () => {
+    const words = placeholderAskWords(DENTAL(), GAUGE_PATH);
+    expect(words?.gaugeLinks.size).toBe(2);
+    expect(words).not.toHaveProperty('first');
+    expect(words?.message).toBeUndefined();
+  });
+  it('CONTRAST: the gauge graph with the ask NOT lifted → never `gauge` either', () => {
+    expect(warn(gaugeGraph(), 'o-raise').first_ask?.kind).not.toBe('gauge');
   });
 });

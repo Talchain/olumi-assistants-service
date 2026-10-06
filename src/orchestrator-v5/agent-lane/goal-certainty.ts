@@ -505,6 +505,8 @@ export function placeholderGoalWarning(
   paths: readonly PlaceholderGoalPath[],
   code: string,
   productBlocks = false,
+  /** RT-18: the (B) gauge ask is gated off in production (cut 5); only its own rows opt in, so cut 6 can lift it tested. */
+  opts: { readonly gaugeAsk?: true } = {},
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }>; first_ask?: PlaceholderFirstAsk } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
@@ -531,7 +533,7 @@ export function placeholderGoalWarning(
   // ⭐ NO DEAD END (MC 21's chain; Science #87 6006425419, 6006548763, 6006685510): every withheld path gets an ask the
   // user can answer in one sentence. A level-less mediator is asked END TO END (the gauge) or in the unit its sized parent
   // fixes; a goal with no frame is asked its level first. Pure wording + offer: the links and the withhold are unchanged.
-  const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered);
+  const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered, opts);
   const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
@@ -563,13 +565,13 @@ export function placeholderGoalWarning(
  * The ONE source of a withhold's no-dead-end words, for the warning AND the Agent's withheld reply (R8: one grammar for the
  * warning, summary, reply and P5; Codex/R8-6: the reply re-said the generic sentence). The AIQ guessed-link rule applies.
  */
-export function placeholderAskWords(graph: unknown, links: ReadonlyArray<{ from: string; to: string }>): { message: string; gaugeLinks: Set<string>; first: PlaceholderFirstAsk } | undefined {
+export function placeholderAskWords(graph: unknown, links: ReadonlyArray<{ from: string; to: string }>, opts: { readonly gaugeAsk?: true } = {}): { message?: string; gaugeLinks: Set<string>; first?: PlaceholderFirstAsk } | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const limitIds = new Set((isRec(graph) && Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
     .filter(isRec).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'));
   const guessed = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
-  return noDeadEndAsks(graph, links, (id) => text(byId.get(id)?.label) ?? id, guessed);
+  return noDeadEndAsks(graph, links, (id) => text(byId.get(id)?.label) ?? id, guessed, opts);
 }
 
 /**
@@ -588,7 +590,9 @@ export function noDeadEndAsks(
   labelOf: (id: string) => string,
   /** AIQ 5903604206 / 5903627210: a guessed link out of a node the user's limit watches is said, never asked. */
   guessed: (l: { from: string; to: string }) => boolean = () => false,
-): { message: string; gaugeLinks: Set<string>; first: PlaceholderFirstAsk } | undefined {
+  opts: { readonly gaugeAsk?: true } = {},
+  // `first` is absent on RT-18's gated early return (`{ gaugeLinks }`): the words ask nothing, so nothing is asked first.
+): { message?: string; gaugeLinks: Set<string>; first?: PlaceholderFirstAsk } | undefined {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || links.length === 0) return undefined;
   const nodes = graph.nodes.filter(isRec);
   const edges = graph.edges.filter(isRec);
@@ -632,6 +636,14 @@ export function noDeadEndAsks(
     if (r.via !== 'gauge' || r.stored === true || !links.some((l) => l.from === m || l.to === m)) continue;
     const lever = gaugeLever(edges, m, r, unitOfNode);
     if (lever === undefined || guessed({ from: lever, to: m }) || guessed({ from: m, to: r.child })) continue;
+    // The gauge path's links are never offered one at a time (a lever → M size alone cannot lift the withhold): kept
+    // whether or not the question below is asked (Codex r1 on #2641, P2).
+    for (const k of [key(lever, m), key(m, r.child)]) gaugeLinks.add(k);
+    // ⛔ RT-18 GATE (DL 0df0e1, 6 Oct, cut 5): the (B) end-to-end QUESTION stays OFF until its answer has a working path. On
+    // a served dental draft every answer was refused (the Agent sizes lever → goal, which the model does not hold; the
+    // through-M answer reads "% of appointments" as another quantity). A dead end with a cause beats a false instruction:
+    // the path is said in the unsized-link sentence. Cut 6 lifts this with the end-to-end retarget.
+    if (opts.gaugeAsk !== true) continue;
     const leverUnit = unitOfNode(lever)!;
     // ⛔ NEVER DOUBLE-COUNTED, AND NEVER ANOTHER QUANTITY (Science 6006425419; Codex r1 P2): only the lever's OTHER
     // user-sized links that lie on a goal path are "already given". One stated in the asked unit is quoted; otherwise the
@@ -648,7 +660,7 @@ export function noDeadEndAsks(
     sentences.push(fitted(() => `This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which nobody has set yet.`
       + ` Roughly how much would a ${oneOf(leverUnit)} rise in ${q(lever)} change ${q(r.child)} that way${onTop()}, in ${r.unit}?`
       + ' A best guess and a range is fine.'));
-    for (const k of [key(lever, m), key(m, r.child)]) { covered.add(k); gaugeLinks.add(k); }
+    for (const k of [key(lever, m), key(m, r.child)]) covered.add(k);
   }
   for (const l of links) {
     const r = readings.get(l.from);
@@ -661,7 +673,7 @@ export function noDeadEndAsks(
       + ` Roughly how much does each ${oneOf(r.unit)} of ${q(l.from)} change ${q(l.to)}, in ${childUnit}?`));
     covered.add(key(l.from, l.to));
   }
-  if (sentences.length === 0) return undefined;
+  if (sentences.length === 0) return gaugeLinks.size > 0 ? { gaugeLinks } : undefined;
   const rest = links.filter((l) => !covered.has(key(l.from, l.to)));
   if (rest.length > 0) sentences.push(unsizedLinkSentence(rest.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) }))));
   return { message: fit(sentences) || sentences[0]!, gaugeLinks, first: first! };

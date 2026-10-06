@@ -237,6 +237,14 @@ export const WITHHELD_UNREQUESTED_ANALYSIS = 'unrequested_analysis_withheld';
 export const WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN = 'nonlinear_identity_sign_unproven';
 /** The Run withheld comparison through a caller-identified goal link nobody sized. */
 export const WITHHELD_GOAL_PATH_UNSIZED = 'goal_path_unsized';
+/**
+ * ⭐ MC D1 (DL 6 Oct; Acceptance rehearsal 9 on CEE 1c88f3c): NO RUN PRODUCED A RESULT (`never_run`, `running`, `refused`,
+ * `blocked`), so nothing was checked. The chain's default used to name it `constraint_verdict_withheld` — a limit verdict
+ * on a brief with no limit, for a Run that had returned a question. WE DID NOT LOOK — so it classifies `not_evaluated`.
+ */
+export const WITHHELD_NO_RESULT = 'analysis_no_result';
+/** The run states that hold no result: ONE definition, read by the claim here and by the reply's closing. */
+export const NO_RESULT_RUN_KINDS: ReadonlySet<string> = new Set(['never_run', 'refused', 'blocked', 'running']);
 
 /**
  * ⛔ P1-d (AI Quality #70 5850056041, DL 5850069309) — THE RUN IS OUT OF DATE, and no caller stated why its leader
@@ -339,6 +347,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
   [WITHHELD_RUN_IDENTITY_CONFLICT]: 'not_evaluated',
   [WITHHELD_RUN_OUT_OF_DATE]: 'not_evaluated',
+  [WITHHELD_NO_RESULT]: 'not_evaluated',
 };
 
 /**
@@ -1010,7 +1019,10 @@ export function composeLeaderClaim(
     // supplied only when the constraint verdict itself permitted — so `constraint_verdict_withheld`
     // keeps the field while a limit withholds (AI Quality option (i), #70 5842615260).
     claim.withheld_reason = !entitled
-      ? input.withheldBecauseUnrequested === true
+      // MC D1: no result → nothing was checked, never a limit verdict (and no cause read off a run that did not run).
+      ? NO_RESULT_RUN_KINDS.has(runState.kind)
+        ? WITHHELD_NO_RESULT
+      : input.withheldBecauseUnrequested === true
         ? WITHHELD_UNREQUESTED_ANALYSIS
         // F-LIMIT: what every option does against a limit holds whatever the ranking — but only of the revision the
         // run analysed, so never on an out-of-date run.
