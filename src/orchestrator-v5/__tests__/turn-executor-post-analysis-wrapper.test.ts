@@ -646,8 +646,7 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
 
     // The deterministic flip composer output — leading option A at 62% — must
     // be present, and the generic apology must NOT be the answer.
-    expect(result.response.assistant_text).toContain('scored highest');
-    expect(result.response.assistant_text).toContain('62%');
+    expect(result.response.assistant_text).toContain("In this model, 'A' was supported by 62% of runs.");
     expect(result.response.assistant_text).not.toContain("couldn't complete that turn");
 
     // Ops signal preserved: bounded fallback still fired, cause intact.
