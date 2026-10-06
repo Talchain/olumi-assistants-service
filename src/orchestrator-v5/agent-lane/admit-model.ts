@@ -1436,13 +1436,29 @@ function markProductIdentities(
   }
   const levelRefused = new Map<CandidateIdentity, string[]>();
   const levelled = (id: string): boolean => { const t = todayOf(id); return t !== undefined && t !== 0; };
+  /**
+   * ⭐ AN EVIDENCED CREATION-0 IS A LEVEL WHEN NOTHING STATES THE PRODUCT'S OWN (Science d5 #87 6008551439 (A), amending
+   * 6006376889 (b)). The refusal above exists because ISL withholds a product over a missing or zero part, so PLoT then
+   * withholds every option's goal chance with no question (R3 5898443502). ISL withholds a ZERO part only against a
+   * stated level on the product (its rule 3, AIQ #72 5881596876: "with no stated target … a zero operand is an ordinary
+   * level"). So a part at 0 today, or with no level, that an option CREATES (`optionsCreating`: its own creation verb,
+   * and its path reaches the part) is not refused under a product whose node states no level; construction holds a
+   * level-less one at 0 (`created_part_zero`, below), and ISL works the product out exactly.
+   */
+  const statusQuoOptions = new Set(nodes.filter((n) => n.kind === 'option' && (declaredStatusQuo.has(n.id) || n.is_baseline === true)).map((n) => n.id));
+  const createdAtZero = (part: string, d: CandidateIdentity): boolean => {
+    const t = todayOf(part);
+    const product = resolve(d.outcome);
+    if ((t !== undefined && t !== 0) || product === undefined || todayOf(product) !== undefined) return false;
+    return optionsCreating(nodes, edges, part, statusQuoOptions).length > 0;
+  };
   for (let changed = true; changed;) {
     changed = false;
     for (const d of declared) {
       if (d.provenance === 'explicit' || d.operation !== 'product' || levelRefused.has(d)) continue;
       const parts = [...new Set((Array.isArray(d.factors) ? d.factors : []).map((f) => resolve(f)).filter((id): id is string => id !== undefined))];
       const missing = parts.filter((id) => {
-        if (levelled(id)) return false;
+        if (levelled(id) || createdAtZero(id, d)) return false;
         if (kindOf.get(id) === 'factor') return true;
         // An outcome counts only when a product refused here was to give it its level: one no product declares is left
         // as before (the served MRR "Pro paying subscribers", journey C's tally), unmeasured against ISL.

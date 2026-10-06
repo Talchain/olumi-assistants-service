@@ -53,6 +53,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
+import { withRateCountProducts } from '../rate-count-product.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -1441,8 +1442,10 @@ export async function buildModelFromBrief(
     const gap = withoutGapResidual(c1, brief);
     const c = gap?.model ?? c1;
     const residual = gap?.residual ?? null;
-    const minted = withReconcilingProductIdentity(c, brief);
-    return minted !== c ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(c, brief), dropped, residual };
+    // (A) A rate × count drawn as two added links into an outcome is Olumi's product of the two (Science 6008551439 (A)).
+    const products = withRateCountProducts(c, brief).model;
+    const minted = withReconcilingProductIdentity(products, brief);
+    return minted !== products ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(products, brief), dropped, residual };
   };
   const firstIdentity = mintOrFold(candidate);
   let foldedCarrier = firstIdentity.folded;
