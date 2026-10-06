@@ -1696,7 +1696,7 @@ export async function buildModelFromBrief(
             || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
             || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
           // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
-          chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted.edges)) &&
+          chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted.edges, firstCandidate)) &&
           // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
           (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
           // The collapsed quantity is the one risk the chain issue asks the retry to replace.
@@ -1719,6 +1719,12 @@ export async function buildModelFromBrief(
           // What the first draft took out stays said; the retry's own are added once.
           mechanismsUnmodelled = [...mechanismsUnmodelled, ...retryUnsupported.mechanisms.filter((m) => !mechanismsUnmodelled.some((x) => canonicalLabel(x.label) === canonicalLabel(m.label)))];
           costsOffRevenue = [...costsOffRevenue, ...retryUnsupported.costs.filter((c) => !costsOffRevenue.some((x) => canonicalLabel(x.cost) === canonicalLabel(c.cost)))];
+          // ⛔ Never said as not modelled when the adopted model carries it (Codex #2662 r1 P2-4: a retry may draw it again as
+          // the brief's), nor a cost as off the revenue when the adopted model still links it in.
+          const adoptedLabels = new Set([...retryCandidate.factors, ...retryCandidate.risks, ...retryCandidate.outcomes].map((q) => canonicalLabel(q.label)));
+          mechanismsUnmodelled = mechanismsUnmodelled.filter((m) => !adoptedLabels.has(canonicalLabel(m.label)));
+          costsOffRevenue = costsOffRevenue.filter((c) => !retryCandidate.links.some((l) => canonicalLabel(l.from) === canonicalLabel(c.cost)
+            && canonicalLabel(l.to) === canonicalLabel(retryCandidate.goal.metric)));
           size = retrySize;
           // ⛔ An adopted retry must not erase what the first pass had to disclose
           // (review 5822933692, B3): a retry that echoes the prepared candidate

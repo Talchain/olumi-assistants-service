@@ -15,7 +15,7 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { targetTestabilityOf } from '../../admission/target-testability.js';
-import { collapsedChains, withoutUnsupportedMechanisms } from '../unsupported-mechanism.js';
+import { collapsedChains, costOffRevenueLine, withoutUnsupportedMechanisms } from '../unsupported-mechanism.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
@@ -231,16 +231,17 @@ describe('rule 3: a cost quantity never enters a revenue goal as accounting; a c
   });
 });
 
+/** The retry the issue asks for: ‘Customers lost to price rise’ counted, one link per user statement, no product. */
+const usersChain = (x: Rec): Rec => ({
+  ...x,
+  risks: x.risks.filter((r: Rec) => r.label !== 'MRR lost to price-driven churn'),
+  outcomes: [...x.outcomes, { label: 'Customers lost to price rise', provenance: 'explicit', unit: 'customers', plausible_max: 400 }],
+  links: [...x.links.filter((l: Rec) => l.from !== 'MRR lost to price-driven churn' && l.to !== 'MRR lost to price-driven churn'),
+    L('Price rise', 'Customers lost to price rise', 'positive', 2, 1, 'explicit'),
+    L('Customers lost to price rise', GOAL, 'negative', -300, 1, 'explicit')],
+});
+
 describe('rule 2 (served d4): the user\'s chain collapsed into Olumi\'s £600 is asked of the retry, drawn as the user wrote it', () => {
-  /** The retry the issue asks for: ‘Customers lost to price rise’ counted, one link per user statement, no product. */
-  const usersChain = (x: Rec): Rec => ({
-    ...x,
-    risks: x.risks.filter((r: Rec) => r.label !== 'MRR lost to price-driven churn'),
-    outcomes: [...x.outcomes, { label: 'Customers lost to price rise', provenance: 'explicit', unit: 'customers', plausible_max: 400 }],
-    links: [...x.links.filter((l: Rec) => l.from !== 'MRR lost to price-driven churn' && l.to !== 'MRR lost to price-driven churn'),
-      L('Price rise', 'Customers lost to price rise', 'positive', 2, 1, 'explicit'),
-      L('Customers lost to price rise', GOAL, 'negative', -300, 1, 'explicit')],
-  });
   it('PRECONDITION (served): the first draft is never cut (dropping it overstates Raise) and is withheld on its £600', async () => {
     const { g, trace } = await build(FX['draft-4']);
     expect(ids(g)).toContain('mrr_lost_to_price_driven_churn');
@@ -366,6 +367,63 @@ describe('only a risk that is a side consequence is taken, and never one whose r
     c.options[1].interventions.push({ factor_label: 'Starter launch campaign', value: 1, value_kind: 'absolute', unit: '', provenance: 'ai_proposed' });
     c.links.push(L('Starter launch campaign', 'MRR lost to starter cannibalisation', 'positive'));
     expect(withoutUnsupportedMechanisms(c as never, BRIEF).mechanisms).toEqual([]);
+  });
+});
+
+/** Codex buddy #2662 round 1 (gpt-6.1-sol, high): each finding's own input, RED on 13f37d70. */
+describe('Codex r1: the buddy\'s inputs', () => {
+  it('P1-1: a non-cost feedback loop that reaches the goal only through the mechanism is never taken as the cost side → the mechanism stays', () => {
+    const c = structuredClone(FX['draft-1']);
+    c.factors.push({ label: 'Support backlog', role: 'observable', baseline_known: true, baseline_value: 20, unit: 'tickets', provenance: 'explicit', plausible_max: 200 },
+      { label: 'Delivery delay', role: 'observable', baseline_known: true, baseline_value: 10, unit: 'days', provenance: 'explicit', plausible_max: 100 });
+    c.links.push(L('Support backlog', 'Delivery delay', 'positive'), L('Delivery delay', 'Support backlog', 'positive'), L('Delivery delay', 'Starter-tier service degradation', 'positive'));
+    const brief = `${BRIEF} Our support backlog is 20 tickets and the delivery delay is 10 days.`;
+    const w = withoutUnsupportedMechanisms(c as never, brief);
+    expect(w.mechanisms).toEqual([]);
+    expect(w.model.factors.map((f) => f.label)).toEqual(expect.arrayContaining(['Support backlog', 'Delivery delay']));
+  });
+  it('P1-2 (d5\'s own contrast, provenance as served): "some existing customers may downgrade to the starter tier" keeps ‘MRR lost to starter cannibalisation’', async () => {
+    const { r, g } = await build(FX['draft-2'], { brief: `${BRIEF} Some existing customers may downgrade to the starter tier.` });
+    expect(ids(g)).toContain('mrr_lost_to_starter_cannibalisation');
+    expect([...(r.open_questions ?? []), ...(r.not_represented ?? [])].filter((x: string) => x.includes('hasn’t modelled'))).toEqual([]);
+  });
+  it('P1-3: a retry that draws the user\'s chain but KEEPS the collapsed quantity (now £599) is never adopted', async () => {
+    const { g, trace } = await build(FX['draft-4'], { retry: (x) => {
+      const y = usersChain(x);
+      return { ...y, risks: x.risks, links: [...y.links, ...x.links.filter((l: Rec) => l.to === 'MRR lost to price-driven churn' || l.from === 'MRR lost to price-driven churn')
+        .map((l: Rec) => (l.to === 'MRR lost to price-driven churn' ? { ...l, effect_amount: 599 } : l))] };
+    } });
+    expect(trace.outcome).not.toBe('adopted');
+    expect(ids(g)).not.toContain('customers_lost_to_price_rise');
+  });
+  it('P1-3: a retry that RENAMES the collapsed quantity (Olumi-sized £599 out of the same source) is never adopted', async () => {
+    const { trace } = await build(FX['draft-4'], { retry: (x) => {
+      const y = usersChain(x);
+      return { ...y, risks: [...y.risks, { label: 'MRR lost to churn', provenance: 'inferred' }],
+        links: [...y.links, L('Price rise', 'MRR lost to churn', 'positive', 599, 1, 'ai_proposed'), L('MRR lost to churn', GOAL, 'negative', -1, 1, 'ai_proposed')] };
+    } });
+    expect(trace.outcome).not.toBe('adopted');
+  });
+  it('P2-4: an adopted retry that draws the mechanism again as the brief\'s is never said as not modelled', async () => {
+    const c = structuredClone(FX['draft-1']);
+    const raise = c.options.find((o: Rec) => o.label === 'Raise prices 10%');
+    const kept = raise.interventions; raise.interventions = []; raise.changes = ['Price rise'];
+    const { r, g, trace } = await build(c, { retry: (x) => ({ ...x,
+      options: x.options.map((o: Rec) => (o.label === 'Raise prices 10%' ? { ...o, interventions: kept } : o)),
+      risks: [...x.risks, { label: 'Starter-tier service degradation', provenance: 'explicit' }],
+      links: [...x.links, L('Starter subscribers', 'Starter-tier service degradation', 'positive'), L('Starter-tier service degradation', GOAL, 'negative')] }) });
+    expect(trace.outcome, 'PRECONDITION: adopted').toBe('adopted');
+    expect(ids(g)).toContain('starter_tier_service_degradation');
+    expect([...(r.open_questions ?? []), ...(r.not_represented ?? [])].filter((x: string) => x.includes('hasn’t modelled ‘Starter-tier service degradation’'))).toEqual([]);
+  });
+  it('P2-5: a cost whose accounting link goes while its causal route stays is SAID, as not taken off pound for pound', () => {
+    const c = structuredClone(FX['draft-2']);
+    c.factors.push({ label: 'Support quality', role: 'observable', baseline_known: true, baseline_value: 10, unit: 'points', provenance: 'explicit', plausible_max: 100 });
+    c.links.push(L('Starter-tier support cost', 'Support quality', 'negative', -0.01, 1, 'explicit'), L('Support quality', GOAL, 'positive', 100, 1, 'explicit'));
+    const w = withoutUnsupportedMechanisms(c as never, BRIEF);
+    expect(w.model.links.some((l) => l.from === 'Starter-tier support cost' && l.to === GOAL)).toBe(false);
+    expect(w.costs).toEqual([{ cost: 'Starter-tier support cost', goal: GOAL, stillReaches: true }]);
+    expect(costOffRevenueLine(w.costs)).toBe('‘Starter-tier support cost’ is a cost, so it isn’t taken off ‘monthly recurring revenue’ pound for pound; it would matter for profit.');
   });
 });
 

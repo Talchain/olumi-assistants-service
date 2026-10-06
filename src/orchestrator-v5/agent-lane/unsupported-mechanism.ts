@@ -33,8 +33,11 @@ export interface UnmodelledMechanism {
   readonly direction: 'raise' | 'lower' | null;
 }
 
-/** A cost the drafter drew into a revenue goal, taken out. */
-export interface CostOffRevenue { readonly cost: string; readonly goal: string }
+/**
+ * A cost the drafter drew into a revenue goal, taken out. `stillReaches`: its accounting link went but a causal route the
+ * model keeps still runs from it to the goal (Codex #2662 r1 P2-5), so it is said as not SUBTRACTED, never as not changing.
+ */
+export interface CostOffRevenue { readonly cost: string; readonly goal: string; readonly stillReaches?: boolean }
 
 /** Words that name no mechanism ("MRR lost TO price rise"): too short or too common to carry a label's meaning. */
 const FILLER = new Set(['the', 'and', 'from', 'for', 'per', 'with', 'into', 'onto', 'that', 'this', 'than', 'via', 'due', 'its', 'our']);
@@ -63,6 +66,22 @@ function briefSupport(label: string, brief: string): number {
   if (content.length === 0) return 1;
   return Math.max(0, ...sentencesOf(brief).map((s) => { const said = wordsOf(s).map(base); return content.filter((w) => said.some((x) => sameWord(x, w))).length / content.length; }));
 }
+/**
+ * ⛔ A MECHANISM THE BRIEF STATES IN OTHER WORDS IS KEPT (Science d5 6011168471's contrast: "some existing customers may
+ * downgrade to the starter tier" IS ‘MRR lost to starter cannibalisation’; Codex #2662 r1 P1-2). Paraphrase cannot be read
+ * from words, so the rule fails safe: a brief sentence that writes NO figure (a qualitative statement, never one of the
+ * facts the model sizes) and names any content word of the label beyond the goal's own and the generic loss words is
+ * taken as the user's, and the mechanism is kept. Measured on every stored draft: it keeps none of the served invented
+ * mechanisms (no T1b sentence without a figure names a starter, support or service word).
+ */
+const GENERIC = new Set(['lost', 'lose', 'loss', 'losses', 'gain', 'gains', 'risk', 'risks', 'impact', 'effect', 'effects', 'change', 'changes']);
+function namedByAQualitativeSentence(label: string, goal: string, brief: string): boolean {
+  const goalWords = new Set([...wordsOf(goal), ...REVENUE].map(base));
+  const content = wordsOf(label).filter((w) => !FILLER.has(w) && !TIME.has(w) && !GENERIC.has(base(w)) && !goalWords.has(base(w))).map(base);
+  if (content.length === 0) return false;
+  return sentencesOf(brief).some((s) => !/\d/u.test(s) && wordsOf(s).map(base).some((x) => content.some((w) => sameWord(x, w))));
+}
+
 /** An irregular past form read as its verb ("deals WON" names a "win rate"), local to this reading; never `sameWord` itself. */
 const IRREGULAR: Record<string, string> = { won: 'win', lost: 'lose', paid: 'pay', sold: 'sell', bought: 'buy', grew: 'grow', grown: 'grow',
   spent: 'spend', kept: 'keep', held: 'hold', made: 'make', gave: 'give', given: 'give', brought: 'bring', left: 'leave', taken: 'take', took: 'take' };
@@ -182,7 +201,8 @@ export function withoutUnsupportedMechanisms(candidate: CandidateModel, brief: s
   }
   const risks = candidate.risks.filter((r) => k(r.label) !== k(goal) && r.provenance !== 'explicit' && r.analysis_participation !== 'retained_excluded'
     && !setByOption.has(k(r.label)) && !inIdentity.has(k(r.label)) && !limited.has(k(r.label)) && !briefFigureAt(r.label)
-    && briefSupport(r.label, brief) <= 0.5 && !keep(r.label) && intoGoalOnly(r.label) && reached.has(k(r.label)));
+    && briefSupport(r.label, brief) <= 0.5 && !namedByAQualitativeSentence(r.label, goal, brief) && !keep(r.label)
+    && intoGoalOnly(r.label) && reached.has(k(r.label)));
   const revenue = isRevenueGoal(goal);
   const labels = [...candidate.factors, ...candidate.risks, ...candidate.outcomes].map((q) => q.label);
   const reachedBefore = new Set(labels.filter((l) => reachesGoal(candidate, l)).map(k));
@@ -199,15 +219,19 @@ export function withoutUnsupportedMechanisms(candidate: CandidateModel, brief: s
     const stranded = new Set(labels.filter((l) => !gone.has(k(l)) && reachedBefore.has(k(l)) && !reachesGoal(after, l)).map(k));
     if (stranded.size === 0) return stranded;
     if (!revenue) return null;
-    for (const x of stranded) {
-      if (setByOption.has(x) || controllable.has(x) || limited.has(x)) return null;
-      if (costQuantity(labels.find((l) => k(l) === x)!)) continue;
-      // A feeder of the cost side only: every link out of it ends in a stranded node.
-      const out = links.filter((l) => k(l.from) === x);
-      if (out.length === 0 || !out.every((l) => stranded.has(k(l.to)))) return null;
+    if ([...stranded].some((x) => setByOption.has(x) || controllable.has(x) || limited.has(x))) return null;
+    // The cost side, grown BACKWARDS from the stranded cost quantities: a node joins only when every link out of it ends in
+    // the cost side (Codex #2662 r1 P1-1: a non-cost loop beside a stranded cost is not a feeder of it, and keeps the cut back).
+    const side = new Set([...stranded].filter((x) => costQuantity(labels.find((l) => k(l) === x)!)));
+    for (let grew = side.size > 0; grew;) {
+      grew = false;
+      for (const x of stranded) {
+        if (side.has(x)) continue;
+        const out = links.filter((l) => k(l.from) === x);
+        if (out.length > 0 && out.every((l) => side.has(k(l.to)))) { side.add(x); grew = true; }
+      }
     }
-    // At least one cost quantity heads what is stranded (a lone feeder chain is not a cost).
-    return [...stranded].some((x) => costQuantity(labels.find((l) => k(l) === x)!)) ? stranded : null;
+    return side.size === stranded.size ? stranded : null;
   };
   // Rule 1, one mechanism at a time, in drafted order: each is taken only if what it strands may go with it.
   const gone = new Set<string>();
@@ -226,6 +250,7 @@ export function withoutUnsupportedMechanisms(candidate: CandidateModel, brief: s
   // Rule 3 (d5 (3)), on a revenue goal: a cost QUANTITY's ACCOUNTING link into the goal (DL ruling on Desk 6b (3): the cost
   // subtracted £-for-£, drawn negative and unsized or ±1 per 1) is taken off. A cost link with any other size is a causal
   // claim and is kept; so is a spend LEVER (Desk 6b: "Ad spend → MRR").
+  const offRevenue = new Set<string>();
   if (revenue) {
     const accounting = (l: CandidateModel['links'][number]): boolean => l.direction === 'negative'
       && (typeof l.effect_amount !== 'number' || (typeof l.effect_per_source_change === 'number' && l.effect_per_source_change !== 0
@@ -234,12 +259,15 @@ export function withoutUnsupportedMechanisms(candidate: CandidateModel, brief: s
       const tryLinks = links.filter((x) => x !== l);
       if (strands(gone, tryLinks) === null) continue;
       links = tryLinks;
+      offRevenue.add(k(l.from));
     }
   }
   const stranded = strands(gone, links) ?? new Set<string>();
-  // Every cost quantity the cut takes off the revenue is said (d1's, which reached it only through a mechanism taken out,
-  // and d2's, drawn straight into it).
-  const costs: CostOffRevenue[] = labels.filter((l) => stranded.has(k(l)) && costQuantity(l)).map((cost) => ({ cost, goal }));
+  // Every cost quantity the cut takes off the revenue is said: d1's, which reached it only through a mechanism taken out,
+  // d2's, drawn straight into it, and one whose accounting link went while a causal route of it stays (Codex r1 P2-5).
+  const after = { ...candidate, links };
+  const costs: CostOffRevenue[] = labels.filter((l) => costQuantity(l) && (stranded.has(k(l)) || offRevenue.has(k(l))))
+    .map((cost) => ({ cost, goal, ...(stranded.has(k(cost)) || !reachesGoal(after, cost) ? {} : { stillReaches: true }) }));
   if (gone.size === 0 && links.length === candidate.links.length) return { model: candidate, mechanisms: [], costs: [] };
   const out = new Set([...gone, ...stranded]);
   return {
@@ -268,12 +296,20 @@ export function unmodelledMechanismChallenge(m: UnmodelledMechanism): string {
  * would matter for profit"): d1 takes the per-subscriber cost and its total together.
  */
 export function costOffRevenueLine(costs: readonly CostOffRevenue[]): string {
-  const names = costs.map((c) => `‘${c.cost}’`);
-  const list = names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   const goal = costs[0]?.goal ?? '';
-  return names.length <= 1
-    ? `${list} is a cost, so it doesn’t change ‘${goal}’; it would matter for profit.`
-    : `${list} are costs, so they don’t change ‘${goal}’; they would matter for profit.`;
+  const list = (xs: readonly CostOffRevenue[]): string => {
+    const names = xs.map((c) => `‘${c.cost}’`);
+    return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  };
+  const gone = costs.filter((c) => c.stillReaches !== true);
+  const kept = costs.filter((c) => c.stillReaches === true);
+  const said: string[] = [];
+  if (gone.length === 1) said.push(`${list(gone)} is a cost, so it doesn’t change ‘${goal}’; it would matter for profit.`);
+  if (gone.length > 1) said.push(`${list(gone)} are costs, so they don’t change ‘${goal}’; they would matter for profit.`);
+  // Its causal route stays in the model: only the £-for-£ subtraction is gone (Codex r1 P2-5).
+  if (kept.length === 1) said.push(`${list(kept)} is a cost, so it isn’t taken off ‘${goal}’ pound for pound; it would matter for profit.`);
+  if (kept.length > 1) said.push(`${list(kept)} are costs, so they aren’t taken off ‘${goal}’ pound for pound; they would matter for profit.`);
+  return said.join(' ');
 }
 
 /** One collapsed user chain the repair retry is asked to draw as the user wrote it (d4; Science d5 (2), DL ruling 6 Oct). */
@@ -315,12 +351,20 @@ export function collapsedChainIssue(c: CollapsedChain): string {
 
 /**
  * Whether a retry draws a collapsed chain as the user's (DL: adopt ONLY then): both sentences are bound as the user's on
- * some registered link (`source_quote`), and no drafted link still carries the product (a double count).
+ * some registered link (`source_quote`), no drafted link still carries the product, the collapsed quantity is gone (node
+ * and links), and every link the retry newly draws out of the chain's source is sized by the user (Codex #2662 r1 P1-3: a
+ * retry that keeps the collapsed quantity at £599, or renames it, double counts the loss).
  */
-export function drawsChainAsTheUsers(c: CollapsedChain, retry: CandidateModel, registeredEdges: readonly { readonly provenance?: unknown }[]): boolean {
+export function drawsChainAsTheUsers(c: CollapsedChain, retry: CandidateModel, registeredEdges: readonly { readonly provenance?: unknown }[], first: CandidateModel): boolean {
   const quotes = new Set(registeredEdges.map((e) => (typeof e.provenance === 'object' && e.provenance !== null ? (e.provenance as Record<string, unknown>).source_quote : undefined))
     .filter((q): q is string => typeof q === 'string'));
   const carriesProduct = retry.links.some((l) => typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number'
     && l.effect_per_source_change !== 0 && Math.abs(Math.abs(l.effect_amount / l.effect_per_source_change) - c.product) < 1e-9 * Math.max(1, c.product));
-  return c.sentences.every((s) => quotes.has(s)) && !carriesProduct;
+  const through = k(c.through);
+  const throughGone = ![...retry.factors, ...retry.risks, ...retry.outcomes].some((q) => k(q.label) === through)
+    && !retry.links.some((l) => k(l.from) === through || k(l.to) === through);
+  const before = new Set(first.links.filter((l) => k(l.from) === k(c.from)).map((l) => k(l.to)));
+  const newOutOfSourceAreTheUsers = retry.links.filter((l) => k(l.from) === k(c.from) && !before.has(k(l.to)))
+    .every((l) => (l.effect_provenance ?? null) === 'explicit' && typeof l.effect_amount === 'number');
+  return c.sentences.every((s) => quotes.has(s)) && !carriesProduct && throughGone && newOutOfSourceAreTheUsers;
 }
