@@ -92,6 +92,12 @@ describe('THE ONE READER: mediatorReadings', () => {
     edge(disagree, 'staff', 'cost').provenance.natural_effect.amount_unit = 'GBP/year';
     expect(mediatorReadings(disagree).has('cost')).toBe(false);
   });
+  it('(C) MUTANT GUARD: M with TWO children on the goal path takes no unit (one child only)', () => {
+    const g = sizedParentGraph();
+    g.nodes.push({ id: 'churn', kind: 'factor', label: 'Churn', observed_state: { value: 0.05, raw_value: 5, cap: 100, unit: '%' } });
+    g.edges.push(placeholder('cost', 'churn', 0.2), placeholder('churn', 'mrr', -0.5));
+    expect(mediatorReadings(g).has('cost')).toBe(false);
+  });
   it('LABEL (d5 6006685510 (1)): unit-bearing iff a currency token, %, a points spelling or "per <noun>"', () => {
     expect(labelUnitParts('Support capacity strain')).toBeNull();
     expect(labelUnitParts('Monthly fees')).toBeNull();
