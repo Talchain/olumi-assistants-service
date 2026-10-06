@@ -34,22 +34,32 @@ export interface UserFigureHeld {
  * size in natural units (`natural_effect`). A band the user picked earlier carries no figure, so a later band edit
  * loses nothing and is not refused.
  */
+/**
+ * Does the edge's stored natural size (`provenance.natural_effect`) still DESCRIBE it (buddy r1 #6)?
+ * `natural_effect.strength_mean` is the β it was written for, and every reader trusts it only while the edge's mean equals
+ * it (R&C 5845818897) — or while a stored clamp records that β (`refit-frames.ts` `clampForPersist`: mean ±1,
+ * `clamped_from` = the full β). A stale carrier states nothing. Served T1b (red team c89f5126, 4/4 brief links): exactly
+ * equal. Shared by this file's F1 guard and the Run's input snapshot (schemas 0.78 `natural_effect`), so the two never
+ * disagree about which size is current.
+ */
+export function naturalEffectDescribesEdge(edge: unknown): boolean {
+  const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
+  const ne = p !== undefined && isRec(p.natural_effect) ? p.natural_effect : undefined;
+  const mean = isRec(edge) && isRec(edge.strength) ? edge.strength.mean : undefined;
+  const written = ne?.strength_mean;
+  if (p === undefined || typeof mean !== 'number' || typeof written !== 'number') return false;
+  return Math.abs(written - mean) <= 1e-9
+    || (typeof p.clamped_from === 'number' && Math.abs(p.clamped_from - written) <= 1e-9
+      && Math.abs(mean) === 1 && Math.sign(mean) === Math.sign(written));
+}
+
 export function userFigureHeld(edge: unknown): UserFigureHeld | null {
   const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
   if (p?.magnitude !== 'user_stated') return null;
   const ne = isRec(p.natural_effect) ? p.natural_effect : undefined;
   if (ne === undefined) return null;
-  // ⭐ Only a figure that still DESCRIBES the link (buddy r1 #6): `natural_effect.strength_mean` is the β it was written
-  // for, and every reader trusts it only while the edge's mean equals it (R&C 5845818897) — or while a stored clamp
-  // records that β (`refit-frames.ts` `clampForPersist`: mean ±1, `clamped_from` = the full β). A stale carrier states
-  // nothing a write could lose, so it is not refused. Served T1b (red team c89f5126, 4/4 brief links): exactly equal.
-  const mean = isRec(edge) && isRec(edge.strength) ? edge.strength.mean : undefined;
-  const written = ne.strength_mean;
-  if (typeof mean !== 'number' || typeof written !== 'number') return null;
-  const describes = Math.abs(written - mean) <= 1e-9
-    || (typeof p.clamped_from === 'number' && Math.abs(p.clamped_from - written) <= 1e-9
-      && Math.abs(mean) === 1 && Math.sign(mean) === Math.sign(written));
-  if (!describes) return null;
+  // ⭐ Only a figure that still DESCRIBES the link: a stale carrier states nothing a write could lose, so it is not refused.
+  if (!naturalEffectDescribesEdge(edge)) return null;
   const range = isRec(ne.stated_range) ? text(ne.stated_range.text) : undefined;
   // The stored-figure fallback is the display `grouped-link-sizing.ts` already serves for a link's natural size.
   const quote = text(p.source_quote) ?? range
