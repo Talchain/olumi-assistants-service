@@ -6,7 +6,7 @@
  */
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { CURRENCY_WORD_TO_CODE } from '../../utils/currency-alphabet.js';
-import { isPeriodConnector, periodAdverb, periodNoun, shareKind, type UnitPeriod } from '../../utils/unit-alphabet.js';
+import { isPeriodConnector, periodAdverb, periodNoun, PERIOD_NOUN_SPELLINGS, shareKind, type UnitPeriod } from '../../utils/unit-alphabet.js';
 
 /**
  * ⚠ C1 IS A NARROWER VIEW OF THE ONE GRAMMAR (Science U-GRAMMAR, PR-U1 conditions 5 Oct). The vocabulary is the leaf's
@@ -248,6 +248,40 @@ export function readUnitParts(unit: unknown): UnitParts | null {
 export function readPercentUnit(unit: unknown): UnitParts | null {
   const parts = readUnitParts(unit);
   return parts?.kind === 'percent' ? parts : null;
+}
+
+const RELATIVE_CHANGE_WORDS: ReadonlySet<string> = new Set([
+  'change', 'increase', 'decrease', 'rise', 'fall', 'growth', 'gain', 'drop', 'decline', 'reduction', 'improvement',
+  'uplift', 'up', 'down', 'more', 'less', 'higher', 'lower',
+].map(singular));
+const CHANGE_REFERENCE_CONNECTORS: readonly (readonly string[])[] = [
+  ['from'], ['vs'], ['versus'].map(singular), ['over'], ['compared', 'to'], ['relative', 'to'],
+];
+const CHANGE_REFERENCE_LEVELS: ReadonlySet<string> = new Set([
+  'today', 'now', 'current', 'currently', 'baseline', 'the baseline', 'current level', 'present', 'start',
+  'starting point', 'before',
+]);
+// Qualifiers have already passed through singular(): the leaf's "mins" is held as "min", for example.
+const CHANGE_REFERENCE_PERIODS: ReadonlySet<string> = new Set(Object.values(PERIOD_NOUN_SPELLINGS).flat().map(singular));
+
+/**
+ * A percent naming only a relative change's size, optionally against a reference level. Consume the ONE grammar's
+ * parts, never reparse the unit: bases, rates and named quantities cannot pass this closed word-family predicate.
+ * Whether the goal itself is a relative change of a non-percentage metric belongs to `isChangeOwnPercent`.
+ */
+export function isRelativeChangePercentUnit(unit: unknown): boolean {
+  const parts = readPercentUnit(unit);
+  if (parts === null || parts.base !== null) return false;
+  const tail = parts.qualifiers ?? [];
+  let end = 0;
+  while (end < tail.length && RELATIVE_CHANGE_WORDS.has(tail[end]!)) end += 1;
+  if (end === tail.length) return true;
+  const reference = tail.slice(end);
+  const connector = CHANGE_REFERENCE_CONNECTORS.find((ws) => ws.every((w, i) => reference[i] === w));
+  if (connector === undefined) return false;
+  const level = reference.slice(connector.length);
+  return CHANGE_REFERENCE_LEVELS.has(level.join(' '))
+    || (level[0] === 'last' && (level.length === 1 || (level.length === 2 && CHANGE_REFERENCE_PERIODS.has(level[1]!))));
 }
 
 const sameWords = (a: readonly string[], b: readonly string[]): boolean => a.join(' ') === b.join(' ');

@@ -32,9 +32,8 @@
  * gives £45k, but it isn't held as today's level of ‘costs’"); null when the brief gives no money figure at all.
  */
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
-import type { CandidateModel } from './admit-model.js';
+import { isChangeOwnPercent, type CandidateModel } from './admit-model.js';
 import { periodIn, readMoneyTotal } from './reconciling-product.js';
-import { readPercentUnit } from './same-unit.js';
 
 export type BriefGoalLevel =
   | {
@@ -127,7 +126,7 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
   // ⛔ AIQ 5897443539 (served run 0): a percentage change typed in "%" names the CHANGE's unit, not the level's. The
   // level's money terms are then read from the brief's ONE money figure (its currency, its own clause's period).
   let goalUnit = typeof goal.unit === 'string' ? goal.unit : '';
-  if (goal.frame === 'change_rel' && readPercentUnit(goalUnit) !== null && distinct.length === 1) {
+  if (isChangeOwnPercent(goal) && distinct.length === 1) {
     const only = distinct[0]!;
     const period = periodIn(clauseAround(brief, only.index, only.index + only.matchedText.length));
     // ⛔ PR Review CR on #2313 @ 729afc91: a period the goal's own name states must be the figure's ("Annual spend is £45k"
