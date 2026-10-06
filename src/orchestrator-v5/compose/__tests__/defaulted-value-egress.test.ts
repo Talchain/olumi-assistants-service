@@ -244,7 +244,7 @@ describe('F6 egress — KNOWN-SUPPRESSED corpus (exact set)', () => {
     'This result looks fragile, so even small adjustments could shift it.',
     'The picture appears fragile, so even small adjustments could shift it.',
     "Each option's own score is individually stable, so this is a genuine dead heat rather than noise in the estimates.",
-    'The result is sensitive to small movements in the strongest drivers, so the leading option could change without much shifting.',
+    'The result is sensitive to small movements in the strongest drivers, so the most-supported option could change without much shifting.',
     'The results are robust to the assumptions we tested.',
     'These findings appear very stable.',
     // ⭐ REVIEW-MEASURED BREACH — shipped with no suppression and no

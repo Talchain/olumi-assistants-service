@@ -121,7 +121,7 @@ describe('SCI-DEEP reply', () => {
   it('a lead that is not clear is never stated as a lead', () => {
     const close: StructuralChallengeResultV1 = { ...changed, claims: [{ ...changed.claims[0], noise_verdict: 'within_noise', verdict: 'delta_only', basis: 'within_noise' } as StructuralChallengeClaimV1, ...changed.claims.slice(1)] };
     const reply = composeStructuralChallengeReply({ result: close, labels: LABELS });
-    expect(reply).toContain('Which option leads is too close to call in at least one version.');
+    expect(reply).toContain('Which option most runs support is too close to tell apart in at least one version.');
     expect(reply).not.toContain('leads in both versions');
     expect(reply).not.toContain('still leads');
   });
@@ -284,7 +284,8 @@ describe('independent-review reply and press regressions', () => {
   it.each(['frame_changed', 'unit_changed', 'identity_status_changed', 'ranking_status_changed', 'withheld_on_one_side', 'missing_on_one_side'] as const)('4: incomparable leader reason %s is never a tie or omitted', (basis) => {
     const c: StructuralChallengeClaimV1 = { ...changed.claims[0] as Extract<StructuralChallengeClaimV1, { kind: 'leader' }>, verdict: 'not_comparable', basis, noise_verdict: 'not_noise_qualified', ...(basis === 'withheld_on_one_side' || basis === 'missing_on_one_side' ? { baseline_option_id: null, alternative_option_id: null } : {}) };
     const reply = replyFor([c]);
-    expect(reply).toContain('Which option leads');
+    expect(reply).toContain('Which option most runs support');
+    expect(reply).not.toContain('too close to tell apart');
     expect(reply).not.toContain('too close to call');
     expect(reply).not.toContain('still hold');
     expect(reply).not.toContain('doesn\'t depend on this link');
@@ -467,7 +468,7 @@ describe('review closure: final presentation is bound to its baseline execution 
       expect(turn?.result?.baseline.run_id).toBe(BASE.baseline.run_id);
       expect(turn?.reply).toContain('The two Runs are separately sampled (unpaired).');
       const next = turn!.reply.split('\n').find((line) => line.startsWith('Next step:'))!;
-      expect(next).toContain(kind === 'leader' ? 'which option leads' : kind === 'goal_probability' ? 'Status quo’s target certainty'
+      expect(next).toContain(kind === 'leader' ? 'which option most runs support' : kind === 'goal_probability' ? 'Status quo’s target certainty'
         : kind === 'outcome_level' ? 'Status quo’s position relative to the target' : 'Status quo’s frequency within c');
       expect(turn?.reply).not.toMatch(/rests on|depends on|doesn.t depend|independent of/i);
     },
@@ -507,7 +508,7 @@ describe('repeated structural challenge licence adaptation only narrows', () => 
     expect(first.result?.claims.find((claim) => claim.kind === 'leader')).toMatchObject({
       baseline_option_id: null, alternative_option_id: null, verdict: 'not_comparable', basis: 'withheld_on_one_side',
     });
-    expect(first.reply).toContain('Which option leads cannot be compared. At least one run withheld this claim.');
+    expect(first.reply).toContain('Which option most runs support cannot be compared. At least one run withheld this claim.');
     if (provisional) expect(first.reply).toContain(disclosure);
     const second = structuralChallengeTurnUnderLicence(first, finalRead());
     expect(second.result?.claims.find((claim) => claim.kind === 'leader')).toEqual(first.result?.claims.find((claim) => claim.kind === 'leader'));
