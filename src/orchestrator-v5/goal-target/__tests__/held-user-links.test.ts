@@ -189,7 +189,7 @@ describe('the model reasons with the existence the Run USES (d5: every reader th
  * either copy REDs that repo's CI until both are re-pinned to the same digest. Check name: "held-link parity fixture digest".
  */
 describe('held-link parity fixture (shared with DGAI)', () => {
-  const FIXTURE_SHA256 = '8cbd230b58a9e1d356e84e1383c1bac277e223649b96756927db27e40e5f4e0d';
+  const FIXTURE_SHA256 = 'f4ee9da4bf7eba64eedbf8f16cdde5b8cccc89cb0f8b2efb02970c8a3c1c1cfc';
   const load = async (): Promise<{ bytes: Buffer; rows: Array<{ name: string; edge: Rec; held: boolean }> }> => {
     const { readFileSync } = await import('node:fs');
     const bytes = readFileSync(new URL('./fixtures/held-link-parity.json', import.meta.url));
@@ -236,5 +236,28 @@ describe('Codex r1 #2643: identity, currency and the decision reviewer read the 
     expect((viaEnrichment.graph.edges as Rec[])[0].exists_probability).toBe(1);
     // CONTRAST: an unheld user link keeps its 0.8 on the fallback branch.
     expect(((projectRunGraphForDecisionReview({}, graphWith(userLink('price', 'subs', undefined))) as Rec).graph.edges as Rec[])[0]).toMatchObject({ exists: 0.8 });
+  });
+});
+
+describe('Codex r2 #2643: history recorded before the hold still validates; freshness still moves', () => {
+  const graphWith = (edge: Rec): Rec => ({ nodes: [{ id: 'price', kind: 'factor', label: 'Price' }, { id: 'subs', kind: 'outcome', label: 'Subscribers' }], edges: [edge] });
+  it('a model version hashed BEFORE the hold (pre-hold projection) is still that version; the live hash differs (stale)', async () => {
+    const { computeAnalysisAffectingGraphHashSha256, computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const { matchesHistoricalAnalysisIdentity } = await import('../../context/graph-identity.js');
+    const g = graphWith(userLink('price', 'subs', ranged(20, 40)));
+    const recordedBeforeHold = computeAnalysisAffectingGraphHashSha256(g as never, 'pre_hold')!;
+    expect(recordedBeforeHold).not.toBe(computeAnalysisAffectingGraphHashSha256(g as never));
+    expect(matchesHistoricalAnalysisIdentity(g as never, recordedBeforeHold)).toBe(true);
+    // Freshness reads the CURRENT projection only: a pre-hold Run on this graph is stale.
+    expect(computeAnalysisAffectingGraphHash(g as never)).not.toBe(computeAnalysisAffectingGraphHash(g as never, 'pre_hold'));
+  });
+  it('CONTRAST: a graph with no held link hashes the same under both projections (no churn)', async () => {
+    const { computeAnalysisAffectingGraphHashSha256 } = await import('../../context/graph-hash.js');
+    const g = graphWith(userLink('price', 'subs', undefined));
+    expect(computeAnalysisAffectingGraphHashSha256(g as never, 'pre_hold')).toBe(computeAnalysisAffectingGraphHashSha256(g as never));
+  });
+  it('a hash that matches NO projection is still refused (the pre-hold door is not a wildcard)', async () => {
+    const { matchesHistoricalAnalysisIdentity } = await import('../../context/graph-identity.js');
+    expect(matchesHistoricalAnalysisIdentity(graphWith(userLink('price', 'subs', ranged(20, 40))) as never, '0'.repeat(64))).toBe(false);
   });
 });

@@ -1056,6 +1056,68 @@
     }
    },
    "held": false
+  },
+  {
+   "name": "not: UNDERFLOW (beta = Number.MIN_VALUE; the spread rounds to 0)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 5e-324,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 20,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 5e-324,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 20,
+       "high": 40,
+       "text": "20 to 40",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
+  },
+  {
+   "name": "not: OVERFLOW (range 1 to 1.7e308 at beta 1e10 per unit; the spread is Infinity)",
+   "edge": {
+    "from": "x",
+    "to": "y",
+    "strength": {
+     "mean": 10000000000.0,
+     "std": 0.15
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "customers",
+      "per_source_change": 1,
+      "per_source_change_unit": "£",
+      "strength_mean": 10000000000.0,
+      "strength_mean_frame": "edge_strength",
+      "stated_range": {
+       "low": 1,
+       "high": 1.7e+308,
+       "text": "1 to 1.7e+308",
+       "end": "low"
+      }
+     }
+    }
+   },
+   "held": false
   }
  ]
 }

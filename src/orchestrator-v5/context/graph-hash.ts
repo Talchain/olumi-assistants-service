@@ -128,7 +128,7 @@ export function computeDeterministicGraphHash(
  */
 export function computeAnalysisAffectingGraphHash(
   graph: GraphStateIngress | null | undefined,
-  projection: 'current' | 'legacy' = 'current',
+  projection: 'current' | 'legacy' | 'pre_hold' = 'current',
 ): string | null {
   const full = computeAnalysisAffectingGraphHashSha256(graph, projection);
   return full === null ? null : full.slice(0, HASH_HEX_LENGTH);
@@ -143,7 +143,7 @@ export function computeAnalysisAffectingGraphHash(
  */
 export function computeAnalysisAffectingGraphHashSha256(
   graph: GraphStateIngress | null | undefined,
-  projection: 'current' | 'legacy' = 'current',
+  projection: 'current' | 'legacy' | 'pre_hold' = 'current',
 ): string | null {
   if (projection === 'legacy') return frozenLegacyProjectionHash(graph);
   if (!graph) return null;
@@ -185,7 +185,7 @@ export function computeAnalysisAffectingGraphHashSha256(
       return { ...projectNode(node), ...projectAdmissionGaps(option, nodeOption?.unresolved_targets) };
     }).sort((a, b) => a.id.localeCompare(b.id)),
     edges: edges
-      .map(projectEdge)
+      .map((edge) => projectEdge(edge, projection !== 'pre_hold'))
       .sort((a, b) => {
         const fromCmp = a.from.localeCompare(b.from);
         return fromCmp !== 0 ? fromCmp : a.to.localeCompare(b.to);
@@ -373,7 +373,11 @@ interface EdgeProjection {
   [key: string]: unknown;
 }
 
-function projectEdge(raw: unknown): EdgeProjection {
+/**
+ * `applyHold` false is the PRE-HOLD current projection (Codex r2 #2643): identical but for hold-at-1.0, so a model version
+ * or Run recorded before the hold still validates as IMMUTABLE history. Never used for freshness.
+ */
+function projectEdge(raw: unknown, applyHold = true): EdgeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const out: EdgeProjection = {
     from: typeof r.from === 'string' ? r.from : '',
@@ -407,7 +411,7 @@ function projectEdge(raw: unknown): EdgeProjection {
   // ⭐ HOLD-AT-1.0 (d5 #87 6008807178; Codex r1 #2643 P1): the analysis-affecting identity of a HELD link is what the Run
   // is SENT — existence 1 and its range's spread — through the same fields (no new key), so a range edit is an input change
   // and a Run computed before the hold is not "fresh". Only a graph with a held link hashes differently.
-  const held = heldLinkOf(r);
+  const held = applyHold ? heldLinkOf(r) : null;
   if (held !== null) {
     out.exists_probability = 1;
     out.strength = { ...(out.strength as Record<string, unknown> | undefined), std: held.std };
