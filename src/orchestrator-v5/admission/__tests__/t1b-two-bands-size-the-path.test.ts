@@ -104,6 +104,23 @@ describe('T1b: two user bands through a level-less mediator size the path', () =
     expect(caseC(g)?.link).toEqual({ from: M, to: GOAL });
   });
 
+  // P5 reads a figure into the goal by its UNIT only (`sizedInGoalUnit`, unchanged): a stale mean in £/month is "in the goal
+  // unit" there on the base code too, so only the wrong unit asks; certainty's `sizedLinkTest` also reads the mean.
+  it.each([
+    ['a stale mean', { amount_unit: '£/month', strength_mean: -0.1 }, false],
+    ['the wrong unit', { amount_unit: 'customers', strength_mean: -0.3 }, true],
+  ] as const)('CONTROL (Codex r2 P1) a user FIGURE on M→child with %s is not a valid size → no certainty is earned', (_name, ne, asks) => {
+    const g = SERVED();
+    g.nodes.find((n: Rec) => n.id === 'starter_support_cost').nonlinear_identity = { operation: 'product',
+      factor_ids: ['starter_subscribers', 'starter_support_cost_per_subscriber'] };
+    edge(g, M, GOAL).provenance = { source: 'brief_extraction', magnitude: 'user_stated', natural_effect: { amount: -300,
+      per_source_change: 1, per_source_change_unit: 'quality units', strength_mean_frame: 'edge_strength', ...ne } };
+    expect(caseC(g)?.link).toEqual(asks ? { from: M, to: GOAL } : undefined);
+    expect(goalCertaintyDecisions(g, [{ option_id: 'launch_starter_tier', probability_of_goal: 1 }],
+      [{ node_id: 'starter_support_cost', evaluated: true, level_source: 'stated_level' }]))
+      .toEqual([expect.objectContaining({ option_id: 'launch_starter_tier', earned: false })]);
+  });
+
   it('CERTAINTY (Codex r1 P1-2): a P(goal) = 1 through the banded path is EARNED, never "isn\'t sized"; Olumi\'s out-link → unearned (contrast)', () => {
     const withIdentity = (g: Rec): Rec => {
       g.nodes.find((n: Rec) => n.id === 'starter_support_cost').nonlinear_identity = { operation: 'product',

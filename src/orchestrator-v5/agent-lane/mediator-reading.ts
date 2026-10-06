@@ -29,6 +29,7 @@ import { POINTS_SPELLINGS, periodAdverb, periodNoun, type UnitPeriod } from '../
 import { carrierCompatible, readUnitParts, sameUnit, singular, words, type UnitParts } from './same-unit.js';
 import { licenceUnsizedLink } from './goal-certainty.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 
 type Rec = Record<string, unknown>;
@@ -109,6 +110,8 @@ export function userSizedLevelLessLinks(graph: unknown): ReadonlySet<string> {
   const byId = new Map(nodes.map(n => [n.id, n] as const));
   const setByOption = new Set(nodes.filter(n => n.kind === 'option').flatMap(o => Object.keys(mergeInterventionSourceObjects(o))));
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints));
+  const figureOn = (e: Rec): boolean => isRec(e.provenance) && (isRec(e.provenance.natural_effect) || e.provenance.magnitude === 'user_stated');
   for (const m of nodes) {
     if (typeof m.id !== 'string' || !['factor', 'risk', 'outcome'].includes(String(m.kind))) continue;
     const mv = view.get(m.id);
@@ -122,7 +125,10 @@ export function userSizedLevelLessLinks(graph: unknown): ReadonlySet<string> {
     const operands = isRec(child?.nonlinear_identity) ? (child!.nonlinear_identity as Rec).factor_ids : undefined;
     if (Array.isArray(operands) && operands.includes(m.id)) continue;
     const chain = [...into, kids[0]!];
-    if (!chain.every(e => linkSizing(e) === 'user')) continue;
+    // Codex r2 on #2648: a FIGURE counts only while it is a valid, current size (`sizedLinkTest`: its mean and unit), the
+    // same test every sized reader applies; a stale or wrong-unit figure is not the user's size of this link. A band
+    // (no natural effect) is the user's judgement of the strength itself.
+    if (!chain.every(e => linkSizing(e) === 'user' && (!figureOn(e) || sized(e)))) continue;
     for (const e of chain) out.add(`${String(e.from)}→${String(e.to)}`);
   }
   return out;
