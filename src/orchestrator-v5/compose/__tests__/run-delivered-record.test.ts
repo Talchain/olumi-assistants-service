@@ -8,9 +8,12 @@
 import { describe, expect, it } from 'vitest';
 import { RunDeliveredRecordSchema, type OlumiResponse } from '@talchain/schemas/boundary';
 import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
-import { maximalReviewCardBlock, maximalCoachingBlock, maximalTextBlock } from '@talchain/schemas/fixtures';
+import { maximalReviewCardBlock, maximalCoachingBlock, maximalTextBlock, maximalOlumiResponse, maximalOlumiResponseWithInitialModelVersionReceipt } from '@talchain/schemas/fixtures';
 
-import { buildRunDeliveredRecord, stampDeliveredRecord } from '../run-delivered-record.js';
+import { buildRunDeliveredRecord, egressContractAccepts, stampDeliveredRecord } from '../run-delivered-record.js';
+import { composeDirectAnswerResponse } from '../../compose.js';
+import { validateEgress } from '../../../validators/b1.js';
+import { textAssertsLeadingOption } from '../leading-option-egress-guard.js';
 import { enforceLeadingOptionClaimsAtWire } from '../leading-option-wire-enforcement.js';
 import { sanitiseOlumiResponseForEgress } from '../output-safety.js';
 
@@ -38,7 +41,8 @@ const runFact = (over: Rec = {}): HandlerFact => ({
   fact_type: 'run_analysis', fact_version: 1, noop: false,
   result: { scenario_id: '11111111-1111-4111-8111-111111111111', leading_option_id: null, summary: 's', run_id: 'run_b', graph_hash_at_run: 'gh_b', ...over },
 } as unknown as HandlerFact);
-const response = (blocks: unknown[]): OlumiResponse => ({ assistant_text: '', suggested_actions: [], insights: [], blocks } as unknown as OlumiResponse);
+/** A contract-valid composed response (the egress contract is part of what the builder checks). */
+const response = (blocks: unknown[]): OlumiResponse => composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'Ran the analysis.', stage: 'analyse', blocks: blocks as never } as never);
 const build = (blocks: unknown[], over: Partial<Parameters<typeof buildRunDeliveredRecord>[0]> = {}) => buildRunDeliveredRecord({
   response: response(blocks), handlerFacts: [runFact()], graph: GRAPH, analysisReady: ANALYSIS_READY,
   authorityUnavailable: false, requestId: 'req-1', exitPath: 'test', ...over,
@@ -76,7 +80,7 @@ describe('the delivered record holds what the wire would ship', () => {
   it('the stored blocks are the wire SANITISER\'s output (the same pure function, the same graph)', () => {
     const composed = [card(NEUTRAL)];
     const record = (build(composed) as { record: Rec }).record;
-    const sanitised = sanitiseOlumiResponseForEgress(response(composed), { graph: GRAPH, requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: false }).blocks;
+    const sanitised = sanitiseOlumiResponseForEgress({ ...response(composed), assistant_text: '' }, { graph: GRAPH, requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: false }).blocks;
     expect(record.phase3_blocks).toEqual(sanitised);
   });
 
@@ -163,5 +167,57 @@ describe('stamping binds the record to its ONE Run fact', () => {
     const facts = [validRunFact()];
     const widened = { ...(record as unknown as Rec), carried_extra: 1 } as never;
     expect(stampDeliveredRecord(facts, widened, parses)).toBe(facts);
+  });
+});
+
+describe('buddy r1 on #2645: what else can make the stored bytes differ from the wire\'s → nothing recorded', () => {
+  it('P1-1 PRECONDITION: a graph label `Team` asserts what the analysis_ready label `Team leads` swallows; the lexical reader alone sees neither', () => {
+    const body = 'Team leads in 60% of runs.';
+    expect(textAssertsLeadingOption(body)).toBe(false);
+    expect(textAssertsLeadingOption(body, { optionLabels: ['Team'] })).toBe(true);
+    expect(textAssertsLeadingOption(body, { optionLabels: ['Team', 'Team leads'] })).toBe(false);
+  });
+
+  it('⭐ P1-1: each roster is checked on its own → omitted, asserts_leader', () => {
+    const graph = { nodes: [{ id: 'opt_team', kind: 'option', label: 'Team' }, { id: 'opt_solo', kind: 'option', label: 'Solo' }], edges: [] } as never;
+    const ready = { status: 'ready', goal_node_id: 'out_rev', options: [
+      { option_id: 'opt_team', label: 'Team leads', status: 'ready', interventions: {} },
+      { option_id: 'opt_solo', label: 'Solo', status: 'ready', interventions: {} },
+    ] } as never;
+    expect(build([card('Team leads in 60% of runs.')], { graph, analysisReady: ready })).toEqual({ kind: 'omitted', reason: 'asserts_leader' });
+  });
+
+  it('⭐ P1-2: a sanitiser pass that would change the text again (an id whose label is another id) → omitted, sanitise_unstable', () => {
+    const graph = { nodes: [{ id: 'factor_analysis', kind: 'factor', label: 'factor_value' }, { id: 'factor_value', kind: 'factor', label: 'Revenue' }], edges: [] } as never;
+    const opts = { graph, requestId: 'r', exitPath: 't', userMessage: null, mayNameLeadingOption: false };
+    const once = sanitiseOlumiResponseForEgress(response([card('Check factor_analysis.')]), opts);
+    const twice = sanitiseOlumiResponseForEgress(once, opts);
+    expect(JSON.stringify(twice.blocks)).not.toBe(JSON.stringify(once.blocks)); // precondition: not a fixed point
+    expect(build([card('Check factor_analysis.')], { graph })).toEqual({ kind: 'omitted', reason: 'sanitise_unstable' });
+  });
+
+  it('⭐ P1-3: a response the egress contract refuses (the wire ships its fallback, no cards) → omitted, egress_refused', () => {
+    const bad = { ...response([card(NEUTRAL)]), framing_question: '' } as unknown as OlumiResponse;
+    expect(validateEgress(bad, 'req-1').ok).toBe(false); // precondition: the real validator refuses it
+    expect(buildRunDeliveredRecord({ response: bad, handlerFacts: [runFact()], graph: GRAPH, analysisReady: ANALYSIS_READY,
+      authorityUnavailable: false, requestId: 'req-1', exitPath: 'test' })).toEqual({ kind: 'omitted', reason: 'egress_refused' });
+  });
+
+  it.each([
+    ['the maximal response', () => maximalOlumiResponse],
+    ['an empty framing question', () => ({ ...maximalOlumiResponse, framing_question: '' })],
+    ['a receipt whose node label is too long (the one rescued carrier)', () => {
+      const r = structuredClone(maximalOlumiResponseWithInitialModelVersionReceipt) as Rec;
+      ((r.model_version_receipt as Rec).graph as Rec).nodes = [{ ...(((r.model_version_receipt as Rec).graph as Rec).nodes as Rec[])[0], label: 'x'.repeat(201) }];
+      return r;
+    }],
+    ['that receipt AND an empty framing question', () => {
+      const r = structuredClone(maximalOlumiResponseWithInitialModelVersionReceipt) as Rec;
+      ((r.model_version_receipt as Rec).graph as Rec).nodes = [{ ...(((r.model_version_receipt as Rec).graph as Rec).nodes as Rec[])[0], label: 'x'.repeat(201) }];
+      return { ...r, framing_question: '' };
+    }],
+  ])('egressContractAccepts agrees with the real validateEgress: %s', (_name, make) => {
+    const r = make();
+    expect(egressContractAccepts(r)).toBe(validateEgress(r, 'req-pin').ok);
   });
 });

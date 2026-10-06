@@ -437,7 +437,8 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
     const stamp = sd1Commit().stampHandlerFacts;
     expect(typeof stamp).toBe('function');
     const card = { ...(maximalReviewCardBlock as unknown as Record<string, unknown>), body: 'Most of this result rests on opt_a.' };
-    const out = stamp!({ assistant_text: '', suggested_actions: [], insights: [], blocks: [card] }, [sd1RunFact()]);
+    const { composeDirectAnswerResponse } = await import('../../compose.js');
+    const out = stamp!(composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'Ran the analysis.', stage: 'analyse', blocks: [card] } as never), [sd1RunFact()]);
     const record = out[0]!.result.delivered_record as { phase3_blocks: { body: string }[] };
     // The snapshot graph's label for opt_a — a null graph would leave the id or a generic word.
     expect(record.phase3_blocks[0]!.body).toBe('Most of this result rests on Option A.');

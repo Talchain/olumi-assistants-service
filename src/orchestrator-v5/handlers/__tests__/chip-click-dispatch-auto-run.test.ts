@@ -195,6 +195,17 @@ beforeEach(() => {
 });
 
 describe('dispatchChipClickRunAnalysis — autoRun trigger present', () => {
+  it('⭐ SD-1 (DL ruling on #2645 P1-4): the auto-run RECORDS its delivered cards — its commit carries the delivered_record stamper', async () => {
+    // The scenario read is the auto-run's only delivery, so the record IS what the user first sees (the read serves it
+    // verbatim, under its own leader gate: assist.v1.scenario-graph.analysis-read.test.ts).
+    await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-auto-record',
+      autoRun: { draftTurnId: DRAFT_TURN_ID },
+    });
+    expect(typeof commitDirectAnswerMock.mock.calls[0][1].stampHandlerFacts).toBe('function');
+  });
+
   it('commits WITHOUT a userMessage: nothing is recorded as the user\'s words', async () => {
     const out = await dispatchChipClickRunAnalysis({
       payload: payload(),

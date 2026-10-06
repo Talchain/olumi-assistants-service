@@ -20,7 +20,7 @@
  * Pure; never throws. Omits (never truncates) whenever anything is out of contract — a partial record would misstate
  * what was seen (`phase3_blocks: []` means "none delivered").
  */
-import { RunDeliveredRecordSchema, type OlumiResponse, type RunDeliveredRecord } from '@talchain/schemas/boundary';
+import { OlumiResponseSchema, RunDeliveredRecordSchema, type OlumiResponse, type RunDeliveredRecord } from '@talchain/schemas/boundary';
 import { RunAnalysisHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { BLOCK_PROSE_FIELDS, textAssertsLeadingOption } from './leading-option-egress-guard.js';
@@ -36,7 +36,7 @@ export const DELIVERED_PHASE3_TYPES: ReadonlySet<string> = new Set(['review_card
 
 export type DeliveredRecordOmitReason =
   | 'no_run_fact' | 'several_run_facts' | 'unbound_run' | 'authority_unavailable' | 'asserts_leader'
-  | 'option_out_of_contract' | 'schema_refused' | 'threw';
+  | 'sanitise_unstable' | 'egress_refused' | 'option_out_of_contract' | 'schema_refused' | 'threw';
 
 export type DeliveredRecordOutcome =
   | { readonly kind: 'recorded'; readonly record: RunDeliveredRecord }
@@ -59,24 +59,41 @@ export interface DeliveredRecordInput {
 
 const omitted = (reason: DeliveredRecordOmitReason): DeliveredRecordOutcome => ({ kind: 'omitted', reason });
 
-/** Every option label this turn knows: the graph's options and the analysis_ready roster (a superset of the wire's). */
-function rosterOf(graph: GraphV3T | null, analysisReady: AnalysisReadyPayload | null | undefined): string[] {
-  const labels = new Set<string>();
-  for (const n of (isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [])) {
-    if (isRec(n) && n.kind === 'option' && typeof n.label === 'string' && n.label.trim() !== '') labels.add(n.label);
-  }
-  for (const o of (isRec(analysisReady) && Array.isArray(analysisReady.options) ? analysisReady.options : [])) {
-    if (isRec(o) && typeof o.label === 'string' && o.label.trim() !== '') labels.add(o.label);
-  }
-  return [...labels];
+/**
+ * Every roster the wire could bind labels with: the graph's options (its first choice) and the analysis_ready options (its
+ * fallback), each on its OWN, plus their union. Assertion detection is not monotonic under a roster union: a longer label
+ * in one roster can swallow the predicate a shorter label in the other leaves standing (buddy r1 P1-1: `Team` vs
+ * `Team leads`). So each roster is checked separately; empty rosters are skipped.
+ */
+function rostersOf(graph: GraphV3T | null, analysisReady: AnalysisReadyPayload | null | undefined): string[][] {
+  const labelsOf = (items: unknown[], keep: (r: Rec) => boolean) => [...new Set(items.filter(isRec).filter(keep)
+    .map((r) => r.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''))];
+  const graphRoster = labelsOf(isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [], (n) => n.kind === 'option');
+  const readyRoster = labelsOf(isRec(analysisReady) && Array.isArray(analysisReady.options) ? analysisReady.options : [], () => true);
+  return [graphRoster, readyRoster, [...new Set([...graphRoster, ...readyRoster])]].filter((r) => r.length > 0);
 }
 
-function assertsLeader(block: Rec, roster: readonly string[]): boolean {
+function assertsLeader(block: Rec, rosters: readonly string[][]): boolean {
   return BLOCK_PROSE_FIELDS.some((field) => {
     const value = block[field];
     return typeof value === 'string' && value.length > 0
-      && (textAssertsLeadingOption(value) || textAssertsLeadingOption(value, { optionLabels: roster }));
+      && (textAssertsLeadingOption(value) || rosters.some((optionLabels) => textAssertsLeadingOption(value, { optionLabels })));
   });
+}
+
+/**
+ * Would the wire's egress contract accept this response (`validateEgress`, validators/b1.ts)? The same schema and the same
+ * one-carrier rescue (`model_version_receipt` alone at fault → retried without it), with none of its telemetry (the route
+ * emits its own). A refused response ships the typed fallback, which carries no Phase 3 block (buddy r1 P1-3), so a record
+ * of it would describe cards nobody saw. Pinned to the real validator in the builder's tests.
+ */
+export function egressContractAccepts(response: unknown): boolean {
+  const parsed = OlumiResponseSchema.safeParse(response);
+  if (parsed.success) return true;
+  if (!isRec(response) || !Object.prototype.hasOwnProperty.call(response, 'model_version_receipt')) return false;
+  if (!parsed.error.issues.every((i) => i.path[0] === 'model_version_receipt')) return false;
+  const { model_version_receipt: _dropped, ...withoutReceipt } = response;
+  return OlumiResponseSchema.safeParse(withoutReceipt).success;
 }
 
 export function buildRunDeliveredRecord(input: DeliveredRecordInput): DeliveredRecordOutcome {
@@ -89,13 +106,18 @@ export function buildRunDeliveredRecord(input: DeliveredRecordInput): DeliveredR
     const graphHash = result.graph_hash_at_run;
     if (typeof runId !== 'string' || runId === '' || typeof graphHash !== 'string' || graphHash === '') return omitted('unbound_run');
     if (input.authorityUnavailable) return omitted('authority_unavailable');
+    // The route validates the sanitised response and ships its typed fallback when the contract refuses it.
+    const wholeSanitised = sanitiseOlumiResponseForEgress(input.response, {
+      graph: input.graph, requestId: input.requestId, exitPath: input.exitPath, userMessage: null, mayNameLeadingOption: false,
+    });
+    if (!egressContractAccepts(wholeSanitised)) return omitted('egress_refused');
 
     const phase3 = (input.response.blocks ?? []).filter((b) => isRec(b) && DELIVERED_PHASE3_TYPES.has(String(b.type)));
     // The wire's own sanitiser, over the Phase 3 subset only (assistant_text and every other block are not recorded).
-    const sanitised = (sanitiseOlumiResponseForEgress(
+    const sanitise = (blocks: unknown[]): unknown[] => (sanitiseOlumiResponseForEgress(
       // A blocks-only carrier: no prose, chips or insights (their finalisers and telemetry belong to the wire, not to
       // this record). The sanitiser's block pass is per block, so the Phase 3 bytes are the wire's.
-      { ...input.response, assistant_text: '', suggested_actions: [], insights: [], blocks: phase3 } as OlumiResponse,
+      { ...input.response, assistant_text: '', suggested_actions: [], insights: [], blocks } as OlumiResponse,
       {
         graph: input.graph, requestId: input.requestId, exitPath: input.exitPath,
         // The looping-chip guard's only input; the carrier has no chips.
@@ -104,8 +126,13 @@ export function buildRunDeliveredRecord(input: DeliveredRecordInput): DeliveredR
         mayNameLeadingOption: false,
       },
     ).blocks ?? []) as unknown[];
-    const roster = rosterOf(input.graph, input.analysisReady);
-    if (sanitised.some((b) => isRec(b) && assertsLeader(b, roster))) return omitted('asserts_leader');
+    const sanitised = sanitise(phase3);
+    // The route sanitises the response several times (each exit re-enters the chokepoint), and a replacement label is not
+    // itself re-sanitised (buddy r1 P1-2: an id whose label is another node's id). Record only when one more pass changes
+    // nothing, so the stored bytes are the wire's whatever the number of passes.
+    if (JSON.stringify(sanitise(sanitised)) !== JSON.stringify(sanitised)) return omitted('sanitise_unstable');
+    const rosters = rostersOf(input.graph, input.analysisReady);
+    if (sanitised.some((b) => isRec(b) && assertsLeader(b, rosters))) return omitted('asserts_leader');
 
     const deliveredOptions = isRec(input.analysisReady) && Array.isArray(input.analysisReady.options) ? input.analysisReady.options : null;
     const options = deliveredOptions?.map((o) => (isRec(o) ? {
