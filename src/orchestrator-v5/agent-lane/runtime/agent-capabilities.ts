@@ -3492,7 +3492,10 @@ export function createAgentCapabilities(
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
           const stated = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
           // ONE scope for admission, the figure question and the recorded sentence, so they cannot read different units.
-          const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to) };
+          const endUnits = linkEffectEndUnits(working, from.id, to.id);
+          const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to),
+            target_unitless: endUnits?.target.own.length === 0 && endUnits.target.adopted === undefined,
+            source_unitless: endUnits?.source.own.length === 0 && endUnits.source.adopted === undefined };
           // RT-18 (DL 0df0e1): a link the model does not hold is said FIRST. Every figure question below ends with the canvas
           // route "click the link from A to B", which must never name a link the canvas does not show.
           const held = linkEffectTargetOf(working, from.id, to.id);
@@ -3538,15 +3541,16 @@ export function createAgentCapabilities(
           // reading the card shows for approval (never a silent credit).
           const labelled = withLabelCountUnits(working, from.id, to.id, stated, said);
           const labelReadings = labelled.label_readings.length > 0 ? { label_readings: labelled.label_readings } : {};
-          const consent = { ...linkEffectConsent(working, from.id, to.id, labelled.effect),
-            ...(linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {}) };
-          const unitReading = prepareLinkEffectUnitReadings(working, from.id, to.id, labelled.effect, said, { link_selected: consent.link_selected });
+          const selected = linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {};
+          const unitReading = prepareLinkEffectUnitReadings(working, from.id, to.id, labelled.effect, said, selected);
           const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
             ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
           if (unitAsk !== undefined) {
             fail('unit_mismatch', linkEffectUnitAskWords(unitAsk, from, to));
             continue;
           }
+          const unitView = withLinkEffectUnitReadings(working, unitReading.unit_readings);
+          const consent = { ...linkEffectConsent(unitView, from.id, to.id, labelled.effect), ...selected };
           const effect = withPointsAtZero(labelled.effect, unitReading.points_at_zero, from.id, to.id);
           const unitReadings = unitReading.unit_readings.length > 0 ? { unit_readings: unitReading.unit_readings } : {};
           const dry = applyLinkEffectEdit({ persistedGraph: working, from: from.id, to: to.id, effect,
@@ -3562,7 +3566,7 @@ export function createAgentCapabilities(
             continue;
           }
           // No-dead-end (B)/(C): a level-less mediator's reading is said on the card, for approval.
-          const mediated = linkEffectMediatorReadings(working, from.id, to.id);
+          const mediated = linkEffectMediatorReadings(unitView, from.id, to.id);
           prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
             ...unitReadings, ...labelReadings, ...(mediated.length > 0 ? { mediator_readings: mediated } : {}), ...consent,
             from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
@@ -3625,7 +3629,10 @@ export function createAgentCapabilities(
         .map((n) => String(n.label ?? '')).filter((l) => l !== '');
       const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const statedEnds = { source: from.label, target: to.label };
-      const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to) };
+      const endUnits = linkEffectEndUnits(g.raw, from.id, to.id);
+      const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to),
+        target_unitless: endUnits?.target.own.length === 0 && endUnits.target.adopted === undefined,
+        source_unitless: endUnits?.source.own.length === 0 && endUnits.source.adopted === undefined };
       // RT-18 (DL 0df0e1): a link the model does not hold is said FIRST. Every figure question below ends with the canvas
       // route "click the link from A to B", which must never name a link the canvas does not show.
       const held = linkEffectTargetOf(g.raw, from.id, to.id);
@@ -3666,14 +3673,15 @@ export function createAgentCapabilities(
       const labelled = withLabelCountUnits(g.raw, from.id, to.id, { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit }, said);
       const stated = labelled.effect;
       const labelReadings = labelled.label_readings.length > 0 ? { label_readings: labelled.label_readings } : {};
-      const consent = { ...linkEffectConsent(g.raw, from.id, to.id, stated),
-        ...(linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {}) };
-      const unitReading = prepareLinkEffectUnitReadings(g.raw, from.id, to.id, stated, said, { link_selected: consent.link_selected });
+      const selected = linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {};
+      const unitReading = prepareLinkEffectUnitReadings(g.raw, from.id, to.id, stated, said, selected);
       const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
         ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
       if (unitAsk !== undefined) {
         return { ok: false, mutated: false, refusal: 'unit_mismatch', question: unitAsk, detail: linkEffectUnitAskWords(unitAsk, from, to) };
       }
+      const unitView = withLinkEffectUnitReadings(g.raw, unitReading.unit_readings);
+      const consent = { ...linkEffectConsent(unitView, from.id, to.id, stated), ...selected };
       // Science F1: a % at the user's own 0 is points; the card shows, and the writer stores, that reading.
       const effect = withPointsAtZero(stated, unitReading.points_at_zero, from.id, to.id);
       const unitReadings = unitReading.unit_readings.length > 0 ? { unit_readings: unitReading.unit_readings } : {};
@@ -3695,7 +3703,7 @@ export function createAgentCapabilities(
         operations: [{ op: 'set_link_effect', path: `${from.id}::${to.id}`,
           value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, ...unitReadings, ...labelReadings,
             // No-dead-end (B)/(C): a level-less mediator's reading is said on the card, for approval.
-            ...((m) => m.length > 0 ? { mediator_readings: m } : {})(linkEffectMediatorReadings(g.raw, from.id, to.id)), ...consent } }],
+            ...((m) => m.length > 0 ? { mediator_readings: m } : {})(linkEffectMediatorReadings(unitView, from.id, to.id)), ...consent } }],
         provenance: { authored_by: 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`,

@@ -50,7 +50,7 @@ import {
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 import { statedEffectQuoteMatches, statedEffectSpansInText, statedSwitchEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
-import { readUnitParts } from "../../orchestrator-v5/agent-lane/same-unit.js";
+import { readUnitParts, sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -1279,6 +1279,8 @@ interface Candidate {
   readonly carrier?: "edge_effect";
   /** The one place in the brief this figure may match. Absent means anywhere. */
   readonly boundSpan?: { readonly start: number; readonly end: number };
+  /** A bare count located by this edge's verified quote and persisted user unit receipt. */
+  readonly receiptedQuantity?: Quantity;
   /** An option's level on this factor (`collectSourceBoundInterventionCandidates`).
    *  Admitted only under Science's W2/W3, see {@link admissibleCandidates}. */
   readonly optionLevel?: true;
@@ -1480,11 +1482,14 @@ function collectBriefNaturalEffectCandidates(
 ): Candidate[] {
   if (!Array.isArray(graph.edges)) return [];
   const labels = new Map<string, string>();
+  const unitReadings = new Map<string, Record<string, unknown>>();
   if (Array.isArray(graph.nodes)) {
     for (const raw of graph.nodes) {
       if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
       const node = raw as Record<string, unknown>;
       if (typeof node.id === "string" && typeof node.label === "string") labels.set(node.id, node.label);
+      if (typeof node.id === "string" && node.unit_reading !== null && typeof node.unit_reading === "object"
+        && !Array.isArray(node.unit_reading)) unitReadings.set(node.id, node.unit_reading as Record<string, unknown>);
     }
   }
   const out: Candidate[] = [];
@@ -1543,6 +1548,15 @@ function collectBriefNaturalEffectCandidates(
     const perSourceChange = natural.per_source_change;
     const perSourceChangeUnit = natural.per_source_change_unit;
     if (typeof amount !== "number" || typeof amountUnit !== "string") continue;
+    // MC own-label units: only a persisted USER reading, attested inside this quote in this endpoint's stored unit,
+    // licences the label-head grammar. A proposed/Olumi reading never makes a brief figure appear represented.
+    const attestedUnit = (id: string, unit: unknown): boolean => {
+      const r = unitReadings.get(id);
+      return r?.source === "user_stated" && sameUnit(r.unit, unit) && typeof r.source_quote === "string"
+        && r.source_quote.length > 0 && quote !== null && quote.includes(r.source_quote);
+    };
+    const labelEnds = attestedUnit(to, amountUnit) || attestedUnit(from, perSourceChangeUnit)
+      ? { source: sourceLabel, target: targetLabel } : undefined;
     const quoteVerified =
       quote !== null &&
       typeof perSourceChange === "number" &&
@@ -1554,12 +1568,12 @@ function collectBriefNaturalEffectCandidates(
         amount_unit: amountUnit,
         per_source_change: perSourceChange,
         per_source_change_unit: perSourceChangeUnit,
-      }) || statedSwitchEffectQuoteMatches(quote, {
+      }, undefined, labelEnds) || statedSwitchEffectQuoteMatches(quote, {
         amount,
         amount_unit: amountUnit,
         per_source_change: perSourceChange,
         per_source_change_unit: perSourceChangeUnit,
-      }));
+      }, undefined, labelEnds));
     // ⛔ A RESIZE IN CHAT KEEPS THE OLD EVIDENCE (Codex r1 on #2610, P2): `link-effect-edit.ts` replaces `natural_effect`
     // and keeps the rest of the provenance, so a Fi link resized from £1,200 to £2,000 still carries the £1,200 sentence.
     // That sentence no longer describes the link's size. On a chat-sized link it is stale, never a veto: the link binds
@@ -1588,7 +1602,7 @@ function collectBriefNaturalEffectCandidates(
         amount_unit: amountUnit,
         per_source_change: perSourceChange as number,
         per_source_change_unit: perSourceChangeUnit as string,
-      });
+      }, labelEnds);
       if (spans === null) continue;
       boundSpan = spans.target;
       sourceSpan = spans.source ?? undefined;
@@ -1606,6 +1620,7 @@ function collectBriefNaturalEffectCandidates(
       const { kind, currencyCode, multiplier } = parts !== null && parts.kind === "currency"
         ? { kind: "currency" as const, currencyCode: parts.code ?? undefined, multiplier: parts.scale }
         : readCurrencyUnitWithQualifiers(amountUnit);
+      const targetLiteral = boundSpan === undefined ? "" : briefText.slice(boundSpan.start, boundSpan.end);
       out.push({
         nodeId: to,
         label: targetLabel,
@@ -1616,6 +1631,18 @@ function collectBriefNaturalEffectCandidates(
         declaredUnit: amountUnit,
         carrier: "edge_effect",
         ...(boundSpan !== undefined ? { boundSpan } : {}),
+        // The general scanner deliberately omits bare numerals. A verified own-label count is no longer unitless:
+        // retain ONLY its target numeral, at the quote's unique span, licensed by this endpoint's USER receipt.
+        ...(quoteVerified && attestedUnit(to, amountUnit) && boundSpan !== undefined
+          && parts?.kind === "count" && /^\d[\d,]*(?:\.\d+)?$/.test(targetLiteral)
+          ? { receiptedQuantity: {
+            literal: targetLiteral,
+            at: boundSpan.start,
+            kind: "count" as const,
+            value: toNumber(targetLiteral),
+            mantissa: toNumber(targetLiteral),
+            unit: amountUnit,
+          } } : {}),
       });
     }
 
@@ -1839,6 +1866,8 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
       // honestly; a count that cannot be verified falls to "not modelled yet",
       // which invites the user to add it rather than claiming we used it.
       if (q.unit === null || c.declaredUnit === null) return false;
+      // A receipt-located count belongs only to the edge that verified it, with its full noun/period unit.
+      if (c.receiptedQuantity === q) return sameUnit(q.unit, c.declaredUnit);
       return sameUnitFamily(q.unit, c.declaredUnit);
     }
     default:
@@ -1851,7 +1880,8 @@ function unitCompatible(q: Quantity, c: Candidate): boolean {
  *  say WHICH modelled quantity it is claiming. */
 function matchCandidate(q: Quantity, candidates: readonly Candidate[]): Candidate | null {
   if (q.value === null) return null;
-  for (const c of candidates) {
+  const receipt = candidates.find(c => c.receiptedQuantity === q);
+  for (const c of receipt === undefined ? candidates : [receipt]) {
     if (c.boundSpan !== undefined && !(q.at < c.boundSpan.end && q.at + q.literal.length > c.boundSpan.start)) continue;
     if (!unitCompatible(q, c)) continue;
     if (numbersEqual(c.value, q.value)) return c;
@@ -2046,7 +2076,7 @@ function classifyStatedKind(q: Quantity, spans: readonly ConstraintSpan[]): Stat
 
 const SCOPE = {
   searched:
-    "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods",
+    "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word or a verified user unit receipt, calendar dates and fiscal periods",
   // ⚠ DERIVED FROM `CANDIDATE_COLLECTIONS`, NOT RESTATED. This sentence is
   // USER-VISIBLE COPY describing what we searched, and it was WRONG: it read
   // "node, edge and option values" while `collectCandidates` walks only
@@ -2060,7 +2090,7 @@ const SCOPE = {
   ],
   prose_surface: ["coaching cards", "draft warnings", "validation warnings"],
   excluded_from_search: [
-    "bare numbers carrying no unit, currency or percent sign",
+    "bare numbers carrying no unit, currency or percent sign, unless a quoted effect and user unit receipt verify their own count unit",
     "everything in not_tracked",
   ],
 } as const;
@@ -2116,6 +2146,13 @@ export function deriveNotModelledManifest(
 
   const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
   const quantities = extractStatedQuantities(briefText);
+  for (const candidate of surfaces.candidates) {
+    const q = candidate.receiptedQuantity;
+    // Keep the existing scanner's literal when it already covers this numeral; never duplicate an item.
+    if (q !== undefined && !quantities.some(existing => existing.at < q.at + q.literal.length
+      && existing.at + existing.literal.length > q.at)) quantities.push(q);
+  }
+  quantities.sort((a, b) => a.at - b.at);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 
   const items: NotModelledItem[] = [];

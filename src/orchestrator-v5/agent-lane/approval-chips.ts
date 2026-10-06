@@ -335,8 +335,11 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
   if (proposal.operations.length === 1) {
     const op = proposal.operations[0]!.value as
       { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown };
-    const link = result.link as { from?: unknown; to?: unknown; your_words?: unknown } | undefined;
-    if (link === undefined || link.your_words !== op.quote) return undefined;
+    // A grouped request can prepare just one operation (including when its other rows refuse).
+    // It returns `links`, but approval still records the same single-operation reading.
+    const link = (result.link ?? (Array.isArray(result.links) && result.links.length === 1 ? result.links[0] : undefined)) as
+      { from?: unknown; to?: unknown; your_words?: unknown } | undefined;
+    if (link === undefined || link === null || link.your_words !== op.quote) return undefined;
     return linkEffectReadingOf(proposal, { from: link.from, to: link.to });
   }
   const links = result.links;

@@ -7,10 +7,11 @@ import { countedNoun } from '../agent-lane/counted-nouns.js';
 import { afterChangeWord, denominatorWords, isChangeWord, levelDenominatorOf, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import { singular, words } from '../agent-lane/same-unit.js';
 import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
-import { isPercentageLevelUnit, resolveMagnitudeFrame } from '../../cee/magnitude/link-effect.js';
+import { isPercentageLevelUnit, resolveMagnitudeFrame, sourceUnitWords } from '../../cee/magnitude/link-effect.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectStatement } from './link-effect-edit.js';
 import { mediatorReadings } from '../agent-lane/mediator-reading.js';
+import { canAdoptLabelUnit, labelHeadUnit } from '../agent-lane/label-head-unit.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -150,10 +151,7 @@ const levelUnitKey = (u: string): string | undefined => /^(?:percentage\s+points
 
 /** The model can adopt only where no established unit or level would be reinterpreted (U1). */
 function eligible(node: Rec, edges: readonly Rec[], from: string, to: string, unit: string): boolean {
-  if (unitOf(node) !== undefined) return false;
-  // Even a zero level is a level; never infer a unit for a value already held by the model.
-  if (isRec(node.observed_state) && ['value', 'raw_value', 'baseline'].some(k => node.observed_state && isRec(node.observed_state)
-    && node.observed_state[k] !== undefined && node.observed_state[k] !== null)) return false;
+  if (unitOf(node) !== undefined || !canAdoptLabelUnit(node, [], unit)) return false;
   return !edges.some(e => (e.from === node.id || e.to === node.id) && !(e.from === from && e.to === to)
     && endpointUnit(e, String(node.id)) !== undefined && levelUnitKey(endpointUnit(e, String(node.id))!) !== levelUnitKey(unit));
 }
@@ -215,7 +213,8 @@ function clauseOf(quote: string, amounts: readonly StatedAmount[], i: number, no
     return m === null || ENDS_PHRASE.test(m[2]!);
   };
   // …and on its left (backward): only a sentence start, punctuation, a determiner or a clause word may precede it.
-  const STARTS_PHRASE = /^(?:the|our|your|its|their|when|if|as|and|each|every|while|because|so|then|once|after|before|that|sees?|saw|makes?|keeps?|gets?|has|have|had|leaves?|puts?|sends?|drives?|watch(?:es)?)$/i;
+  // ‘Would cut monthly cancellations by 40%’ still names the end beside its bare percent: U3 asks, never adopts it.
+  const STARTS_PHRASE = /^(?:the|our|your|its|their|when|if|as|and|each|every|while|because|so|then|once|after|before|that|sees?|saw|makes?|keeps?|gets?|has|have|had|leaves?|puts?|sends?|drives?|watch(?:es)?|cuts?)$/i;
   // "per 12 months", "/ 3 years": a numbered period the unit grammar cannot carry → no adoption, so the end is ASKED
   // (buddy r3 P2), never silently stored without its period.
   const numberedPeriodAt = (from: number): boolean => /^\s*(?:per\s+|\/\s*)\d/i.test(quote.slice(from));
@@ -340,14 +339,22 @@ export function prepareLinkEffectUnitReadings(
     [target, source, effect.amount, effect.amount_unit]] as const) {
     const label = String(node.label ?? node.id);
     const reading = mediated.get(String(node.id));
-    const mediatedUnit = reading === undefined || (reading.via === 'gauge' && node === source) ? undefined : reading.unit;
-    const establishedUnit = unitOf(node) ?? mediatedUnit ?? (current === undefined ? undefined : endpointUnit(current, String(node.id)));
+    const ownNoun = labelHeadUnit(quote, value, label, String(other.label ?? other.id), node === source);
+    // A gauge not yet written is a fallback for an unknown quantity. This end's own stated noun supplies its unit
+    // first; U1 still guards every stored unit/level/other size, and an already stored gauge remains established.
+    const ownBeforeGauge = reading?.via === 'gauge' && reading.stored !== true && ownNoun !== undefined
+      && eligible(node, edges, from, to, ownNoun.unit);
+    const mediatedUnit = reading === undefined || (reading.via === 'gauge' && (node === source || ownBeforeGauge)) ? undefined : reading.unit;
+    const magnitude = view.get(String(node.id));
+    const frame = magnitude === undefined ? undefined : resolveMagnitudeFrame(magnitude);
+    // The banked pause source has option levels 0/1 and no observed_state. The SAME sizer still types it as a switch.
+    const switchUnit = node === source && magnitude !== undefined && sourceUnitWords(magnitude, frame) === 'switch'
+      ? 'switch' : undefined;
+    const establishedUnit = unitOf(node) ?? mediatedUnit ?? (current === undefined ? undefined : endpointUnit(current, String(node.id))) ?? switchUnit;
     const literalPercent = amounts.find(a => a.magnitude === Math.abs(value) && a.kind === 'percent');
     const sourceLevels = node === source
       ? linkEffectSourceLevels(quote, namesSourceOf({ source: String(source.label ?? source.id), target: String(target.label ?? target.id) })) : undefined;
     const explicitSourceLevels = sourceLevels !== undefined && Math.abs(sourceLevels.change) === Math.abs(value);
-    const magnitude = view.get(String(node.id));
-    const frame = magnitude === undefined ? undefined : resolveMagnitudeFrame(magnitude);
     if (establishedUnit !== undefined && literalPercent !== undefined && !explicitSourceLevels) {
       if ((unitOf(node) !== undefined || percentLevels.has(String(node.id)))
         // A bare % on a percent LEVEL is two readings whatever frame it is stored on (Codex r1 HIGH: a capless 0 resolves to
@@ -370,13 +377,13 @@ export function prepareLinkEffectUnitReadings(
     }
     // Step 1's established size continues to govern; this door adopts units for UNSIZED ends only.
     if (establishedUnit !== undefined) continue;
-    const candidates = amounts.flatMap((a, i) => {
+    const candidates = ownNoun !== undefined ? [{ clause: ownNoun.source_quote, unit: ownNoun.unit }] : amounts.flatMap((a, i) => {
       if (a.magnitude !== Math.abs(value)) return [];
       const clause = clauseOf(quote, amounts, i, node, other)
         ?? (options?.link_selected === true ? selectedCurrencyClause(quote, a) : undefined);
       return clause === undefined ? [] : [{ clause, ...literalUnit(a, clause, node) }];
     });
-    const one = candidates.length === 1 ? candidates[0] : undefined;
+    const one: { clause: string; unit?: string; barePercent?: true } | undefined = candidates.length === 1 ? candidates[0] : undefined;
     const unit = one?.unit;
     if (!eligible(node, edges, from, to, unit ?? statedUnit)) continue;
     if (one?.barePercent === true) {
