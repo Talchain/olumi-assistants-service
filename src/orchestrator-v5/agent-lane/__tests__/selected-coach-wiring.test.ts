@@ -29,8 +29,10 @@ const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f6
 //   Acceptance rehearsal 2), and names an option in Part B's neutral form "N% of runs supported X" (Codex r1 #2614: "scored
 //   highest" is false on a minimise Run and inexact under split tie credit), and with no share makes no claim about how
 //   runs fell (Codex r2): 28,835 → 29,212 bytes (+377). Same rebuild, which reproduced 2bc25cba… exactly first.
-const RENDERED_SHA = 'fb420f2527c5dae62e6f9d10777c50119796283897906dad921cf361fecc696a';
-const RENDERED_BYTES = 29_212;
+// + GOAL_CHANCE_RANKING_INSTRUCTION appended after the naming rule (D3 step 2, DL 0df0e1 ruling C, 6 Oct): 29,212 → 29,958
+//   bytes (+1 space +745 = exactly the rule's bytes); template and host shas unchanged. Derived from the SENT body.
+const RENDERED_SHA = '087781c88802fc8e061716d33f66d9525fb338b600b0e2ecbad5f149c60dd17d';
+const RENDERED_BYTES = 29_958;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';

@@ -138,3 +138,32 @@ export function withGoalChanceLicence<E>(
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
   return { ...envelope, inference_warnings: [...warnings, licence] } as E;
 }
+
+/**
+ * ⭐ DL 0df0e1 ruling C (6 Oct): the Run's stored licence as the Agent may read it — `form` and option ids only, read by
+ * its code where the Run carries it (`enrichment.inference_warnings`) or where a kept Run moved it (`inference_warnings`).
+ * No percentage travels: the Agent quotes each option's `probability_of_goal` from its own row. `undefined` when the Run
+ * carries no single well-formed licence.
+ */
+export function goalChanceLicenceForAgent(result: unknown): {
+  form: GoalChanceForm; option_ids: string[]; leader_option_id?: string; similar_option_ids?: string[]; withheld_option_ids?: string[];
+} | undefined {
+  if (!isRec(result)) return undefined;
+  const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
+    .flatMap((w) => (Array.isArray(w) ? w : [])).filter((w): w is Rec => isRec(w) && w.code === GOAL_CHANCE_LICENSED);
+  if (records.length !== 1) return undefined;
+  const r = records[0]!;
+  const ids = (v: unknown): string[] | undefined => (Array.isArray(v) && v.every((x) => typeof x === 'string') ? v as string[] : undefined);
+  const forms: readonly string[] = ['highest', 'highest_all_likely_to_miss', 'all_likely_to_miss', 'similar', 'each'];
+  const optionIds = ids(r.option_ids);
+  if (typeof r.form !== 'string' || !forms.includes(r.form) || optionIds === undefined) return undefined;
+  const similar = ids(r.similar_option_ids);
+  const withheld = ids(r.withheld_option_ids);
+  return {
+    form: r.form as GoalChanceForm,
+    option_ids: optionIds,
+    ...(typeof r.leader_option_id === 'string' ? { leader_option_id: r.leader_option_id } : {}),
+    ...(similar !== undefined ? { similar_option_ids: similar } : {}),
+    ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),
+  };
+}
