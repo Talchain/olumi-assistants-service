@@ -182,3 +182,27 @@ describe('the model reasons with the existence the Run USES (d5: every reader th
     expect((editCompactGraph(g() as never).edges as Rec[]).find((e) => e.from === 'price')?.exists_probability).toBe(0.8);
   });
 });
+
+/**
+ * ⭐ HELD-LINK PARITY (DL 0df0e1 condition 2): the SAME fixture, byte for byte, runs here and in DGAI
+ * (`src/canvas/domain/__tests__/fixtures/held-link-parity.json`, `isHeldUserLink`). Each repo pins its sha256, so an edit to
+ * either copy REDs that repo's CI until both are re-pinned to the same digest. Check name: "held-link parity fixture digest".
+ */
+describe('held-link parity fixture (shared with DGAI)', () => {
+  const FIXTURE_SHA256 = '294ffd2ac4e69e2020c7a539efa8ec2a382a02db692195c684da7842dceeb3d6';
+  const load = async (): Promise<{ bytes: Buffer; rows: Array<{ name: string; edge: Rec; held: boolean }> }> => {
+    const { readFileSync } = await import('node:fs');
+    const bytes = readFileSync(new URL('./fixtures/held-link-parity.json', import.meta.url));
+    return { bytes, rows: (JSON.parse(bytes.toString('utf8')) as { rows: Array<{ name: string; edge: Rec; held: boolean }> }).rows };
+  };
+  it('held-link parity fixture digest: the bytes are the ones DGAI pins', async () => {
+    const { createHash } = await import('node:crypto');
+    expect(createHash('sha256').update((await load()).bytes).digest('hex')).toBe(FIXTURE_SHA256);
+  });
+  it('every row: heldLinkOf agrees with the fixture (both directions present)', async () => {
+    const { rows } = await load();
+    expect(rows.filter((r) => r.held).length).toBeGreaterThan(0);
+    expect(rows.filter((r) => !r.held).length).toBeGreaterThan(0);
+    for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge) !== null }).toEqual({ name: r.name, held: r.held });
+  });
+});
