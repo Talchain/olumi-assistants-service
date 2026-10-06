@@ -1,6 +1,6 @@
 // Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
 export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
-import { statedEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
+import { statedEffectQuoteMatches, statedSwitchEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
 /**
  * Agent lane — whole-candidate admission.
  *
@@ -3801,10 +3801,52 @@ function admitOnce(
   // occurrences are claimed by nonEffectQuantitySpans in the binding reader.
   const claimedLevelSpans = levelReading.value?.kind === 'adopt' && levelReading.value.span !== undefined ? [levelReading.value.span] : [];
   const passThroughs: PassThroughBinding[] = [];
+  // A switch is also named by the options that set it (Science 6008844683 (c)): "Launch starter tier" sets ‘launched’.
+  const settersOf = new Map<string, string[]>();
+  for (const o of model.options) for (const i of o.interventions ?? []) {
+    const id = ids.get(i.factor_label);
+    if (id !== undefined) settersOf.set(id, [...(settersOf.get(id) ?? []), o.label]);
+  }
+  const centreRanges = new Map<number, StatedRangeEnd>();
+  const signRefused: { readonly through: PassThroughBinding; readonly said: 1 | -1 | null }[] = [];
+  const directSignRefused: { readonly link: number; readonly sentence: string }[] = [];
   const boundSizeSentences = bindStatedLinkSizes(resolvable.map((l, i) => ({
     from: l.from, to: l.to, effect_direction: l.direction, natural_effect: prospectiveEffects[i],
-  })), bindingNodes, brief, claimedLevelSpans, passThroughs);
+  })), bindingNodes, brief, claimedLevelSpans, { passThroughs, settersOf, centreRanges, signRefused, directSignRefused });
+  // ⛔ A direct bind drawn the other way from the user's sentence is never theirs, and that is SAID (DL #2644 pilot).
+  for (const r of directSignRefused) {
+    const link = resolvable[r.link]!;
+    const label = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+    loss.push({
+      field_path: `edges[${link.from}->${link.to}].stated_sign`,
+      before: { direction: link.direction },
+      after: null,
+      reason: `“${r.sentence}” is not recorded as your figure for ‘${label(link.from)}’ → ‘${label(link.to)}’: that link is drawn to `
+        + 'run the other way from what you wrote. Check which way it runs.',
+      severity: 'warn',
+    } as RepairEntry);
+  }
+  // ⛔ A pass-through whose path runs the other way from the user's sentence is never typed, and that is SAID (Desk 6b Q3).
+  for (const { through: r, said } of signRefused) {
+    const into = resolvable[r.link]!;
+    const onward = resolvable[r.onward]!;
+    const label = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+    // Desk 6b: a verb Olumi cannot read gets its own words, never the false "drawn to run the other way".
+    const why = said === null
+      ? `Olumi can't tell from it which way it moves ‘${label(onward.to)}’. Say whether it adds to ‘${label(onward.to)}’ or takes away from it.`
+      : `the links ‘${label(into.from)}’ → ‘${label(into.to)}’ → ‘${label(onward.to)}’ are drawn to run the other way from what you wrote. `
+        + 'Check which way each of them runs.';
+    loss.push({
+      field_path: `edges[${into.from}->${onward.to}].pass_through_sign`,
+      before: { via: label(into.to) },
+      after: null,
+      reason: `“${r.sentence}” is not recorded through ‘${label(into.to)}’: ${why}`,
+      severity: 'warn',
+    } as RepairEntry);
+  }
   const boundByLink = new Map([...boundSizeSentences].map(([index, sentence]) => [resolvable[index]!, sentence]));
+  // The range the bound sentence writes around the user's figure (`centreRangeAt`), read where the size is.
+  const centreByLink = new Map([...centreRanges].map(([index, range]) => [resolvable[index]!, range]));
   /**
    * ⭐ (B) THE MEDIATOR'S ONWARD LINK IS THE DEFINITION THE BOUND SENTENCE IMPLIES (Science d5 #87 6008551439 (B)): ±1 per
    * 1, its typed sign, written as if the drafter had said it holds by definition, so the ONE definitional check
@@ -3817,9 +3859,12 @@ function admitOnce(
     const statedUnit = prospectiveEffects[t.link]?.amount_unit;
     if (!unitById.has(onward.from) && typeof statedUnit === 'string') unitById.set(onward.from, statedUnit);
   }
+  // A link whose pass-through ran the other way from the sentence is not the user's by the door either (Desk 6b Q3).
+  const signRefusedLinks = new Set([...signRefused.map((r) => resolvable[r.through.link]!), ...directSignRefused.map((r) => resolvable[r.link]!)]);
   const userSizeEarned = (l: CandidateLink): boolean => {
     if (l.provenance_source === 'user_specified') return true;
     if (boundByLink.has(l)) return true;
+    if (signRefusedLinks.has(l)) return false;
     // ⚠ The `sizeWritten` door is RETIRED by Science 6008581742, in its own PR: Fi does not yet bind every sentence it
     // covers ("cuts churn by 6 points" is not read as percentage points; a three-word noun such as "each qualified investor
     // conversation" is not located), so retiring it here would demote real user figures.
@@ -3884,8 +3929,9 @@ function admitOnce(
     const levelUnit = target.observed_state?.unit ?? target.unit ?? target.goal_threshold_unit;
     const user_stated = userSizeEarned(l);
     // A4: a size the brief writes only as one END of a range is said with that range (a user's own edit never is).
+    // The bound sentence's range AROUND the figure first ("about 150, between 80 and 250"; d5 6009282279), else A4's end.
     const range = user_stated && l.provenance_source !== 'user_specified'
-      ? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
+      ? centreByLink.get(l) ?? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
         source: source.label,
         sourceUnit: source.unit,
         others: quantityLabels.filter((q) => q !== source.label),
@@ -3914,7 +3960,8 @@ function admitOnce(
     const edge = linkResult.edges.find(e => e.from === link.from && e.to === link.to);
     if (edge?.provenance?.magnitude === 'user_stated'
       && edge.provenance.natural_effect !== undefined
-      && statedEffectQuoteMatches(sentence, edge.provenance.natural_effect)) edge.provenance.source_quote = sentence;
+      && (statedEffectQuoteMatches(sentence, edge.provenance.natural_effect)
+        || statedSwitchEffectQuoteMatches(sentence, edge.provenance.natural_effect))) edge.provenance.source_quote = sentence;
   }
 
   // decision -> option edges are TOPOLOGY, not causal belief. They use the

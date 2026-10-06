@@ -2187,7 +2187,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // target, not a limit: its claims are withheld and said once under GOAL_FIGURES_TARGET_NOT_TESTABLE (above), so it
     // never also withholds the leader here. Bound by the row's identity (`untestableGoalTargetRowId`); a deadline row,
     // another node's limit and a testable target's row stay. It still travels to PLoT unchanged.
-    const untestableTargetRowId = untestableGoalTargetRowId(graphForAnalysis);
+    const runEvaluations = (response as Record<string, unknown>).identity_evaluations;
+    const untestableTargetRowId = untestableGoalTargetRowId(graphForAnalysis, Array.isArray(runEvaluations) ? runEvaluations : undefined);
     const ratifiedConstraints = readRatifiedConstraints(
       snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
     ).filter((c) => c.constraint_id !== untestableTargetRowId);
@@ -2839,7 +2840,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ AIQ 5895379601 (1): Olumi's readings of the goal (its direction, its today level) are said once, through the
     // predicates the Run acts on (`goal-reading-disclosure.ts`), on the graph this Run analysed. The forwarder admits
     // them only as its own rebuild from `__goal_reading_source` (AIQ 5895590866 (2), exact equality).
-    const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id);
+    // ⭐ #2644 (Science d5 6009457214): an inferred product THIS Run evaluated is one of Olumi's readings the chance rests on.
+    const runIdentityEvaluations = Array.isArray((response as Record<string, unknown>).identity_evaluations)
+      ? (response as Record<string, unknown>).identity_evaluations as unknown[] : undefined;
+    const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id, runIdentityEvaluations);
     const identicalArmsDisclosure = buildIdenticalArmsDisclosure(identicalArms);
     const disclosedHeadline = headline !== null
       ? appendLegacyFiguresAfterLeaderSentence(headline, legacyFiguresDisclosure) : null;
@@ -3062,7 +3066,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         ? { __legacy_figures_source: { graph: graphForAnalysis, links: legacyFiguresLinks } }
         : {}),
       ...(goalReadingDisclosure !== ''
-        ? { __goal_reading_source: { graph: graphForAnalysis, goal_node_id: snapshot.goal_node_id } }
+        ? { __goal_reading_source: { graph: graphForAnalysis, goal_node_id: snapshot.goal_node_id,
+          ...(runIdentityEvaluations !== undefined ? { identity_evaluations: runIdentityEvaluations } : {}) } }
         : {}),
       // GO(A) — the cell whose native value would make the withheld limit
       // checkable. Server-only: the turn-executor arms it as an
@@ -3724,7 +3729,9 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   // (the whole-run arm); a run an earlier withhold already emptied keeps that withhold's reason alone.
   const ids = shown.length > 0 ? shown : runWithheldGoalFigures(response as Record<string, unknown>) ? [] : scored;
   if (ids.length === 0) return response;
-  const verdict = targetTestabilityOf(graph);
+  // THIS Run's identity evaluations, as (S) reads them: an inferred product the Run evaluated is exact (Science d5, #2644).
+  const evaluations = (response as Record<string, unknown>).identity_evaluations;
+  const verdict = targetTestabilityOf(graph, Array.isArray(evaluations) ? evaluations : undefined);
   const warning = targetNotTestableWarning(graph, verdict, ids, GOAL_FIGURES_TARGET_NOT_TESTABLE);
   // ⭐ F1b [R1] (contract §2; L2(a) "option outcome distributions always show when computed"): when every failure is
   // about how the TARGET is stated (P2 off scale, P3 comparator, P4 unit), the goal has today's level and every path size

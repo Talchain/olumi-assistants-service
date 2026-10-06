@@ -10,8 +10,13 @@
  * exactly; one it cannot evaluate is withdrawn and the Run goes ahead as before (PLoT variants (a)/(b)).
  *
  * Only when:
- *  · the outcome is not the goal, has no level of its own (ISL rule 3: with no stated level a 0 part is an ordinary
- *    level), carries no declaration already, and its ONLY non-option parents are the rate and the count;
+ *  · the outcome is not the goal, carries no declaration already, and its ONLY non-option parents are the rate and the count;
+ *  · the outcome has no level of its own (ISL rule 3: with no stated level a 0 part is an ordinary level). The candidate
+ *    wire gives an outcome no level field (`buildCandidateSchema`: label, provenance, unit, plausible_max), so the one
+ *    route a level reaches its node is a FACTOR of the same label, which admission makes the same node: refused (Desk 6b
+ *    #2644 Q1);
+ *  · BOTH links into it are drawn positive: a product of a rate and a count rises with each, so a negative link is the
+ *    drafter saying something else, and its sign is never overwritten by Olumi's + product (Desk 6b #2644 Q2);
  *  · no option sets the COUNT to a single figure: the brief's range must survive (Science: "a point 150 gives Starter
  *    100%"). A count fed by a link keeps that link's spread; a point-set count waits for the range reshape (a8's hold);
  *  · every option level on a part is a figure the brief writes, in that part's unit (the user's own option levels).
@@ -37,8 +42,13 @@ export function withRateCountProducts(candidate: CandidateModel, brief: string):
   for (const outcome of candidate.outcomes) {
     const label = outcome.label;
     if (label === candidate.goal.metric || declared.has(label)) continue;
-    const parents = [...new Set(candidate.links.filter((l) => l.to === label).map((l) => l.from))].filter((p) => !options.has(p));
+    // A same-labelled factor is this node's level (`buildCandidateSchema` gives an outcome none of its own).
+    if (candidate.factors.some((f) => f.label === label)) continue;
+    const into = candidate.links.filter((l) => l.to === label && !options.has(l.from));
+    const parents = [...new Set(into.map((l) => l.from))];
     if (parents.length !== 2) continue;
+    // Both drawn positive, or the drafter's sign would be replaced by the product's.
+    if (!into.every((l) => l.direction === 'positive')) continue;
     const [a, b] = parents as [string, string];
     const composed = unitsCompose(candidate.goal.unit, candidate.goal.metric, { unit: unitOf(a), label: a }, { unit: unitOf(b), label: b });
     if (composed.kind !== 'proof') continue;

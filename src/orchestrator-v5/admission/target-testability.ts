@@ -1,4 +1,5 @@
 import { linkList } from '../agent-lane/unsized-path-cause.js';
+import { evaluatedIdentityCarriers } from './identity-evaluations.js';
 /**
  * ⭐ IS THE GOAL'S TARGET TESTABLE, BEFORE ANY RUN (DECISION-REPRESENTATION-v1 row 4; PTL A #77 5912737934).
  *
@@ -130,8 +131,8 @@ export function targetVerdictWithholdsTargetClaims(verdict: TargetTestability): 
  * raw target only the row stating that figure; Codex r1 #2606), never by operator. A deadline row on the goal (DR row 3),
  * a different-figure row beside a raw target, every other node's limit, and a testable target: null, nothing moves.
  */
-export function untestableGoalTargetRowId(input: unknown): string | null {
-  const verdict = targetTestabilityOf(input);
+export function untestableGoalTargetRowId(input: unknown, identityEvaluations?: readonly unknown[]): string | null {
+  const verdict = targetTestabilityOf(input, identityEvaluations);
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable' || !isRec(input) || !Array.isArray(input.nodes)) return null;
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
   const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && n.id === verdict.goal_id);
@@ -164,7 +165,7 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
       toGoal.add(e.from); grew = true;
     }
   }
-  const evaluated = new Set((identityEvaluations ?? []).filter(isRec).filter(e => e.evaluated === true).map(e => e.node_id));
+  const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
   const exactLinks = new Set(edges.filter(e => {
     if (isRec(e.provenance) && e.provenance.definitional === true) return true;
     const to = byId.get(e.to);
@@ -207,7 +208,15 @@ export function goalOrderedLinks(graph: unknown, links: readonly { from: string;
       || edges.findIndex(e => e.from === a.from && e.to === a.to) - edges.findIndex(e => e.from === b.from && e.to === b.to));
 }
 
-export function targetTestabilityOf(input: unknown): TargetTestability {
+export function targetTestabilityOf(
+  input: unknown,
+  /**
+   * THIS Run's `identity_evaluations` (ISL via PLoT, top level of the response). An inferred identity the Run evaluated
+   * carries its operand links exactly, as the licence's own walk reads them (`reachedGoalPaths` `exactLinks`; Science
+   * d5 ruling for #2644). Omitted (before a Run) = none attested: only a confirmed identity counts.
+   */
+  identityEvaluations?: readonly unknown[],
+): TargetTestability {
   if (!isRec(input) || !Array.isArray(input.nodes)) return { kind: 'no_goal' };
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
   const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && typeof n.id === 'string');
@@ -247,7 +256,9 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
-    const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.stated_in_brief !== false).map((n) => n.id));
+    const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
+    const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity)
+      && (n.nonlinear_identity.stated_in_brief !== false || evaluated.has(n.id))).map((n) => n.id));
     // A link Olumi sized (R3 #2371 5914745577: an `olumi_*` magnitude, or a plain `defaulted: true` size — m1's churn →
     // subscribers-at-12-months) that does not hold by definition: B6's ONE test (`olumiGuessedLink`), so the goal and a
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
@@ -345,6 +356,11 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     const ends = linkEffectEndUnits(graph, upstream.from, upstream.to);
     const [fromUnit, toUnit] = [ends?.source.own[0], ends?.target.own[0]];
     const to = failingLink?.link_to ?? upstream.to;
+    // A yes/no lever is switched on, never "rises by 1 0 / 1" (a8 + red team 19, CEE b38592ed): the sizer's own word for
+    // its source unit is 'switch' (`sourceUnitWords`), the link-effect convention the card says it in.
+    if (toUnit !== undefined && ends?.source.own.includes('switch') === true) {
+      return `Roughly how much does ${to} change, in ${toUnit}, when ${lever} is switched on?`;
+    }
     return fromUnit !== undefined && toUnit !== undefined
       ? `Roughly how much does ${to} change, in ${toUnit}, when ${lever} rises by ${sayFigure(1, fromUnit)}?`
       : `Roughly how much does ${to} change when ${lever} changes?`;

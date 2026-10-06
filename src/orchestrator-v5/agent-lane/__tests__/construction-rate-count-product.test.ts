@@ -12,6 +12,7 @@ import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
+import { EdgeV3, NodeV3 } from '../../../schemas/cee-v3.js';
 
 const T1B = 'We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. '
   + 'Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least '
@@ -27,8 +28,12 @@ const link = (from: string, to: string, direction: Dir, amount: number | null = 
   ({ from, to, direction, provenance, effect_amount: amount, effect_per_source_change: per, effect_provenance: amount === null ? null : provenance });
 const set = (factor_label: string, value: number, unit: string, provenance = 'explicit') => ({ factor_label, value, value_kind: 'absolute', unit, provenance });
 
-/** Served draft 7's shape. `pointCount`: draft 8's shape instead, where Launch sets the subscribers to one figure. */
-function draft7(over: { pointCount?: boolean; priceUnit?: string; price?: number } = {}): Record<string, unknown> {
+/**
+ * Served draft 7's shape. `pointCount`: draft 8's shape instead, where Launch sets the subscribers to one figure.
+ * `countDirection`: the drafter's sign on the count's link (Desk 6b Q2). `levelledOutcome`: the outcome ALSO drafted as a
+ * factor with a level, which admission makes the same node (Desk 6b Q1).
+ */
+function draft7(over: { pointCount?: boolean; priceUnit?: string; price?: number; countDirection?: Dir; levelledOutcome?: number } = {}): Record<string, unknown> {
   const launch = over.pointCount === true
     ? [set('Starter subscribers', 150, 'subscribers', 'ai_proposed'), set('Starter tier monthly price', over.price ?? 49, over.priceUnit ?? 'GBP per subscriber per month', 'ai_proposed')]
     : [set('Starter tier launched', 1, '', 'ai_proposed'), set('Starter tier monthly price', over.price ?? 49, over.priceUnit ?? 'GBP per subscriber per month', 'ai_proposed')];
@@ -46,7 +51,13 @@ function draft7(over: { pointCount?: boolean; priceUnit?: string; price?: number
       ...(over.pointCount === true
         ? [{ label: 'Starter subscribers', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'subscribers', provenance: 'ai_proposed', plausible_max: 1000 }]
         : [{ label: 'Starter tier launched', role: 'controllable', baseline_known: true, baseline_value: 0, unit: '', provenance: 'ai_proposed', plausible_max: 1 }]),
-      { label: 'Starter tier monthly price', role: 'controllable', baseline_known: true, baseline_value: 0, unit: over.priceUnit ?? 'GBP per subscriber per month', provenance: 'ai_proposed', plausible_max: 200 },
+      { label: 'Starter tier monthly price', role: 'controllable', baseline_known: true, baseline_value: over.levelledOutcome !== undefined ? 49 : 0,
+        unit: over.priceUnit ?? 'GBP per subscriber per month', provenance: over.levelledOutcome !== undefined ? 'explicit' : 'ai_proposed', plausible_max: 200 },
+      // Desk 6b Q1: the outcome drafted with a level of its own, and BOTH parts levelled (so no part-level refusal applies).
+      ...(over.levelledOutcome !== undefined
+        ? [{ label: 'Starter-tier MRR', role: 'observable', baseline_known: true, baseline_value: over.levelledOutcome, unit: 'GBP per month', provenance: 'explicit', plausible_max: 50000 },
+          { label: 'Starter subscribers', role: 'observable', baseline_known: true, baseline_value: 120, unit: 'subscribers', provenance: 'explicit', plausible_max: 1000 }]
+        : []),
     ],
     risks: [],
     outcomes: [
@@ -60,7 +71,7 @@ function draft7(over: { pointCount?: boolean; priceUnit?: string; price?: number
       link('Customers lost from price rise', 'monthly recurring revenue', 'negative', -300, 1),
       ...(over.pointCount === true ? [] : [link('Starter tier launched', 'Starter subscribers', 'positive', 150, 1)]),
       link('Starter tier monthly price', 'Starter-tier MRR', 'positive'),
-      link('Starter subscribers', 'Starter-tier MRR', 'positive'),
+      link('Starter subscribers', 'Starter-tier MRR', over.countDirection ?? 'positive'),
       { ...link('Starter-tier MRR', 'monthly recurring revenue', 'positive', 1, 1, 'inferred'), definitional: true },
     ],
     identities: [],
@@ -70,7 +81,7 @@ function draft7(over: { pointCount?: boolean; priceUnit?: string; price?: number
 }
 
 type Rec = Record<string, any>;
-async function build(wire: Record<string, unknown>): Promise<{ graph: Rec; node: (label: string) => Rec; said: string[] }> {
+async function build(wire: Record<string, unknown>): Promise<{ graph: Rec; node: (label: string) => Rec; edge: (from: string, to: string) => Rec; said: string[] }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let registered: Rec | null = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -84,7 +95,10 @@ async function build(wire: Record<string, unknown>): Promise<{ graph: Rec; node:
   const out = await buildModelFromBrief('b63d8672-0000-4000-8000-0000000b63d8', T1B, dispatch, call) as Rec;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   const graph = registered!;
-  return { graph, node: (label) => (graph.nodes as Rec[]).find((n) => n.label === label)!, said: [...(out.not_represented ?? []), ...(out.open_questions ?? [])] };
+  // As a reload reads them back (`NodeV3` / `EdgeV3`).
+  const node = (label: string): Rec => NodeV3.parse((graph.nodes as Rec[]).find((n) => n.label === label)!) as Rec;
+  const edge = (from: string, to: string): Rec => EdgeV3.parse((graph.edges as Rec[]).find((e) => e.from === node(from).id && e.to === node(to).id)!) as Rec;
+  return { graph, node, edge, said: [...(out.not_represented ?? []), ...(out.open_questions ?? [])] };
 }
 
 describe('(A) a rate × count drawn as two added links is Olumi\'s product of the two', () => {
@@ -109,6 +123,19 @@ describe('(A) a rate × count drawn as two added links is Olumi\'s product of th
 
   it('CONTROL: a rate whose denominator does not name the count ("GBP per month") is no proof — no product', async () => {
     const { node } = await build(draft7({ priceUnit: 'GBP per month' }));
+    expect(node('Starter-tier MRR').nonlinear_identity).toBeUndefined();
+  });
+
+  it('CONTROL (Desk 6b Q2): a count drawn NEGATIVE into the outcome is never overwritten by a + product; the drafter\'s sign stays', async () => {
+    const { node, edge } = await build(draft7({ countDirection: 'negative' }));
+    expect(node('Starter-tier MRR').nonlinear_identity).toBeUndefined();
+    expect(edge('Starter subscribers', 'Starter-tier MRR').effect_direction).toBe('negative');
+  });
+
+  it('CONTROL (Desk 6b Q1): an outcome holding a level its parts contradict (£9,000 vs 49 × 120) gets no inferred product', async () => {
+    // Admission refuses a levelled product only when a part is 0 or has none (`levelRefused`): with both parts levelled,
+    // nothing else stops the mint (measured without the check: minted at £9,000 and at £5,880).
+    const { node } = await build(draft7({ levelledOutcome: 9000 }));
     expect(node('Starter-tier MRR').nonlinear_identity).toBeUndefined();
   });
 

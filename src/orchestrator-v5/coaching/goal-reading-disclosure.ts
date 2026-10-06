@@ -19,10 +19,18 @@
  * A reading whose words trip the reply's content defences (a raw decimal such as "£4.5k" in the quoted clause, a
  * forbidden word) is left out, exactly as every other disclosure builder degrades: the defences are not widened for it.
  * Named residual: that reading's chance is then shown without its words.
+ *
+ * ⭐ A THIRD READING (Science d5 #87 6009457214; DL #2644 condition 3): a product Olumi INFERRED (`stated_in_brief: false`)
+ * that THIS Run evaluated (`evaluatedIdentityCarriers`: its node and operand set) on a path to the goal. The goal's chance
+ * then rests on how Olumi says the parts combine, so the Run says it, in Science's words: "Olumi works out ‘X’ as ‘A’ ×
+ * ‘B’. That’s Olumi’s reading of how they combine; tell me if it’s wrong." Not evaluated ⇒ the Run walked the links, and
+ * nothing is said. The evaluations travel in the same source, so the forwarder rebuilds the same tail.
  */
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
 import { resolveGoalDirection } from '../goal-target/goal-direction.js';
 import { goalLevelReadingWords } from '../goal-target/goal-level-reading.js';
+import { evaluatedIdentityCarriers } from '../admission/identity-evaluations.js';
+import { reachesAlong } from '../agent-lane/option-creates.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -36,9 +44,30 @@ function senseReadingWords(graph: unknown, goalNodeId: unknown): string | null {
   return typeof words === 'string' && words.trim() !== '' ? words.trim() : null;
 }
 
-/** ' <direction words> <level words>' for the reply, or '' when the goal holds no reading that speaks. */
-export function buildGoalReadingDisclosure(graph: unknown, goalNodeId: unknown): string {
-  return [senseReadingWords(graph, goalNodeId), goalLevelReadingWords(graph, goalNodeId)]
+/** One sentence per inferred product THIS Run evaluated on a path to the goal, in node order. */
+function productReadingWords(graph: unknown, goalNodeId: unknown, identityEvaluations?: readonly unknown[]): string[] {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges)
+    ? graph.edges.filter((e): e is { from: string; to: string } => isRec(e) && typeof e.from === 'string' && typeof e.to === 'string') : [];
+  const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
+  const label = (id: unknown): string | undefined => {
+    const l = nodes.find((n) => n.id === id)?.label;
+    return typeof l === 'string' && l.trim() !== '' ? l.trim() : undefined;
+  };
+  return nodes.flatMap((n) => {
+    const identity = isRec(n.nonlinear_identity) ? n.nonlinear_identity : undefined;
+    if (identity === undefined || identity.stated_in_brief !== false || identity.operation !== 'product' || !evaluated.has(n.id)) return [];
+    if (typeof n.id !== 'string' || typeof goalNodeId !== 'string' || (n.id !== goalNodeId && !reachesAlong(edges, n.id, goalNodeId))) return [];
+    const parts = (Array.isArray(identity.factor_ids) ? identity.factor_ids : []).map(label);
+    const own = label(n.id);
+    if (own === undefined || parts.length < 2 || parts.some((p) => p === undefined)) return [];
+    return [`Olumi works out ‘${own}’ as ${parts.map((p) => `‘${p}’`).join(' × ')}. That’s Olumi’s reading of how they combine; tell me if it’s wrong.`];
+  });
+}
+
+/** ' <direction words> <level words> <product words>' for the reply, or '' when the goal holds no reading that speaks. */
+export function buildGoalReadingDisclosure(graph: unknown, goalNodeId: unknown, identityEvaluations?: readonly unknown[]): string {
+  return [senseReadingWords(graph, goalNodeId), goalLevelReadingWords(graph, goalNodeId), ...productReadingWords(graph, goalNodeId, identityEvaluations)]
     .filter((w): w is string => w !== null && passesAssistantTextContentDefences(w))
     .map((w) => ` ${w}`)
     .join('');
@@ -48,6 +77,8 @@ export function buildGoalReadingDisclosure(graph: unknown, goalNodeId: unknown):
 export interface GoalReadingSource {
   readonly graph: unknown;
   readonly goal_node_id: string;
+  /** THIS Run's `identity_evaluations`, so the product reading is rebuilt from the same evaluations it was said from. */
+  readonly identity_evaluations?: readonly unknown[];
 }
 
 /** The tail the forwarder admits for THIS outcome, rebuilt from the handler's own graph; '' when there is none. */
@@ -55,5 +86,6 @@ export function goalReadingTailOf(outcome: unknown): string {
   if (outcome === null || typeof outcome !== 'object') return '';
   const source = (outcome as { __goal_reading_source?: unknown }).__goal_reading_source;
   if (!isRec(source) || typeof source.goal_node_id !== 'string') return '';
-  return buildGoalReadingDisclosure(source.graph, source.goal_node_id);
+  return buildGoalReadingDisclosure(source.graph, source.goal_node_id,
+    Array.isArray(source.identity_evaluations) ? source.identity_evaluations : undefined);
 }

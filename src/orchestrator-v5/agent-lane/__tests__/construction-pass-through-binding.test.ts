@@ -11,6 +11,8 @@ import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { EdgeV3 } from '../../../schemas/cee-v3.js';
+import { signTheSentenceSays } from '../stated-size-binding.js';
 
 const SCENARIO = '956e3c12-0000-4000-8000-0000000956e3';
 const T1B = 'We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. '
@@ -21,6 +23,45 @@ const T1B = 'We are a B2B software company with £120,000 monthly recurring reve
   + 'starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in '
   + 'support. Keeping pricing as it is adds nothing.';
 const QUOTE = 'Each lost customer removes £300 a month of monthly recurring revenue.';
+/** The served effect sentences (Desk 6b), with the way each says its figure moves what it names, and its served count. */
+const CORPUS: [string, 1 | -1 | null, number][] = [
+  ["each 1% price rise adds £1,200 a month to monthly recurring revenue before churn.", 1, 21],
+  ["Each 1% price rise loses about 2 customers, between 1 and 4.", -1, 21],
+  ["Each lost customer removes £300 a month of monthly recurring revenue.", -1, 21],
+  ["Each starter subscriber adds £49 a month to monthly recurring revenue.", 1, 21],
+  ["Each starter subscriber costs about £6 a month in support.", null, 21],
+  ["Each 1 percentage point increase in Price rise from current level increases Existing customers lost from price rises by about 3 customers.", 1, 2],
+  ["Each 1 percentage point increase in Price rise from current price increases Lost customers from price rise by about 3 customers.", 1, 2],
+  ["Every 10 more cafés adds about 1 percentage point of wholesale subscription revenue.", 1, 2],
+  ["Each 1 more Customers lost from price rise reduces monthly recurring revenue by about £350 a month.", -1, 2],
+  ["Each 1 percentage point price rise adds £1,200 a month to monthly recurring revenue before churn.", 1, 2],
+  ["Every 1 percentage point more of Enterprise win rate adds about £40,000 per quarter of quarterly revenue.", 1, 1],
+  ["Every 1 more Enterprise deals won adds about £40,000 per quarter of quarterly revenue.", 1, 1],
+  ["Each 1 percentage point increase in Price rise increases Price-rise customer loss by about 3 customers.", 1, 1],
+  ["Each 1% Price rise increases Customers lost to price rise by about 3 customers", 1, 1],
+  ["Each one-percentage-point Price rise increases Customers lost to price rise by about 3 customers.", 1, 1],
+  ["Each senior consultant should bill about 150 days a year.", null, 1],
+  ["Every 10 more café subscribers adds about 1 percentage point of wholesale subscription revenue.", 1, 1],
+  ["Each 10 percentage point rise in text reminder coverage lowers no-shows by about 1 percentage point of appointments.", -1, 1],
+  ["Through patient dissatisfaction, each £1 rise in the no-show charge raises no-shows by about 0.05 percentage points of appointments.", 1, 1],
+  ["A £1 per missed appointment rise in No-show charge would raise no-shows by about 0.05% of appointments that way.", 1, 1],
+  ["Every 10 more subscribers adds about 2 percentage points of wholesale subscription revenue.", 1, 1],
+  ["Every 10 more café subscribers adds about 2 percentage points of wholesale subscription revenue.", 1, 1],
+  ["Through fee-related patient dissatisfaction, each £1 rise in the missed-appointment fee raises no-shows by about 0.05 percentage points of appointments.", 1, 1],
+  ["A £1 per missed appointment rise in Missed-appointment fee would raise no-shows by about 0.05% that way.", 1, 1],
+  ["Each 1% Existing-customer price rise increases Existing customers lost by about 3 customers.", 1, 1],
+  ["Each 1 percentage point increase in Existing-customer price rise increases Existing customers lost by about 3 customers.", 1, 1],
+  ["Each 1 percentage point increase in Price rise increases Customers lost from price rise by about 3 customers.", 1, 1],
+  ["Each 10 percentage point rise in central kitchen implementation risk costs us about 1 percentage point of gross margin.", null, 1],
+  ["Each 10% rise in weak-shop operating losses costs us about 1 percentage point of gross margin.", null, 1],
+  ["Every 20% increase in weak-shop operating losses cuts gross margin by about 2 percentage points.", -1, 1],
+  ["Each 10% rise in footfall loss from price rise costs us about 1 percentage point of gross margin.", null, 1],
+  ["Every 10 more café subscribers adds about 1 pp of wholesale subscription revenue.", 1, 1],
+  ["Every 10 more café subscribers adds about 1 point of wholesale subscription revenue.", 1, 1],
+  ["Every 1,000 more active customers adds about 2 points of monthly cancellations.", 1, 1],
+  ["Each 1% price rise adds £1,200 a month to monthly recurring revenue before churn.", 1, 1],
+  ["The starter tier would win about 150 new subscribers, between 80 and 250.", 1, 21],
+];
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
 type Dir = 'positive' | 'negative';
@@ -58,7 +99,7 @@ function draft9(over: { extraLinks?: Record<string, unknown>[]; extraFactors?: R
 }
 
 type Edge = Record<string, any>;
-async function build(wire: Record<string, unknown>, brief = T1B): Promise<{ edge: (from: string, to: string) => Edge; label: Map<string, string> }> {
+async function build(wire: Record<string, unknown>, brief = T1B): Promise<{ edge: (from: string, to: string) => Edge; label: Map<string, string>; said: string[] }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let registered: { nodes: Edge[]; edges: Edge[] } | null = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -69,12 +110,14 @@ async function build(wire: Record<string, unknown>, brief = T1B): Promise<{ edge
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief(SCENARIO, brief, dispatch, call) as { ok: boolean };
+  const out = await buildModelFromBrief(SCENARIO, brief, dispatch, call) as { ok: boolean; not_represented?: string[]; open_questions?: string[] };
   expect(out.ok, JSON.stringify(out)).toBe(true);
   const g = registered!;
   const label = new Map<string, string>(g.nodes.map((n) => [n.id, n.label]));
   const idOf = (l: string) => g.nodes.find((n) => n.label === l)!.id;
-  return { edge: (from, to) => g.edges.find((e) => e.from === idOf(from) && e.to === idOf(to))!, label };
+  // The stored edge as a reload reads it back (`EdgeV3`).
+  const edge = (from: string, to: string): Edge => EdgeV3.parse(g.edges.find((e) => e.from === idOf(from) && e.to === idOf(to))!) as Edge;
+  return { edge, label, said: [...(out.not_represented ?? []), ...(out.open_questions ?? [])] };
 }
 
 describe('(B) a stated size is bound through Olumi\'s pass-through', () => {
@@ -88,6 +131,40 @@ describe('(B) a stated size is bound through Olumi\'s pass-through', () => {
     expect(onward.provenance.natural_effect).toMatchObject({ amount: -1, per_source_change: 1 });
     expect(onward.effect_direction).toBe('negative');
     expect(onward.provenance.source).not.toBe('user_specified');
+    // The PATH carries the user's "removes £300": per lost customer, −£300 of monthly recurring revenue (Desk 6b Q3).
+    expect(Math.sign(into.provenance.natural_effect.amount) * onward.provenance.natural_effect.amount).toBe(-1);
+  });
+
+  it('CONTROL (Desk 6b Q3): a path drawn to run the OTHER way (−300 into the mediator, −1 onward = +£300) is never the user\'s, and that is said', async () => {
+    const flipped = draft9();
+    (flipped.links as Edge[])[2] = sized('Customers lost from price rise', 'MRR lost to price churn', 'negative', -300, 1);
+    const { edge, said } = await build(flipped);
+    const into = edge('Customers lost from price rise', 'MRR lost to price churn').provenance;
+    const onward = edge('MRR lost to price churn', 'monthly recurring revenue').provenance;
+    expect(into.source_quote).toBeUndefined();
+    expect(into.magnitude).not.toBe('user_stated');
+    expect(onward.definitional).toBeUndefined();
+    expect(said.filter((s) => s.startsWith(`“${QUOTE}” is not recorded through ‘MRR lost to price churn’`))).toHaveLength(1);
+  });
+
+  it('CONTROL (Desk 6b Q3): a sentence whose way it moves Q cannot be read ("means") types nothing onward, and says THAT — never "the other way"', async () => {
+    const means = 'Each lost customer means £300 a month of monthly recurring revenue.';
+    const { edge, said } = await build(draft9(), T1B.replace(QUOTE, means));
+    expect(edge('Customers lost from price rise', 'MRR lost to price churn').provenance.source_quote).toBeUndefined();
+    expect(edge('MRR lost to price churn', 'monthly recurring revenue').provenance.definitional).toBeUndefined();
+    const refusal = said.filter((s) => s.startsWith(`“${means}” is not recorded through ‘MRR lost to price churn’`));
+    expect(refusal).toEqual([`“${means}” is not recorded through ‘MRR lost to price churn’: Olumi can't tell from it which way it moves `
+      + '‘monthly recurring revenue’. Say whether it adds to ‘monthly recurring revenue’ or takes away from it.']);
+  });
+});
+
+/**
+ * Desk 6b (#2644): the verb lexicon is MEASURED on served sentences, never authored — Acceptance successor-20261005
+ * (@dd1d8d3f) + red team github-87 (@0b005aee), each sentence with how often it was served. "costs" is served both ways.
+ */
+describe('signTheSentenceSays on the served corpus', () => {
+  it.each(CORPUS)('%s → %s (served %i×)', (sentence, sign) => {
+    expect(signTheSentenceSays(sentence)).toBe(sign);
   });
 
   it('CONTROL (unit-only typing is refused): a sentence that never names the onward quantity binds directly and types NOTHING onward', async () => {
