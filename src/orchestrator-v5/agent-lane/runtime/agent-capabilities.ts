@@ -3433,8 +3433,9 @@ export function createAgentCapabilities(
           const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
           const stated = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
-          const miss = linkEffectQuoteContextMiss(entryQuote, text) ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label },
-            { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to) });
+          // ONE scope for admission, the figure question and the recorded sentence, so they cannot read different units.
+          const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to) };
+          const miss = linkEffectQuoteContextMiss(entryQuote, text) ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label }, statedScope);
           if (miss === 'figures_not_in_statement') {
             // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510): ONE fixed
             // question, said exactly, with the canvas route that always works.
@@ -3443,11 +3444,10 @@ export function createAgentCapabilities(
           }
           if (miss !== null) {
             fail('not_the_users_statement', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label,
-              linkEffectFigureNotAChange(entryQuote, stated, { source: from.label, target: to.label }, ownUnitsOf(to))?.question), from, to));
+              linkEffectFigureNotAChange(entryQuote, stated, { source: from.label, target: to.label }, statedScope.target_units)?.question), from, to));
             continue;
           }
-          const said = statingSentenceOf(entryQuote, stated, { source: from.label, target: to.label },
-            { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id) }) ?? entryQuote;
+          const said = statingSentenceOf(entryQuote, stated, { source: from.label, target: to.label }, statedScope) ?? entryQuote;
           const endpoints = linkEffectTargetOf(working, from.id, to.id);
           if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
             fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
