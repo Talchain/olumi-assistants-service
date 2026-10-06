@@ -141,6 +141,9 @@ describe('composeExplainResultsFallback', () => {
     expectNaturalProse(text);
     expect(text).toContain('effectively tied');
     expect(text).not.toContain('clearly separated in this model');
+    // Science d5 mutant row: a near tie carries NO runner-up line ("next most runs" / the runner's own share).
+    expect(text).toContain('so they are too close to tell apart without firming up the key assumptions.');
+    expect(text).not.toMatch(/next most runs|'Hire Two Mid-Level' (?:was supported by|came next)/);
     // The awkward "0 percentage points" non sequitur must not be cited.
     expect(text).not.toContain('0 percentage points');
     // Both option labels are named in the closeness sentence.

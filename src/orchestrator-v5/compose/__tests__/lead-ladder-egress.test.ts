@@ -30,6 +30,16 @@ describe('CATCH: the ladder verb, in any tense and fronted', () => {
   });
 });
 
+describe('CATCH: the runner-up lines alone (d5 mutant row: a runner-up line on a withheld Run is SEEN, so the gate replaces it)', () => {
+  it.each([
+    "In this model, 'Hold Price' was supported by the next most runs (38%).",
+    'In this model, ‘Hold Price’ was supported by the next most runs.',
+    "'Hold Price' was supported by 38% of runs, so the two are clearly separated in this model.",
+  ])('%s', (t) => {
+    expect(both(t)).toEqual([true, true]);
+  });
+});
+
 describe('CATCH: "ahead" with an adverb names a leader (the r18 sentence and its siblings)', () => {
   it.each([
     'Raise prices 10% is slightly ahead.',
