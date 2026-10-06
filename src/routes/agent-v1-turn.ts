@@ -3499,10 +3499,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
     // An authorised revision says what it did to the result on screen, from this turn's typed readback (R&C 5842738466).
     const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
-    const postWriteReadinessRead = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
-    // ⭐ NEVER RE-ASK (G1b d4): its sibling sentence ends in the Run's own question; once asked, the reason alone is said.
-    const postWriteReadiness = postWriteReadinessRead === null ? null : withoutAskedQuestion(postWriteReadinessRead,
-      await repliesToCheckAsks([postWriteReadinessRead], store, scenarioId, undefined)) || null;
+    const postWriteReadiness = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
     const askLine = wroteThisTurn ? postWriteAskLine(readbackGraph, analysisReady) : null;
     // "Run it again" already says a run is permitted; the readiness sentence would repeat it. And on the build turn whose
     // automatic first pass already RAN, "The analysis can run now" sits beside that result with no Run chip (the route

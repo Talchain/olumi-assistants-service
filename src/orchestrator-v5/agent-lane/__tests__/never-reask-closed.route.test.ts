@@ -51,11 +51,14 @@ const answerRow = (n: number, text: string): Row => ({ id: `h-${n}`, turn_id: `0
   request_hash: `agent_turn:h${n}`, assistant_message: text });
 
 let modelOutputs: Record<string, unknown>[][] = [];
+/** Every model request body this test sent (the Explain interpreter's input is read from here). */
+let modelBodies: Record<string, unknown>[] = [];
 
 describe('the Run\'s withheld-chance question is asked once (served d4), through the real route', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
+      modelBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
       const output = modelOutputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }];
       return new Response(JSON.stringify({ output }), { status: 200 });
     }));
@@ -70,20 +73,38 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: D4.draft_graph, graph_hash: D4.graph_hash, analysis_state: D4.analysis_state, analysis_ready: D4.analysis_ready,
+      analysis_result: D4.blocks[0],
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); history = []; modelOutputs = []; });
+  beforeEach(() => { rows.clear(); history = []; modelOutputs = []; modelBodies = []; });
 
-  /** The served rerun: the "Run analysis" chip (the Run fast path). */
-  const runChip = async (): Promise<string> => {
+  type RunBody = { assistant_text: string; suggested_actions?: { id: string }[]; _agent?: { session_id?: string } };
+  const runChipBody = async (turnId: string = randomUUID()): Promise<RunBody> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-      kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
+      kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: 'Run analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
     expect(r.statusCode, r.body).toBe(200);
-    return plain((r.json() as { assistant_text: string }).assistant_text);
+    return r.json() as RunBody;
+  };
+  /** The served rerun: the "Run analysis" chip (the Run fast path). */
+  const runChip = async (turnId?: string): Promise<string> => plain((await runChipBody(turnId)).assistant_text);
+  /** The Explain chip on the Run just made: the interpreter's goal_chance.say, as the model was handed it. */
+  const explainSaySent = async (): Promise<string> => {
+    const first = await runChipBody();
+    const chip = (first.suggested_actions ?? []).find((c) => c.id.startsWith('agent-explain-run:'));
+    expect(chip, JSON.stringify(first.suggested_actions)).toBeDefined();
+    modelBodies = [];
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(),
+      ...(first._agent?.session_id !== undefined ? { agent_session_id: first._agent.session_id } : {}),
+      message: 'Explain this result', source: 'chip', chip: { id: chip!.id } } });
+    expect(r.statusCode, r.body).toBe(200);
+    const sent = JSON.stringify(modelBodies);
+    const m = /\\"say\\":\\"((?:[^"\\]|\\\\.)*?)\\"/.exec(sent);
+    expect(m, 'the interpreter was handed goal_chance.say').not.toBeNull();
+    return plain(JSON.parse(`"${JSON.parse(`"${m![1]}"`)}"`) as string);
   };
   /** An Agent turn that runs (`run_analysis` scripted), then replies without the withheld sentence. */
   const agentRun = async (): Promise<string> => {
@@ -119,6 +140,34 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
       expect(text).not.toContain('Roughly how much');
     });
 
+  it('⭐ Explain: the interpreter is handed the reason WITHOUT the question once it was asked; CONTROL: with it before', async () => {
+    const before = await explainSaySent();
+    expect(before).toContain(plain(REASON));
+    expect(before).toContain(QUESTION);
+    history = [answerRow(1, D4.first_run_reply)];
+    const after = await explainSaySent();
+    expect(after).toContain(plain(REASON));
+    expect(after).not.toContain(QUESTION);
+  });
+
+  it('a lost-response retry of the Run chip says what the live turn said (its own row is not "asked before")', async () => {
+    const turnId = randomUUID();
+    const live = await runChip(turnId);
+    expect(live).toContain(QUESTION);
+    history = [{ ...answerRow(9, [...rows.values()][0]?.assistant_message ?? ''), turn_id: turnId }];
+    const replay = await runChip(turnId);
+    expect(replay).toBe(live);
+  });
+
+  it('a retry after an EARLIER answer asked it drops the question, live and replayed alike', async () => {
+    history = [answerRow(1, D4.first_run_reply)];
+    const turnId = randomUUID();
+    const live = await runChip(turnId);
+    expect(live).not.toContain(QUESTION);
+    history = [{ ...answerRow(9, [...rows.values()][0]?.assistant_message ?? ''), turn_id: turnId }, answerRow(1, D4.first_run_reply)];
+    expect(await runChip(turnId)).toBe(live);
+  });
+
   it('CONTROL: ANOTHER question in the history does not silence this one', async () => {
     history = [answerRow(1, 'Roughly how much does Starter tier subscribers change, in subscribers, when Starter price rises by £1?')];
     const text = await runChip();
@@ -135,5 +184,25 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     store.readRecent.mockImplementationOnce(async () => { throw new Error('read failed'); });
     const text = await runChip();
     expect(text).toContain(QUESTION);
+  });
+});
+
+describe('withoutAskedQuestion (the one rule)', async () => {
+  const { withoutAskedQuestion } = await import('../goal-chance-withheld.js');
+  const SAY = `${REASON} ${QUESTION}`;
+  it.each([
+    ['asked before (quotes and emphasis forgiven)', [`**${QUESTION.replace(/'/g, '\u2019')}**`], REASON],
+    ['not asked before', ['Something else entirely.'], SAY],
+    ['no history', [], SAY],
+    ['a line that asks nothing', [QUESTION], REASON],
+  ] as const)('%s', (_n, replies, expected) => {
+    expect(withoutAskedQuestion(_n === 'a line that asks nothing' ? REASON : SAY, replies)).toBe(expected);
+  });
+  it('a line that is only that question goes entirely', () => {
+    expect(withoutAskedQuestion(QUESTION, [D4.first_run_reply])).toBe('');
+  });
+  it('only the CLOSING question goes; an earlier sentence that asks stays', () => {
+    const line = 'Is that per month? I need a size. What is it?';
+    expect(withoutAskedQuestion(line, ['What is it?'])).toBe('Is that per month? I need a size.');
   });
 });
