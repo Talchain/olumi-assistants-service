@@ -137,6 +137,17 @@ describe('the receipt binding (`userWrittenLinksForRunPair`), on the j3rw pair',
     (s1b.links as Rec[]).find((l) => `${l.from}->${l.to}` === edited)!.mean = 0.9;
     expect(userWrittenLinksForRunPair([run('run_1', T1, s1b), run('run_2', T2, J3RW.s2)], delta(), [write])).toEqual([]);
   });
+  it('KNOWN LIMIT (Review Desk 6b): a strength change made through chat edit_graph `update_edge` is no receipt → none', () => {
+    // Its `edit_graph` fact (edit-graph-fact-builder.ts: edit_kind 'parameter_update') records the entities touched and the
+    // graph hashes, never the link's strength before/after, so it cannot be bound to the pair's means. S7 then says
+    // "can't say what changed" for that link: an under-claim, never a false "You". Closing it needs those means on the fact.
+    const viaEditGraph = { fact_type: 'edit_graph', fact_version: 1, noop: false, result: {
+      edit_kind: 'parameter_update', status: 'applied', operations_count: 1,
+      affected_entities: [{ id: edited, kind: 'edge', label: 'Price rise → Customers lost to price rise' }],
+      graph_hash_before: 'g1', graph_hash_after: 'g2', safe_summary: 'Updated a link.', impact: 'analysis', rerun_recommended: true,
+    } } as unknown as HandlerFact;
+    expect(userWrittenLinksForRunPair(facts, delta(), [{ fact: viaEditGraph, created_at: '2026-10-06T03:05:00.000Z' }])).toEqual([]);
+  });
   it('a pair whose Runs cannot be read → none (fail closed)', () => {
     expect(userWrittenLinksForRunPair([], delta(), [{ fact: own, created_at: '2026-10-06T03:05:00.000Z' }])).toEqual([]);
   });
