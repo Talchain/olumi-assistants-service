@@ -278,7 +278,14 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // against the PUBLISHED tarballs (sha1 `57f6764c…` for 0.77.0): the FILE SET naming `edge_strength_edit` is identical;
     // four files are byte-unchanged and `dist/fixtures/index.js` differs; 0 changed dist lines name a strength or a band
     // (contrast: the same diff finds 19 changed lines naming `stated_relationship`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.77.0');
+    // 0.77.0 → 0.78.0 (schemas #89: `natural_effect` + `effect` + `delivered_record`; main `28f4eccc`), RE-DERIVED on
+    // 6 Oct against the PUBLISHED tarballs (0.77.0 sha1 `57f6764c…`, 0.78.0 sha1 `29c008b0…`): the FILE SET naming
+    // `edge_strength_edit` is identical (5 files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0
+    // changed lines naming `edge_strength_edit`. The 286 changed dist lines naming a strength or a band are inferred type
+    // expansions (`RunInputField` with 'effect'; the delivered Phase 3 block types in handler-fact / handler-results /
+    // blocks .d.ts) and comments — none in an edge_strength_edit file (contrast: 56 changed lines name `natural_effect`,
+    // 14 name `delivered_record`).
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.78.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

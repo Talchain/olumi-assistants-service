@@ -385,6 +385,18 @@ export function linkEffectReadingToken(reading: {
   return `reading:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
 }
 const refuse = (reason: LinkEffectRefusal): LinkEffectEditResult => ({ kind: 'refused', reason });
+
+/**
+ * ⭐ THE GAUGE'S SIGN (MC 21: "M→child = ±1, its stored sign"): the stored child link's own orientation, read before the
+ * write. ONE rule for the writer and the commit door (#2634 r1 P2), so the door never admits a gauge the writer would not write.
+ */
+export function storedGaugeSign(edge: { readonly strength?: unknown; readonly effect_direction?: unknown }): 1 | -1 {
+  const s = edge.strength as { mean?: unknown } | undefined;
+  const mean = typeof s?.mean === 'number' && Number.isFinite(s.mean) ? s.mean : 0;
+  const direction = edge.effect_direction === 'positive' || edge.effect_direction === 'negative' ? edge.effect_direction
+    : mean < 0 ? 'negative' : mean > 0 ? 'positive' : null;
+  return direction === 'negative' ? -1 : 1;
+}
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
 export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffectEditResult {
@@ -482,7 +494,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // ⭐ (B) THE GAUGE KEEPS M'S ORIENTATION (MC 21: "M→child = ±1"): M→child = g, its stored sign, so M is measured in the
   // child's units AS IT ALREADY MOVES IT, and the user's END-TO-END figure E sizes lever→M = E × g. Every other link into or
   // out of M keeps its meaning (a +1 gauge would silently flip them), and the ordinary sign check below is the PATH's.
-  const gaugeSign = gaugeEdge === undefined ? 1 : directionOf(gaugeEdge) === 'negative' ? -1 : 1;
+  const gaugeSign = gaugeEdge === undefined ? 1 : storedGaugeSign(gaugeEdge);
   const stated = linkEffectGaugeStatement(params.persistedGraph, from, to, effect);
   if (gaugeEdge !== undefined && stated.amount !== effect.amount * gaugeSign) return refuse('unit_mismatch');
   const direction = Math.sign(stated.amount) * Math.sign(stated.per_source_change) < 0 ? 'negative' : 'positive';
