@@ -104,6 +104,13 @@ describe('(b) the served T1b graphs: who placed the Starter tier in the goal', (
     expect(untypedScopeComponents(g, GOAL)).toEqual(['Starter subscribers']);
   });
 
+  it('CONTROL (Science d5 #87 6007727066): an ABSENT stored level is not zero — an option setting it creates no component', () => {
+    const g = with49();
+    delete provenanceOf(edge(g, 'starter_subscribers', GOAL)).source_quote;
+    delete (node(g, 'starter_subscribers').observed_state as Rec).value;
+    expect(untypedScopeComponents(g, GOAL)).toEqual([]);
+  });
+
   it('the list rule: up to three named, then " and N more"', () => {
     const words = (c: string[]) => untypedScopeDisclosure('MRR', c);
     expect(words(['A'])).toBe('I’ve read your goal, ‘MRR’, as the total across every tier, including ‘A’. If you meant only part of it, say which.');
