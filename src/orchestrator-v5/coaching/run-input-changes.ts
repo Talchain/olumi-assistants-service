@@ -331,8 +331,14 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     // flip or a spread the move does not explain. Either is a change no row states → partial.
     if (pl.mean !== cl.mean && !bandMoved) complete = false;
     if (Math.sign(pl.mean) !== Math.sign(cl.mean)) complete = false;
-    if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std)) complete = false;
-    if (pl.exists_probability !== cl.exists_probability) complete = false;
+    // ⭐ HOLD-AT-1.0 (Science d5 #87 6008807178; Review Desk 6b on #2643): the user's own size with a range that excludes
+    // zero holds the link at existence exactly 1 with the range's spread on the Run input. The sizing row that moved TO the
+    // user's states both moves; no writer sets a user link's existence, so the hold is the only source of that 1. Any other
+    // existence or spread move stays partial.
+    const heldBySizing = pl.sizing !== undefined && pl.sizing !== 'user' && cl.sizing === 'user'
+      && cl.exists_probability === 1 && typeof pl.exists_probability === 'number' && pl.exists_probability < 1;
+    if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std) && !heldBySizing) complete = false;
+    if (pl.exists_probability !== cl.exists_probability && !heldBySizing) complete = false;
     if (!authorshipExplained(pl, cl)) complete = false;
   }
 

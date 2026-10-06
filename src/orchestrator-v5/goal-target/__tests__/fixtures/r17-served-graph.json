@@ -1,0 +1,343 @@
+{
+ "_source": "pd acceptance/successor-20261005 @3fc5bdaf output/acceptance-successor-20261005/final/cut5-rehearsal17-t1b/wire/read-002-J2-1791253931010.json; scenario 49e22bef; graph_hash 97a724c215d9920d; cee_build 231affb. Sanitised: quotes replaced, brief dropped.",
+ "goal_node_id": "monthly_recurring_revenue",
+ "graph": {
+  "nodes": [
+   {
+    "id": "decision_monthly_recurring_revenue",
+    "kind": "decision",
+    "label": "Decision: monthly recurring revenue"
+   },
+   {
+    "id": "monthly_recurring_revenue",
+    "kind": "goal",
+    "label": "monthly recurring revenue",
+    "goal_threshold_raw": 126000,
+    "goal_threshold": 0.8,
+    "goal_threshold_unit": "£/month",
+    "goal_direction": ">=",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap": 157500,
+    "observed_state": {
+     "cap": 157500,
+     "unit": "£/month",
+     "value": 0.7619047619047619,
+     "source": "brief_extraction",
+     "baseline": 0.7619047619047619,
+     "raw_value": 120000
+    }
+   },
+   {
+    "id": "raise_prices_10",
+    "kind": "option",
+    "label": "Raise prices 10%",
+    "interventions": {
+     "price_rise": {
+      "unit": "%",
+      "value": 0.1,
+      "source": "brief_extraction",
+      "raw_value": 10,
+      "target_match": {
+       "node_id": "price_rise",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "launch_starter_tier",
+    "kind": "option",
+    "label": "Launch starter tier",
+    "interventions": {
+     "starter_tier_availability": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "starter_tier_availability",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "keep_pricing_as_is",
+    "kind": "option",
+    "label": "Keep pricing as is"
+   },
+   {
+    "id": "price_rise",
+    "kind": "factor",
+    "label": "Price rise",
+    "observed_state": {
+     "cap": 100,
+     "unit": "%",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "starter_tier_availability",
+    "kind": "factor",
+    "label": "Starter tier availability",
+    "observed_state": {
+     "unit": "binary",
+     "value": 0,
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "customers_lost_to_price_rise",
+    "kind": "risk",
+    "label": "Customers lost to price rise",
+    "scale_frame": 200
+   },
+   {
+    "id": "starter_subscribers",
+    "kind": "outcome",
+    "label": "Starter subscribers",
+    "scale_frame": 500
+   }
+  ],
+  "edges": [
+   {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "raise_prices_10",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "launch_starter_tier",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "keep_pricing_as_is",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "raise_prices_10",
+    "to": "price_rise",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "launch_starter_tier",
+    "to": "starter_tier_availability",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "keep_pricing_as_is",
+    "to": "price_rise",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "keep_pricing_as_is",
+    "to": "starter_tier_availability",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "price_rise",
+    "to": "monthly_recurring_revenue",
+    "strength": {
+     "std": 0.38095238095238093,
+     "mean": 0.7619047619047619
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": 1200,
+      "amount_unit": "£/month",
+      "strength_mean": 0.7619047619047619,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    }
+   },
+   {
+    "from": "price_rise",
+    "to": "customers_lost_to_price_rise",
+    "strength": {
+     "std": 0.5,
+     "mean": 1
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": 2,
+      "amount_unit": "customers",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    }
+   },
+   {
+    "from": "customers_lost_to_price_rise",
+    "to": "monthly_recurring_revenue",
+    "strength": {
+     "std": 0.19047619047619047,
+     "mean": -0.38095238095238093
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": -300,
+      "amount_unit": "£/month",
+      "strength_mean": -0.38095238095238093,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "customers"
+     }
+    }
+   },
+   {
+    "from": "starter_tier_availability",
+    "to": "starter_subscribers",
+    "strength": {
+     "std": 0.15,
+     "mean": 0.3
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 150,
+      "amount_unit": "subscribers",
+      "strength_mean": 0.3,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "switch"
+     }
+    }
+   },
+   {
+    "from": "starter_subscribers",
+    "to": "monthly_recurring_revenue",
+    "strength": {
+     "std": 0.07777777777777778,
+     "mean": 0.15555555555555556
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "source_quote": "<quote>",
+     "natural_effect": {
+      "amount": 49,
+      "amount_unit": "£/month",
+      "strength_mean": 0.15555555555555556,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "subscribers"
+     }
+    }
+   }
+  ]
+ },
+ "envelope": {
+  "option_comparison": [
+   {
+    "option_id": "raise_prices_10",
+    "id": "raise_prices_10",
+    "probability_of_goal": 0.5026,
+    "win_probability": 0.5434666666666661
+   },
+   {
+    "option_id": "launch_starter_tier",
+    "id": "launch_starter_tier",
+    "probability_of_goal": 0.348,
+    "win_probability": 0.3957166666666678
+   },
+   {
+    "option_id": "keep_pricing_as_is",
+    "id": "keep_pricing_as_is",
+    "probability_of_goal": 0,
+    "win_probability": 0.060816666666666686
+   }
+  ],
+  "inference_warnings": []
+ },
+ "goal_certainty": [
+  {
+   "option_id": "keep_pricing_as_is",
+   "probability_of_goal": 0,
+   "earned": true
+  }
+ ]
+}
