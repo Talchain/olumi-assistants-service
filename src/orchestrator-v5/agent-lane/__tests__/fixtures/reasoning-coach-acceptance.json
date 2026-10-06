@@ -2825,9 +2825,9 @@
       "policy_id": "RC-WHAT-CHANGES",
       "variant": null,
       "item": "gcp_savings_at_full_migration",
-      "title": "GCP savings at full migration could change which option leads.",
+      "title": "GCP savings at full migration could change how the options compare.",
       "why": "In this model, which option scores highest is sensitive to GCP savings at full migration.",
-      "question": "Do you know GCP savings at full migration more precisely? Within Olumi's assumed range it could change which option leads."
+      "question": "Do you know GCP savings at full migration more precisely? Within Olumi's assumed range it could change how the options compare."
      }
     ]
    }
