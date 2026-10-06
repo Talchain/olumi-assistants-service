@@ -659,6 +659,18 @@ describe('C7 — semantic qualifiers survive on BOTH projection arms', () => {
     ).toBe('level');
   });
 
+  it.each([
+    ['strict', 'fac_budget'],
+    ['fallback', 'fac_Budget'],
+  ])('C7l %s — D3 step 1: the target keeps its comparator, so "at most" is never read as a floor', (_l, budgetId) => {
+    const src = semanticGraph(budgetId) as { nodes: Array<Record<string, unknown>> };
+    src.nodes.find((n) => n.id === 'goal_margin')!.goal_direction = '<=';
+    const goalOf = (p: ReturnType<typeof projectRunGraphForDecisionReview>) =>
+      (p.graph.nodes as Array<Record<string, unknown>>).find((n) => n.id === 'goal_margin');
+    expect(goalOf(projectRunGraphForDecisionReview({}, src))?.goal_direction).toBe('<=');
+    expect(goalOf(projectRunGraphForDecisionReview({}, semanticGraph(budgetId)))?.goal_direction, 'none held, none invented').toBeUndefined();
+  });
+
   it('C7j the derived field list covers every declared goal_threshold* sibling', () => {
     // The union assertion trap 12d asks for: derivation proves the consumers
     // agree, and only a check against the CONTRACT proves the list is complete.

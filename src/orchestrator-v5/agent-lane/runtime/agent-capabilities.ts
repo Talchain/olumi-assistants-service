@@ -218,6 +218,7 @@ import { checkProvisionalView, type LeaderStanding } from '../provisional-view.j
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { approvalSizes, isAcceptedOlumiSize, linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { mentionsLabel, REPLACE_KEEPS_DIRECTION_TEXT, replaceClauseOf, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
@@ -3296,8 +3297,39 @@ export function createAgentCapabilities(
       // Already in the band the user named, pushing the same way: KEEP the figure. A confirm is REVIEW, never authorship
       // (R11): the writer keeps who sized the link, so only a link the user ALREADY sized may be called theirs (M1 Accept
       // receipt, R3 5942069984; DL 5942097719 — on Olumi's estimate it lands `olumi_accepted`, Olumi's figure).
-      const confirm = currentBand === band && wanted === current;
+      /**
+       * ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a band that MOVES a link holding the user's own figure would
+       * drop that figure. Nothing is prepared, and the user hears their figure quoted — unless THIS turn's own words ask
+       * to replace it, which the approval then carries to the writer in-process. A confirm keeps the figure (review), so
+       * it is never refused.
+       * The ask binds to ONE link and ONE band (buddy r1 #3, r2 #1): its clause (`replaceClauseOf`, un-negated, #2)
+       * states this band and names no other node — only this link's ends, or none: the bare "replace my figure with
+       * slight" the refusal invites. Decided BEFORE confirm: a replace in the band the link already sits in is still a replace (#4).
+       * A replace keeps the sign (d5; #5): one that would also reverse the link is refused.
+       */
+      const heldNow = userFigureHeld(edge);
+      const replaceClause = heldNow === null ? null : replaceClauseOf(ctx.user_turn_text);
+      const otherLabels = g.nodes.map((n) => String(n.label ?? '')).filter((l) => l !== from.label && l !== to.label);
+      // Bound to THIS link (buddy r2 #1): the clause names no other node — the bare ask, or only this link's own ends. A
+      // shared end never binds it to a link it does not name ("Replace my figure on Pro plan price to MRR" names Pro plan
+      // price, so it is not Cost overrun risk → MRR's). A node whose label sits inside one of this link's ends ("Price"
+      // in "Pro plan price") is that end, not another node.
+      const ownEnds = [from.label, to.label];
+      const namesAnotherNode = replaceClause !== null && otherLabels.some((l) => mentionsLabel(replaceClause, l)
+        && !ownEnds.some((end) => mentionsLabel(replaceClause, end) && mentionsLabel(end, l)));
+      const replacesFigure = replaceClause !== null && bandTheUserWrote(band, replaceClause) && !namesAnotherNode;
+      if (replacesFigure && reverses) {
+        return { ok: false, mutated: false, refusal: 'replace_keeps_direction',
+          detail: `Nothing was prepared. Tell the user exactly this: "${REPLACE_KEEPS_DIRECTION_TEXT}"` };
+      }
+      const confirm = !replacesFigure && currentBand === band && wanted === current;
       const keptIsTheirs = linkSizing(edge) === 'user';
+      const heldFigure = confirm ? null : heldNow;
+      if (heldFigure !== null && !replacesFigure) {
+        return { ok: false, mutated: false, refusal: 'user_figure_held',
+          detail: `Nothing was prepared. Tell the user exactly this: "${userFigureHeldRefusalText(heldFigure, linkBandWord(band))}" `
+            + 'Never offer a band as their estimate for this link unless they ask to replace their figure in their own words.' };
+      }
       const magnitude = confirm ? Math.abs(mean) : bandMidpoint(band);
       const value = {
         magnitude,
@@ -3308,6 +3340,8 @@ export function createAgentCapabilities(
         // writer in-process on approval, never on the wire: a named band stores the band's own spread as the link's
         // std (`edgeBandStd`), which the `edge_strength_edit` event cannot tell apart from an exact figure.
         band,
+        // ⭐ F1: the user's explicit replace, with the figure it replaces (for the receipt), held the same way.
+        ...(replacesFigure && heldFigure !== null ? { replaces_user_figure: { quote: heldFigure.quote } } : {}),
       };
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -3316,7 +3350,9 @@ export function createAgentCapabilities(
         operations: [{ op: 'update_edge', path: `${from.id}::${to.id}`, value }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: confirm
+        public_label: replacesFigure && heldFigure !== null
+          ? `Replace your figure (\u2018${heldFigure.quote}\u2019) on "${from.label}" \u2192 "${to.label}" with ${linkBandWord(band)}, as your own estimate`
+          : confirm
           ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}${keptIsTheirs ? ', as your own estimate' : ''} (its strength stays as it is)`
           : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`,
         ...(interpretation === undefined ? {} : { interpretation }),
@@ -3650,6 +3686,8 @@ export function createAgentCapabilities(
       const shown: Shown[] = [];
       const already: string[] = [];
       const definitional: string[] = [];
+      // ⭐ F1: links left out because they hold the user's own figure, each in the refusal's own words.
+      const heldFigures: string[] = [];
       const seen = new Set<string>();
       for (const l of asked) {
         const name = `"${String(l?.from_label ?? '')}" \u2192 "${String(l?.to_label ?? '')}"`;
@@ -3705,6 +3743,17 @@ export function createAgentCapabilities(
         // The link's review stamp as proposed (#2257's `reviewed_by_user`): the writer refuses the set if it moved since.
         const review = (edge.provenance as { reviewed_by_user?: { intent?: unknown; at?: unknown } } | undefined)?.reviewed_by_user;
         const reviewedAt = review?.intent === 'confirm' && typeof review.at === 'string' ? review.at : null;
+        /**
+         * ⭐ F1 (#87 6006627551; DL lease c6): a band that MOVES a link holding the user's own figure would drop it — for
+         * the user's band and Olumi's estimate alike (a brief figure is `brief_extraction` + `user_stated`, so the
+         * `usersOwn` test below never saw it). The writer refuses the whole set at approval, so it is left out HERE and
+         * said, as a definitional link is. A replace goes through `propose_link_strength`, one link, in the user's words.
+         */
+        const heldFigure = currentBand === band ? null : userFigureHeld(edge);
+        if (heldFigure !== null) {
+          heldFigures.push(userFigureHeldRefusalText(heldFigure, linkBandWord(band)));
+          continue;
+        }
         if (namedByTheUser(band, l.from_words, from.label, to.label)) {
           // ⛔ B1 (DL CR on #2255; AIQ R11 rows): naming the band a link already sits in changes no value, so it is a
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)
@@ -3744,8 +3793,13 @@ export function createAgentCapabilities(
         shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
       }
       if (ops.length === 0) {
+        if (heldFigures.length > 0 && definitional.length === 0) {
+          return { ok: false, mutated: false, refusal: 'user_figure_held', left_out_user_figures: heldFigures, ...(already.length > 0 ? { already } : {}),
+            detail: 'Nothing was prepared: every link left holds the user\u2019s own figure. Tell the user exactly what `left_out_user_figures` says, and never offer a band as their estimate for those links.' };
+        }
         if (definitional.length > 0) {
           return { ok: false, mutated: false, refusal: 'definitional_link', definitional, ...(already.length > 0 ? { already } : {}),
+            ...(heldFigures.length > 0 ? { left_out_user_figures: heldFigures } : {}),
             detail: 'Nothing was prepared: every link left is defined by a calculation the model declares. Tell the user exactly what `definitional` says. Never offer to change those links.' };
         }
         return { ok: false, mutated: false, refusal: 'nothing_to_change', already,
@@ -3786,8 +3840,10 @@ export function createAgentCapabilities(
           becomes: { band: linkBandWord(x.band) }, whose: whoseFigure(x), keeps_current_strength: x.keeps })),
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
+        ...(heldFigures.length > 0 ? { left_out_user_figures: heldFigures } : {}),
         note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
           + (definitional.length > 0 ? 'Some links were left out because a calculation the model declares defines them (`left_out_definitional`): say so in those words, and never offer to change them. ' : '')
+          + (heldFigures.length > 0 ? 'Some links were left out because they hold the user\u2019s own figure (`left_out_user_figures`): say exactly those words for them. ' : '')
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
             : '')
@@ -3993,6 +4049,16 @@ export function createAgentCapabilities(
         }
       }
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
+      // ⭐ D3 step 1 (Science #87 6006079049 (1)): ONE target per goal — approving retires the goal's other own target row
+      // (`add-constraint.ts`), so the card names what it replaces, in the row's own words and units.
+      const chosenOperator = type === 'at_most' ? '<=' : '>=';
+      const replaced = ((g.raw as { goal_constraints?: unknown }).goal_constraints as Array<Record<string, unknown>> | undefined ?? [])
+        .filter((c) => c !== null && typeof c === 'object' && c.node_id === goal.id && (c.deadline_metadata === undefined || c.deadline_metadata === null)
+          && (c.value_frame === undefined || c.value_frame === 'level')
+          && (c.operator === '<=' || c.operator === '>=') && c.operator !== chosenOperator && typeof c.value === 'number' && Number.isFinite(c.value))
+        .map((c) => `${c.operator_as_stated === '<' ? 'below' : c.operator_as_stated === '>' ? 'above' : c.operator === '<=' ? 'at most' : 'at least'} `
+          + targetFigure(c.value as number, typeof c.unit === 'string' && c.unit.trim() !== '' ? c.unit : unit));
+      const replaces = replaced.length === 0 ? '' : ` This replaces your earlier target for "${goal.label}" (${replaced.join(' and ')}). Approve, or correct.`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4001,9 +4067,9 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         // AIQ's words for the one card (5913952911): both figures, the user's own.
-        public_label: today === undefined
+        public_label: (today === undefined
           ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}${derived === null ? '' : ` (${derived.multiplier} × your ${targetFigure(derived.base, unit)})`}`
-          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`,
+          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`) + replaces,
       });
       proposals.put(proposal);
       return {
@@ -5144,7 +5210,7 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'update_edge') {
         const op = ops[0]!;
         const [fromId, toId] = op.path.split('::') as [string, string];
-        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' }; band?: unknown };
+        const v = op.value as { magnitude: number; intent: 'set' | 'confirm_current'; direction_intent: 'preserve' | 'positive' | 'negative'; expected: { mean: number; effect_direction: 'positive' | 'negative' }; band?: unknown; replaces_user_figure?: { quote?: unknown } };
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
         const send = () => dispatch('/orchestrate/v2/turn', {
           kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
@@ -5154,9 +5220,13 @@ export function createAgentCapabilities(
         // way an approved adoption does: only a proposal the user authored (`user_stated`) that stored a band. One
         // restored from before the band was stored sends none, and the writer keeps the link's spread (a figure).
         const statedBand = decision.proposal.provenance.authored_by === 'user_stated' && isInfluenceBand(v.band) ? v.band : undefined;
+        // ⭐ F1: the user's explicit replace rides the same verified, in-process context — only on a user-authored proposal
+        // that stored it. One prepared before F1 carries none, and the writer refuses to drop the figure.
+        const replacedQuote = statedBand !== undefined && typeof v.replaces_user_figure?.quote === 'string' ? v.replaces_user_figure.quote : undefined;
         const res = statedBand !== undefined
           ? await runWithStatedLinkBand(
-            { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, from: fromId, to: toId, band: statedBand },
+            { scenarioId: ctx.scenario_id, proposalId: decision.proposal.proposal_id, from: fromId, to: toId, band: statedBand,
+              ...(replacedQuote !== undefined ? { replacesUserFigure: true as const } : {}) },
             send,
           )
           : await send();
@@ -5226,7 +5296,10 @@ export function createAgentCapabilities(
         const sizing = storedEdge === undefined ? undefined : linkSizing(storedEdge);
         const fromLabel = after.nodes.find((n) => n.id === fromId)?.label;
         const toLabel = after.nodes.find((n) => n.id === toId)?.label;
-        const followUp = sizing === 'user'
+        const followUp = sizing === 'user' && replacedQuote !== undefined && statedBand !== undefined
+          // ⭐ F1 (d5 6006667946): the receipt names exactly what was replaced, and with what.
+          ? userFigureReplacedReceipt({ quote: replacedQuote }, linkBandWord(statedBand))
+          : sizing === 'user'
           ? `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`
           : typeof fromLabel === 'string' && typeof toLabel === 'string'
             // Quoted: shown through `withoutAgentDirections`, where an unquoted label can drop the sentence (Codex P2).

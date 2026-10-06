@@ -484,21 +484,27 @@ describe('POST /orchestrate/v2/turn — goal_target_edit (the structured success
     expect(chatRow.value_frame).toBeUndefined();
   });
 
-  // ── (c) at_most: the row only, never the success threshold
+  // ── (c) at_most: the goal's ONE target, paired on its level frame or unpaired — never beside the floor's figure
+  // ⭐ D3 step 1 (Science #87 6005138341 + 6006079049 (1); DL 0df0e1). Before: "at most stamps nothing", so the floor's
+  // £250,000 stayed on the channel and its `>=` row stayed beside the new `<=` one. Now the approved ceiling is the goal's
+  // one target: the floor's row is retired in the same write, and this goal has no today's level (no frame) and a £ unit
+  // (no metric scale), so the ceiling is UNPAIRED and the floor's figure leaves the channel — never minimised against.
+  const channelClearedOfTheFloor = (): Json => ({
+    ...goalTargetChannel(buildPersistedGraph()),
+    goal_threshold: undefined, goal_threshold_raw: undefined, goal_threshold_cap: undefined, goal_threshold_cap_provenance: undefined,
+  });
 
-  it('(c) at_most writes ONLY a `<=` row — the goal threshold channel is untouched', async () => {
+  it('(c) at_most REPLACES the floor: one `<=` row, the floor\'s row retired, and (no level frame) the channel cleared', async () => {
     const res = await post(goalEvent({ constraint_type: 'at_most', raw_value: 400000 }), '4');
     expect(res.statusCode).toBe(200);
     const graph = lastAppend()!.graph!;
 
-    // Byte-identical to the persisted channel: at_most never stamps a threshold.
-    expect(goalTargetChannel(graph)).toEqual(goalTargetChannel(buildPersistedGraph()));
+    expect(goalTargetChannel(graph)).toEqual(channelClearedOfTheFloor());
+    expect(nodeById(graph, GOAL_ID)?.goal_direction).toBe('<=');
 
     const rows = rowsFor(graph, GOAL_ID);
-    expect(rows).toHaveLength(2);
-    expect(rows.find((r) => r.constraint_id === EXISTING_ROW_ID)).toEqual(
-      buildPersistedGraph().goal_constraints[0],
-    );
+    expect(rows).toHaveLength(1);
+    expect(rows.find((r) => r.constraint_id === EXISTING_ROW_ID)).toBeUndefined();
     const added = rows.find((r) => r.operator === '<=')!;
     expect(added).toMatchObject({
       node_id: GOAL_ID,
@@ -597,11 +603,11 @@ describe('POST /orchestrate/v2/turn — goal_target_edit (the structured success
 
   // Zero is a meaningful `at_most` level ("at most 0 defects"; Codex, #63
   // 5821693599). The 0.59.0 contract admits it; the SERVER decides by direction.
-  it('(g0) at_most 0 COMMITS: the stored `<=` row reads back value 0, the threshold channel untouched', async () => {
+  it('(g0) at_most 0 COMMITS: the stored `<=` row reads back value 0, the floor\'s figure cleared from the channel (unpaired)', async () => {
     const res = await post(goalEvent({ constraint_type: 'at_most', raw_value: 0 }), '16');
     expect(res.statusCode).toBe(200);
     const graph = lastAppend()!.graph!;
-    expect(goalTargetChannel(graph)).toEqual(goalTargetChannel(buildPersistedGraph()));
+    expect(goalTargetChannel(graph)).toEqual(channelClearedOfTheFloor());
     const added = rowsFor(graph, GOAL_ID).find((r) => r.operator === '<=');
     expect(added).toMatchObject({ node_id: GOAL_ID, operator: '<=', value: 0, unit: '£', value_frame: 'level' });
     // Readback: the reply's hash is the hash of exactly these bytes.

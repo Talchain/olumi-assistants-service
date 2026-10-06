@@ -133,6 +133,24 @@ describe('the chip\'s movement guard travels with the record (Codex buddy r1 on 
   });
 });
 
+describe('several changes are credited together, never one of them (DL follow-up on #2616)', () => {
+  const link = (from: string, to: string) => ({ entity_kind: 'link', entity_id: `${from}->${to}`, link: { from, to }, field: 'strength',
+    before: { raw: 'slight' }, after: { raw: 'moderate' }, change: 'changed' });
+  const NODES2 = [...NODES, { id: 'price', kind: 'factor', label: 'Price' }, { id: 'churn', kind: 'factor', label: 'Churn' }];
+  it('RED: a prior-withheld C1 pair with TWO named changes → the record says C2_unpaired (the model may not single one out)', () => {
+    const record = rerunRecordForModel({ ...SERVED_PAIR, attribution_case: 'C1_attributable',
+      input_changes: [link('current_plan_mrr', 'mrr'), link('price', 'churn')] }, false, NODES2)!;
+    expect(record.prior_withheld).toBe(true);
+    expect(record.attribution_case).toBe('C2_unpaired');
+    // The code line still credits them TOGETHER, as the chip says it.
+    expect(record.code_line).toContain(RERUN_FALLBACK_LINES.unwithheld);
+  });
+  it('CONTROL: the same pair with ONE change keeps C1_attributable', () => {
+    const record = rerunRecordForModel({ ...SERVED_PAIR, attribution_case: 'C1_attributable', input_changes: [link('current_plan_mrr', 'mrr')] }, false, NODES2)!;
+    expect(record.attribution_case).toBe('C1_attributable');
+  });
+});
+
 describe('the record\'s rule: how the typed answer uses it', () => {
   it('reads "since the last run" as the latest Run against the one before, and never lets "nothing changed" stand beside a named change', () => {
     expect(TYPED_RERUN_RECORD_RULE).toContain('“Since the last run” means the latest Run against the one before it');
