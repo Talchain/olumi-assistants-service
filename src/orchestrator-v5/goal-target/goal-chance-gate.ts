@@ -37,13 +37,16 @@ export function goalChanceTargetCause(graph: unknown, goalId: unknown): GoalChan
   const target = stated ?? (heldThreshold ? {
     ...(typeof goal!.goal_threshold_unit === 'string' ? { unit: goal!.goal_threshold_unit } : {}),
     ...(typeof goal!.goal_direction === 'string' ? { held: goal!.goal_direction } : {}),
+    ...(typeof goal!.goal_threshold_frame === 'string' ? { frame: goal!.goal_threshold_frame } : {}),
   } : null);
   if (target === null) return 'no_stated_target';
-  // ⏸ `no_stated_direction` (a target figure with no comparator held or stated: 22% of targeted goals, DL measured 6 Oct)
-  // ships in STEP 2, WITH the one-click "at least / at most {target}?" invitation that resolves it (DL 0df0e1; c6). Withheld
-  // here alone it would be a dead end for those users between the two cuts. Until then the Run's own sense stands (the
-  // label's, else ISL's unattested maximiser) and the headline's assumption line says so, exactly as today.
   if (typeof target.unit !== 'string' || target.unit.trim() === '') return 'no_target_unit';
+  // ⭐ D3 STEP 2 (DL 0df0e1, accepted 6 Oct; c6 words): a target figure with no comparator held or stated (22% of targeted
+  // goals, DL measured) is no chance of meeting anything the user said — ISL scored its unattested maximiser. Withheld,
+  // typed, and it carries the one-click "at least / at most {target}?" invitation (`invite`, below) that resolves it.
+  // A target stated as a CHANGE carries its direction in its sign ("cut by 20%": change_rel −0.2) — stated, not missing.
+  const isChange = target.frame === 'change_rel' || target.frame === 'change_abs' || target.frame === 'delta';
+  if (target.held === undefined && !isChange) return 'no_stated_direction';
   // A ceiling is a chance of staying AT OR BELOW it only where the run minimised; otherwise ISL scored P(goal ≥ X).
   if ((target.held === '<=' || target.held === '<') && resolveGoalDirection(graph, goalId)?.direction !== 'minimise') return 'ceiling_not_minimised';
   // The mirror (Review Desk 6b, #2618): a held FLOOR on a goal the run MINIMISED (a "reduce" label outranks a held floor in
@@ -55,6 +58,19 @@ export function goalChanceTargetCause(graph: unknown, goalId: unknown): GoalChan
   const floorPointsDown = (frame === 'change_rel' || frame === 'change_abs' || frame === 'delta') && typeof value === 'number' && value < 0;
   if ((target.held === '>=' || target.held === '>') && !floorPointsDown && resolveGoalDirection(graph, goalId)?.direction === 'minimise') return 'floor_minimised';
   return null;
+}
+
+/**
+ * The invitation a `no_stated_direction` withhold carries (DL 0df0e1; c6): the goal and its target AS STATED, so the UI can
+ * offer "At least {target}" / "At most {target}" — each writes the direction through the existing goal-target door; the
+ * user re-runs. Empty when the raw figure or its unit cannot be said (the withhold still stands, typed).
+ */
+function directionInvite(graph: unknown, goalId: unknown): Rec {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const stated = goal === undefined ? null : statedGoalTargetOf(graph as Rec, goal);
+  if (stated === null || typeof stated.unit !== 'string' || stated.unit.trim() === '' || typeof goalId !== 'string') return {};
+  return { invite: { kind: 'state_goal_direction', goal_node_id: goalId, target: { value: stated.value, unit: stated.unit } } };
 }
 
 /** The figure's own cause: null for a finite number in [0, 1]. */
@@ -79,7 +95,7 @@ export const GOAL_FIT_UNUSABLE = 'GOAL_FIT_UNUSABLE';
  */
 export const GOAL_FIGURES_NO_STATED_TARGET = 'GOAL_FIGURES_NO_STATED_TARGET';
 
-function stripGoalChancesWithNoTarget(env: Rec): Rec {
+function stripGoalChancesWithNoTarget(env: Rec, goalId: unknown): Rec {
   const removed: string[] = [];
   const strip = (rows: unknown): unknown => (!Array.isArray(rows) ? rows : rows.map((row) => {
     if (!isRec(row) || !('probability_of_goal' in row)) return row;
@@ -113,6 +129,8 @@ function stripGoalChancesWithNoTarget(env: Rec): Rec {
     code: GOAL_FIGURES_NO_STATED_TARGET, severity: 'info',
     message: 'The goal has no stated target, so no option has a chance of meeting one to show.',
     option_ids: removed, cause: 'no_stated_target' satisfies GoalChanceUnusable, ...(fitRemoved ? { goal_fit_removed: true } : {}),
+    // ⭐ D3 STEP 2 (DL 0df0e1; c6): the invitation that resolves it — "Give ‘{goal}’ a target …" through the existing target door.
+    ...(typeof goalId === 'string' ? { invite: { kind: 'state_goal_target', goal_node_id: goalId } } : {}),
   }];
   return out;
 }
@@ -126,7 +144,7 @@ const MESSAGE = 'Not shown. The chance of meeting your goal could not be read as
 export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goalId: unknown): E {
   if (!isRec(envelope)) return envelope;
   const targetCause = goalChanceTargetCause(graph, goalId);
-  if (targetCause === 'no_stated_target') return stripGoalChancesWithNoTarget(envelope) as E;
+  if (targetCause === 'no_stated_target') return stripGoalChancesWithNoTarget(envelope, goalId) as E;
   const causes = new Map<string, GoalChanceUnusable>();
   for (const record of readOptionResultSources(envelope).flat()) {
     if (!isRec(record) || !('probability_of_goal' in record) || record.probability_of_goal === undefined) continue;
@@ -147,6 +165,7 @@ export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goal
     severity: 'warning',
     option_ids: [...causes.keys()],
     causes: [...causes].map(([option_id, cause]) => ({ option_id, cause })),
+    ...(targetCause === 'no_stated_direction' ? directionInvite(graph, goalId) : {}),
   }, { keepOutcome: true, keepOrdering: true }) as Rec;
   // `goal_fit` is the leader's own goal chance: withheld with its cause, never left beside a withheld one.
   const outBrief = isRec(out.decision_brief) ? out.decision_brief : undefined;

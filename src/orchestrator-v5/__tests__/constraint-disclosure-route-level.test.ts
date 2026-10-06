@@ -58,7 +58,8 @@ const READY_GRAPH = {
   nodes: [
     // `goal_threshold_unit`: D3 step 1's goal-chance gate shows `goal_fit` only beside a target WITH its unit (DL 0df0e1,
     // PL rec 5); every targeted goal on the shared DB carries one (DL measured 770/770, 6 Oct). Hand-built graph.
-    { id: 'goal_growth', kind: 'goal', label: 'Customer growth', goal_threshold: 0.8, goal_threshold_unit: 'customers' },
+    // + `goal_direction` (D3 step 2: a goal chance needs a stated direction too; 78% of targeted goals hold one, DL measured).
+    { id: 'goal_growth', kind: 'goal', label: 'Customer growth', goal_threshold: 0.8, goal_threshold_unit: 'customers', goal_direction: '>=' },
     { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
     { id: 'opt_hire', kind: 'option', label: 'Hire Marketing Manager', interventions: { fac_capacity: 1 } },
     { id: 'opt_hold', kind: 'option', label: 'Hold', is_baseline: true, interventions: { fac_capacity: 0 } },
