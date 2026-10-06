@@ -93,10 +93,10 @@ describe('W-HEAD: the Run headline names the option only in this model, and is n
     return template({ assistant_text: text });
   };
   const SHAPES: ReadonlyArray<[string, string]> = [
-    ['Case C (caution, no margin)', 'Hire A scored highest in this model, but treat this as provisional: the result is sensitive to Quality.'],
-    ['Case C (link caution)', 'Hire A scored highest in this model, but treat this as provisional: it rests heavily on how much Price changes Revenue.'],
-    ['Case B (driver, no margin)', 'Hire A scored highest in this model because Cost is the strongest driver.'],
-    ['Case E (floor)', 'Hire A scored highest in this model.'],
+    ['Case C (caution, no margin)', 'Hire A was supported by the most runs of this model, but treat this as provisional: the result is sensitive to Quality.'],
+    ['Case C (link caution)', 'Hire A was supported by the most runs of this model, but treat this as provisional: it rests heavily on how much Price changes Revenue.'],
+    ['Case B (driver, no margin)', 'Hire A was supported by the most runs of this model because Cost is the strongest driver.'],
+    ['Case E (floor)', 'Hire A was supported by the most runs of this model.'],
   ];
 
   it('Case E, built by the real builder, is the new floor and reaches the wire verbatim', () => {
@@ -112,7 +112,7 @@ describe('W-HEAD: the Run headline names the option only in this model, and is n
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(text).toBe('Option A scored highest in this model.');
+    expect(text).toBe('Option A was supported by the most runs of this model.');
     expect(forward(text!)).toBe(text);
   });
 
@@ -164,7 +164,7 @@ describe('SERVED BYTES (DL Review Desk on #2588): the served rerun capture (CEE 
   const SERVED_SUMMARY = BLOCK['summary'] as string;
   /** As served by CEE c74a432, in the RETIRED caution words. */
   const SERVED_HEADLINE =
-    'Raise Price to £50 scored highest against your goal in 84% of runs of this model,' +
+    'Raise Price to £50 was supported by 84% of runs of this model,' +
     ' but treat this as provisional: the link between Price per seat and Monthly revenue is fragile.';
   /** The scaffold sentence run-analysis.ts appended after the headline, byte for byte from the capture. */
   const SCAFFOLD = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
@@ -188,7 +188,7 @@ describe('SERVED BYTES (DL Review Desk on #2588): the served rerun capture (CEE 
   it("today's builder on the served envelope says the caution in the new words, and the served-shape summary is forwarded verbatim", () => {
     expect(built).not.toBeNull();
     expect(built).toContain('it rests heavily on how much Price per seat changes Monthly revenue');
-    expect(built).toContain('scored highest in 84% of runs of this model');
+    expect(built).toContain('was supported by 84% of runs of this model');
     expect(built).not.toContain('is fragile');
     const summary = `${built}${SCAFFOLD}`;
     expect(forward(summary)).toBe(summary);

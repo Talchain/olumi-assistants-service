@@ -5,7 +5,7 @@
  * explicit rerun after the user set active seats to 1,500. Its analysis_result
  * block said:
  *
- *   "Raise Price to £50 scored highest against your goal in 84% of runs of this
+ *   "Raise Price to £50 was supported by 84% of runs of this
  *    model, but treat this as provisional: the link between Price per seat and
  *    Monthly revenue is fragile."
  *
@@ -67,14 +67,14 @@ const ROOT_DEFAULT = 'ROOT_NODE_DEFAULT_VALUE';
 
 /** The served headline (goal-framed), the first sentence of the served summary. */
 const SERVED_HEADLINE =
-  'Raise Price to £50 scored highest against your goal in 84% of runs of this model,' +
+  'Raise Price to £50 was supported by 84% of runs of this model,' +
   ' but treat this as provisional: the link between Price per seat and Monthly revenue is fragile.';
 /**
  * The same goal-framed headline as TODAY's builder words it. The only difference from the served capture is the link
  * caution (principle audit, 5 Oct: "fragile" retired from user copy); the capture above stays byte-for-byte as served.
  */
 const CURRENT_GOAL_FRAMED_HEADLINE =
-  'Raise Price to £50 scored highest against your goal in 84% of runs of this model,' +
+  'Raise Price to £50 was supported by 84% of runs of this model,' +
   ' but treat this as provisional: it rests heavily on how much Price per seat changes Monthly revenue.';
 /** The served summary's scaffold sentence, which run-analysis.ts appends after the headline. */
 const SCAFFOLD_SENTENCE = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
@@ -82,7 +82,7 @@ const SCAFFOLD_SENTENCE = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
 const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
 /** What this envelope must now produce: the withdrawn frame plus the combined sentence (R3-1). */
 const FIXED_HEADLINE =
-  'Raise Price to £50 scored highest in 84% of runs of this model,' +
+  'Raise Price to £50 was supported by 84% of runs of this model,' +
   ' but treat this as provisional: it rests heavily on how much Price per seat changes Monthly revenue.' +
   ' In this model I’ve assumed a higher value is better for your goal,' +
   ' and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';

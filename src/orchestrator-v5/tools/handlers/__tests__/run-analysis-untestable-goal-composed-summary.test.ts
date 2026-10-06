@@ -159,23 +159,23 @@ function composeAsHandler(recs: Json[], codes: readonly string[], rawGraph: Json
   };
 }
 
-const HOLD_WITHDRAWN = `${HOLD} scored highest in 71% of runs of this model.`;
-const HOLD_FRAMED = `${HOLD} scored highest against your goal in 71% of runs of this model.`;
+const HOLD_WITHDRAWN = `${HOLD} was supported by 71% of runs of this model.`;
+const HOLD_FRAMED = `${HOLD} was supported by 71% of runs of this model.`;
 
 const ARM_B_FRAMED =
   ` Two different questions have two different answers here: “${HOLD}” scored highest against your goal most often,` +
   ` but “${RAISE}” is more likely to reach your stated target (48% against 0%).` +
-  ' Scoring highest counts how often an option scored highest on your goal, not whether your target was met.';
+  ' The share of runs counts how often an option ranked first on your goal’s measure, not whether your target was met.';
 const ARM_B_UNFRAMED =
   ` Two different questions have two different answers here: “${HOLD}” scored highest most often,` +
   ` but “${RAISE}” is more likely to reach your stated target (48% against 0%).` +
-  ' Scoring highest counts how often an option scored highest on your goal, not whether your target was met.';
+  ' The share of runs counts how often an option ranked first on your goal’s measure, not whether your target was met.';
 const ARM_A_FRAMED =
-  ` “${HOLD}” scored highest against your goal most often without moving “Seat Price Level” the way your goal asks.` +
-  ` Among the options that do, “${RAISE}” scored highest in 28% of runs.`;
+  ` “${HOLD}” was supported by the most runs without moving “Seat Price Level” the way your goal asks.` +
+  ` Among the options that do, “${RAISE}” was supported by 28% of runs.`;
 const ARM_A_UNFRAMED =
-  ` “${HOLD}” scored highest most often without moving “Seat Price Level” the way your goal asks.` +
-  ` Among the options that do, “${RAISE}” scored highest in 28% of runs.`;
+  ` “${HOLD}” was supported by the most runs without moving “Seat Price Level” the way your goal asks.` +
+  ` Among the options that do, “${RAISE}” was supported by 28% of runs.`;
 
 /** The claims a composed summary must never make once a code is present. */
 function expectNoContradiction(summary: string, codes: readonly string[]): void {

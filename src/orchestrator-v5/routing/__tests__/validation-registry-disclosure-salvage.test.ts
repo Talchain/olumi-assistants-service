@@ -77,7 +77,7 @@ const INTAKE_DISCLOSURE = buildIntakeOptionDisclosure(
 const OBJECTIVE_CONTRADICTION_TAIL =
   ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
   ' “Seat Price Level” the way your goal asks. Among the options that do,' +
-  ' “Raise to £59 Per Seat” scored highest in 28% of runs.';
+  ' “Raise to £59 Per Seat” was supported by 28% of runs.';
 
 describe('salvage fixtures are the real thing (precondition pins)', () => {
   it('the scaffold fixture is a non-empty scaffold disclosure', () => {

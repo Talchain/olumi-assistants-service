@@ -307,7 +307,7 @@ it('RD-1/RD-2 fa027 stored shape: licence permitted, all legacy names immediatel
   expect(r.leading_option_id).toBe('ai_reporting_module_sprint');
   const shadow = leaderLicenceShadow({ fact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: r } as never, graph: saved.graph, scenarioId: scenario, summaryNamesLeader: true });
   expect(shadow.verdict).toMatchObject({ verdict: 'permitted', leader_option_id: 'ai_reporting_module_sprint', reason: null });
-  expect(r.summary.startsWith(`AI Reporting Module Sprint scored highest against your goal in 80% of runs of this model because Price is the strongest driver. ${words}`)).toBe(true);
+  expect(r.summary.startsWith(`AI Reporting Module Sprint was supported by 80% of runs of this model because Price is the strongest driver. ${words}`)).toBe(true);
   expect(isAllowedRunAnalysisAssistantText(r.summary)).toBe(true);
   const persisted = await saveAndReload(saved.graph, [{ fact_type: 'run_analysis', fact_version: 1, noop: false, result: r }]);
   reads.facts = persisted.facts;
@@ -338,7 +338,7 @@ it('R8 actual-move negative control: both compared options hold Capacity; option
 
 it('RD-2 summary insertion precedes existing caution tails and survives reply grammar', () => {
   const disclosure = ' Olumi supplied the figures for the link from ‘Capacity’ to ‘Revenue’. Set your own to see how much it matters.';
-  const simple = 'Expand scored highest against your goal in 80% of runs of this model.';
+  const simple = 'Expand was supported by 80% of runs of this model.';
   expect(appendLegacyFiguresAfterLeaderSentence(simple, disclosure)).toBe(simple + disclosure);
   const withFollowup = simple + ' Run the follow-up checks before treating this as final.';
   expect(appendLegacyFiguresAfterLeaderSentence(withFollowup, disclosure)).toBe(simple + disclosure + ' Run the follow-up checks before treating this as final.');

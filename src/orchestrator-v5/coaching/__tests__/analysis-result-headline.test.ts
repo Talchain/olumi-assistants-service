@@ -57,12 +57,12 @@ describe('buildAnalysisResultHeadline', () => {
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
     expect(buildAnalysisResultHeadline(input)).toBe(
-      'Option A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final. The result is not yet robust — small changes could flip it.',
+      'Option A was supported by 62% of runs of this model. Run the follow-up checks before treating this as final. The result is not yet robust — small changes could flip it.',
     );
     expect(buildAnalysisResultHeadline({ ...input, enrichment: { ...enrichment,
       flip_thresholds: [{ factor_id: 'fac_a', current_value: 0.5, flip_value: null, flip_reason: 'structurally_invariant' }],
     } })).toBe(
-      'Option A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.',
+      'Option A was supported by 62% of runs of this model. Run the follow-up checks before treating this as final. The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.',
     );
   });
 
@@ -74,7 +74,7 @@ describe('buildAnalysisResultHeadline', () => {
     });
     expect(out).not.toBeNull();
     expect(out!).toBe(
-      'Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
+      'Hire One Senior Technical Lead was supported by 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
     );
     // The driver is intentionally NOT named in the caution shape — the fragile
     // assumption is the single validation reason, so the same factor can never
@@ -94,7 +94,7 @@ describe('buildAnalysisResultHeadline', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model because Technical Leadership in Place is the strongest driver.',
+      'Hire One Senior Technical Lead was supported by 62% of runs of this model because Technical Leadership in Place is the strongest driver.',
     );
   });
 
@@ -109,7 +109,7 @@ describe('buildAnalysisResultHeadline', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
+      'Hire One Senior Technical Lead was supported by 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
     );
     expect(out!).not.toContain('is the strongest driver');
   });
@@ -128,7 +128,7 @@ describe('buildAnalysisResultHeadline', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Option A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final.',
+      'Option A was supported by 62% of runs of this model. Run the follow-up checks before treating this as final.',
     );
     expect(out).toMatch(/\d+% of runs of this model/);
     expect(out).not.toMatch(RAW_DECIMAL_PATTERN);
@@ -236,7 +236,7 @@ describe('buildAnalysisResultHeadline', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Option A scored highest against your goal in');
+    expect(out).toContain('Option A was supported by');
   });
 
   it('supports enrichment.decision_brief.options shape', () => {
@@ -253,7 +253,7 @@ describe('buildAnalysisResultHeadline', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Option A scored highest against your goal in');
+    expect(out).toContain('Option A was supported by');
   });
 
   it('robustness.level === "high" omits fragility clause even when fragile_edges present', () => {
@@ -492,7 +492,7 @@ describe('buildAnalysisResultHeadline', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A scored highest in this model.');
+    expect(out).toBe('Option A was supported by the most runs of this model.');
   });
 
   it('driver label filtered when it matches an ID prefix; falls through to next-best', () => {
@@ -585,7 +585,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A scored highest against your goal in 42% of runs of this model, but the options are close.');
+    expect(out).toBe('Option A was supported by 42% of runs of this model, but the options are close.');
     // A near-tie never names a driver or implies a strong lead.
     expect(out).not.toContain('because');
     expect(out).not.toContain('strongest driver');
@@ -617,7 +617,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Option A scored highest against your goal in 30% of runs of this model, but treat this as provisional: the result is sensitive to Cost.',
+      'Option A was supported by 30% of runs of this model, but treat this as provisional: the result is sensitive to Cost.',
     );
     // Cautious, not confident: no "because ... strongest driver" framing.
     expect(out).not.toContain('because');
@@ -668,7 +668,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Option A scored highest against your goal in 50% of runs of this model because Strong Driver is the strongest driver');
+    expect(out).toContain('Option A was supported by 50% of runs of this model because Strong Driver is the strongest driver');
   });
 
   it('boundary: winner exactly at MIN_LEAD_PROBABILITY (0.40) with 5pp margin — emits headline', () => {
@@ -688,7 +688,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       status_kind: 'ok',
     });
     expect(out).not.toBeNull();
-    expect(out!).toContain('Option A scored highest against your goal in');
+    expect(out!).toContain('Option A was supported by');
   });
 
   it('single-option result with finite probability — margin check waived', () => {
@@ -708,7 +708,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Option A scored highest against your goal in 62% of runs of this model because Driver is the strongest driver');
+    expect(out).toContain('Option A was supported by 62% of runs of this model because Driver is the strongest driver');
   });
 
   it('out-of-range winner probability (1.5) — falls back', () => {
@@ -760,7 +760,7 @@ describe('resolveWinnerLabel — multi-source fallthrough on ID-shaped labels', 
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Hire One Senior Technical Lead scored highest against your goal in');
+    expect(out).toContain('Hire One Senior Technical Lead was supported by');
   });
 
   it('ID-shaped labels in BOTH results[] and option_comparison falls through to decision_brief.options', () => {
@@ -782,7 +782,7 @@ describe('resolveWinnerLabel — multi-source fallthrough on ID-shaped labels', 
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Hire One Senior Technical Lead scored highest against your goal in');
+    expect(out).toContain('Hire One Senior Technical Lead was supported by');
   });
 
   it('ID-shaped labels in every source — final fallback to null', () => {
@@ -831,7 +831,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
       status_kind: 'ok',
     });
     expect(out).not.toBeNull();
-    expect(out!).toContain('Hire X scored highest against your goal in 62% of runs of this model');
+    expect(out!).toContain('Hire X was supported by 62% of runs of this model');
     // Distinctive 99% from results[] must NOT appear — that would
     // signal cross-source mixing.
     expect(out!).not.toContain('99');
@@ -855,7 +855,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
       status_kind: 'ok',
     });
     expect(out).not.toBeNull();
-    expect(out!).toContain('Hire X scored highest against your goal in 62% of runs of this model');
+    expect(out!).toContain('Hire X was supported by 62% of runs of this model');
   });
 
   it('runner-up probability comes from the same source as the winner', () => {
@@ -881,7 +881,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
       status_kind: 'ok',
     });
     expect(out).not.toBeNull();
-    expect(out!).toContain('Hire X scored highest against your goal in 62% of runs of this model');
+    expect(out!).toContain('Hire X was supported by 62% of runs of this model');
   });
 
   it('first source is a near-tie — guard fires on THAT source; Case E fires on the first source, does NOT silently switch to a later source with a wider margin', () => {
@@ -960,13 +960,13 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
 
   it('returns true for a clean deterministic headline (caution shape with margin)', () => {
     const headline =
-      'Hire A scored highest against your goal in 24% of runs of this model, but treat this as provisional: the result is sensitive to Quality.';
+      'Hire A was supported by 24% of runs of this model, but treat this as provisional: the result is sensitive to Quality.';
     expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
   });
 
   it('returns true for a Case D probability headline', () => {
     const headline =
-      'Hire A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final.';
+      'Hire A was supported by 62% of runs of this model. Run the follow-up checks before treating this as final.';
     expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
   });
 
@@ -980,23 +980,23 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
       ' The analysis engine reported an unfamiliar status — treat the result with caution.';
     const baseShapes = [
       // Case A — caution + margin
-      'Hire A scored highest against your goal in 24% of runs of this model, but treat this as provisional: the result is sensitive to Quality.',
+      'Hire A was supported by 24% of runs of this model, but treat this as provisional: the result is sensitive to Quality.',
       // Case C — caution, no margin
-      'Hire A scored highest in this model, but treat this as provisional: the result is sensitive to Quality.',
+      'Hire A was supported by the most runs of this model, but treat this as provisional: the result is sensitive to Quality.',
       // Case B — driver + margin
-      'Hire A scored highest against your goal in 24% of runs of this model because Cost is the strongest driver.',
+      'Hire A was supported by 24% of runs of this model because Cost is the strongest driver.',
       // Case B — driver, no margin
-      'Hire A scored highest in this model because Cost is the strongest driver.',
+      'Hire A was supported by the most runs of this model because Cost is the strongest driver.',
       // Case D — margin only
-      'Hire A scored highest against your goal in 24% of runs of this model.',
+      'Hire A was supported by 24% of runs of this model.',
       // Case D — probability (single-option)
-      'Hire A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final.',
+      'Hire A was supported by 62% of runs of this model. Run the follow-up checks before treating this as final.',
       // Case NT — small but real lead, flagged close
-      'Hire A scored highest against your goal in 2% of runs of this model, but the options are close.',
+      'Hire A was supported by 2% of runs of this model, but the options are close.',
       // Case NT — effectively tied
       'Hire A was supported by only fractionally more runs of this model, so the options are effectively tied.',
       // Case E — link-safe floor
-      'Hire A scored highest in this model.',
+      'Hire A was supported by the most runs of this model.',
     ];
     for (const base of baseShapes) {
       for (const suffix of ['', PARTIAL, UNKNOWN]) {
@@ -1011,7 +1011,7 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
     // Now rejected because none of the Case A/B/C/D grammars match.
     expect(
       isAllowedRunAnalysisAssistantText(
-        'Hire A scored highest in this model for reasons outside the deterministic headline grammar.',
+        'Hire A was supported by the most runs of this model for reasons outside the deterministic headline grammar.',
       ),
     ).toBe(false);
   });
@@ -1019,7 +1019,7 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
   it('rejects Case-A-shaped prose with the wrong driver-clause wording', () => {
     expect(
       isAllowedRunAnalysisAssistantText(
-        'Hire A scored highest in this model because Cost is the dominant factor, but the result is sensitive to Quality.',
+        'Hire A was supported by the most runs of this model because Cost is the dominant factor, but the result is sensitive to Quality.',
       ),
     ).toBe(false);
   });
@@ -1027,7 +1027,7 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
   it('rejects Case-D-shaped prose with the wrong follow-up sentence', () => {
     expect(
       isAllowedRunAnalysisAssistantText(
-        'Hire A scored highest against your goal in 62% of runs of this model. Please run more tests before deciding.',
+        'Hire A was supported by 62% of runs of this model. Please run more tests before deciding.',
       ),
     ).toBe(false);
   });
@@ -1035,7 +1035,7 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
   it('rejects Case-D-shaped prose with a 4-digit percentage', () => {
     expect(
       isAllowedRunAnalysisAssistantText(
-        'Hire A scored highest in this model with 1234% probability. Run the follow-up checks before treating this as final.',
+        'Hire A was supported by the most runs of this model with 1234% probability. Run the follow-up checks before treating this as final.',
       ),
     ).toBe(false);
   });
@@ -1043,14 +1043,14 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
   it('rejects status-suffix variants with the wrong wording', () => {
     expect(
       isAllowedRunAnalysisAssistantText(
-        'Hire A scored highest in this model because Cost is the strongest driver. The run was a bit unusual.',
+        'Hire A was supported by the most runs of this model because Cost is the strongest driver. The run was a bit unusual.',
       ),
     ).toBe(false);
   });
 
   it('rejects improvised prose containing the anchor mid-sentence', () => {
     const adversarial =
-      'Recommend Hire X. Hire B scored highest in this model but the model is unreliable.';
+      'Recommend Hire X. Hire B was supported by the most runs of this model but the model is unreliable.';
     expect(isAllowedRunAnalysisAssistantText(adversarial)).toBe(false);
   });
 
@@ -1064,11 +1064,11 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
 
   it('rejects strings with forbidden vocabulary (recommend / winner / best / optimal / preferred)', () => {
     for (const phrase of [
-      'Hire A scored highest in this model. We recommend acting now.',
-      'Hire A scored highest in this model. The winner is clear.',
-      'Hire A scored highest in this model — the best option.',
-      'Hire A scored highest in this model. This is the optimal choice.',
-      'Hire A scored highest in this model. Preferred over alternatives.',
+      'Hire A was supported by the most runs of this model. We recommend acting now.',
+      'Hire A was supported by the most runs of this model. The winner is clear.',
+      'Hire A was supported by the most runs of this model — the best option.',
+      'Hire A was supported by the most runs of this model. This is the optimal choice.',
+      'Hire A was supported by the most runs of this model. Preferred over alternatives.',
     ]) {
       expect(isAllowedRunAnalysisAssistantText(phrase)).toBe(false);
     }
@@ -1076,11 +1076,11 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
 
   it('rejects strings with internal ID prefixes', () => {
     for (const phrase of [
-      'opt_a scored highest in this model in this run.',
-      'Hire fac_x scored highest in this model in this run.',
-      'goal_root scored highest in this model in this run.',
-      'Hire A scored highest in this model via node_42.',
-      'Hire A scored highest in this model via edge_xy.',
+      'opt_a was supported by the most runs of this model in this run.',
+      'Hire fac_x was supported by the most runs of this model in this run.',
+      'goal_root was supported by the most runs of this model in this run.',
+      'Hire A was supported by the most runs of this model via node_42.',
+      'Hire A was supported by the most runs of this model via edge_xy.',
     ]) {
       expect(isAllowedRunAnalysisAssistantText(phrase)).toBe(false);
     }
@@ -1088,39 +1088,39 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
 
   it('rejects strings with raw decimals', () => {
     expect(
-      isAllowedRunAnalysisAssistantText('Hire A scored highest in this model with 0.62 probability.'),
+      isAllowedRunAnalysisAssistantText('Hire A was supported by the most runs of this model with 0.62 probability.'),
     ).toBe(false);
   });
 
   it('accepts integer percentages (e.g. 62%)', () => {
     expect(
-      isAllowedRunAnalysisAssistantText('Hire A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final.'),
+      isAllowedRunAnalysisAssistantText('Hire A was supported by 62% of runs of this model. Run the follow-up checks before treating this as final.'),
     ).toBe(true);
   });
 
   it('rejects multi-line text', () => {
     expect(
-      isAllowedRunAnalysisAssistantText('Hire A scored highest in this model.\nMore detail follows.'),
+      isAllowedRunAnalysisAssistantText('Hire A was supported by the most runs of this model.\nMore detail follows.'),
     ).toBe(false);
     expect(
-      isAllowedRunAnalysisAssistantText('Hire A scored highest in this model.\r\nMore detail follows.'),
+      isAllowedRunAnalysisAssistantText('Hire A was supported by the most runs of this model.\r\nMore detail follows.'),
     ).toBe(false);
   });
 
   it('rejects text exceeding MAX_HEADLINE_CHARS', () => {
     const tail = 'X'.repeat(MAX_HEADLINE_CHARS);
     expect(
-      isAllowedRunAnalysisAssistantText(`Hire A scored highest in this model ${tail}.`),
+      isAllowedRunAnalysisAssistantText(`Hire A was supported by the most runs of this model ${tail}.`),
     ).toBe(false);
   });
 
   it('rejects text not ending with a period (when not a locked template)', () => {
     expect(
-      isAllowedRunAnalysisAssistantText('Hire A scored highest in this model in this analysis'),
+      isAllowedRunAnalysisAssistantText('Hire A was supported by the most runs of this model in this analysis'),
     ).toBe(false);
   });
 
-  it('rejects text missing the "scored highest in this model" anchor (when not a locked template)', () => {
+  it('rejects text missing the "was supported by the most runs of this model" anchor (when not a locked template)', () => {
     expect(
       isAllowedRunAnalysisAssistantText('Hire A is the strongest option in this run.'),
     ).toBe(false);
@@ -1132,7 +1132,7 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
     expect(isAllowedRunAnalysisAssistantText(undefined)).toBe(false);
     expect(isAllowedRunAnalysisAssistantText(42)).toBe(false);
     expect(isAllowedRunAnalysisAssistantText({})).toBe(false);
-    expect(isAllowedRunAnalysisAssistantText(['Hire A scored highest in this model.'])).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(['Hire A was supported by the most runs of this model.'])).toBe(false);
   });
 });
 
@@ -1145,7 +1145,7 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
-  it('soft confidence (winner 0.34) on a LEVEL field → withheld (was: "{label} scored highest in this model.")', () => {
+  it('soft confidence (winner 0.34) on a LEVEL field → withheld (was: "{label} was supported by the most runs of this model.")', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
@@ -1176,7 +1176,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A scored highest against your goal in 42% of runs of this model, but the options are close.');
+    expect(out).toBe('Option A was supported by 42% of runs of this model, but the options are close.');
   });
 
   it('soft confidence + driver + fragility on a LEVEL field → withheld (was: Case E)', () => {
@@ -1226,7 +1226,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       status_kind: 'partial',
     });
     expect(out).toBe(
-      'Hire X scored highest in this model. The run was flagged as partial — treat as provisional.',
+      'Hire X was supported by the most runs of this model. The run was flagged as partial — treat as provisional.',
     );
   });
 
@@ -1243,7 +1243,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       status_kind: 'unknown',
     });
     expect(out).toBe(
-      'Hire X scored highest in this model. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      'Hire X was supported by the most runs of this model. The analysis engine reported an unfamiliar status — treat the result with caution.',
     );
   });
 
@@ -1323,10 +1323,10 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     });
     // A clear lead with fragility data produces the rich caution shape
     // (margin + provisional + fragile reason), never the Case E floor.
-    expect(out).toContain('Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model');
+    expect(out).toContain('Hire One Senior Technical Lead was supported by 62% of runs of this model');
     expect(out).toContain('but treat this as provisional: the result is sensitive to');
     // Case E literal form must NOT show up.
-    expect(out).not.toBe('Hire One Senior Technical Lead scored highest in this model.');
+    expect(out).not.toBe('Hire One Senior Technical Lead was supported by the most runs of this model.');
   });
 
   it('ID-shaped leading label still returns null (Case E does not paper over unsafe labels)', () => {
@@ -1392,22 +1392,22 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
 
   it('isAllowedRunAnalysisAssistantText accepts every Case-E shape with every status suffix', () => {
     const acceptedShapes = [
-      'Hire A scored highest in this model.',
-      'Hire A scored highest in this model. The run was flagged as partial — treat as provisional.',
-      'Hire A scored highest in this model. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      'Hire A was supported by the most runs of this model.',
+      'Hire A was supported by the most runs of this model. The run was flagged as partial — treat as provisional.',
+      'Hire A was supported by the most runs of this model. The analysis engine reported an unfamiliar status — treat the result with caution.',
     ];
     for (const text of acceptedShapes) {
       expect(isAllowedRunAnalysisAssistantText(text), `should accept: "${text}"`).toBe(true);
     }
   });
 
-  it('isAllowedRunAnalysisAssistantText still rejects anchor-shaped prose despite Case-E (e.g. "scored highest in this model for reasons…")', () => {
+  it('isAllowedRunAnalysisAssistantText still rejects anchor-shaped prose despite Case-E (e.g. "was supported by the most runs of this model for reasons…")', () => {
     // The Case-E regex requires a literal period right after "currently leads".
     // Prose like "currently leads for reasons …" extends with extra tokens
     // and is rejected.
     expect(
       isAllowedRunAnalysisAssistantText(
-        'Hire A scored highest in this model for reasons outside the deterministic headline grammar.',
+        'Hire A was supported by the most runs of this model for reasons outside the deterministic headline grammar.',
       ),
     ).toBe(false);
   });
@@ -1419,11 +1419,11 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     // match to fail (the regex anchors with `$`). And even if grammar
     // matched, defence-in-depth catches "recommend".
     expect(
-      isAllowedRunAnalysisAssistantText('Hire A scored highest in this model. We recommend acting now.'),
+      isAllowedRunAnalysisAssistantText('Hire A was supported by the most runs of this model. We recommend acting now.'),
     ).toBe(false);
     // Standalone Case-E forbidden vocab check.
     expect(
-      isAllowedRunAnalysisAssistantText('Recommend Hire A scored highest in this model.'),
+      isAllowedRunAnalysisAssistantText('Recommend Hire A was supported by the most runs of this model.'),
     ).toBe(false);
   });
 });
@@ -1586,7 +1586,7 @@ describe('buildAnalysisResultHeadline — margin rendering (units)', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Hire One Tech Lead scored highest against your goal in 70% of runs of this model.');
+    expect(out).toBe('Hire One Tech Lead was supported by 70% of runs of this model.');
     // Re-aimed: the headline no longer renders a margin, so the unit rule now
     // applies to the statistic it DOES render — the leader's own win
     // probability, as a whole integer percentage and never a raw decimal
@@ -1616,7 +1616,7 @@ describe('buildAnalysisResultHeadline — margin rendering (units)', () => {
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Tech Lead scored highest against your goal in 70% of runs of this model, but treat this as provisional: the result is sensitive to Delivery Speed Assumption.',
+      'Hire One Tech Lead was supported by 70% of runs of this model, but treat this as provisional: the result is sensitive to Delivery Speed Assumption.',
     );
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
@@ -1661,7 +1661,7 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A scored highest against your goal in 45% of runs of this model, but the options are close.');
+    expect(out).toBe('Option A was supported by 45% of runs of this model, but the options are close.');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
@@ -1678,7 +1678,7 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
       status_kind: 'partial',
     });
     expect(out).toBe(
-      'Option A scored highest against your goal in 45% of runs of this model, but the options are close. The run was flagged as partial — treat as provisional.',
+      'Option A was supported by 45% of runs of this model, but the options are close. The run was flagged as partial — treat as provisional.',
     );
   });
 
@@ -1701,7 +1701,7 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
     expect(out).toBe(
       'In this model, Option B was supported by marginally more runs than Option A (45% against 40%), so the two are close. Change a figure you’re unsure about to see what separates them.',
     );
-    expect(out).not.toContain('scored highest against your goal in');
+    expect(out).not.toContain('was supported by');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
@@ -1764,7 +1764,7 @@ describe('buildAnalysisResultHeadline — driver / fragility de-duplication', ()
     // The caution shape names the fragile reason ONLY — the driver clause is
     // never added, so "Delivery Speed" appears exactly once.
     expect(out).toBe(
-      'Hire One Tech Lead scored highest against your goal in 62% of runs of this model, but treat this as provisional: the result is sensitive to Delivery Speed.',
+      'Hire One Tech Lead was supported by 62% of runs of this model, but treat this as provisional: the result is sensitive to Delivery Speed.',
     );
     const occurrences = out!.split('Delivery Speed').length - 1;
     expect(occurrences).toBe(1);
@@ -1881,7 +1881,7 @@ describe('isAllowedRunAnalysisAssistantText <-> emission lockstep (allowlist pro
 
   // The retired combined driver+caution shape must never be emitted.
   const RETIRED_COMBINED_SHAPE =
-    /scored highest in this model(?: by \d+ percentage points?)? because .+ is the strongest driver, but the result is sensitive to/;
+    /was supported by the most runs of this model(?: by \d+ percentage points?)? because .+ is the strongest driver, but the result is sensitive to/;
 
   it('every emitted headline across the fixture matrix x suffixes passes the gate, and never emits the retired combined shape', () => {
     for (const { name, enrichment, id } of matrix) {
@@ -1907,7 +1907,7 @@ describe('isAllowedRunAnalysisAssistantText <-> emission lockstep (allowlist pro
   it('the retired combined driver+caution shape is no longer accepted by the gate', () => {
     expect(
       isAllowedRunAnalysisAssistantText(
-        'Hire A scored highest in this model because Cost is the strongest driver, but the result is sensitive to Quality.',
+        'Hire A was supported by the most runs of this model because Cost is the strongest driver, but the result is sensitive to Quality.',
       ),
     ).toBe(false);
   });
@@ -1945,7 +1945,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
     // provisional_doctrine_v0 (Mission B): level 'low' appends the
     // robustness-honesty sentence after the caution shape.
     expect(out).toBe(
-      'Hire Contractor scored highest against your goal in 36% of runs of this model, but treat this as provisional: the result is sensitive to Overtime Intensity. The result is not yet robust — small changes could flip it.',
+      'Hire Contractor was supported by 36% of runs of this model, but treat this as provisional: the result is sensitive to Overtime Intensity. The result is not yet robust — small changes could flip it.',
     );
     expect(out).not.toContain('because'); // never the confident driver framing
     // Descriptor reports the enriched case (NOT 'E'), so the handler does not
@@ -1979,7 +1979,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Option A scored highest against your goal in 33% of runs of this model, but treat this as provisional: the result is sensitive to Launch Timing.',
+      'Option A was supported by 33% of runs of this model, but treat this as provisional: the result is sensitive to Launch Timing.',
     );
     expect(describeAnalysisHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' }).case).toBe('SC');
   });
@@ -1999,7 +1999,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A scored highest in this model.');
+    expect(out).toBe('Option A was supported by the most runs of this model.');
     expect(describeAnalysisHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' }).case).toBe('E');
   });
 
@@ -2070,7 +2070,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
     expect(buildAnalysisResultHeadline(input)).toBe(
-      'Option A scored highest against your goal in 30% of runs of this model, but treat this as provisional: the result is sensitive to Cost.',
+      'Option A was supported by 30% of runs of this model, but treat this as provisional: the result is sensitive to Cost.',
     );
     expect(describeAnalysisHeadline(input).case).toBe('SC');
   });
@@ -2086,7 +2086,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       factor_sensitivity: driver,
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
-    expect(buildAnalysisResultHeadline(input)).toBe('Option A scored highest in this model.');
+    expect(buildAnalysisResultHeadline(input)).toBe('Option A was supported by the most runs of this model.');
     expect(describeAnalysisHeadline(input).case).toBe('E');
   });
 
@@ -2103,7 +2103,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       factor_sensitivity: driver,
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
-    expect(buildAnalysisResultHeadline(input)).toBe('Option A scored highest in this model.');
+    expect(buildAnalysisResultHeadline(input)).toBe('Option A was supported by the most runs of this model.');
     expect(describeAnalysisHeadline(input).case).toBe('E');
   });
 
@@ -2298,7 +2298,7 @@ describe('samples_reduced suffix (seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY
   const REDUCED_SUFFIX =
     ' Because this model is complex, the analysis ran fewer simulations than usual, so results may be less precise.';
   const CASE_A_BASE =
-    'Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.';
+    'Hire One Senior Technical Lead was supported by 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.';
 
   it('samples_reduced: true appends the reduced-samples suffix to the emitted headline', () => {
     const out = buildAnalysisResultHeadline({
@@ -2390,7 +2390,7 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
     expect(out).not.toContain('Defer Hiring has marginally better raw probability');
     expect(out).not.toContain('Defer Hiring was supported by marginally more runs');
     // Never a false "currently leads" for a leader that trails on raw odds.
-    expect(out).not.toContain('scored highest against your goal in');
+    expect(out).not.toContain('was supported by');
     expect(isAllowedRunAnalysisAssistantText(out)).toBe(true);
     expect(out!.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
   });
@@ -2403,7 +2403,7 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('scored highest against your goal in');
+    expect(out).toContain('was supported by');
     expect(out).not.toContain('leads overall');
     expect(out).not.toContain('was supported by the most runs');
   });

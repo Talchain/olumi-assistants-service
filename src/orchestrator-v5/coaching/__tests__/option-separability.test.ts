@@ -297,7 +297,7 @@ describe('⭐ ZERO-TAIL INVARIANCE — dead options cannot buy back a winner', (
    * The product's emitted sentence was the tell, and it indicted itself:
    *
    *   "Selling to the Wrong Customers currently leads. 2 options are
-   *    effectively eliminated (each scored highest in less than 1% of runs)."
+   *    effectively eliminated (each supported by under 1% of runs)."
    *
    * It called the arms dead and let them restore the claim.
    */
@@ -544,7 +544,7 @@ describe('the headline withholds an unsupportable winner, end to end', () => {
   it('⭐ the padded field emits NO headline — the review counterexample, end to end', () => {
     // The reviewer measured this at the handler, where the emitted receipt was
     //   "Selling to the Wrong Customers currently leads. 2 options are
-    //    effectively eliminated (each scored highest in less than 1% of runs)."
+    //    effectively eliminated (each supported by under 1% of runs)."
     // Asserted here at the builder, which is where the verdict is made and
     // where a regression would originate. Two zero-win arms appended to the
     // real captured field; leader, labels and every live probability unchanged.

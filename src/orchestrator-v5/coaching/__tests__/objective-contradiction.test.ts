@@ -115,7 +115,7 @@ describe('ARM B — goal-attainment contradiction (pure arithmetic)', () => {
     );
     expect(suffix).toBe(
       ' Two different questions have two different answers here: “Hold at £49 Per Seat (Status Quo)”' +
-        ' scored highest against your goal most often, but “Raise to £59 Per Seat” is more likely to reach your stated' +
+        ' was supported by the most runs, but “Raise to £59 Per Seat” is more likely to reach your stated' +
         ' target (48% against 0%). Scoring highest counts how often an option scored highest on' +
         ' your goal, not whether your target was met.',
     );
@@ -237,7 +237,7 @@ describe('ARM A — directional contradiction (arithmetic-gated)', () => {
     expect(suffix).toBe(
       ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
         ' “Seat Price Level” the way your goal asks. Among the options that do,' +
-        ' “Raise to £59 Per Seat” scored highest in 28% of runs.',
+        ' “Raise to £59 Per Seat” was supported by 28% of runs.',
     );
   });
 
@@ -472,10 +472,10 @@ describe('the goal frame the headline builder decided', () => {
 
   it('goal_framed: both arms exactly as before (they say "against your goal")', () => {
     expect(buildObjectiveContradictionDisclosure(ATTAINMENT(), true, 'goal_framed')).toContain(
-      ' scored highest against your goal most often, but ',
+      ' was supported by the most runs, but ',
     );
     expect(buildObjectiveContradictionDisclosure(DIRECTIONAL(), true, 'goal_framed')).toContain(
-      ' scored highest against your goal most often without moving ',
+      ' was supported by the most runs without moving ',
     );
   });
 
@@ -507,7 +507,7 @@ describe('the goal frame the headline builder decided', () => {
       expect(buildObjectiveContradictionDisclosure(DIRECTIONAL(), true, frame)).toBe(
         ' “Hold at £49 Per Seat (Status Quo)” scored highest most often without moving' +
           ' “Seat Price Level” the way your goal asks. Among the options that do,' +
-          ' “Raise to £59 Per Seat” scored highest in 28% of runs.',
+          ' “Raise to £59 Per Seat” was supported by 28% of runs.',
       );
     });
 
@@ -535,7 +535,7 @@ describe('the goal frame the headline builder decided', () => {
     const framed = buildObjectiveContradictionDisclosure(ATTAINMENT(), true, 'goal_framed');
     // Positive control: the framed Arm B is admitted.
     expect(exact.test(framed)).toBe(true);
-    const unframed = framed.replace(' scored highest against your goal most often, but ', ' scored highest most often, but ');
+    const unframed = framed.replace(' was supported by the most runs, but ', ' scored highest most often, but ');
     expect(unframed).not.toBe(framed);
     expect(exact.test(unframed)).toBe(false);
   });

@@ -93,7 +93,7 @@ describe('the predicate', () => {
  */
 const SERVED_9FC32BF8_NEWEST_FIRST = [
   row('r10', A('d'), 'Run analysis.', '**On this model, raising the Pro price to £59 does best.'),
-  row('r9', S('e'), 'the user pressed Run', 'Raise price to £59 scored highest against your goal in 100% of runs. This was a re-run.'),
+  row('r9', S('e'), 'the user pressed Run', 'Raise price to £59 was supported by 100% of runs. This was a re-run.'),
   row('r8:claim', A('d'), null, null),
   row('r7', A('c'), 'Yes — Is “MRR” your “Pro plan monthly price” × “Paying subscribers”?', 'Recorded, as you confirmed: "MRR" is calculated as…'),
   row('r6', S('f'), null, 'Recorded as yours: "MRR" is "Pro plan monthly price"… The held change has lapsed because the model changed.'),
