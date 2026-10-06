@@ -95,3 +95,67 @@ describe('PARITY: lines the ladder verb must not newly claim', () => {
     expect(both(t)).toEqual(expected);
   });
 });
+
+/**
+ * ⭐ THE LADDER VERB'S PARAPHRASE CLASSES (Review Desk 6b + DL, #2646). Every class CATCHES in an active, a fronted and a
+ * predicative form; the contrast rows (an aim, a weighting, a mechanism, a scope, the goal-chance copy) stay LEAVE.
+ */
+const CLASSES: Record<string, readonly string[]> = {
+  'production verbs': [
+    'Raise to £59 produced the lowest churn.',
+    'Raise to £59 delivered the highest MRR.',
+    'Raise to £59 yields the highest monthly revenue.',
+    'The highest MRR was delivered by Raise to £59.',
+    'Churn was lowest under Raise to £59.',
+  ],
+  'has / had': [
+    'Raise to £59 had the highest MRR.',
+    'Raise to £59 has the lowest churn.',
+    'The lowest churn came from Raise to £59.',
+    'MRR was highest with Raise to £59.',
+  ],
+  'the most / least, with a run share': [
+    'Raise to £59 gave the most MRR in 62% of runs.',
+    'Raise to £59 produced the least churn in the most runs.',
+    'The most MRR in 62% of runs came from Raise to £59.',
+    'The most MRR came from Raise to £59.',
+  ],
+  'fronted and passive': [
+    'The lowest churn came from Raise to £59.',
+    'The highest MRR was produced by Raise to £59.',
+    'The highest monthly revenue comes from Raise to £59.',
+  ],
+  'predicative': [
+    'Churn was lowest under Raise to £59.',
+    'MRR is highest with Raise to £59.',
+    'Churn is the lowest for Raise to £59.',
+  ],
+  'top': [
+    'Raise to £59 came top on MRR in 62% of runs.',
+    'Raise to £59 topped MRR in 62% of runs.',
+    'Raise to £59 came top.',
+    'Raise to £59 was top on MRR.',
+    'Top on MRR was Raise to £59.',
+  ],
+};
+describe.each(Object.entries(CLASSES))('CATCH: %s', (_cls, rows) => {
+  it.each(rows)('%s', (t) => {
+    expect(both(t)).toEqual([true, true]);
+  });
+});
+
+describe('LEAVE: the contrast rows the paraphrase classes must not take', () => {
+  it.each([
+    'You want the lowest churn you can get.',
+    'This gives the lowest priority to cost.',
+    'Seat price has the highest influence on the result.',
+    'Churn has the highest uncertainty in your model.',
+    'We have the most data on churn.',
+    'Risk is highest under the current assumptions.',
+    'The team topped up the budget.',
+    'Retention is the top priority this quarter.',
+    'The most of the uplift came from the price change.',
+  ])('%s', (t) => {
+    expect(both(t)).toEqual([false, false]);
+  });
+});

@@ -1493,3 +1493,37 @@ describe('a sentence naming ONE option as separated ranks the options', () => {
     expect(gate({ permitted: true }).endsWith(reply)).toBe(true); // after the leading caveat (AIQ 5913751874)
   });
 });
+
+/**
+ * ⭐ THE LADDER VERB'S PARAPHRASE CLASSES on the SERVED agent lane (Review Desk 6b + DL, #2646). `highest` is bare here,
+ * so the gap was `lowest` (bound to gave/came out only) and "came top": a minimise leader claim with no share passed.
+ */
+describe('ladder paraphrase classes (Desk 6b + DL, #2646)', () => {
+  it.each([
+    // production verbs
+    'Raise to £59 produced the lowest churn.',
+    'Raise to £59 delivered the lowest monthly cancellations.',
+    'The lowest churn was delivered by Raise to £59.',
+    // has / had
+    'Raise to £59 had the lowest churn.',
+    'Raise to £59 has the lowest churn.',
+    // fronted and predicative
+    'The lowest churn came from Raise to £59.',
+    'Churn was lowest under Raise to £59.',
+    'Churn is the lowest for Raise to £59.',
+    // top
+    'Raise to £59 came top.',
+    'Raise to £59 was top on churn.',
+    'Top on churn was Raise to £59.',
+  ])('CATCH: %s', (s) => {
+    expect(sentenceRanksOptions(s)).toBe(true);
+  });
+  it.each([
+    'You want the lowest churn you can get.',
+    'This gives the lowest priority to cost.',
+    'Risk is lowest under the current assumptions.',
+    'The team topped up the budget.',
+  ])('LEAVE: %s', (s) => {
+    expect(sentenceRanksOptions(s)).toBe(false);
+  });
+});
