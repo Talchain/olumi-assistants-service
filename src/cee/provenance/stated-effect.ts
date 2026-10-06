@@ -1,4 +1,5 @@
 import { findStatedAmounts, readUnit, type StatedAmount } from "./stated-amounts.js";
+import { levelChangeStating } from "./stated-level-change.js";
 import {
   carrierCompatible,
   nounUnitsAt,
@@ -129,16 +130,30 @@ export function statedEffectSpansInText(
  * starter tier would win about 150 new subscribers": one switch turned on, so no per-source figure is ever written. This
  * validates the TARGET figure only: exactly one located amount, in the target's unit, for a typed effect per ONE switch.
  * The caller binds it only for a source typed binary that the sentence names (`stated-size-binding.ts`).
+ *
+ * ⭐ Or a LEVEL CHANGE that states it (MC, DL bench DIAGNOSIS §2a): "would lift our enterprise win rate from 20% to about
+ * 30%" is +10 percentage points, "roughly halve that" of "about 30%" is −15 (`stated-level-change.ts`), read only when no
+ * figure states the amount itself. A level change reports where its quantity is named (`level.names`): the binder
+ * credits it only to the link whose target that is.
  */
 export function statedSwitchEffectQuoteMatches(
   quote: string,
   detail: StatedEffectDetail,
-  onMatch?: (spans: { amount: { start: number; end: number }; per: { start: number; end: number } }) => void,
+  onMatch?: (spans: {
+    amount: { start: number; end: number };
+    per: { start: number; end: number };
+    level?: { names: { start: number; end: number } };
+  }) => void,
 ): boolean {
   if (quote.trim().length === 0 || detail.per_source_change !== 1 || detail.per_source_change_unit !== "switch") return false;
   if (!Number.isFinite(detail.amount) || detail.amount === 0 || detail.amount_unit.trim().length === 0) return false;
   const target = oneMatchingAmount(locatedAmounts(quote).filter((a) => a.implicitSource !== true), detail.amount, detail.amount_unit, false, quote);
-  if (target === undefined) return false;
+  if (target === undefined) {
+    const level = levelChangeStating(quote, detail.amount, detail.amount_unit);
+    if (level === undefined) return false;
+    onMatch?.({ amount: level.said, per: level.said, level: { names: level.names } });
+    return true;
+  }
   const span = { start: target.index, end: target.index + target.matchedText.length };
   onMatch?.({ amount: span, per: span });
   return true;
