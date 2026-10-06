@@ -21,15 +21,20 @@
 import { splitIntoRedactableUnits } from '../compose/redactable-units.js';
 import { sanitiseCoachingProse } from '../../orchestrator/shared/output-safety.js';
 import { withoutProposalIds } from './display-ids.js';
-import { agentLaneLeaderWithheld, agentNoLeaderReason, limitCauseCodesOf } from './withheld-leader-fail-closed.js';
+import { agentLaneLeaderWithheld, agentNoLeaderReason, limitCauseCodesOf, rankingLabelContext, sentenceRanksOptions } from './withheld-leader-fail-closed.js';
 import type { StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 
 export const PROVISIONAL_VIEW_TOOL = 'give_provisional_view';
 /** The words the block opens on. Changing them changes what the user is told the paragraph IS. */
 export const PROVISIONAL_VIEW_LABEL = 'Provisional view';
 
+export const PROVISIONAL_VIEW_RULE =
+  'Say WHAT to test or find out: a factor, an assumption or a figure, grounded in this model. '
+  + 'Never say WHICH option to do or explore first, never recommend, rank or favour an option, even in first person or with a hedge. '
+  + 'This applies to view, reasoning and confirm_step. For example: Before comparing, it is worth testing how much a factor moves the goal.';
+
 export interface ProvisionalView {
-  /** What the Agent would do — at most two sentences. */
+  /** What to test or find out about the model — at most two sentences. */
   readonly view: string;
   /** Why, from the model's facts and the user's own words — at most three sentences. */
   readonly reasoning: string;
@@ -47,7 +52,29 @@ export const PROVISIONAL_VIEW_LIMITS: Readonly<Record<Field, { readonly sentence
 
 export type ProvisionalViewCheck =
   | { readonly ok: true; readonly view: ProvisionalView }
-  | { readonly ok: false; readonly field: Field; readonly problem: 'missing' | 'too_long' | 'too_many_sentences'; readonly limit?: number };
+  | { readonly ok: false; readonly field: Field; readonly problem: 'missing' | 'too_long' | 'too_many_sentences' | 'option_recommendation'; readonly limit?: number };
+
+// These recommendation forms bypassed the analysis's leader gate via the typed sidecar. Keep the check here so
+// tool calls, Run-button JSON and their egress re-check all refuse them. Testing/measurement itself is allowed.
+const OPTION_PRIORITY = /\b(?:i\s+would|i['’]d)\s+(?:explore|try|pursue|choose|pick|select|hire|start\s+with)\b(?!\s+(?:testing|measuring|checking|finding\s+out)\b)[^.!?]*(?:\bfirst\b|\bstart\s+with\b)|\b(?:i\s+would|i['’]d)\s+start\s+with\s+(?!testing\b|measuring\b|checking\b|finding\s+out\b)|\bis\s+worth\s+(?:trying|exploring|pursuing)\s+first\b|\b(?:i\s+would|i['’]d)\s+(?:raise|hold|hire|choose|pick|select|recommend|favour|lean\s+towards)\b/iu;
+
+const OPTION_ACTION = '(?:explor(?:e|ed|ing)|try|trying|pursu(?:e|ed|ing)|choos(?:e|ing)|pick|select|hir(?:e|ed|ing)|(?:start|begin)\\s+with|recommend|favour|lean\\s+towards)';
+const OPTION_FIRST = /\bshould\s+be\s+explored\s+first\b|\bwe\s+should\s+begin\s+with\s+(?!(?:testing|measuring|checking|finding\s+out)\b)/iu;
+
+/** Match advice to act on an option, rather than an action word anywhere in a measurement question. */
+function recommendsOption(line: string, optionNames: readonly string[] = []): boolean {
+  if (OPTION_PRIORITY.test(line) || OPTION_FIRST.test(line)) return true;
+  return optionNames.some((name) => {
+    const option = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const named = `(?:a\\s+|an\\s+|the\\s+)?${option}(?=\\s|[.!?,;:]|$)`;
+    const advice = new RegExp(
+      `(?:^\\s*|[.!?;:]\\s*|\\b(?:and|then|worth|consider)\\s+|\\b(?:i|we|you)\\s+(?:should|would|could|must)\\s+|\\bi['’]d\\s+)${OPTION_ACTION}\\s+${named}`
+      + `|${option}\\s+(?:(?:should|could|must)\\s+(?:be\\s+)?|is\\s+worth\\s+)${OPTION_ACTION}\\b`,
+      'iu',
+    );
+    return advice.test(line);
+  });
+}
 
 /**
  * One line, sentence-final. A newline would let the model open a list, a heading or a second paragraph inside the
@@ -71,6 +98,7 @@ export function checkProvisionalView(args: unknown): ProvisionalViewCheck {
     const limit = PROVISIONAL_VIEW_LIMITS[field];
     if (line.length > limit.chars) return { ok: false, field, problem: 'too_long', limit: limit.chars };
     if (sentenceCount(line) > limit.sentences) return { ok: false, field, problem: 'too_many_sentences', limit: limit.sentences };
+    if (recommendsOption(line) || sentenceRanksOptions(line)) return { ok: false, field, problem: 'option_recommendation' };
     out[field] = line;
   }
   return { ok: true, view: out as ProvisionalView };
@@ -185,7 +213,11 @@ export const RUN_INTERPRETATION_FORMAT = Object.freeze({
             type: 'object',
             additionalProperties: false,
             required: ['view', 'reasoning', 'confirm_step'],
-            properties: { view: { type: 'string' }, reasoning: { type: 'string' }, confirm_step: { type: 'string' } },
+            properties: {
+              view: { type: 'string', description: PROVISIONAL_VIEW_RULE },
+              reasoning: { type: 'string', description: 'Why this factor, assumption or figure needs testing, from the model and the user’s words. Never favour an option.' },
+              confirm_step: { type: 'string', description: 'One step to test or find out what the comparison needs. Never an option to do or explore first.' },
+            },
           },
         ],
       },
@@ -196,7 +228,8 @@ export const RUN_INTERPRETATION_FORMAT = Object.freeze({
 /** Appended to the interpreter's instructions ONLY when the run withholds its leader. */
 export const RUN_INTERPRETATION_VIEW_INSTRUCTION =
   'On this call you have no tools, so give_provisional_view is not available. Answer as JSON. `answer` is your reply to the user, and every rule in these instructions applies to it: it never names, ranks or favours an option. '
-  + '`provisional_view` is your own provisional view, the one give_provisional_view would carry: `view` (what you would do, at most two sentences), `reasoning` (why, from the model’s facts and the user’s own words, at most three sentences) and `confirm_step` (the ONE step that would let the analysis confirm or overturn it, one sentence). '
+  + '`provisional_view` is your own provisional view, the one give_provisional_view would carry: `view` (what to test or find out, at most two sentences), `reasoning` (why, from the model’s facts and the user’s own words, at most three sentences) and `confirm_step` (the ONE step that would let the analysis confirm or overturn it, one sentence). '
+  + PROVISIONAL_VIEW_RULE + ' '
   + 'Olumi shows it beneath your reply, labelled as your provisional view and never as the analysis result. '
   // Served 27 Sep (pj-timing-2104, pj-dispatch-2106r): the FIRST Run carried a view, and the RERUN after the user's
   // challenge carried none, 2/2 (its output was the answer alone). The user lost Olumi's view just when they had changed
@@ -232,7 +265,7 @@ const CODE_TOKEN = /\b(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)+|[A-Z][A-Z0-9]*(?:_[A-Z0-9
 
 export function sanitiseProvisionalView(
   v: ProvisionalView,
-  graph: { readonly nodes?: readonly { readonly id?: unknown; readonly label?: unknown }[] } | null,
+  graph: { readonly nodes?: readonly { readonly id?: unknown; readonly label?: unknown; readonly kind?: unknown }[] } | null,
 ): ProvisionalView | null {
   const ids = (graph?.nodes ?? [])
     .map((n) => ({ id: typeof n.id === 'string' ? n.id : '', label: typeof n.label === 'string' ? n.label.trim() : '' }))
@@ -249,5 +282,14 @@ export function sanitiseProvisionalView(
   const confirm = scrub(v.confirm_step);
   if (view === null || reasoning === null || confirm === null) return null;
   const checked = checkProvisionalView({ view, reasoning, confirm_step: confirm });
-  return checked.ok ? checked.view : null;
+  if (!checked.ok) return null;
+  const labels = rankingLabelContext(graph, undefined);
+  const optionNames = (graph?.nodes ?? []).filter((n) => n.kind === 'option')
+    .map((n) => typeof n.label === 'string' ? n.label.trim().toLocaleLowerCase('en-GB') : '').filter(Boolean);
+  for (const line of [view, reasoning, confirm]) {
+    if (sentenceRanksOptions(line, labels)) return null;
+    // Ordinary option mentions (e.g. asking for its cost) are allowed. Acting on an option is a recommendation.
+    if (recommendsOption(line, optionNames)) return null;
+  }
+  return checked.view;
 }

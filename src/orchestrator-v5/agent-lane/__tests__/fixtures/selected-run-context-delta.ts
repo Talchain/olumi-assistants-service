@@ -29,7 +29,7 @@ export function selectedRunContextPair(hash: string, at: string, mayName = true)
       input_snapshot: RunInputSnapshotSchema.parse({ snapshot_version: 1, sent_digest: 'a'.repeat(64),
         residual_digest: 'b'.repeat(64), goal: { node_id: 'mrr', unit: '£/month' },
         options: options.map(o => ({ option_id: o.id, label: labels.get(o.id), settings: [] })),
-        options_not_sent: [], factors: [], constraints: [], links: [] }),
+        options_not_sent: [], factors: [{ factor_id: 'mrr' }], constraints: [], links: [] }),
     } } as unknown as HandlerFact;
   });
 }

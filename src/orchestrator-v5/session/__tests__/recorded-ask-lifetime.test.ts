@@ -184,6 +184,9 @@ describe('dial A — the recorded-ask window', () => {
     expect(askKinds.sort()).toEqual([
       'elicit_edit_target',
       'elicit_effect_target',
+      // Harness #2681 — "today's level of <goal>?" (Agent lane). A recorded question awaiting the user's own figure,
+      // answered over several turns in the founder journey, so it takes the widened ask window too.
+      'elicit_goal_current_level',
       'elicit_goal_target',
       'elicit_option_effect',
       // GO(A) — "what does <option> cost, in <unit>?". A recorded question

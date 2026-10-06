@@ -183,7 +183,7 @@ import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-run-context-facts.js';
-import { selectedRunDeltaForModel } from '../selected-run-delta-for-model.js';
+import { selectedRunDeltaForModel, SELECTED_RUN_DELTA_DEADLINE_MS } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
@@ -3208,6 +3208,7 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const evidenceDeadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
       const delta = await selectedRunDeltaForModel(ctx.scenario_id, g, g.run_delta);
       const { run_delta: _wireDelta, ...readWithoutDelta } = g;
       const modelRead = { ...readWithoutDelta, ...(delta === undefined ? {} : { run_delta: delta }) };
@@ -3223,8 +3224,10 @@ export function createAgentCapabilities(
         && (delta as { attribution_case?: unknown }).attribution_case !== 'C1_attributable';
       // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
       // from the pair's own persisted Run facts (never on the wire). No read for a model delta shown as licensed.
+      // This fallback shares the selected-delta budget; incomplete coverage must not start a second deadline.
       const pairRead = delta !== undefined && !modelCaseCheckedDown ? undefined
-        : await rerunPairReadForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta);
+        : await rerunPairReadForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta,
+          Math.max(0, evidenceDeadlineAt - Date.now()));
       const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
         [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks,
         pairRead?.frameRefitLinks);
@@ -8243,7 +8246,7 @@ export function createAgentCapabilities(
         return {
           ok: false, mutated: false, refusal: 'invalid_provisional_view', field: checked.field, problem: checked.problem,
           ...(checked.limit !== undefined ? { limit: checked.limit } : {}),
-          detail: 'Nothing was shown. The view is at most 2 sentences, the reasoning at most 3 and the confirming step ONE; '
+          detail: 'Nothing was shown. Say what to test or find out, never which option to do or explore first. The view is at most 2 sentences, the reasoning at most 3 and the confirming step ONE; '
             + `\`${checked.field}\` was ${checked.problem.replace(/_/g, ' ')}. Call give_provisional_view again with it fixed.`,
         };
       }
