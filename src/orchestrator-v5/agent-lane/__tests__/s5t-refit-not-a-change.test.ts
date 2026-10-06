@@ -38,14 +38,14 @@ const labelOf = (id: string): string | undefined => (G5.nodes as Rec[]).find((n)
 const edgeOf = (g: Rec, k: string) => (g.edges as Rec[]).find((e) => `${e.from}->${e.to}` === k)!;
 
 /** The real ONE-link door's write (as `executeOptionInterventionBatch` calls it, `frameRefit`). */
-function write(graph: Rec, effect: Rec) {
+function write(graph: Rec, effect: Rec): Rec {
   const edge = edgeOf(graph, EDITED);
   return applyLinkEffectEdit({
     persistedGraph: structuredClone(graph), from: edge.from, to: edge.to, effect: effect as never, quote: QUOTE,
     expected: { graph_hash: computeAnalysisAffectingGraphHash(graph as never)!, edge_token: linkEffectEdgeToken(graph, edge.from, edge.to)! },
     reading_token: linkEffectReadingToken({ from: edge.from, to: edge.to, effect: effect as never, quote: QUOTE }),
     frameRefit: true,
-  });
+  }) as unknown as Rec;
 }
 
 /** A Run's snapshot links, by the snapshot builder's own projection (`run-input-snapshot.ts`): mean, band, sizing, authorship. */
@@ -204,6 +204,44 @@ describe('a refit move that crosses a band: no row is said and none is counted',
     const plan = rerunExplanationPlan(delta, labelOf, [], false, [], withinBandLinkMovesForRunPair(facts, delta, []),
       new Set(userWrittenLinksForRunPair(facts, delta, [])), new Set(frameRefitLinksForRunPair(facts, delta, [])))!;
     expect(plan.codeLine).toMatch(/Other things also differed/u);
+  });
+});
+
+describe('Codex buddy r1 on #2661: the refit chain never swallows a genuine change', () => {
+  const [from, to] = SIBLINGS[0]!.split('->');
+  const withSib = (s: Rec, mean: number): Rec => {
+    const out = structuredClone(s);
+    const l = (out.links as Rec[]).find((x) => x.from === from && x.to === to)!;
+    l.mean = mean; l.band = strengthBandFromEdgeBand(edgeBandFromMagnitude(Math.abs(mean)));
+    return out;
+  };
+  const refitReceipt = (moves: Rec[], target = EDITED): HandlerFact => ({ fact_type: 'adjust_edge_strength', fact_version: 1, noop: false,
+    result: { status: 'applied', target_id: target.replace('->', '→'), before: { strength: { mean: 0.1 } }, after: { strength: { mean: 0.2 }, frame_refit: moves } } } as unknown as HandlerFact);
+  const userReceipt = (k: string, before: number, after: number): HandlerFact => ({ fact_type: 'adjust_edge_strength', fact_version: 1, noop: false,
+    result: { status: 'applied', target_id: k.replace('->', '→'), before: { strength: { mean: before } }, after: { strength: { mean: after } } } } as unknown as HandlerFact);
+
+  it('⭐ RED: refit 0.5 → 1, then Olumi re-estimates to β 1.2 (persisted 1): the current Run\'s 1.2 is a change, not the refit\'s', () => {
+    const { facts, delta } = pair(withSib(S1, 0.5), withSib(S2, 1.2));
+    const timed = [{ fact: refitReceipt([{ from, to, before_mean: 0.5, after_mean: 1 }]), created_at: AT }];
+    expect(frameRefitLinksForRunPair(facts, delta, timed)).not.toContain(SIBLINGS[0]);
+  });
+  it('CONTROL: the same refit whose current Run sends exactly its 1 → the refit\'s alone', () => {
+    const { facts, delta } = pair(withSib(S1, 0.5), withSib(S2, 1));
+    const timed = [{ fact: refitReceipt([{ from, to, before_mean: 0.5, after_mean: 1 }]), created_at: AT }];
+    expect(frameRefitLinksForRunPair(facts, delta, timed)).toContain(SIBLINGS[0]);
+  });
+  it('two refits between the Runs that chain 0.5 → 0.3 → 0.2 → the refits\' alone, in any input order', () => {
+    const { facts, delta } = pair(withSib(S1, 0.5), withSib(S2, 0.2));
+    const a = { fact: refitReceipt([{ from, to, before_mean: 0.5, after_mean: 0.3 }]), created_at: '2026-10-06T06:59:00.000Z' };
+    const b = { fact: refitReceipt([{ from, to, before_mean: 0.3, after_mean: 0.2 }]), created_at: '2026-10-06T07:00:00.000Z' };
+    expect(frameRefitLinksForRunPair(facts, delta, [a, b])).toContain(SIBLINGS[0]);
+    expect(frameRefitLinksForRunPair(facts, delta, [b, a])).toContain(SIBLINGS[0]);
+  });
+  it('CROSSOVER: the user wrote the link (its target), then a refit rescaled it → not the refit\'s alone (the user\'s move is a change)', () => {
+    const { facts, delta } = pair(withSib(S1, 0.5), withSib(S2, 0.2));
+    const user = { fact: userReceipt(SIBLINGS[0]!, 0.5, 0.4), created_at: '2026-10-06T06:59:00.000Z' };
+    const refit = { fact: refitReceipt([{ from, to, before_mean: 0.4, after_mean: 0.2 }]), created_at: '2026-10-06T07:00:00.000Z' };
+    expect(frameRefitLinksForRunPair(facts, delta, [user, refit])).not.toContain(SIBLINGS[0]);
   });
 });
 
