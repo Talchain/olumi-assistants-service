@@ -19,7 +19,7 @@ import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRe
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
-import { acceptedOlumiEstimateSentence } from '../rerun-explanation.js';
+import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapApprovalWords, applyOptionGapDeclarations } from '../unmodelled-mechanisms.js';
@@ -3155,6 +3155,11 @@ export function createAgentCapabilities(
       const scopeIssues = g.goal_scope_reconciliation ?? [];
       const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission });
       const optionNames = optionNameAliasesForCurrentRun(g);
+      // S7 (D4 lease #87 6005636960): a pair the model is NOT shown as licensed still gets Olumi's own leader-free record of
+      // what changed, so a typed "what changed since the last run?" is answered from the record. `undefined` for a licensed
+      // model delta (context byte-unchanged) and for a first Run.
+      const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined, g.nodes,
+        [...optionNames.values()].map((a) => a.display));
       return {
         ok: true,
         mutated: false,
@@ -3183,6 +3188,7 @@ export function createAgentCapabilities(
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
         ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead),
+        ...(rerunRecord === undefined ? {} : { rerun_record: rerunRecord }),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest

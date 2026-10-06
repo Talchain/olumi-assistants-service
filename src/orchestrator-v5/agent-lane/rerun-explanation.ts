@@ -172,9 +172,16 @@ export function rerunExplanationPlan(
   const priorWithheld = d.win_probabilities_unavailable === 'prior_withheld';
   const noMatched = !priorWithheld && Array.isArray(d.win_probabilities) && d.win_probabilities.length === 0;
   const noise = text(rec(d.leader)?.noise_verdict);
+  // ⛔ SAYING WHAT CAUSED A MOVEMENT needs ONE change (Science d5, #87 6005682972 (1)): C1 proves the same draw, builds and
+  // sample count, but it allows several edits (build-run-delta.ts checks only seed/draws/n/builds/hash), and with two edits no
+  // single one can be credited without an ablation. A goal row (direction, operator, target, unit) changes the question
+  // itself, so it is never the credited change. Any other C1 pair is checked as C2_unpaired (no cause), as C3–C5 already are.
+  // The UNWITHHELD line is NOT gated here: the licence change is deterministic (d5 (d)), and its own C1 rule is below.
+  const movementAttributable = wireCase === 'C1_attributable' && rows.length === 1 && rows[0]!.entity_kind !== 'goal';
+  const checkedCase = !priorWithheld && wireCase === 'C1_attributable' && !movementAttributable ? 'C2_unpaired' : wireCase;
   const inputs: MethodInputs = {
     change_labels: changes,
-    attribution_case: checkCase(wireCase),
+    attribution_case: checkCase(checkedCase),
     leader_licensed: leaderLicensed,
     ...(noise !== undefined ? { noise_verdict: noise } : {}),
     prior_withheld: priorWithheld,
@@ -207,6 +214,8 @@ export function rerunExplanationPlan(
         ? 'No option has figures in both Runs, so never say anything rose, fell or moved; say only what this Run shows.'
         : inputs.attribution_case === 'C1_attributable'
           ? 'You may say what moved in the comparison.'
+          : wireCase === 'C1_attributable'
+            ? 'More than one input changed between the two Runs, or the goal itself changed, so never say which change caused the difference.'
           // Each premise is TRUE of its case (CODEX on 3d0891e2 P1): C0 + complete proves identity; C2 leaves the draw unshown.
           : wireCase === 'C0_identical'
             ? 'Nothing differed between the two Runs, so never say anything moved because of a change.'
@@ -217,6 +226,102 @@ export function rerunExplanationPlan(
                 : 'Other things also differed between the two Runs, so never say the change caused the difference.',
   ].join('\n');
   return { inputs, changes, codeLine, instruction, fallback: codeLine };
+}
+
+/**
+ * ⭐ S7 "EXPLAIN THE CHANGE" ON THE TYPED PATH (D4 lease #87 6005636960; DL decision YES; Science d5 6005682972).
+ *
+ * Served at 5d767fa3 (red team s7-d4): after a withheld Run → set link → permitted Run, the TYPED question "What changed since
+ * the last run, and why?" answered "Nothing changed since the latest saved run", which was false. The Explain chip said it right
+ * from this same plan. The typed Agent loop never saw it: `selectedRunDeltaForModel` gives the model a delta only for a pair
+ * PROVEN licensed at both ends.
+ *
+ * So, for every OTHER pair, the model gets Olumi's own record from the chip's plan: the code line, `prior_withheld` and the
+ * checked case. LEADER-FREE BY CONSTRUCTION: the line is built from `input_changes` rows and the case lines only. There is no
+ * leader, no option share and no win_probabilities (asserted per field in rerun-record.test.ts). Raw `input_changes` rows
+ * never reach the model (AIQ binding rule, schemas #76 5916401270: a row carries no author). The code line is CODE-OWNED
+ * (ruling 5940472067). A pair the model DOES see as licensed gets nothing here, so its context is byte-unchanged.
+ */
+export interface RerunRecordForModel {
+  readonly code_line: string;
+  readonly prior_withheld: boolean;
+  readonly attribution_case: 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
+  readonly use: string;
+}
+
+export const TYPED_RERUN_RECORD_RULE =
+  'Olumi\u2019s own record of what changed between the Run before the latest one and the latest Run. '
+  + 'When the user asks what changed since the last run, or why the result is different, answer from it: '
+  + 'first say code_line exactly, as Olumi\u2019s record, then say what the latest Run shows. '
+  + '\u201cSince the last run\u201d means the latest Run against the one before it; say any edit made after the latest Run separately. '
+  + 'Never say nothing changed when code_line names a change. '
+  + 'If prior_withheld is true, never say anything rose, fell or moved. '
+  + 'Unless attribution_case is C1_attributable, never say which change caused the difference. '
+  + 'If the latest Run still holds its comparison back, name every link in unsized_goal_path_links as what the comparison still needs, ranking none.';
+
+type NodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown };
+
+/** The chip's no-matched-figures guard, appended to the typed rule when it holds. */
+export const NO_MATCHED_FIGURES_RULE = ' No option has figures in both Runs, so never say anything rose, fell or moved.';
+
+/**
+ * ⛔ LEADER-FREE IS CHECKED, NOT ASSUMED (Codex buddy r1 on d70025a9 P1; r2 on b521a584 P1): the code line interpolates row
+ * labels, values and units verbatim, so a label that IS a leading option's id, or an input written as one of this pair's
+ * win shares, would carry it. The forbidden set is THIS delta's own: every option id in its leader block and
+ * win_probabilities, and every share it records. A share is matched in ANY written form: a percentage ("79%", "79.0 %",
+ * "79 per cent", "79 percent", or the rounded "80 %" for 0.795) or a bare fraction ("0.79"), within half a percentage
+ * point. Any hit → the neutral "can't say" line (fail closed: a coincidental input costs the named change, never a share).
+ */
+const PERCENT_FORM = /(?<![\d.])(\d{1,3}(?:\.\d+)?) ?(?:%|per ?cent\b|percent\b)/giu;
+// A fraction needs its decimal point: a bare 0 or 1 is an ordinary input ("0 → 5"), not a share. A sentence's full stop
+// after it ("→ 0.795.") does not make it a longer number: only a digit or ".digit" does.
+const FRACTION_FORM = /(?<![\d.])(0?\.\d+|1\.0+)(?!\d|\.\d| ?(?:%|per ?cent\b|percent\b))/giu;
+const SHARE_TOLERANCE = 0.005 + 1e-9;
+
+function leaksPairLeaderOrShare(line: string, wireDelta: unknown): boolean {
+  const d = rec(wireDelta);
+  if (d === undefined) return false;
+  const ids = new Set<string>();
+  for (const [k, v] of Object.entries(rec(d.leader) ?? {})) if (/option_id$/u.test(k) && typeof v === 'string' && v.trim() !== '') ids.add(v);
+  const shares: number[] = [];
+  for (const row of Array.isArray(d.win_probabilities) ? d.win_probabilities : []) {
+    const r = rec(row);
+    if (r === undefined) continue;
+    if (typeof r.option_id === 'string' && r.option_id.trim() !== '') ids.add(r.option_id);
+    for (const v of Object.values(r)) if (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1) shares.push(v);
+  }
+  if ([...ids].some((id) => line.includes(id))) return true;
+  if (shares.length === 0) return false;
+  // Any run of whitespace (incl. no-break spaces) reads as one space, so "79.5 per  cent" is "79.5 per cent" (buddy r3).
+  const flat = line.replace(/\s+/gu, ' ');
+  const said = [
+    ...[...flat.matchAll(PERCENT_FORM)].map((m) => Number(m[1]) / 100),
+    ...[...flat.matchAll(FRACTION_FORM)].map((m) => Number(m[1])),
+  ].filter((v) => Number.isFinite(v));
+  return said.some((v) => shares.some((share) => Math.abs(v - share) <= SHARE_TOLERANCE));
+}
+
+/** The record for the typed Agent loop, or `undefined` when there is no wire delta (a first Run). Never for a licensed model delta. */
+export function rerunRecordForModel(
+  wireDelta: unknown,
+  modelDeltaShown: boolean,
+  nodes: readonly NodeLike[],
+  optionDisplayLabels: readonly string[] = [],
+): RerunRecordForModel | undefined {
+  if (modelDeltaShown) return undefined;
+  const labelled = nodes.filter((n): n is NodeLike & { id: string; label: string } =>
+    typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '');
+  const labelOf = (id: string): string | undefined => labelled.find((n) => n.id === id)?.label;
+  const optionLabels = [...new Set([...labelled.filter((n) => n.kind === 'option').map((n) => n.label), ...optionDisplayLabels])];
+  const plan = rerunExplanationPlan(wireDelta, labelOf, optionLabels, false, labelled.map((n) => n.label));
+  if (plan === null) return undefined;
+  return {
+    code_line: leaksPairLeaderOrShare(plan.codeLine, wireDelta) ? RERUN_NO_CHANGE_LINES.unknown : plan.codeLine,
+    prior_withheld: plan.inputs.prior_withheld === true,
+    attribution_case: plan.inputs.attribution_case ?? 'C2_unpaired',
+    // The chip's own movement guard travels too (Codex buddy r1, P2): no option has figures in both Runs → no movement.
+    use: plan.inputs.no_matched_figures === true ? `${TYPED_RERUN_RECORD_RULE}${NO_MATCHED_FIGURES_RULE}` : TYPED_RERUN_RECORD_RULE,
+  };
 }
 
 const SENTENCE_BREAK = /(?<=[.!?])\s+/u;
