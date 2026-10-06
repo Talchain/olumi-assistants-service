@@ -19,12 +19,13 @@ import { isDeepStrictEqual } from 'node:util';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import { approvedLinkAdoptionFor } from '../agent-lane/approved-adoption-context.js';
-import { statedLinkBandFor } from '../agent-lane/stated-link-band-context.js';
+import { statedLinkBandFor, statedLinkReplacesUserFigureFor } from '../agent-lane/stated-link-band-context.js';
+import { REPLACE_KEEPS_DIRECTION_TEXT, userFigureHeld, userFigureHeldRefusalText } from '../../cee/magnitude/user-figure-held.js';
 import { composeToolCallResponse } from '../compose.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../compose/definitional-links.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
-import { edgeBandFromMagnitude, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
@@ -507,11 +508,43 @@ export async function applyEdgeStrengthEdit(
     );
   }
 
+  // ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a write that MOVES the strength of a link holding the user's own
+  // figure would drop it. Refused here first, nothing written, the figure quoted, in the writer's own words
+  // (`user-figure-held.ts`) — the canvas pill, the slider and the β field included. Only an approval that carried the
+  // user's explicit replace for this exact link passes (`statedLinkReplacesUserFigureFor`); no client can claim it on the
+  // wire. A replace keeps the sign (buddy r1 #5), and is a real write even at a midpoint equal to the stored mean (#4),
+  // so the "unchanged set" refusal below never applies to it. A `confirm_current` (or anything that keeps the strength)
+  // changes nothing and is never refused.
+  const rawTargetEdge = Array.isArray((persistedGraph as { edges?: unknown }).edges)
+    ? ((persistedGraph as { edges: Array<{ from?: unknown; to?: unknown }> }).edges).find((e) => e?.from === event.from && e?.to === event.to)
+    : undefined;
+  const heldNow = userFigureHeld(rawTargetEdge ?? targetEdge);
+  const replacesUserFigure = heldNow !== null && statedLinkReplacesUserFigureFor(payload.scenario_id, event.from, event.to);
+  if (replacesUserFigure && target.effectDirection !== targetEdge.effect_direction) {
+    return refuse(payload, 'replace_keeps_direction', REPLACE_KEEPS_DIRECTION_TEXT);
+  }
+  const movesStrength = target.mean !== targetEdge.strength.mean || target.effectDirection !== targetEdge.effect_direction;
+  if (heldNow !== null && movesStrength && !replacesUserFigure) {
+    log.info(
+      {
+        event: 'v5.system_event.edge_strength_edit.user_figure_held',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+      },
+      'edge_strength_edit — the link holds the user\'s own figure; refusing to drop it without their replace',
+    );
+    return refuse(
+      payload,
+      'user_figure_held',
+      userFigureHeldRefusalText(heldNow, CANVAS_BAND_WORD[statedBand ?? edgeBandFromMagnitude(Math.abs(target.mean))]),
+    );
+  }
   // `set` and `confirm_current` are intentionally different acts. A set that
   // resolves to the already-persisted scientific tuple has changed nothing,
   // so it must not reach the handler merely to stamp human provenance. Only
   // the explicit confirmation intent grants that provenance-only write.
   if (
+    !replacesUserFigure &&
     event.intent === 'set' &&
     target.mean === targetEdge.strength.mean &&
     target.effectDirection === targetEdge.effect_direction
@@ -607,6 +640,7 @@ export async function applyEdgeStrengthEdit(
     identityRunUseAuthority: params.lastRunIdentityUse ?? null,
     ...(statedBand !== undefined ? { edgeStrengthBandAuthority: statedBand } : {}),
     ...(adoptedEstimate !== undefined ? { edgeStrengthAdoptedEstimateAuthority: adoptedEstimate } : {}),
+    ...(replacesUserFigure ? { edgeStrengthReplacesUserFigureAuthority: true as const } : {}),
     // Give the canonical handler the strict raw persisted shape. It performs
     // its own GraphV3 narrowing for mutation while its existing merge helper
     // preserves additive top-level fields; the parsed `graph` above remains
