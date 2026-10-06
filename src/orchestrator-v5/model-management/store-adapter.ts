@@ -96,6 +96,9 @@ export interface SaveVersionWrite {
   /** Optional write-time CAS: expected CURRENT HEAD identity hash,
    *  evaluated in-transaction by the RPC under the scenarios row lock. */
   readonly expected_graph_identity_hash?: string;
+  /** Captured before the graph read; null explicitly expects no version yet. */
+  readonly expected_head_version_id?: string | null;
+  readonly expected_working_graph_identity_hash?: string;
   /** Optional caller-supplied journey event id (idempotency key; the RPC
    *  mints a row-keyed id when absent). */
   readonly event_id?: string;
@@ -214,6 +217,13 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
       // deterministic on the turn id); else the RPC mints a row-keyed id.
       p_event_id: write.event_id ?? null,
       p_expected_graph_identity_hash: write.expected_graph_identity_hash ?? null,
+      ...(write.expected_head_version_id !== undefined
+        ? {
+            p_base_known: true,
+            p_expected_head_version_id: write.expected_head_version_id,
+            p_expected_working_graph_identity_hash: write.expected_working_graph_identity_hash,
+          }
+        : {}),
     });
     if (error) {
       throw mapRpcError('create_model_version', error, write.expected_graph_identity_hash ?? null);
