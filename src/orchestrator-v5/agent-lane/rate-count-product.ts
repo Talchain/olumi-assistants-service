@@ -76,7 +76,11 @@ export function withRateCountProducts(candidate: CandidateModel, brief: string):
       const unitWords = typeof unitOf(part) === 'string' ? wordsOf(unitOf(part) as string) : [];
       const clause = wordsOf(brief.slice(before, after === -1 ? brief.length : span.end + after))
         .filter((c) => !unitWords.some((u) => sameWord(u, c)));
-      return [...wordsOf(part), ...wordsOf(option)].some((w) => clause.some((c) => sameWord(c, w)));
+      const own = [...wordsOf(part), ...wordsOf(option)];
+      const ownWord = (c: string): boolean => own.some((w) => sameWord(c, w));
+      // A shared head word qualified by ANOTHER entity's word ("PRO tier costs £49") names that entity, not this part
+      // (Codex buddy r2 F6): an occurrence counts only when the word before it is this part's own, or none at all.
+      return clause.some((c, i) => ownWord(c) && (i === 0 || ownWord(clause[i - 1]!) || GENERIC.has(clause[i - 1]!)));
     });
     if (![a, b].every(theirs)) continue;
     minted.push({ outcome: label, rate: composed.rate, count: composed.count });
@@ -90,3 +94,6 @@ export function withRateCountProducts(candidate: CandidateModel, brief: string):
     minted,
   };
 }
+
+/** Words that qualify nothing ("launch A new starter tier", "keep THE price"): never another entity's name. */
+const GENERIC = new Set(['the', 'our', 'its', 'their', 'this', 'that', 'these', 'those', 'each', 'every', 'any', 'new', 'own', 'one', 'launch', 'introduce', 'start']);

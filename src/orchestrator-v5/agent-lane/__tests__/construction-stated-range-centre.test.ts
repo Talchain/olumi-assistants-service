@@ -128,6 +128,14 @@ describe('the range the user wrote around their figure is carried with it', () =
     expect(lost.natural_effect.stated_range).toBeUndefined();
   });
 
+  it('CONTROL (Codex r2 F3): "between 1 and 4 CALENDAR months after launch" is a time too — never the size\'s range', async () => {
+    const said = 'Each 1% price rise loses about 2 customers, between 1 and 4 calendar months after launch.';
+    const { edge } = await build(t1b(), T1B.replace(LOSES, said));
+    const lost = edge('Price rise', 'Customers lost from price rise').provenance;
+    expect(lost).toMatchObject({ magnitude: 'user_stated', source_quote: said });
+    expect(lost.natural_effect.stated_range).toBeUndefined();
+  });
+
   it('RED (Codex r1 F7): the not-modelled manifest credits a switch\'s quoted figure ("The AI release reduces Support cost by £150 a month")', async () => {
     const SAID_150 = 'The AI release reduces Support cost by £150 a month.';
     const brief = 'We are deciding whether to release an AI assistant for customer support. Support cost is £5,000 a month today. '

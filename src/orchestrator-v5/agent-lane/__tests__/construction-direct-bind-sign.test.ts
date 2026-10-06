@@ -95,13 +95,14 @@ describe('a direct bind is the user\'s only when it runs the way their sentence 
   });
 });
 
-describe('Codex r1 F5: the verb is read against the TARGET\'s change, never the coefficient', () => {
-  it('CONTROL: "a £1 price REDUCTION adds 2 subscribers" drawn negative (2 per −1) stays the user\'s, with its quote', async () => {
-    const said = 'A £1 price reduction adds 2 subscribers.';
+describe('Codex r1 F5 + r2 P1: the verb is read against the target\'s change, and the source\'s stated direction against the drawn one', () => {
+  async function priceToSubscribers(said: string): Promise<{ edge: Rec; out: Rec }> {
     const brief = `${T1B} ${said}`;
-    const wire = draft('Price rise', 'Customers lost from price rise', 2) as Rec;
+    // The other link's labels share no word with the sentence, so only ‘Price’ → ‘Subscribers’ can be what it names.
+    const wire = draft('Fee increase', 'Customers lost from fee increase', 2) as Rec;
     (wire.factors as Rec[]).push({ label: 'Price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: 'GBP', provenance: 'explicit', plausible_max: 200 });
     (wire.outcomes as Rec[]).push({ label: 'Subscribers', provenance: 'inferred', unit: 'subscribers', plausible_max: 1000 });
+    // Drawn as a NEGATIVE link: 2 subscribers per −£1.
     (wire.links as Rec[]).push(sized('Price', 'Subscribers', 'negative', 2, -1), sized('Subscribers', 'monthly recurring revenue', 'positive', 49, 1));
     (wire.options as Rec[])[0]!.interventions.push({ factor_label: 'Price', value: 45, value_kind: 'absolute', unit: 'GBP', provenance: 'ai_proposed' });
     let g: Rec | null = null;
@@ -113,8 +114,22 @@ describe('Codex r1 F5: the verb is read against the TARGET\'s change, never the 
     const out = await buildModelFromBrief('956e3c12-0000-4000-8000-0000000956e3', brief, dispatch, call) as Rec;
     expect(out.ok, JSON.stringify(out)).toBe(true);
     const idOf = (l: string): string => (g!.nodes as Rec[]).find((n) => n.label === l)!.id;
-    const e = EdgeV3.parse((g!.edges as Rec[]).find((x) => x.from === idOf('Price') && x.to === idOf('Subscribers'))!) as Rec;
-    expect(e.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: said });
+    return { edge: EdgeV3.parse((g!.edges as Rec[]).find((x) => x.from === idOf('Price') && x.to === idOf('Subscribers'))!) as Rec, out };
+  }
+
+  it('CONTROL (F5): "A £1 price REDUCTION adds 2 subscribers" drawn 2 per −£1 stays the user\'s, with its quote', async () => {
+    const said = 'A £1 price reduction adds 2 subscribers.';
+    const { edge, out } = await priceToSubscribers(said);
+    expect(edge.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: said });
     expect([...(out.not_represented ?? [])].filter((x: string) => x.includes('drawn to run the other way'))).toEqual([]);
+  });
+
+  it('RED (r2 P1): "A £1 price RISE adds 2 subscribers" drawn 2 per −£1 is NOT the user\'s, and that is said', async () => {
+    const said = 'A £1 price rise adds 2 subscribers.';
+    const { edge, out } = await priceToSubscribers(said);
+    expect(edge.provenance.magnitude).not.toBe('user_stated');
+    expect(edge.provenance.source_quote).toBeUndefined();
+    expect(out.not_represented).toContain(`“${said}” is not recorded as your figure for ‘Price’ → ‘Subscribers’: that link is drawn to `
+      + 'run the other way from what you wrote. Check which way it runs.');
   });
 });

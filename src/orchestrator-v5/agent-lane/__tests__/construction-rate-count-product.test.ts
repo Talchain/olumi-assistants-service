@@ -157,6 +157,15 @@ describe('(A) a rate × count drawn as two added links is Olumi\'s product of th
     expect(node('Starter-tier MRR').nonlinear_identity).toBeUndefined();
   });
 
+  it('CONTROL (Codex r2 F6): "PRO tier costs £49 …" shares the word ‘tier’ but names another tier — no product', async () => {
+    const brief = T1B.replace('launch a starter tier at £49 a month', 'launch a starter tier, its price undecided')
+      .replace('Each starter subscriber adds £49 a month to monthly recurring revenue.', 'Each starter subscriber adds revenue at the starter price.')
+      + ' Pro tier costs £49 per subscriber per month.';
+    expect(brief.match(/£49/gu)).toHaveLength(1);
+    const { node } = await build(draft7(), brief);
+    expect(node('Starter-tier MRR').nonlinear_identity).toBeUndefined();
+  });
+
   it('CONTROL: an option level the brief never writes (£59) is not the user\'s — no product', async () => {
     const { node } = await build(draft7({ price: 59 }));
     expect(node('Starter-tier MRR').nonlinear_identity).toBeUndefined();
