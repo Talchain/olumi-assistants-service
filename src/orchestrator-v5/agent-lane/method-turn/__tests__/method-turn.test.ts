@@ -5,10 +5,11 @@
  * method-turn reply fixtures, vendored from programme-docs @a00cb9c8).
  */
 import { readFileSync } from 'node:fs';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { POLICY } from '../../guidance/policy.js';
 import { methodPlanOf, type GuidanceSignals as SelectorSignals } from '../../guidance/index.js';
+import * as plans from '../../guidance/plan.js';
 import type { SuppliedItem } from '../../science/method-science-context.js';
 import type { GuidanceSignalInputs, GuidanceSignals as TurnSignals } from '../../turn-context/guidance-signals.js';
 import { AGENT_TOOLS } from '../../runtime/agent-tools.js';
@@ -98,33 +99,97 @@ describe('who names the plan: never Olumi for the user (RC choose_plan; PTL 5933
       const c = rcCase(id);
       const pick = c.state['user.selected_option_id'];
       const out = methodTurnFromSignals(typeof pick === 'string' ? planPickChipId(pick) : PREMORTEM_PRESS_ID, methodState(c.state), undefined);
-      if (c.expect.mode === 'choose_plan') {
+      // This historical case pinned choose_plan for a generic multi-option press; it now stresses the decision.
+      if (id === 'A-PREMORTEM-ASKED-CHOOSE-PLAN-D1') {
+        expect(out?.kind).toBe('run');
+        if (out?.kind !== 'run') return;
+        expect(out.context.decision_level).toBe(true);
+        expect(out.context.plan).toBeNull();
+      } else if (c.expect.mode === 'choose_plan') {
         expect(out?.kind).toBe('choose_plan');
         if (out?.kind !== 'choose_plan') return;
         expect(out.reply).toBe('Which option do you want to stress-test?');
         expect(out.actions.map((a) => a.id)).toEqual([...(c.expect.choices ?? []).map(planPickChipId), TALK_IT_THROUGH_CHIP.id]);
+        // The one-option control retains the same private, hashed choice ids.
+        for (const a of out.actions.slice(0, -1)) expect(a.id).toMatch(new RegExp(`^${PLAN_PICK_PREFIX}[0-9a-f]{12}$`));
       } else {
         expect(out?.kind).toBe('run');
         if (out?.kind !== 'run') return;
-        expect(out.context.plan.option_id).toBe(methodPlanOf(c.state as SelectorSignals));
-        expect(out.context.plan.basis).toBe('user_selected');
+        expect(out.context.plan?.option_id).toBe(methodPlanOf(c.state as SelectorSignals));
+        expect(out.context.plan?.basis).toBe('user_selected');
       }
     });
   }
 
-  it('ROW M2 SERVED D1 (2 own options, leader withheld): the generic press asks, one curly-quoted button per own option + Talk it through', () => {
+  it('ROW M2 RED (58bd5e71 reported conditions, served D1): a generic press runs the decision without selecting an option', () => {
+    // 58bd5e71 is not included in this checkout. The existing served D1 fixture carries the reported state:
+    // no licensed leader, no pick and two own options. Keep its captured bytes intact.
     const c = served('A-STRENGTHEN-PLACEHOLDER-P1');
+    expect(c.expected_state['run.leader_licensed']).toBe(false);
+    expect(c.expected_state['model.non_sq_option_ids']).toHaveLength(2);
     const out = turnFor(c, PREMORTEM_PRESS_ID);
-    expect(out?.kind).toBe('choose_plan');
-    if (out?.kind !== 'choose_plan') return;
-    const own = c.expected_state['model.non_sq_option_ids'] as string[];
-    expect(own).toEqual(rcCase('A-PREMORTEM-ASKED-CHOOSE-PLAN-D1').expect.choices);
-    expect(out.actions).toEqual([
-      ...own.map((id) => ({ id: planPickChipId(id), label: q(labelsOf(c)[id]), message: `Run a pre-mortem on ${q(labelsOf(c)[id])}.` })),
-      TALK_IT_THROUGH_CHIP,
+    expect(out?.kind).toBe('run');
+    if (out?.kind !== 'run') throw new Error('expected a decision-level run');
+    expect(out.context.decision_level).toBe(true);
+    expect(out.context.plan).toBeNull();
+    expect(out.check_inputs.plan_label).toBeUndefined();
+    expect(out.check_inputs.decision_level).toBe(true);
+    expect(out.context.supplied_items.length).toBeGreaterThan(0);
+    expect(out.context.dsk).toBeNull(); // no identified winning option: citation gate stays closed
+    expect(out.context.not_cited).toBe('no_identified_plan');
+    expect(out.directive).toContain('Stress-test the whole decision.');
+    expect(out.directive).toContain(POLICY.method_turns['RC-PREMORTEM'].decision_plan.rule);
+    expect(out.directive).toContain(POLICY.method_turns['RC-PREMORTEM'].format);
+  });
+
+  it('ROW M2 MUTANT: disabling decision mode makes the regression row RED', () => {
+    const assertDecision = () => {
+      const out = turnFor(served('A-STRENGTHEN-PLACEHOLDER-P1'), PREMORTEM_PRESS_ID);
+      expect(out?.kind).toBe('run');
+      expect(out?.kind === 'run' && out.context.decision_level).toBe(true);
+    };
+    assertDecision();
+    const mutant = vi.spyOn(plans, 'isDecisionPlan').mockReturnValue(false);
+    try {
+      expect(assertDecision).toThrow();
+      expect(turnFor(served('A-STRENGTHEN-PLACEHOLDER-P1'), PREMORTEM_PRESS_ID)?.kind).toBe('choose_plan');
+    } finally {
+      mutant.mockRestore();
+    }
+  });
+
+  it('ROW M2 UNION: separate own-option paths contribute links, factors, risks and limits once, with no SQ or left-out path', () => {
+    const state = methodState(rcCase('A-PREMORTEM-ASKED-CHOOSE-PLAN-D1').state);
+    const own = state['model.non_sq_option_ids'];
+    const path = (from: string, to: string, option: string, goal_distance: number) => ({
+      link_id: `${from}->${to}`, from_label: from, to_label: to, option_ids: [option],
+      link_sizing: 'olumi_estimate' as const, goal_distance, value_hash: '000000000000',
+    });
+    const signals: TurnSignals = { ...state,
+      'model.goal_path_links': [path('First driver', 'First risk', own[0], 2), path('Second driver', 'Second risk', own[1], 1),
+        { ...path('Shared driver', 'Goal', own[0], 0), option_ids: [...own] },
+        path('SQ driver', 'Goal', 'sq', 0), path('Excluded driver', 'Goal', 'left_out', 0)],
+      'model.goal_path_factors': ['First driver', 'Second driver', 'Shared driver', 'SQ driver', 'Excluded driver'].map(factor_id => ({
+        factor_id, label: factor_id, value_authorship: 'olumi_estimate' as const, goal_distance: 1, value_hash: '000000000000',
+      })),
+      'model.risk_ids': ['First risk', 'Second risk'],
+    };
+    const graph = { goal_constraints: [
+      { constraint_id: 'first-limit', node_id: 'First driver', label: 'First limit' },
+      { constraint_id: 'second-limit', node_id: 'Second driver', label: 'Second limit' },
+      { constraint_id: 'sq-limit', node_id: 'SQ driver', label: 'SQ limit' },
+    ] };
+    const out = methodTurnFromSignals(PREMORTEM_PRESS_ID, signals, graph);
+    if (out?.kind !== 'run') throw new Error('expected a decision-level run');
+    expect(out.context.plan).toBeNull();
+    expect(out.context.supplied_items.map(i => i.id)).toEqual([
+      'Shared driver->Goal', 'Second driver->Second risk', 'First driver->First risk',
+      'First driver', 'Second driver', 'Shared driver', 'First risk', 'Second risk', 'first-limit', 'second-limit',
     ]);
-    // The button id never carries the user's words: a 12-hex hash after the prefix.
-    for (const a of out.actions.slice(0, -1)) expect(a.id).toMatch(new RegExp(`^${PLAN_PICK_PREFIX}[0-9a-f]{12}$`));
+    const pick = methodTurnFromSignals(planPickChipId(own[0]), signals, graph);
+    if (pick?.kind !== 'run') throw new Error('expected an option run');
+    expect(pick.context.plan?.option_id).toBe(own[0]);
+    expect(pick.context.supplied_items.some(i => i.id === 'Second driver->Second risk')).toBe(false);
   });
 
   it('ROW M3 PAIR (served D1): pressing a button runs on THAT option, user-selected, with no DSK badge (a pick is not a winner)', () => {
@@ -149,7 +214,7 @@ describe('who names the plan: never Olumi for the user (RC choose_plan; PTL 5933
     }
     const ran = turnFor(c, planPickChipId(own));
     expect(ran?.kind).toBe('run');
-    expect(ran?.kind === 'run' && ran.context.plan.option_id).toBe(own);
+    expect(ran?.kind === 'run' && ran.context.plan?.option_id).toBe(own);
   });
 
   it('ROW M5 SERVED D3 (leader LICENSED): the generic press runs on the licensed leader, asks nothing; one own option → no P-001', () => {
@@ -157,8 +222,8 @@ describe('who names the plan: never Olumi for the user (RC choose_plan; PTL 5933
     const out = turnFor(c, PREMORTEM_PRESS_ID);
     expect(out?.kind).toBe('run');
     if (out?.kind !== 'run') return;
-    expect(out.context.plan.basis).toBe('licensed_leader');
-    expect(out.context.plan.option_id).toBe(c.body.analysis_result?.leading_option_id ?? c.body.analysis_result?.data?.leading_option_id);
+    expect(out.context.plan?.basis).toBe('licensed_leader');
+    expect(out.context.plan?.option_id).toBe(c.body.analysis_result?.leading_option_id ?? c.body.analysis_result?.data?.leading_option_id);
     expect(out.context.not_cited).toBe('single_option');
   });
 
@@ -216,6 +281,47 @@ describe('the directive: RC\'s method, grounded items, no other option', () => {
 });
 
 describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared.runtime)', () => {
+  it('DECISION GATES: stories can name different options; every existing pre-mortem gate still replaces a failing draft', () => {
+    const out = turnFor(served('A-STRENGTHEN-PLACEHOLDER-P1'), PREMORTEM_PRESS_ID);
+    if (out?.kind !== 'run') throw new Error('expected a decision-level run');
+    const [a, b] = out.context.supplied_items;
+    const [first, second] = out.context.current_option_labels;
+    const lines = ['Two ways this decision went badly.',
+      `1. ${first}: ${a.labels[0]} stalled and ${a.labels[1]} slipped. Watch for: a missed demo. Mitigate: protect capacity.`,
+      `2. ${second}: ${b.labels[0]} stalled and ${b.labels[1]} slipped. Watch for: quiet trials. Mitigate: test the handoff.`,
+      'Outside the model: what else could have blindsided this?'];
+    const good = lines.join('\n');
+    const settled = settleMethodTurn(out, good);
+    expect(settled.passed).toBe(true);
+    expect(settled.reply).toBe(good);
+    expect(settled.target).toEqual(a);
+    const mutants = [
+      ['PM-COUNT', [lines[0], lines[1], lines[3]].join('\n')],
+      ['PM-GROUNDED', [lines[0], lines[1], '2. A supplier disappeared. Watch for: silence. Mitigate: call early.', lines[3]].join('\n')],
+      ['PM-WATCH-MITIGATE', good.replaceAll('Watch for:', 'Watch:')],
+      ['PM-NO-PROB', `This was likely.\n${good}`],
+      ['PM-NO-PREDICTION', `This will fail.\n${good}`],
+      ['PM-PLAN-ONLY', good.replace(lines[1], `${lines[1]} ${second} also stalled.`)],
+      ['PM-BLINDSPOT', good.slice(0, -1)],
+      ...['Hire a contractor is the best option here.', 'Option B comes out ahead.', 'We recommend the contractor.', 'The contractor leads.', 'We winner this.', 'Option B wins.', 'Hire a contractor is the best.', 'Option B is ahead.', 'The contractor wins on cost.']
+        .map(sentence => ['PM-NO-WINNER', `${sentence}\n${good}`]),
+    ];
+    // Ordinary pre-mortem prose must NOT trip the winner gate (DL review of #2675).
+    for (const ok of ['a missed hire leads to a slower launch.', 'Mitigate: line up quick wins in month one.', 'In the best case, churn stays flat.', 'Win back lapsed users before launch.', 'At best, the hire lands in month two.', 'The lead time on hiring doubled.', 'Small wins kept the team going.']) {
+      const passes = settleMethodTurn(out, `${ok}\n${good}`);
+      expect(passes.failed, ok).not.toContain('PM-NO-WINNER');
+    }
+    const ahead = settleMethodTurn(out, good.replace(lines[3], 'Outside the model: what is the cash runway ahead?'));
+    expect(ahead.failed).not.toContain('PM-NO-WINNER');
+    for (const [gate, draft] of mutants) {
+      const failed = settleMethodTurn(out, draft);
+      expect(failed.passed, gate).toBe(false);
+      expect(failed.failed, gate).toContain(gate);
+      expect(failed.reply).toContain('Imagine this decision has gone badly. Start with');
+      expect(failed.target).toEqual(a);
+    }
+  });
+
   const turnOf = (f: RcReply): RunMethodTurn => {
     const context = {
       method: 'pre_mortem' as const, dsk: null, not_cited: 'no_identified_plan' as const,
@@ -421,6 +527,10 @@ describe('round 2 (CODEX_CLI_OVERFLOW 5939415083; DL ruling): a recognised press
     const out = unavailable(bare);
     expect(out.reason).toBe('no_grounded_item');
     expect(out.reply).toContain(q((state['model.option_labels'] as Record<string, string>)['ai_reporting_module_sprint']));
+    const decision = methodTurnFromSignals(PREMORTEM_PRESS_ID,
+      methodState({ ...state, 'model.goal_path_links': [], 'model.goal_path_factors': [], 'model.risk_ids': [] }), undefined);
+    expect(unavailable(decision).reason).toBe('no_grounded_item');
+    expect(decision?.kind === 'unavailable' && decision.reply).toContain('this decision');
   });
 
   it('ROW N4: the link card is built by the ONE composer, from RC\'s ONE band read', () => {

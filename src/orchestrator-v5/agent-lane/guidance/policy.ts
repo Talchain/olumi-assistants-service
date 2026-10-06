@@ -499,7 +499,7 @@ export const POLICY = {
           "run.leader_licensed == true",
           "len(model.non_sq_option_ids) == 1 AND len(model.risk_ids) >= 1"
         ],
-        "explicit_request": "On user.explicit_request with a goal and at least one option, run it at any stage. The plan is the licensed leader, else the single user option; with no licensed leader and 2+ user options the method first asks which option to stress-test (mode choose_plan: one button per user option + 'Talk it through'; the pick is user-selected, PTL 5933036532 #5), then runs on it. With no current Run, use the qualitative protocol: no invented winner, probability or figure (SCI-09).",
+        "explicit_request": "On user.explicit_request with a goal and at least one option, run it at any stage. The METHOD plan is the licensed leader, else the user's explicit pick. A generic press naming no option, with no licensed leader, no pick and 2+ own options, runs a decision-level pre-mortem (mode decision_plan); otherwise no plan means choose_plan. With no current Run, use the qualitative protocol: no invented winner, probability or figure (SCI-09).",
         "none": [
           "run.withheld_reason in [no_option_meets_limit, every_option_likely_breaks_limit]"
         ]
@@ -824,7 +824,7 @@ export const POLICY = {
     },
     "RC-PREMORTEM": {
       "inputs": [
-        "plan: option label (leader if licensed, else the single user option); NOT a supplied item, so naming it alone is not grounding",
+        "plan: option label (leader if licensed, else the user's explicit pick), or the whole decision in decision_plan mode with no option id; NOT a supplied item, so naming it alone is not grounding",
         "goal label, target and horizon if set",
         "supplied_items (shared.action_target.grounded_inputs_shape) in ACTION-PRIORITY order: (1) links on the plan's path with link_sizing placeholder or olumi_estimate, nearest the goal first (card propose_link_strengths); (2) goal-path factors whose value authorship is olumi_estimate, label + class only (card propose_assumptions); (3) risks on the plan's path (card propose_new_risk); (4) limits: label + verdict class (card propose_new_risk, a new risk into the limit)",
         "figures the user stated (label + value)"
@@ -854,7 +854,11 @@ export const POLICY = {
         },
         {
           "id": "PM-PLAN-ONLY",
-          "rule": "no current option label other than the plan's label_matches"
+          "rule": "option plan: no current option label other than the plan's label_matches; decision_plan: each numbered story names at most one current option"
+        },
+        {
+          "id": "PM-NO-WINNER",
+          "rule": "decision_plan only: no winner, winning, recommend (including inflections), 'best option/choice/bet/path/plan', 'comes out ahead' or bare 'lead(s)' (not 'leads to') claim in Olumi's own text; ordinary prose such as quick wins, in the best case or the months ahead is allowed (shared.label_masking)"
         },
         {
           "id": "PM-BLINDSPOT",
@@ -866,15 +870,19 @@ export const POLICY = {
       "format": "Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.",
       "targets": "checkMethodTurn returns targets[]: one per numbered item (parsing.target). The harness picks action_target from them.",
       "wording_owner": "REASONING COACH owns the 'Outside the model: …?' wording and PM-BLINDSPOT (PTL 5933600218); PTL/DL may challenge.",
+      "decision_plan": {
+        "when": "user.explicit_request == RC-PREMORTEM AND the press is generic (static chip or menu, naming no option) AND run.leader_licensed == false AND no user.selected_option_id AND len(model.non_sq_option_ids) >= 2",
+        "rule": "Stress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape."
+      },
       "choose_plan": {
-        "when": "user.explicit_request == RC-PREMORTEM AND the METHOD plan is unknown (no licensed leader, no user.selected_option_id) AND len(model.non_sq_option_ids) >= 1",
+        "when": "user.explicit_request == RC-PREMORTEM AND the METHOD plan is unknown AND len(model.non_sq_option_ids) >= 1 AND decision_plan does not apply",
         "copy": "Which option do you want to stress-test?",
         "action_kind": "choose_1_of_3",
         "choices": "one button per model.non_sq_option_ids label (curly quotes, case kept), then 'Talk it through'",
         "never": "pick a plan for the user, or name a leader the Run did not license",
-        "why": "D1 (the investor decision) has 2 options and a withheld leader; without this step the pre-mortem has no plan (RC reference selector, 1 Oct 14:5xZ).",
+        "why": "A single own option is never auto-selected; an invalid option-naming press asks again rather than silently switching subject.",
         "then": "The press sets user.selected_option_id; the next method turn runs on that option (no second ask). METHOD plan = licensed leader > user.selected_option_id (still in non_sq). It is never auto-named (PTL 5933036532 #5, merged in SCIENCE/DSK #2466; SCIENCE/DSK 5937084931).",
-        "row_press_is_a_pick": "Pressing the RC-PREMORTEM ROW whose copy names the user's single option ('Imagine ‘Switch to GCP’ has failed…') IS the explicit pick: HARNESS sets user.selected_option_id to that option, so there is no one-button question. Only a GENERIC press (the static chip or the menu, which names no option) gets the choose_plan buttons, even for one option.",
+        "row_press_is_a_pick": "Pressing the RC-PREMORTEM ROW whose copy names the user's single option ('Imagine ‘Switch to GCP’ has failed…') IS the explicit pick: HARNESS sets user.selected_option_id to that option, so there is no one-button question. A GENERIC press with one own option still gets choose_plan; with 2+ own options and no licensed leader or pick it gets decision_plan.",
         "row_subject": "The ROW's subject (copy + cooldown key) may name the single user option: that is not a leader claim. The METHOD plan sent to SCIENCE/DSK follows the precedence above."
       }
     },

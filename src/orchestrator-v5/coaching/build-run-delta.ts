@@ -507,7 +507,27 @@ export function withinBandLinkMovesForRunPair(
   if (asRecord(runDelta)?.input_coverage !== 'partial') return [];
   const pair = recordedRunPair(facts, runDelta, timedReceipts);
   if (pair === null) return [];
-  return linksMovedWithinBand(pair.prior, pair.current, pair.userWrote);
+  return linksMovedWithinBand(pair.prior, pair.current, pair.userWrote, pair.refitOnly);
+}
+
+/**
+ * ⭐ S5t-W (e7 #87 6011176086; Science Q2 6009456901: a frame change is never narrated as a change): the links whose WHOLE
+ * move between the two Runs a delta names is a frame refit's rescale — the refit receipts (`frame_refit` on the writing
+ * `adjust_edge_strength` fact, link-effect-edit.ts) written between the Runs, chaining the link from the prior Run's mean to
+ * the current's. Such a link's natural size never moved, so S7 neither names nor counts its band row. Fail closed (`[]`).
+ */
+export function frameRefitLinksForRunPair(
+  facts: readonly HandlerFact[],
+  runDelta: unknown,
+  timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[] = [],
+): string[] {
+  const pair = recordedRunPair(facts, runDelta, timedReceipts);
+  if (pair === null) return [];
+  const prior = new Map(pair.prior.links.map((l) => [`${l.from}->${l.to}`, l] as const));
+  return pair.current.links.flatMap((cl) => {
+    const pl = prior.get(`${cl.from}->${cl.to}`);
+    return pl !== undefined && pl.mean !== cl.mean && pair.refitOnly(cl.from, cl.to, pl.mean, cl.mean) ? [`${cl.from}->${cl.to}`] : [];
+  });
 }
 
 /**
@@ -552,6 +572,7 @@ function recordedRunPair(
   prior: ReturnType<typeof RunInputSnapshotSchema.parse>;
   current: ReturnType<typeof RunInputSnapshotSchema.parse>;
   userWrote: (from: string, to: string, priorMean: number, currentMean: number) => boolean;
+  refitOnly: (from: string, to: string, priorMean: number, currentMean: number) => boolean;
 } | null {
   const d = asRecord(runDelta);
   const endpoints = asRecord(d?.endpoints);
@@ -597,7 +618,41 @@ function recordedRunPair(
       }
       return sameMean(mean, persistedMean(currentMean));
     },
+    // S5t-W: the same chain, of the refit's rescales alone (any other move of the link between the Runs breaks it).
+    refitOnly: (from, to, priorMean, currentMean) => {
+      const moves = timedReceipts.filter((r) => between(r.created_at))
+        .map((r) => ({ at: Date.parse(r.created_at), user: userLinkWriteMove(r.fact, from, to), refit: frameRefitMove(r.fact, from, to) }))
+        .filter((r) => r.user !== null || r.refit !== null)
+        .sort((a, b) => a.at - b.at);
+      if (moves.length === 0 || moves.some((r) => r.user !== null)) return false;
+      if (moves.some((r, i) => i > 0 && r.at === moves[i - 1]!.at)) return false;
+      let mean = persistedMean(priorMean);
+      for (const { refit } of moves) {
+        if (!sameMean(refit!.before, mean)) return false;
+        mean = refit!.after;
+      }
+      // ⛔ The chain ends at the current Run's OWN mean, never its clamp (Codex buddy r1 on #2661): a refit never writes a
+      // clamped link (`refitKeepsOtherLinks` refuses one), so a current β beyond ±1 restored from `clamped_from` is a later
+      // re-estimate that only collides with the refit's endpoint at the clamp. It is a change, and it is said.
+      return Math.abs(currentMean) <= 1 && sameMean(mean, currentMean);
+    },
   };
+}
+
+/**
+ * The rescale a refit receipt records for `from → to` (`result.after.frame_refit`, link-effect-edit.ts: the persisted mean
+ * before and after), or `null` when `fact` records none for that link.
+ */
+function frameRefitMove(fact: HandlerFact, from: string, to: string): { before: number; after: number } | null {
+  const f = fact as { fact_type?: unknown; noop?: unknown; result?: unknown };
+  if (f.fact_type !== 'adjust_edge_strength' || f.noop === true) return null;
+  const result = asRecord(f.result);
+  if (result === null || result.status !== 'applied') return null;
+  const moves = asRecord(result.after)?.frame_refit;
+  const move = (Array.isArray(moves) ? moves : []).map(asRecord).find((m) => m !== null && m.from === from && m.to === to);
+  const before = move?.before_mean;
+  const after = move?.after_mean;
+  return typeof before === 'number' && Number.isFinite(before) && typeof after === 'number' && Number.isFinite(after) ? { before, after } : null;
 }
 
 /**
