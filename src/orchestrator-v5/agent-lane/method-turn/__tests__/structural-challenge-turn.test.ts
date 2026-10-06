@@ -284,7 +284,8 @@ describe('independent-review reply and press regressions', () => {
   it.each(['frame_changed', 'unit_changed', 'identity_status_changed', 'ranking_status_changed', 'withheld_on_one_side', 'missing_on_one_side'] as const)('4: incomparable leader reason %s is never a tie or omitted', (basis) => {
     const c: StructuralChallengeClaimV1 = { ...changed.claims[0] as Extract<StructuralChallengeClaimV1, { kind: 'leader' }>, verdict: 'not_comparable', basis, noise_verdict: 'not_noise_qualified', ...(basis === 'withheld_on_one_side' || basis === 'missing_on_one_side' ? { baseline_option_id: null, alternative_option_id: null } : {}) };
     const reply = replyFor([c]);
-    expect(reply).toContain('Which option leads');
+    expect(reply).toContain('Which option most runs support');
+    expect(reply).not.toContain('too close to tell apart');
     expect(reply).not.toContain('too close to call');
     expect(reply).not.toContain('still hold');
     expect(reply).not.toContain('doesn\'t depend on this link');
