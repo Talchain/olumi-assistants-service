@@ -59,7 +59,9 @@ export const WITHIN_BAND_LINES = {
 /**
  * ⭐ SD-1 cut 6 (schemas 0.78, #87 6008093205): the same move WITH the user's figures, when the pair carries an `effect`
  * row for that link (both Runs recorded a current point size, per the same source change). Same author rule; still no
- * cause. ⚠ WORDS PROPOSED to c6 (#87 6008146719) — replaced verbatim by c6's before REVIEW-READY.
+ * cause. WORDS c6, accepted verbatim (DM 6 Oct 03:1xZ, re #87 6008146719), on c6's condition: `{band}` is the canvas
+ * pill's word (`CANVAS_BAND_WORD`, the one mapper the edit turn and interpret use), and an author that is not typed is the
+ * unknown-author line, never inferred.
  */
 export const WITHIN_BAND_FIGURE_LINES = {
   user: (from: string, to: string, before: string, after: string, band: string) =>

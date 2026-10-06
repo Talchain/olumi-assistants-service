@@ -82,8 +82,10 @@ import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, storedGaugeSign, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
 import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { mediatorReadings } from '../agent-lane/mediator-reading.js';
+import { isDirectedEdge } from '../../schemas/graph.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
@@ -587,6 +589,7 @@ const LINK_WRITER_OWNED_EDGE_MEMBERS = ['strength', 'effect_direction', 'provena
 /**
  * ⛔ ONLY THE DECLARED LINKS MAY CHANGE, and on each only what the link writer owns. The size-by-chat door additionally
  * owns exactly each approved end's unit_reading: no other node field, other link, order or top-level field may move.
+ * The one exception is the GAUGE a declared link's answer writes (#2623 (B); below), admitted by identity.
  */
 export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unknown,
   links: readonly { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }[]): boolean {
@@ -614,11 +617,33 @@ export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unk
     if (Object.hasOwn(was[0]!, 'unit_reading')) now[0]!.unit_reading = structuredClone(was[0]!.unit_reading);
     else delete now[0]!.unit_reading;
   }
+  // ⭐ #2623 (B) AT THE DOOR (Codex r1 on #2631; DL 0df0e1 ruling): one end-to-end answer through a level-less mediator also
+  // writes the GAUGE (M → child = ±1, `sized_by_identity: {op:'gauge'}`, Science 6006425419). Admitted ONLY for the child edge
+  // `mediatorReadings` names for a declared link's TARGET on the stored graph, only when that was not already the stored
+  // gauge, and only when the postimage reads it back as the intact stored gauge; on it, as on a declared link, only what
+  // the link writer owns may move. Any other edge that changed still refuses.
+  const gauges = new Set<number>();
+  const readBefore = mediatorReadings(before);
+  const readAfter = mediatorReadings(after);
+  for (const link of links) {
+    const was = readBefore.get(link.to);
+    if (was?.via !== 'gauge' || was.stored === true) continue;
+    const now = readAfter.get(link.to);
+    if (now?.via !== 'gauge' || now.child !== was.child || now.stored !== true) continue;
+    // #2634 r1 P1: the ONE directed child edge, by POSITION, never by an id string (ids may hold any character, and a
+    // bidirected pair shares the endpoints). r1 P2: carrying exactly the writer's sign, the stored child's own orientation.
+    const at = before.edges.flatMap((e, i) => e.from === link.to && e.to === was.child && isDirectedEdge(e as never) ? [i] : []);
+    if (at.length !== 1) continue;
+    const sign = storedGaugeSign(before.edges[at[0]!]!);
+    const written = after.edges[at[0]!];
+    if (written?.strength?.mean !== sign || written.effect_direction !== (sign < 0 ? 'negative' : 'positive')) continue;
+    gauges.add(at[0]!);
+  }
   for (let i = 0; i < restored.edges.length; i += 1) {
     const now = restored.edges[i]! as Record<string, unknown> & { from: string; to: string };
     const was = before.edges[i]! as Record<string, unknown> & { from: string; to: string };
     if (now.from !== was.from || now.to !== was.to) return false;
-    if (!links.some(l => l.from === was.from && l.to === was.to)) continue;
+    if (!links.some(l => l.from === was.from && l.to === was.to) && !gauges.has(i)) continue;
     for (const member of LINK_WRITER_OWNED_EDGE_MEMBERS) {
       if (Object.hasOwn(was, member)) now[member] = structuredClone(was[member]);
       else delete now[member];

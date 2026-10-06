@@ -127,6 +127,27 @@ describe('the producer → S7 chain: a link resized inside its band, with its fi
   });
 });
 
+describe('c6\'s condition: {band} is the canvas pill\'s word; an untyped author is never inferred', () => {
+  it.each([
+    ['slight', 'slight'],
+    ['moderate', 'moderate'],
+    ['strong', 'strong'],
+    ['very_strong', 'very strong'],
+  ] as const)('band %s reads "%s" (lowercase, mid-sentence)', (literal, word) => {
+    const { plan } = s7(pairFacts({ band: literal, natural_effect: size(2) }, { band: literal, natural_effect: size(3) }));
+    expect(plan.codeLine).toContain(`; it is still ${word}.`);
+  });
+
+  it('sizing recorded as unmarked on both Runs → the unknown-author line, with its figures', () => {
+    const { plan } = s7(pairFacts(
+      { sizing: 'unmarked', natural_effect: size(2) },
+      { sizing: 'unmarked', natural_effect: size(3), authorship_digest: BRIEF_DIGEST },
+    ));
+    expect(plan.codeLine).toContain('How much Existing-customer price rise changes Customers lost from price rise changed from 2 customers per 1 percentage point to 3 customers per 1 percentage point; it is still strong.');
+    expect(plan.codeLine).not.toMatch(/You changed|Olumi’s estimate/);
+  });
+});
+
 describe('no pair → no figures: the served line, exactly', () => {
   it.each([
     ['CONTROL: neither Run recorded a size (a pre-0.78 Run)', {}, {}],
