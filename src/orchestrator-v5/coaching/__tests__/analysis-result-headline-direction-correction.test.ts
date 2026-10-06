@@ -55,7 +55,9 @@ describe('goalDirectionCorrectableByTarget — the door\'s own refusal (goal_tar
     ['change_abs', { goal_threshold_frame: 'change_abs', goal_threshold_raw: -5 }, false],
     ['delta', { goal_threshold_frame: 'delta', goal_threshold_raw: -5 }, false],
     ['a level target whose user stamp agrees', { goal_threshold_frame: 'level', goal_threshold_raw: 2, threshold_source: 'user', success_threshold: 2 }, true],
-    ['a level target SHOWN at another figure (user stamp 3, held 2)', { goal_threshold_frame: 'level', goal_threshold_raw: 2, threshold_source: 'user', success_threshold: 3 }, false],
+    // ⭐ D3 step 1 (Science #87 6006079049 (1)): the approved "at most" replaces the held figure (one target per goal), so
+    // the door re-orders here too and the correction is promised (was false: the card then cleared the direction).
+    ['a level target SHOWN at another figure (user stamp 3, held 2)', { goal_threshold_frame: 'level', goal_threshold_raw: 2, threshold_source: 'user', success_threshold: 3 }, true],
     ['a stamp with no held figure (the card holds whatever is set)', { threshold_source: 'user', success_threshold: 3 }, true],
   ])('%s → %s', (_name, fields, expected) => {
     expect(goalDirectionCorrectableByTarget(g(fields), 'goal')).toBe(expected);

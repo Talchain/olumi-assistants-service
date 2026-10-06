@@ -3993,6 +3993,16 @@ export function createAgentCapabilities(
         }
       }
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
+      // ⭐ D3 step 1 (Science #87 6006079049 (1)): ONE target per goal — approving retires the goal's other own target row
+      // (`add-constraint.ts`), so the card names what it replaces, in the row's own words and units.
+      const chosenOperator = type === 'at_most' ? '<=' : '>=';
+      const replaced = ((g.raw as { goal_constraints?: unknown }).goal_constraints as Array<Record<string, unknown>> | undefined ?? [])
+        .filter((c) => c !== null && typeof c === 'object' && c.node_id === goal.id && (c.deadline_metadata === undefined || c.deadline_metadata === null)
+          && (c.value_frame === undefined || c.value_frame === 'level')
+          && (c.operator === '<=' || c.operator === '>=') && c.operator !== chosenOperator && typeof c.value === 'number' && Number.isFinite(c.value))
+        .map((c) => `${c.operator_as_stated === '<' ? 'below' : c.operator_as_stated === '>' ? 'above' : c.operator === '<=' ? 'at most' : 'at least'} `
+          + targetFigure(c.value as number, typeof c.unit === 'string' && c.unit.trim() !== '' ? c.unit : unit));
+      const replaces = replaced.length === 0 ? '' : ` This replaces your earlier target for "${goal.label}" (${replaced.join(' and ')}). Approve, or correct.`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4001,9 +4011,9 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         // AIQ's words for the one card (5913952911): both figures, the user's own.
-        public_label: today === undefined
+        public_label: (today === undefined
           ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}${derived === null ? '' : ` (${derived.multiplier} × your ${targetFigure(derived.base, unit)})`}`
-          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`,
+          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`) + replaces,
       });
       proposals.put(proposal);
       return {

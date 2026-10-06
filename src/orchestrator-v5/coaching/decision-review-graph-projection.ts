@@ -237,9 +237,13 @@ function readEdgeReasoning(edge: Record<string, unknown>): Record<string, unknow
  * declared, and an UNdeclared one is excluded by construction — which is right,
  * since `NodeV3` strips those anyway.
  */
-const GOAL_THRESHOLD_FIELDS: readonly string[] = Object.keys(NodeV3.shape).filter((key) =>
-  key.startsWith('goal_threshold'),
-);
+const GOAL_THRESHOLD_FIELDS: readonly string[] = [
+  ...Object.keys(NodeV3.shape).filter((key) => key.startsWith('goal_threshold')),
+  // ⭐ D3 step 1 (census BLIND carrier): the comparator of the stated target travels WITH the threshold it qualifies.
+  // A paired ceiling ("at most 400") is stamped on the goal node like a floor, so a threshold handed over without its
+  // `goal_direction` reads as "reach 400" — the reviewing model could call the goal "well short of its target".
+  'goal_direction',
+];
 
 function readGoalThreshold(node: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};

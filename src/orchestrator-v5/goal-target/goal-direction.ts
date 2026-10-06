@@ -353,7 +353,11 @@ export function resolveGoalThresholdStrict(graph: unknown, goalNodeId: unknown):
   const node = readNodes(graph).find((n) => n.id === goalNodeId);
   const threshold = node?.goal_threshold;
   if (typeof threshold !== 'number' || !Number.isFinite(threshold)) return false;
-  return heldStrictFloorIsScoredStrictly(readHeldGoalComparator(graph, goalNodeId), readGoalLabel(graph, goalNodeId));
+  const held = readHeldGoalComparator(graph, goalNodeId);
+  // ⭐ D3 step 1 (Science #87 6005138341 (4)): a held STRICT ceiling ("below 400") on a run that minimises is scored
+  // strictly too — ISL counts a draw AT the threshold as met unless `goal_threshold_strict` (ISL #209, either direction).
+  if (held === '<') return resolveGoalDirection(graph, goalNodeId)?.direction === 'minimise';
+  return heldStrictFloorIsScoredStrictly(held, readGoalLabel(graph, goalNodeId));
 }
 
 /** The label classifier alone: `'minimise'` when the goal label attests a REDUCE aim, otherwise `undefined`. */

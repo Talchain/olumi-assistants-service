@@ -102,6 +102,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE,
 } from './d1-shared/user-guidance.js';
 import { retireNormalisingGoalFrame, rederiveGoalInLinks } from '../../agent-lane/normalising-goal-frame.js';
 import { frameOf } from '../../agent-lane/refit-frames.js';
+import { pairGoalCeiling } from '../../goal-target/goal-ceiling-pair.js';
 
 /**
  * Parameter Zod schema. The brief originally listed
@@ -1053,19 +1054,34 @@ export function createAddConstraintHandler(): HandlerFn {
       // beside its own approved row on the goal and sends `minimise`, so the run is never left on the maximiser and the
       // ceiling is never scored as a floor. The assumption line's correction ("set the goal’s target to ‘at most’ and
       // re-run", `analysis-result-headline.ts`) is this door, so it re-orders.
-      // ⛔ Only where the goal holds NO target figure, or this very figure: the threshold channel is untouched, and a held
-      // ceiling beside a DIFFERENT figure (a floor's £1.2m under an approved "at most £1.4m") would be minimised against
-      // the stale figure. There the direction still goes, exactly as before (the assumption line then says so).
-      const heldFigure = (targetNode as { goal_threshold_raw?: unknown }).goal_threshold_raw;
-      const ceilingMatchesHeldFigure = heldFigure === undefined || heldFigure === null || heldFigure === params.value;
+      // ⭐ D3 step 1 (Science #87 6005138341; DL 0df0e1): the approved ceiling OWNS the goal's threshold channel, as ONE pair
+      // with its direction (`pairGoalCeiling`, below, in this same write): the ceiling's own row value on the goal's own
+      // level frame, or the channel cleared when there is no frame. A floor's £1.2m under an approved "at most £1.4m" can
+      // therefore never be minimised against: the latest statement replaces it (C3). Before this, the direction was dropped
+      // beside a different held figure and the ceiling held only its row and direction, so no option had a goal chance.
       const cardIsAGoalCeiling = targetNode.kind === 'goal' && invocation.holdsGoalDirection === true && operator === '<=';
-      const cardGoalCeiling = cardIsAGoalCeiling && ceilingMatchesHeldFigure ? (operatorAsStated ?? operator) : undefined;
-      const cardClearsGoalDirection = cardIsAGoalCeiling && !ceilingMatchesHeldFigure;
+      const cardGoalCeiling = cardIsAGoalCeiling ? (operatorAsStated ?? operator) : undefined;
       const directionDisagrees = (cardGoalDirection !== undefined && targetNode.goal_direction !== cardGoalDirection)
-        || (cardGoalCeiling !== undefined && targetNode.goal_direction !== cardGoalCeiling)
-        || (cardClearsGoalDirection && targetNode.goal_direction !== undefined && targetNode.goal_direction !== null);
+        || (cardGoalCeiling !== undefined && targetNode.goal_direction !== cardGoalCeiling);
+      // ⭐ D3 step 1 (Science #87 6006079049 (1)): ONE TARGET PER GOAL, no band. The approved card's row IS the goal's target,
+      // so every OTHER own target row on the goal (another operator; never a deadline row) is retired in this same write: a
+      // held "at least 300" never stays beside an approved "at most 400" as a second limit (a band needs ISL P(lo≤Y≤hi);
+      // parked). Two own rows on the card's operator are ONE target too (Codex buddy r1 F1 on #2618: the upsert set both to
+      // the card's row, so the pair had no one row to read): the card's row is kept once. A card that retires one is never
+      // a no-op.
+      const goalCard = invocation.holdsGoalDirection === true && targetNode.kind === 'goal';
+      // A TARGET row only: the goal's own level-frame (or unframed) row. A deadline, or a limit stated as a CHANGE on the
+      // goal (`change_abs` "growth at most £50k a quarter"), is an independent limit and stays (Codex buddy r2 F2, #2618).
+      const ownTarget = (c: { node_id: string; deadline_metadata?: unknown; value_frame?: unknown }): boolean =>
+        goalCard && c.node_id === targetId && (c.deadline_metadata === undefined || c.deadline_metadata === null)
+        && (c.value_frame === undefined || c.value_frame === 'level');
+      const retiresOtherTarget = (c: { node_id: string; operator: string; deadline_metadata?: unknown; value_frame?: unknown }): boolean =>
+        ownTarget(c) && c.operator !== operator;
+      const ownRows = (graph.goal_constraints ?? []).filter(ownTarget);
+      const retiresATarget = ownRows.some(retiresOtherTarget) || ownRows.filter((c) => c.operator === operator).length > 1;
       const rowValueUnchanged =
         !directionDisagrees &&
+        !retiresATarget &&
         existing !== undefined &&
         existing.value === newConstraint.value &&
         existing.unit === newConstraint.unit &&
@@ -1074,6 +1090,7 @@ export function createAddConstraintHandler(): HandlerFn {
         !userStampDisagrees;
       const nodeChannelUnchanged =
         !directionDisagrees &&
+        !retiresATarget &&
         ownsGoalThresholdChannel &&
         typeof targetNode.goal_threshold_raw === 'number' &&
         targetNode.goal_threshold_raw === params.value &&
@@ -1395,11 +1412,20 @@ export function createAddConstraintHandler(): HandlerFn {
             : valueUnchanged
               ? list
               : [...list, constraintParse.data];
-        clone.goal_constraints = next;
-        if (cardGoalCeiling !== undefined || cardClearsGoalDirection) {
+        if (retiresATarget) {
+          let kept = false;
+          clone.goal_constraints = next.filter((c) => {
+            if (!ownTarget(c)) return true;
+            if (retiresOtherTarget(c) || kept) return false;
+            kept = true;
+            return true;
+          });
+        } else clone.goal_constraints = next;
+        if (cardGoalCeiling !== undefined) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
-          if (goalNode !== undefined && cardGoalCeiling !== undefined) (goalNode as { goal_direction?: unknown }).goal_direction = cardGoalCeiling;
-          else if (goalNode !== undefined) delete (goalNode as { goal_direction?: unknown }).goal_direction;
+          if (goalNode !== undefined) (goalNode as { goal_direction?: unknown }).goal_direction = cardGoalCeiling;
+          // The pair: the row this write just set, on the goal's own level frame (or the channel cleared). One writer.
+          pairGoalCeiling(clone, targetId);
         }
         // ⭐ D1 B: the frame the goal was read on before this write moved its level (see the stamp below), else undefined.
         let levelFrameMovedFrom: number | undefined;

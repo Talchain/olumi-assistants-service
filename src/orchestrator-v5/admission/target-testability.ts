@@ -15,7 +15,7 @@ import { linkList } from '../agent-lane/unsized-path-cause.js';
  * checked here yet. Words: AIQ #77 5912882031. Pure and total.
  */
 import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
-import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
+import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
@@ -226,8 +226,11 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
   }
   // P3 — a comparator science can score: `>=` / `<=`, and a strict `>` (it travels as `goal_threshold_strict`).
   // The comparator the node HOLDS, else the one its own target row STATES (one reader, Codex r1 #2606).
+  // ⭐ D3 step 1 (Science #87 6006079049 (2); Codex buddy r1 F4 on #2618): a strict `<` is scorable exactly where the run
+  // sends it strictly — held on the node, minimised, beside its threshold (`resolveGoalThresholdStrict`). Anywhere else
+  // (a `<` only the row states, or no threshold to score) it stays unscorable.
   const heldComparator = readHeldGoalComparator(graph, goalId) ?? statedGoalTargetOf(graph, goal)?.held;
-  if (heldComparator === '<') failures.push({ precondition: 'P3', case: 'b', code: 'comparator_unscorable' });
+  if (heldComparator === '<' && !resolveGoalThresholdStrict(graph, goalId)) failures.push({ precondition: 'P3', case: 'b', code: 'comparator_unscorable' });
   // P5 — the goal's samples arrive in its own unit (see `linkSized`). LEVEL goals only (R3 #75 5914084339): the ruler
   // artefact is `raw / (raw × 1.25) = 0.8` on a level frame; a change frame ("cut by 20%") is left as it was.
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
