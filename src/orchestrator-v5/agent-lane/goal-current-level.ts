@@ -55,7 +55,7 @@
  */
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
-import { admitStatedGoalLevel, admitStatedGoalLevelOnScale } from './admit-model.js';
+import { admitStatedGoalLevel, admitStatedGoalLevelOnScale, isBarePercent, isChangeOwnPercent } from './admit-model.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { retireNormalisingGoalFrame, rederiveGoalInLinks } from './normalising-goal-frame.js';
 import { frameOf } from './refit-frames.js';
@@ -522,16 +522,105 @@ export function levelUnitForGoal(
   return { ok: false, refusal: 'unit_unrecognised', detail: `"${stated}" names no one currency, and ${money}, so ${value} ${stated} is never recorded as its current level. ${ask}` };
 }
 
-/** The card's clause for an adopted unit: the unit, naming its currency, the goal is measured in from this approval on. */
-function sayAdoptedUnit(goalLabel: string, adopted: string | undefined): string {
-  return adopted === undefined ? '' : `, and measure "${goalLabel}" in ${adopted} (no currency was set for it before)`;
+/**
+ * The card's clause for an adopted unit: the unit the goal is measured in from this approval on. A currency named for an
+ * unnamed-currency goal (`levelUnitForGoal`), or (`fromChange`) the unit today's level is stated in, for a goal held only
+ * as a percentage change (`levelUnitForChangeGoal`): Olumi's reading of the user's figures, with the user's own sentence.
+ */
+function sayAdoptedUnit(goalLabel: string, adopted: string | undefined, fromChange?: { readonly quote: string }): string {
+  if (adopted === undefined) return '';
+  if (fromChange !== undefined) {
+    return `, and measure "${goalLabel}" in ${adopted} (Olumi’s reading of your figures in “${fromChange.quote}”; until now ` +
+      `"${goalLabel}" held only your change, with no unit of its own)`;
+  }
+  return `, and measure "${goalLabel}" in ${adopted} (no currency was set for it before)`;
 }
 
 /** The Agent's instruction for an adopted unit: say it, as part of what the approval changes. */
-function noteAdoptedUnit(goalLabel: string, stored: string | undefined, adopted: string | undefined): string {
-  return adopted === undefined ? ''
-    : `. "${goalLabel}" had no currency set (its unit was ${String(stored)}): say plainly that this approval also measures it in ` +
-      `${adopted}, the currency the user wrote`;
+function noteAdoptedUnit(goalLabel: string, stored: string | undefined, adopted: string | undefined, fromChange?: { readonly quote: string }): string {
+  if (adopted === undefined) return '';
+  if (fromChange !== undefined) {
+    return `. "${goalLabel}" had no unit of its own (it held only the change${stored !== undefined ? `, typed in ${stored}` : ''}): say ` +
+      `plainly that this approval also measures it in ${adopted}, that this unit is Olumi’s reading of the user’s figures (never ` +
+      'their own words or weights), and that their target stays exactly as they stated it';
+  }
+  return `. "${goalLabel}" had no currency set (its unit was ${String(stored)}): say plainly that this approval also measures it in ` +
+    `${adopted}, the currency the user wrote`;
+}
+
+/**
+ * ⭐ A1 — A GOAL HELD ONLY AS A PERCENTAGE CHANGE TAKES THE UNIT TODAY'S LEVEL IS STATED IN (DL 0df0e1 founder trace Q1,
+ * Paul's scenario 58bd5e71; AIE review on #87 6016108422 (2)).
+ *
+ * Served 6 Oct: "increase productivity by at least 10%" was stored as productivity measured in "%" (construction copied the
+ * change's "%"; A2 stops that for new builds). Paul then taught a sprint measure, and his "16 small" per sprint was refused
+ * `unit_mismatch` ("it currently measures productivity in %"); no tool could change a goal's unit, so it was a dead end.
+ * That "%" was only the size of the change, and a relative change is scale-free (+10% of any level is +10%), so the goal
+ * held nothing in it. On THIS card, and only here, the goal takes the unit the user's level is stated in:
+ *   · IN SCOPE ONLY: a `change_rel` goal whose stored unit is none, or a bare "%" on a quantity that is not a percentage
+ *     (`isChangeOwnPercent`, construction's own rule), framed on nothing yet (no cap), and a level stated in a unit that is
+ *     not a percent. A level-frame goal, a % metric ("churn rate"), a framed goal or a % level never adopts here: every
+ *     rule above stands word for word;
+ *   · NEVER A SILENT RESCALE: anything the goal already holds in the old unit refuses the card, typed `unit_in_use` — a
+ *     link into the goal the user sized or that holds by definition, a link into it carrying a natural size in %, a limit
+ *     row on the goal, or a level already recorded on it. Olumi's placeholder links stay placeholders. The target is the
+ *     relative change, kept exactly;
+ *   · THE UNIT IS OLUMI'S READING: it names the user's figure as Olumi reads it (Paul's "small-update equivalents per
+ *     sprint" rests on S/M/L weights Olumi proposed), so it is written beside the goal as `unit_reading` with source
+ *     `olumi_reading` and the user's own sentence (schema 0.67.0) — never `user_stated`. The level is the user's figure;
+ *   · A BASELINE IS REQUIRED: the unit is adopted only with today's level, in the same card, because a relative change is
+ *     read as a level only from a base. The apply writes the unit, the frame from construction's own rule
+ *     (`admitStatedGoalChange`: the cap of the larger of today's level and the target it implies, `goal_threshold` = r),
+ *     the level and the reading in ONE registration, each re-derived at apply time.
+ * Not in scope → `{ ok: true }` with nothing adopted.
+ */
+export function levelUnitForChangeGoal(
+  statedUnitArg: unknown,
+  goal: Readonly<Record<string, unknown>>,
+  rawGraph: unknown,
+):
+  | { readonly ok: true; readonly adopted?: string }
+  | { readonly ok: false; readonly refusal: 'unit_in_use' | 'unit_unrecognised'; readonly detail: string } {
+  const storedRaw = goal.goal_threshold_unit;
+  const stored = typeof storedRaw === 'string' && storedRaw.trim() !== '' ? storedRaw.trim() : undefined;
+  const stated = typeof statedUnitArg === 'string' ? statedUnitArg.trim() : '';
+  const label = String(goal.label ?? '');
+  const inScope = goal.goal_threshold_frame === 'change_rel'
+    && (stored === undefined || isChangeOwnPercent({ frame: 'change_rel', unit: stored, metric: label }))
+    && (goal.goal_threshold_cap === undefined || goal.goal_threshold_cap === null)
+    && stated !== '' && !isBarePercent(stated) && unitPhraseFamily(stated) !== 'percent';
+  if (!inScope) return { ok: true };
+  // The schema's own bound on a unit reading (`NodeV3.unit_reading.unit`): a unit it would drop is never adopted.
+  if (stated.length > 40) {
+    return { ok: false, refusal: 'unit_unrecognised', detail: `"${stated}" is too long to hold as the unit "${label}" is measured in. ` +
+      `Nothing was prepared. Ask the user for a short name for the unit of "${label}".` };
+  }
+  const old = stored ?? 'no unit';
+  const rec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const graph = rec(rawGraph) ? rawGraph : {};
+  const edges = Array.isArray(graph.edges) ? graph.edges.filter(rec) : [];
+  const sized = edges.filter((e) => {
+    if (e.to !== goal.id) return false;
+    const p = rec(e.provenance) ? e.provenance : {};
+    const natural = rec(p.natural_effect) ? p.natural_effect : undefined;
+    return p.magnitude === 'user_stated' || p.definitional === true || (natural !== undefined && isBarePercent(natural.amount_unit));
+  });
+  const rows = (Array.isArray(graph.goal_constraints) ? graph.goal_constraints.filter(rec) : []).filter((r) => r.node_id === goal.id);
+  const level = rec(goal.observed_state) && typeof goal.observed_state.raw_value === 'number';
+  const held = [
+    ...(sized.length > 0 ? [`${sized.length === 1 ? 'a link' : `${sized.length} links`} into it sized against its change in ${old}`] : []),
+    ...(rows.length > 0 ? [`${rows.length === 1 ? 'a limit' : `${rows.length} limits`} on it in ${old}`] : []),
+    ...(level ? [`a current level recorded in ${old}`] : []),
+  ];
+  if (held.length > 0) {
+    return {
+      ok: false, refusal: 'unit_in_use',
+      detail: `"${label}" already holds ${held.join(' and ')}, and measuring it in ${stated} would change what those figures ` +
+        'mean. Nothing is ever rescaled silently, so nothing was prepared. Say plainly that today\'s level could not be ' +
+        `recorded in ${stated} while they stand, and ask the user whether to restate or remove them first.`,
+    };
+  }
+  return { ok: true, adopted: stated };
 }
 
 /** The goal's unit as the USER read it: the NodeV3 `unit_reading` carrier, always theirs here. */
@@ -698,8 +787,11 @@ export async function proposeGoalCurrentLevel(
   // its own unit. From here `goalUnit` is the unit the level is read, said and written in.
   const forLevel = levelUnitForGoal(value, args?.unit, { label: goal.label, unit: storedUnit, heldUnit: unitAlreadyOnGoal(goal, g.raw, storedUnit) });
   if (!forLevel.ok) return refuse(forLevel.refusal, forLevel.detail);
-  const goalUnit = forLevel.unit;
-  const adoptedUnit = forLevel.adopted ? forLevel.unit : undefined;
+  // ── A GOAL HELD ONLY AS A PERCENTAGE CHANGE TAKES THE UNIT ITS LEVEL IS STATED IN (`levelUnitForChangeGoal`, A1).
+  const forChange = levelUnitForChangeGoal(args?.unit, node as Record<string, unknown>, g.raw);
+  if (!forChange.ok) return refuse(forChange.refusal, forChange.detail);
+  const goalUnit = forChange.adopted ?? forLevel.unit;
+  const adoptedUnit = forLevel.adopted ? forLevel.unit : forChange.adopted;
 
   // ── IN THE GOAL'S OWN UNIT, AND IN THE USER'S OWN WORDS? One rule, shared with the target card (`statedGoalLevelInUsersWords`).
   const inWords = statedGoalLevelInUsersWords(value, args?.unit, { label: goal.label, unit: goalUnit }, ctx.user_text);
@@ -708,7 +800,15 @@ export async function proposeGoalCurrentLevel(
   const raw = inWords.raw;
   const statedUnit = inWords.statedUnit;
   if (isChange && args.goal_scope !== undefined) return refuse('scope_frame_unresolved', 'Clarify the level of the total goal before recording its scope. Nothing was prepared.');
-  if (isChange) return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit, adoptedUnit, storedUnit);
+  // ⛔ An adopted unit is Olumi's reading of the user's figure, quoted from their sentence: none found, nothing is prepared.
+  if (forChange.adopted !== undefined && stated.quote === null) {
+    return refuse('figure_not_in_users_words', `${value} ${statedUnit} could not be found in a sentence the user wrote, so "${goal.label}" is ` +
+      'never measured in it. Nothing was prepared. Ask the user for today\'s figure in their own words.');
+  }
+  if (isChange) {
+    return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit, adoptedUnit, storedUnit,
+      forChange.adopted !== undefined ? { quote: stated.quote as string } : undefined);
+  }
 
 
   let normalisedLevel: number;
@@ -987,6 +1087,8 @@ function changeGoalLevel(
   goalUnit: string | undefined,
   adoptedUnit: string | undefined,
   storedUnit: string | undefined,
+  /** A1: the unit is adopted from the stated level (`levelUnitForChangeGoal`), with the user's sentence it was read from. */
+  fromChange?: { readonly quote: string },
 ): ToolResult {
   const cap = node.goal_threshold_cap;
   // Construction's own rule for a change goal (`admit-model.ts`, the brief's level): the frame holds both today's level
@@ -995,7 +1097,15 @@ function changeGoalLevel(
   const reframed = node.goal_threshold_frame === 'change_rel' && node.goal_threshold_cap_provenance === 'target_derived_headroom'
     ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(raw, raw * (1 + stored)), goalUnit, undefined)
     : null;
-  const frameCap = reframed?.cap ?? (num(cap) && cap > 0 ? cap : undefined);
+  /**
+   * ⭐ A1: a goal measured for the first time (`levelUnitForChangeGoal`: no cap yet) is framed by construction's own rule
+   * (`admitStatedGoalChange`): the one cap of the larger of today's level and the target it implies, and the relative
+   * change as its scale-free threshold (r). A level that gives no positive range (0) still has nothing to read it on.
+   */
+  const firstFrame = fromChange !== undefined && node.goal_threshold_frame === 'change_rel' && raw > 0 && raw * (1 + stored) >= 0
+    ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(raw, raw * (1 + stored)), goalUnit, undefined)
+    : null;
+  const frameCap = reframed?.cap ?? firstFrame?.cap ?? (num(cap) && cap > 0 ? cap : undefined);
   const withUnit = (x: number) => sayFigureExactly(x, goalUnit ?? '') ?? `${x}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`;
   if (frameCap === undefined) {
     return refuse('no_target', `"${goal.label}" has no range to read its current level on, so nothing was prepared.`);
@@ -1070,6 +1180,13 @@ function changeGoalLevel(
         ...(prior !== undefined ? { level_reading: levelReading } : {}),
         ...(rederived !== null ? { rederived_part: rederived } : {}),
         ...(adoptedUnit !== undefined ? { adopted_unit: adoptedUnit } : {}),
+        // ⭐ A1: the goal's first frame and Olumi's reading of the adopted unit, written with the level (re-derived at apply).
+        ...(firstFrame !== null
+          ? { first_frame: { goal_threshold_cap: firstFrame.cap, goal_threshold_cap_provenance: firstFrame.provenance, goal_threshold: stored } }
+          : {}),
+        ...(fromChange !== undefined && adoptedUnit !== undefined
+          ? { adopted_from: 'change', adopted_unit_reading: { unit: adoptedUnit, source: 'olumi_reading', source_quote: fromChange.quote } }
+          : {}),
       },
     }],
     provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
@@ -1078,7 +1195,7 @@ function changeGoalLevel(
       `Record today's level of "${goal.label}" as your figure: ` +
       (replaces !== undefined ? `${sayFigureRead(replaces, storedUnit ?? '')} → ${figure}` : figure) +
       (change !== '' ? ` (your target: ${change})` : '') +
-      sayAdoptedUnit(goal.label, adoptedUnit) +
+      sayAdoptedUnit(goal.label, adoptedUnit, fromChange) +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
       (productSaid !== '' ? `. ${productSaid}` : '') +
       (earlierHeld !== null ? earlierHeld.label : ''),
@@ -1101,7 +1218,7 @@ function changeGoalLevel(
       (productSaid !== '' ? `. Say plainly: ${productSaid}` : '') +
       (levelReading !== null ? `. Reading "${goal.label}" as what they call it stays Olumi's reading; say so` : '') +
       (earlierHeld !== null ? earlierHeld.note : '') +
-      noteAdoptedUnit(goal.label, storedUnit, adoptedUnit) +
+      noteAdoptedUnit(goal.label, storedUnit, adoptedUnit, fromChange) +
       '. Call authorise_change with this proposal_id only once they agree.',
   };
 }
@@ -1148,11 +1265,43 @@ export async function applyGoalCurrentLevel(
    */
   const carriedAdopted = (op.value as { adopted_unit?: unknown } | undefined)?.adopted_unit;
   const adoptedUnit = typeof carriedAdopted === 'string' ? carriedAdopted : undefined;
-  if (carriedAdopted !== undefined && (adoptedUnit === undefined || os.unit !== adoptedUnit || now.goal_threshold_unit === null ||
-    unitNamingCurrency(now.goal_threshold_unit, unitPhraseHead(adoptedUnit) ?? '') !== adoptedUnit ||
-    unitAlreadyOnGoal(goal, approved.raw, now.goal_threshold_unit) !== null)) {
+  const carriedChange = op.value as { adopted_from?: unknown; adopted_unit_reading?: unknown; first_frame?: unknown } | undefined;
+  const fromChange = carriedChange?.adopted_from === 'change';
+  const currencyAdoptionHolds = (unit: string): boolean => now.goal_threshold_unit !== null &&
+    unitNamingCurrency(now.goal_threshold_unit, unitPhraseHead(unit) ?? '') === unit &&
+    unitAlreadyOnGoal(goal, approved.raw, now.goal_threshold_unit) === null;
+  /**
+   * ⛔ A1: A UNIT ADOPTED FROM THE STATED LEVEL OF A CHANGE GOAL (`levelUnitForChangeGoal`) IS RE-DERIVED AT APPLY TIME on the
+   * approved read: the same rule adopts the same unit (still a change goal held in no unit or the change's "%", framed on
+   * nothing, holding nothing in the old unit), construction's rule gives the same first frame for the level as carried, and
+   * Olumi's reading is exactly the carried one, `olumi_reading`, in that unit. Anything else writes nothing.
+   */
+  const firstFrameFor = (unit: string): { goal_threshold_cap: number; goal_threshold_cap_provenance: string; goal_threshold: number } | undefined => {
+    const r = os.raw_value;
+    const change = now.goal_threshold_raw;
+    if (!num(r) || !num(change) || !(r > 0) || r * (1 + change) < 0) return undefined;
+    const framed = resolveGoalThresholdCapWithProvenance(undefined, Math.max(r, r * (1 + change)), unit, undefined);
+    return framed === null ? undefined : { goal_threshold_cap: framed.cap, goal_threshold_cap_provenance: framed.provenance, goal_threshold: change };
+  };
+  const changeReading = fromChange ? NodeV3.shape.unit_reading.safeParse(carriedChange?.adopted_unit_reading) : undefined;
+  const changeAdoptionHolds = (unit: string): boolean => {
+    const again = levelUnitForChangeGoal(unit, goal as unknown as Record<string, unknown>, approved.raw);
+    const frame = firstFrameFor(unit);
+    return again.ok && again.adopted === unit && frame !== undefined && os.cap === frame.goal_threshold_cap
+      && stableStringify(frame) === stableStringify(carriedChange?.first_frame)
+      && changeReading !== undefined && changeReading.success && changeReading.data !== undefined
+      && changeReading.data.source === 'olumi_reading' && changeReading.data.unit === unit
+      && stableStringify(changeReading.data) === stableStringify(carriedChange?.adopted_unit_reading);
+  };
+  const changeCarried = carriedChange?.adopted_from !== undefined || carriedChange?.first_frame !== undefined
+    || carriedChange?.adopted_unit_reading !== undefined;
+  if ((carriedAdopted !== undefined && (adoptedUnit === undefined || os.unit !== adoptedUnit
+    || !(fromChange ? changeAdoptionHolds(adoptedUnit) : currencyAdoptionHolds(adoptedUnit))))
+    || (changeCarried && !(fromChange && adoptedUnit !== undefined))) {
     return notApplied(`The unit this level of "${goal.label}" was prepared in no longer fits the goal, so nothing was written. Read the model again and propose afresh.`);
   }
+  const firstFrame = fromChange && adoptedUnit !== undefined ? firstFrameFor(adoptedUnit) : undefined;
+  const changeReadingToWrite = fromChange && changeReading?.success === true ? changeReading.data : undefined;
 
   /**
    * ⛔ THE USER'S READING (`statedPercentOfReading`) IS RE-CHECKED AT APPLY TIME: the carrier exactly (strict NodeV3), the
@@ -1202,9 +1351,12 @@ export async function applyGoalCurrentLevel(
       ...(scope && withdrawal ? applyIdentityWithdrawalToGoal(n as Record<string, unknown>, scope, withdrawal)! : n), observed_state: { ...kept, ...os },
       ...(scope ? { goal_scope: scope } : {}),
       ...(reframedCap !== undefined ? { goal_threshold_cap: reframedCap } : {}),
+      // A1: a change goal measured for the first time is framed, as construction frames it, in the same registration.
+      ...(firstFrame !== undefined ? firstFrame : {}),
       // The goal is measured in the adopted unit from this write on — its target too — in the SAME registration as its level.
       ...(adoptedUnit !== undefined ? { goal_threshold_unit: adoptedUnit } : {}),
       ...(readingToWrite !== undefined ? { unit_reading: readingToWrite } : {}),
+      ...(changeReadingToWrite !== undefined ? { unit_reading: changeReadingToWrite } : {}),
     };
     // Olumi's reading of the replaced figure is refreshed from the user's words, or goes when they could not be read.
     if (carriedOp !== undefined && 'level_reading' in carriedOp) {
@@ -1272,6 +1424,10 @@ export async function applyGoalCurrentLevel(
     (after?.nodes.find((n) => n.id === op.path) as { goal_threshold_unit?: unknown } | undefined)?.goal_threshold_unit === adoptedUnit);
   const readingHeld = readingToWrite === undefined
     || stableStringify((after?.nodes.find((n) => n.id === op.path) as { unit_reading?: unknown } | undefined)?.unit_reading) === stableStringify(readingToWrite);
+  // A1: the first frame and Olumi's reading of the adopted unit are read back byte for byte.
+  const afterGoal = after?.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined;
+  const changeHeld = (firstFrame === undefined || (Object.keys(firstFrame) as (keyof typeof firstFrame)[]).every((k) => afterGoal?.[k] === firstFrame[k]))
+    && (changeReadingToWrite === undefined || stableStringify(afterGoal?.unit_reading) === stableStringify(changeReadingToWrite));
   const scopeHeld = !scope || (after !== null && stableStringify(goalScopeMeaning((after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.goal_scope)) === stableStringify(goalScopeMeaning(scope))
     && (!withdrawal || !(after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.nonlinear_identity));
   // The ceiling's pair is read back too: its figure, its cap and its threshold, exactly as this write carried them.
@@ -1281,7 +1437,7 @@ export async function applyGoalCurrentLevel(
   const pairWritten = writtenGoal as Pair | undefined;
   const pairHeld = !ceilingPaired || (pairNow !== undefined && pairWritten !== undefined
     && (['goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold', 'goal_direction', 'goal_threshold_frame'] as const).every((k) => pairNow[k] === pairWritten[k]));
-  const landed = readingHeld && scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
+  const landed = readingHeld && changeHeld && scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {
