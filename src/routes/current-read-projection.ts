@@ -18,7 +18,7 @@ type RunHashes = Pick<FreshnessDerivation, 'graph_hash_at_run' | 'current_graph_
  * admission record's wider digest.
  */
 export interface CurrentReadProjection {
-  /** Readiness evidence belongs to this selected Run, never a second top-level authority. */
+  /** Current graph readiness beside the selected Run verdict, never a second top-level authority. */
   readonly analysis_ready?: AnalysisReadyPayload;
   readonly run_state: AnalysisStateV1['run_state'] | null;
   readonly computed_against_hash: string | null;

@@ -127,6 +127,10 @@ import {
 import { evaluatedIdentityNodeIds, nodesUnderANonlinearIdentity, nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
 import { selectCanonicalAnalysisState } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
+import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
+import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
+import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
+import type { AnalysisReadyPayload } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 import {
   readMayNameLeadingOptionFromResult,
   readConstraintVerdictStateFromResult,
@@ -139,7 +143,7 @@ import {
   type LeaderLimitRisk,
   type StoredLimitVerdicts,
 } from '../orchestrator/context/constraint-feasibility.js';
-import { deriveAnalysisFreshness, isGoalSnapshotStaleReason, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
+import { compareRunGoalUnitSnapshot, deriveAnalysisFreshness, isGoalSnapshotStaleReason, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional-links.js';
 import { isScenarioAnalysisReasoningAuthority, readScenarioAnalysisClaimSafetyFact, type ScenarioAnalysisClaimSafetyRead } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -610,14 +614,32 @@ export async function readScenarioAnalysis(
     const permissions = claimPermissionsFrom(analysisState, analysisReady, { requested: true });
     params.onCurrentnessRead?.({ ...currentnessRead,
       ...(analysisReady === undefined || scopeInput.status === 'unavailable' ? {} : { permissions }) });
+    // The live readback consumes this same whole readiness payload. Preserve the
+    // existing stale-goal explanation; ordinary reads use the live freshness
+    // decorators, including its raw edit-token domain (not the selector's hash).
+    const graphHash = computeAnalysisAffectingGraphHash(params.graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) ?? undefined;
+    // An observed-state unit edit also diverges the hash, before freshness can
+    // name the goal-unit change. Use the selected Run's existing snapshot
+    // comparison for readiness copy only; selection and result gates stay put.
+    const readinessDerivation = derivation.reason === 'graph_hash_diverged' && historical !== null
+      && compareRunGoalUnitSnapshot(historical.fact, params.graph) === 'unit_changed'
+      ? { ...derivation, reason: 'goal_unit_changed' as const }
+      : derivation;
+    const readinessForRead = analysisReady === undefined ? undefined : withCurrentGraphHash(
+      withRunStateFreshness(
+        isGoalSnapshotStaleReason(readinessDerivation.reason) ? attachComputedAt(analysisReady, readinessDerivation) : analysisReady,
+        analysisState,
+        { graphHash, analysisResult: boundResult },
+      ),
+      graphHash,
+    ) as AnalysisReadyPayload;
     return {
       ...(recording === undefined ? {} : { run_recording: recording }),
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })
         : projectCurrentRead({
             analysisState, derivation, analysisResult: boundResult,
-            ...(analysisReady !== undefined && isGoalSnapshotStaleReason(derivation.reason)
-              ? { analysisReady: attachComputedAt(analysisReady, derivation) } : {}),
+            ...(readinessForRead !== undefined ? { analysisReady: readinessForRead } : {}),
             figures: projectSelectedRunFigures({
               scenarioId: params.scenarioId,
               runState: analysisState.run_state,

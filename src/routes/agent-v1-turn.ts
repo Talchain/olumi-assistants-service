@@ -1238,6 +1238,11 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       scopeOpen = Array.isArray(after.json.goal_scope_reconciliation) && after.json.goal_scope_reconciliation.length > 0;
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
+      // Cold reload and live turns carry the same canonical readiness. The
+      // legacy root carrier still wins; the local builder below is fail-soft.
+      if (analysisReady === undefined && typeof after.json.current_read === 'object' && after.json.current_read !== null) {
+        analysisReady = (after.json.current_read as { analysis_ready?: unknown }).analysis_ready;
+      }
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
       if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
       // The selected run's own constraint verdict state, bound to the SAME fact as
@@ -1283,10 +1288,10 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
        * does NOT compute `may_run`; only
        * `canonicalAnalysisReadyFrom(resolveRunAdmission(g), g)` — i.e.
        * `buildCanonicalAnalysisReadyFromGraph` — does. And
-       * `/assist/v1/scenarios/:id/graph` never sends `analysis_ready` at all
-       * (its 200 carries `graph_hash`, `layout_present`, `not_modelled` …), so
-       * the branch above is ALWAYS taken: every readiness payload an Agent-lane
-       * user receives came from here.
+       * `/assist/v1/scenarios/:id/graph` keeps readiness in `current_read`,
+       * rather than at the root. That canonical payload now wins above; this
+       * fallback still supplies readiness when the additive analysis read
+       * could not answer or an older reader has no whole readiness carrier.
        *
        * The consequence is not subtle. The client gates the Run affordance on
        * `admitsRunAffordance(status, may_run) = status === 'ready' || may_run
