@@ -154,7 +154,11 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     const turnId = randomUUID();
     const live = await runChip(turnId);
     expect(live).toContain(QUESTION);
-    history = [{ ...answerRow(9, [...rows.values()][0]?.assistant_message ?? ''), turn_id: turnId }];
+    // The turn's OWN answer row (not its claim row, written first with no text): it asked, so only `exceptTurnId` keeps a
+    // retry from reading it as "asked before" (mutant M10 survived while this row read the claim row's empty text).
+    const own = rows.get(turnId)?.assistant_message ?? '';
+    expect(own, 'precondition: the replayed row itself asked').toContain(QUESTION);
+    history = [{ ...answerRow(9, own), turn_id: turnId }];
     const replay = await runChip(turnId);
     expect(replay).toBe(live);
   });
@@ -164,7 +168,7 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     const turnId = randomUUID();
     const live = await runChip(turnId);
     expect(live).not.toContain(QUESTION);
-    history = [{ ...answerRow(9, [...rows.values()][0]?.assistant_message ?? ''), turn_id: turnId }, answerRow(1, D4.first_run_reply)];
+    history = [{ ...answerRow(9, rows.get(turnId)?.assistant_message ?? ''), turn_id: turnId }, answerRow(1, D4.first_run_reply)];
     expect(await runChip(turnId)).toBe(live);
   });
 
@@ -186,7 +190,7 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     const live = await reviewPress(turnId);
     expect(live).toContain(plain(REASON));
     expect(live).not.toContain(QUESTION);
-    history = [{ ...answerRow(9, [...rows.values()].at(-1)?.assistant_message ?? ''), turn_id: turnId }, answerRow(1, D4.first_run_reply)];
+    history = [{ ...answerRow(9, rows.get(turnId)?.assistant_message ?? ''), turn_id: turnId }, answerRow(1, D4.first_run_reply)];
     expect(await reviewPress(turnId)).toBe(live);
   });
 
