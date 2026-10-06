@@ -135,6 +135,21 @@ export function userSizedLevelLessLinks(graph: unknown): ReadonlySet<string> {
 }
 
 /** Every mediator reading of a graph, by node id. Pure; one pass. */
+/**
+ * ⭐ S5t (Codex r2 on #2631, P1): every gauge `before` holds as STORED is still the stored gauge, on the same child, in
+ * `after`. A frame refit rescales a link framed at both ends, so a gauge whose mediator and child frames differ leaves ±1
+ * and the reading is lost (a repeated answer would then be read on the mediator's own frame). Such a refit is refused.
+ */
+export function storedGaugesKept(before: unknown, after: unknown): boolean {
+  const now = mediatorReadings(after);
+  for (const [id, was] of mediatorReadings(before)) {
+    if (was.via !== 'gauge' || was.stored !== true) continue;
+    const kept = now.get(id);
+    if (kept?.via !== 'gauge' || kept.stored !== true || kept.child !== was.child) return false;
+  }
+  return true;
+}
+
 export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
   const out = new Map<string, MediatorReading>();
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return out;
