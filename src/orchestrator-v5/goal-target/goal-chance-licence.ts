@@ -27,7 +27,7 @@
 import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
-import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { heldLinkOf, isUserStatedLink } from './held-user-links.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -190,14 +190,13 @@ export function userStatedLinksBelowOne(graph: unknown, goalId: unknown, optionI
     for (const e of directed) if (reached.has(e.from) && !reached.has(e.to) && walkable(e.to)) { reached.add(e.to); grew = true; }
   }
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
-  const userStated = (e: Rec): boolean => linkSizing(e) === 'user'
-    || (isRec(e.provenance) && e.provenance.source === 'brief_extraction'
-      && typeof e.provenance.source_quote === 'string' && e.provenance.source_quote.trim() !== '');
   const identityEdge = (e: Rec): boolean => {
     const id = byId.get(e.to)?.nonlinear_identity;
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(e.from);
   };
-  return directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && userStated(e) && !identityEdge(e)
+  // ⭐ Hold-at-1.0 (d5 #87 6008807178): a link the Run holds at 1.0 is not Olumi's doubt; the SAME function the payload uses.
+  return directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && isUserStatedLink(e) && !identityEdge(e)
+    && heldLinkOf(e) === null
     && typeof e.exists_probability === 'number' && Number.isFinite(e.exists_probability) && e.exists_probability < 1);
 }
 
