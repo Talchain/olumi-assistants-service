@@ -173,9 +173,16 @@ export function withoutUnsupportedMechanisms(candidate: CandidateModel, brief: s
     const out = candidate.links.filter((l) => k(l.from) === k(label));
     return out.length > 0 && out.every((l) => k(l.to) === k(goal));
   };
+  // On an option's way to the goal: only there is an unsized link one the user must size before the options' chances show
+  // (P5 reads the links options reach). A risk no option reaches moves no option's chance and stays as drafted.
+  const reached = new Set<string>(setByOption);
+  for (const queue = [...setByOption]; queue.length > 0;) {
+    const at = queue.shift()!;
+    for (const l of candidate.links) if (k(l.from) === at && !reached.has(k(l.to))) { reached.add(k(l.to)); queue.push(k(l.to)); }
+  }
   const risks = candidate.risks.filter((r) => k(r.label) !== k(goal) && r.provenance !== 'explicit' && r.analysis_participation !== 'retained_excluded'
     && !setByOption.has(k(r.label)) && !inIdentity.has(k(r.label)) && !limited.has(k(r.label)) && !briefFigureAt(r.label)
-    && briefSupport(r.label, brief) <= 0.5 && !keep(r.label) && intoGoalOnly(r.label));
+    && briefSupport(r.label, brief) <= 0.5 && !keep(r.label) && intoGoalOnly(r.label) && reached.has(k(r.label)));
   const revenue = isRevenueGoal(goal);
   const labels = [...candidate.factors, ...candidate.risks, ...candidate.outcomes].map((q) => q.label);
   const reachedBefore = new Set(labels.filter((l) => reachesGoal(candidate, l)).map(k));
@@ -223,7 +230,7 @@ export function withoutUnsupportedMechanisms(candidate: CandidateModel, brief: s
     const accounting = (l: CandidateModel['links'][number]): boolean => l.direction === 'negative'
       && (typeof l.effect_amount !== 'number' || (typeof l.effect_per_source_change === 'number' && l.effect_per_source_change !== 0
         && Math.abs(l.effect_amount / l.effect_per_source_change) === 1));
-    for (const l of links.filter((x) => k(x.to) === k(goal) && costQuantity(x.from) && accounting(x))) {
+    for (const l of links.filter((x) => k(x.to) === k(goal) && costQuantity(x.from) && accounting(x) && reached.has(k(x.from)))) {
       const tryLinks = links.filter((x) => x !== l);
       if (strands(gone, tryLinks) === null) continue;
       links = tryLinks;

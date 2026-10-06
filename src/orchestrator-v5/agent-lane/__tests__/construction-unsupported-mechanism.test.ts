@@ -179,7 +179,8 @@ describe('the repair retry is held to rule 1', () => {
     const { r, g, trace } = await build(c, { retry: (x) => ({ ...x,
       options: x.options.map((o: Rec) => (o.label === 'Raise prices 10%' ? { ...o, interventions: kept } : o)),
       risks: [...x.risks, { label: 'Starter-tier service degradation', provenance: 'inferred' }],
-      links: [...x.links, L('Starter support cost', 'Starter-tier service degradation', 'positive'), L('Starter-tier service degradation', GOAL, 'negative')] }) });
+      // (Drawn from the starter count: the first draft's support cost went with the cut, so the retry has no such node.)
+      links: [...x.links, L('Starter subscribers', 'Starter-tier service degradation', 'positive'), L('Starter-tier service degradation', GOAL, 'negative')] }) });
     expect(trace.retried).toBe(true);
     expect(ids(g)).not.toContain('starter_tier_service_degradation');
     expect(r.open_questions).toContain(challenge('Starter-tier service degradation'));
@@ -346,6 +347,17 @@ describe('only a risk that is a side consequence is taken, and never one whose r
     c.outcomes.push({ label: 'Starter onboarding load', provenance: 'inferred' });
     c.links.push(L('Starter subscribers', 'Starter onboarding load', 'positive'));
     expect(withoutUnsupportedMechanisms(c as never, BRIEF).mechanisms).toEqual([]);
+  });
+  it('⛔ CONTROL: an unsupported risk NO option reaches moves no option\'s chance → kept as drafted, even beside one that is taken', async () => {
+    const c = structuredClone(FX['draft-1']);
+    c.risks.push({ label: 'Market downturn', provenance: 'inferred' });
+    c.links.push(L('Market downturn', GOAL, 'negative'));
+    expect(withoutUnsupportedMechanisms(c as never, BRIEF).mechanisms.map((m) => m.label)).toEqual(['Starter-tier service degradation']);
+    const { r, g } = await build(c);
+    expect(g.nodes.filter((n: Rec) => n.kind === 'risk').map((n: Rec) => n.label)).toEqual(['Market downturn']);
+    // No challenge for it (it is drafted); the existing ask for its size stays as before.
+    expect([...(r.open_questions ?? []), ...(r.not_represented ?? [])].filter((x: string) => x.includes('hasn’t modelled ‘Market downturn’'))).toEqual([]);
+    expect(gates(g)).toEqual({ placeholder: [], target: 'testable', failures: [] });
   });
   it('⛔ CONTROL: an option\'s lever whose only way to the goal is the mechanism is never stranded → kept', () => {
     const c = structuredClone(FX['draft-2']);
