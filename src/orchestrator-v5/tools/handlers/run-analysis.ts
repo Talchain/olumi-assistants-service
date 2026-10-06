@@ -2906,6 +2906,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Option C: compute in-process before the existing fact commit; no callback and no brief carry.
     const factorEnrichments = await agentFactorEnrichments(snapshot.rawPersistedGraph ?? snapshot.graph,
       (response as Record<string, unknown>).factor_sensitivity, invocation.requestId);
+    // Attached to the PLoT response before the one owned projection stamp (handler-ownership guard pins that line).
+    if (factorEnrichments !== undefined) (response as Record<string, unknown>).factor_enrichments = factorEnrichments;
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -2921,8 +2923,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // Every new Run records the existing projection version in persisted
         // enrichment. Transport strips this internal key; the provider response
         // is unchanged. Freshness still uses the one analysis-affecting hash.
-        enrichment: stampRunAnalysisProjection({ ...response as Record<string, unknown>,
-          ...(factorEnrichments !== undefined ? { factor_enrichments: factorEnrichments } : {}) }),
+        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run
