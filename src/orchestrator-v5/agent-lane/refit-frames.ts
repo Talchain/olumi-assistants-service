@@ -199,6 +199,39 @@ function reframed(graph: Rec, id: string, F: number): Rec {
   return g;
 }
 
+/**
+ * ⭐ S5t r2 (Codex r1 on #2631, P1 ×2): a refit made for the links in `written` leaves EVERY OTHER link's analysed size where
+ * it was. A link framed at both ends keeps β·F_to/F_from: `reframed` rescales it, but a CLAMPED link (|β| stored at 1)
+ * whose end is re-framed would not. A link into or out of a re-framed node whose other end has no frame (an implicit one,
+ * e.g. a 0–1 switch) is skipped by `reframed`, so its size cannot be shown to stay: when it carries a natural size, the
+ * refit is refused. A predicate only: construction's own call is unchanged.
+ */
+export function refitKeepsOtherLinks(before: Rec, after: Rec, written: ReadonlySet<string>): boolean {
+  const fb = new Map((before.nodes as Rec[]).map((n) => [n.id, frameOf(n)]));
+  const fa = new Map((after.nodes as Rec[]).map((n) => [n.id, frameOf(n)]));
+  const kinds = new Map((before.nodes as Rec[]).map((n) => [n.id, n.kind]));
+  const eb = before.edges as Rec[];
+  const ea = after.edges as Rec[];
+  if (eb.length !== ea.length) return false;
+  for (let i = 0; i < eb.length; i += 1) {
+    const b = eb[i]!;
+    const a = ea[i]!;
+    if (a.from !== b.from || a.to !== b.to) return false;
+    if (written.has(key(b)) || kinds.get(b.from) === 'option' || kinds.get(b.from) === 'decision') continue;
+    const [sb, tb, sa, ta] = [fb.get(b.from), fb.get(b.to), fa.get(b.from), fa.get(b.to)];
+    if (sb === sa && tb === ta) continue;
+    if (sb === undefined || tb === undefined || sa === undefined || ta === undefined) {
+      if (b.provenance?.natural_effect !== undefined) return false;
+      continue;
+    }
+    if (!num(b.strength?.mean) || !num(a.strength?.mean)) continue;
+    const was = (b.strength.mean * tb) / sb;
+    const now = (a.strength.mean * ta) / sa;
+    if (Math.abs(was - now) > TOL * Math.max(1, Math.abs(was))) return false;
+  }
+  return true;
+}
+
 /** Links out of the contract (|β| > 1) between two framed nodes. */
 function cuts(g: Rec): Rec[] {
   const frames = new Map((g.nodes as Rec[]).map((n) => [n.id, frameOf(n)]));

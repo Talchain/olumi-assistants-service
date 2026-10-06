@@ -43,6 +43,7 @@ function baseWithAnotherCut(): Rec {
     amount_unit: 'GBP/quarter', per_source_change: 1, per_source_change_unit: '%', strength_mean: beta, strength_mean_frame: 'edge_strength' } };
   return g;
 }
+const edge2 = (g: Rec, from: string, to: string): Rec => g.edges.find((x: Rec) => x.from === from && x.to === to);
 const frameOfNode = (n: Rec): number => n.scale_frame ?? n.observed_state?.cap ?? n.goal_threshold_cap;
 /** A link's natural size per one source unit, read off its β and the two frames: β · F_target / F_source. */
 const naturalPerUnit = (g: Rec, e: Rec): number => {
@@ -228,4 +229,79 @@ describe('S5t: the chat writer refits the frame a stated size needs, exactly as 
     expect(words).toContain('How strong is this effect?');
     expect(words).not.toContain('cannot be changed from this conversation');
   });
+
+  // ── r2: Codex r1 on #2631 (three P1s), each its graph + a control ──
+  const node = (id: string, kind: string, label: string, os?: Rec): Rec => ({ id, kind, label, ...(os ? { observed_state: os } : {}) });
+  const framed = (raw: number, unit: string): Rec => ({ value: raw / 100, raw_value: raw, cap: 100, unit, source: 'user_override' });
+  const ph = (from: string, to: string, mean: number): Rec => ({ from, to, strength: { mean, std: 0.1 }, exists_probability: 0.9,
+    effect_direction: mean < 0 ? 'negative' : 'positive', defaulted: true, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
+  const userStated = (from: string, to: string, mean: number, ne: Rec, clampedFrom?: number): Rec => ({ from, to,
+    strength: { mean, std: 0.1 }, exists_probability: 0.9, effect_direction: mean < 0 ? 'negative' : 'positive',
+    provenance: { source: 'user_specified', magnitude: 'user_stated', ...(clampedFrom !== undefined ? { clamped_from: clampedFrom } : {}),
+      natural_effect: { ...ne, strength_mean: clampedFrom ?? mean, strength_mean_frame: 'edge_strength' } } });
+  const sized = (g: Rec, from: string, to: string, amount: number, unit: string, per: string, quote: string) =>
+    write(g, from, to, { amount, amount_unit: unit, per_source_change: 1, per_source_change_unit: per }, quote);
+
+  /** P1-b: x → m → g; m → g is the user's £2 per £1, stored CLAMPED at 1 (a limit names g, so construction refused it). */
+  function clampedSibling(): Rec {
+    return { goal_node_id: 'g',
+      nodes: [node('g', 'goal', 'Revenue', framed(50, '£')), node('x', 'factor', 'Customers', framed(50, 'customers')),
+        node('m', 'outcome', 'New-customer revenue', framed(50, '£'))],
+      edges: [ph('x', 'm', 0.2), userStated('m', 'g', 1, { amount: 2, amount_unit: '£', per_source_change: 1, per_source_change_unit: '£' }, 2)],
+      goal_constraints: [{ constraint_id: 'c1', node_id: 'g', operator: '>=', value: 60, unit: '£' }] };
+  }
+  it('r2 P1-b CLAMPED SIBLING: a refit that would re-frame a clamped user link (its analysed size halves) is refused', () => {
+    const g = clampedSibling();
+    const base = refitFramesForStatedEffects(g);
+    expect(base.refits).toEqual([]); // precondition: the base-refit check does NOT catch it…
+    expect(base.refused.map((r) => r.link)).toEqual(['m→g']); // …because the sibling's own refit is refused
+    const before = JSON.stringify(g);
+    expect(sized(g, 'x', 'm', 2, '£', 'customers', 'Every 1 more customer adds £2 of new-customer revenue.'))
+      .toMatchObject({ kind: 'refused', reason: 'not_representable' });
+    expect(JSON.stringify(g)).toBe(before);
+    // CONTROL: a size the frames hold refits nothing, and the clamped sibling is byte-identical.
+    const ok = sized(clampedSibling(), 'x', 'm', 0.5, '£', 'customers', 'Every 1 more customer adds £0.50 of new-customer revenue.');
+    expect(ok.kind, JSON.stringify(ok)).toBe('mutated');
+    if (ok.kind === 'mutated') expect(JSON.stringify(edge2(ok.mutatedGraph as Rec, 'm', 'g'))).toBe(JSON.stringify(edge2(clampedSibling(), 'm', 'g')));
+  });
+
+  /** P1-c: x → g and a 0–1 switch b → g the user sized at £50 per switch; b has no stored frame (an implicit one). */
+  function implicitSibling(): Rec {
+    return { goal_node_id: 'g',
+      nodes: [node('g', 'goal', 'Revenue', framed(50, '£')), node('x', 'factor', 'Customers', framed(50, 'customers')),
+        node('b', 'factor', 'Reporting switch', { value: 0, unit: '0-1', source: 'user_override' })],
+      edges: [ph('x', 'g', 0.2), userStated('b', 'g', 0.5, { amount: 50, amount_unit: '£', per_source_change: 1, per_source_change_unit: 'switch' })] };
+  }
+  it('r2 P1-c IMPLICIT FRAME: a refit of the goal is refused while a sized link from a frameless node points at it', () => {
+    const g = implicitSibling();
+    const before = JSON.stringify(g);
+    expect(sized(g, 'x', 'g', 2, '£', 'customers', 'Every 1 more customer adds £2 of revenue.'))
+      .toMatchObject({ kind: 'refused', reason: 'not_representable' });
+    expect(JSON.stringify(g)).toBe(before);
+    const ok = sized(implicitSibling(), 'x', 'g', 0.5, '£', 'customers', 'Every 1 more customer adds £0.50 of revenue.');
+    expect(ok.kind, JSON.stringify(ok)).toBe('mutated');
+    if (ok.kind === 'mutated') expect(JSON.stringify(edge2(ok.mutatedGraph as Rec, 'b', 'g'))).toBe(JSON.stringify(edge2(implicitSibling(), 'b', 'g')));
+  });
+
+  it('r2 P1-a ONE PREIMAGE: a write whose option setting hides under data.interventions never passes the door guard', () => {
+    const base = projectGraphForPersistence({ goal_node_id: 'g',
+      nodes: [node('g', 'goal', 'Revenue', framed(50, '£')), node('x', 'factor', 'Customers', framed(50, 'customers')),
+        { id: 'o', kind: 'option', label: 'Push upsell', interventions: { g: { value: 0.5, source: 'user_specified',
+          target_match: { node_id: 'g', match_type: 'exact_id', confidence: 'high' } } } }],
+      edges: [ph('x', 'g', 0.2)] }) as Rec;
+    const link = { from: 'x', to: 'g' };
+    const raw = structuredClone(base);
+    const e = raw.edges.find((x: Rec) => x.from === 'x' && x.to === 'g');
+    e.strength = { ...e.strength, mean: 2 };
+    e.provenance = { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 2, amount_unit: '£', per_source_change: 1,
+      per_source_change_unit: 'customers', strength_mean: 2, strength_mean_frame: 'edge_strength' } };
+    const o = raw.nodes.find((n: Rec) => n.id === 'o');
+    o.data = { ...(o.data ?? {}), interventions: o.interventions };
+    delete o.interventions;
+    expect(refitFramesForStatedEffects(raw).refits.length).toBeGreaterThan(0); // precondition: the RAW shape widens g…
+    expect(refitFramesForStatedEffects(projectGraphForPersistence(raw) as Rec).refits).toEqual([]); // …the canonical one refuses
+    const after = projectGraphForPersistence(clampForPersist(refitFramesForStatedEffects(raw).graph)) as Rec;
+    expect(linkEffectRefitPostimageIsScoped(base, raw, after, link)).toBe(false);
+  });
 });
+

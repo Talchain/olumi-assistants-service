@@ -40,7 +40,7 @@ import { prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero, t
 import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
 import { GAUGE_OP, mediatorReadings, withMediatorReading } from '../agent-lane/mediator-reading.js';
-import { clampForPersist, refitFramesForStatedEffects } from '../agent-lane/refit-frames.js';
+import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -592,6 +592,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
       return refuse('not_representable');
     }
     written = clampForPersist(fitted.graph) as typeof graph;
+    // r2 (Codex r1 on #2631): no OTHER link's analysed size may move (a clamped sibling, or one from an implicit frame).
+    if (!refitKeepsOtherLinks(refitFrom as Rec, written, new Set([`${from}→${to}`]))) return refuse('not_representable');
   }
   const writtenEdge = (written.edges as Rec[]).find(e => e.from === from && e.to === to && isDirectedEdge(e as never)) ?? edge;
   const parsed = GraphV3.safeParse(written);

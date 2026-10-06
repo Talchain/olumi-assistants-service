@@ -86,7 +86,7 @@ import { applyLinkEffectEdit, linkEffectEdgeToken, storedGaugeSign, type LinkEff
 import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { mediatorReadings } from '../agent-lane/mediator-reading.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
-import { clampForPersist, refitFramesForStatedEffects } from '../agent-lane/refit-frames.js';
+import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
@@ -610,10 +610,14 @@ export function linkEffectRefitPostimageIsScoped(storedBefore: unknown, refitFro
   link: { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }): boolean {
   if (!isEditableGraph(after) || !isRecordGraph(refitFrom)) return false;
   if (refitFramesForStatedEffects(normaliseAbsenceOnly(storedBefore) as Record<string, unknown>).refits.length > 0) return false;
-  if (!linkWriteIsScoped(storedBefore, projectGraphForPersistence(refitFrom), [link])) return false;
-  const fitted = refitFramesForStatedEffects(refitFrom as Record<string, unknown>);
+  // r2 (Codex r1 on #2631, P1): ONE preimage. The scope rule and the recompute read the same canonical write, so a shape the
+  // projection repairs (an option's setting under `data.interventions`) can never pass one and escape the other.
+  const canonical = projectGraphForPersistence(refitFrom) as Record<string, unknown>;
+  if (!linkWriteIsScoped(storedBefore, canonical, [link])) return false;
+  const fitted = refitFramesForStatedEffects(canonical);
   if (fitted.refits.length === 0) return false;
-  return isDeepStrictEqual(projectGraphForPersistence(clampForPersist(fitted.graph)), after);
+  return isDeepStrictEqual(projectGraphForPersistence(clampForPersist(fitted.graph)), after)
+    && refitKeepsOtherLinks(canonical, after as Record<string, unknown>, new Set([`${link.from}→${link.to}`]));
 }
 
 const isRecordGraph = (g: unknown): g is { nodes: unknown[]; edges: unknown[] } =>
