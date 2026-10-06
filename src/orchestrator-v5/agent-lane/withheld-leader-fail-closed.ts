@@ -79,6 +79,8 @@ import { leaderLicence } from '../compose/leader-licence.js';
 import {
   WITHHELD_GOAL_PATH_UNSIZED,
   WITHHELD_CONSTRAINT_VERDICT,
+  WITHHELD_NO_RESULT,
+  NO_RESULT_RUN_KINDS,
   WITHHELD_LEADER_CAUSE_UNRECORDED,
   WITHHELD_NEAR_TIE,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
@@ -90,6 +92,7 @@ import {
   WITHHELD_SEPARATION_UNAVAILABLE,
   SEPARATION_NEAR_TIE,
 } from '../compose/analysis-state-v1.js';
+import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-ask.js';
 import {
   neutraliseEnforcementFalsePositiveSpans,
   optionLabelPattern,
@@ -970,6 +973,9 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
     'because the options came out too close together on this run to tell apart; tell me what matters most to you between them',
   [WITHHELD_SEPARATION_UNAVAILABLE]:
     'because how far apart the options are was not established on this run; ask me to run the analysis and I will measure it',
+  // MC D1 (a): no Run produced a result, so nothing was checked — never a limit verdict.
+  [WITHHELD_NO_RESULT]:
+    'because no analysis has produced a result for this model yet; ask me to run it',
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]:
     'because this result could not be confirmed as an analysis of the model as it stands; run the analysis again',
   [WITHHELD_RUN_IDENTITY_CONFLICT]:
@@ -1036,7 +1042,6 @@ function estimateOnlyClause(limitVerdicts: StoredLimitVerdicts | undefined, limi
  * claim said a limit "was not shown to be met on this run" about a Run PLoT refused (served 651a7fd, journey C run 2).
  * Absent and `unknown_degraded` are not listed: they do not prove there is no result.
  */
-const NO_RESULT_RUN_KINDS: ReadonlySet<string> = new Set(['never_run', 'refused', 'blocked', 'running']);
 
 /** The run's own separation statement (`leader_claim.separation`); absent = not computed, never "near tie". */
 export function separationOf(analysisState: unknown): string | undefined {
@@ -1058,10 +1063,10 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
   return warnings.map((w) => (w as { code?: unknown } | null)?.code).filter((c): c is string => typeof c === 'string');
 }
 
-type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string };
+export type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
 
 /** The run's own goal-figure warning, kept separate from decision-brief limit warnings. */
-function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold | undefined {
+export function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold | undefined {
   if (!Array.isArray(blocks)) return undefined;
   const result = blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as
     { enrichment?: { inference_warnings?: unknown }; inference_warnings?: unknown } | undefined;
@@ -1074,7 +1079,7 @@ function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold |
     return { why: 'Olumi has not read your goal as the product of your own figures, so its figures cannot yet support a comparison' };
   }
   const warning = codes.find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
-  if (warning === undefined) return undefined;
+  if (warning === undefined) return ownGoalFigureCoHold(codes, graph);
   const cause = readUnsizedPathLeaderCause(result);
   const g = graph as { nodes?: unknown } | null;
   const nodes = Array.isArray(g?.nodes) ? g.nodes as Array<{ id?: unknown; label?: unknown }> : [];
@@ -1095,6 +1100,35 @@ function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold |
   // (never while a product gate withholds every option: no cause, no invitation).
   const words = (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
   return words !== '' ? { why: words, say: words } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
+}
+
+/**
+ * ⭐ MC D1 (b) (DL 6 Oct; Acceptance rehearsals 8 and 13): EVERY OTHER GOAL-FIGURE WITHHOLD THAT TOOK THE SHARES IS SAID IN
+ * ITS OWN WORDS, never "ask me to run the analysis and I will measure it" — the same model gives the same withhold. PLoT
+ * #416 (an identity the run could not calculate) carries the ONE ask that would let it (`composeIdentityAskForNode`);
+ * PLoT #422 (the user's own size cut to fit) and identical options say their own cause. A target-only or unusable-chance
+ * withhold keeps its own reader (the admission's clause / the goal-chance line).
+ */
+const OWN_WORDS_GOAL_FIGURE_CODES: ReadonlySet<string> = new Set([
+  'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_USER_EFFECT_CLAMPED', 'GOAL_FIGURES_OPTIONS_IDENTICAL',
+]);
+
+function ownGoalFigureCoHold(
+  codes: readonly { code: string; node_ids?: unknown; message?: unknown; withheld_claims?: unknown }[], graph: unknown,
+): GoalFigureCoHold | undefined {
+  const keptShares = (w: { withheld_claims?: unknown }): boolean =>
+    Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share');
+  const warning = codes.find((w) => OWN_WORDS_GOAL_FIGURE_CODES.has(w.code) && !keptShares(w));
+  if (warning === undefined || typeof warning.message !== 'string') return undefined;
+  const said = warning.message.replace(/^\s*Not shown\.\s*/, '').trim().replace(/[.!?]+$/, '');
+  // "because your size …": only an ordinary sentence-opening word drops its capital (Codex buddy r1 P2); a name ("Olumi",
+  // "MRR") or a quoted label ("'Starter-tier MRR' …") is kept as written.
+  const why = /^(?:Your|The|This|That|These|Those|A|An|It|Its)\b/.test(said) ? `${said[0]!.toLowerCase()}${said.slice(1)}` : said;
+  if (why === '') return undefined;
+  const nodeId = Array.isArray(warning.node_ids) && typeof warning.node_ids[0] === 'string' ? warning.node_ids[0] : undefined;
+  const ask = warning.code === 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED' && nodeId !== undefined
+    ? composeIdentityAskForNode(nodeId, graph) : null;
+  return ask === null ? { why } : { why, say: `${sentence(`because ${why}`)} ${ask.assistant_text}`, ask: ask.assistant_text };
 }
 
 /** Keyed by the admission's `permitted_analysis_mode` reason code, when the claim itself did not withhold. */
@@ -1657,9 +1691,11 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const closingFor = (goalFigureCoHold: GoalFigureCoHold | undefined): string => agentNoLeaderSentence(withheldReason, opts.analysisReady,
         limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
         separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHold);
+      const coHold = noResult ? undefined : goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph);
+      // MC D1 (a), Codex buddy r1 P2: a Run with no result says that known cause, never "the reason is not recorded".
       const closing = noResult
-        ? sentence(REASON_NOT_RECORDED)
-        : closingFor(goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph));
+        ? sentence(withheldReason === WITHHELD_NO_RESULT ? BY_WITHHELD_REASON[WITHHELD_NO_RESULT]! : REASON_NOT_RECORDED)
+        : closingFor(coHold);
       // A second wire pass must not parse a deterministic closing as fresh model prose. Node labels can contain
       // punctuation and ranking words, so splitting that closing into sentences can otherwise drop half and append it twice.
       const trimmed = text.trimEnd();
@@ -1701,8 +1737,14 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         // #2613 buddy r5 P1: when the reply already says the typed goal reason and the closing repeats it, the closing
         // drops ONLY that reason. Any other cause it carried (the admission's) is still said; nothing else is invented.
         const typedReasonSaid = typedSay !== null && sameWordsIn(body, typedSay) && sameWordsIn(closing, typedSay);
-        const closingToAdd = !typedReasonSaid ? closing
-          : admissionClause(opts.analysisReady) === undefined ? '' : closingFor(undefined);
+        // MC D1 (c), Codex buddy r1 P2: the #416 ask is said ONCE. When the reply already says the warning's cause (the
+        // protected goal-chance line) or already carries the ask (the route's owed line), only the missing half is added.
+        const causeSaid = coHold?.ask !== undefined && sameWordsIn(body, coHold.why);
+        const askSaid = coHold?.ask !== undefined && sameWordsIn(body, coHold.ask);
+        const closingToAdd = coHold?.ask !== undefined && (causeSaid || askSaid)
+          ? (causeSaid && askSaid ? '' : causeSaid ? coHold.ask : sentence(`because ${coHold.why}`))
+          : !typedReasonSaid ? closing
+            : admissionClause(opts.analysisReady) === undefined ? '' : closingFor(undefined);
         const alreadySaid = (closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph))
           || closingToAdd === '' || sameWordsIn(body, closingToAdd);
         next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closingToAdd}` } as OlumiResponse;

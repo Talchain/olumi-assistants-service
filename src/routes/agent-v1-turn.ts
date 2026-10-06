@@ -90,7 +90,7 @@ import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-see
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
-import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -1985,6 +1985,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
           const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
           const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
+          // MC D1 (c): the same #416 ask the live Run turn said, from the same readback.
+          const askNow = identityAskLineFor(state.analysisResult, state.graph);
+          if (askNow !== null) owedNow.push(askNow);
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
           const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
           if (rootNow !== null) owedNow.push(rootNow);
@@ -3100,6 +3103,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
         // ⛔ A withheld goal chance's reason is said as written, unless the Agent already said it (AIQ 5887805333 (3)).
         ...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
+        // MC D1 (c): the Run's #416 ask, after its reason (never a bare "couldn't calculate it" with nothing to answer).
+        ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
