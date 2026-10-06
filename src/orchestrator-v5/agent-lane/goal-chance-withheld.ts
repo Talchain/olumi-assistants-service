@@ -187,8 +187,12 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
       .map((w) => (typeof w.message === 'string' ? w.message.trim() : '')).find((m) => m !== '');
     return words === undefined ? '' : words.replace(UI_OPENING, '').trim();
   };
-  const reason = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED)]
-    .filter((r) => r !== '').join(' ');
+  // ⭐ MC D1 (f) (DL 6 Oct; Acceptance g1-b501 drafts 1 and 6, full wire on CEE 231affb): a placeholder path beside an
+  // untestable target that KEPT the shares fell through to the bare opening, so the chat asked nothing answerable while
+  // the panel named a link. The placeholder's own words ARE its one ask ("… whose strengths nobody has set yet. Set them
+  // to see how much they matter."), so they are said here, after any PLoT reason; the target's own question is not added.
+  const reason = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED),
+    reasonFor(GOAL_FIGURES_PLACEHOLDER_PATH)].filter((r) => r !== '').join(' ');
   const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
   return { withheld: true, say: reason === '' ? OPENING : `${OPENING} ${reason}`, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
 }

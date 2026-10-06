@@ -192,3 +192,24 @@ describe('(c) WIRING: both Run replies owe the ask (the live turn and its replay
     expect(route).toContain('...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
   });
 });
+
+describe('(f) a placeholder path beside an untestable target: the chat asks the withhold\'s OWN named link (g1-b501 draft 1)', () => {
+  const D1 = JSON.parse(readFileSync(new URL('./fixtures/served-g1b501-draft1-placeholder-target.json', import.meta.url), 'utf8')) as Rec;
+  const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
+
+  it('PRECONDITION: the served Run carried both withholds, and the target one KEPT the shares', () => {
+    const codes = (D1.analysis_result.enrichment.inference_warnings as Rec[]).map((w) => w.code);
+    expect(codes).toEqual(['GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_TARGET_NOT_TESTABLE']);
+    expect(placeholder.message).toMatch(/Set (it|them) to see how much (it|they) matters?\.$/);
+  });
+
+  it('RED (served: the reply was the bare opening, then "clarify whether support affects…"): the say carries the placeholder\'s ask', () => {
+    const say = goalChanceWithheldForAgent(D1.analysis_result)!.say;
+    expect(say).toBe(`This run doesn’t show how often each option reaches the goal’s target. ${placeholder.message}`);
+  });
+
+  it('CONTROL: a target-only withhold that kept the shares keeps its own tail (no placeholder words appear)', () => {
+    const target = (D1.analysis_result.enrichment.inference_warnings as Rec[]).filter((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
+    expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: target } })!.say).not.toContain('nobody has set yet');
+  });
+});
