@@ -272,7 +272,7 @@ describe('R6: the contrast control — a target with no frame keeps today\'s ±0
     expect(e.strength).toStrictEqual({ mean: 0.5, std: 0.125 });
     expect(e.exists_probability).toBe(0.8);
     expect(e.defaulted).toBe(true);
-    expect(e.provenance).toStrictEqual({ source: 'cee_hypothesis' });
+    expect(e.provenance).toStrictEqual({ source: 'cee_hypothesis', mean_projected: true });
     expect(e).toStrictEqual(edge(unsized, 'pro_plan_price', 'price_sensitivity'));
   });
 });

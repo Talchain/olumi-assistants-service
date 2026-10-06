@@ -1,3 +1,4 @@
+import { unsizedLinkSentence, unsizedLinkStatement, legacyLinkSentence } from './unsized-path-cause.js';
 /**
  * ⭐ IS A GOAL CERTAINTY EARNED? — ONE typed decision the reply and every goal-probability display read (AI Quality
  * 5882366427 + R3 5882389030, ACKed 5882498938; the DL assigns the producer to MG, 5882387398).
@@ -21,7 +22,9 @@
  * into the goal hides every unsized path into it, so a certainty through it is unearned and has no figure (fail closed).
  * No engine run and no new carrier: everything is on CEE's own graph and the run's per-option P(goal). Pure.
  */
-import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
+import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testability.js';
+export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { sayFigure } from './say-figure.js';
@@ -340,6 +343,62 @@ export interface PlaceholderGoalPath {
 }
 
 /**
+ * R4 leader licence: nobody sized a causal link on a compared option's goal path. Independent of the target and
+ * stricter than the legacy placeholder-only coaching reader below. A user size wins over stale stamps; definition
+ * and confirmed identity operands are exact. Examples and Olumi's actual estimates keep their existing disclosures.
+ */
+/** Actual moved factors, using the legacy placeholder reader's held/raw scale rule. Unknown moves fail closed. */
+function actualMoveSeeds(graph: unknown, optionIds: readonly string[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): Map<string, string[]> {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const byId = new Map(nodes.map(n => [n.id, n] as const));
+  return new Map(optionIds.map(optionId => {
+    const option = byId.get(optionId);
+    const iv = scoredInterventions?.get(optionId) ?? (option === undefined ? undefined : mergeInterventionSourceObjects(option));
+    const moved = Object.entries(iv ?? {}).flatMap(([factorId, set]) => {
+      if (!byId.has(factorId)) return [];
+      const held = levelOf(byId.get(factorId));
+      const to = interventionLevel(set);
+      const same = (a: number | undefined, b: number | undefined): boolean => a !== undefined && b !== undefined && a === b;
+      return same(to.value, held.value) || same(to.raw, held.raw) || same(to.value, held.raw) ? [] : [factorId];
+    });
+    return [optionId, moved];
+  }));
+}
+
+export function unsizedLeaderGoalPaths(graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): PlaceholderGoalPath[] {
+  const seeds = actualMoveSeeds(graph, optionIds, scoredInterventions);
+  const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, seeds, identityEvaluations);
+  return paths.flatMap(path => {
+    const links = path.links.filter(e => {
+      if (exactLinks.has(e) || linkSizing(e) === 'user') return false;
+      const p = isRec(e.provenance) ? e.provenance : undefined;
+      return p?.magnitude === 'olumi_placeholder' || p?.mean_projected === true;
+    }).flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []);
+    return links.length > 0 ? [{ option_id: path.option_id, links }] : [];
+  });
+}
+
+/** R8 legacy disclosure uses the same actual-move licence walk; defaulted alone never withholds. */
+export function legacyLeaderGoalLinks(graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): Array<{ from: string; to: string }> {
+  const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, actualMoveSeeds(graph, optionIds, scoredInterventions), identityEvaluations);
+  return goalOrderedLinks(graph, paths.flatMap(path => path.links.filter(e => {
+    const p = isRec(e.provenance) ? e.provenance : undefined;
+    return !exactLinks.has(e) && linkSizing(e) !== 'user' && p?.mean_projected !== true
+      && p?.magnitude === undefined && e.defaulted === true;
+  }).flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : [])));
+}
+
+export function legacyGoalWarning(graph: unknown, links: Array<{ from: string; to: string }>): {
+  code: 'GOAL_FIGURES_OLUMI_SUPPLIED_LINK'; message: string; severity: 'info'; node_ids: string[]; links: Array<{ from: string; to: string }>;
+} {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const label = (id: string): string => text(nodes.find(n => n.id === id)?.label) ?? id;
+  return { code: 'GOAL_FIGURES_OLUMI_SUPPLIED_LINK', severity: 'info',
+    message: legacyLinkSentence(links.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) }))),
+    node_ids: links[0] === undefined ? [] : [links[0].from, links[0].to], links };
+}
+
+/**
  * ⛔ (S) AN OPTION'S GOAL FIGURES ARE NOT EARNED WHILE ANY PATH FROM WHAT IT MOVES INTO THE GOAL RUNS THROUGH A LINK
  * NOBODY SIZED (DL #75 5902570568; AIQ 5902548598: the ANY-path rule #2323 ships for limits, 5900908629).
  *
@@ -399,19 +458,7 @@ export function placeholderGoalPaths(
   }
   const out: PlaceholderGoalPath[] = [];
   for (const optionId of optionIds) {
-    const option = byId.get(optionId);
-    const iv = scoredInterventions?.get(optionId) ?? (option !== undefined ? mergeInterventionSourceObjects(option) : undefined);
-    if (iv === undefined) continue;
-    // A factor set at the level it holds moves nothing; an unknown move is read as a move (fail closed). The wire carries
-    // a level in the node's model scale or in the user's units (the egress denormalises capped factors: the scaffolded
-    // status quo "Keep £49" arrives as 49 beside a held 0.245), so it is the held level in EITHER scale.
-    const moved = Object.entries(iv).flatMap(([factorId, set]) => {
-      if (!byId.has(factorId) || !reachesGoal.has(factorId)) return [];
-      const held = levelOf(byId.get(factorId));
-      const to = interventionLevel(set);
-      const same = (a: number | undefined, b: number | undefined): boolean => a !== undefined && b !== undefined && a === b;
-      return same(to.value, held.value) || same(to.raw, held.raw) || same(to.value, held.raw) ? [] : [factorId];
-    });
+    const moved = (actualMoveSeeds(graph, [optionId], scoredInterventions).get(optionId) ?? []).filter(id => reachesGoal.has(id));
     const links: { from: string; to: string }[] = [];
     const seen = new Set<unknown>(moved);
     const queue: unknown[] = [...moved];
@@ -438,11 +485,10 @@ export function placeholderGoalWarning(
   graph: unknown,
   paths: readonly PlaceholderGoalPath[],
   code: string,
-): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; acceptable_links?: Array<{ from: string; to: string }> } {
+  productBlocks = false,
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }> } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
-  const label = (id: unknown): string => `‘${text(byId.get(id)?.label) ?? String(id)}’`;
-  const list = (xs: readonly string[]): string => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
   const cardSized = (l: { from: string; to: string }): boolean => {
     const id = byId.get(l.to)?.nonlinear_identity;
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(l.from);
@@ -461,38 +507,21 @@ export function placeholderGoalWarning(
   // Only a link INTO the goal (AIQ 5903874730; P0 PARTNER 5903857287): a placeholder out of limit-watched churn into
   // subscribers is a real mechanism whose size is unknown, so it is asked for as before; downtime → spend is the guess.
   const guessedLink = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
-  const guessed = named.filter(guessedLink);
   const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined);
-  const byTarget = new Map<string, string[]>();
-  for (const l of named) byTarget.set(l.to, [...(byTarget.get(l.to) ?? []), l.from]);
-  const phrases = [...byTarget].slice(0, 2).map(([to, froms]) =>
-    `${list(froms.slice(0, 3).map(label))}${froms.length > 3 ? ' and others' : ''} ${froms.length === 1 ? 'moves' : 'move'} ${label(to)}`);
-  const options = paths.map((p) => label(p.option_id));
-  const opts = options.length > 3 ? `${list(options.slice(0, 2))} and ${options.length - 2} more options` : list(options);
-  const verb = options.length === 1 ? 'is' : 'are';
-  const sized = phrases.length === 0 ? '' : `Olumi hasn’t sized how ${phrases.join(', or how ')}${byTarget.size > 2 ? ', and more' : ''}, so t`;
-  const ask = asked.length === 0 ? ''
-    : ` Give a figure for how ${list(asked.slice(0, 2).map((l) => `${label(l.from)} moves ${label(l.to)}`))} and Olumi will use it.`;
-  const guess = guessed.length === 0 ? ''
-    : ` Olumi only guessed that ${list(guessed.slice(0, 2).map((l) => `${label(l.from)} changes ${label(l.to)}`))}, so you aren’t asked `
-      + `to size ${guessed.length === 1 ? 'that link' : 'those links'}.`;
-  const message = `Not shown. ${sized === '' ? 'T' : sized}his run can’t say how likely ${opts} ${verb} to reach the goal, or which option does best.${ask}${guess}`;
-  const compactLabel = (id: string): string => {
-    const value = text(byId.get(id)?.label) ?? id;
-    return `‘${value.length <= 48 ? value : `${value.slice(0, 47).trimEnd()}…`}’`;
-  };
-  const fallbackAsk = asked.length === 0 ? ''
-    : ` Give a figure for how ${compactLabel(asked[0]!.from)} moves ${compactLabel(asked[0]!.to)} and Olumi will use it.`;
-  const fallbackGuess = guessed.length === 0 ? '' : ' Olumi only guessed another link; you aren’t asked to size it.';
+  const ordered = goalOrderedLinks(graph, links);
+  const labelOf = (id: string): string => text(byId.get(id)?.label) ?? id;
+  // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
+  const said = productBlocks ? unsizedLinkStatement : unsizedLinkSentence;
+  const message = said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
   return {
-    code, message: message.length <= 400 ? message
-      : `Not shown. This run can’t say how likely these options are to reach the goal: a link on the way is not sized.${fallbackAsk}${fallbackGuess}`,
+    code, message,
+    links: ordered,
     severity: 'warning',
     node_ids: [...new Set(links.flatMap((l) => [l.from, l.to]))],
     option_ids: paths.map((p) => p.option_id),
     // ⭐ DL [R2] (5930827933): the links the row may offer as ONE click, "Accept starting strength", through the
     // approval that sizes a placeholder (#2446 `approvalSizes`). Only the ones whose size can make the figure right — the
     // SAME set the sentence asks about (a levelled source, not a guessed mechanism): the offer gate (V4).
-    ...(asked.length > 0 ? { acceptable_links: asked.map((l) => ({ from: l.from, to: l.to })) } : {}),
+    ...(asked.length > 0 && !productBlocks ? { acceptable_links: asked.map((l) => ({ from: l.from, to: l.to })) } : {}),
   };
 }

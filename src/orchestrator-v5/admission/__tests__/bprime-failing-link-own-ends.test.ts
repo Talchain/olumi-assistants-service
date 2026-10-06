@@ -34,14 +34,18 @@ describe('B′ (c) names the failing link by its own two ends', () => {
     expect(v.kind).toBe('not_testable');
     if (v.kind !== 'not_testable') return;
     expect(v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Starter monthly price', link_to: 'Starter-tier monthly recurring revenue',
-      link: { from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' } }]);
+      link: { from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' }, links: [
+        { from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' },
+        { from: 'starter_subscribers', to: 'starter_tier_monthly_recurring_revenue' },
+      ] }]);
     expect(g.edges.some((e: Json) => e.from === 'starter_monthly_price' && e.to === 'monthly_recurring_revenue')).toBe(false);
   });
 
   it('d3: the readiness sentence and the B′ tail name "Starter monthly price → Starter-tier monthly recurring revenue", never a Starter monthly price → goal link', () => {
     const g = withPriceLinkSized();
     const v = targetTestabilityOf(g);
-    const link = 'a size for the link from Starter monthly price to Starter-tier monthly recurring revenue';
+    // R10 composition: P0's complete reason list; #2606's SAME first-link question below.
+    const link = 'a size for the links from Starter monthly price to Starter-tier monthly recurring revenue and from Starter subscribers to Starter-tier monthly recurring revenue';
     const sentence = notTargetTestableSentence(g, v);
     const tail = untestableTargetTail(g, v);
     expect(sentence).toBe(`Olumi can compare your options, but can't yet test them against your target (at least £150,000 / month), because it needs ${link}. `
@@ -67,7 +71,7 @@ describe('B′ (c) names the failing link by its own two ends', () => {
     const v = targetTestabilityOf(D3);
     expect(v.kind === 'not_testable' && v.failures[0]).toMatchObject({ lever: 'Existing-price increase', link_to: 'monthly recurring revenue' });
     expect(notTargetTestableSentence(D3, v)).toBe("Olumi can compare your options, but can't yet test them against your target (at least £150,000 / month), "
-      + 'because it needs a size for the link from Existing-price increase to monthly recurring revenue. '
+      + 'because it needs a size for the links from Existing-price increase to monthly recurring revenue, from Starter monthly price to Starter-tier monthly recurring revenue and from Starter subscribers to Starter-tier monthly recurring revenue. '
       + 'Roughly how much monthly recurring revenue in £/month does a change in Existing-price increase bring?');
   });
 });
