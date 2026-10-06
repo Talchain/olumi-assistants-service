@@ -81,6 +81,8 @@ export interface SaveVersionRequest {
   readonly provenance?: string;
   /** Optional write-time CAS: expected current-head identity hash. */
   readonly expected_graph_identity_hash?: string;
+  /** Server-read head; null is known absence, undefined is an uninstrumented caller. */
+  readonly expected_head_version_id?: string | null;
   /**
    * Optional caller-supplied journey event id (idempotency key). When set,
    * the RPC uses it verbatim instead of minting one keyed on the new row —
@@ -171,6 +173,12 @@ export class ModelManagementService {
         ...(request.provenance !== undefined ? { provenance: request.provenance } : {}),
         ...(request.expected_graph_identity_hash !== undefined
           ? { expected_graph_identity_hash: request.expected_graph_identity_hash }
+          : {}),
+        ...(request.expected_head_version_id !== undefined
+          ? {
+              expected_head_version_id: request.expected_head_version_id,
+              expected_working_graph_identity_hash: identity.value,
+            }
           : {}),
         ...(request.event_id !== undefined ? { event_id: request.event_id } : {}),
       }),

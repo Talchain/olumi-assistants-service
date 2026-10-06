@@ -894,6 +894,14 @@ export default async function route(app: FastifyInstance) {
 
       // The graph being versioned is the SERVER's — never the client's. A
       // `graph` field in the body is deliberately never read (see header).
+      const service = getModelManagementService();
+      // Capture the head BEFORE reading the graph. If either moves in the
+      // read-to-write interval, the version RPC refuses under its row lock.
+      const head = await service.getCurrentVersionPointer(ctx.scenarioId);
+      if (head.status === "disabled") return disabled(reply, requestId);
+      if (head.status !== "ok") {
+        return unavailable(reply, requestId, "The version could not be saved right now.");
+      }
       const store = getSessionStore();
       let currentGraph: unknown;
       try {
@@ -911,10 +919,10 @@ export default async function route(app: FastifyInstance) {
         return unavailable(reply, requestId, "The version could not be saved right now.");
       }
 
-      const service = getModelManagementService();
       const result = await service.saveVersion({
         scenario_id: ctx.scenarioId,
         graph: currentGraph,
+        expected_head_version_id: head.value,
         ...(parsedBody.data.label !== undefined ? { label: parsedBody.data.label } : {}),
         provenance: "user_save",
         ...(parsedBody.data.expected_graph_identity_hash !== undefined
