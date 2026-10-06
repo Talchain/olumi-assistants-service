@@ -38,6 +38,8 @@ import type { CandidateModel } from './admit-model.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
+import { labelHeadUnit } from './label-head-unit.js';
+import { readUnitParts, sameUnit } from './same-unit.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
@@ -1072,7 +1074,8 @@ export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_st
  * `target_units`: the link target's OWN units, read from its stored node (`ownUnitsOf`). Only these make a figure's
  * "of <denominator>" the target's own unit; the Agent's proposed unit alone never does (Integrator, #2632).
  */
-type LinkEffectScope = { readonly quantities: readonly string[]; readonly link_selected?: boolean; readonly target_units?: readonly string[] };
+type LinkEffectScope = { readonly quantities: readonly string[]; readonly link_selected?: boolean; readonly target_units?: readonly string[];
+  readonly target_unitless?: boolean; readonly source_unitless?: boolean };
 /**
  * A stored node's own units, the USER's stated reading FIRST (Science #87 6008791322 (2)), then its data unit, its
  * level's unit and its goal threshold unit. An Olumi-written reading is never one of them.
@@ -1564,6 +1567,17 @@ function linkEffectInOneSentence(
   // The target is checked even when the source change is distributive or written as levels (Codex r2 HIGH).
   const notAChange = linkEffectFigureNotAChange(q, effect, ends, scope.target_units ?? []);
   if (notAChange !== undefined) return notAChange.miss;
+  // A unitless target's proposed count unit must be this end's OWN noun beside the figure, never the other end or
+  // another quantity. This shares construction's located reader; established units still use their existing door.
+  if (scope.target_unitless === true && readUnitParts(effect.amount_unit)?.kind === 'count') {
+    const reading = labelHeadUnit(q, effect.amount, ends.target, ends.source);
+    if (reading === undefined || !sameUnit(reading.unit, effect.amount_unit)) return 'figure_of_another_quantity';
+  }
+  if (scope.source_unitless === true && effect.per_source_change_unit !== 'switch'
+    && readUnitParts(effect.per_source_change_unit)?.kind === 'count') {
+    const reading = labelHeadUnit(q, effect.per_source_change, ends.source, ends.target, true);
+    if (reading === undefined || !sameUnit(reading.unit, effect.per_source_change_unit)) return 'figure_counts_another_unit';
+  }
   if (!CHANGE_STATED.test(q)) return 'no_change_stated';
   if (scope.link_selected === true) return null;
   const quoteWords = wordsOf(q);

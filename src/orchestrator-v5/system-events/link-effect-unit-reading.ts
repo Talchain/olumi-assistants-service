@@ -11,6 +11,7 @@ import { isPercentageLevelUnit, resolveMagnitudeFrame } from '../../cee/magnitud
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectStatement } from './link-effect-edit.js';
 import { mediatorReadings } from '../agent-lane/mediator-reading.js';
+import { labelHeadUnit } from '../agent-lane/label-head-unit.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -370,13 +371,14 @@ export function prepareLinkEffectUnitReadings(
     }
     // Step 1's established size continues to govern; this door adopts units for UNSIZED ends only.
     if (establishedUnit !== undefined) continue;
-    const candidates = amounts.flatMap((a, i) => {
+    const ownNoun = labelHeadUnit(quote, value, label, String(other.label ?? other.id), node === source);
+    const candidates = ownNoun !== undefined ? [{ clause: ownNoun.source_quote, unit: ownNoun.unit }] : amounts.flatMap((a, i) => {
       if (a.magnitude !== Math.abs(value)) return [];
       const clause = clauseOf(quote, amounts, i, node, other)
         ?? (options?.link_selected === true ? selectedCurrencyClause(quote, a) : undefined);
       return clause === undefined ? [] : [{ clause, ...literalUnit(a, clause, node) }];
     });
-    const one = candidates.length === 1 ? candidates[0] : undefined;
+    const one: { clause: string; unit?: string; barePercent?: true } | undefined = candidates.length === 1 ? candidates[0] : undefined;
     const unit = one?.unit;
     if (!eligible(node, edges, from, to, unit ?? statedUnit)) continue;
     if (one?.barePercent === true) {
