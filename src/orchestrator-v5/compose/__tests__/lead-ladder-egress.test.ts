@@ -106,6 +106,9 @@ const CLASSES: Record<string, readonly string[]> = {
     'Raise to £59 produced the lowest churn.',
     'Raise to £59 delivered the highest MRR.',
     'Raise to £59 yields the highest monthly revenue.',
+    // Codex #2660 r2: a compound with a RESULT head is still a claim.
+    'Hold delivered the lowest-churn outcome.',
+    'Hold gave the highest-margin result.',
     // Desk 6b follow-up rows.
     'Raise to £59 ends up with the highest MRR.',
     'Raise to £59 resulted in the lowest churn.',

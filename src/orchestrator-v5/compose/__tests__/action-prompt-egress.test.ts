@@ -95,10 +95,13 @@ describe('controls: nothing else moves', () => {
     expect(changed).toBe(false);
     expect(response).toBe(input);
   });
-  it('CONTROL: the same verb with a RESULT still omits the chip', () => {
-    const b = blockOf(enforce(card(CLEAN_Q, 'Hold ended up with the highest MRR.'), false).response);
-    expect(b).not.toHaveProperty('action_prompt');
-  });
+  it.each(['Hold ended up with the highest MRR.', 'Hold delivered the lowest-churn outcome.', 'Hold gave the highest-margin result.'])(
+    'CONTROL: a RESULT still omits the chip (Codex #2660 r2) — %s',
+    (prompt) => {
+      const b = blockOf(enforce(card(CLEAN_Q, prompt), false).response);
+      expect(b).not.toHaveProperty('action_prompt');
+    },
+  );
   it('LICENSED: the same claim-bearing card ships byte for byte', () => {
     const input = envelope(card(CLAIM_Q, CLAIM_Q));
     const { response, changed } = enforceLeadingOptionClaimsAtWire(input, { ...OPTS, mayNameLeadingOption: true });

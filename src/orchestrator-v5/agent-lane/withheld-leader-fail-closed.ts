@@ -226,9 +226,10 @@ const PCT = String.raw`(?<![\w.])\d+(?:[.,]\d+)?\s?(?:%|per\s?cent\b)`;
 /** A factor's own likelihood VALUE, not a win share: "the current 30% product-market-fit likelihood assumption" (served survey). */
 const LIKELIHOOD_INPUT = new RegExp(String.raw`${PCT}\s+(?:[\w'-]+\s+){0,3}?likel(?:y|ihood)\s+(?:assumption|estimate|input|parameter|value|figure)s?\b`, 'gi');
 
-// Codex #2660 r1: a hyphenated compound ("the lowest-risk path", "the highest-cost assumption") or an input noun describes
-// the thing, not a result.
-const NOT_A_RESULT_SRC = String.raw`(?!-|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|assumptions?|inputs?|estimates?)\b)`;
+// Codex #2660 r1+r2: a hyphenated compound whose HEAD names the thing ("the lowest-risk path", "the highest-cost
+// assumption"), or an input noun, is not a result. A compound with a result head ("the lowest-churn outcome", "the
+// highest-margin result") is still a claim.
+const NOT_A_RESULT_SRC = String.raw`(?!-[a-z]+\s+(?:paths?|routes?|steps?|checklists?|assumptions?|inputs?|estimates?|settings?|tests?)\b|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|assumptions?|inputs?|estimates?)\b)`;
 const LOWEST_LEADER_RE = new RegExp(
   [
     String.raw`\b(?:gave|gives|give|giving|came\s+out|comes\s+out|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|shows?|showed|reach(?:es|ed)?|has|had|have|having|end(?:s|ed|ing)?\s+up\s+with|result(?:s|ed|ing)?\s+in)\s+(?:the\s+)?lowest\b${NOT_A_RESULT_SRC}`,
