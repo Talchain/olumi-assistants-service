@@ -140,6 +140,7 @@ describe('the guard\'s own conditions on the served graph (each control must not
     ['a build ran this turn (build_model_from_brief)', R18D, ['build_model_from_brief']],
     ['a span, not a change (Codex r1)', 'Compare text reminder coverage and no-shows over 12 months.', []],
     ['a sum, not a change (Codex r1)', 'We allocated £500 to investigate text reminder coverage and no-shows.', []],
+    ['the changes are about other quantities, in a clause naming neither end', 'Text reminder coverage is up and no-shows are down. Each 10 percentage point rise in staff hours cuts waiting time by about 1 point.', []],
     ['one change figure only (a level beside it)', 'Each 10 percentage point rise in text reminder coverage leaves no-shows at 8%.', []],
     ['one node + a figure', 'No-shows are about 8% of appointments today.', []],
     ['a question with no figure', 'Does text reminder coverage affect no-shows?', []],
