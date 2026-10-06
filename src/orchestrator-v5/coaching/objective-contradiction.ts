@@ -861,19 +861,22 @@ export function detectDirectionalContradiction(
 export const OBJECTIVE_LABEL_MAX_CHARS = 60;
 
 const ATTAINMENT_LEAD_IN = ' Two different questions have two different answers here: ';
-const ATTAINMENT_MIDDLE = ' scored highest against your goal most often, but ';
+// ⭐ LEAD LADDER (Science d5 #87 6008575410): the run share in the headline's own words, never "against your goal"
+// (since 6 Oct that reads as the TARGET, which is what Tail A is about).
+const ATTAINMENT_MIDDLE = ' was supported by the most runs, but ';
 const ATTAINMENT_TAIL_A = ' is more likely to reach your stated target (';
 const ATTAINMENT_TAIL_B =
-  '). Scoring highest counts how often an option scored highest on your goal, not whether your target was met.';
+  '). The share of runs counts how often an option ranked first on your goal’s measure, not whether your target was met.';
 
-const DIRECTIONAL_MIDDLE = ' scored highest against your goal most often without moving ';
+const DIRECTIONAL_MIDDLE = ' was supported by the most runs without moving ';
 
 /**
  * ⛔ THE WITHDRAWN MIDDLE — Arm A's, used whenever the goal frame is not
  * `goal_framed`.
  *
- * Only "against your goal" goes; the statistic ("scored highest most often"),
- * the labels, the percentage and every other clause of the arm are kept. The
+ * Since the lead ladder (d5 #87 6008575410) neither middle says "against your
+ * goal", so the two are the same words; the constant stays so the frame rule
+ * keeps one named seat. The
  * run could not test the goal as stated, or assumed its direction (see
  * {@link GoalFrame}), and the headline this rides on has just said so, so the
  * tail must not re-assert it. "Scored highest" stays visible to the shared
@@ -883,7 +886,7 @@ const DIRECTIONAL_MIDDLE = ' scored highest against your goal most often without
  * There is deliberately NO withdrawn middle for Arm B (R3-2): it does not ship
  * under a withdrawn frame at all.
  */
-const DIRECTIONAL_MIDDLE_UNFRAMED = ' scored highest most often without moving ';
+const DIRECTIONAL_MIDDLE_UNFRAMED = DIRECTIONAL_MIDDLE;
 const DIRECTIONAL_TAIL_A = ' the way your goal asks. Among the options that do, ';
 /**
  * ⚠⚠ THIS CLAUSE MUST NOT END IN THE HEADLINE'S OWN LEAD CLAUSE, and the first
@@ -914,7 +917,7 @@ const DIRECTIONAL_TAIL_A = ' the way your goal asks. Among the options that do, 
  * discriminating pair in the wiring spec pins it: the composed summary must be
  * REJECTED with the slot removed and ADMITTED with it present.
  */
-const DIRECTIONAL_TAIL_B = ' scored highest in ';
+const DIRECTIONAL_TAIL_B = ' was supported by ';
 const DIRECTIONAL_TAIL_C = '% of runs.';
 
 function quote(label: string): string {

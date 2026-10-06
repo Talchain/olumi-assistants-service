@@ -42,6 +42,7 @@ import type { ScenarioReader } from '../tools/handlers/run-analysis.js';
 // T1 layer 3 — the guard's own scanner, reused here as the (d)-assertion
 // instrument so the route test and the guard cannot drift apart.
 import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
+import { ANY_LEAD_CLAUSE_RE } from './support/lead-clause.support.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
@@ -784,7 +785,7 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     // The withheld headline is why the confirmation opens with the locked
     // template rather than "Hire Marketing Manager currently leads".
     expect(turn.assistantText).not.toContain('currently leads');
-    expect(turn.assistantText).not.toContain('scored highest');
+    expect(turn.assistantText).not.toMatch(ANY_LEAD_CLAUSE_RE);
   });
 });
 
@@ -1418,7 +1419,7 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
         // …and the strings themselves are off the SERIALISED bytes, not merely
         // off one parsed path.
         expect(turn.raw).not.toContain('currently leads');
-        expect(turn.raw).not.toContain('scored highest');
+        expect(turn.raw).not.toMatch(ANY_LEAD_CLAUSE_RE);
         expect(turn.raw).not.toContain('is slightly ahead');
         expect(turn.raw).not.toContain('could change the most-supported option');
         expect(turn.raw).not.toContain('slightly_ahead');

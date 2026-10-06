@@ -226,6 +226,19 @@ const PCT = String.raw`(?<![\w.])\d+(?:[.,]\d+)?\s?(?:%|per\s?cent\b)`;
 /** A factor's own likelihood VALUE, not a win share: "the current 30% product-market-fit likelihood assumption" (served survey). */
 const LIKELIHOOD_INPUT = new RegExp(String.raw`${PCT}\s+(?:[\w'-]+\s+){0,3}?likel(?:y|ihood)\s+(?:assumption|estimate|input|parameter|value|figure)s?\b`, 'gi');
 
+const NOT_A_RESULT_SRC = String.raw`(?!\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance)\b)`;
+const LOWEST_LEADER_RE = new RegExp(
+  [
+    String.raw`\b(?:gave|gives|give|giving|came\s+out|comes\s+out|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|shows?|showed|reach(?:es|ed)?|has|had|have|having)\s+(?:the\s+)?lowest\b${NOT_A_RESULT_SRC}`,
+    String.raw`\bthe\s+lowest\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)\s+by)\b`,
+    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?lowest\s+(?:under|with|for)\s+(?!(?:the\s+)?(?:current|these|this|those|that|your|our|its|their|all|any|each|every|both|most|many|some)\b)`,
+  ].join('|'),
+  'i',
+);
+/** "{X} came top", "{X} was top on MRR", "Top on MRR was {X}" (Desk 6b + DL, #2646). */
+const TOP_LEADER_RE =
+  /\b(?:came|comes|coming)\s+(?:out\s+)?top\b|\b(?:was|is|were|are)\s+(?:the\s+)?top\s+(?:on|for)\b|(?:^|[.;:!?\n]\s*)top\s+(?:on|for)\s+[^.;:!?\n]{0,48}?\b(?:was|were|is|are|came)\b/i;
+
 /**
  * Ranking language. Each entry is ONE question — "does this sentence order the options or single
  * one out?" — asked of a sentence whose idioms and ranking-shaped labels have been blanked.
@@ -269,6 +282,12 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     re: /\bstronger\s+(?:than|option|choice|case|candidate|result|outcome|performer|position|bet|path|route|contender)\b|\b(?:perform(?:s|ed|ing)?|comes?\s+out|came\s+out|looks?|scor(?:e|es|ed|ing))\s+stronger\b/i,
   },
   { code: 'highest', re: /\bhighest\b/i },
+  // The lead ladder (d5 #87 6008589328): "gave the lowest {quantity}" names a leader as "highest" does. Bound to the
+  // ladder's verb classes (Review Desk 6b + DL, #2646: any production verb or has/had, fronted "The lowest churn came
+  // from X" / passive "…was produced by X", predicative "churn was lowest under X"), so "you want the lowest churn" (an
+  // aim) and "the lowest priority" (a weighting) still pass.
+  { code: 'lowest', re: LOWEST_LEADER_RE },
+  { code: 'top', re: TOP_LEADER_RE },
   {
     code: 'higher',
     re: /\b(?:ranks?|ranked|scor(?:e|es|ed|ing)|perform(?:s|ed|ing)?|comes?\s+out|came\s+out|finish(?:es|ed)?|rated?|sits?)\s+higher\b|\b(?:produces?|produced|producing|gives?|gave|delivers?|delivered|yields?|yielded|generates?|generated|achieves?|achieved|has|had|shows?|showed|returns?|returned|reaches|reached)\s+(?:a\s+|the\s+)?higher\b|\bhigher\s+(?:(?:modelled|expected|median|mean|projected|simulated|overall|#)\s+)*(?:mrr\s+)?(?:outcomes?|results?|scores?|chances?|probabilit(?:y|ies)|likelihood|win\s+(?:rates?|shares?))\b|\bhigher\s+than\s+(?:#|(?:the\s+)?(?:other|others|alternatives?|rest|both|either|all|keeping|phasing|raising|holding|staying))\b/i,

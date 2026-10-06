@@ -305,10 +305,13 @@ export function linkEffectGaugeStatement<E extends { readonly amount: number }>(
 /** A level-less mediator end the card names, so the reading is approved, never silent (no-dead-end (B)/(C)). */
 export interface LinkEffectMediatorReading {
   readonly node_id: string;
-  readonly via: 'sized_parents' | 'gauge' | 'definitional_part';
-  /** The unit Olumi measures the mediator in (C), its one child's unit (B), or the total it is a part of (FA1). */
+  readonly via: 'sized_parents' | 'gauge' | 'definitional_part' | 'product';
+  /** The unit Olumi measures the mediator in (C), its one child's unit (B), the total it is a part of (FA1), or its operands' composed unit (FA1-3). */
   readonly unit: string;
-  /** (C) the parent link whose estimate fixes the unit; (B) the child the answer reaches through the mediator; (FA1) the total. */
+  /**
+   * (C) the parent link whose estimate fixes the unit; (B) the child the answer reaches through the mediator; (FA1) the total;
+   * (FA1-3) the product as said, its two operand labels quoted: "‘Starter subscribers’ × ‘Support cost per starter subscriber’".
+   */
   readonly other_label: string;
   /** brief3's fallback (d5 6006685510 (2)): the answer replaces Olumi's own estimate on this link. */
   readonly replaces?: true;
@@ -333,6 +336,8 @@ export function linkEffectMediatorReadings(graph: unknown, from: string, to: str
     // DL P2 (#2652): sizing the part → total link itself (an identity withdrawn, or none declared) still reads the part in
     // the total's unit, so the card says it; the writer takes the answer in that unit either way.
     out.push({ node_id: from, via: 'definitional_part', unit: source.unit, other_label: label(source.child) });
+  } else if (source?.via === 'product') {
+    out.push({ node_id: from, via: 'product', unit: source.unit, other_label: productWords(source.operands) });
   }
   const target = readings.get(to);
   if (target?.via === 'gauge') {
@@ -342,8 +347,14 @@ export function linkEffectMediatorReadings(graph: unknown, from: string, to: str
     out.push({ node_id: to, via: 'sized_parents', unit: target.unit, other_label: label(target.parents[0]!) });
   } else if (target?.via === 'definitional_part') {
     out.push({ node_id: to, via: 'definitional_part', unit: target.unit, other_label: label(target.child) });
+  } else if (target?.via === 'product') {
+    out.push({ node_id: to, via: 'product', unit: target.unit, other_label: productWords(target.operands) });
   }
   return out;
+
+  function productWords(operands: readonly [string, string]): string {
+    return `\u2018${label(operands[0])}\u2019 \u00d7 \u2018${label(operands[1])}\u2019`;
+  }
 }
 
 /**

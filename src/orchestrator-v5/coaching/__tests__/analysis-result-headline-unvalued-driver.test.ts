@@ -29,7 +29,7 @@ const NO_GOAL_CODES: Json = {
 const input = (extra: Partial<AnalysisResultHeadlineInput> = {}): AnalysisResultHeadlineInput => ({
   enrichment: NO_GOAL_CODES, leading_option_id: BLOCK['leading_option_id'] as string, status_kind: 'ok', ...extra,
 });
-const TODAY = 'Raise to £59 scored highest against your goal in 81% of runs of this model because Active paid seats is the strongest driver.';
+const TODAY = 'Raise to £59 was supported by 81% of runs of this model because Active paid seats is the strongest driver.';
 
 describe('PJ-B3 headline: an unvalued factor is never "the strongest driver"', () => {
   it('precondition: #1 is Active paid seats, with no value_source while the others carry one', () => {
@@ -43,7 +43,7 @@ describe('PJ-B3 headline: an unvalued factor is never "the strongest driver"', (
 
   it('RED: the analysed graph holds no value for Active paid seats → the clause is OMITTED (never a weaker substitute)', () => {
     const text = buildAnalysisResultHeadline(input({ unvaluedFactorIds: new Set(['active_paid_seats']) }));
-    expect(text).toBe('Raise to £59 scored highest against your goal in 81% of runs of this model.');
+    expect(text).toBe('Raise to £59 was supported by 81% of runs of this model.');
     expect(text).not.toMatch(/strongest driver/);
   });
 

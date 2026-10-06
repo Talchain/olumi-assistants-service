@@ -4,7 +4,7 @@
  * ⛔ MEASURED on deployed staging, 23 Sep, scenario `e243debd`: the brief stated
  * no numbers, the product supplied three of its four factor values (`cee_inference` /
  * `inferred`, identical across three draws), ran the analysis and reported
- * *"Hire a Tech Lead scored highest against your goal in 81% of runs"* — with no
+ * *"Hire a Tech Lead was supported by 81% of runs"* — with no
  * mention that a single number was ours.
  *
  * This applies Paul's ratified D-ask-1 ruling — *"the analysis result must never

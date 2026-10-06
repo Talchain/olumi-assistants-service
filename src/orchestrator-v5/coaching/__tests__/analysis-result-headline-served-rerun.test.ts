@@ -5,7 +5,7 @@
  * explicit rerun after the user set active seats to 1,500. Its analysis_result
  * block said:
  *
- *   "Raise Price to £50 scored highest against your goal in 84% of runs of this
+ *   "Raise Price to £50 was supported by 84% of runs of this
  *    model, but treat this as provisional: the link between Price per seat and
  *    Monthly revenue is fragile."
  *
@@ -70,11 +70,12 @@ const SERVED_HEADLINE =
   'Raise Price to £50 scored highest against your goal in 84% of runs of this model,' +
   ' but treat this as provisional: the link between Price per seat and Monthly revenue is fragile.';
 /**
- * The same goal-framed headline as TODAY's builder words it. The only difference from the served capture is the link
+ * The same headline as TODAY's builder words it: the lead ladder's rung 3 (Science d5 #87 6008589328; no goal unit on
+ * this envelope), so it makes no goal claim on any frame. The only difference from the served capture is the link
  * caution (principle audit, 5 Oct: "fragile" retired from user copy); the capture above stays byte-for-byte as served.
  */
 const CURRENT_GOAL_FRAMED_HEADLINE =
-  'Raise Price to £50 scored highest against your goal in 84% of runs of this model,' +
+  'Raise Price to £50 was supported by 84% of runs of this model,' +
   ' but treat this as provisional: it rests heavily on how much Price per seat changes Monthly revenue.';
 /** The served summary's scaffold sentence, which run-analysis.ts appends after the headline. */
 const SCAFFOLD_SENTENCE = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
@@ -82,7 +83,7 @@ const SCAFFOLD_SENTENCE = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
 const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
 /** What this envelope must now produce: the withdrawn frame plus the combined sentence (R3-1). */
 const FIXED_HEADLINE =
-  'Raise Price to £50 scored highest in 84% of runs of this model,' +
+  'Raise Price to £50 was supported by 84% of runs of this model,' +
   ' but treat this as provisional: it rests heavily on how much Price per seat changes Monthly revenue.' +
   ' In this model I’ve assumed a higher value is better for your goal,' +
   ' and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
@@ -130,14 +131,15 @@ describe('the served rerun capture (positive controls)', () => {
     expect(LEADER_CLAIM).toEqual({ permitted: true, separation: 'separated' });
   });
 
-  it('⭐ REPRODUCTION: without the DIRECTION code, today\'s builder on the trimmed envelope gives the served headline, differing only in the caution wording', () => {
+  it('⭐ REPRODUCTION: without the DIRECTION code, today\'s builder on the trimmed envelope gives the served headline, differing only in the caution wording and the lead ladder\'s opening', () => {
     const withoutDirection = withCodes(codes(ENRICHMENT).filter((c) => c !== DIRECTION));
     expect(buildAnalysisResultHeadline(input(withoutDirection))).toBe(CURRENT_GOAL_FRAMED_HEADLINE);
-    // The ONLY difference from the served bytes is the reworded caution reason.
+    // The ONLY differences from the served bytes: the reworded caution reason, and the lead ladder's rung 3 in place of
+    // the retired goal-framed opening (Science d5 #87 6008589328).
     expect(SERVED_HEADLINE.replace(
       'the link between Price per seat and Monthly revenue is fragile',
       'it rests heavily on how much Price per seat changes Monthly revenue',
-    )).toBe(CURRENT_GOAL_FRAMED_HEADLINE);
+    ).replace('scored highest against your goal in', 'was supported by')).toBe(CURRENT_GOAL_FRAMED_HEADLINE);
   });
 });
 
@@ -162,10 +164,10 @@ describe('⭐ R3-5 — the served rerun shape makes no goal claim and discloses 
   it('the composed summary (headline + the served scaffold sentence) is admitted at egress', () => {
     const composed = `${buildAnalysisResultHeadline(input(ENRICHMENT))}${SCAFFOLD_SENTENCE}`;
     expect(isAllowedRunAnalysisAssistantText(composed)).toBe(true);
-    // CONTRAST: the served summary with the disclosure appended contradicts itself and is rejected.
+    // CONTRAST: the SERVED goal-claiming lead with the disclosure appended contradicts itself and is rejected.
     expect(
       isAllowedRunAnalysisAssistantText(
-        `${CURRENT_GOAL_FRAMED_HEADLINE} In this model I’ve assumed a higher value is better for your goal,` +
+        `${SERVED_HEADLINE} In this model I’ve assumed a higher value is better for your goal,` +
           ` and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.${SCAFFOLD_SENTENCE}`,
       ),
     ).toBe(false);
@@ -179,7 +181,7 @@ describe('⭐ R3-5 — the served rerun shape makes no goal claim and discloses 
     expect(describeAnalysisHeadline(warned)).toEqual(describeAnalysisHeadline(clean));
     // The served turn permitted the leader; the fixed headline still names it.
     expect(LEADER_CLAIM['permitted']).toBe(true);
-    expect(buildAnalysisResultHeadline(warned)!.startsWith('Raise Price to £50 scored highest in 84%')).toBe(true);
+    expect(buildAnalysisResultHeadline(warned)!.startsWith('Raise Price to £50 was supported by 84%')).toBe(true);
   });
 });
 

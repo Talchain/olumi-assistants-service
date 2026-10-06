@@ -5,7 +5,7 @@
  * comment 5830649501). Served CEE c1ddb50, agent lane, the pricing brief's run
  * turn. Its `analysis_result` block said:
  *
- *   "Raise to £59 scored highest against your goal in 81% of runs of this model
+ *   "Raise to £59 was supported by 81% of runs of this model
  *    because Active paid seats is the strongest driver."
  *
  * The SAME enrichment carries two PLoT warnings on its warning channel that
@@ -167,19 +167,23 @@ const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better 
  * exact enrichment. It is also the first 125 characters of the served summary,
  * which is asserted below, so it is the wire's own text and not a transcription.
  */
-const TODAY =
+/** The SERVED bytes (capture): they keep the retired goal-framed lead they shipped with. */
+const SERVED_HEADLINE =
   'Raise to £59 scored highest against your goal in 81% of runs of this model because Active paid seats is the strongest driver.';
+/** Today's builder on the same block with no code: the lead ladder's rung 3 (no goal unit on the served records). */
+const TODAY =
+  'Raise to £59 was supported by 81% of runs of this model because Active paid seats is the strongest driver.';
 
 /**
  * What the served block must produce once the goal claim is withdrawn. It
  * carries BOTH codes and no attainment data, so the combined sentence (R3-1).
  */
 const UNTESTED =
-  'Raise to £59 scored highest in 81% of runs of this model because Active paid seats is the strongest driver.' +
+  'Raise to £59 was supported by 81% of runs of this model because Active paid seats is the strongest driver.' +
   COMBINED_DISCLOSURE;
 /** The same block with GOAL_THRESHOLD_NOT_CONVERTIBLE alone: no direction clause. */
 const UNTESTED_THRESHOLD_ONLY =
-  'Raise to £59 scored highest in 81% of runs of this model because Active paid seats is the strongest driver.' +
+  'Raise to £59 was supported by 81% of runs of this model because Active paid seats is the strongest driver.' +
   DISCLOSURE;
 
 // ============================================================================
@@ -262,7 +266,7 @@ describe('the served t2 capture (positive controls)', () => {
   });
 
   it('its served summary opens with today\'s goal-claiming headline', () => {
-    expect(SERVED_SUMMARY.startsWith(TODAY)).toBe(true);
+    expect(SERVED_SUMMARY.startsWith(SERVED_HEADLINE)).toBe(true);
   });
 });
 
@@ -275,12 +279,12 @@ describe('T1–T3 — an untestable goal is never claimed', () => {
     const text = buildAnalysisResultHeadline(served(SERVED_ENRICHMENT));
     expect(text).toBe(UNTESTED);
     expectNoGoalClaim(text!);
-    expect(text!).toContain('Raise to £59 scored highest in 81% of runs of this model');
+    expect(text!).toContain('Raise to £59 was supported by 81% of runs of this model');
     expectPassesCopyGates(text!);
   });
 
   it('T1: the served SUMMARY composition (headline + the scaffold sentence it shipped with) is admitted at egress', () => {
-    const scaffoldSentence = SERVED_SUMMARY.slice(TODAY.length);
+    const scaffoldSentence = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
     expect(scaffoldSentence).toContain('was analysed as no change');
     const text = buildAnalysisResultHeadline(served(SERVED_ENRICHMENT));
     const composed = `${text}${scaffoldSentence}`;
@@ -452,8 +456,12 @@ describe('T5 — LEADER PERMISSION: a withheld leader stays withheld, identicall
  * (GOAL_DIRECTION_UNATTESTED with attainment data), so neutrality is shown for
  * both sentence lengths.
  */
-const GOAL_FRAMED_OPENING = 'scored highest against your goal in';
-const WITHDRAWN_OPENING = 'scored highest in';
+// ⭐ LEAD LADDER (Science d5 #87 6008589328): there is no goal-framed lead left to withdraw. Every frame leads with the
+// same words (rung 3 here: no goal unit), so a code adds only its sentence, and each site's cap is moved from the
+// retired opening's reference length (35) exactly as the builder moves it.
+const GOAL_FRAMED_OPENING = 'was supported by';
+const WITHDRAWN_OPENING = GOAL_FRAMED_OPENING;
+const SITE_CAP = MAX_HEADLINE_CHARS + (GOAL_FRAMED_OPENING.length - 35);
 
 interface LeadCapSiteRow {
   readonly site: string;
@@ -486,7 +494,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
         fragile_edges: [{ from_label: 'Hiring and Salary Cost', to_label: 'Outcome', switch_probability: 0.45 }],
       },
     },
-    shed: (l) => `${l} scored highest in this model${PROVISIONAL_HIRING}`,
+    shed: (l) => `${l} was supported by the most runs of this model${PROVISIONAL_HIRING}`,
     shedCase: 'C',
   },
   {
@@ -501,7 +509,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
       factor_sensitivity: [{ label: 'Technical Leadership in Place', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: { level: 'moderate' },
     },
-    shed: (l) => `${l} scored highest in this model${DRIVER_TECH_LEAD}`,
+    shed: (l) => `${l} was supported by the most runs of this model${DRIVER_TECH_LEAD}`,
     shedCase: 'B',
   },
   {
@@ -512,7 +520,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
       { option_id: 'opt_a', option_label: l, win_probability: 0.62 },
       { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.38 },
     ],
-    shed: (l) => `${l} scored highest in this model.`,
+    shed: (l) => `${l} was supported by the most runs of this model.`,
     shedCase: 'E',
   },
   {
@@ -521,7 +529,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
     candidate: (l) =>
       `${l} ${GOAL_FRAMED_OPENING} 62% of runs of this model. Run the follow-up checks before treating this as final.`,
     records: (l) => [{ option_id: 'opt_a', option_label: l, win_probability: 0.62 }],
-    shed: (l) => `${l} scored highest in this model.`,
+    shed: (l) => `${l} was supported by the most runs of this model.`,
     shedCase: 'E',
   },
   {
@@ -575,7 +583,7 @@ const LEAD_CAP_SITES: readonly LeadCapSiteRow[] = [
     extra: {
       factor_sensitivity: [{ label: 'Launch Timing', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
     },
-    shed: (l) => `${l} scored highest in this model${PROVISIONAL_LAUNCH}`,
+    shed: (l) => `${l} was supported by the most runs of this model${PROVISIONAL_LAUNCH}`,
     shedCase: 'SC',
   },
 ];
@@ -653,7 +661,7 @@ describe('F2 — every leadCap site gives the same outcome, case and shed with a
     describe(row.site, () => {
       for (const variant of CODE_VARIANTS) {
         it(`${variant.name}: AT THE CAP the site is reached and names the leader either way`, () => {
-          const label = labelFor(row, MAX_HEADLINE_CHARS);
+          const label = labelFor(row, SITE_CAP);
           const { clean, warned } = siteInputs(row, label, variant);
           expect(buildAnalysisResultHeadline(clean)).toBe(row.candidate(label));
           expect(describeAnalysisHeadline(clean).case).toBe(row.caseAtCap);
@@ -664,7 +672,7 @@ describe('F2 — every leadCap site gives the same outcome, case and shed with a
         });
 
         it(`${variant.name}: 5 OVER the cap, the same outcome, case and shed with the codes as without`, () => {
-          const label = labelFor(row, MAX_HEADLINE_CHARS + 5);
+          const label = labelFor(row, SITE_CAP + 5);
           const { clean, warned } = siteInputs(row, label, variant);
           const cleanText = buildAnalysisResultHeadline(clean);
           // The clean run is pinned to TODAY's behaviour, so the row proves the
@@ -726,9 +734,9 @@ const PATHS: readonly PathRow[] = [
     },
     expectedCase: 'A',
     today:
-      'Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
+      'Hire One Senior Technical Lead was supported by 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.',
     untested:
-      'Hire One Senior Technical Lead scored highest in 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.' +
+      'Hire One Senior Technical Lead was supported by 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.' +
       DISCLOSURE,
   },
   {
@@ -743,9 +751,9 @@ const PATHS: readonly PathRow[] = [
     },
     expectedCase: 'B',
     today:
-      'Hire One Senior Technical Lead scored highest against your goal in 62% of runs of this model because Technical Leadership in Place is the strongest driver.',
+      'Hire One Senior Technical Lead was supported by 62% of runs of this model because Technical Leadership in Place is the strongest driver.',
     untested:
-      'Hire One Senior Technical Lead scored highest in 62% of runs of this model because Technical Leadership in Place is the strongest driver.' +
+      'Hire One Senior Technical Lead was supported by 62% of runs of this model because Technical Leadership in Place is the strongest driver.' +
       DISCLOSURE,
   },
   {
@@ -757,17 +765,17 @@ const PATHS: readonly PathRow[] = [
       ],
     },
     expectedCase: 'D',
-    today: 'Option A scored highest against your goal in 62% of runs of this model.',
-    untested: 'Option A scored highest in 62% of runs of this model.' + DISCLOSURE,
+    today: 'Option A was supported by 62% of runs of this model.',
+    untested: 'Option A was supported by 62% of runs of this model.' + DISCLOSURE,
   },
   {
     path: 'Case D, probability / single option :1214',
     enrichment: { results: [{ option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 }] },
     expectedCase: 'D',
     today:
-      'Option A scored highest against your goal in 62% of runs of this model. Run the follow-up checks before treating this as final.',
+      'Option A was supported by 62% of runs of this model. Run the follow-up checks before treating this as final.',
     untested:
-      'Option A scored highest in 62% of runs of this model. Run the follow-up checks before treating this as final.' +
+      'Option A was supported by 62% of runs of this model. Run the follow-up checks before treating this as final.' +
       DISCLOSURE,
   },
   {
@@ -780,8 +788,8 @@ const PATHS: readonly PathRow[] = [
       robustness: { near_tie: { is_tie: true } },
     },
     expectedCase: 'NT',
-    today: 'Option A scored highest against your goal in 55% of runs of this model, but the analysis treats this as a close call.',
-    untested: 'Option A scored highest in 55% of runs of this model, but the analysis treats this as a close call.' + DISCLOSURE,
+    today: 'Option A was supported by 55% of runs of this model, but the analysis treats this as a close call.',
+    untested: 'Option A was supported by 55% of runs of this model, but the analysis treats this as a close call.' + DISCLOSURE,
   },
   {
     path: 'NT close (1pp < margin < 5pp) :1272',
@@ -792,8 +800,8 @@ const PATHS: readonly PathRow[] = [
       ],
     },
     expectedCase: 'NT',
-    today: 'Option A scored highest against your goal in 45% of runs of this model, but the options are close.',
-    untested: 'Option A scored highest in 45% of runs of this model, but the options are close.' + DISCLOSURE,
+    today: 'Option A was supported by 45% of runs of this model, but the options are close.',
+    untested: 'Option A was supported by 45% of runs of this model, but the options are close.' + DISCLOSURE,
   },
   {
     path: 'NT override, winner below 0.40 :1323',
@@ -806,8 +814,8 @@ const PATHS: readonly PathRow[] = [
       robustness: { near_tie: { is_tie: true } },
     },
     expectedCase: 'NT',
-    today: 'Option A scored highest against your goal in 38% of runs of this model, but the analysis treats this as a close call.',
-    untested: 'Option A scored highest in 38% of runs of this model, but the analysis treats this as a close call.' + DISCLOSURE,
+    today: 'Option A was supported by 38% of runs of this model, but the analysis treats this as a close call.',
+    untested: 'Option A was supported by 38% of runs of this model, but the analysis treats this as a close call.' + DISCLOSURE,
   },
   {
     path: 'SC soft confidence :1407',
@@ -822,9 +830,9 @@ const PATHS: readonly PathRow[] = [
     },
     expectedCase: 'SC',
     today:
-      'Option A scored highest against your goal in 33% of runs of this model, but treat this as provisional: the result is sensitive to Launch Timing.',
+      'Option A was supported by 33% of runs of this model, but treat this as provisional: the result is sensitive to Launch Timing.',
     untested:
-      'Option A scored highest in 33% of runs of this model, but treat this as provisional: the result is sensitive to Launch Timing.' +
+      'Option A was supported by 33% of runs of this model, but treat this as provisional: the result is sensitive to Launch Timing.' +
       DISCLOSURE,
   },
   {
@@ -841,11 +849,11 @@ const PATHS: readonly PathRow[] = [
     },
     expectedCase: 'D',
     today:
-      'Option A scored highest against your goal in 62% of runs of this model. 2 options are effectively eliminated (each scored highest in less than 1% of runs).',
+      'Option A was supported by 62% of runs of this model. 2 options are effectively eliminated (each supported by under 1% of runs).',
     untested:
-      'Option A scored highest in 62% of runs of this model.' +
+      'Option A was supported by 62% of runs of this model.' +
       DISCLOSURE +
-      ' 2 options are effectively eliminated (each scored highest in less than 1% of runs).',
+      ' 2 options are effectively eliminated (each supported by under 1% of runs).',
   },
 ];
 
@@ -856,7 +864,7 @@ describe('T6 — every goal-claim path withdraws the claim when a goal code is p
 
       it('CONTROL: without a goal code the path is reached and claims the goal, exactly as today', () => {
         expect(buildAnalysisResultHeadline(clean)).toBe(row.today);
-        expect(row.today).toMatch(/scored highest against your goal in \d+% of runs of this model/);
+        expect(row.today).toMatch(/was supported by \d+% of runs of this model/);
         expect(describeAnalysisHeadline(clean).case).toBe(row.expectedCase);
       });
 
@@ -900,7 +908,7 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
         ],
       },
       'E',
-      'Option A scored highest in this model.',
+      'Option A was supported by 29% of runs of this model.',
     ],
     [
       'NT margin (<= 1pp, effectively tied)',
@@ -955,7 +963,7 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
     };
     const text = buildAnalysisResultHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'partial' });
     expect(text).toBe(
-      'Option A scored highest in 62% of runs of this model.' +
+      'Option A was supported by 62% of runs of this model.' +
         COMBINED_DISCLOSURE +
         ' The result is not yet robust — small changes could flip it.' +
         ' The run was flagged as partial — treat as provisional.',
@@ -1014,7 +1022,7 @@ const PLOT_CODE_DERIVED = JSON.parse(
   ),
 ) as { _provenance: Json; enrichment: Json };
 
-const LEAD_SENTENCE = 'Raise to £59 scored highest in 81% of runs of this model because Active paid seats is the strongest driver.';
+const LEAD_SENTENCE = 'Raise to £59 was supported by 81% of runs of this model because Active paid seats is the strongest driver.';
 
 describe('F3 — "could not test" only where it is true; otherwise a sentence with no attainment claim', () => {
   it('PRECONDITION: the served records carry neither attainment field, and each variant carries only its own', () => {
@@ -1148,7 +1156,7 @@ describe('F3 — "could not test" only where it is true; otherwise a sentence wi
     };
     const text = buildAnalysisResultHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' });
     expect(text).toBe(
-      `Option A scored highest in this model.${DIRECTION_DISCLOSURE} The result is not yet robust — small changes could flip it.`,
+      `Option A was supported by 29% of runs of this model.${DIRECTION_DISCLOSURE} The result is not yet robust — small changes could flip it.`,
     );
     expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
   });
@@ -1268,9 +1276,9 @@ describe('F4 — NON-MEMBER CONTROL: GOAL_ANCESTOR_DATA_GAP does not withdraw th
     const ancestorOnly = withGoalCodes(CAPTURE_5039CCA_ENRICHMENT, []);
     expect((ancestorOnly['inference_warnings'] as Json[]).map((w) => w['code'])).toContain('GOAL_ANCESTOR_DATA_GAP');
     const kept = buildAnalysisResultHeadline(input(ancestorOnly));
-    expect(kept).toMatch(/^Improve Engineering System scored highest against your goal in 66% of runs of this model/);
+    expect(kept).toMatch(/^Improve Engineering System was supported by 66% of runs of this model/);
     const withdrawn = buildAnalysisResultHeadline(input(CAPTURE_5039CCA_ENRICHMENT));
-    expect(withdrawn).toMatch(/^Improve Engineering System scored highest in 66% of runs of this model/);
+    expect(withdrawn).toMatch(/^Improve Engineering System was supported by 66% of runs of this model/);
     // It carries the served DIRECTION code, so the direction clause rides (R3-1).
     expect(withdrawn).toContain(DIRECTION_CLAUSE);
   });
@@ -1282,13 +1290,17 @@ describe('F4 — NON-MEMBER CONTROL: GOAL_ANCESTOR_DATA_GAP does not withdraw th
 
 describe('egress grammar — the withdrawn clause and the disclosure travel together', () => {
   it('REJECTS the goal claim WITH the disclosure (a sentence that contradicts itself)', () => {
-    expect(isAllowedRunAnalysisAssistantText(`${TODAY}${DISCLOSURE}`)).toBe(false);
-    expect(isAllowedRunAnalysisAssistantText(`${TODAY}${COMBINED_DISCLOSURE}`)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(`${SERVED_HEADLINE}${DISCLOSURE}`)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(`${SERVED_HEADLINE}${COMBINED_DISCLOSURE}`)).toBe(false);
   });
 
-  it('REJECTS the withdrawn clause WITHOUT the disclosure (the user is not told why the goal is gone)', () => {
-    expect(isAllowedRunAnalysisAssistantText(UNTESTED.slice(0, -COMBINED_DISCLOSURE.length))).toBe(false);
-    expect(isAllowedRunAnalysisAssistantText(LEAD_SENTENCE)).toBe(false);
+  // ⭐ LEAD LADDER (d5 #87 6008589328): the lead no longer claims the goal on ANY frame, so there is no withdrawn clause
+  // whose reason the user is owed — the lead is admitted with or without a disclosure. The builder still appends the
+  // disclosure whenever a code is present (T1–T3 pin the exact text).
+  it('the ladder lead makes no goal claim, so it is admitted without the disclosure too', () => {
+    expect(isAllowedRunAnalysisAssistantText(UNTESTED.slice(0, -COMBINED_DISCLOSURE.length))).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(LEAD_SENTENCE)).toBe(true);
+    expectNoGoalClaim(LEAD_SENTENCE);
   });
 
   it('⭐ R3-1: the COMBINED sentence is admitted with the withdrawn clause, alone in its slot', () => {
@@ -1319,14 +1331,14 @@ describe('egress grammar — the withdrawn clause and the disclosure travel toge
   it('REJECTS the disclosure reworded (the slot is exact)', () => {
     expect(
       isAllowedRunAnalysisAssistantText(
-        'Raise to £59 scored highest in 81% of runs of this model because Active paid seats is the strongest driver. The model could not check your goal.',
+        'Raise to £59 was supported by 81% of runs of this model because Active paid seats is the strongest driver. The model could not check your goal.',
       ),
     ).toBe(false);
   });
 
   it('the DIRECTION sentence is bound the same way: admitted with the withdrawn clause, rejected with the goal claim', () => {
     expect(isAllowedRunAnalysisAssistantText(`${LEAD_SENTENCE}${DIRECTION_DISCLOSURE}`)).toBe(true);
-    expect(isAllowedRunAnalysisAssistantText(`${TODAY}${DIRECTION_DISCLOSURE}`)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(`${SERVED_HEADLINE}${DIRECTION_DISCLOSURE}`)).toBe(false);
   });
 
   it('REJECTS both sentences together (the builder emits exactly one)', () => {

@@ -668,15 +668,17 @@ export function noDeadEndAsks(
   }
   for (const l of links) {
     const r = readings.get(l.from);
-    if (r?.via !== 'sized_parents' || r.child !== l.to || covered.has(key(l.from, l.to)) || guessed(l)) continue;
+    // FA1-3 (DL, 6 Oct): a product source is measured in its operands' composed unit, the same reading the writer takes.
+    if ((r?.via !== 'sized_parents' && r?.via !== 'product') || r.child !== l.to || covered.has(key(l.from, l.to)) || guessed(l)) continue;
     // FA1 (Science d5): a child with no unit of its own that is a definitional part of its total is asked in that unit,
     // the same reading the writer takes the answer in.
     const partOf = readings.get(l.to);
     const childUnit = unitOfNode(l.to) ?? (partOf?.via === 'definitional_part' ? partOf.unit : undefined);
     if (childUnit === undefined) continue;
     first ??= { kind: 'link', from: l.from, to: l.to };
+    const why = r.via === 'product' ? `as ${q(r.operands[0])} \u00d7 ${q(r.operands[1])}` : `from its own estimate of the link from ${q(r.parents[0]!)}`;
     sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
-      + ` Olumi measures ${q(l.from)} in ${r.unit}, from its own estimate of the link from ${q(r.parents[0]!)}; correct that if it\u2019s wrong.`
+      + ` Olumi measures ${q(l.from)} in ${r.unit}, ${why}; correct that if it\u2019s wrong.`
       + ` Roughly how much does ${sourceChangeWords(q(l.from), r.unit, isTwoStateSource(nodes, l.from, r.unit)).eachOf} change ${q(l.to)}, in ${childUnit}?`));
     covered.add(key(l.from, l.to));
   }

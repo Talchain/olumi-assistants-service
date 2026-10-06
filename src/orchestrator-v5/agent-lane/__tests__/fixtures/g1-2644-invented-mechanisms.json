@@ -1,0 +1,1936 @@
+{
+ "_source": "pd acceptance/successor-20261005 @22fe54b8 output/acceptance-successor-20261005/final/g1-2644/draft-{1,2,4}/wire (e7 G1-2644, CEE 5f8f24ce): each draft_graph read back into the drafter candidate it registered from (labels, units, links, sizes, provenance marks, identities).",
+ "brief": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £126,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.",
+ "draft-1": {
+  "goal": {
+   "metric": "monthly recurring revenue",
+   "operator": ">=",
+   "target_stated": true,
+   "frame": "level",
+   "value": 126000,
+   "unit": "£/month",
+   "horizon_months": 9,
+   "provenance": "explicit",
+   "baseline_known": true,
+   "baseline_value": 120000,
+   "baseline_provenance": "explicit",
+   "scope": null
+  },
+  "constraints": [],
+  "options": [
+   {
+    "label": "Raise prices 10%",
+    "provenance": "explicit",
+    "is_status_quo": null,
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Price rise",
+      "value": 10,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "explicit"
+     }
+    ]
+   },
+   {
+    "label": "Launch £49 starter tier",
+    "provenance": "explicit",
+    "is_status_quo": null,
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Starter tier price",
+      "value": 49,
+      "value_kind": "absolute",
+      "unit": "£ per subscriber per month",
+      "provenance": "ai_proposed"
+     },
+     {
+      "factor_label": "Starter subscribers",
+      "value": 150,
+      "value_kind": "absolute",
+      "unit": "subscribers",
+      "provenance": "ai_proposed"
+     }
+    ]
+   },
+   {
+    "label": "Keep pricing as it is",
+    "provenance": "explicit",
+    "is_status_quo": true,
+    "changes": [],
+    "interventions": []
+   }
+  ],
+  "factors": [
+   {
+    "label": "Price rise",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "explicit",
+    "plausible_max": 100
+   },
+   {
+    "label": "Starter tier price",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "£ per subscriber per month",
+    "provenance": "inferred",
+    "plausible_max": 200
+   },
+   {
+    "label": "Starter subscribers",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "subscribers",
+    "provenance": "inferred",
+    "plausible_max": 1000
+   },
+   {
+    "label": "Support cost per starter subscriber",
+    "role": "external",
+    "baseline_known": true,
+    "baseline_value": 6,
+    "unit": "£ per subscriber per month",
+    "provenance": "explicit",
+    "plausible_max": 50
+   }
+  ],
+  "risks": [
+   {
+    "label": "Starter-tier service degradation",
+    "provenance": "inferred",
+    "unit": null,
+    "plausible_max": null
+   }
+  ],
+  "outcomes": [
+   {
+    "label": "Customers lost from price rise",
+    "provenance": "explicit",
+    "unit": "customers",
+    "plausible_max": 400
+   },
+   {
+    "label": "Starter tier monthly recurring revenue",
+    "provenance": "inferred",
+    "unit": "£/month",
+    "plausible_max": 100000
+   },
+   {
+    "label": "Starter support cost",
+    "provenance": "explicit",
+    "unit": null,
+    "plausible_max": null
+   }
+  ],
+  "links": [
+   {
+    "from": "Price rise",
+    "to": "monthly recurring revenue",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": 1200,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   },
+   {
+    "from": "Price rise",
+    "to": "Customers lost from price rise",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": 2,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   },
+   {
+    "from": "Customers lost from price rise",
+    "to": "monthly recurring revenue",
+    "direction": "negative",
+    "provenance": "explicit",
+    "effect_amount": -300,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   },
+   {
+    "from": "Starter tier price",
+    "to": "Starter tier monthly recurring revenue",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   },
+   {
+    "from": "Starter subscribers",
+    "to": "Starter tier monthly recurring revenue",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   },
+   {
+    "from": "Starter tier monthly recurring revenue",
+    "to": "monthly recurring revenue",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": 1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed",
+    "definitional": true
+   },
+   {
+    "from": "Starter subscribers",
+    "to": "Starter support cost",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   },
+   {
+    "from": "Support cost per starter subscriber",
+    "to": "Starter support cost",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   },
+   {
+    "from": "Starter support cost",
+    "to": "Starter-tier service degradation",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   },
+   {
+    "from": "Starter-tier service degradation",
+    "to": "monthly recurring revenue",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   }
+  ],
+  "identities": [
+   {
+    "outcome": "Starter tier monthly recurring revenue",
+    "operation": "product",
+    "factors": [
+     "Starter tier price",
+     "Starter subscribers"
+    ],
+    "provenance": "inferred"
+   },
+   {
+    "outcome": "Starter support cost",
+    "operation": "product",
+    "factors": [
+     "Starter subscribers",
+     "Support cost per starter subscriber"
+    ],
+    "provenance": "explicit"
+   }
+  ],
+  "unknowns": [],
+  "decision_question": null
+ },
+ "draft-2": {
+  "goal": {
+   "metric": "monthly recurring revenue",
+   "operator": ">=",
+   "target_stated": true,
+   "frame": "level",
+   "value": 126000,
+   "unit": "£/month",
+   "horizon_months": 9,
+   "provenance": "explicit",
+   "baseline_known": true,
+   "baseline_value": 120000,
+   "baseline_provenance": "explicit",
+   "scope": null
+  },
+  "constraints": [],
+  "options": [
+   {
+    "label": "Raise prices 10%",
+    "provenance": "explicit",
+    "is_status_quo": null,
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Price rise",
+      "value": 10,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "explicit"
+     }
+    ]
+   },
+   {
+    "label": "Launch starter tier",
+    "provenance": "explicit",
+    "is_status_quo": null,
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Starter tier subscribers",
+      "value": 150,
+      "value_kind": "absolute",
+      "unit": "subscribers",
+      "provenance": "explicit"
+     }
+    ]
+   },
+   {
+    "label": "Keep pricing as it is",
+    "provenance": "explicit",
+    "is_status_quo": true,
+    "changes": [],
+    "interventions": []
+   }
+  ],
+  "factors": [
+   {
+    "label": "Price rise",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "explicit",
+    "plausible_max": 100
+   },
+   {
+    "label": "Starter tier subscribers",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "subscribers",
+    "provenance": "explicit",
+    "plausible_max": 1000
+   }
+  ],
+  "risks": [
+   {
+    "label": "MRR lost to starter cannibalisation",
+    "provenance": "inferred",
+    "unit": "£/month",
+    "plausible_max": 50000
+   }
+  ],
+  "outcomes": [
+   {
+    "label": "Customers lost to price rise",
+    "provenance": "explicit",
+    "unit": "customers",
+    "plausible_max": 500
+   },
+   {
+    "label": "Starter-tier support cost",
+    "provenance": "explicit",
+    "unit": "£/month",
+    "plausible_max": 10000
+   }
+  ],
+  "links": [
+   {
+    "from": "Price rise",
+    "to": "monthly recurring revenue",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": 1200,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   },
+   {
+    "from": "Price rise",
+    "to": "Customers lost to price rise",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": 2,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   },
+   {
+    "from": "Customers lost to price rise",
+    "to": "monthly recurring revenue",
+    "direction": "negative",
+    "provenance": "explicit",
+    "effect_amount": -300,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   },
+   {
+    "from": "Starter tier subscribers",
+    "to": "monthly recurring revenue",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": 49,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   },
+   {
+    "from": "Starter tier subscribers",
+    "to": "Starter-tier support cost",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": 6,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   },
+   {
+    "from": "Starter-tier support cost",
+    "to": "monthly recurring revenue",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   },
+   {
+    "from": "Starter tier subscribers",
+    "to": "MRR lost to starter cannibalisation",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null
+   },
+   {
+    "from": "MRR lost to starter cannibalisation",
+    "to": "monthly recurring revenue",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": -1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed",
+    "definitional": true
+   }
+  ],
+  "identities": [],
+  "unknowns": [],
+  "decision_question": null
+ },
+ "draft-4": {
+  "goal": {
+   "metric": "monthly recurring revenue",
+   "operator": ">=",
+   "target_stated": true,
+   "frame": "level",
+   "value": 126000,
+   "unit": "£/month",
+   "horizon_months": 9,
+   "provenance": "explicit",
+   "baseline_known": true,
+   "baseline_value": 120000,
+   "baseline_provenance": "explicit",
+   "scope": null
+  },
+  "constraints": [],
+  "options": [
+   {
+    "label": "Raise prices 10%",
+    "provenance": "explicit",
+    "is_status_quo": null,
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Price rise",
+      "value": 10,
+      "value_kind": "absolute",
+      "unit": "%",
+      "provenance": "explicit"
+     }
+    ]
+   },
+   {
+    "label": "Launch starter tier",
+    "provenance": "explicit",
+    "is_status_quo": null,
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Starter-tier subscribers",
+      "value": 150,
+      "value_kind": "absolute",
+      "unit": "subscribers",
+      "provenance": "explicit"
+     }
+    ]
+   },
+   {
+    "label": "Keep pricing as it is",
+    "provenance": "explicit",
+    "is_status_quo": true,
+    "changes": [],
+    "interventions": []
+   }
+  ],
+  "factors": [
+   {
+    "label": "Price rise",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "%",
+    "provenance": "explicit",
+    "plausible_max": 100
+   },
+   {
+    "label": "Starter-tier subscribers",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "subscribers",
+    "provenance": "explicit",
+    "plausible_max": 1000
+   }
+  ],
+  "risks": [
+   {
+    "label": "MRR lost to price-driven churn",
+    "provenance": "inferred",
+    "unit": "£/month",
+    "plausible_max": 120000
+   }
+  ],
+  "outcomes": [],
+  "links": [
+   {
+    "from": "Price rise",
+    "to": "monthly recurring revenue",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": 1200,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   },
+   {
+    "from": "Price rise",
+    "to": "MRR lost to price-driven churn",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": 600,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed"
+   },
+   {
+    "from": "MRR lost to price-driven churn",
+    "to": "monthly recurring revenue",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": -1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "ai_proposed",
+    "definitional": true
+   },
+   {
+    "from": "Starter-tier subscribers",
+    "to": "monthly recurring revenue",
+    "direction": "positive",
+    "provenance": "explicit",
+    "effect_amount": 49,
+    "effect_per_source_change": 1,
+    "effect_provenance": "explicit"
+   }
+  ],
+  "identities": [],
+  "unknowns": [],
+  "decision_question": null
+ },
+ "corpus": {
+  "dental-awareness": {
+   "where": "rt:nde-2623/nde3-run.resp.txt",
+   "brief": "We run a group of 12 dental clinics. Too many patients miss their appointments without warning, and we want no-shows to fall. We are choosing between (A) sending text reminders 48 hours before each appointment, (B) charging a £20 fee for a missed appointment, or (C) letting patients reschedule themselves online. Our front-desk staff think reminders would make the biggest difference.",
+   "candidate": {
+    "goal": {
+     "metric": "no-shows",
+     "operator": ">=",
+     "target_stated": false,
+     "frame": "level",
+     "value": null,
+     "unit": "% of appointments",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "baseline_known": true,
+     "baseline_value": 8,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "48-hour text reminders",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "48-hour text-reminder coverage",
+        "value": 100,
+        "value_kind": "absolute",
+        "unit": "% of appointments",
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "£20 no-show charge",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "No-show charge",
+        "value": 20,
+        "value_kind": "absolute",
+        "unit": "GBP per missed appointment",
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "Online self-rescheduling",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Online self-rescheduling availability",
+        "value": 90,
+        "value_kind": "absolute",
+        "unit": "% of appointments",
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "Current approach",
+      "provenance": "inferred",
+      "is_status_quo": true,
+      "changes": [],
+      "interventions": []
+     }
+    ],
+    "factors": [
+     {
+      "label": "48-hour text-reminder coverage",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "% of appointments",
+      "provenance": "inferred",
+      "plausible_max": 100
+     },
+     {
+      "label": "No-show charge",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "GBP per missed appointment",
+      "provenance": "inferred",
+      "plausible_max": 100
+     },
+     {
+      "label": "Online self-rescheduling availability",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "% of appointments",
+      "provenance": "inferred",
+      "plausible_max": 100
+     },
+     {
+      "label": "Appointment awareness",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 70,
+      "unit": "score out of 100",
+      "provenance": "inferred",
+      "plausible_max": 100
+     }
+    ],
+    "risks": [
+     {
+      "label": "Patient dissatisfaction from charges",
+      "provenance": "inferred",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Appointments rescheduled before slot",
+      "provenance": "inferred",
+      "unit": "% of appointments",
+      "plausible_max": 100
+     }
+    ],
+    "links": [
+     {
+      "from": "48-hour text-reminder coverage",
+      "to": "Appointment awareness",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 7,
+      "effect_per_source_change": 10,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Appointment awareness",
+      "to": "no-shows",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "No-show charge",
+      "to": "no-shows",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "No-show charge",
+      "to": "Patient dissatisfaction from charges",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Patient dissatisfaction from charges",
+      "to": "no-shows",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Online self-rescheduling availability",
+      "to": "Appointments rescheduled before slot",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 0.6,
+      "effect_per_source_change": 10,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Appointments rescheduled before slot",
+      "to": "no-shows",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     }
+    ],
+    "identities": [],
+    "unknowns": [],
+    "decision_question": null
+   }
+  },
+  "investor-deals-won": {
+   "where": "acc:final/cut5-investor-stg4/wire/turn-003-1791251986164.json",
+   "brief": "We are a B2B SaaS company with £2.4M quarterly revenue. Option A: build the AI reporting module — enterprise prospects tell us it would lift our enterprise win rate from 20% to about 30%. Option B: fix the integration-step bug — about 30% of trial users abandon at that step today, and fixing it should roughly halve that. Option C: carry on with the current roadmap. Goal: grow quarterly revenue to £2.8M.",
+   "candidate": {
+    "goal": {
+     "metric": "quarterly revenue",
+     "operator": ">=",
+     "target_stated": true,
+     "frame": "level",
+     "value": 2800000,
+     "unit": "GBP/quarter",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "baseline_known": true,
+     "baseline_value": 2400000,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Build AI reporting module",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "AI reporting build duration",
+        "value": 8,
+        "value_kind": "absolute",
+        "unit": "weeks",
+        "provenance": "ai_proposed"
+       },
+       {
+        "factor_label": "AI reporting module availability",
+        "value": null,
+        "value_kind": "absolute",
+        "unit": null,
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "Fix integration-step bug",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Integration-step bug fixed",
+        "value": null,
+        "value_kind": "absolute",
+        "unit": null,
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "Current roadmap",
+      "provenance": "explicit",
+      "is_status_quo": true,
+      "changes": [],
+      "interventions": []
+     }
+    ],
+    "factors": [
+     {
+      "label": "AI reporting module availability",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "binary",
+      "provenance": "inferred",
+      "plausible_max": 1000
+     },
+     {
+      "label": "AI reporting build duration",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "weeks",
+      "provenance": "inferred",
+      "plausible_max": 52
+     },
+     {
+      "label": "Enterprise win rate",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_value": 20,
+      "unit": "%",
+      "provenance": "explicit",
+      "plausible_max": 100
+     },
+     {
+      "label": "Enterprise prospects",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 40,
+      "unit": "prospects/quarter",
+      "provenance": "inferred",
+      "plausible_max": 500
+     },
+     {
+      "label": "Integration-step bug fixed",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "binary",
+      "provenance": "inferred",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Trial abandonment at integration step",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_value": 30,
+      "unit": "%",
+      "provenance": "explicit",
+      "plausible_max": 100
+     },
+     {
+      "label": "Trial users",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 1000,
+      "unit": "trial users/quarter",
+      "provenance": "inferred",
+      "plausible_max": 10000
+     }
+    ],
+    "risks": [
+     {
+      "label": "Revenue lost to AI reporting delay",
+      "provenance": "inferred",
+      "unit": "GBP/quarter",
+      "plausible_max": 500000
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Enterprise deals won",
+      "provenance": "inferred",
+      "unit": "deals/quarter",
+      "plausible_max": 200
+     },
+     {
+      "label": "Trial users completing integration",
+      "provenance": "inferred",
+      "unit": "trial users/quarter",
+      "plausible_max": 10000
+     }
+    ],
+    "links": [
+     {
+      "from": "AI reporting module availability",
+      "to": "Enterprise win rate",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 10,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Enterprise prospects",
+      "to": "Enterprise deals won",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 0.2,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Enterprise win rate",
+      "to": "Enterprise deals won",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 0.4,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Enterprise deals won",
+      "to": "quarterly revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Integration-step bug fixed",
+      "to": "Trial abandonment at integration step",
+      "direction": "negative",
+      "provenance": "explicit",
+      "effect_amount": -15,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Trial abandonment at integration step",
+      "to": "Trial users completing integration",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": -10,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Trial users",
+      "to": "Trial users completing integration",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 0.7,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Trial users completing integration",
+      "to": "quarterly revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "AI reporting build duration",
+      "to": "Revenue lost to AI reporting delay",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Revenue lost to AI reporting delay",
+      "to": "quarterly revenue",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": -1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed",
+      "definitional": true
+     }
+    ],
+    "identities": [],
+    "unknowns": [],
+    "decision_question": null
+   }
+  },
+  "t1b-higher-churn": {
+   "where": "acc:final/g1-2633t/draft-3/wire/turn-007-1791258932632.json",
+   "brief": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £126,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.",
+   "candidate": {
+    "goal": {
+     "metric": "monthly recurring revenue",
+     "operator": ">=",
+     "target_stated": true,
+     "frame": "level",
+     "value": 126000,
+     "unit": "£/month",
+     "horizon_months": 9,
+     "provenance": "explicit",
+     "baseline_known": true,
+     "baseline_value": 120000,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Raise prices 10%",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Price rise from current level",
+        "value": 10,
+        "value_kind": "absolute",
+        "unit": "%",
+        "provenance": "explicit"
+       }
+      ]
+     },
+     {
+      "label": "Launch starter tier",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Starter tier price",
+        "value": 49,
+        "value_kind": "absolute",
+        "unit": "£ per starter subscriber per month",
+        "provenance": "explicit"
+       },
+       {
+        "factor_label": "Starter tier active",
+        "value": null,
+        "value_kind": "absolute",
+        "unit": null,
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "Keep pricing as it is",
+      "provenance": "explicit",
+      "is_status_quo": true,
+      "changes": [],
+      "interventions": []
+     }
+    ],
+    "factors": [
+     {
+      "label": "Price rise from current level",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "%",
+      "provenance": "inferred",
+      "plausible_max": 100
+     },
+     {
+      "label": "Starter tier active",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "binary",
+      "provenance": "inferred",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Starter tier price",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "£ per starter subscriber per month",
+      "provenance": "inferred",
+      "plausible_max": 200
+     }
+    ],
+    "risks": [
+     {
+      "label": "Higher-than-expected price-rise churn",
+      "provenance": "inferred",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Customers lost after price rise",
+      "provenance": "explicit",
+      "unit": "customers",
+      "plausible_max": 500
+     },
+     {
+      "label": "Starter subscribers",
+      "provenance": "explicit",
+      "unit": "subscribers",
+      "plausible_max": 500
+     },
+     {
+      "label": "Starter tier monthly recurring revenue",
+      "provenance": "inferred",
+      "unit": "£/month",
+      "plausible_max": 50000
+     }
+    ],
+    "links": [
+     {
+      "from": "Price rise from current level",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1200,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Price rise from current level",
+      "to": "Customers lost after price rise",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 2,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Customers lost after price rise",
+      "to": "monthly recurring revenue",
+      "direction": "negative",
+      "provenance": "explicit",
+      "effect_amount": -300,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Price rise from current level",
+      "to": "Higher-than-expected price-rise churn",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Higher-than-expected price-rise churn",
+      "to": "monthly recurring revenue",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Starter tier active",
+      "to": "Starter subscribers",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 150,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Starter subscribers",
+      "to": "Starter tier monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Starter tier price",
+      "to": "Starter tier monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Starter tier monthly recurring revenue",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed",
+      "definitional": true
+     }
+    ],
+    "identities": [],
+    "unknowns": [],
+    "decision_question": null
+   }
+  },
+  "t1b-starter-mrr-49": {
+   "where": "acc:final/g1-fa9f/draft-7/wire/turn-003-1791254244685.json",
+   "brief": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £126,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.",
+   "candidate": {
+    "goal": {
+     "metric": "monthly recurring revenue",
+     "operator": ">=",
+     "target_stated": true,
+     "frame": "level",
+     "value": 126000,
+     "unit": "£/month",
+     "horizon_months": 9,
+     "provenance": "explicit",
+     "baseline_known": true,
+     "baseline_value": 120000,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Raise prices 10%",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Price rise",
+        "value": 10,
+        "value_kind": "absolute",
+        "unit": "%",
+        "provenance": "explicit"
+       }
+      ]
+     },
+     {
+      "label": "Launch £49 starter tier",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Starter tier launched",
+        "value": null,
+        "value_kind": "absolute",
+        "unit": null,
+        "provenance": "explicit"
+       },
+       {
+        "factor_label": "Starter tier monthly price",
+        "value": 49,
+        "value_kind": "absolute",
+        "unit": "£ per subscriber per month",
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "Keep pricing as it is",
+      "provenance": "explicit",
+      "is_status_quo": true,
+      "changes": [],
+      "interventions": []
+     }
+    ],
+    "factors": [
+     {
+      "label": "Existing customers",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_value": 400,
+      "unit": "customers",
+      "provenance": "explicit",
+      "plausible_max": 2000
+     },
+     {
+      "label": "Price rise",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "%",
+      "provenance": "explicit",
+      "plausible_max": 100
+     },
+     {
+      "label": "Starter tier launched",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "0/1",
+      "provenance": "inferred",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Starter tier monthly price",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "£ per subscriber per month",
+      "provenance": "inferred",
+      "plausible_max": 200
+     }
+    ],
+    "risks": [
+     {
+      "label": "Customers lost from price rise",
+      "provenance": "explicit",
+      "unit": "customers",
+      "plausible_max": 400
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Starter subscribers",
+      "provenance": "explicit",
+      "unit": "subscribers",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Starter-tier MRR",
+      "provenance": "inferred",
+      "unit": "£/month",
+      "plausible_max": 100000
+     }
+    ],
+    "links": [
+     {
+      "from": "Existing customers",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Price rise",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1200,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Price rise",
+      "to": "Customers lost from price rise",
+      "direction": "negative",
+      "provenance": "explicit",
+      "effect_amount": -2,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Customers lost from price rise",
+      "to": "monthly recurring revenue",
+      "direction": "negative",
+      "provenance": "explicit",
+      "effect_amount": -300,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Starter tier launched",
+      "to": "Starter subscribers",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 150,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Starter tier monthly price",
+      "to": "Starter-tier MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Starter subscribers",
+      "to": "Starter-tier MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Starter-tier MRR",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed",
+      "definitional": true
+     }
+    ],
+    "identities": [],
+    "unknowns": [],
+    "decision_question": null
+   }
+  },
+  "t1b-1200-written": {
+   "where": "acc:final/cut5-g1-t1b-prod-wire/turn-004-1791263446536.json",
+   "brief": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £126,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.",
+   "candidate": {
+    "goal": {
+     "metric": "monthly recurring revenue",
+     "operator": ">=",
+     "target_stated": true,
+     "frame": "level",
+     "value": 126000,
+     "unit": "£/month",
+     "horizon_months": 9,
+     "provenance": "explicit",
+     "baseline_known": true,
+     "baseline_value": 120000,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Raise prices 10%",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Price increase",
+        "value": 10,
+        "value_kind": "absolute",
+        "unit": "%",
+        "provenance": "explicit"
+       }
+      ]
+     },
+     {
+      "label": "Launch £49 starter tier",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Starter tier price",
+        "value": 49,
+        "value_kind": "absolute",
+        "unit": "£ per subscriber per month",
+        "provenance": "ai_proposed"
+       },
+       {
+        "factor_label": "Starter tier available",
+        "value": null,
+        "value_kind": "absolute",
+        "unit": null,
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "Keep pricing as it is",
+      "provenance": "explicit",
+      "is_status_quo": true,
+      "changes": [],
+      "interventions": []
+     }
+    ],
+    "factors": [
+     {
+      "label": "Price increase",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "%",
+      "provenance": "explicit",
+      "plausible_max": 100
+     },
+     {
+      "label": "Starter tier available",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "0/1",
+      "provenance": "inferred",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Starter tier price",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "£ per subscriber per month",
+      "provenance": "inferred",
+      "plausible_max": 200
+     }
+    ],
+    "risks": [
+     {
+      "label": "Support capacity strain",
+      "provenance": "inferred",
+      "unit": null,
+      "plausible_max": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Price-rise customer losses",
+      "provenance": "explicit",
+      "unit": "customers",
+      "plausible_max": 500
+     },
+     {
+      "label": "Incremental price-rise MRR",
+      "provenance": "explicit",
+      "unit": "£/month",
+      "plausible_max": 250000
+     },
+     {
+      "label": "Starter-tier subscribers",
+      "provenance": "explicit",
+      "unit": "subscribers",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Starter-tier MRR",
+      "provenance": "explicit",
+      "unit": "£/month",
+      "plausible_max": 100000
+     },
+     {
+      "label": "Starter support cost",
+      "provenance": "explicit",
+      "unit": "£/month",
+      "plausible_max": 10000
+     }
+    ],
+    "links": [
+     {
+      "from": "Price increase",
+      "to": "Incremental price-rise MRR",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1200,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Price increase",
+      "to": "Price-rise customer losses",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 2,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Price-rise customer losses",
+      "to": "monthly recurring revenue",
+      "direction": "negative",
+      "provenance": "explicit",
+      "effect_amount": -300,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Incremental price-rise MRR",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Starter tier available",
+      "to": "Starter-tier subscribers",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 150,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Starter tier price",
+      "to": "Starter-tier MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Starter-tier subscribers",
+      "to": "Starter-tier MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Starter-tier MRR",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed",
+      "definitional": true
+     },
+     {
+      "from": "Starter-tier subscribers",
+      "to": "Starter support cost",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 6,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit"
+     },
+     {
+      "from": "Starter support cost",
+      "to": "Support capacity strain",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Support capacity strain",
+      "to": "monthly recurring revenue",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     }
+    ],
+    "identities": [
+     {
+      "outcome": "Starter-tier MRR",
+      "operation": "product",
+      "factors": [
+       "Starter-tier subscribers",
+       "Starter tier price"
+      ],
+      "provenance": "explicit"
+     }
+    ],
+    "unknowns": [],
+    "decision_question": null
+   }
+  },
+  "investor-deals-won-2": {
+   "where": "acc:final/cut6-investor-s5t-stg3/wire/turn-007-1791268237656.json",
+   "brief": "We are a B2B SaaS company with £2.4M quarterly revenue. Option A: build the AI reporting module — enterprise prospects tell us it would lift our enterprise win rate from 20% to about 30%. Option B: fix the integration-step bug — about 30% of trial users abandon at that step today, and fixing it should roughly halve that. Option C: carry on with the current roadmap. Goal: grow quarterly revenue to £2.8M.",
+   "candidate": {
+    "goal": {
+     "metric": "quarterly revenue",
+     "operator": ">=",
+     "target_stated": true,
+     "frame": "level",
+     "value": 2800000,
+     "unit": "£/quarter",
+     "horizon_months": null,
+     "provenance": "explicit",
+     "baseline_known": true,
+     "baseline_value": 2400000,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Build AI reporting module",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "AI reporting build effort",
+        "value": 1000,
+        "value_kind": "absolute",
+        "unit": "hours",
+        "provenance": "ai_proposed"
+       },
+       {
+        "factor_label": "AI reporting module available",
+        "value": null,
+        "value_kind": "absolute",
+        "unit": null,
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "Fix integration-step bug",
+      "provenance": "explicit",
+      "is_status_quo": null,
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Integration-step bug fixed",
+        "value": null,
+        "value_kind": "absolute",
+        "unit": null,
+        "provenance": "ai_proposed"
+       }
+      ]
+     },
+     {
+      "label": "Current roadmap",
+      "provenance": "explicit",
+      "is_status_quo": true,
+      "changes": [],
+      "interventions": []
+     }
+    ],
+    "factors": [
+     {
+      "label": "AI reporting build effort",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "hours",
+      "provenance": "inferred",
+      "plausible_max": 2000
+     },
+     {
+      "label": "AI reporting module available",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "binary",
+      "provenance": "inferred",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Integration-step bug fixed",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "binary",
+      "provenance": "inferred",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Enterprise win rate",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_value": 20,
+      "unit": "%",
+      "provenance": "explicit",
+      "plausible_max": 100
+     },
+     {
+      "label": "Enterprise prospects per quarter",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 20,
+      "unit": "prospects/quarter",
+      "provenance": "inferred",
+      "plausible_max": 100
+     },
+     {
+      "label": "Integration-step abandonment rate",
+      "role": "observable",
+      "baseline_known": true,
+      "baseline_value": 30,
+      "unit": "%",
+      "provenance": "explicit",
+      "plausible_max": 100
+     },
+     {
+      "label": "Trial users per quarter",
+      "role": "observable",
+      "baseline_known": false,
+      "baseline_value": 1000,
+      "unit": "trial users/quarter",
+      "provenance": "inferred",
+      "plausible_max": 5000
+     }
+    ],
+    "risks": [
+     {
+      "label": "Quarterly revenue lost to AI delivery shortfall",
+      "provenance": "inferred",
+      "unit": "£/quarter",
+      "plausible_max": 400000
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Enterprise deals won",
+      "provenance": "inferred",
+      "unit": "deals/quarter",
+      "plausible_max": 50
+     },
+     {
+      "label": "Trial users retained past integration",
+      "provenance": "inferred",
+      "unit": "trial users/quarter",
+      "plausible_max": 5000
+     }
+    ],
+    "links": [
+     {
+      "from": "AI reporting build effort",
+      "to": "AI reporting module available",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "AI reporting build effort",
+      "to": "Quarterly revenue lost to AI delivery shortfall",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 20000,
+      "effect_per_source_change": 1000,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "AI reporting module available",
+      "to": "Enterprise win rate",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 10,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "AI reporting module available",
+      "to": "Quarterly revenue lost to AI delivery shortfall",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null
+     },
+     {
+      "from": "Integration-step bug fixed",
+      "to": "Integration-step abandonment rate",
+      "direction": "negative",
+      "provenance": "explicit",
+      "effect_amount": -15,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Enterprise win rate",
+      "to": "Enterprise deals won",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 0.2,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Enterprise prospects per quarter",
+      "to": "Enterprise deals won",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 0.2,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Integration-step abandonment rate",
+      "to": "Trial users retained past integration",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": -10,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Trial users per quarter",
+      "to": "Trial users retained past integration",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 0.7,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Enterprise deals won",
+      "to": "quarterly revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 40000,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Trial users retained past integration",
+      "to": "quarterly revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 500,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed"
+     },
+     {
+      "from": "Quarterly revenue lost to AI delivery shortfall",
+      "to": "quarterly revenue",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": -1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "ai_proposed",
+      "definitional": true
+     }
+    ],
+    "identities": [],
+    "unknowns": [],
+    "decision_question": null
+   }
+  }
+ },
+ "_source_corpus": "MC 21 corpus measure (6 Oct): served Acceptance (pd acceptance/successor-20261005 @22fe54b8 final/) and red-team (pd red-team/github-87 @37e71e4 evidence/) draft graphs, each read back into its candidate; `where` names the file."
+}

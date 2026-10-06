@@ -160,7 +160,7 @@ describe('enricher egress — narrated figures keep their meaning', () => {
   it('RED-FIRST: the same claim in robustness_explanation.summary is repaired too', async () => {
     const dr = await enrichAndReadReview(
       paulsRunEnrichment(),
-      reviewWith('Reduce scope scored highest against your goal in 52% of runs.', HOLDS_70),
+      reviewWith('Reduce scope was supported by 52% of runs.', HOLDS_70),
     );
     const summary = (dr.robustness_explanation as Record<string, unknown>).summary as string;
     expect(summary).not.toContain('70%');
@@ -209,7 +209,7 @@ describe('enricher egress — narrated figures keep their meaning', () => {
     });
   const UNRESOLVED_COPY =
     'A figure for how often the ordering holds or flips is left out here, because this run cannot confirm what it means.';
-  const WIN_SENTENCE = 'Reduce scope scored highest against your goal in 52% of runs.';
+  const WIN_SENTENCE = 'Reduce scope was supported by 52% of runs.';
 
   it('RED-FIRST (Codex #1754): "does not hold in about 70%" with stability 0.70 never reaches the user', async () => {
     const enrichment = stability70();
