@@ -75,7 +75,7 @@ const INTAKE_DISCLOSURE = buildIntakeOptionDisclosure(
  * branch.
  */
 const OBJECTIVE_CONTRADICTION_TAIL =
-  ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
+  ' “Hold at £49 Per Seat (Status Quo)” was supported by the most runs without moving' +
   ' “Seat Price Level” the way your goal asks. Among the options that do,' +
   ' “Raise to £59 Per Seat” was supported by 28% of runs.';
 

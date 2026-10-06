@@ -97,7 +97,7 @@ const COMBINED =
   ' In this model I’ve assumed a higher value is better for your goal,' +
   ' and the model could not test whether any option reaches your goal. If lower is better, set the goal’s target to ‘at most’ and re-run.';
 const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better for your goal';
-const GLOSS = 'Scoring highest counts how often an option scored highest on your goal';
+const GLOSS = 'The share of runs counts how often an option ranked first on your goal’s measure';
 
 const HOLD = 'Hold at £49 Per Seat (Status Quo)';
 const RAISE = 'Raise to £59 Per Seat';
@@ -162,20 +162,18 @@ function composeAsHandler(recs: Json[], codes: readonly string[], rawGraph: Json
 const HOLD_WITHDRAWN = `${HOLD} was supported by 71% of runs of this model.`;
 const HOLD_FRAMED = `${HOLD} was supported by 71% of runs of this model.`;
 
+// ⭐ LEAD LADDER (Science d5 #87 6008575410): neither arm says "against your goal" any more, so the framed and unframed
+// arms are the same words, as the headline is on every frame. The FRAME rule that survives is R3-2's: Arm B (an
+// attainment claim) never rides beside a sentence that says the goal could not be tested or the direction was assumed.
 const ARM_B_FRAMED =
-  ` Two different questions have two different answers here: “${HOLD}” scored highest against your goal most often,` +
+  ` Two different questions have two different answers here: “${HOLD}” was supported by the most runs,` +
   ` but “${RAISE}” is more likely to reach your stated target (48% against 0%).` +
   ' The share of runs counts how often an option ranked first on your goal’s measure, not whether your target was met.';
-const ARM_B_UNFRAMED =
-  ` Two different questions have two different answers here: “${HOLD}” scored highest most often,` +
-  ` but “${RAISE}” is more likely to reach your stated target (48% against 0%).` +
-  ' The share of runs counts how often an option ranked first on your goal’s measure, not whether your target was met.';
+const ARM_B_UNFRAMED = ARM_B_FRAMED;
 const ARM_A_FRAMED =
   ` “${HOLD}” was supported by the most runs without moving “Seat Price Level” the way your goal asks.` +
   ` Among the options that do, “${RAISE}” was supported by 28% of runs.`;
-const ARM_A_UNFRAMED =
-  ` “${HOLD}” was supported by the most runs without moving “Seat Price Level” the way your goal asks.` +
-  ` Among the options that do, “${RAISE}” was supported by 28% of runs.`;
+const ARM_A_UNFRAMED = ARM_A_FRAMED;
 
 /** The claims a composed summary must never make once a code is present. */
 function expectNoContradiction(summary: string, codes: readonly string[]): void {
@@ -341,28 +339,18 @@ describe('⭐ every code variant × every arm: no "against your goal", no contra
 
 describe('egress — each arm shape is admitted only beside the headline it agrees with', () => {
   const PAIRS: ReadonlyArray<[string, string, boolean]> = [
-    // Old shapes are still admitted when no code is present.
-    ['goal-framed headline + framed Arm B', `${HOLD_FRAMED}${ARM_B_FRAMED}`, true],
-    ['goal-framed headline + framed Arm A', `${HOLD_FRAMED}${ARM_A_FRAMED}`, true],
-    // The new shapes are admitted beside their sentence.
-    ['could-not-test headline + unframed Arm A', `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`, true],
-    ['direction headline + unframed Arm A', `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`, true],
-    ['combined headline + unframed Arm A', `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_UNFRAMED}`, true],
+    // No code: both arms beside the headline.
+    ['headline + Arm B (no code)', `${HOLD_FRAMED}${ARM_B_FRAMED}`, true],
+    ['headline + Arm A (no code)', `${HOLD_FRAMED}${ARM_A_FRAMED}`, true],
+    // Arm A beside each sentence (it makes no attainment claim).
+    ['could-not-test headline + Arm A', `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_UNFRAMED}`, true],
+    ['direction headline + Arm A', `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_A_UNFRAMED}`, true],
+    ['combined headline + Arm A', `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_UNFRAMED}`, true],
     ['combined headline alone', `${HOLD_WITHDRAWN}${COMBINED}`, true],
-    // R3-2: Arm B (claim + gloss) is admitted beside NO withdrawn sentence, framed or not.
-    ['⭐ R3-2 direction headline + unframed Arm B', `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_B_UNFRAMED}`, false],
-    ['⭐ R3-2 combined headline + unframed Arm B', `${HOLD_WITHDRAWN}${COMBINED}${ARM_B_UNFRAMED}`, false],
-    ['combined headline + FRAMED Arm B', `${HOLD_WITHDRAWN}${COMBINED}${ARM_B_FRAMED}`, false],
-    ['combined headline + FRAMED Arm A', `${HOLD_WITHDRAWN}${COMBINED}${ARM_A_FRAMED}`, false],
-    // The verifier's three compositions, and every other contradicting pair.
-    ['could-not-test headline + FRAMED Arm A', `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_A_FRAMED}`, false],
-    ['could-not-test headline + FRAMED Arm B', `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_B_FRAMED}`, false],
-    ['direction headline + FRAMED Arm A', `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_A_FRAMED}`, false],
-    ['direction headline + FRAMED Arm B', `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_B_FRAMED}`, false],
-    ['⭐ could-not-test headline + unframed Arm B (asserts the attainment it just said was untested)', `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_B_UNFRAMED}`, false],
-    // An unframed arm with no sentence would drop the goal frame without saying why.
-    ['goal-framed headline + unframed Arm A', `${HOLD_FRAMED}${ARM_A_UNFRAMED}`, false],
-    ['goal-framed headline + unframed Arm B', `${HOLD_FRAMED}${ARM_B_UNFRAMED}`, false],
+    // R3-2: Arm B (claim + gloss) is admitted beside NO withdrawn sentence.
+    ['⭐ R3-2 direction headline + Arm B', `${HOLD_WITHDRAWN}${DIRECTION_ASSUMED}${ARM_B_UNFRAMED}`, false],
+    ['⭐ R3-2 combined headline + Arm B', `${HOLD_WITHDRAWN}${COMBINED}${ARM_B_UNFRAMED}`, false],
+    ['⭐ could-not-test headline + Arm B (asserts the attainment it just said was untested)', `${HOLD_WITHDRAWN}${COULD_NOT_TEST}${ARM_B_UNFRAMED}`, false],
   ];
 
   for (const [name, text, admitted] of PAIRS) {

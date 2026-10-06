@@ -289,11 +289,11 @@ describe('headline states the leader’s own win probability, not the gap', () =
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
-  it('Case E (weak plurality floor) keeps its number-free copy', () => {
+  it('Case E (weak plurality floor) states its share, never "the most runs" (Science d5 #87 6009457056)', () => {
     // Sub-MIN_LEAD_PROBABILITY with no driver and no fragility: every enriching
-    // gate declined this run, so the floor must NOT gain a win-probability
-    // number as a side effect of the change. This is the corpus in the other
-    // direction — the bands that must stay exactly as they are.
+    // gate declined this run. The number-free "supported by the most runs"
+    // states a plurality only a licensed lead may claim, so a low plurality
+    // states its share instead — and still gains no goal-chance number.
     const out = buildAnalysisResultHeadline({
       enrichment: {
         results: [
@@ -305,7 +305,8 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Hire One Senior Technical Lead was supported by the most runs of this model.');
+    expect(out).toBe('Hire One Senior Technical Lead was supported by 35% of runs of this model.');
+    expect(out).not.toMatch(/chance|the most runs/);
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 

@@ -90,7 +90,7 @@ const BAND = 0.05;
 
 /** The elimination ceiling the headline module passes in — its own
  *  `ELIMINATED_WIN_PROBABILITY_CEILING`, the constant behind the user-facing
- *  "each scored highest in less than 1% of runs". */
+ *  "(each supported by under 1% of runs)". */
 const CEIL = 0.01;
 
 interface Opt {
@@ -875,7 +875,7 @@ describe('the elimination ceiling — threaded, and honestly bounded', () => {
     // the two and NOT the one — which is only true if the sentence and the gate
     // are reading the same constant.
     expect(text as string).toContain('2 options are effectively eliminated');
-    expect(text as string).toContain('scored highest in less than 1% of runs');
+    expect(text as string).toContain('(each supported by under 1% of runs)');
     // DISCRIMINATOR: the 0.011 arm is genuinely live to the module too.
     expect(
       isFieldUnseparable([0.615, 0.356, 0.011, 0.009, 0.009], BAND, CEIL).separation,

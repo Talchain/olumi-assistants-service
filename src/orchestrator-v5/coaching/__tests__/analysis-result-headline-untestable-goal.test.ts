@@ -167,6 +167,10 @@ const DIRECTION_CLAUSE = 'In this model I’ve assumed a higher value is better 
  * exact enrichment. It is also the first 125 characters of the served summary,
  * which is asserted below, so it is the wire's own text and not a transcription.
  */
+/** The SERVED bytes (capture): they keep the retired goal-framed lead they shipped with. */
+const SERVED_HEADLINE =
+  'Raise to £59 scored highest against your goal in 81% of runs of this model because Active paid seats is the strongest driver.';
+/** Today's builder on the same block with no code: the lead ladder's rung 3 (no goal unit on the served records). */
 const TODAY =
   'Raise to £59 was supported by 81% of runs of this model because Active paid seats is the strongest driver.';
 
@@ -262,7 +266,7 @@ describe('the served t2 capture (positive controls)', () => {
   });
 
   it('its served summary opens with today\'s goal-claiming headline', () => {
-    expect(SERVED_SUMMARY.startsWith(TODAY)).toBe(true);
+    expect(SERVED_SUMMARY.startsWith(SERVED_HEADLINE)).toBe(true);
   });
 });
 
@@ -280,7 +284,7 @@ describe('T1–T3 — an untestable goal is never claimed', () => {
   });
 
   it('T1: the served SUMMARY composition (headline + the scaffold sentence it shipped with) is admitted at egress', () => {
-    const scaffoldSentence = SERVED_SUMMARY.slice(TODAY.length);
+    const scaffoldSentence = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
     expect(scaffoldSentence).toContain('was analysed as no change');
     const text = buildAnalysisResultHeadline(served(SERVED_ENRICHMENT));
     const composed = `${text}${scaffoldSentence}`;
@@ -452,8 +456,12 @@ describe('T5 — LEADER PERMISSION: a withheld leader stays withheld, identicall
  * (GOAL_DIRECTION_UNATTESTED with attainment data), so neutrality is shown for
  * both sentence lengths.
  */
+// ⭐ LEAD LADDER (Science d5 #87 6008589328): there is no goal-framed lead left to withdraw. Every frame leads with the
+// same words (rung 3 here: no goal unit), so a code adds only its sentence, and each site's cap is moved from the
+// retired opening's reference length (35) exactly as the builder moves it.
 const GOAL_FRAMED_OPENING = 'was supported by';
-const WITHDRAWN_OPENING = 'scored highest in';
+const WITHDRAWN_OPENING = GOAL_FRAMED_OPENING;
+const SITE_CAP = MAX_HEADLINE_CHARS + (GOAL_FRAMED_OPENING.length - 35);
 
 interface LeadCapSiteRow {
   readonly site: string;
@@ -653,7 +661,7 @@ describe('F2 — every leadCap site gives the same outcome, case and shed with a
     describe(row.site, () => {
       for (const variant of CODE_VARIANTS) {
         it(`${variant.name}: AT THE CAP the site is reached and names the leader either way`, () => {
-          const label = labelFor(row, MAX_HEADLINE_CHARS);
+          const label = labelFor(row, SITE_CAP);
           const { clean, warned } = siteInputs(row, label, variant);
           expect(buildAnalysisResultHeadline(clean)).toBe(row.candidate(label));
           expect(describeAnalysisHeadline(clean).case).toBe(row.caseAtCap);
@@ -664,7 +672,7 @@ describe('F2 — every leadCap site gives the same outcome, case and shed with a
         });
 
         it(`${variant.name}: 5 OVER the cap, the same outcome, case and shed with the codes as without`, () => {
-          const label = labelFor(row, MAX_HEADLINE_CHARS + 5);
+          const label = labelFor(row, SITE_CAP + 5);
           const { clean, warned } = siteInputs(row, label, variant);
           const cleanText = buildAnalysisResultHeadline(clean);
           // The clean run is pinned to TODAY's behaviour, so the row proves the
@@ -900,7 +908,7 @@ describe('T6 — the shapes that never claimed the goal carry the disclosure and
         ],
       },
       'E',
-      'Option A was supported by the most runs of this model.',
+      'Option A was supported by 29% of runs of this model.',
     ],
     [
       'NT margin (<= 1pp, effectively tied)',
@@ -1148,7 +1156,7 @@ describe('F3 — "could not test" only where it is true; otherwise a sentence wi
     };
     const text = buildAnalysisResultHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' });
     expect(text).toBe(
-      `Option A was supported by the most runs of this model.${DIRECTION_DISCLOSURE} The result is not yet robust — small changes could flip it.`,
+      `Option A was supported by 29% of runs of this model.${DIRECTION_DISCLOSURE} The result is not yet robust — small changes could flip it.`,
     );
     expect(isAllowedRunAnalysisAssistantText(text)).toBe(true);
   });
@@ -1282,13 +1290,17 @@ describe('F4 — NON-MEMBER CONTROL: GOAL_ANCESTOR_DATA_GAP does not withdraw th
 
 describe('egress grammar — the withdrawn clause and the disclosure travel together', () => {
   it('REJECTS the goal claim WITH the disclosure (a sentence that contradicts itself)', () => {
-    expect(isAllowedRunAnalysisAssistantText(`${TODAY}${DISCLOSURE}`)).toBe(false);
-    expect(isAllowedRunAnalysisAssistantText(`${TODAY}${COMBINED_DISCLOSURE}`)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(`${SERVED_HEADLINE}${DISCLOSURE}`)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(`${SERVED_HEADLINE}${COMBINED_DISCLOSURE}`)).toBe(false);
   });
 
-  it('REJECTS the withdrawn clause WITHOUT the disclosure (the user is not told why the goal is gone)', () => {
-    expect(isAllowedRunAnalysisAssistantText(UNTESTED.slice(0, -COMBINED_DISCLOSURE.length))).toBe(false);
-    expect(isAllowedRunAnalysisAssistantText(LEAD_SENTENCE)).toBe(false);
+  // ⭐ LEAD LADDER (d5 #87 6008589328): the lead no longer claims the goal on ANY frame, so there is no withdrawn clause
+  // whose reason the user is owed — the lead is admitted with or without a disclosure. The builder still appends the
+  // disclosure whenever a code is present (T1–T3 pin the exact text).
+  it('the ladder lead makes no goal claim, so it is admitted without the disclosure too', () => {
+    expect(isAllowedRunAnalysisAssistantText(UNTESTED.slice(0, -COMBINED_DISCLOSURE.length))).toBe(true);
+    expect(isAllowedRunAnalysisAssistantText(LEAD_SENTENCE)).toBe(true);
+    expectNoGoalClaim(LEAD_SENTENCE);
   });
 
   it('⭐ R3-1: the COMBINED sentence is admitted with the withdrawn clause, alone in its slot', () => {
@@ -1326,7 +1338,7 @@ describe('egress grammar — the withdrawn clause and the disclosure travel toge
 
   it('the DIRECTION sentence is bound the same way: admitted with the withdrawn clause, rejected with the goal claim', () => {
     expect(isAllowedRunAnalysisAssistantText(`${LEAD_SENTENCE}${DIRECTION_DISCLOSURE}`)).toBe(true);
-    expect(isAllowedRunAnalysisAssistantText(`${TODAY}${DIRECTION_DISCLOSURE}`)).toBe(false);
+    expect(isAllowedRunAnalysisAssistantText(`${SERVED_HEADLINE}${DIRECTION_DISCLOSURE}`)).toBe(false);
   });
 
   it('REJECTS both sentences together (the builder emits exactly one)', () => {

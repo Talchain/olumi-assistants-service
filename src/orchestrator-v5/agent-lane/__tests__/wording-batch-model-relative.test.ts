@@ -112,7 +112,7 @@ describe('W-HEAD: the Run headline names the option only in this model, and is n
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(text).toBe('Option A was supported by the most runs of this model.');
+    expect(text).toBe('Option A was supported by 29% of runs of this model.');
     expect(forward(text!)).toBe(text);
   });
 
@@ -142,14 +142,14 @@ describe('explain and flip fallbacks: the leader and runner-up are said in this 
 
   it('explain fallback: exact leader sentence and the runner-up in its own share', () => {
     const text = composeExplainResultsFallback(ANALYSIS, null, null);
-    expect(text).toContain('In this model, Hire Senior Engineer scored highest in 62% of runs.');
-    expect(text).toContain("'Hire Two Mid-Level' scored highest in 27% of runs");
+    expect(text).toContain('In this model, Hire Senior Engineer was supported by 62% of runs.');
+    expect(text).toContain("'Hire Two Mid-Level' was supported by 27% of runs");
     expect(text).not.toMatch(/performs best|currently leads|second place/);
   });
 
   it('flip fallback: exact leader sentence', () => {
     const text = composeWhatWouldFlipFallback(ANALYSIS, null, null, null);
-    expect(text).toContain("In this model, 'Hire Senior Engineer' scored highest in 62% of runs.");
+    expect(text).toContain("In this model, 'Hire Senior Engineer' was supported by 62% of runs.");
     expect(text).not.toMatch(/performs best|currently leads/);
   });
 });
@@ -164,7 +164,7 @@ describe('SERVED BYTES (DL Review Desk on #2588): the served rerun capture (CEE 
   const SERVED_SUMMARY = BLOCK['summary'] as string;
   /** As served by CEE c74a432, in the RETIRED caution words. */
   const SERVED_HEADLINE =
-    'Raise Price to £50 was supported by 84% of runs of this model,' +
+    'Raise Price to £50 scored highest against your goal in 84% of runs of this model,' +
     ' but treat this as provisional: the link between Price per seat and Monthly revenue is fragile.';
   /** The scaffold sentence run-analysis.ts appended after the headline, byte for byte from the capture. */
   const SCAFFOLD = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);

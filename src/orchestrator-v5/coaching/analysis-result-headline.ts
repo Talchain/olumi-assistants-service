@@ -146,7 +146,6 @@ import {
 import {
   OBJECTIVE_CONTRADICTION_ARM_GRAMMARS,
   OBJECTIVE_CONTRADICTION_MAX_CHARS,
-  deriveGoalIntent,
   recordsCarryGoalAttainment,
   type GoalFrame,
 } from './objective-contradiction.js';
@@ -1215,7 +1214,12 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // ⭐ LEAD LADDER: the goal's quantity when it has a unit, else the share itself (`lead-quantity.ts`). Every cap is moved
   // by exactly what its opening adds over the retired goal-framed reference, so the length verdict, and therefore the
   // leader permission, is the one that sentence would have got — on every goal frame alike.
-  const leadQuantity = resolveLeadQuantity({
+  // RT-10 B′'s frame rule, kept: "lowest" never rides beside a sentence that says the direction was ASSUMED (the cage
+  // rejects that pair, and the user would silently get the locked template). A minimise Run on such a frame is a
+  // contradiction, so it takes rung 3, which is true either way.
+  const minimisedOnAssumedFrame = input.minimised_goal_label !== undefined
+    && goalFrame !== 'goal_framed' && goalFrame !== 'attainment_untested';
+  const leadQuantity = minimisedOnAssumedFrame ? null : resolveLeadQuantity({
     goalLabel: input.minimised_goal_label ?? input.goal_label,
     goalUnit: input.goal_unit,
     minimised: input.minimised_goal_label !== undefined,

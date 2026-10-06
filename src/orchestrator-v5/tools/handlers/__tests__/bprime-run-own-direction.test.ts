@@ -102,12 +102,12 @@ describe('B′ — the shares and the leader are ISL\'s at the direction THIS Ru
     expect(leaderOf(F.plot_body_at_least)).toBe('more_reliable_courier');
   });
 
-  it('row 1 (served Run 2, "at most 400"): every share is the minimise body\'s, by option id, and the lead says "came out lowest"', async () => {
+  it('row 1 (served Run 2, "at most 400"): every share is the minimise body\'s, by option id, and the lead says "gave the lowest"', async () => {
     const { result } = await runOn(F.graph_with_target);
     expect(resultShares(result)).toEqual(sharesById(F.plot_body_minimise.option_comparison));
     expect(result.leading_option_id).toBe('15_loyalty_discount');
     const headline = headlineOf(result.summary);
-    expect(headline).toBe('15% Loyalty Discount came out lowest for monthly cancellations in 71% of runs of this model, but treat this as provisional: the result is sensitive to Pauses taken instead of cancellations.');
+    expect(headline).toBe('15% Loyalty Discount gave the lowest monthly cancellations in 71% of runs of this model, but treat this as provisional: the result is sensitive to Pauses taken instead of cancellations.');
     // The egress cage admits it, and the leader detectors see it (so a withheld leader cannot leave through this verb).
     expect(isAllowedRunAnalysisAssistantText(headline)).toBe(true);
     expect(textNamesLeadingOption(headline)).toBe(true);

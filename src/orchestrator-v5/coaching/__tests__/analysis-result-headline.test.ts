@@ -492,7 +492,7 @@ describe('buildAnalysisResultHeadline', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A was supported by the most runs of this model.');
+    expect(out).toBe('Option A was supported by 34% of runs of this model.');
   });
 
   it('driver label filtered when it matches an ID prefix; falls through to next-best', () => {
@@ -1226,7 +1226,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       status_kind: 'partial',
     });
     expect(out).toBe(
-      'Hire X was supported by the most runs of this model. The run was flagged as partial — treat as provisional.',
+      'Hire X was supported by 34% of runs of this model. The run was flagged as partial — treat as provisional.',
     );
   });
 
@@ -1243,7 +1243,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       status_kind: 'unknown',
     });
     expect(out).toBe(
-      'Hire X was supported by the most runs of this model. The analysis engine reported an unfamiliar status — treat the result with caution.',
+      'Hire X was supported by 34% of runs of this model. The analysis engine reported an unfamiliar status — treat the result with caution.',
     );
   });
 
@@ -1263,7 +1263,9 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     expect(out!).not.toMatch(/\b(best|winner|winners|recommend|recommends|recommended|recommendation|recommendations|optimal|preferred)\b/i);
   });
 
-  it('Case E never emits a probability number (no overclaim)', () => {
+  // ⭐ Science d5 (#87 6009457056): a LOW plurality at the floor states its SHARE of runs — never "the most runs" (that is
+  // the plurality claim, licensed only for a meaningful lead) and never a probability (a run share is not a chance).
+  it('Case E on a low plurality states its share of runs, never "the most runs" or a probability (no overclaim)', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
@@ -1275,8 +1277,8 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).not.toBeNull();
-    expect(out!).not.toMatch(/\d+%/);
+    expect(out).toBe('Option A was supported by 34% of runs of this model.');
+    expect(out!).not.toMatch(/the most runs|probabilit|chance/i);
     expect(out!).not.toMatch(/\d+\.\d+/);
   });
 
@@ -1701,7 +1703,7 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
     expect(out).toBe(
       'In this model, Option B was supported by marginally more runs than Option A (45% against 40%), so the two are close. Change a figure you’re unsure about to see what separates them.',
     );
-    expect(out).not.toContain('was supported by');
+    expect(out).not.toMatch(/was supported by \d{1,3}% of runs of this model/);
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
@@ -1999,7 +2001,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A was supported by the most runs of this model.');
+    expect(out).toBe('Option A was supported by 33% of runs of this model.');
     expect(describeAnalysisHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' }).case).toBe('E');
   });
 
@@ -2086,7 +2088,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       factor_sensitivity: driver,
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
-    expect(buildAnalysisResultHeadline(input)).toBe('Option A was supported by the most runs of this model.');
+    expect(buildAnalysisResultHeadline(input)).toBe('Option A was supported by 29% of runs of this model.');
     expect(describeAnalysisHeadline(input).case).toBe('E');
   });
 
@@ -2103,7 +2105,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       factor_sensitivity: driver,
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
-    expect(buildAnalysisResultHeadline(input)).toBe('Option A was supported by the most runs of this model.');
+    expect(buildAnalysisResultHeadline(input)).toBe('Option A was supported by 30% of runs of this model.');
     expect(describeAnalysisHeadline(input).case).toBe('E');
   });
 
@@ -2390,7 +2392,7 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
     expect(out).not.toContain('Defer Hiring has marginally better raw probability');
     expect(out).not.toContain('Defer Hiring was supported by marginally more runs');
     // Never a false "currently leads" for a leader that trails on raw odds.
-    expect(out).not.toContain('was supported by');
+    expect(out).not.toMatch(/was supported by \d{1,3}% of runs of this model/);
     expect(isAllowedRunAnalysisAssistantText(out)).toBe(true);
     expect(out!.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
   });

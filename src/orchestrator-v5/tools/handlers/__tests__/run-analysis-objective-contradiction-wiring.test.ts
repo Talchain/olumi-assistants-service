@@ -178,8 +178,8 @@ describe('egress — the sentence actually reaches the user', () => {
     expect(disclosure).toBe(
       ' Two different questions have two different answers here: “Hold at £49 Per Seat (Status Quo)”' +
         ' was supported by the most runs, but “Raise to £59 Per Seat” is more likely to reach your stated' +
-        ' target (48% against 0%). Scoring highest counts how often an option scored highest on' +
-        ' your goal, not whether your target was met.',
+        ' target (48% against 0%). The share of runs counts how often an option ranked first on' +
+        ' your goal’s measure, not whether your target was met.',
     );
     // THE LOAD-BEARING ASSERTION: without this, the tail is composed and then
     // silently discarded at egress, and the user gets the locked template.
@@ -202,7 +202,7 @@ describe('egress — the sentence actually reaches the user', () => {
       'goal_framed',
     );
     expect(disclosure).toBe(
-      ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
+      ' “Hold at £49 Per Seat (Status Quo)” was supported by the most runs without moving' +
         ' “Seat Price Level” the way your goal asks. Among the options that do,' +
         ' “Raise to £59 Per Seat” was supported by 28% of runs.',
     );

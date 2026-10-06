@@ -307,7 +307,8 @@ it('RD-1/RD-2 fa027 stored shape: licence permitted, all legacy names immediatel
   expect(r.leading_option_id).toBe('ai_reporting_module_sprint');
   const shadow = leaderLicenceShadow({ fact: { fact_type: 'run_analysis', fact_version: 1, noop: false, result: r } as never, graph: saved.graph, scenarioId: scenario, summaryNamesLeader: true });
   expect(shadow.verdict).toMatchObject({ verdict: 'permitted', leader_option_id: 'ai_reporting_module_sprint', reason: null });
-  expect(r.summary.startsWith(`AI Reporting Module Sprint was supported by 80% of runs of this model because Price is the strongest driver. ${words}`)).toBe(true);
+  // The lead ladder's rung 1 (Science d5 #87 6008589328): this goal has a unit, so the lead names its quantity.
+  expect(r.summary.startsWith(`AI Reporting Module Sprint gave the highest quarterly revenue in 80% of runs of this model because Price is the strongest driver. ${words}`)).toBe(true);
   expect(isAllowedRunAnalysisAssistantText(r.summary)).toBe(true);
   const persisted = await saveAndReload(saved.graph, [{ fact_type: 'run_analysis', fact_version: 1, noop: false, result: r }]);
   reads.facts = persisted.facts;

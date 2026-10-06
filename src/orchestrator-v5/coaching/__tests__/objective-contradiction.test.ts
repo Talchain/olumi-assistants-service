@@ -116,8 +116,8 @@ describe('ARM B — goal-attainment contradiction (pure arithmetic)', () => {
     expect(suffix).toBe(
       ' Two different questions have two different answers here: “Hold at £49 Per Seat (Status Quo)”' +
         ' was supported by the most runs, but “Raise to £59 Per Seat” is more likely to reach your stated' +
-        ' target (48% against 0%). Scoring highest counts how often an option scored highest on' +
-        ' your goal, not whether your target was met.',
+        ' target (48% against 0%). The share of runs counts how often an option ranked first on' +
+        ' your goal’s measure, not whether your target was met.',
     );
   });
 
@@ -235,7 +235,7 @@ describe('ARM A — directional contradiction (arithmetic-gated)', () => {
       'goal_framed',
     );
     expect(suffix).toBe(
-      ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
+      ' “Hold at £49 Per Seat (Status Quo)” was supported by the most runs without moving' +
         ' “Seat Price Level” the way your goal asks. Among the options that do,' +
         ' “Raise to £59 Per Seat” was supported by 28% of runs.',
     );
@@ -470,7 +470,7 @@ describe('the goal frame the headline builder decided', () => {
     expect(DIRECTIONAL()).not.toBeNull();
   });
 
-  it('goal_framed: both arms exactly as before (they say "against your goal")', () => {
+  it('goal_framed: both arms in the lead ladder\'s run-share words (no "against your goal" on any frame)', () => {
     expect(buildObjectiveContradictionDisclosure(ATTAINMENT(), true, 'goal_framed')).toContain(
       ' was supported by the most runs, but ',
     );
@@ -505,7 +505,7 @@ describe('the goal frame the headline builder decided', () => {
   for (const frame of WITHDRAWN_FRAMES) {
     it(`⭐ ${frame}: Arm A ships, unframed, with the rest of its content intact`, () => {
       expect(buildObjectiveContradictionDisclosure(DIRECTIONAL(), true, frame)).toBe(
-        ' “Hold at £49 Per Seat (Status Quo)” scored highest most often without moving' +
+        ' “Hold at £49 Per Seat (Status Quo)” was supported by the most runs without moving' +
           ' “Seat Price Level” the way your goal asks. Among the options that do,' +
           ' “Raise to £59 Per Seat” was supported by 28% of runs.',
       );
@@ -525,7 +525,7 @@ describe('the goal frame the headline builder decided', () => {
       expect(shape).not.toMatch(/against your goal/);
       expect(exact.test(shape)).toBe(true);
       expect(shape.length).toBeLessThanOrEqual(OBJECTIVE_CONTRADICTION_MAX_CHARS);
-      // Withheld-turn redaction must still see the leader ("scored highest").
+      // Withheld-turn redaction must still see the leader ("supported by … runs", runs_supported).
       expect(textNamesLeadingOption(shape)).toBe(true);
     }
   });

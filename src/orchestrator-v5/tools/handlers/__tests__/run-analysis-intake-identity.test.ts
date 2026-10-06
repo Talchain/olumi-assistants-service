@@ -88,7 +88,7 @@ describe('run_analysis handler — source-bound intake identity', () => {
   it('recovers explicit quotes dropped from snapshot.options by the same canonical IDs', async () => {
     const { outcome, result } = await run({ nodes: boundNodes });
     expect(result.constraint_verdict?.may_name_leading_option).toBe(true);
-    expect(outcome.assistant_text).toContain('Option A scored highest');
+    expect(outcome.assistant_text).toContain('Option A was supported by');
     expect(outcome.assistant_text).not.toContain('does not establish');
   });
 
@@ -157,7 +157,7 @@ describe('run_analysis handler — source-bound intake identity', () => {
       expect(outcome.assistant_text).toContain('does not establish which options correspond');
       expect(outcome.assistant_text).not.toContain('candidate is missing');
     } else {
-      if (!withConstraint) expect(outcome.assistant_text).toContain('Option A scored highest');
+      if (!withConstraint) expect(outcome.assistant_text).toContain('Option A was supported by');
       expect(outcome.assistant_text).not.toMatch(/candidate is missing|does not establish/);
     }
   });
