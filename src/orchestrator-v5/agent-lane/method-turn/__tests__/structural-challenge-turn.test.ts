@@ -22,6 +22,13 @@ import { StructuralChallengeResultV1Schema } from '@talchain/schemas';
 import { vi } from 'vitest';
 import type { StructuralChallengeCertainty } from '../../../coaching/structural-challenge-compare.js';
 import type { StructuralChallengeClaimV1, StructuralChallengeResultV1 } from '@talchain/schemas';
+import { goalChanceDisplayForAgent } from '../../../goal-target/goal-chance-licence.js';
+
+/** Explicit display-licence controls for the existing quantity/permission fixtures. */
+const displayFor = (pct: number) => goalChanceDisplayForAgent({ enrichment: { inference_warnings: [{
+  code: 'GOAL_CHANCE_LICENSED', form: 'each', option_ids: ['raise_pro_price_to_59'],
+  pct_by_option: { raise_pro_price_to_59: pct }, display_rounding_by_option: { raise_pro_price_to_59: 'whole' },
+}] } });
 
 const LABELS = new Map([
   ['monthly_churn', 'Monthly churn'], ['paying_subscribers', 'Paying subscribers'], ['pro_plan_price', 'Pro plan price'],
@@ -74,9 +81,9 @@ function finalRead(permitted = true, provisional = false): StructuralChallengeFi
 
 describe('SCI-DEEP reply', () => {
   it('an unchanged winner with a changed consequence: says both, in model-run terms, and asks for evidence', () => {
-    const reply = composeStructuralChallengeReply({ result: changed, labels: LABELS, certainty: { baseline: [], alternative: [{ option_id: 'raise_pro_price_to_59', probability_of_goal: 1, earned: true }] } });
+    const reply = composeStructuralChallengeReply({ result: changed, labels: LABELS, certainty: { baseline: [], alternative: [{ option_id: 'raise_pro_price_to_59', probability_of_goal: 1, earned: true }], baselineDisplay: displayFor(53), alternativeDisplay: displayFor(100) } });
     expect(reply.split('\n')[0]).toBe('Without the link from Monthly churn to Paying subscribers, Raise Pro price to £59 still leads — but part of the result changes.');
-    expect(reply).toContain('baseline: Reaches the target in about 53% of model runs. Without the link: Reaches the target in 100% of model runs.');
+    expect(reply).toContain('baseline: about 53% chance of meeting the goal, in this model, on current information. Without the link: more than 99% chance of meeting the goal, in this model, on current information.');
     // DL beat-4 audit: no unitless amount; the direction and the target crossing the claim's own side test proves.
     expect(reply).toContain('Raise Pro price to £59\'s expected result is higher without the link, and moves from below your target to above it.');
     expect(reply).not.toMatch(/83,434|90,306|85,000/);
@@ -128,9 +135,9 @@ describe('SCI-DEEP reply', () => {
 
   it('a chance is never rounded to certain', () => {
     const near = { ...changed, claims: [{ ...changed.claims[1], baseline: 0.996, alternative: 0.004, verdict: 'delta_only', basis: 'no_licensed_boundary' } as const] } as StructuralChallengeResultV1;
-    const reply = composeStructuralChallengeReply({ result: near, labels: LABELS });
-    expect(reply).toContain('over 99% of model runs');
-    expect(reply).toContain('under 1% of model runs');
+    const reply = composeStructuralChallengeReply({ result: near, labels: LABELS, certainty: { baseline: [], alternative: [], baselineDisplay: displayFor(100), alternativeDisplay: displayFor(0) } });
+    expect(reply).toContain('more than 99% chance of meeting the goal, in this model, on current information');
+    expect(reply).toContain('less than 1% chance of meeting the goal, in this model, on current information');
   });
 
   it('the press id round-trips typed ids; anything else is not this press', () => {
@@ -250,10 +257,12 @@ describe('independent-review reply and press regressions', () => {
       const say = 'Olumi can’t yet say how likely this option is to meet the goal: the relevant link isn’t sized.';
       const decision = { option_id: 'raise_pro_price_to_59', probability_of_goal: value, earned: licence === 'earned', ...(licence === 'unearned' ? { say } : {}) };
       const recorded = licence === 'unrecorded' ? undefined : licence === 'duplicate' ? [decision, decision] : licence === 'mismatch' ? [{ ...decision, probability_of_goal: value === 1 ? 0 as const : 1 as const }] : [decision];
-      const certainty = { baseline: undefined, alternative: undefined, [side]: recorded };
+      const certainty = { baseline: undefined, alternative: undefined, [side]: recorded,
+        baselineDisplay: displayFor(side === 'baseline' ? value * 100 : 53),
+        alternativeDisplay: displayFor(side === 'alternative' ? value * 100 : 53) };
       const reply = replyFor([c], certainty);
       expect(reply).toContain('Raise Pro price to £59');
-      if (licence === 'earned') expect(reply).toContain(value === 1 ? '100% of model runs' : '0% of model runs');
+      if (licence === 'earned') expect(reply).toContain(value === 1 ? 'more than 99% chance of meeting the goal, in this model, on current information' : 'less than 1% chance of meeting the goal, in this model, on current information');
       else {
         expect(reply).not.toContain('100%'); expect(reply).not.toContain('0%');
         expect(reply).toContain(licence === 'unearned' ? say : 'what this model gives, not a certainty');

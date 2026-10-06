@@ -3,8 +3,8 @@
  * typed result (`StructuralChallengeResultV1`), so if narration ever fails the facts still read the same.
  *
  * Copy rules (existing licences, not new ones):
- *   - a chance of reaching the target is said as how often it does so IN MODEL RUNS ("in about 53% of model runs"),
- *     never "likely", never rounded to certain (a non-exact 99.6% is "over 99%");
+ *   - goal chances use the bound Run's shared screen/Agent display and goal-chance headline;
+ *     an exact 0/1 still needs its stored earned decision; unearned/withheld sentences stay verbatim;
  *   - a leader is named only when the result carries its id (the per-Run licence decided that upstream);
  *   - no internal vocabulary reaches the user (claim kinds, bases, statuses are mapped to plain words);
  *   - the reply always says what was tested, that it is one alternative and not "the true model", and that it is not
@@ -109,14 +109,17 @@ const BASIS_WORDS: Partial<Record<StructuralChallengeClaimV1['basis'], string>> 
   missing_on_one_side: 'At least one model version has no usable measurement for this claim.',
 };
 
-function goalSide(value: number | null, optionId: string, decisions: StructuralChallengeCertainty['baseline'], withheld = false): string {
+function goalSide(value: number | null, optionId: string, decisions: StructuralChallengeCertainty['baseline'], withheld = false, displays?: Readonly<Record<string, string>>): string {
   const matches = decisions?.filter((d) => d.option_id === optionId);
   // The existing certainty reader also speaks its stored sentence beside a withheld figure, without restoring it.
   if (value === null) return withheld && matches?.length === 1 && matches[0].earned === false && matches[0].say
     ? matches[0].say : TARGET_FREQUENCY_UNAVAILABLE;
-  if (value !== 0 && value !== 1) return `Reaches the target in ${chance(value)} of model runs.`;
+  const headline = () => displays?.[optionId] !== undefined
+    ? `${displays[optionId]} chance of meeting the goal, in this model, on current information.`
+    : TARGET_FREQUENCY_UNAVAILABLE;
+  if (value !== 0 && value !== 1) return headline();
   const decision = matches?.length === 1 && matches[0].probability_of_goal === value ? matches[0] : undefined;
-  if (decision?.earned === true) return `Reaches the target in ${chance(value)} of model runs.`;
+  if (decision?.earned === true) return headline();
   // Follow the Run's stored unearned sentence verbatim, just as the existing Agent certainty reader does.
   return decision?.earned === false && decision.say
     ? decision.say : 'This is what this model gives, not a certainty; whether that certainty is earned could not be checked.';
@@ -136,7 +139,7 @@ function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string,
   const q = c as StructuralChallengeQuantityClaimV1;
   const who = label(q.option_id);
   if (q.kind === 'goal_probability') {
-    return `${who} — baseline: ${goalSide(q.baseline, q.option_id, certainty?.baseline, q.basis === 'withheld_on_one_side')} Without the link: ${goalSide(q.alternative, q.option_id, certainty?.alternative, q.basis === 'withheld_on_one_side')}${reason ? ` ${reason}` : ''}`;
+    return `${who} — baseline: ${goalSide(q.baseline, q.option_id, certainty?.baseline, q.basis === 'withheld_on_one_side', certainty?.baselineDisplay)} Without the link: ${goalSide(q.alternative, q.option_id, certainty?.alternative, q.basis === 'withheld_on_one_side', certainty?.alternativeDisplay)}${reason ? ` ${reason}` : ''}`;
   }
   const share = (v: number) => v === 1 ? 'all sampled model runs' : v === 0 ? 'none of the sampled model runs' : `${chance(v)} of model runs`;
   if (q.kind === 'outcome_level') return outcomeLevelLine(who, q, reason);
