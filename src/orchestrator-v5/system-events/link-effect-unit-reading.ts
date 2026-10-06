@@ -4,7 +4,8 @@ import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-read
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
-import { namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { afterChangeWord, isChangeWord, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { singular, words } from '../agent-lane/same-unit.js';
 import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
 import { isPercentageLevelUnit, resolveMagnitudeFrame } from '../../cee/magnitude/link-effect.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
@@ -50,6 +51,35 @@ function pointsOrShareAsk(label: string, value: number, level: number | undefine
   const example = value < 0 ? `${10 + by}% → 10%` : `10% → ${10 + value}%`;
   return `Is that a ${move} (say ${example}), or ${by}% of today\u2019s level?`;
 }
+
+/**
+ * ⭐ RT-6 row 1b (Codex r1 on the follow-up; Science #87 6005615422): the user's own COUNTED PHRASE for an end is its node's
+ * label. Right after a figure equal to that end's change (one change word such as "more"/"fewer" skipped), the sentence's
+ * words begin with the label's words (case + `singular()` only). "Every 10 more café subscribers" counts "Café
+ * subscribers"; "Every 10 more subscribers" does not, whatever unit the Agent passes.
+ */
+export function sentenceCountsLabel(said: string, figure: number, label: unknown): boolean {
+  if (typeof label !== 'string' || !Number.isFinite(figure) || figure === 0) return false;
+  // ⛔ Codex r2: THIS end's own change occurrence, never any figure of its size. Two figures of this size in the sentence
+  // (including equal source and target figures) leave nothing saying which one counts this end: no reading, never a guess.
+  const want = words(label).map(singular);
+  const hits = findLinkEffectAmounts(said).filter((a) => Math.abs(a.magnitude) === Math.abs(figure));
+  if (want.length === 0 || hits.length !== 1) return false;
+  const hit = hits[0]!;
+  // Closing punctuation only: a possessive mark is kept, so "café subscribers’ customers" never reads as the label.
+  const raw = words(afterChangeWord(said.slice(hit.index + hit.matchedText.length)));
+  const got = raw.map((w) => w.replace(/[.,;:!?"\u201c\u201d]+$/u, ''));
+  if (!want.every((w, i) => got[i] !== undefined && singular(got[i]!) === w)) return false;
+  // ⛔ Codex r2 + sol r3: a COMPLETE counted phrase needs a DEMONSTRATED boundary, never "the next word is not a known
+  // noun" ("café subscribers support tickets" continues it). The label ends the sentence or its clause (closing
+  // punctuation), or the next word begins the statement's predicate: a change word the binder itself reads ("adds",
+  // "costs") or a modal ("would add"). Anything else, no reading.
+  const next = got[want.length];
+  return next === undefined || /[.,;:!?]$/u.test(raw[want.length - 1]!) || isChangeWord(next) || MODAL.test(next);
+}
+
+/** A modal that opens the predicate after a counted phrase ("10 more café subscribers would add …"): closed-class words. */
+const MODAL = /^(?:would|will|could|can|should|might|may|must)$/i;
 
 /** The reading the card shows and the writer stores: a typed-zero end's change is said in points (B3). */
 export function withPointsAtZero<E extends LinkEffectStatement>(effect: E, zero: readonly string[] | undefined, from: string, to: string): E {

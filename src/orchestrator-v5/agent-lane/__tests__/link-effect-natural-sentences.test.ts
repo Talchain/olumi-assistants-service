@@ -101,6 +101,21 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
     quote: 'Every 10 more cafés adds about 1 percentage point of wholesale subscription revenue.',
     effect: effect(1, 'percentage points', 10, 'cafés'),
     card: 'Record: +10 cafés on "Café subscribers" → +1 percentage point in "Wholesale subscription revenue": raising "Café subscribers" by 10 cafés raises "Wholesale subscription revenue" by 1 percentage point. From your words: "Every 10 more cafés adds about 1 percentage point of wholesale subscription revenue." I\'ve taken "Wholesale subscription revenue" to be in %, from your words.' + TAIL },
+  // ⭐ RT-6 row 1b (Science #87 6005615422; red team 6005529714, 2 of 3 live sentences): the source written as its node's
+  // own LABEL ("café subscribers"; unit "cafés") is a READING shown on the card for approval, never a silent credit.
+  { id: 'RT1b', fixture: 'b8143909', from: 'caf_subscribers', to: 'wholesale_subscription_revenue', selection: 'link',
+    quote: 'Every 10 more café subscribers adds about 1 percentage point of wholesale subscription revenue.',
+    effect: effect(1, 'percentage points', 10, 'café subscribers'),
+    card: 'Record: +10 cafés on "Café subscribers" → +1 percentage point in "Wholesale subscription revenue": raising "Café subscribers" by 10 cafés raises "Wholesale subscription revenue" by 1 percentage point. From your words: "Every 10 more café subscribers adds about 1 percentage point of wholesale subscription revenue." I\'ve taken "Wholesale subscription revenue" to be in %, from your words. I\'ve read that as +1 percentage point per 10 cafés (the unit of "Café subscribers").' + TAIL },
+  // Codex r1: a NEGATIVE source change keeps its sign in the reading ("per −10 cafés"), never a reversed ratio.
+  { id: 'RT1b-neg', fixture: 'b8143909', from: 'caf_subscribers', to: 'wholesale_subscription_revenue', selection: 'link',
+    quote: 'Every 10 fewer café subscribers costs about 1 percentage point of wholesale subscription revenue.',
+    effect: effect(-1, 'percentage points', -10, 'café subscribers'),
+    card: 'Record: −10 cafés on "Café subscribers" → −1 percentage point in "Wholesale subscription revenue": lowering "Café subscribers" by 10 cafés lowers "Wholesale subscription revenue" by 1 percentage point. From your words: "Every 10 fewer café subscribers costs about 1 percentage point of wholesale subscription revenue." I\'ve taken "Wholesale subscription revenue" to be in %, from your words. I\'ve read that as −1 percentage point per −10 cafés (the unit of "Café subscribers").' + TAIL },
+  { id: 'RT1b-pp', fixture: 'b8143909', from: 'caf_subscribers', to: 'wholesale_subscription_revenue', selection: 'link',
+    quote: 'Every 10 more café subscribers adds about 1 pp of wholesale subscription revenue.',
+    effect: effect(1, 'pp', 10, 'café subscribers'),
+    card: 'Record: +10 cafés on "Café subscribers" → +1 pp in "Wholesale subscription revenue": raising "Café subscribers" by 10 cafés raises "Wholesale subscription revenue" by 1 pp. From your words: "Every 10 more café subscribers adds about 1 pp of wholesale subscription revenue." I\'ve taken "Wholesale subscription revenue" to be in %, from your words. I\'ve read that as +1 pp per 10 cafés (the unit of "Café subscribers").' + TAIL },
   { id: 'F6', fixture: 'f0eb03ac', from: 'shops_operating', to: 'gross_margin',
     quote: 'Closing two shops would probably push gross margin up by about a point.',
     effect: effect(1, 'points', -2, 'shops'),
@@ -498,11 +513,13 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
 // ⛔ Codex step-4 buddy r1 (5 Oct ~20:1xZ): two shapes #2605's other-quantity guard let through as WRONG-reading cards.
 describe('RT-6 row 1 (red team #87 6004429045): a unit the sentence WROTE is never called "no unit or scale"', () => {
   const rt1 = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'RT1')!;
-  // The Agent sent the SOURCE's label as its unit (served, 3/3): the writer refuses that end. The target's "%" was read
-  // from the user's own "percentage point", so the words must not say it has none, and name the unit read.
+  // A source unit that is neither the source's unit nor its label (the head noun alone, refused by Science #87
+  // 6005615422 rule (b)): the writer refuses that end. The target's "%" was read from the user's own "percentage point",
+  // so the words must not say it has none, and name the unit read.
+  // RE-PINNED (RT-6 row 1b): this row once used the source LABEL "café subscribers", which now cards by label identity.
   it('a refusal on the source end never calls the target, whose unit the user just wrote, unitless', async () => {
     const w = world(rt1); const before = w.graph();
-    const result = await propose(w, { ...rt1, effect: effect(1, 'percentage points', 10, 'café subscribers') });
+    const result = await propose(w, { ...rt1, effect: effect(1, 'percentage points', 10, 'subscribers') });
     expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false, refusal: 'unit_mismatch' });
     expect(String(result.detail)).not.toMatch(/no unit or scale/);
     expect(String(result.detail)).toContain('"Wholesale subscription revenue" is measured in %');
@@ -542,6 +559,41 @@ describe('RT-6 row 1 (red team #87 6004429045): a unit the sentence WROTE is nev
     const result = await propose(w, { ...s1, effect: effect(-0.5, 'percentage points', 1, unit) });
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
     expect(cardsFor(w, result)).toHaveLength(2);
+  });
+});
+
+describe('RT-6 row 1b (Science #87 6005615422): only the node\'s own LABEL stands for its unit', () => {
+  const rt1b = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'RT1b')!;
+  // Codex r1: the Agent passes the full LABEL but the user said only the head noun. The sentence does not count the
+  // label, so it is not read as "cafés", and there is no card.
+  it('CONTRAST (Codex r1 bypass): the Agent\'s "café subscribers" for the user\'s "subscribers" gets no card', async () => {
+    const quote = 'Every 10 more subscribers adds about 1 percentage point of wholesale subscription revenue.';
+    const w = world(rt1b); const before = w.graph();
+    const result = await propose(w, { ...rt1b, quote, effect: effect(1, 'percentage points', 10, 'café subscribers') });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false });
+    expect(cardsFor(w, result)).toEqual([]);
+    noWrite(w, rt1b, before);
+  });
+  // Codex r2: the label after an UNRELATED figure of the same size, or continued by a possessive, is not this end's counted
+  // phrase: no card.
+  it.each([
+    ['a borrowed figure', 'Every 10 more subscribers adds about 1 percentage point of wholesale subscription revenue, alongside 10 café subscribers.'],
+    ['a possessive continuation', 'Every 10 more café subscribers\u2019 customers adds about 1 percentage point of wholesale subscription revenue.'],
+  ])('CONTRAST (Codex r2, %s): no card', async (_why, quote) => {
+    const w = world(rt1b); const before = w.graph();
+    const result = await propose(w, { ...rt1b, quote, effect: effect(1, 'percentage points', 10, 'café subscribers') });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false });
+    expect(cardsFor(w, result)).toEqual([]);
+    noWrite(w, rt1b, before);
+  });
+  // Rule (b) refused: the label's head noun alone is not the label. Refused at the writer's comparator, never carded.
+  it('CONTRAST: the head noun alone ("subscribers") gets no card', async () => {
+    const quote = 'Every 10 more subscribers adds about 1 percentage point of wholesale subscription revenue.';
+    const w = world(rt1b); const before = w.graph();
+    const result = await propose(w, { ...rt1b, quote, effect: effect(1, 'percentage points', 10, 'subscribers') });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false });
+    expect(cardsFor(w, result)).toEqual([]);
+    noWrite(w, rt1b, before);
   });
 });
 

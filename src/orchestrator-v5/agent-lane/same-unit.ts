@@ -274,6 +274,29 @@ export function readCountRate(unit: unknown): { noun: string[]; period: UnitPeri
   return p === null || p.kind !== 'count' || p.noun === null ? null : { noun: [...p.noun], period: p.period };
 }
 
+/**
+ * ⭐ RT-6 row 1b (Science ruling #87 6005615422; red team 6005529714): a stated unit that IS the node's own LABEL ("café
+ * subscribers" for "Café subscribers", counted in "cafés") stands for one of that node's unit. Label IDENTITY only, by
+ * case and `singular()`: never a head noun ("subscribers") or any fuzzy match. Only when the unit reads as a count or
+ * count rate (`readCountRate`), never money, %, pp or a duration ("months"). A period the label names, read by the FULL
+ * period reader (every leaf period, never C1's month/year `periodIn`), must be the unit's own: a different period, two
+ * periods, or a period the unit does not carry, refuse.
+ * U1's reader leaves accented words unread ("cafés"), so only the unit's KIND is read with accents folded; the label
+ * comparison is not folded.
+ */
+export function labelStandsForCountUnit(stated: unknown, label: unknown, unit: unknown): boolean {
+  if (typeof stated !== 'string' || typeof label !== 'string' || typeof unit !== 'string') return false;
+  const said = words(stated).map(singular).join(' ');
+  if (said === '' || said !== words(label).map(singular).join(' ')) return false;
+  const count = readCountRate(unit.normalize('NFD').replace(/\p{M}/gu, ''));
+  if (count === null || count.noun.every(isLeafPeriodNoun)) return false;
+  const labelPeriods = new Set(words(label).flatMap((w) => {
+    const p = periodNoun(w) ?? periodAdverb(w);
+    return p === null ? [] : [p];
+  }));
+  return labelPeriods.size === 0 || (labelPeriods.size === 1 && count.period !== null && labelPeriods.has(count.period));
+}
+
 /** The one period a set of unit parts names, 'ambiguous' when they name two, else null. */
 export function evidencePeriod(parts: readonly string[]): UnitPeriod | null | 'ambiguous' {
   const seen = new Set<UnitPeriod>();
