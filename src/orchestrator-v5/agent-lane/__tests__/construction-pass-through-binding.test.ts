@@ -97,6 +97,13 @@ describe('(B) a stated size is bound through Olumi\'s pass-through', () => {
     expect(edge('MRR lost to price churn', 'monthly recurring revenue').provenance.definitional).toBeUndefined();
   });
 
+  it('CONTROL: a sentence that ALSO names another quantity (‘Price rise’) is not bound through the pass-through', async () => {
+    const said = 'Each lost customer after a price rise removes £300 a month of monthly recurring revenue.';
+    const { edge } = await build(draft9(), T1B.replace(QUOTE, said));
+    expect(edge('Customers lost from price rise', 'MRR lost to price churn').provenance.source_quote).toBeUndefined();
+    expect(edge('MRR lost to price churn', 'monthly recurring revenue').provenance.definitional).toBeUndefined();
+  });
+
   it('CONTROL: a mediator with TWO links onward is no pass-through — nothing is bound through it', async () => {
     const { edge } = await build(draft9({
       extraRisks: [{ label: 'Reputation damage', provenance: 'inferred' }],
