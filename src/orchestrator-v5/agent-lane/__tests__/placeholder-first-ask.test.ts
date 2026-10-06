@@ -49,7 +49,7 @@ describe('first_ask: the one step the placeholder withhold asks first, typed', (
   it('(A) a goal with no frame: its level first, before any link', () => {
     const g = gaugeGraph();
     delete g.nodes.find((n: Rec) => n.id === 'mrr').observed_state;
-    expect(warn(g, 'o-raise').first_ask).toEqual({ kind: 'goal_level', node_id: 'mrr' });
+    expect(warn(g, 'o-raise').first_ask).toEqual({ kind: 'goal_level', node_id: 'mrr', question: 'To size them, I first need today’s level of ‘MRR’. What is it?' });
   });
 
   it('(C) a mediator in its sized parent\'s unit: that link', () => {
@@ -73,7 +73,8 @@ describe('first_ask: the one step the placeholder withhold asks first, typed', (
     goal.label = `Monthly recurring revenue ${'across every plan and region '.repeat(6)}`.slice(0, 180);
     g.nodes.find((n: Rec) => n.id === 'price').label = `Pro plan price ${'for every seat on annual and monthly billing '.repeat(4)}`.slice(0, 180);
     const w = warn(g, 'o-raise');
-    expect(w.first_ask).toEqual({ kind: 'goal_level', node_id: 'mrr' });
+    expect(w.first_ask).toEqual({ kind: 'goal_level', node_id: 'mrr', question: expect.stringContaining('I first need today’s level of') });
+    expect(w.message).toContain(w.first_ask.question);
     expect(w.message).toContain('I first need today\u2019s level of');
     expect(w.message.length).toBeLessThanOrEqual(400);
   });
