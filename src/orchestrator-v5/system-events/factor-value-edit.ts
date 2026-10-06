@@ -384,7 +384,7 @@ export async function applyFactorValueEdit(
 
   // ⭐⭐ SD-1 (domain 2; DL 0df0e1 6 Oct; Codex buddy on DGAI #2543): A CONFIRM IS A REVIEW OF THE PERSISTED FIGURE,
   // NEVER A SET. It used to be resolved exactly as a set and judged after the handler, whose review path needs STRICT
-  // equality — so a value-only factor, a capped float drift and an equal-pair percent became `user_override` or were
+  // equality — so a value-only factor, a capped float drift and an equal-pair percent became the user's own override or were
   // refused. Now it is matched against the persisted figure by ONE rule (`confirmMatchesPersisted`) before anything is
   // resolved, and the single writer records only the review (`recordFactorReview`). A panel apply cannot ride a
   // confirm (its server-substituted number is a set by construction).
