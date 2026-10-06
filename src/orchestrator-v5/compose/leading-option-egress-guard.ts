@@ -141,13 +141,15 @@ const MOST_SUPPORTED_LEADER_RE = new RegExp(
 );
 
 /** The ladder verb's classes (Desk 6b + DL, #2646): production verbs, and has/had (a held quantity). */
-const LADDER_VERB_SRC = String.raw`(?:gave|gives|give|giving|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|has|had|have|having|end(?:s|ed|ing)?\s+up\s+with|result(?:s|ed|ing)?\s+in)`;
+const LADDER_VERB_SRC = String.raw`(?:gave|gives|give|giving|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|has|had|have|having|end(?:s|ed|ing)?\s+up\s+with|end(?:s|ed|ing)?\s+with|finish(?:es|ed|ing)?\s+with|result(?:s|ed|ing)?\s+in)`;
 const LADDER_PASSIVE_SRC = String.raw`(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)`;
 /** A weighting, a mechanism or the goal-chance copy: "the highest priority", "the highest influence", "the highest chance". */
-// Codex #2660 r1+r2: a hyphenated compound whose HEAD names the thing ("the lowest-risk path", "the highest-cost
-// assumption"), or an input noun, is not a result. A compound with a result head ("the lowest-churn outcome", "the
-// highest-margin result") is still a claim.
-const NOT_A_RESULT_SRC = String.raw`(?!-[a-z]+\s+(?:paths?|routes?|steps?|checklists?|assumptions?|inputs?|estimates?|settings?|tests?)\b|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds|assumptions?|inputs?|estimates?)\b)`;
+// Desk/DL follow-up (F1/F2, DL 6 Oct): a planning head exempts only a non-result modifier ("lowest-risk path").
+// Result metrics still claim a leader ("highest-revenue path"); cost alone keeps an input head exempt
+// ("highest-cost assumption"). The same non-result nouns guard every ladder superlative.
+const RESULT_METRIC_MODIFIER_SRC = String.raw`(?:revenue|mrr|arr|margin|profit|return|growth|churn|retention|sales|income|conversion)\b|cost\s+(?!(?:assumptions?|inputs?|estimates?|settings?)\b)`;
+const LADDER_SUPERLATIVE_SRC = String.raw`(?:highest|lowest|best|top|greatest|largest|biggest|strongest)`;
+const NOT_A_RESULT_SRC = String.raw`(?!-(?!${RESULT_METRIC_MODIFIER_SRC})[a-z]+\s+(?:paths?|routes?|steps?|checklists?|assumptions?|inputs?|estimates?|settings?|tests?)\b|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds|assumptions?|inputs?|estimates?|guess(?:es)?|cases?|practices?|scenarios?|ways?|next\s+steps?|questions?)\b)`;
 /**
  * A STATISTIC comparison ("produced the highest average outcome", "has the lowest modelled median") is v6 class C2 when
  * the sentence names its metric scope, and the served agent lane keeps it by that scope (`blankScopedMetricComparison`).
@@ -161,15 +163,18 @@ const NOT_AN_OPTION_SCOPE_SRC = String.raw`(?!(?:the\s+)?(?:current|these|this|t
 const GAVE_THE_EXTREME_RE = new RegExp(
   [
     // Active: "X gave / produced / had the highest|lowest {q}".
-    String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:highest|lowest)\b${NOT_A_RESULT_SRC}${NOT_A_STATISTIC_SRC}`,
+    String.raw`\b${LADDER_VERB_SRC}\s+the\s+${LADDER_SUPERLATIVE_SRC}\b${NOT_A_RESULT_SRC}${NOT_A_STATISTIC_SRC}`,
     // "the most|least {q}", only with a run share: "X gave the most MRR in 62% of runs".
     String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:most|least)\b[^.;:!?\n]{0,60}?${RUN_SHARE_SRC}`,
     // Fronted with a run share: "The highest {q} came from X in 81% of runs".
-    String.raw`\b(?:highest|lowest)\b[^.;:!?\n]{0,80}?${RUN_SHARE_SRC}`,
+    // highest/lowest keep their unguarded run-share form (DL review 6 Oct); only the NEW superlatives take the noun guard.
+    String.raw`\b(?:(?:highest|lowest)\b|(?:best|top|greatest|largest|biggest|strongest)\b${NOT_A_RESULT_SRC})[^.;:!?\n]{0,80}?${RUN_SHARE_SRC}`,
     // Fronted, no share: "The lowest churn came from X" / "The highest MRR was produced by X" / "The most MRR came from X".
-    String.raw`\bthe\s+(?:highest|lowest|(?:most|least)(?!\s+(?:of|runs?|support)\b))\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+${LADDER_PASSIVE_SRC}\s+by)\b`,
+    String.raw`\bthe\s+(?:${LADDER_SUPERLATIVE_SRC}|(?:most|least)(?!\s+(?:of|runs?|support)\b))\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+${LADDER_PASSIVE_SRC}\s+by)\b`,
+    // Predicative result first: "The best MRR is what X ends up with".
+    String.raw`\bthe\s+${LADDER_SUPERLATIVE_SRC}\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:is|was|are|were)\s+what\s+[^.;:!?\n]{1,80}?\b${LADDER_VERB_SRC}\b`,
     // Predicative: "churn was lowest under X", "MRR is highest with X".
-    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?(?:highest|lowest)\s+(?:under|with|for)\s+${NOT_AN_OPTION_SCOPE_SRC}`,
+    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?${LADDER_SUPERLATIVE_SRC}\b${NOT_A_RESULT_SRC}\s+(?:under|with|for)\s+${NOT_AN_OPTION_SCOPE_SRC}`,
   ].join('|'),
   'i',
 );
@@ -908,6 +913,30 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   // Desk 6b follow-up rows (DL 6010662486): "ends up with" / "resulted in".
   'Raise to £59 ends up with the highest MRR.',
   'Raise to £59 resulted in the lowest churn.',
+  // Desk/DL follow-up rows (F1/F2, DL 6 Oct).
+  'Raise to £59 has the highest-revenue path.',
+  'Hire a marketing manager gives the lowest-churn route.',
+  ...['revenue', 'MRR', 'ARR', 'margin', 'profit', 'return', 'growth', 'churn', 'retention', 'sales', 'income', 'conversion', 'cost']
+    .map((metric) => `Raise to £59 gives the lowest-${metric} path.`),
+  ...['best', 'top', 'greatest', 'largest', 'biggest', 'strongest'].flatMap((word) => [
+    `Hire a marketing manager ends up with the ${word} MRR.`,
+    `Both hires end up with the ${word} MRR.`,
+    `Hire a marketing manager and Raise to £59 end up with the ${word} MRR.`,
+    `The ${word} MRR is what Raise to £59 ends up with.`,
+    `With the ${word} MRR, Raise to £59 comes out ahead.`,
+    `The ${word} MRR came from Raise to £59.`,
+    `The ${word} MRR was produced by Raise to £59.`,
+    `MRR is ${word} with Raise to £59.`,
+    `The ${word} MRR came from Raise to £59 in 62% of runs.`,
+  ]),
+  'Both hires end with the highest MRR.',
+  'Raise to £59 ends with the highest MRR.',
+  'Raise to £59 ended with the highest MRR.',
+  'Raise to £59 is ending with the highest MRR.',
+  'Both hires finish with the highest MRR.',
+  'Raise to £59 finishes with the highest MRR.',
+  'Raise to £59 finished with the highest MRR.',
+  'Raise to £59 is finishing with the highest MRR.',
   // <<< #2646 Desk 6b + DL
 ]);
 
