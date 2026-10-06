@@ -103,7 +103,6 @@ import { loadMostRecentPendingActionsIntegrityStrict } from '../orchestrator-v5/
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
-import type { RunDeliveredRecord } from '@talchain/schemas/boundary';
 import { buildRunDelta } from '../orchestrator-v5/coaching/build-run-delta.js';
 import { selectTwoNewestRunAnalysisFacts } from '../orchestrator-v5/coaching/compare-runs.js';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
@@ -148,8 +147,7 @@ import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrat
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { claimPermissionsFrom, type ClaimPermissions } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
-import { textAssertsLeadingOption } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
-import { optionRosterFromAnalysisReady, optionRosterFromGraph } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import { deliveredRecordWithinLicence } from './delivered-record-licence.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
@@ -268,28 +266,6 @@ export interface ReadScenarioAnalysisParams {
  * Compose the scenario's analysis verdict (and its current result, if any) from
  * persisted facts alone. Total: never throws, never mutates, no model call.
  */
-/**
- * 0.79 SD-1 Slice R: does ANY string in a delivered record (every block field, every option field, at any depth) assert
- * a leading option? Checked bare, and against each roster the read knows: the graph's options, the read's
- * `analysis_ready` options, and the record's own option labels.
- */
-function deliveredRecordAssertsLeader(rec: RunDeliveredRecord, graph: unknown, analysisReady: unknown): boolean {
-  const rosters = [
-    optionRosterFromGraph(graph),
-    optionRosterFromAnalysisReady(analysisReady),
-    (rec.analysis_ready_options ?? []).map((o) => o.label),
-  ].filter((r) => r.length > 0);
-  const asserts = (value: string): boolean =>
-    textAssertsLeadingOption(value) || rosters.some((optionLabels) => textAssertsLeadingOption(value, { optionLabels }));
-  const walk = (value: unknown): boolean => {
-    if (typeof value === 'string') return asserts(value);
-    if (Array.isArray(value)) return value.some(walk);
-    if (value !== null && typeof value === 'object') return Object.values(value as Record<string, unknown>).some(walk);
-    return false;
-  };
-  return walk(rec.phase3_blocks) || walk(rec.analysis_ready_options ?? []);
-}
-
 export async function readScenarioAnalysis(
   params: ReadScenarioAnalysisParams,
 ): Promise<ScenarioAnalysisRead> {
@@ -614,11 +590,10 @@ export async function readScenarioAnalysis(
         },
       ).response;
       if (JSON.stringify(gated.blocks) !== JSON.stringify(rec.phase3_blocks)) return undefined;
-      // ⚠ THE LICENCE GATE SEES ONLY ITS OWN PROSE FIELDS (Codex r1 on #2654: a coaching `action_prompt` naming the
-      // leader, and an option's own strings, both pass it unchanged). Unless this read may name a SEPARATED leader, a
-      // record with a leader claim in ANY string, block or option, is omitted: serve-or-omit, never a field list.
-      const mayNameSeparatedLeader = claim?.permitted === true && claim?.separation === 'separated';
-      return !mayNameSeparatedLeader && deliveredRecordAssertsLeader(rec, params.graph, analysisReady) ? undefined : rec;
+      // ⚠ THE LICENCE GATE SEES ONLY ITS OWN PROSE FIELDS (Codex r1/r2 on #2654). Unless this read's licence is fully
+      // `'permitted'`, a record with a leader claim in ANY string or key, block or option, is omitted.
+      const licence = leaderLicenceFromState(analysisState, analysisReady);
+      return deliveredRecordWithinLicence(rec, { licence, graph: params.graph, analysisReady }) ? rec : undefined;
     })();
     const permissions = claimPermissionsFrom(analysisState, analysisReady, { requested: true });
     params.onCurrentnessRead?.({ ...currentnessRead,
