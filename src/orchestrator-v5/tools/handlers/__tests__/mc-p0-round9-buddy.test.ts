@@ -108,13 +108,13 @@ describe('R9 F2 exact Science disclosure with graph labels', () => {
     if (fact.fact_type !== 'run_analysis') throw new Error('missing Run fact');
     const disclosure = ` Olumi supplied the figures for the link from ‘${label}’ to ‘Revenue’. Set your own to see how much it matters.`;
     expect(fact.result.leading_option_id).toBe('a');
-    expect(outcome.assistant_text).toMatch(/^Expand scored highest against your goal in 80% of runs of this model/);
+    expect(outcome.assistant_text).toMatch(/^Expand was supported by 80% of runs of this model/);
     expect(outcome.assistant_text).toContain(disclosure);
     const confirm = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
     if (typeof confirm !== 'function') throw new Error('Run confirmation must be a forwarder');
     expect(confirm(outcome)).toBe(outcome.assistant_text);
     expect(isAllowedRunAnalysisAssistantText(outcome.assistant_text, '', disclosure)).toBe(true);
-    const followup = appendLegacyFiguresAfterLeaderSentence('Expand scored highest against your goal in 80% of runs of this model. Run the follow-up checks before treating this as final.', disclosure);
+    const followup = appendLegacyFiguresAfterLeaderSentence('Expand was supported by 80% of runs of this model. Run the follow-up checks before treating this as final.', disclosure);
     expect(followup).toContain(`${disclosure} Run the follow-up checks`);
     expect(isAllowedRunAnalysisAssistantText(followup, '', disclosure)).toBe(true);
     const forged = { ...outcome, assistant_text: outcome.assistant_text.replace(disclosure, disclosure.replace(label, 'Unrelated label')) };

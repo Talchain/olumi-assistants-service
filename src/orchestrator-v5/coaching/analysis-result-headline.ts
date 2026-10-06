@@ -146,7 +146,6 @@ import {
 import {
   OBJECTIVE_CONTRADICTION_ARM_GRAMMARS,
   OBJECTIVE_CONTRADICTION_MAX_CHARS,
-  deriveGoalIntent,
   recordsCarryGoalAttainment,
   type GoalFrame,
 } from './objective-contradiction.js';
@@ -182,6 +181,7 @@ import {
 // — a builder-side mirror is exactly the drift class that silently
 // swallowed the disclosure for ID-shaped labels ("Plan E_2").
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
+import { LEAD_QUANTITY_MAX_CHARS, resolveLeadQuantity, type LeadQuantity } from './lead-quantity.js';
 // SEPARABILITY (31 Aug 2026): "does this model tell the options apart at all?"
 // A leaf module rather than a predicate inlined here, because the question has
 // to be named APART from the five neighbouring ones it resembles — and in
@@ -226,7 +226,14 @@ import {
  * This widens what `isAllowedRunAnalysisAssistantText` admits by the same 18
  * characters, which is intended: the same sentence, in longer words.
  */
-const LEAD_CLAUSE_OPENING = 'scored highest against your goal in';
+/**
+ * ⭐ LEAD LADDER (Science d5 #87 6008575410 + 6008589328 + 6009457056; WORDING c6 lease 6009413360): the goal-framed
+ * opening this budget was derived from is RETIRED — "your goal" now reads as the target, and the share is a ranking on
+ * the goal's QUANTITY (see `lead-quantity.ts`). Its length (35) stays the REFERENCE every lead's cap is moved from, so
+ * no headline sheds that did not shed before and none survives that did not survive before: length-neutral by
+ * construction, as the rewording above was. Recorded as a number, like the opening it replaced.
+ */
+const LEAD_LENGTH_REFERENCE_CHARS = 35;
 /**
  * Length of the RETIRED opening (`came out ahead in`) — recorded as a NUMBER,
  * not as a string constant, and deliberately so: a literal of the retired copy
@@ -238,32 +245,30 @@ const LEAD_CLAUSE_OPENING = 'scored highest against your goal in';
  */
 const RETIRED_LEAD_CLAUSE_OPENING_CHARS = 17;
 const LEAD_CLAUSE_COPY_DELTA_CHARS =
-  LEAD_CLAUSE_OPENING.length - RETIRED_LEAD_CLAUSE_OPENING_CHARS;
+  LEAD_LENGTH_REFERENCE_CHARS - RETIRED_LEAD_CLAUSE_OPENING_CHARS;
 
 export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
 
 /**
- * ⭐ RT-10 B′ — THE LEAD OF A RUN THAT SENT `minimise` (DL e8 condition 1; Science d5's words, #87).
- *
- * When THIS Run sent `goal_direction: minimise`, ISL's `win_probability` is the share of runs in which the option kept
- * the goal LOWEST, and the lead says so in the goal's own words: "{option} came out lowest for {goal} in N% of runs of
- * this model". Measured on the red team's rt10b graph (guest 078e521e): Run 1 sent no direction, so ISL ranked by the
- * LARGEST cancellations and the headline read "More Reliable Courier scored highest in 87% of runs of this model"; the
- * same graph after "at most 400" sends minimise, and ISL names 15% Loyalty Discount at 71% (PLoT 2473ace, 5 Oct).
- *
- * The goal's label rides only when it NAMES the quantity (no aim verb: "Reduce churn" would read "came out lowest for
- * Reduce churn"), passes the content defences, and fits {@link MINIMISED_GOAL_LABEL_MAX_CHARS}; otherwise the lead is
- * the one this module emitted before, which is true under either direction. It never rides beside a sentence that says
- * the direction was assumed (this Run sent it). The number-free shed form is the same words without the share.
+ * Rung 3 of the ladder, true of every Run: the share as what it is, no direction and no quantity. RT-10 B′'s minimise
+ * lead ("came out lowest for {goal}") is rung 1's "gave the lowest {quantity}" now, under the same rule: only when THIS
+ * Run sent minimise (`minimised_goal_label`, the handler's own payload).
  */
-const MINIMISED_LEAD_PREFIX = 'came out lowest for';
-/** The number-free shed form of the default lead (Case C/B/E and the stability-caution shed). */
-const SCORED_HIGHEST_PLAIN = 'scored highest in this model';
-const MINIMISED_GOAL_LABEL_MAX_CHARS = 48;
-/** The most the minimise lead, in either form, adds over the form it replaces: budgeted on the registry cap. */
-const MINIMISED_LEAD_EXTRA_MAX_CHARS = Math.max(
-  `${MINIMISED_LEAD_PREFIX} ${'x'.repeat(MINIMISED_GOAL_LABEL_MAX_CHARS)} in`.length - LEAD_CLAUSE_OPENING.length,
-  `${MINIMISED_LEAD_PREFIX} ${'x'.repeat(MINIMISED_GOAL_LABEL_MAX_CHARS)} in this model`.length - SCORED_HIGHEST_PLAIN.length,
+const RUN_SHARE_LEAD_OPENING = 'was supported by';
+/**
+ * The number-free shed forms state the PLURALITY, so they ride only where the numeric lead is licensed (d5 b): the
+ * length sheds of Cases A/B/C/SC and a licensed Case E. A low-plurality E says the share; a near-tie E names no option.
+ */
+const RUN_SHARE_PLAIN = 'was supported by the most runs of this model';
+/** The plain form's reference length (the retired "scored … in this model", 28), moved from like the lead's. */
+const PLAIN_LENGTH_REFERENCE_CHARS = 28;
+const quantityLead = (q: LeadQuantity): string => `gave the ${q.extreme} ${q.quantity} in`;
+const quantityPlain = (q: LeadQuantity): string => `gave the ${q.extreme} ${q.quantity} in the most runs of this model`;
+/** The most a lead, in either form, adds over the reference it is measured from: budgeted on the registry cap. */
+const LEAD_QUANTITY_EXTRA_MAX_CHARS = Math.max(
+  quantityLead({ extreme: 'highest', quantity: 'x'.repeat(LEAD_QUANTITY_MAX_CHARS) }).length - LEAD_LENGTH_REFERENCE_CHARS,
+  quantityPlain({ extreme: 'highest', quantity: 'x'.repeat(LEAD_QUANTITY_MAX_CHARS) }).length - PLAIN_LENGTH_REFERENCE_CHARS,
+  RUN_SHARE_PLAIN.length - PLAIN_LENGTH_REFERENCE_CHARS,
 );
 
 /**
@@ -318,7 +323,6 @@ const MINIMISED_LEAD_EXTRA_MAX_CHARS = Math.max(
  * The three are built from two shared clauses, so the combined sentence cannot
  * drift from either half.
  */
-const UNTESTED_GOAL_LEAD_CLAUSE_OPENING = 'scored highest in';
 // ⭐ RT-10 B′ (DL ruling; words APPROVED 5 Oct): the assumption is OLUMI'S and model-relative, and the sentence after it
 // names the ONE correction that works. An "at most" target set on the goal in the Model panel (`goal_target_edit`) now
 // holds the user's ceiling (`add-constraint.ts`), so the rerun minimises (`resolveGoalDirection`, the goal-row branch);
@@ -361,17 +365,6 @@ const GOAL_FRAME_DISCLOSURE_MAX_CHARS = Math.max(
   GOAL_DIRECTION_ASSUMED_PLAIN_DISCLOSURE.length,
   GOAL_DIRECTION_ASSUMED_AND_UNTESTED_PLAIN_DISCLOSURE.length,
 );
-/**
- * How much SHORTER the withdrawn opening is than the goal-framed one (18). The
- * cases that carry the lead clause are measured against a cap reduced by this,
- * so their length verdicts are identical with and without the warnings. That
- * is a LEADER-PERMISSION property, not a nicety: a near-tie that overflows
- * returns null, so without the reduction a sentence that overflows today by up
- * to 18 characters would fit once the codes are present, and the warnings would
- * turn a withheld leader into a named one.
- */
-const GOAL_UNTESTED_LEAD_SHORTFALL_CHARS =
-  LEAD_CLAUSE_OPENING.length - UNTESTED_GOAL_LEAD_CLAUSE_OPENING.length;
 
 // ============================================================================
 // Lane 3 narration-completeness tails (Mission B — provisional_doctrine_v0)
@@ -480,7 +473,7 @@ function eliminatedSentence(count: number): string {
   //
   // Still an integer percentage ("1%", no raw decimal) so the defence-in-depth
   // decimal rule holds, and still plural-safe (count >= ELIMINATED_MIN_COUNT).
-  return ` ${count} options are effectively eliminated (each scored highest in less than 1% of runs).`;
+  return ` ${count} options are effectively eliminated (each supported by under 1% of runs).`;
 }
 
 /**
@@ -508,8 +501,8 @@ export const REDUCED_SAMPLES_SUFFIX =
  */
 export const MAX_ASSISTANT_TEXT_CHARS =
   MAX_HEADLINE_CHARS +
-  // RT-10 B′: the minimise lead's goal label (bounded), so an honest minimise headline is never swapped for the template.
-  MINIMISED_LEAD_EXTRA_MAX_CHARS +
+  // The lead ladder's longest form (a bounded quantity), so an honest headline is never swapped for the template.
+  LEAD_QUANTITY_EXTRA_MAX_CHARS +
   // 2.278: derived over EVERY robustness-honesty variant, not just the first.
   NOT_ROBUST_SENTENCE_MAX_CHARS +
   ELIMINATED_SENTENCE_MAX_CHARS +
@@ -774,9 +767,17 @@ export interface AnalysisResultHeadlineInput {
   readonly goal_direction_correctable?: boolean;
   /**
    * ⭐ RT-10 B′ (DL e8 condition 1): the goal's label, present ONLY when THIS Run sent `goal_direction: minimise` to
-   * PLoT — the handler's own `plotPayload.goal_direction`, never re-derived here. See {@link MINIMISED_LEAD_PREFIX}.
+   * PLoT — the handler's own `plotPayload.goal_direction`, never re-derived here. It makes the lead ladder's extreme
+   * "lowest" (`lead-quantity.ts`).
    */
   readonly minimised_goal_label?: string;
+  /**
+   * ⭐ LEAD LADDER (d5 #87 6008589328): the goal's label and unit, read by the handler off the graph the Run used. With a
+   * unit the lead names the QUANTITY ("gave the highest {quantity}"); without one it is rung 3 ("was supported by").
+   * Omitted ⇒ rung 3. `minimised_goal_label`, when present, is the label and makes the extreme "lowest".
+   */
+  readonly goal_label?: string;
+  readonly goal_unit?: string;
   /**
    * T1. True for the constraint verdict's `identity_unresolved` state: the
    * producer plainly evaluated constraints, but not one of the ids it returned
@@ -1014,19 +1015,6 @@ function resolveGoalFrame(enrichment: Record<string, unknown>, goalPointsUpAsHel
   return attainmentTested ? 'direction_assumed' : 'direction_assumed_and_attainment_untested';
 }
 
-/**
- * RT-10 B′: the goal label the minimise lead may carry, or null (the lead is then the one this module emitted before).
- * Only on the frames that do not say the direction was assumed; only a label that names the quantity rather than an aim
- * (`deriveGoalIntent` finds no direction verb), survives the content defences, and fits the budget.
- */
-function minimisedLeadGoalLabel(raw: unknown, goalFrame: GoalFrame): string | null {
-  if (goalFrame !== 'goal_framed' && goalFrame !== 'attainment_untested') return null;
-  if (typeof raw !== 'string') return null;
-  const label = sanitiseLabel(raw, '');
-  if (label === null || label.length > MINIMISED_GOAL_LABEL_MAX_CHARS) return null;
-  if (deriveGoalIntent(label).direction !== 'undetermined') return null;
-  return passesAssistantTextContentDefences(label) ? label : null;
-}
 
 function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   const {
@@ -1213,7 +1201,6 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // the tails, on every emitted case, budgeted on top like its siblings. It
   // never decides a case: see `leadCap`.
   const goalFrame = resolveGoalFrame(enrichment, input.goal_points_up_as_held === true);
-  const goalUntestable = goalFrame !== 'goal_framed';
   const goalUntestedSuffix = (input.goal_direction_correctable === true
     ? GOAL_FRAME_SENTENCE : GOAL_FRAME_SENTENCE_UNCORRECTABLE)[goalFrame];
   const suffix = `${goalUntestedSuffix}${narrationTail}${reducedSamplesSuffix}${statusSuffix(status_kind)}`;
@@ -1224,19 +1211,23 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // characters the withdrawal saved, so every length verdict (and therefore the
   // leader permission) is the one the goal-framed sentence would have got.
   //
-  // RT-10 B′: a Run that sent minimise leads with "came out lowest for {goal}" (see MINIMISED_LEAD_PREFIX). Its cap is
-  // moved by exactly the characters its opening adds over the goal-framed one, so the length verdict, and therefore the
-  // leader permission, is the one the goal-framed sentence would have got. The number-free shed forms are measured
-  // the same way against `plainCap`.
-  const minimisedLabel = minimisedLeadGoalLabel(input.minimised_goal_label, goalFrame);
-  const leadOpening = minimisedLabel !== null
-    ? `${MINIMISED_LEAD_PREFIX} ${minimisedLabel} in`
-    : goalUntestable ? UNTESTED_GOAL_LEAD_CLAUSE_OPENING : LEAD_CLAUSE_OPENING;
-  const leadCap = lengthCap - (minimisedLabel !== null
-    ? LEAD_CLAUSE_OPENING.length - leadOpening.length
-    : goalUntestable ? GOAL_UNTESTED_LEAD_SHORTFALL_CHARS : 0);
-  const leadsPlain = minimisedLabel !== null ? `${MINIMISED_LEAD_PREFIX} ${minimisedLabel} in this model` : SCORED_HIGHEST_PLAIN;
-  const plainCap = lengthCap + (leadsPlain.length - SCORED_HIGHEST_PLAIN.length);
+  // ⭐ LEAD LADDER: the goal's quantity when it has a unit, else the share itself (`lead-quantity.ts`). Every cap is moved
+  // by exactly what its opening adds over the retired goal-framed reference, so the length verdict, and therefore the
+  // leader permission, is the one that sentence would have got — on every goal frame alike.
+  // RT-10 B′'s frame rule, kept: "lowest" never rides beside a sentence that says the direction was ASSUMED (the cage
+  // rejects that pair, and the user would silently get the locked template). A minimise Run on such a frame is a
+  // contradiction, so it takes rung 3, which is true either way.
+  const minimisedOnAssumedFrame = input.minimised_goal_label !== undefined
+    && goalFrame !== 'goal_framed' && goalFrame !== 'attainment_untested';
+  const leadQuantity = minimisedOnAssumedFrame ? null : resolveLeadQuantity({
+    goalLabel: input.minimised_goal_label ?? input.goal_label,
+    goalUnit: input.goal_unit,
+    minimised: input.minimised_goal_label !== undefined,
+  });
+  const leadOpening = leadQuantity !== null ? quantityLead(leadQuantity) : RUN_SHARE_LEAD_OPENING;
+  const leadCap = lengthCap + (leadOpening.length - LEAD_LENGTH_REFERENCE_CHARS);
+  const leadsPlain = leadQuantity !== null ? quantityPlain(leadQuantity) : RUN_SHARE_PLAIN;
+  const plainCap = lengthCap + (leadsPlain.length - PLAIN_LENGTH_REFERENCE_CHARS);
   const marginBucket = computeMarginBucket(winner);
   const hasDriver = driverLabel !== null;
   const hasFragility = caution !== null;
@@ -1814,9 +1805,17 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // non-overclaiming "{Label} currently leads." (+ status suffix).
   // No "best", "winner", "recommended", "optimal", "preferred". No
   // probability number. No driver/fragility clauses.
-  const caseE = `${winnerLabel} ${LEADS_PLAIN}.${suffix}`;
+  // ⭐ d5 (#87 6009457056): the number-free form states the plurality, so only a LICENSED floor (a meaningful lead that
+  // fell here on length) keeps it. A low plurality says its share instead. A near tie names no option at all: the
+  // separability gate above already withholds every one measured (0.31/0.29, 0.39/0.36, 0.33/0.31 …: options_not_
+  // separable), so this is defence in depth, and it adds no sentence — the locked template, as the gate returns.
   const reason = deriveCaseEReason(winner, driverLabel, hasFragility);
-  if (caseE.length <= plainCap) {
+  if (winner.runnerUpProb !== null
+    && Math.round((winner.winnerProb - winner.runnerUpProb) * 100) < Math.round(MIN_LEAD_MARGIN * 100)) {
+    return { text: null, descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }) };
+  }
+  const caseE = hasMeaningfulLead(winner) ? `${winnerLabel} ${LEADS_PLAIN}.${suffix}` : `${winnerLabel} ${leadClause}.${suffix}`;
+  if (caseE.length <= (hasMeaningfulLead(winner) ? plainCap : leadCap)) {
     return {
       text: caseE,
       descriptor: buildDescriptor('E', reason, { hasDriver, hasFragility, marginBucket }),
@@ -2632,7 +2631,7 @@ const NOT_ROBUST_RE_SRC = NOT_ROBUST_SENTENCES.map(escapeForRegex).join('|');
 // from the grammar is rejected at egress and the user silently receives the
 // locked template instead.
 const ELIMINATED_RE_SRC =
-  ' \\d{1,3} options are effectively eliminated \\(each scored highest in less than 1% of runs\\)\\.';
+  ' \\d{1,3} options are effectively eliminated \\(each supported by under 1% of runs\\)\\.';
 const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // The goal-frame sentence rides FIRST of the tails, mirroring `suffix` in
 // computeHeadline. It is a headline PREFIX family (before the status suffix)
@@ -2973,13 +2972,16 @@ const GOAL_DIRECTION_ASSUMED_RE_SRC = `(?:${[
 ]
   .map(escapeForRegex)
   .join('|')})`;
+// ⭐ LEAD LADDER: rung 3 on any frame; rung 1/2 with the goal's quantity, "lowest" never beside a sentence that says the
+// direction was ASSUMED (a Run that assumed it sent no minimise).
 const LEAD_CLAUSE_RE_SRC =
-  `(?:${LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model(?!.*${GOAL_FRAME_WITHDRAWN_RE_SRC})` +
-  `|${UNTESTED_GOAL_LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model(?=.*${GOAL_FRAME_WITHDRAWN_RE_SRC})` +
-  `|${MINIMISED_LEAD_PREFIX} .+? in \\d{1,3}% of runs of this model(?!.*${GOAL_DIRECTION_ASSUMED_RE_SRC}))`;
-/** The number-free shed forms: the default, and RT-10 B′'s minimise form under the same frame rule as its lead. */
+  `(?:${RUN_SHARE_LEAD_OPENING} \\d{1,3}% of runs of this model` +
+  `|gave the highest .+? in \\d{1,3}% of runs of this model` +
+  `|gave the lowest .+? in \\d{1,3}% of runs of this model(?!.*${GOAL_DIRECTION_ASSUMED_RE_SRC}))`;
+/** The number-free shed forms, under the same frame rule as their leads. */
 const PLAIN_LEAD_RE_SRC =
-  `(?:${SCORED_HIGHEST_PLAIN}|${MINIMISED_LEAD_PREFIX} .+? in this model(?!.*${GOAL_DIRECTION_ASSUMED_RE_SRC}))`;
+  `(?:${RUN_SHARE_PLAIN}|gave the highest .+? in the most runs of this model` +
+  `|gave the lowest .+? in the most runs of this model(?!.*${GOAL_DIRECTION_ASSUMED_RE_SRC}))`;
 
 function headlineGrammarRegexes(legacyFiguresDisclosure = ''): RegExp[] {
   const legacyPattern = legacyFiguresDisclosure === '' ? LEGACY_FIGURES_DISCLOSURE_RE_SRC : escapeForRegex(legacyFiguresDisclosure);

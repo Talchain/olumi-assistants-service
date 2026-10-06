@@ -82,6 +82,7 @@ import {
 import { buildScaffoldDisclosureSuffix } from '../../coaching/scaffold-disclosure.js';
 import { OBJECTIVE_CONTRADICTION_RE_SRC } from '../../coaching/objective-contradiction.js';
 import type { IntakeOptionReconciliation } from '../../../orchestrator/context/intake-option-reconciliation.js';
+import { ANY_LEAD_CLAUSE_RE } from '../../__tests__/support/lead-clause.support.js';
 
 const FALLBACK = 'Ran analysis on your current scenario.';
 const REGISTERED_NAME = 'UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC';
@@ -135,9 +136,9 @@ const INTAKE_DISCLOSURE = buildIntakeOptionDisclosure(
  * AS LEADING, which is exactly why it is excluded from the withheld branch.
  */
 const OBJECTIVE_CONTRADICTION_TAIL =
-  ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
+  ' “Hold at £49 Per Seat (Status Quo)” was supported by the most runs without moving' +
   ' “Seat Price Level” the way your goal asks. Among the options that do,' +
-  ' “Raise to £59 Per Seat” scored highest in 28% of runs.';
+  ' “Raise to £59 Per Seat” was supported by 28% of runs.';
 
 describe('preconditions — the fixtures are real, and the salvage path is the one under test', () => {
   it('the unset fixture is non-empty AND matches the unset grammar exactly', () => {
@@ -261,7 +262,7 @@ describe('counterpart direction — the salvage still refuses what it must', () 
       assistant_text: `${REJECTED_HEAD}${UNSET_DISCLOSURE}${OBJECTIVE_CONTRADICTION_TAIL}`,
     });
     expect(out).toBe(`${FALLBACK}${UNSET_DISCLOSURE}`);
-    expect(out).not.toContain('scored highest against your goal');
+    expect(out).not.toMatch(ANY_LEAD_CLAUSE_RE);
     expect(out).not.toContain('Hold at £49 Per Seat');
   });
 
