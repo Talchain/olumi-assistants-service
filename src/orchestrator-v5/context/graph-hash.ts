@@ -23,6 +23,7 @@ import { projectOptionForCanonicalBuilder } from '../../orchestrator/tools/analy
 import { computeAnalysisReadyStatusWithReason } from '../../cee/transforms/option-status.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION as VOCABULARY } from '@talchain/schemas/boundary';
+import { heldLinkOf } from '../goal-target/held-user-links.js';
 import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
@@ -401,6 +402,15 @@ function projectEdge(raw: unknown): EdgeProjection {
       if (Object.keys(ne).length > 0) provenance.natural_effect = ne;
     }
     if (Object.keys(provenance).length > 0) out.provenance = provenance;
+  }
+
+  // ⭐ HOLD-AT-1.0 (d5 #87 6008807178; Codex r1 #2643 P1): the analysis-affecting identity of a HELD link is what the Run
+  // is SENT — existence 1 and its range's spread — through the same fields (no new key), so a range edit is an input change
+  // and a Run computed before the hold is not "fresh". Only a graph with a held link hashes differently.
+  const held = heldLinkOf(r);
+  if (held !== null) {
+    out.exists_probability = 1;
+    out.strength = { ...(out.strength as Record<string, unknown> | undefined), std: held.std };
   }
 
   return out;

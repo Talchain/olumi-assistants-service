@@ -14,6 +14,17 @@ type Rec = Record<string, any>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+const TOL = 1e-9;
+const near = (a: number, b: number): boolean => Math.abs(a - b) <= TOL * Math.max(1, Math.abs(b));
+
+function carriesStatedSize(e: Rec, beta: number): boolean {
+  const mean = isRec(e.strength) ? e.strength.mean : undefined;
+  if (!finite(mean)) return false;
+  if (near(mean, beta)) return true;
+  const clampedFrom = isRec(e.provenance) ? e.provenance.clamped_from : undefined;
+  return finite(clampedFrom) && near(clampedFrom, beta) && near(Math.abs(mean), 1) && Math.sign(mean) === Math.sign(beta);
+}
+
 /** The z-width of a 90% range: 2 × 1.645. */
 const RANGE_90_WIDTH_Z = 3.29;
 
@@ -39,6 +50,10 @@ export function heldLinkOf(e: unknown): { readonly std: number } | null {
   if (!isRec(ne) || !isRec(ne.stated_range)) return null;
   const { low, high } = ne.stated_range;
   if (!finite(low) || !finite(high) || !finite(ne.amount) || ne.amount === 0 || !finite(ne.strength_mean)) return null;
+  // ⛔ CURRENT CARRIER ONLY (Codex r1 #2643 P1): a writer that changed the strength and kept `natural_effect` (a quoted
+  // brief link sized by Olumi) leaves it stale. Held only while the link still carries the user's β, or a verified stored
+  // clamp of it (|mean| 1, same sign, `clamped_from` = that β), the same rule `withStatedStrengths` applies.
+  if (!carriesStatedSize(e as Rec, ne.strength_mean)) return null;
   // Excludes zero: both ends strictly on one side. A range touching or crossing zero says the effect may not be there.
   if (!((low > 0 && high > 0) || (low < 0 && high < 0))) return null;
   const std = Math.abs((high - low) * (ne.strength_mean / ne.amount)) / RANGE_90_WIDTH_Z;

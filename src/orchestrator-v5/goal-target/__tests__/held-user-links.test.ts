@@ -189,7 +189,7 @@ describe('the model reasons with the existence the Run USES (d5: every reader th
  * either copy REDs that repo's CI until both are re-pinned to the same digest. Check name: "held-link parity fixture digest".
  */
 describe('held-link parity fixture (shared with DGAI)', () => {
-  const FIXTURE_SHA256 = '294ffd2ac4e69e2020c7a539efa8ec2a382a02db692195c684da7842dceeb3d6';
+  const FIXTURE_SHA256 = '8cbd230b58a9e1d356e84e1383c1bac277e223649b96756927db27e40e5f4e0d';
   const load = async (): Promise<{ bytes: Buffer; rows: Array<{ name: string; edge: Rec; held: boolean }> }> => {
     const { readFileSync } = await import('node:fs');
     const bytes = readFileSync(new URL('./fixtures/held-link-parity.json', import.meta.url));
@@ -204,5 +204,37 @@ describe('held-link parity fixture (shared with DGAI)', () => {
     expect(rows.filter((r) => r.held).length).toBeGreaterThan(0);
     expect(rows.filter((r) => !r.held).length).toBeGreaterThan(0);
     for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge) !== null }).toEqual({ name: r.name, held: r.held });
+  });
+});
+
+describe('Codex r1 #2643: identity, currency and the decision reviewer read the hold', () => {
+  const graphWith = (edge: Rec): Rec => ({ nodes: [{ id: 'price', kind: 'factor', label: 'Price' }, { id: 'subs', kind: 'outcome', label: 'Subscribers' }], edges: [edge] });
+  it('P1 identity: a range edit on a HELD link (20–40 → 20–80) changes the analysis hash', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const a = computeAnalysisAffectingGraphHash(graphWith(userLink('price', 'subs', ranged(20, 40))) as never);
+    const b = computeAnalysisAffectingGraphHash(graphWith(userLink('price', 'subs', ranged(20, 80))) as never);
+    expect(a).not.toBeNull();
+    expect(a).not.toBe(b);
+  });
+  it('CONTRAST (no churn): the same range edit on an UNHELD link (Olumi estimate) leaves the hash alone', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const olumi = (ne: Rec): Rec => ({ ...userLink('price', 'subs', ne), provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: ne } });
+    expect(computeAnalysisAffectingGraphHash(graphWith(olumi(ranged(20, 40))) as never))
+      .toBe(computeAnalysisAffectingGraphHash(graphWith(olumi(ranged(20, 80))) as never));
+  });
+  it('P1 currency: a writer that moved the strength and kept natural_effect leaves it STALE → not held', () => {
+    const e = { ...userLink('price', 'subs', ranged(20, 40)), strength: { mean: 0.6, std: 0.15 } };
+    expect(heldLinkOf(e)).toBeNull();
+  });
+  it('P2 decision review: both branches read the existence the Run uses (fallback projection and enrichment graph)', async () => {
+    const { projectRunGraphForDecisionReview } = await import('../../coaching/decision-review-graph-projection.js');
+    const held = userLink('price', 'subs', ranged(20, 40));
+    const viaRun = projectRunGraphForDecisionReview({}, graphWith(held)) as Rec;
+    expect((viaRun.graph.edges as Rec[])[0]).toMatchObject({ exists: 1 });
+    const viaEnrichment = projectRunGraphForDecisionReview(graphWith(held), null) as Rec;
+    expect(viaEnrichment.via).toBe('enrichment');
+    expect((viaEnrichment.graph.edges as Rec[])[0].exists_probability).toBe(1);
+    // CONTRAST: an unheld user link keeps its 0.8 on the fallback branch.
+    expect(((projectRunGraphForDecisionReview({}, graphWith(userLink('price', 'subs', undefined))) as Rec).graph.edges as Rec[])[0]).toMatchObject({ exists: 0.8 });
   });
 });
