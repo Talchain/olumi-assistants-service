@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import type { ResolutionSource } from '../../adapters/llm/router.js';
 import { config } from '../../config/index.js';
-import { getRuntimeEnv } from '../../config/env-resolver.js';
+import { getRuntimeEnv, isProductionDeployment } from '../../config/env-resolver.js';
 
 /** Default TTL: 1 hour */
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
@@ -555,7 +555,9 @@ export function recordPromptCapture(
  * conjunct narrows the UNAUTHENTICATED surface only.
  */
 export function promptCaptureMayRideTheWire(): boolean {
-  return config.cee.turnDebugEnabled && getRuntimeEnv() !== 'prod';
+  // The declared production deployment refuses too, whatever label it runs under
+  // (`isProductionDeployment`, env-resolver.ts).
+  return config.cee.turnDebugEnabled && getRuntimeEnv() !== 'prod' && !isProductionDeployment();
 }
 
 /**
