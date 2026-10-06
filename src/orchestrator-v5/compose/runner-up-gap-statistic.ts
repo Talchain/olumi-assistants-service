@@ -223,7 +223,7 @@ function neutralise(text: string): string {
  * `QTY_SRC` does not match it and the ratified-correct sentence still passes.
  * What is now caught is only the gap form, which is what this reader is for.
  */
-const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|wins|winning|won|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|scor(?:e|es|ed|ing)\s+highest|outperforms?|outperforming|outranks?|beats?|beating)`;
+const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|wins|winning|won|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|scor(?:e|es|ed|ing)\s+highest|came\s+out\s+lowest|(?:gave|gives|give|giving)\s+the\s+(?:highest|lowest)(?:\s+[^,.!?;:]{1,48}?)?|supported|outperforms?|outperforming|outranks?|beats?|beating)`;
 
 /**
  * Bounded and ordered: the FIRST match is what rides the log's primary `reason`

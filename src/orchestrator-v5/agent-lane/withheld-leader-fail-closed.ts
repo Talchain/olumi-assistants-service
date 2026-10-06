@@ -269,6 +269,9 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     re: /\bstronger\s+(?:than|option|choice|case|candidate|result|outcome|performer|position|bet|path|route|contender)\b|\b(?:perform(?:s|ed|ing)?|comes?\s+out|came\s+out|looks?|scor(?:e|es|ed|ing))\s+stronger\b/i,
   },
   { code: 'highest', re: /\bhighest\b/i },
+  // The lead ladder (d5 #87 6008589328): "gave the lowest {quantity}" names a leader as "highest" does. Bound to the
+  // ladder's verbs, so "you want the lowest churn" (an aim) still passes.
+  { code: 'lowest', re: /\b(?:gave|gives|give|giving|came\s+out|comes\s+out)\s+(?:the\s+)?lowest\b/i },
   {
     code: 'higher',
     re: /\b(?:ranks?|ranked|scor(?:e|es|ed|ing)|perform(?:s|ed|ing)?|comes?\s+out|came\s+out|finish(?:es|ed)?|rated?|sits?)\s+higher\b|\b(?:produces?|produced|producing|gives?|gave|delivers?|delivered|yields?|yielded|generates?|generated|achieves?|achieved|has|had|shows?|showed|returns?|returned|reaches|reached)\s+(?:a\s+|the\s+)?higher\b|\bhigher\s+(?:(?:modelled|expected|median|mean|projected|simulated|overall|#)\s+)*(?:mrr\s+)?(?:outcomes?|results?|scores?|chances?|probabilit(?:y|ies)|likelihood|win\s+(?:rates?|shares?))\b|\bhigher\s+than\s+(?:#|(?:the\s+)?(?:other|others|alternatives?|rest|both|either|all|keeping|phasing|raising|holding|staying))\b/i,

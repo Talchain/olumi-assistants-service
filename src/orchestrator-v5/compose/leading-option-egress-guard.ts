@@ -338,6 +338,17 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    */
   { code: 'came_out_lowest', re: /\bcame\s+out\s+lowest\b/i },
   /**
+   * ⭐ THE LEAD LADDER'S RUNG 1/2 VERB (Science d5 #87 6008589328): "{X} gave the highest|lowest {quantity} in N% of runs
+   * of this model" names the run-share leader exactly as "scored highest" did, so the withheld gate must SEE it — in any
+   * tense, and fronted ("The highest {quantity} came from X in 81% of runs"). Rung 3 ("was supported by") is
+   * `runs_supported`'s. The fronted form is bound to a run share, so "the highest chance of meeting your goal" (the
+   * goal-chance copy, its own licence) is not this code's.
+   */
+  {
+    code: 'gave_the_extreme',
+    re: /\b(?:gave|gives|give|giving)\s+the\s+(?:highest|lowest)\b|\b(?:highest|lowest)\b[^.;:!?\n]{0,80}?\bin\s+(?:the\s+most|\d{1,3}(?:\.\d+)?\s?%)\s+(?:of\s+(?:the\s+)?)?(?:runs?|simulations?)\b/i,
+  },
+  /**
    * ⭐ THE DIRECTION-NEUTRAL FORM (DL 0df0e1 #87 6002469285, Part B): where a composer cannot see the Run's sent
    * direction, it names an option as "{N}% of runs supported {X}", "{X} would be supported by the most runs if …", "the
    * option the most runs supported" or "{X} was supported by … runs" (a plurality, never "most runs" bare). Added WITH those composers, for the same reason as `scored_highest` above: a new leader verb the
