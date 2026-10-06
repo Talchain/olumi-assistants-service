@@ -91,7 +91,7 @@ import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct-link.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
-import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -499,16 +499,47 @@ async function decisionLinesAskedOnce(
   const lines = decisionInputLines(graph, ctx);
   if (!lines.some(isDecisionInputAsk) || typeof store.readRecent !== 'function') return lines;
   try {
-    const recentReplies = (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
-      .filter((t) => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
-      .slice(0, RECENT_REPLIES_READ)
-      .map((t) => t.assistant_message)
-      .filter((m): m is string => typeof m === 'string');
+    const recentReplies = await recentAgentReplies(store, scenarioId, exceptTurnId);
     return recentReplies.length > 0 ? decisionInputLines(graph, { ...ctx, recentReplies }) : lines;
   } catch (err) {
     log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — the target ask is said');
     return lines;
   }
+}
+
+/**
+ * The Agent's own recent answers the user read (`isAgentAnswerRow`), newest first, at most `RECENT_REPLIES_READ`, the same
+ * window as the target ask's. `exceptTurnId` leaves out the row being replayed. Throws when the read fails; [] with no reader.
+ */
+async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string[]> {
+  if (typeof store.readRecent !== 'function') return [];
+  return (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
+    .filter((t) => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
+    .slice(0, RECENT_REPLIES_READ)
+    .map((t) => t.assistant_message)
+    .filter((m): m is string => typeof m === 'string');
+}
+
+/**
+ * ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; Acceptance G1b d4): the recent answers a host line's closing question is checked against
+ * (`withoutAskedQuestion`). Read only when one of `lines` asks (`[]` otherwise); a failed read keeps every question, as the
+ * target ask does.
+ */
+async function repliesToCheckAsks(lines: readonly (string | null | undefined)[], store: RecentRowsReader, scenarioId: string,
+  exceptTurnId: string | undefined): Promise<string[]> {
+  if (!lines.some((l) => typeof l === 'string' && l.trimEnd().endsWith('?'))) return [];
+  try {
+    return await recentAgentReplies(store, scenarioId, exceptTurnId);
+  } catch (err) {
+    log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — owed questions are said');
+    return [];
+  }
+}
+
+/** `lines` with each already-asked closing question dropped, IN PLACE (a line that was only that question goes). */
+function askEachOnce(lines: string[], replies: readonly string[]): void {
+  if (replies.length === 0) return;
+  lines.splice(0, lines.length, ...lines.map((l) => withoutAskedQuestion(l, replies)).filter((l) => l.trim() !== ''));
 }
 
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
@@ -1942,7 +1973,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (decisionReviewReplay) {
         // Deterministic on the readback: today's bound Run gives the same review; a Run that moved gives today's (or the
         // unavailable reply). The SAME owner as the live turn, never a model call.
-        const review = decisionReviewFor(scenarioId, state);
+        const review = decisionReviewFor(scenarioId, { ...state, recentReplies: await repliesToCheckAsks(
+          [goalChanceWithheldForAgent(state.analysisResult)?.say], store, scenarioId, turnId) });
         replayText = review.reply;
         boundControl.push(...decisionReviewChips(review));
       } else if (whatChangesReplay) {
@@ -1998,6 +2030,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               analysedOptionIds: analysedOptionIds(state.analysisResult) });
             if (basis !== null) owedNow.push(basis);
           }
+          // ⭐ NEVER RE-ASK (G1b d4): the live Run turn's own rule, on the answers before the turn being replayed.
+          askEachOnce(owedNow, await repliesToCheckAsks(owedNow, store, scenarioId, turnId));
           const withoutAsks = withDisclosures(RUN_RESULT_READY_TEXT, owedNow);
           const lines = await decisionLinesAskedOnce(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks }, store, scenarioId, turnId);
           let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow, ...lines]);
@@ -2495,7 +2529,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
         limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
       }, selectedPermissions);
-      const goalChanceNow = goalChanceWithheldForAgent(st.analysisResult);
+      // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
+      const goalChanceRead = goalChanceWithheldForAgent(st.analysisResult);
+      const goalChanceAskedOnce = goalChanceRead === undefined ? ''
+        : withoutAskedQuestion(goalChanceRead.say, await repliesToCheckAsks([goalChanceRead.say], store, scenarioId, undefined));
+      const goalChanceNow = goalChanceRead === undefined || goalChanceAskedOnce === '' ? goalChanceRead : { ...goalChanceRead, say: goalChanceAskedOnce };
       const goalCertaintyNow = goalCertaintyForAgent(st.analysisResult, { scenario_id: scenarioId, analysis_state: st.analysisState },
         { raw: st.graph, analysis_state: st.analysisState, analysis_result: st.analysisResult,
           ...(st.goalCertainty !== undefined ? { goal_certainty: st.goalCertainty } : {}) });
@@ -3108,6 +3146,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // MC D1 (c): the Run's #416 ask, after its reason (never a bare "couldn't calculate it" with nothing to answer).
         ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
+    // ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; G1b d4): an owed line's closing question already among the Agent's recent answers is
+    // not asked again; its reason is still said (the D1 target ask's rule, PANEL 5944136475, for every owed line).
+    askEachOnce(owed, await repliesToCheckAsks(owed, store, scenarioId, undefined));
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
      * 5788648244). A model-authored "Saved…" survived here on a turn that wrote
@@ -3182,7 +3223,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
     }
     if (decisionReviewRequested) {
-      decisionReviewTurn = decisionReviewFor(scenarioId, composedRead);
+      decisionReviewTurn = decisionReviewFor(scenarioId, { ...composedRead, recentReplies: await repliesToCheckAsks(
+        [goalChanceWithheldForAgent(composedRead.analysisResult)?.say], store, scenarioId, undefined) });
       text = decisionReviewTurn.reply;
       result = { ...result, assistant_text: text };
     }
@@ -3457,7 +3499,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && result.tool_results.some((r) => (r as { mutated?: unknown; applied?: unknown } | undefined)?.mutated === true || (r as { applied?: unknown } | undefined)?.applied === true);
     // An authorised revision says what it did to the result on screen, from this turn's typed readback (R&C 5842738466).
     const staleLine = wroteThisTurn ? staleResultLine(analysisState, analysisReady) : null;
-    const postWriteReadiness = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
+    const postWriteReadinessRead = wroteThisTurn ? postWriteReadinessLine(readbackGraph, analysisReady) : null;
+    // ⭐ NEVER RE-ASK (G1b d4): its sibling sentence ends in the Run's own question; once asked, the reason alone is said.
+    const postWriteReadiness = postWriteReadinessRead === null ? null : withoutAskedQuestion(postWriteReadinessRead,
+      await repliesToCheckAsks([postWriteReadinessRead], store, scenarioId, undefined)) || null;
     const askLine = wroteThisTurn ? postWriteAskLine(readbackGraph, analysisReady) : null;
     // "Run it again" already says a run is permitted; the readiness sentence would repeat it. And on the build turn whose
     // automatic first pass already RAN, "The analysis can run now" sits beside that result with no Run chip (the route

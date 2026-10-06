@@ -243,6 +243,22 @@ export function sameWordsIn(text: string, sentence: string): boolean {
 }
 
 /**
+ * ⭐ NEVER RE-ASK WHAT IS ALREADY ASKED (DL 0df0e1, 6 Oct; Acceptance G1b d4, pd 22fe54b8): a host line's closing QUESTION
+ * already among the Agent's recent answers is still open, so it is not asked again; the line's reason is still said, since
+ * the Run withheld the chance THIS time too. d4: the user answered "about 2 customers per 1% rise" three times, in a unit the
+ * £/month link cannot hold, and every Run and every Explain asked the same question again. This is the D1 target ask's rule
+ * (PANEL 5944136475, `decision-input-ask.ts`) for every host line that ends in a question. Returns '' when the whole line
+ * was that question; the line unchanged when it asks nothing, or asks something not yet asked.
+ */
+export function withoutAskedQuestion(line: string, recentReplies: readonly string[]): string {
+  const body = line.trimEnd();
+  if (!body.endsWith('?') || recentReplies.length === 0) return line;
+  const sentences = body.split(/(?<=[.!?])\s+(?=[A-Z\u2018\u201c"'])/u);
+  const question = sentences[sentences.length - 1]!;
+  return recentReplies.some((reply) => sameWordsIn(reply, question)) ? sentences.slice(0, -1).join(' ') : line;
+}
+
+/**
  * ⭐ MC D1 (c) ON THE RUN TURN ITSELF (served witness on CEE b501eda4, draw 6, #87 6008006944): the chip Run's reply is
  * Olumi's fixed line plus the owed lines, so PLoT #416's reason was said ("'Monthly starter support cost' depends on … ×
  * …, but this run couldn't calculate it that way") and nothing asked — the fail-closed closing only speaks when ranking
