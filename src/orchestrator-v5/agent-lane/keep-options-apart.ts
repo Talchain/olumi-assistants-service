@@ -19,6 +19,9 @@
  * `construction-option-self-loop.test.ts`) is left to the loop handling, which withholds the self-link and says so;
  * renaming it would only keep an orphan that no path joins to the goal, and readiness would refuse Run on it.
  *
+ * ⭐ (DL ruling, dental brief) Such a link no longer refuses the build: see `SetAsideLink`. Only a name carried by more than
+ * one other item (`because: 'owners'`) still fails closed, since no link, level or limit naming it can be given to one.
+ *
  * ⛔ A LINK FROM THE SHARED NAME IS AMBIGUOUS UNLESS ONLY THE QUANTITY CAN HOLD IT (PR Review CHANGES_REQUIRED on
  * #2281 @ bcd8d856). `links[].from` is an untyped label, so "Discount -> Churn risk" may be the option's link:
  * admission reads option -> factor as what the option sets and option -> risk as a shortcut it folds or asks about.
@@ -48,6 +51,23 @@ export interface KeptApart {
  * #2281 @ b3f0c2ab): admission gives every canonical-equal label one id, so registering it would silently lose the
  * factor or risk. The build refuses (`option_name_ambiguous`) with the reason, and nothing is saved.
  */
+/**
+ * ⭐ A LINK SET ASIDE, NOT A BUILD REFUSED (DL ruling on the dental brief; Acceptance e7, prod CEE b38592e: 3 of 3 first drafts
+ * of a guest's brief refused, "Missed-appointment fee" option + factor). When ONE quantity shares the option's name and a
+ * link drawn from that name could be the option's (to a factor, a risk, an option, an unnamed label, or the name itself),
+ * the quantity is still renamed and keeps every link only it can hold (to the goal or an outcome); each link the option
+ * could hold is SET ASIDE — left out of the model, said, and asked about — never re-sourced (PR Review #2281 row 8's
+ * concern: re-sourcing would assert a mechanism) and never the reason nothing is saved.
+ */
+export interface SetAsideLink {
+  readonly option: string;
+  /** The quantity's new name ("Missed-appointment fee level"). */
+  readonly renamed: string;
+  readonly to: string;
+  /** A link from the shared name to itself: said, never asked (it is no question either could answer). */
+  readonly self: boolean;
+}
+
 export interface NotToldApart {
   readonly option: string;
   /** What else carries the name, e.g. ['factor', 'risk'], ['factor', 'factor'], ['factor', 'goal'], ['factor', 'option']. */
@@ -57,6 +77,7 @@ export interface NotToldApart {
 
 export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
   readonly model: CandidateModel; readonly renamed: readonly KeptApart[]; readonly ambiguous: readonly NotToldApart[];
+  readonly setAside: readonly SetAsideLink[];
 } {
   // The FIRST option spelled this way keeps its words (the order the user's options came in).
   const optionNames = new Map([...candidate.options].reverse().map((o) => [canon(o.label), o.label] as const));
@@ -95,6 +116,8 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
     ...candidate.options.filter((o) => canon(o.label) === key).slice(1).map(() => 'option'),
   ];
   const ambiguous: NotToldApart[] = [];
+  // Names whose links are SPLIT: the quantity keeps those only it can hold, the rest are set aside.
+  const split = new Set<string>();
   const plan = (label: string, kind: KeptApart['kind']): void => {
     const option = optionNames.get(canon(label));
     if (option === undefined || to.has(canon(label))) return;
@@ -105,10 +128,7 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
     }
     const links = linksFrom(canon(label));
     if (links === 'none') return;
-    if (links === 'ambiguous') {
-      ambiguous.push({ option, owners, because: 'links' });
-      return;
-    }
+    if (links === 'ambiguous') split.add(canon(label));
     const suffix = kind === 'risk' && !/\brisk$/i.test(label.trim()) ? ' risk' : ' level';
     let next = `${label.trim()}${suffix}`;
     for (let n = 2; taken.has(canon(next)); n += 1) next = `${label.trim()}${suffix} ${n}`;
@@ -119,8 +139,16 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
   candidate.factors.forEach((f) => plan(f.label, 'factor'));
   candidate.risks.forEach((r) => plan(r.label, 'risk'));
   candidate.outcomes.forEach((o) => plan(o.label, 'outcome'));
-  if (renamed.length === 0) return { model: candidate, renamed, ambiguous };
+  if (renamed.length === 0) return { model: candidate, renamed, ambiguous, setAside: [] };
   const re = (label: string): string => to.get(canon(label)) ?? label;
+  // A link from a SPLIT name the option could hold: set aside (and said), never re-sourced to the quantity.
+  const setAside: SetAsideLink[] = [];
+  const optionHolds = (l: { from: string; to: string }): boolean => split.has(canon(l.from))
+    && (canon(l.to) === canon(l.from) || !onlyAQuantityHolds.has(canon(l.to)) || optionNames.has(canon(l.to)));
+  for (const l of candidate.links) {
+    if (!optionHolds(l)) continue;
+    setAside.push({ option: optionNames.get(canon(l.from))!, renamed: re(l.from), to: l.to, self: canon(l.to) === canon(l.from) });
+  }
   const model: CandidateModel = {
     ...candidate,
     factors: candidate.factors.map((f) => ({ ...f, label: re(f.label) })),
@@ -131,13 +159,25 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
       ...(o.interventions !== undefined ? { interventions: o.interventions.map((i) => ({ ...i, factor_label: re(i.factor_label) })) } : {}),
       ...(o.changes !== undefined ? { changes: o.changes.map(re) } : {}),
     })),
-    links: candidate.links.map((l) => ({ ...l, from: re(l.from), to: re(l.to) })),
+    links: candidate.links.filter((l) => !optionHolds(l)).map((l) => ({ ...l, from: re(l.from), to: re(l.to) })),
     constraints: candidate.constraints.map((c) => ({ ...c, metric: re(c.metric) })),
     ...(candidate.identities !== undefined
       ? { identities: candidate.identities.map((i) => ({ ...i, outcome: re(i.outcome), factors: i.factors.map(re) })) }
       : {}),
   };
-  return { model, renamed, ambiguous };
+  return { model, renamed, ambiguous, setAside };
+}
+
+/** What is said for a link set aside (`not_represented`, suffix `.link_set_aside`). */
+export function setAsideLinkLine(a: SetAsideLink): string {
+  return a.self
+    ? `A link from "${a.option}" to itself was set aside: it is not in the model.`
+    : `The link from "${a.option}" to "${a.to}" could be the option's own or "${a.renamed}"'s, so it is set aside and not in the model yet.`;
+}
+
+/** The one question asked for it (`open_questions`), never for a self-link. */
+export function setAsideLinkQuestion(a: SetAsideLink): string | null {
+  return a.self ? null : `Does "${a.option}" change "${a.to}" directly, or through "${a.renamed}"? Say which and I'll draw that link.`;
 }
 
 /** The line said for each rename (`not_represented`, suffix `.label_kept_apart`). */

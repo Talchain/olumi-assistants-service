@@ -9,7 +9,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { keepOptionsAndQuantitiesApart, notToldApartLine } from '../keep-options-apart.js';
+import { keepOptionsAndQuantitiesApart, notToldApartLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import { narrateWriteOutcome } from '../write-outcome.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -62,16 +62,21 @@ describe('Canvas\'s cloud-bill brief (saved live draft): the option and the fact
     expect(status).toContain('the model uses one name for an option and for something else in the model, so they could not be told apart and nothing was saved');
     expect(status).not.toMatch(/option_name_ambiguous/);
   });
-  it('8 (real build) — a link from the shared name to a RISK may be the option\'s: nothing is renamed, and the build FAILS CLOSED (nothing saved, the reason named)', async () => {
+  it('8 (real build, DL dental ruling) — a link from the shared name to a RISK may be the option\'s: the factor is still renamed, that link is SET ASIDE, said and asked, and the model is built', async () => {
     const c = structuredClone(FX.candidate) as Rec;
     c.risks = [...(c.risks ?? []), { label: 'Provider lock-in', provenance: 'inferred' }];
     c.links = [...c.links, { from: 'Enterprise discount', to: 'Provider lock-in', direction: 'positive', provenance: 'inferred' }];
-    expect(keepOptionsAndQuantitiesApart(c as CandidateModel).renamed).toEqual([]);
+    expect(keepOptionsAndQuantitiesApart(c as CandidateModel).setAside).toEqual([
+      { option: 'Enterprise discount', renamed: 'Enterprise discount level', to: 'Provider lock-in', self: false },
+    ]);
     const { r, g } = await build(c);
-    expect(g).toBeNull();
-    expect(r).toMatchObject({ ok: false, refusal: 'option_name_ambiguous' });
-    expect(r.ambiguous_names).toEqual([{ option: 'Enterprise discount', owners: ['factor'], because: 'links' }]);
-    expect(r.detail).toMatch(/and a link from "Enterprise discount" could belong to either/);
+    expect(r).toMatchObject({ ok: true });
+    const factor = (g.nodes as Rec[]).find((n) => n.kind === 'factor' && n.label === 'Enterprise discount level')!;
+    const risk = (g.nodes as Rec[]).find((n) => n.label === 'Provider lock-in')!;
+    // Never re-sourced to the factor, never drawn from the option: the link is not in the model.
+    expect((g.edges as Rec[]).filter((e) => e.to === risk.id && (e.from === factor.id || e.from === 'enterprise_discount'))).toEqual([]);
+    expect(r.not_represented).toContain('The link from "Enterprise discount" to "Provider lock-in" could be the option\'s own or "Enterprise discount level"\'s, so it is set aside and not in the model yet.');
+    expect(r.open_questions).toContain('Does "Enterprise discount" change "Provider lock-in" directly, or through "Enterprise discount level"? Say which and I\'ll draw that link.');
   });
 });
 
@@ -119,7 +124,7 @@ describe('the pure rule', () => {
       expect(out.model).toBe(c);
     }
   });
-  it('8b — FAIL CLOSED: a link from the shared name to a risk, a factor, another option or an unnamed label leaves the candidate exactly as it came, even beside a goal link', () => {
+  it('8b (DL dental ruling) — a link from the shared name to a risk, a factor, another option or an unnamed label is SET ASIDE, never re-sourced; a goal link beside it is the renamed factor\'s', () => {
     const risk = { label: 'Churn risk', provenance: 'inferred' };
     const usage = { label: 'Usage', role: 'observable', baseline_known: false, baseline_value: null, unit: 'GBP', provenance: 'inferred' };
     const goalLink = { from: 'Discount', to: 'Monthly cloud bill', direction: 'negative', provenance: 'inferred' };
@@ -127,23 +132,25 @@ describe('the pure rule', () => {
       for (const links of [[{ from: 'Discount', to, direction: 'positive', provenance: 'inferred' }], [goalLink, { from: 'Discount', to, direction: 'positive', provenance: 'inferred' }]]) {
         const c = base({ ...(extra as Partial<CandidateModel>), links: links as never });
         const out = keepOptionsAndQuantitiesApart(c);
-        expect(out.renamed, `${to} / ${links.length}`).toEqual([]);
-        expect(out.model).toBe(c);
-        expect(out.model.links.every((l) => l.from === 'Discount')).toBe(true);
-        expect(out.ambiguous, `${to} / ${links.length}`).toEqual([{ option: 'Discount', owners: ['factor'], because: 'links' }]);
+        expect(out.ambiguous, `${to} / ${links.length}`).toEqual([]);
+        expect(out.renamed.map((r) => r.to)).toEqual(['Discount level']);
+        expect(out.setAside, `${to} / ${links.length}`).toEqual([{ option: 'Discount', renamed: 'Discount level', to, self: false }]);
+        // The ambiguous link is in neither name's keeping: not from the option, not re-sourced to the factor.
+        expect(out.model.links.some((l) => l.to === to)).toBe(false);
+        expect(out.model.links.filter((l) => l.to === 'Monthly cloud bill').map((l) => l.from)).toEqual(links.length === 2 ? ['Discount level'] : []);
       }
     }
   });
-  it('8c — FAIL CLOSED: a self-link on the shared name beside a goal link is never re-sourced as a factor self-loop', () => {
+  it('8c — a self-link on the shared name beside a goal link is never re-sourced as a factor self-loop: set aside (said, not asked)', () => {
     const c = base({ links: [
       { from: 'Discount', to: 'Discount', direction: 'positive', provenance: 'explicit' },
       { from: 'Discount', to: 'Monthly cloud bill', direction: 'negative', provenance: 'inferred' },
     ] as never, constraints: [], identities: [] });
     const out = keepOptionsAndQuantitiesApart(c);
-    expect(out.renamed).toEqual([]);
-    expect(out.model).toBe(c);
-    expect(out.model.links[0]).toMatchObject({ from: 'Discount', to: 'Discount' });
-    expect(out.ambiguous).toEqual([{ option: 'Discount', owners: ['factor'], because: 'links' }]);
+    expect(out.ambiguous).toEqual([]);
+    expect(out.setAside).toEqual([{ option: 'Discount', renamed: 'Discount level', to: 'Discount', self: true }]);
+    expect(out.model.links).toEqual([expect.objectContaining({ from: 'Discount level', to: 'Monthly cloud bill' })]);
+    expect(setAsideLinkQuestion(out.setAside[0]!)).toBeNull();
   });
   it('10 — COLLISION: "<name> level" already in the draft → the renamed quantity is "<name> level 2", never merged into it', () => {
     const existing = { label: 'Discount level', role: 'observable', baseline_known: false, baseline_value: null, unit: '%', provenance: 'inferred' };
