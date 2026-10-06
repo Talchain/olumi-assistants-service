@@ -21,6 +21,7 @@
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
 import { sameWord, wordsOf } from './stated-by-user.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import { PERIOD_ADVERB_SPELLINGS, PERIOD_NOUN_SPELLINGS } from '../../utils/unit-alphabet.js';
 
 const k = canonicalLabel;
 
@@ -66,7 +67,9 @@ function briefSupport(label: string, brief: string): number {
 const IRREGULAR: Record<string, string> = { won: 'win', lost: 'lose', paid: 'pay', sold: 'sell', bought: 'buy', grew: 'grow', grown: 'grow',
   spent: 'spend', kept: 'keep', held: 'hold', made: 'make', gave: 'give', given: 'give', brought: 'bring', left: 'leave', taken: 'take', took: 'take' };
 const base = (w: string): string => IRREGULAR[w] ?? w;
-const TIME = new Set(['day', 'days', 'week', 'weeks', 'month', 'months', 'quarter', 'quarters', 'year', 'years', 'daily', 'weekly', 'monthly', 'quarterly', 'annual', 'yearly']);
+/** A period word names no mechanism ("MONTHLY support cost"): the one unit alphabet's periods (PR-U1), never its metric words. */
+const TIME = new Set([...Object.values(PERIOD_NOUN_SPELLINGS), ...Object.values(PERIOD_ADVERB_SPELLINGS)].flat()
+  .filter((w) => !REVENUE.includes(w)));
 
 /** The sign a drafted path from `from` to the goal carries: +1, −1, or null when paths disagree or one is unknown. */
 function pathSign(c: CandidateModel, from: string): 1 | -1 | null {
