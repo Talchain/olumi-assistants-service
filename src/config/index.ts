@@ -16,6 +16,7 @@ import { z } from "zod";
 import {
   getRuntimeEnv,
   getRuntimeEnvResolution,
+  isProductionDeployment,
   type RuntimeEnv,
   type RuntimeEnvSource,
 } from "./env-resolver.js";
@@ -133,7 +134,8 @@ const booleanString = z
 function createEnvEnforcedBoolean(
   defaultValue: boolean,
   settingName: string,
-  allowStaging: boolean = true
+  allowStaging: boolean = true,
+  lockOnProductionDeployment: boolean = true
 ) {
   return z
     .union([z.boolean(), z.string(), z.number(), z.undefined()])
@@ -154,8 +156,9 @@ function createEnvEnforcedBoolean(
         requestedValue = parsed;
       }
 
-      // Prod: always false, warn if override attempted
-      if (env === "prod") {
+      // Prod: always false, warn if override attempted. "Prod" is the production label OR the
+      // declared production deployment (`isProductionDeployment`), unless the setting is exempt.
+      if (env === "prod" || (lockOnProductionDeployment && isProductionDeployment())) {
         if (requestedValue === true) {
           console.warn(`[SECURITY] ${settingName} cannot be enabled in production (forced to false)`);
           configOverrideEvents.push({
@@ -1383,7 +1386,9 @@ const ConfigSchema = z.object({
     // production lockdown; an explicit CEE_MODEL_VERSIONS_ENABLED=false in
     // the environment still disables it (rollback without a deploy), and the
     // routes answer an honest VERSIONS_DISABLED 503 in that posture.
-    modelVersionsEnabled: createEnvEnforcedBoolean(true, "CEE_MODEL_VERSIONS_ENABLED"),
+    // EXEMPT from the production-DEPLOYMENT lockdown (4th argument): versions are on in
+    // every deployment by ruling. The production LABEL (OLUMI_ENV=prod) still locks it, as before.
+    modelVersionsEnabled: createEnvEnforcedBoolean(true, "CEE_MODEL_VERSIONS_ENABLED", true, false),
   }),
 
   // ISL (Inference Service Layer) Configuration
