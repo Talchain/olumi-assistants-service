@@ -73,14 +73,14 @@ export function readMoney(unit: unknown, label: string): { code: string; period:
     if (parts.length !== 1 || ws.filter(isPeriod).length !== 1) return null;
     const seg = parts[0]!;
     const nouns = seg.slice(0, -1);
-    if (!nouns.every((w) => /^\p{L}+$/u.test(w) && !isCurrency(w) && !MONEY_WORDS.has(w))) return null;
+    if (!nouns.every((w) => /^\p{L}[\p{L}\p{M}]*$/u.test(w) && !isCurrency(w) && !MONEY_WORDS.has(w))) return null;
     const period = periodOf([seg[seg.length - 1]!]);
     if (period === 'both' || period === null) return null;
     return { code: r.currencyCode, period, per: nouns.map(singular), mixed: true };
   }
   const denominators = segments.slice(1).filter((s) => !s.every(isPeriod));
   if (denominators.length > 1) return null;
-  if (denominators.some((s) => !s.every((w) => /^\p{L}+$/u.test(w) && !isPeriod(w) && !isCurrency(w) && !MONEY_WORDS.has(w)))) return null;
+  if (denominators.some((s) => !s.every((w) => /^\p{L}[\p{L}\p{M}]*$/u.test(w) && !isPeriod(w) && !isCurrency(w) && !MONEY_WORDS.has(w)))) return null;
   // ⛔ PR Review on 98be677f: ONE period at most. "GBP per subscriber per month per month" is money per month², and
   // "GBP monthly per subscriber per month" says the period twice; neither composes to money per month.
   if (ws.filter(isPeriod).length > 1) return null;
@@ -103,7 +103,7 @@ export function readMoneyTotal(unit: unknown, label: string): { code: string; pe
 
 /** A COUNT: words only ("subscribers", "paying customers") — no currency, no %, no period, no "per" (a rate). */
 export function readCount(unit: unknown): string[] | null {
-  if (typeof unit !== 'string' || !/^\p{L}[\p{L}\s-]*$/u.test(unit.trim())) return null;
+  if (typeof unit !== 'string' || !/^\p{L}[\p{L}\p{M}\s-]*$/u.test(unit.trim())) return null;
   const ws = words(unit);
   if (ws.length === 0 || ws.includes('per') || periodOf(ws) !== null || readCurrencyUnitWithQualifiers(unit).kind === 'currency') return null;
   return ws.map(singular);
@@ -222,7 +222,7 @@ export function readUnitParts(unit: unknown): UnitParts | null {
       // In a MONEY unit string a period noun right after the currency is its period ("£ year" as C1 reads it); in a
       // count it stays a duration noun ("18 months").
       if (i === 0 && money !== null && isLeafPeriodNoun(w)) { if (!setPeriod(periodNoun(w)!)) return null; continue; }
-      if (!/^\p{L}[\p{L}.'-]*$/u.test(w)) return null;
+      if (!/^\p{L}[\p{L}\p{M}.'-]*$/u.test(w)) return null;
       segNouns.push(w);
     }
     if (segNouns.length === 0) continue;
@@ -281,14 +281,12 @@ export function readCountRate(unit: unknown): { noun: string[]; period: UnitPeri
  * count rate (`readCountRate`), never money, %, pp or a duration ("months"). A period the label names, read by the FULL
  * period reader (every leaf period, never C1's month/year `periodIn`), must be the unit's own: a different period, two
  * periods, or a period the unit does not carry, refuse.
- * U1's reader leaves accented words unread ("cafés"), so only the unit's KIND is read with accents folded; the label
- * comparison is not folded.
  */
 export function labelStandsForCountUnit(stated: unknown, label: unknown, unit: unknown): boolean {
   if (typeof stated !== 'string' || typeof label !== 'string' || typeof unit !== 'string') return false;
   const said = words(stated).map(singular).join(' ');
   if (said === '' || said !== words(label).map(singular).join(' ')) return false;
-  const count = readCountRate(unit.normalize('NFD').replace(/\p{M}/gu, ''));
+  const count = readCountRate(unit);
   if (count === null || count.noun.every(isLeafPeriodNoun)) return false;
   const labelPeriods = new Set(words(label).flatMap((w) => {
     const p = periodNoun(w) ?? periodAdverb(w);
@@ -313,7 +311,7 @@ const CURRENCY_TOKEN = /(?:A\$|C\$|NZ\$|[£$€¥₹]|CHF|kr)/iu;
 
 /** Every sub-phrase of the first three words after a plain literal ("12,000 tickets a month" → tickets, tickets a, …). */
 export function nounUnitsAt(tail: string): readonly string[] {
-  const ws = tail.match(/^\s+((?:\p{L}[\p{L}-]*\s*){1,3})/u)?.[1]
+  const ws = tail.match(/^\s+((?:\p{L}[\p{L}\p{M}-]*\s*){1,3})/u)?.[1]
     .trim()
     .split(/\s+/u)
     .map((word) => word.toLowerCase()) ?? [];
@@ -334,7 +332,7 @@ export function statedTailParts(text: string, literal: { index: number; matchedT
     .filter((w) => w !== '');
   const digit = toks.findIndex((w) => /\d/.test(w));
   if (digit >= 0) toks.length = digit;
-  const isWord = (w: string | undefined): boolean => w !== undefined && /^\p{L}[\p{L}']*$/u.test(w);
+  const isWord = (w: string | undefined): boolean => w !== undefined && /^\p{L}[\p{L}\p{M}']*$/u.test(w);
   let k = 0;
   let period: UnitPeriod | null = null;
   let per: string[] | null = null;
@@ -429,7 +427,7 @@ export function unitsAt(text: string, literal: { index: number; matchedText: str
     const per = parts.per !== null && parts.per.length > 0 ? `/${parts.per.join(' ')}` : '';
     return [`${currency}${per}${parts.period !== null ? `/${parts.period}` : ''}`];
   }
-  const head = tail.match(/^\s+((?:[A-Za-z%][A-Za-z%-]*\s*){1,3})/u)?.[1]?.trim().toLowerCase().split(/\s+/u) ?? [];
+  const head = tail.match(/^\s+((?:[\p{L}%][\p{L}\p{M}%-]*\s*){1,3})/u)?.[1]?.trim().toLowerCase().split(/\s+/u) ?? [];
   for (let n = Math.min(3, head.length); n >= 1; n -= 1) {
     if (shareKind(head.slice(0, n).join(' ')) !== null) return [head.slice(0, n).join(' ')];
   }
