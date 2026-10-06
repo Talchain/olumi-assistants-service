@@ -338,8 +338,9 @@ describe('THE WORDS: the card and the withhold ask', () => {
     expect(linkEffectRefusalWords('unit_mismatch', gaugeGraph(), { id: 'strain', label: 'Support capacity strain' }, { id: 'mrr', label: 'MRR' },
       { amount_unit: '£/month', per_source_change_unit: 'cafés' }), 'CONTROL: a gauge is never a source unit').not.toContain('"Support capacity strain" in £/month');
   });
+  // RT-18 (cut 5): production gates the (B) ask off; these rows keep its words tested for cut 6 (`gaugeAsk: true`).
   const W = (graph: Rec, links: { from: string; to: string }[], option: string) =>
-    placeholderGoalWarning(graph, [{ option_id: option, links }], 'GOAL_FIGURES_PLACEHOLDER_PATH');
+    placeholderGoalWarning(graph, [{ option_id: option, links }], 'GOAL_FIGURES_PLACEHOLDER_PATH', false, { gaugeAsk: true });
   it('(B) withhold: ONE end-to-end question, never the two links apart; neither is offered as a one-click', () => {
     const w = W(gaugeGraph(), [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise');
     expect(w.message).toBe('This comparison turns on how much ‘Pro plan price’ changes ‘MRR’ through ‘Support capacity strain’, which nobody has set yet.'

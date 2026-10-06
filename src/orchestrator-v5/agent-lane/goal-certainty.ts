@@ -499,6 +499,8 @@ export function placeholderGoalWarning(
   paths: readonly PlaceholderGoalPath[],
   code: string,
   productBlocks = false,
+  /** RT-18: the (B) gauge ask is gated off in production (cut 5); only its own rows opt in, so cut 6 can lift it tested. */
+  opts: { readonly gaugeAsk?: true } = {},
 ): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }> } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
@@ -525,7 +527,7 @@ export function placeholderGoalWarning(
   // ⭐ NO DEAD END (MC 21's chain; Science #87 6006425419, 6006548763, 6006685510): every withheld path gets an ask the
   // user can answer in one sentence. A level-less mediator is asked END TO END (the gauge) or in the unit its sized parent
   // fixes; a goal with no frame is asked its level first. Pure wording + offer: the links and the withhold are unchanged.
-  const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered);
+  const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered, opts);
   const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
@@ -548,13 +550,13 @@ export function placeholderGoalWarning(
  * The ONE source of a withhold's no-dead-end words, for the warning AND the Agent's withheld reply (R8: one grammar for the
  * warning, summary, reply and P5; Codex/R8-6: the reply re-said the generic sentence). The AIQ guessed-link rule applies.
  */
-export function placeholderAskWords(graph: unknown, links: ReadonlyArray<{ from: string; to: string }>): { message: string; gaugeLinks: Set<string> } | undefined {
+export function placeholderAskWords(graph: unknown, links: ReadonlyArray<{ from: string; to: string }>, opts: { readonly gaugeAsk?: true } = {}): { message: string; gaugeLinks: Set<string> } | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const limitIds = new Set((isRec(graph) && Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
     .filter(isRec).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'));
   const guessed = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
-  return noDeadEndAsks(graph, links, (id) => text(byId.get(id)?.label) ?? id, guessed);
+  return noDeadEndAsks(graph, links, (id) => text(byId.get(id)?.label) ?? id, guessed, opts);
 }
 
 /**
@@ -573,6 +575,7 @@ export function noDeadEndAsks(
   labelOf: (id: string) => string,
   /** AIQ 5903604206 / 5903627210: a guessed link out of a node the user's limit watches is said, never asked. */
   guessed: (l: { from: string; to: string }) => boolean = () => false,
+  opts: { readonly gaugeAsk?: true } = {},
 ): { message: string; gaugeLinks: Set<string> } | undefined {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || links.length === 0) return undefined;
   const nodes = graph.nodes.filter(isRec);
@@ -609,6 +612,11 @@ export function noDeadEndAsks(
   const gaugeLinks = new Set<string>();
   const key = (from: unknown, to: unknown): string => `${String(from)}->${String(to)}`;
   for (const [m, r] of readings) {
+    // ⛔ RT-18 GATE (DL 0df0e1, 6 Oct, cut 5): the (B) end-to-end ask stays OFF until its answer has a working path. On a
+    // served dental draft every answer was refused (the Agent sizes lever → goal, which the model does not hold; the
+    // through-M answer reads "% of appointments" as another quantity). A dead end with a cause beats a false instruction:
+    // the path falls back to the unsized-link sentence. Cut 6 lifts this with the end-to-end retarget.
+    if (opts.gaugeAsk !== true) continue;
     if (r.via !== 'gauge' || r.stored === true || !links.some((l) => l.from === m || l.to === m)) continue;
     const lever = gaugeLever(edges, m, r, unitOfNode);
     if (lever === undefined || guessed({ from: lever, to: m }) || guessed({ from: m, to: r.child })) continue;

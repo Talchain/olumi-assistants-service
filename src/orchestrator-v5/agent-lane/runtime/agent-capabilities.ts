@@ -3446,6 +3446,13 @@ export function createAgentCapabilities(
           const stated = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
           // ONE scope for admission, the figure question and the recorded sentence, so they cannot read different units.
           const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to) };
+          // RT-18 (DL 0df0e1): a link the model does not hold is said FIRST. Every figure question below ends with the canvas
+          // route "click the link from A to B", which must never name a link the canvas does not show.
+          const held = linkEffectTargetOf(working, from.id, to.id);
+          if (held.kind === 'refused' && held.reason === 'edge_not_found') {
+            fail('no_such_link', `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.`);
+            continue;
+          }
           const miss = linkEffectQuoteContextMiss(entryQuote, text) ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label }, statedScope);
           if (miss === 'figures_not_in_statement') {
             // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510): ONE fixed
@@ -3564,6 +3571,13 @@ export function createAgentCapabilities(
       const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const statedEnds = { source: from.label, target: to.label };
       const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to) };
+      // RT-18 (DL 0df0e1): a link the model does not hold is said FIRST. Every figure question below ends with the canvas
+      // route "click the link from A to B", which must never name a link the canvas does not show.
+      const held = linkEffectTargetOf(g.raw, from.id, to.id);
+      if (held.kind === 'refused' && held.reason === 'edge_not_found') {
+        return { ok: false, mutated: false, refusal: 'no_such_link',
+          detail: `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.` };
+      }
       const miss = linkEffectQuoteContextMiss(quote, text) ?? linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
       if (miss === 'figures_not_in_statement') {
         // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510, where Olumi's
