@@ -103,6 +103,7 @@ import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPromp
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
 import { isPromptManagementEnabled } from "./prompts/loader.js";
 import { config, shouldUseStagingPrompts, resolvePromptEnvironment, validateConfig, checkDeprecatedEnvVars, checkDeadEnvVars, emitConfigOverrideTelemetry } from "./config/index.js";
+import { assertNoWildcardOrigin, assertAuthConfigured } from "./config/production-boot-checks.js";
 import { createLoggerConfig } from "./utils/logger-config.js";
 import { log } from "./utils/telemetry.js";
 import { startDraftFailureRetentionJob } from "./cee/draft-failures/store.js";
@@ -153,9 +154,7 @@ function resolveAllowedOrigins(): string[] {
         .filter((o) => o.length > 0)
     : DEFAULT_ORIGINS;
 
-  if (env.NODE_ENV === "production" && origins.some((origin) => origin === "*" || origin === '"*"')) {
-    throw new Error("FATAL: ALLOWED_ORIGINS cannot contain '*' in production");
-  }
+  assertNoWildcardOrigin(origins, env.NODE_ENV);
 
   // Diagnostic: log parsed origins at startup (debug level)
   log.debug({ rawEnv: raw ?? '(not set)', origins }, 'CORS origins parsed');
@@ -306,11 +305,7 @@ export async function build() {
     Boolean(config.auth.assistApiKeys?.some((k) => k.trim().length > 0));
   const hasHmacSecret = Boolean(config.auth.hmacSecret?.trim().length);
 
-  if (nodeEnv === 'production' && !hasApiKeys && !hasHmacSecret) {
-    throw new Error(
-      'FATAL: In production, at least one ASSIST_API_KEY/ASSIST_API_KEYS or HMAC_SECRET must be configured',
-    );
-  }
+  assertAuthConfigured(nodeEnv, hasApiKeys, hasHmacSecret);
 
   // One adapter-free routing projection feeds startup status and the admin
   // endpoint. Gated, inert/display and invalid rows remain visible in the full
