@@ -132,7 +132,7 @@ const KINDS: ReadonlySet<string> = new Set(['factor_value', 'link_strength', 'li
 const none = (reason: GoalChanceNoDriverReason): GoalChanceDriverClaim => ({ no_driver: reason });
 
 /** ISL's ranking (isl-4d §9): spread descending, then `kind`, then `quantity_id` (code-point order, as Python's). */
-function byIslRank(a: Rec, b: Rec): number {
+export function byIslRank(a: Rec, b: Rec): number {
   const d = (b.spread as number) - (a.spread as number);
   if (d !== 0) return d;
   const ka = String(a.kind), kb = String(b.kind);
@@ -150,13 +150,13 @@ export function topDriverRow(record: Rec): Rec | null {
   return [...(rows as Rec[])].sort(byIslRank)[0]!;
 }
 
-function linkEnds(row: Rec): { from: string; to: string } | null {
+export function linkEnds(row: Rec): { from: string; to: string } | null {
   if (typeof row.from === 'string' && typeof row.to === 'string' && row.from !== '' && row.to !== '') return { from: row.from, to: row.to };
   const m = /^(.+)->(.+)$/.exec(String(row.quantity_id));
   return m === null ? null : { from: m[1]!, to: m[2]! };
 }
 
-function runEdge(graph: unknown, from: string, to: string): Rec | undefined {
+export function runEdge(graph: unknown, from: string, to: string): Rec | undefined {
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   return edges.find((e) => e.from === from && e.to === to && e.edge_type !== 'bidirected');
 }
@@ -187,7 +187,7 @@ function fallingSide<S extends string>(pA: number, pB: number, a: S, b: S): S | 
   return pA < pB ? a : pB < pA ? b : null;
 }
 
-function groupPct(p: number, n: number): { pct_if_side: number; pct_if_side_rounding: GoalChanceDisplayRounding } {
+export function groupPct(p: number, n: number): { pct_if_side: number; pct_if_side_rounding: GoalChanceDisplayRounding } {
   const rounding = displayRoundingFor(wilsonHalfWidthPoints(p, n));
   return { pct_if_side: displayedPctAt(p, rounding), pct_if_side_rounding: rounding };
 }
