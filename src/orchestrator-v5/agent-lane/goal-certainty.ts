@@ -28,6 +28,9 @@ export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { sayFigure } from './say-figure.js';
+import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
+import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
+import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.js';
 
 type Rec = Record<string, unknown>;
 
@@ -507,12 +510,17 @@ export function placeholderGoalWarning(
   // Only a link INTO the goal (AIQ 5903874730; P0 PARTNER 5903857287): a placeholder out of limit-watched churn into
   // subscribers is a real mechanism whose size is unknown, so it is asked for as before; downtime → spend is the guess.
   const guessedLink = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
-  const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined);
   const ordered = goalOrderedLinks(graph, links);
   const labelOf = (id: string): string => text(byId.get(id)?.label) ?? id;
+  // ⭐ NO DEAD END (MC 21's chain; Science #87 6006425419, 6006548763, 6006685510): every withheld path gets an ask the
+  // user can answer in one sentence. A level-less mediator is asked END TO END (the gauge) or in the unit its sized parent
+  // fixes; a goal with no frame is asked its level first. Pure wording + offer: the links and the withhold are unchanged.
+  const noDeadEnd = productBlocks ? undefined : noDeadEndAsks(graph, ordered, labelOf);
+  const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
+    && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
   const said = productBlocks ? unsizedLinkStatement : unsizedLinkSentence;
-  const message = said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+  const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
   return {
     code, message,
     links: ordered,
@@ -524,4 +532,83 @@ export function placeholderGoalWarning(
     // SAME set the sentence asks about (a levelled source, not a guessed mechanism): the offer gate (V4).
     ...(asked.length > 0 && !productBlocks ? { acceptable_links: asked.map((l) => ({ from: l.from, to: l.to })) } : {}),
   };
+}
+
+/**
+ * ⭐ THE NO-DEAD-END ASKS (MC 21; Science d5): the words a withheld path's links are asked in, when a level-less mediator or
+ * a frameless goal would otherwise leave the user nothing they can answer. `undefined` when none applies, so every other
+ * withhold keeps its words byte for byte.
+ *   (A) a goal with no frame: its level first, in the served P5 question ("What's today's level of …?"); the existing card
+ *       records it, and the next Run asks the links.
+ *   (B) a gauge mediator: ONE end-to-end question (6006425419), never its two links apart; both leave the one-click offer.
+ *   (C) a mediator measured in its sized parent's unit: asked in that unit, the estimate named (6006548763).
+ * The message keeps the 400-character carrier: whole sentences are dropped from the end, never cut.
+ */
+export function noDeadEndAsks(
+  graph: unknown,
+  links: ReadonlyArray<{ from: string; to: string }>,
+  labelOf: (id: string) => string,
+): { message: string; gaugeLinks: Set<string> } | undefined {
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || links.length === 0) return undefined;
+  const nodes = graph.nodes.filter(isRec);
+  const edges = graph.edges.filter(isRec);
+  const q = (id: string): string => `\u2018${labelOf(id)}\u2019`;
+  const fit = (sentences: readonly string[]): string => {
+    let out = '';
+    for (const s of sentences) { const next = out === '' ? s : `${out} ${s}`; if (next.length > 400) break; out = next; }
+    return out;
+  };
+  const goal = nodes.find((n) => n.kind === 'goal');
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  const goalView = typeof goal?.id === 'string' ? view.get(goal.id) : undefined;
+  if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {
+    const unit = unitOf(goalView);
+    const statement = unsizedLinkStatement(links.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+    return { message: fit([statement, `What's today's level of ${q(String(goal.id))}${unit !== undefined ? `, in ${unit}` : ''}?`]),
+      gaugeLinks: new Set() };
+  }
+  const readings = mediatorReadings(graph);
+  const unitOfNode = (id: unknown): string | undefined => { const v = view.get(id as string); return v === undefined ? undefined : unitOf(v); };
+  const sentences: string[] = [];
+  const covered = new Set<string>();
+  const gaugeLinks = new Set<string>();
+  const key = (from: unknown, to: unknown): string => `${String(from)}->${String(to)}`;
+  for (const [m, r] of readings) {
+    if (r.via !== 'gauge' || r.stored === true || !links.some((l) => l.from === m || l.to === m)) continue;
+    const lever = gaugeLever(edges, m, r, unitOfNode);
+    if (lever === undefined) continue;
+    const leverUnit = unitOfNode(lever)!;
+    const given = edges.filter((e) => e.from === lever && e.to !== m && linkSizing(e) === 'user' && isRec(e.provenance)
+      && isRec(e.provenance.natural_effect)).map((e) => (e.provenance as Rec).natural_effect as Rec)
+      .filter((n) => typeof n.amount === 'number' && typeof n.amount_unit === 'string' && typeof n.per_source_change === 'number'
+        && typeof n.per_source_change_unit === 'string');
+    const onTop = given.length === 0 ? '' : `, on top of the ${sayFigure(given[0]!.amount as number, given[0]!.amount_unit as string)} `
+      + `per ${sayFigure(given[0]!.per_source_change as number, given[0]!.per_source_change_unit as string)} you already gave`;
+    sentences.push(`This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which nobody has set yet.`
+      + ` Roughly how much would a ${sayFigure(1, leverUnit)} rise in ${q(lever)} change ${q(r.child)} that way${onTop}, in ${r.unit}?`
+      + ' A best guess and a range is fine.');
+    for (const k of [key(lever, m), key(m, r.child)]) { covered.add(k); gaugeLinks.add(k); }
+  }
+  for (const l of links) {
+    const r = readings.get(l.from);
+    if (r?.via !== 'sized_parents' || r.child !== l.to || covered.has(key(l.from, l.to))) continue;
+    const childUnit = unitOfNode(l.to);
+    if (childUnit === undefined) continue;
+    sentences.push(`This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
+      + ` Olumi measures ${q(l.from)} in ${r.unit}, from its own estimate of the link from ${q(r.parents[0]!)}; correct that if it\u2019s wrong.`
+      + ` Roughly how much does each ${sayFigure(1, r.unit)} of ${q(l.from)} change ${q(l.to)}, in ${childUnit}?`);
+    covered.add(key(l.from, l.to));
+  }
+  if (sentences.length === 0) return undefined;
+  const rest = links.filter((l) => !covered.has(key(l.from, l.to)));
+  if (rest.length > 0) sentences.push(unsizedLinkSentence(rest.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) }))));
+  return { message: fit(sentences), gaugeLinks };
+}
+
+/** The lever a gauge mediator is asked through: the link the answer replaces (brief3), else its one parent with a unit. */
+function gaugeLever(edges: readonly Rec[], m: string, r: Extract<MediatorReading, { via: 'gauge' }>, unitOfNode: (id: unknown) => string | undefined): string | undefined {
+  if (r.replaces !== undefined) return r.replaces;
+  const levers = [...new Set(edges.filter((e) => e.to === m && typeof e.from === 'string' && unitOfNode(e.from) !== undefined)
+    .map((e) => e.from as string))];
+  return levers.length === 1 ? levers[0] : undefined;
 }

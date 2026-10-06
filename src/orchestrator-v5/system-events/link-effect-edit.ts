@@ -39,6 +39,7 @@ import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-v
 import { prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
+import { GAUGE_OP, mediatorReadings, withMediatorReading } from '../agent-lane/mediator-reading.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -190,9 +191,13 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   const found = linkEffectTargetOf(graph, from, to);
   if (found.kind === 'refused') return null;
   const view = magnitudeNodes(graph.nodes.filter(isRec), percentLevelIds(graph));
-  const sourceView = view.get(from);
-  const targetView = view.get(to);
-  if (sourceView === undefined || targetView === undefined) return null;
+  // ⭐ No-dead-end (C)/(B): a level-less mediator's unit, from the ONE reader (never stored on the node).
+  const readings = mediatorReadings(graph);
+  const sourceStored = view.get(from);
+  const targetStored = view.get(to);
+  if (sourceStored === undefined || targetStored === undefined) return null;
+  const sourceView = withMediatorReading(sourceStored, readings.get(from), 'source');
+  const targetView = withMediatorReading(targetStored, readings.get(to), 'target');
   const sourceEnd = graph.nodes.filter(isRec).find(n => n.id === from);
   const targetEnd = graph.nodes.filter(isRec).find(n => n.id === to);
   const sourceNode = withAdoptedPercentFrame(sourceEnd, sourceView);
@@ -268,6 +273,44 @@ export function withLabelCountUnits(graph: unknown, from: string, to: string, ef
       ...(target !== undefined ? { amount_unit: target.unit } : {}) },
     label_readings: [source, target].filter((r): r is LinkEffectLabelReading => r !== undefined),
   };
+}
+
+/** A level-less mediator end the card names, so the reading is approved, never silent (no-dead-end (B)/(C)). */
+export interface LinkEffectMediatorReading {
+  readonly node_id: string;
+  readonly via: 'sized_parents' | 'gauge';
+  /** The unit Olumi measures the mediator in (C), or its one child's unit (B). */
+  readonly unit: string;
+  /** (C) the parent link whose estimate fixes the unit; (B) the child the answer reaches through the mediator. */
+  readonly other_label: string;
+  /** brief3's fallback (d5 6006685510 (2)): the answer replaces Olumi's own estimate on this link. */
+  readonly replaces?: true;
+}
+
+/**
+ * The card's mediator readings for one link, from the ONE reader (`mediatorReadings`): a source Olumi measures in its
+ * sized parents' unit (C, Science #87 6006548763: "Olumi measures ‘{M}’ in {U}, from its own estimate of the link from
+ * ‘{parent}’; correct that if it’s wrong."), and a gauge target (B, 6006425419: the answer sizes the whole path to the
+ * child). Empty for every other link.
+ */
+export function linkEffectMediatorReadings(graph: unknown, from: string, to: string): LinkEffectMediatorReading[] {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return [];
+  const nodes = graph.nodes.filter(isRec);
+  const label = (id: string): string => { const l = nodes.find((n) => n.id === id)?.label; return typeof l === 'string' && l.trim() !== '' ? l : id; };
+  const readings = mediatorReadings(graph);
+  const out: LinkEffectMediatorReading[] = [];
+  const source = readings.get(from);
+  if (source?.via === 'sized_parents' && source.parents.length > 0) {
+    out.push({ node_id: from, via: 'sized_parents', unit: source.unit, other_label: label(source.parents[0]!) });
+  }
+  const target = readings.get(to);
+  if (target?.via === 'gauge' && target.stored !== true) {
+    out.push({ node_id: to, via: 'gauge', unit: target.unit, other_label: label(target.child),
+      ...(target.replaces === from ? { replaces: true as const } : {}) });
+  } else if (target?.via === 'sized_parents' && !target.parents.includes(from) && target.parents.length > 0) {
+    out.push({ node_id: to, via: 'sized_parents', unit: target.unit, other_label: label(target.parents[0]!) });
+  }
+  return out;
 }
 
 /**
@@ -376,8 +419,18 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
 
   // ── THE UNITS ARE THE ENDS' OWN — never converted by guess ─────────────────────────────────────────────────────────
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
-  const sourceNode = withAdoptedPercentFrame(nodes.find(n => n.id === from), view.get(from)!);
-  const targetNode = withAdoptedPercentFrame(nodes.find(n => n.id === to), view.get(to)!);
+  const readings = mediatorReadings(graph);
+  const sourceNode = withAdoptedPercentFrame(nodes.find(n => n.id === from), withMediatorReading(view.get(from)!, readings.get(from), 'source'));
+  const targetNode = withAdoptedPercentFrame(nodes.find(n => n.id === to), withMediatorReading(view.get(to)!, readings.get(to), 'target'));
+  // ⭐ (B) THE GAUGE (Science #87 6006425419): the user's END-TO-END answer through a level-less M sizes lever→M in M's one
+  // child's units, and M→child = 1 is written in the SAME mutation (never before the answer, never asked separately).
+  // brief3's fallback (6006685510 (2)): only the lever whose Olumi-sized link the answer replaces may answer.
+  const mediated = readings.get(to);
+  const gauge = mediated?.via === 'gauge' && mediated.stored !== true ? mediated : undefined;
+  if (gauge?.replaces !== undefined && gauge.replaces !== from) return refuse('unit_mismatch');
+  const gaugeEdge = gauge === undefined ? undefined
+    : graph.edges.filter(isRec).find(e => e.from === to && e.to === gauge.child && isDirectedEdge(e as never));
+  if (gauge !== undefined && gaugeEdge === undefined) return refuse('unit_mismatch');
   const endUnits = linkEffectEndUnits(graph, from, to);
   // Either the end's stored unit or the words the ask itself is phrased in (Runtime 5882802252: a % level is asked in
   // "percentage points", a yes/no source as "switch") — the same key `sizeLink` says the natural effect back in.
@@ -403,9 +456,17 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // The link's direction is the SIGNED SLOPE (amount ÷ per_source_change; PR Review 5883720887): "lowering price by £1
   // gains 50" (+50 per −1) runs the same way as "raising it by £1 loses 50" (−50 per +1).
   const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? 'negative' : 'positive';
-  const storedMean = isRec(edge.strength) && finite(edge.strength.mean) ? edge.strength.mean : 0;
-  const storedDirection = edge.effect_direction === 'positive' || edge.effect_direction === 'negative' ? edge.effect_direction
-    : storedMean < 0 ? 'negative' : storedMean > 0 ? 'positive' : null;
+  const directionOf = (e: Rec): 'positive' | 'negative' | null => {
+    const mean = isRec(e.strength) && finite(e.strength.mean) ? e.strength.mean : 0;
+    return e.effect_direction === 'positive' || e.effect_direction === 'negative' ? e.effect_direction
+      : mean < 0 ? 'negative' : mean > 0 ? 'positive' : null;
+  };
+  // Through a gauge the user states the PATH's direction (lever→M × M→child): M is Olumi's own abstraction, so its
+  // orientation is free and the gauge is +1; the path the user can see is never silently reversed.
+  const linkDirection = directionOf(edge);
+  const childDirection = gaugeEdge === undefined ? undefined : directionOf(gaugeEdge);
+  const storedDirection = childDirection === undefined ? linkDirection
+    : linkDirection === null || childDirection === null ? null : linkDirection === childDirection ? 'positive' : 'negative';
   if (params.reversal !== undefined && (!isRec(params.reversal) || Object.keys(params.reversal).length !== 2
     || params.reversal.from !== storedDirection || params.reversal.to !== direction
     || params.reversal.from === params.reversal.to)) return refuse('sign_conflict');
@@ -453,6 +514,18 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   delete edge.defaulted;
   // A6f: a natural effect states the size, not its spread — the std is the sizing's, still not the user's.
   edge.std_defaulted = true;
+  if (gaugeEdge !== undefined) {
+    // The gauge: sized, never the user's (MIXED), never a placeholder or a projected mean, never Olumi's old size or why.
+    const kept = isRec(gaugeEdge.provenance) ? gaugeEdge.provenance : {};
+    const { reasoning: _gaugeWhy, natural_effect: _gaugeSize, clamped_from: _gaugeClamp, definitional: _gaugeDefinition,
+      mean_projected: _gaugeProjected, ...keptGauge } = kept;
+    gaugeEdge.strength = { ...(isRec(gaugeEdge.strength) ? gaugeEdge.strength : {}), mean: 1 };
+    gaugeEdge.effect_direction = 'positive';
+    gaugeEdge.provenance = { ...keptGauge, magnitude: 'olumi_estimate', sized_by_identity: { op: GAUGE_OP } };
+    if (gaugeEdge.defaulted === true) gaugeEdge.exists_defaulted = true;
+    delete gaugeEdge.defaulted;
+    gaugeEdge.std_defaulted = true;
+  }
 
   const parsed = GraphV3.safeParse(graph);
   if (!parsed.success) return refuse('invalid_graph');

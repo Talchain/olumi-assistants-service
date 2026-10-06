@@ -10,6 +10,7 @@ import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/lin
 import { isPercentageLevelUnit, resolveMagnitudeFrame } from '../../cee/magnitude/link-effect.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import type { LinkEffectStatement } from './link-effect-edit.js';
+import { mediatorReadings } from '../agent-lane/mediator-reading.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -285,13 +286,18 @@ export function prepareLinkEffectUnitReadings(
   // The writer's ONE frame authority (D2), so a % with no stored cap is read on the same pinned frame it is sized on
   // (Codex buddy r1 HIGH: an explicit-only read skipped U3 where the writer still sized the bare %).
   const view = magnitudeNodes(nodes, percentLevels);
+  // ⭐ No-dead-end (C)/(B): a level-less mediator's derived unit is ESTABLISHED (the one reader), so this door never asks
+  // "What unit…?" for it; as a source, a gauge reading adds nothing (M→child is never sized separately).
+  const mediated = mediatorReadings(graph);
   const unit_readings: LinkEffectUnitReading[] = [];
   const points_at_zero: string[] = [];
   const asks: string[] = [];
   for (const [node, other, value, statedUnit] of [[source, target, effect.per_source_change, effect.per_source_change_unit],
     [target, source, effect.amount, effect.amount_unit]] as const) {
     const label = String(node.label ?? node.id);
-    const establishedUnit = unitOf(node) ?? (current === undefined ? undefined : endpointUnit(current, String(node.id)));
+    const reading = mediated.get(String(node.id));
+    const mediatedUnit = reading === undefined || (reading.via === 'gauge' && node === source) ? undefined : reading.unit;
+    const establishedUnit = unitOf(node) ?? mediatedUnit ?? (current === undefined ? undefined : endpointUnit(current, String(node.id)));
     const literalPercent = amounts.find(a => a.magnitude === Math.abs(value) && a.kind === 'percent');
     const sourceLevels = node === source
       ? linkEffectSourceLevels(quote, namesSourceOf({ source: String(source.label ?? source.id), target: String(target.label ?? target.id) })) : undefined;

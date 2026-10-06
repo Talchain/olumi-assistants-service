@@ -339,7 +339,7 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
 export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
     { from?: unknown; to?: unknown; effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown };
-      quote?: unknown; unit_readings?: unknown; label_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
+      quote?: unknown; unit_readings?: unknown; label_readings?: unknown; mediator_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
   const e = op?.effect;
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
     || typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0
@@ -356,12 +356,34 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
       || (r.from !== 'positive' && r.from !== 'negative') || r.to !== direction || r.from === r.to) return undefined;
     reversal = `REVERSAL: this changes the link from ${r.from} to ${r.to}. `;
   }
+  // ⭐ No-dead-end (B)/(C) (Science #87 6006425419, 6006548763, 6006685510): a level-less mediator's reading, said for
+  // approval. Strict: each item names one end, in the unit that end's figure now carries; anything else, no card.
+  if (op.mediator_readings !== undefined && (!Array.isArray(op.mediator_readings) || op.mediator_readings.length > 2)) return undefined;
+  const mediated: string[] = [];
+  let through: { readonly child: string; readonly mediator: string } | undefined;
+  for (const raw of (op.mediator_readings ?? []) as unknown[]) {
+    const item = raw as { node_id?: unknown; via?: unknown; unit?: unknown; other_label?: unknown; replaces?: unknown } | null;
+    if (item === null || typeof item !== 'object' || typeof item.node_id !== 'string' || (item.node_id !== op.from && item.node_id !== op.to)
+      || typeof item.unit !== 'string' || item.unit.trim() === '' || typeof item.other_label !== 'string' || item.other_label.trim() === ''
+      || Object.keys(item).some((k) => !['node_id', 'via', 'unit', 'other_label', 'replaces'].includes(k))
+      || (item.replaces !== undefined && (item.replaces !== true || item.via !== 'gauge'))) return undefined;
+    const end = item.node_id === op.from ? labels.from : labels.to;
+    if (item.via === 'sized_parents' && (item.node_id === op.from ? e.per_source_change_unit : e.amount_unit) === item.unit) {
+      mediated.push(`Olumi measures \u2018${end}\u2019 in ${item.unit}, from its own estimate of the link from \u2018${item.other_label}\u2019; correct that if it\u2019s wrong.`);
+    } else if (item.via === 'gauge' && item.node_id === op.to && e.amount_unit === item.unit && through === undefined) {
+      through = { child: item.other_label, mediator: end };
+      mediated.push(`Olumi treats \u2018${end}\u2019 as part of how \u2018${labels.from}\u2019 moves \u2018${item.other_label}\u2019, so your answer sizes the whole path.`
+        + (item.replaces === true ? ` Your answer replaces Olumi\u2019s own estimate for the link from \u2018${labels.from}\u2019 to \u2018${end}\u2019.` : ''));
+    } else return undefined;
+  }
+  // Through a gauge the user sized the PATH: the record names the quantity it reaches, through the mediator.
+  const reached = through === undefined ? `"${labels.to}"` : `"${through.child}" through "${through.mediator}"`;
   const words = `${e.per_source_change < 0 ? 'lowering' : 'raising'} "${labels.from}" by ${unsigned(e.per_source_change, e.per_source_change_unit)} `
-    + `${e.amount < 0 ? 'lowers' : 'raises'} "${labels.to}" by ${unsigned(e.amount, e.amount_unit)}`;
+    + `${e.amount < 0 ? 'lowers' : 'raises'} ${reached} by ${unsigned(e.amount, e.amount_unit)}`;
   const levels = linkEffectSourceLevels(op.quote, namesSourceOf({ source: labels.from, target: labels.to }));
   const transition = levels !== undefined && levels.change === e.per_source_change
     ? ` Source change: ${levels.from}% \u2192 ${levels.to}% = ${signed(levels.change, levels.unit)}.` : '';
-  const head = `${reversal}Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}": ${words}.${transition}`;
+  const head = `${reversal}Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in ${reached}: ${words}.${transition}`;
   if (op.unit_readings !== undefined && (!Array.isArray(op.unit_readings) || op.unit_readings.length > 2)) return undefined;
   const disclosures: string[] = [];
   const seen = new Set<string>();
@@ -397,6 +419,7 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
     disclosures.push(`I've read that as ${signed(e.amount, e.amount_unit)} per ${perWords} `
       + `(the unit${labelled.length > 1 ? 's' : ''} of ${labelled.map((l) => `"${l}"`).join(' and ')}).`);
   }
+  disclosures.push(...mediated);
   // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.
   return `${head} From your words: "${op.quote}"${/[.!?]$/.test(op.quote) ? '' : '.'}`
     + (disclosures.length > 0 ? ` ${disclosures.join(' ')}` : '')
