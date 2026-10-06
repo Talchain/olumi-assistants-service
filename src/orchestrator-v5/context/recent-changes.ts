@@ -272,6 +272,10 @@ export const MUTATION_DISPATCH_SKIP: ReadonlyMap<HandlerFact['fact_type'], strin
     // trip its `several ⇒ name none` guard on a non-change — a false causal
     // claim, which is the one thing that module exists to avoid.
     ['finding_dissent', 'Judgement receipt (stated dissent from a finding) — no graph state change.'],
+    // 0.79 (SD-1 Slice R, DL #87 option A): what a Run's turn DELIVERED, recorded by the agent's answer row. A record of
+    // what the user was shown, never a change to the model: a receipt here would let "since you changed X" name a
+    // delivery as a change. `summariseMutation` has no branch for it, so this makes the existing fall-through explicit.
+    ['run_delivery', 'Delivery record (what a Run\'s turn showed) — no graph state change.'],
   ]);
 
 function summariseMutation(

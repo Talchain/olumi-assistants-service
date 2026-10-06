@@ -10,7 +10,7 @@
 // ============================================================================
 import { describe, expect, it } from 'vitest';
 import { maximalRunDeliveredRecord } from '@talchain/schemas/fixtures';
-import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import { HandlerFactSchema, type HandlerFact, type RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
   deriveAnalysisFreshness,
@@ -40,12 +40,13 @@ function run(runId: string, computedAt: string): RunAnalysisHandlerFact {
   };
 }
 
-const delivery = {
+// PARSED, not cast (buddy r1): on a pin without the member this throws, so every row below is RED there.
+const delivery: HandlerFact = HandlerFactSchema.parse({
   fact_type: 'run_delivery',
   fact_version: 1,
   noop: false,
   result: { run_id: 'run_b', record: { ...maximalRunDeliveredRecord, run_id: 'run_b' } },
-} as unknown as HandlerFact;
+});
 
 const constraint = {
   fact_type: 'add_constraint',

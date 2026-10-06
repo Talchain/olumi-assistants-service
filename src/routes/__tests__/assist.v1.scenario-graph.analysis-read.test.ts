@@ -44,7 +44,7 @@
  *     read THROWS must still return the graph, with both new keys null.
  */
 
-import { maximalReviewCardBlock } from '@talchain/schemas/fixtures';
+import { maximalCoachingBlock, maximalReviewCardBlock } from '@talchain/schemas/fixtures';
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -1006,6 +1006,10 @@ describe("0.79 Slice R — current_read.delivered_record from the Run's run_deli
     expect(body.current_read).not.toHaveProperty("delivered_record");
     expect(body.current_read).not.toHaveProperty("run_id");
     expect(readNewestRunDeliveryFor).not.toHaveBeenCalled();
+    // CONTROL (buddy r1): the same stored delivery for a FRESH Run is read and served, so the omission is staleness.
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record()));
+    const fresh = await readOnce(runFact(GRAPH_HASH, true));
+    expect(fresh.current_read.delivered_record).toStrictEqual(record());
   });
 
   it.each([
@@ -1047,5 +1051,40 @@ describe("0.79 Slice R — current_read.delivered_record from the Run's run_deli
     const body = await readOnce(runFact(GRAPH_HASH, true, null));
     expect(body.current_read).not.toHaveProperty("delivered_record");
     expect(readNewestRunDeliveryFor).not.toHaveBeenCalled();
+    // CONTROL (buddy r1): the same Run WITH its run_id is read and served, so the omission is the missing identity.
+    const identified = await readOnce(runFact(GRAPH_HASH, true));
+    expect(identified.current_read.delivered_record).toStrictEqual(record());
+    expect(readNewestRunDeliveryFor).toHaveBeenCalledTimes(1);
+  });
+
+  // Buddy r1 (P1 ×2): the licence gate sees only its own prose fields, so a leader claim in ANY other string of the
+  // record must also omit it under a withheld licence — a coaching `action_prompt`, or an option's own strings.
+  it.each([
+    ["a coaching action_prompt", { phase3_blocks: [{ ...(maximalCoachingBlock as Record<string, unknown>), action_prompt: "Hire a marketing manager leads on the current model; test it before you act." }] }],
+    ["an option's status", { analysis_ready_options: [{ option_id: "opt_hire", label: "Hire a marketing manager", status: "Hire a marketing manager leads on the current model", interventions: { fac_spend: 1 } }] }],
+  ])("a leader claim in %s under a WITHHELD licence → not served", async (_name, over) => {
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record(over)));
+    const withheld = await readOnce(runFact(GRAPH_HASH, false));
+    expect(withheld.current_read).not.toHaveProperty("delivered_record");
+  });
+
+  it("a claim only a ROSTER sees (option 'Team': 'Team leads in 60% of runs.') under a WITHHELD licence → not served", async () => {
+    // Precondition (from #2645 P1-1): the roster-free reader misses it; the record's own option label exposes it.
+    const { textAssertsLeadingOption } = await import("../../orchestrator-v5/compose/leading-option-egress-guard.js");
+    expect(textAssertsLeadingOption("Team leads in 60% of runs.")).toBe(false);
+    expect(textAssertsLeadingOption("Team leads in 60% of runs.", { optionLabels: ["Team"] })).toBe(true);
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(record({
+      phase3_blocks: [card("Team leads in 60% of runs.")],
+      analysis_ready_options: [{ option_id: "opt_team", label: "Team", status: "ready", interventions: { fac_spend: 1 } }],
+    })));
+    const withheld = await readOnce(runFact(GRAPH_HASH, false));
+    expect(withheld.current_read).not.toHaveProperty("delivered_record");
+  });
+
+  it("CONTROL: the same coaching block with a neutral action_prompt under the same WITHHELD licence is served", async () => {
+    const neutral = record({ phase3_blocks: [{ ...(maximalCoachingBlock as Record<string, unknown>), action_prompt: "Argue the case against the strongest link and see whether it survives." }] });
+    readNewestRunDeliveryFor.mockResolvedValue(delivery(neutral));
+    const body = await readOnce(runFact(GRAPH_HASH, false));
+    expect(body.current_read.delivered_record).toStrictEqual(neutral);
   });
 });
