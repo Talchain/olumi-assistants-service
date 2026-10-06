@@ -39,6 +39,17 @@ export function userFigureHeld(edge: unknown): UserFigureHeld | null {
   if (p?.magnitude !== 'user_stated') return null;
   const ne = isRec(p.natural_effect) ? p.natural_effect : undefined;
   if (ne === undefined) return null;
+  // ⭐ Only a figure that still DESCRIBES the link (buddy r1 #6): `natural_effect.strength_mean` is the β it was written
+  // for, and every reader trusts it only while the edge's mean equals it (R&C 5845818897) — or while a stored clamp
+  // records that β (`refit-frames.ts` `clampForPersist`: mean ±1, `clamped_from` = the full β). A stale carrier states
+  // nothing a write could lose, so it is not refused. Served T1b (red team c89f5126, 4/4 brief links): exactly equal.
+  const mean = isRec(edge) && isRec(edge.strength) ? edge.strength.mean : undefined;
+  const written = ne.strength_mean;
+  if (typeof mean !== 'number' || typeof written !== 'number') return null;
+  const describes = Math.abs(written - mean) <= 1e-9
+    || (typeof p.clamped_from === 'number' && Math.abs(p.clamped_from - written) <= 1e-9
+      && Math.abs(mean) === 1 && Math.sign(mean) === Math.sign(written));
+  if (!describes) return null;
   const range = isRec(ne.stated_range) ? text(ne.stated_range.text) : undefined;
   // The stored-figure fallback is the display `grouped-link-sizing.ts` already serves for a link's natural size.
   const quote = text(p.source_quote) ?? range
@@ -56,17 +67,46 @@ export function userFigureReplacedReceipt(held: UserFigureHeld, bandWord: string
   return `Replaced your figure (‘${held.quote}’) with ‘${bandWord}’.`;
 }
 
-const REPLACE_WORDS = /\breplace\s+(?:my|our|the)\s+(?:own\s+)?figure\b/iu;
-const NEGATED_REPLACE = /\b(?:don['’]?t|do\s+not|never|not|no\s+need\s+to)\s+(?:\w+\s+){0,2}replace\s+(?:my|our|the)\s+(?:own\s+)?figure\b/iu;
+const REPLACE_WORDS = /\breplace\s+(?:my|our|the)\s+(?:own\s+)?figures?\b/iu;
+/** Any negator earlier in the same clause cancels the ask, however far back ("I don't want you to replace my figure"). */
+const NEGATOR = /\b(?:don['’]?t|do\s+not|doesn['’]?t|didn['’]?t|never|not|no|without|rather\s+than|instead\s+of|stop|won['’]?t|wouldn['’]?t|shouldn['’]?t|can['’]?t|cannot)\b/iu;
 
 /**
- * The user asked, in THIS turn's own typed words, to replace their figure ("replace my figure with slight"). The only
- * authority for a replace on the Agent's route: the Agent cannot write it, and a negated ask ("don't replace my
- * figure") is no ask.
+ * The CLAUSE in which the user asked, in THIS turn's own typed words, to replace their figure ("replace my figure with
+ * slight") — or `null`. The only authority for a replace on the Agent's route: the Agent cannot write it. A clause runs
+ * from the last sentence or clause break before the ask to the next one; any negator before the ask within it cancels
+ * it (buddy r1 #2). The caller binds the clause to ONE link and ONE band (buddy r1 #3).
  */
-export function replaceFigureTheUserWrote(turnText: unknown): boolean {
-  return typeof turnText === 'string' && REPLACE_WORDS.test(turnText) && !NEGATED_REPLACE.test(turnText);
+export function replaceClauseOf(turnText: unknown): string | null {
+  if (typeof turnText !== 'string') return null;
+  const m = REPLACE_WORDS.exec(turnText);
+  if (m === null) return null;
+  const breaks = /[.!?;\n]/gu;
+  let start = 0;
+  let end = turnText.length;
+  for (let b = breaks.exec(turnText); b !== null; b = breaks.exec(turnText)) {
+    if (b.index < m.index) start = b.index + 1;
+    else { end = b.index; break; }
+  }
+  if (NEGATOR.test(turnText.slice(start, m.index))) return null;
+  return turnText.slice(start, end).trim();
 }
+
+/** Whether THIS turn's own words ask to replace a figure, un-negated (see {@link replaceClauseOf}). */
+export function replaceFigureTheUserWrote(turnText: unknown): boolean {
+  return replaceClauseOf(turnText) !== null;
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+/** `label` named in `text` as whole words, case-insensitive. */
+export function mentionsLabel(text: string, label: string): boolean {
+  const l = label.trim();
+  return l !== '' && new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(l)}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+}
+
+/** What every door says when a replace would also reverse the link (buddy r1 #5; d5: the sign is kept). */
+export const REPLACE_KEEPS_DIRECTION_TEXT =
+  'Replacing your figure keeps the link’s direction. To reverse it, change the figure itself.';
 
 /**
  * The GENERIC merges' check (`patch-applier.ts` `applyUpdateEdge`, the graph-management referee's

@@ -154,3 +154,10 @@ export function mergeRequiredNestedWrite(
 
 /** R8 writer guard (#2613): ONE implementation, in the import-free `link-sizing`; this seam only re-exports it for graph-management. */
 export { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
+/**
+ * ⭐ F1 (#87 6006627551): the applier (`patch-applier.ts` `applyUpdateEdge`) and the referee's candidate builder
+ * (`candidate-graph.ts` `buildUpdateEdgeFieldCandidate`) must refuse the SAME merge — a strength move on a link holding
+ * the user's own figure — in the same words, or the referee's adopted view and the live write disagree (the 2.380
+ * defect class). One check, reached through this one seam.
+ */
+export { userFigureMovedRefusal, UserFigureHeldError } from '../cee/magnitude/user-figure-held.js';

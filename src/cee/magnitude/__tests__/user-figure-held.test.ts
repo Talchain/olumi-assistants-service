@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  mentionsLabel,
+  replaceClauseOf,
   replaceFigureTheUserWrote,
   userFigureHeld,
   userFigureHeldRefusalText,
@@ -36,6 +38,15 @@ describe('userFigureHeld — the user’s own figure, as words they recognise', 
   ])('none on %s', (_n, provenance) => {
     expect(userFigureHeld(edge(provenance))).toBeNull();
   });
+  it('BUDDY r1 #6: none on a STALE carrier (its figure was written for another mean) — nothing a write could lose', () => {
+    expect(userFigureHeld(edge({ source: 'brief_extraction', magnitude: 'user_stated', natural_effect: { ...NATURAL, strength_mean: 0.4 }, source_quote: 'Q' }))).toBeNull();
+  });
+  it('a CLAMPED figure is still the user\u2019s (mean ±1, clamped_from = the β it was written for)', () => {
+    const clamped = edge({ source: 'user_specified', magnitude: 'user_stated', clamped_from: 1.4, natural_effect: { ...NATURAL, strength_mean: 1.4 }, source_quote: 'Q' }, 1);
+    expect(userFigureHeld(clamped)).toEqual({ quote: 'Q' });
+    const staleClamp = edge({ source: 'user_specified', magnitude: 'user_stated', clamped_from: 1.4, natural_effect: { ...NATURAL, strength_mean: 2 }, source_quote: 'Q' }, 1);
+    expect(userFigureHeld(staleClamp)).toBeNull();
+  });
   it('none on a non-object', () => {
     expect(userFigureHeld(undefined)).toBeNull();
     expect(userFigureHeld({ provenance: 'x' })).toBeNull();
@@ -64,9 +75,28 @@ describe('replaceFigureTheUserWrote — only the user’s own, un-negated ask', 
     'I don’t want to replace my figure. Make it weak.',
     'do not replace my figure',
     'never replace the figure',
+    // BUDDY r1 #2: a negator anywhere earlier in the clause, however far back.
+    'I don\u2019t want you to replace my figure. Make it weak.',
+    'Rather than replace my figure, make the link weak.',
+    'Please do not, under any circumstances, replace my figure',
     'my figure is fine, replace nothing',
     undefined,
   ])('does not ask: %s', (t) => expect(replaceFigureTheUserWrote(t)).toBe(false));
+});
+
+describe('replaceClauseOf — the clause the ask lives in (bound to one link and one band by the caller)', () => {
+  it('returns only the asking clause', () => {
+    expect(replaceClauseOf('Make the churn link weak. For price to churn, replace my figure with slight! Thanks'))
+      .toBe('For price to churn, replace my figure with slight');
+  });
+  it('a negator in ANOTHER sentence does not cancel it', () => {
+    expect(replaceClauseOf('I did not mean that. Replace my figure with slight.')).toBe('Replace my figure with slight');
+  });
+});
+
+describe('mentionsLabel — whole words, case-insensitive', () => {
+  it.each([['to MRR, replace', 'MRR', true], ['the mrr link', 'MRR', true], ['MRRs', 'MRR', false], ['Price rise', 'Price', true], ['priced', 'Price', false]] as const)(
+    '%s / %s → %s', (text, label, want) => expect(mentionsLabel(text, label)).toBe(want));
 });
 
 describe('userFigureMovedRefusal — the generic merges’ before/after check', () => {

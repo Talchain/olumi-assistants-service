@@ -16,6 +16,7 @@ import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import { applyPatchOperations, PatchApplyError } from '../../../orchestrator/patch-applier.js';
 import { runWithStatedLinkBand, type StatedLinkBand } from '../../agent-lane/stated-link-band-context.js';
 import { edgeBandStd } from '../../format/edge-strength-bands.js';
+import { REPLACE_KEEPS_DIRECTION_TEXT } from '../../../cee/magnitude/user-figure-held.js';
 import { buildUpdateEdgeFieldCandidate } from '../../graph-management/candidate-graph.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
 import { createAdjustEdgeStrengthHandler } from '../../tools/handlers/adjust-edge-strength.js';
@@ -36,14 +37,14 @@ const replaced = (band: string): string => `Replaced your figure (‘${QUOTE}’
 
 type Sizing = 'user_stated' | 'olumi_estimate' | 'user_band';
 /** The link as the brief left it: the user's figure, in natural units, with the sentence that stated it. */
-function heldGraph(mean = 0.62, sizing: Sizing = 'user_stated'): GraphV3T {
+function heldGraph(mean = 0.62, sizing: Sizing = 'user_stated', writtenFor = mean): GraphV3T {
   const graph = buildD1Fixture();
   const edge = edgeIn(graph);
   edge.strength = { mean, std: 0.12 };
   edge.effect_direction = mean < 0 ? 'negative' : 'positive';
   const natural = {
     amount: mean < 0 ? -300 : 300, amount_unit: 'GBP/month', per_source_change: 1, per_source_change_unit: 'customer',
-    strength_mean: mean, strength_mean_frame: 'edge_strength' as const,
+    strength_mean: writtenFor, strength_mean_frame: 'edge_strength' as const,
   };
   edge.provenance = (sizing === 'user_stated'
     ? { source: 'brief_extraction', magnitude: 'user_stated', natural_effect: natural, source_quote: QUOTE }
@@ -131,6 +132,28 @@ describe('⭐ F1 — the canvas, the slider and the chat approval never drop the
     expect(edgeIn(result.mutatedGraph).effect_direction).toBe('negative');
   });
 
+  it('BUDDY r1 #4: a replace at a midpoint EQUAL to the stored mean is still a replace — the band’s spread, the figure dropped', async () => {
+    const graph = heldGraph(0.55);
+    const result = await runWithStatedLinkBand(approval('strong', true), () => apply(graph, event(0.55, 0.55)));
+    expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
+    if (result.kind !== 'mutated') return;
+    const stored = edgeIn(result.mutatedGraph);
+    expect(stored.strength).toStrictEqual({ mean: 0.55, std: edgeBandStd('strong') });
+    expect(stored.provenance).not.toHaveProperty('natural_effect');
+    expect(stored.provenance).not.toHaveProperty('source_quote');
+    expect(result.response.assistant_text.startsWith(replaced('strong')), result.response.assistant_text).toBe(true);
+  });
+
+  it('BUDDY r1 #5: a replace that would also REVERSE the link is refused (the sign is kept), nothing written', async () => {
+    const graph = heldGraph(0.62);
+    const before = structuredClone(graph);
+    const result = await runWithStatedLinkBand(approval('weak', true), () => apply(graph, event(0.1, 0.62, { direction_intent: 'negative' })));
+    expect(result.kind === 'refused' ? result.reason : result.kind).toBe('replace_keeps_direction');
+    if (result.kind !== 'refused') return;
+    expect(result.response.assistant_text).toBe(REPLACE_KEEPS_DIRECTION_TEXT);
+    expect(graph).toStrictEqual(before);
+  });
+
   it('the replace is scoped to its own link: an approval that carried it for ANOTHER link replaces nothing here', async () => {
     const graph = heldGraph(0.62);
     const result = await runWithStatedLinkBand(approval('weak', true, 'g-other'), () => apply(graph, event(0.1, 0.62)));
@@ -149,10 +172,12 @@ describe('⭐ F1 — the canvas, the slider and the chat approval never drop the
   });
 
   it.each([
-    ['Olumi’s estimate', 'olumi_estimate'],
-    ['a band the user picked earlier (no figure)', 'user_band'],
-  ] as const)('TWIN — %s: the same canvas pill still edits the link', async (_n, sizing) => {
-    const result = await apply(heldGraph(0.62, sizing), event(0.3, 0.62, { band: 'moderate' }));
+    ['Olumi’s estimate', 'olumi_estimate', 0.62],
+    ['a band the user picked earlier (no figure)', 'user_band', 0.62],
+    // BUDDY r1 #6: a stale carrier (written for 0.4, the link now 0.62) states nothing a write could lose.
+    ['a STALE user figure (written for another mean)', 'user_stated', 0.4],
+  ] as const)('TWIN — %s: the same canvas pill still edits the link', async (_n, sizing, writtenFor) => {
+    const result = await apply(heldGraph(0.62, sizing, writtenFor), event(0.3, 0.62, { band: 'moderate' }));
     expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
     if (result.kind !== 'mutated') return;
     expect(edgeIn(result.mutatedGraph).strength.mean).toBe(0.3);

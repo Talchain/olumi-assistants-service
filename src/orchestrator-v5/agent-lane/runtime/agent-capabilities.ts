@@ -218,7 +218,7 @@ import { checkProvisionalView, type LeaderStanding } from '../provisional-view.j
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { approvalSizes, isAcceptedOlumiSize, linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
-import { replaceFigureTheUserWrote, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
+import { mentionsLabel, REPLACE_KEEPS_DIRECTION_TEXT, replaceClauseOf, userFigureHeld, userFigureHeldRefusalText, userFigureReplacedReceipt } from '../../../cee/magnitude/user-figure-held.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
@@ -3297,16 +3297,28 @@ export function createAgentCapabilities(
       // Already in the band the user named, pushing the same way: KEEP the figure. A confirm is REVIEW, never authorship
       // (R11): the writer keeps who sized the link, so only a link the user ALREADY sized may be called theirs (M1 Accept
       // receipt, R3 5942069984; DL 5942097719 — on Olumi's estimate it lands `olumi_accepted`, Olumi's figure).
-      const confirm = currentBand === band && wanted === current;
-      const keptIsTheirs = linkSizing(edge) === 'user';
       /**
        * ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a band that MOVES a link holding the user's own figure would
        * drop that figure. Nothing is prepared, and the user hears their figure quoted — unless THIS turn's own words ask
-       * to replace it (`replaceFigureTheUserWrote`), which the approval then carries to the writer in-process. A confirm
-       * keeps the figure (review), so it is never refused.
+       * to replace it, which the approval then carries to the writer in-process. A confirm keeps the figure (review), so
+       * it is never refused.
+       * The ask binds to ONE link and ONE band (buddy r1 #3): its clause (`replaceClauseOf`, un-negated, #2) states this
+       * band and names an end of this link — or names no other node, the bare "replace my figure with slight" the
+       * refusal invites. Decided BEFORE confirm: a replace in the band the link already sits in is still a replace (#4).
+       * A replace keeps the sign (d5; #5): one that would also reverse the link is refused.
        */
-      const heldFigure = confirm ? null : userFigureHeld(edge);
-      const replacesFigure = heldFigure !== null && replaceFigureTheUserWrote(ctx.user_turn_text);
+      const heldNow = userFigureHeld(edge);
+      const replaceClause = heldNow === null ? null : replaceClauseOf(ctx.user_turn_text);
+      const otherLabels = g.nodes.map((n) => String(n.label ?? '')).filter((l) => l !== from.label && l !== to.label);
+      const replacesFigure = replaceClause !== null && bandTheUserWrote(band, replaceClause)
+        && ([from.label, to.label].some((l) => mentionsLabel(replaceClause, l)) || !otherLabels.some((l) => mentionsLabel(replaceClause, l)));
+      if (replacesFigure && reverses) {
+        return { ok: false, mutated: false, refusal: 'replace_keeps_direction',
+          detail: `Nothing was prepared. Tell the user exactly this: "${REPLACE_KEEPS_DIRECTION_TEXT}"` };
+      }
+      const confirm = !replacesFigure && currentBand === band && wanted === current;
+      const keptIsTheirs = linkSizing(edge) === 'user';
+      const heldFigure = confirm ? null : heldNow;
       if (heldFigure !== null && !replacesFigure) {
         return { ok: false, mutated: false, refusal: 'user_figure_held',
           detail: `Nothing was prepared. Tell the user exactly this: "${userFigureHeldRefusalText(heldFigure, linkBandWord(band))}" `

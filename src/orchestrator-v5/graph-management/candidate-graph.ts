@@ -20,6 +20,8 @@ import {
   isPlainObjectWrite,
   keepMeanProjectionWhenSizeUnchanged,
   mergeRequiredNestedWrite,
+  UserFigureHeldError,
+  userFigureMovedRefusal,
 } from '../../schemas/required-nested-merge.js';
 import {
   CANDIDATE_BUILD_FAILED,
@@ -27,7 +29,6 @@ import {
   GRAPH_INVARIANT_VIOLATED,
 } from './reason-codes.js';
 import type { MutationBlocker } from './types.js';
-import { UserFigureHeldError, userFigureMovedRefusal } from '../../cee/magnitude/user-figure-held.js';
 
 export interface CandidateBuildResult {
   readonly candidate?: Record<string, unknown>;

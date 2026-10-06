@@ -22,8 +22,14 @@ const refusal = (band: string): string =>
   `This link holds your figure: ‘${QUOTE}’. Change the figure, or say ‘replace my figure with ${band}’.`;
 
 type Edge = { from: string; to: string; strength: { mean: number }; provenance?: Record<string, unknown> };
-function withFigure(sizing: 'user_stated' | 'olumi_estimate'): Record<string, unknown> {
+const FDS_QUOTE = 'Each £1k of feature spend adds about 2 points of feature value';
+function withFigure(sizing: 'user_stated' | 'olumi_estimate', alsoHoldFds = false): Record<string, unknown> {
   const g = JSON.parse(JSON.stringify(C05)) as { edges: Edge[] };
+  if (alsoHoldFds) {
+    const f = g.edges.find((x) => x.from === 'feature_development_spend' && x.to === 'pro_plan_feature_value')!;
+    f.provenance = { source: 'brief_extraction', magnitude: 'user_stated', source_quote: FDS_QUOTE,
+      natural_effect: { amount: 2, amount_unit: 'points', per_source_change: 1000, per_source_change_unit: 'GBP', strength_mean: f.strength.mean, strength_mean_frame: 'edge_strength' } };
+  }
   const e = g.edges.find((x) => x.from === 'cost_overrun_risk' && x.to === 'mrr')!;
   const natural = { amount: -2000, amount_unit: 'GBP/month', per_source_change: 1, per_source_change_unit: 'overrun', strength_mean: e.strength.mean, strength_mean_frame: 'edge_strength' };
   e.provenance = sizing === 'user_stated'
@@ -73,6 +79,32 @@ describe('⭐ F1: propose_link_strength never prepares a move that drops the use
     expect(puts[0]!.public_label).toBe(`Replace your figure (‘${QUOTE}’) on "Cost overrun risk" → "MRR" with slight, as your own estimate`);
     expect(puts[0]!.operations[0]!.value).toMatchObject({ intent: 'set', magnitude: 0.1, direction_intent: 'preserve', band: 'weak',
       replaces_user_figure: { quote: QUOTE } });
+  });
+
+  it('BUDDY r1 #3: a replace bound to ANOTHER link grants nothing here — “keeping my figure” on this one is refused', async () => {
+    const msg = 'Replace my figure on Cost overrun risk to MRR with slight. Make Feature development spend to Pro plan feature value weak too, keeping my figure.';
+    const here = await call('propose_link_strength', { from_label: 'Feature development spend', to_label: 'Pro plan feature value', strength: 'weak', rationale: msg }, msg, withFigure('user_stated', true));
+    expect(here.r, JSON.stringify(here.r)).toEqual(expect.objectContaining({ ok: false, refusal: 'user_figure_held' }));
+    expect(String(here.r.detail)).toContain(FDS_QUOTE);
+    expect(here.puts).toEqual([]);
+    // …and the link the clause names IS replaced.
+    const there = await call('propose_link_strength', { ...LINK, strength: 'weak', rationale: msg }, msg, withFigure('user_stated', true));
+    expect(there.puts[0]!.operations[0]!.value).toMatchObject({ replaces_user_figure: { quote: QUOTE } });
+  });
+
+  it('BUDDY r1 #4: “replace my figure with strong” in the band the link already sits in is a replace (set to the midpoint), never a confirm', async () => {
+    const msg = 'For the link from Cost overrun risk to MRR, replace my figure with strong.';
+    const { r, puts } = await call('propose_link_strength', { ...LINK, strength: 'strong', rationale: msg }, msg, withFigure('user_stated'));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true }));
+    expect(puts[0]!.operations[0]!.value).toMatchObject({ intent: 'set', magnitude: 0.55, direction_intent: 'preserve', replaces_user_figure: { quote: QUOTE } });
+  });
+
+  it('BUDDY r1 #5: a replace that would also reverse the link is refused in its own words; nothing prepared', async () => {
+    const msg = 'For the link from Cost overrun risk to MRR, replace my figure with slight; that link runs the other way.';
+    const { r, puts } = await call('propose_link_strength', { ...LINK, strength: 'weak', direction: 'positive', direction_from_words: 'that link runs the other way', rationale: msg }, msg, withFigure('user_stated'));
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'replace_keeps_direction' }));
+    expect(String(r.detail)).toContain('Replacing your figure keeps the link\u2019s direction. To reverse it, change the figure itself.');
+    expect(puts).toEqual([]);
   });
 
   it('CONTROL — naming the band the link already sits in is a confirm: prepared, figure kept (review), no replace carried', async () => {
