@@ -35,6 +35,7 @@ import { goalChanceWithheldForAgent, withoutAskedQuestion } from './goal-chance-
 import { runExplanationChip, RUN_EXPLANATION_UNAVAILABLE_TEXT, type RunExplanationRead } from './run-explanation.js';
 import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany } from './root-line.js';
 import { agentNoLeaderSentence } from './withheld-leader-fail-closed.js';
+import { readFactorEnrichments, factorReviewSensitivity } from './factor-review.js';
 
 export const DECISION_REVIEW_PRESS_ID = 'agent-next-review-decision';
 // Science's words (5 Oct), verbatim.
@@ -62,12 +63,49 @@ export interface DecisionReviewTurn {
 }
 
 export type DecisionReviewRead = RunExplanationRead & { readonly graph?: unknown; readonly analysisReady?: unknown;
+  /** The canonical reader's same-Run persisted enrichment, kept out of the transport/model context. */
+  readonly factorEnrichments?: unknown;
   /** The Agent's recent answers (NEVER RE-ASK, G1b d4): a withheld reason's question already asked is not asked again. */
   readonly recentReplies?: readonly string[] };
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v : null);
+
+/** A stored challenge must not propose acting on, or prioritising, a shortened option reference. */
+function questionSuggestsOptionAction(question: string, graph: unknown): boolean {
+  if (!/\b(?:explor(?:e|ing)|choos(?:e|ing)|hir(?:e|ing)|recruit\w*|add(?:ing)?|rais(?:e|ing)|lower\w*|hold\w*|keep\w*|maintain\w*|use|using|switch\w*|select\w*|pursu(?:e|ing)|adopt\w*|prioriti[sz]\w*|prefer\w*|go\s+with|start\s+with|focus\s+on|first|before|ahead\s+of|instead\s+of|priority)\b/i.test(question)) return false;
+  const words = (s: string): string[] => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const questionWords = ` ${words(question).join(' ')} `;
+  return [...graphNodes(graph).values()].some((node) => {
+    if (node.kind !== 'option' || node.label === null) return false;
+    // The option's noun phrase survives a dropped action/article: "Hire a Tech Lead" → "tech lead".
+    const reference = words(node.label);
+    while (reference.length > 1 && /^(?:a|an|the|hire|hiring|recruit|add|adding|raise|lower|hold|keep|maintain|use|using|choose|adopt|switch|to)$/.test(reference[0]!)) reference.shift();
+    return reference.length > 0 && questionWords.includes(` ${reference.join(' ')} `);
+  });
+}
+
+/** One rank-1 challenge, rank only. Every composed byte must survive the existing #2660 egress ladder. */
+export function factorReviewPressLine(read: DecisionReviewRead): string | null {
+  const enrichment = recordOf(recordOf(read.analysisResult)?.enrichment);
+  const driver = factorReviewSensitivity(enrichment?.factor_sensitivity).find((r) => r.rank === 1);
+  if (driver === undefined) return null;
+  const stored = readFactorEnrichments(read.factorEnrichments ?? enrichment?.factor_enrichments);
+  const question = str(stored?.find((e) => e.factor_id === driver.factor_id && e.sensitivity_rank === 1)?.confidence_question)?.trim();
+  const label = graphNodes(read.graph).get(driver.factor_id)?.label;
+  if (!label || !question) return null;
+  if (questionSuggestsOptionAction(question, read.graph)) return null;
+  if (!survivesReplyEditors(question, read.graph, read.analysisReady)) return null;
+  // Only an open test question: no numeric/value assertion, recommendation or generated observations.
+  if (!/^(?:what|which|how could|how would|could|would)\b/i.test(question) || !question.endsWith('?')
+    || /[\d.!\n]|\b(?:best|recommend\w*|winner|elasticity)\b/i.test(question)
+    || question.slice(0, -1).includes('?')) return null;
+  const relative = /\b(?:this|the) model\b/i.test(question) ? question
+    : `In this model, ${question[0]!.toLowerCase()}${question.slice(1)}`;
+  const line = `The result moves most with ‘${label}’. A question to test it: ${relative}`;
+  return survivesReplyEditors(line, read.graph, read.analysisReady) ? line : null;
+}
 
 /** Every node by id, its kind kept apart from its label: a node with no usable label is still the node (Codex r2 P2). */
 function graphNodes(graph: unknown): Map<string, { readonly label: string | null; readonly kind: string | null }> {
@@ -125,6 +163,9 @@ export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead):
   const licence = leaderLicenceFromState(analysisState, analysisReady);
   const lines: string[] = [];
   const steps: DecisionReviewStep[] = [];
+
+  const factorLine = factorReviewPressLine(read);
+  if (factorLine !== null) lines.push(factorLine);
 
   // F1: a non-factor root on the goal's path, treated as zero, with its ask.
   const rootLine = treatedAsZeroReplyLine(graph, analysisReady);

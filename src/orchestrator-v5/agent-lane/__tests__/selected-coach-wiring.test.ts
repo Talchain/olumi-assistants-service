@@ -16,7 +16,7 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // no longer says a user-named band is always "recorded as theirs" — a band the link already sits in records review and stays
 // Olumi's estimate (R11): 26f7e9c0… → 913872bf…, +210 bytes. The template sha above is unchanged.
 // AI HARNESS (2 Oct, RC 5950124321): none_measurable makes no claim; the sentence it was told to say is gone: 913872bf… → cd04fd8c….
-const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f68b';
+const HOST_SHA = '09f7b6acb78dae6a31ecb4d9b42e1a0211c1111f3788208c9ea39ccf52619619';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -32,8 +32,8 @@ const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f6
 // + GOAL_CHANCE_RANKING_INSTRUCTION appended after the naming rule (D3 step 2, DL 0df0e1 ruling C, 6 Oct): 29,212 → 29,958
 //   bytes (+1 space +745 = exactly the rule's bytes); Codex r2 widened it to every probability_of_goal and to the result being
 //   reported: 29,212 → 30,154 (+1 +941, exactly the rule). Template and host shas unchanged. Derived from the SENT body.
-const RENDERED_SHA = '802027cdbcc2d91de209fcb1edbaf23a574899f375527ed7e14a491965554308';
-const RENDERED_BYTES = 30_154;
+const RENDERED_SHA = 'e04a2258c8ccf21a846eaeb2f655e707994be123bdbf747d5937dc6e06e77ee4';
+const RENDERED_BYTES = 30_246;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';

@@ -1,5 +1,6 @@
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
+import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
 /**
  * POST /agent/v1/turn — the OpenAI Agent mounted in the real PoC.
  *
@@ -133,7 +134,7 @@ import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../
 import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengePressId, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
-import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn } from '../orchestrator-v5/agent-lane/decision-review-press.js';
+import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn, type DecisionReviewRead } from '../orchestrator-v5/agent-lane/decision-review-press.js';
 import { guidanceRequestOf, turnGuidanceFor, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -929,6 +930,20 @@ export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; bl
 /** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
 function placeExplainCaveat(text: string, caveat: string): string {
   return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
+}
+
+/** Read only the same selected, persisted Run; no transport keep-list or second selection authority. */
+export async function persistedFactorReviewFor(scenarioId: string, read: DecisionReviewRead, requestId: string): Promise<unknown> {
+  const expected = runExplanationChip(scenarioId, read);
+  if (expected === null) return undefined;
+  try {
+    const current = await readScenarioAnalysis({ scenarioId, graph: read.graph, requestId, includeFactorEnrichments: true });
+    const actual = runExplanationChip(scenarioId, { graphHash: read.graphHash,
+      analysisState: current.analysis_state, analysisResult: current.analysis_result });
+    return actual?.id === expected.id ? current.factor_enrichments : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Prefer the identity-bound Run's own deterministic copy; only older summaries need a structural fallback. */
@@ -2025,7 +2040,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (decisionReviewReplay) {
         // Deterministic on the readback: today's bound Run gives the same review; a Run that moved gives today's (or the
         // unavailable reply). The SAME owner as the live turn, never a model call.
-        const review = decisionReviewFor(scenarioId, { ...state, recentReplies: await repliesToCheckAsks(
+        const review = decisionReviewFor(scenarioId, { ...state,
+          factorEnrichments: await persistedFactorReviewFor(scenarioId, state, String(req.id)), recentReplies: await repliesToCheckAsks(
           [goalChanceWithheldForAgent(state.analysisResult)?.say], store, scenarioId, turnId) });
         replayText = review.reply;
         boundControl.push(...decisionReviewChips(review));
@@ -2944,6 +2960,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
     let briefReadingOpen = false;
+    let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
+    let levelAnswerTool: typeof CURRENT_LEVEL_TOOL | undefined;
     /** RT-1: set only on the path that runs the Agent with the selection; absent ⇒ no `_grounded_selection`. */
     let selectionContext: AgentSelectionContext | null | undefined;
     if (result === undefined) try {
@@ -3024,8 +3042,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const r = await readingWithin(reading, BRIEF_ROUTE_WAIT_MS);
           if (r !== null && r.build === true && (r.goal !== null || r.options.length > 0)) hostFirstCall = { name: 'build_model_from_brief', args: { brief: message } };
         }
+        // Only the LAST row's typed ask may claim this answer; failed reads preserve ordinary routing.
+        if (mode === 'full' && typedNow !== null && typeof store.readMostRecentPendingActions === 'function') {
+          try {
+            levelAsk = latestCurrentLevelAsk(await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }), scenarioId, userId);
+            levelAnswerTool = currentLevelAnswerFirstCall(st, levelAsk, typedNow,
+              hostFirstCall !== undefined || methodTurn !== null || widenTurn !== null || withheldToolsOf(body).includes(CURRENT_LEVEL_TOOL));
+          } catch (err) {
+            log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: current-level ask unreadable — ordinary routing');
+          }
+        }
         // AI Harness: a TYPED sentence saying how strong ONE existing link is forces that link's door first (link-sentence-route.ts).
-        linkSentenceTool = linkSentenceFirstCall(st, typedNow, hostFirstCall !== undefined || methodTurn !== null || widenTurn !== null);
+        linkSentenceTool = linkSentenceFirstCall(st, typedNow, hostFirstCall !== undefined || methodTurn !== null || widenTurn !== null || levelAnswerTool !== undefined);
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
       }
@@ -3035,7 +3063,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (methodTurn?.kind === 'run') budget = interpretBudget();
       result = await runAgentTurn(
         {
-          ctx: { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
+          ctx: { ...toolCtx,
+            // A qualified confirmation retains the user's ORIGINAL figure quote after a restart; never Olumi's restatement.
+            ...(levelAnswerTool !== undefined && levelAsk?.action.figure_quote !== undefined
+              ? { user_text: userWordsOf([...histories.typedWords(sessionId), levelAsk.action.figure_quote], typedNow) } : {}),
+            ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
             ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) },
           history,
           message,
@@ -3050,6 +3082,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(methodTurn?.kind === 'run' || widenRun !== undefined ? { maxHops: 1 } : {}),
           // Before the widen and chip forcings below, which win if both were ever set.
           ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
+          ...(levelAnswerTool !== undefined ? { firstCallTool: levelAnswerTool } : {}),
           ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
@@ -3281,7 +3314,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
     }
     if (decisionReviewRequested) {
-      decisionReviewTurn = decisionReviewFor(scenarioId, { ...composedRead, recentReplies: await repliesToCheckAsks(
+      decisionReviewTurn = decisionReviewFor(scenarioId, { ...composedRead,
+        factorEnrichments: await persistedFactorReviewFor(scenarioId, composedRead, String(req.id)), recentReplies: await repliesToCheckAsks(
         [goalChanceWithheldForAgent(composedRead.analysisResult)?.say], store, scenarioId, undefined) });
       text = decisionReviewTurn.reply;
       result = { ...result, assistant_text: text };
@@ -3888,6 +3922,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
     // Every retained Run output becomes a neutral marker; superseded pairs leave with their reasoning as before.
     const sentText = String(wireBody.assistant_text ?? text);
+    // Persist the producer's exact delivered question or its qualified clarification, after every egress gate.
+    const nextLevelAsk = mode === 'full' && fastPath !== 'method' ? currentLevelAskOnAnswer({
+      graph: readbackGraph, analysisResult, sentText, scenarioId, userId, emittedAtIso,
+      prior: levelAsk, answered: levelAnswerTool !== undefined, message,
+      awaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
+    }) : null;
+    if (nextLevelAsk !== null) {
+      // The question precedes lower-priority Run offers; never displace an approval or a live hold.
+      const at = durablePending.findIndex((pa) => pa.action.kind === 'run_analysis');
+      if (durablePending.length < PENDING_ACTIONS_PER_TURN_CAP) durablePending.splice(at < 0 ? durablePending.length : at, 0, nextLevelAsk);
+      else if (at >= 0) durablePending.splice(at, 1, nextLevelAsk);
+      else log.warn({ scenario_id: scenarioId }, 'agent-lane: current-level ask could not fit beside live holds');
+    }
     const sentItems = fastPath === 'method'
       ? methodTurnItems(history, message, sentText)
       : historyWithSentText(result.items, sentText);

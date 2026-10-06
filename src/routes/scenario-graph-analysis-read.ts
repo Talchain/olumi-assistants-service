@@ -143,6 +143,8 @@ import { deriveAnalysisFreshness, isGoalSnapshotStaleReason, selectClaimBearingR
 import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional-links.js';
 import { isScenarioAnalysisReasoningAuthority, readScenarioAnalysisClaimSafetyFact, type ScenarioAnalysisClaimSafetyRead } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
+import { readFactorEnrichments } from '../orchestrator-v5/agent-lane/factor-review.js';
+import type { FactorEnrichmentT } from '../schemas/enrichment.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { claimPermissionsFrom, type ClaimPermissions } from '../orchestrator-v5/agent-lane/first-analysis.js';
@@ -155,6 +157,8 @@ import { projectSelectedRunFigures, readSelectedGoalFigureContext } from './sele
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
+  /** Internal opt-in for the Agent review press; never forwarded by the graph route. */
+  readonly factor_enrichments?: FactorEnrichmentT[];
   /** Internal joined projection; not published by the graph route yet. */
   readonly current_read: CurrentReadProjection;
   /**
@@ -247,6 +251,8 @@ const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
 });
 
 export interface ReadScenarioAnalysisParams {
+  /** Read the selected Run's stored questions internally, without widening transport enrichment. */
+  readonly includeFactorEnrichments?: true;
   /** An open scope issue restricts claims without rewriting the saved Run or its freshness. */
   readonly goalScopeClaimInput?: GoalScopeClaimInput;
   readonly scenarioId: string;
@@ -628,6 +634,10 @@ export async function readScenarioAnalysis(
       // `analysis_result` withholds this too, so it ships exactly when that block does.
       ...(fact !== null && boundResult !== null
         ? {
+            ...(params.includeFactorEnrichments === true ? (() => {
+              const stored = readFactorEnrichments((fact.result.enrichment as Record<string, unknown> | undefined)?.factor_enrichments);
+              return stored === undefined ? {} : { factor_enrichments: stored };
+            })() : {}),
             analysis_constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
             analysis_leader_limit_risks: readLeaderLimitRisksFromResult(fact.result, readRatifiedConstraints(params.graph)),
             ...(() => {

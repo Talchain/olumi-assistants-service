@@ -17,8 +17,8 @@
  *    #2644 Q1);
  *  · BOTH links into it are drawn positive: a product of a rate and a count rises with each, so a negative link is the
  *    drafter saying something else, and its sign is never overwritten by Olumi's + product (Desk 6b #2644 Q2);
- *  · no option sets the COUNT to a single figure: the brief's range must survive (Science: "a point 150 gives Starter
- *    100%"). A count fed by a link keeps that link's spread; a point-set count waits for the range reshape (a8's hold);
+ *  · every option setting the COUNT carries the user's admitted likely range (Science: "a point 150 gives Starter
+ *    100%"). A count fed by a link keeps that link's spread; a bare point-set count is still refused;
  *  · every option level on a part is a figure the brief writes ABOUT that part or its option, in that part's unit (the
  *    user's own option levels; `figureTheUserWroteFor`, never the same number about another quantity).
  * Admission then judges the declaration like any other (`markProductIdentities`). Pure.
@@ -28,6 +28,7 @@ import { unitsCompose } from './reconciling-product.js';
 import { readCount, readMoney } from './same-unit.js';
 import { figureTheUserWroteForSpan, sameWord, wordsOf } from './stated-by-user.js';
 import { canonicalLabel } from './model-primitives.js';
+import { admitInterventionRange } from '../intervention-range.js';
 
 export interface RateCountProduct {
   readonly outcome: string;
@@ -69,8 +70,11 @@ export function withRateCountProducts(candidate: CandidateModel, brief: string):
     const composed = plain.kind === 'proof' ? plain
       : unitsCompose(candidate.goal.unit, candidate.goal.metric, { unit: readable(a), label: a }, { unit: readable(b), label: b });
     if (composed.kind !== 'proof') continue;
-    // The count's range survives only through a link: an option that sets it to one figure is a point (Science (A)).
-    if (levelsSet(composed.count).length > 0) continue;
+    // EVERY setting must keep a sampled range beside its own point; one bare point still refuses the product.
+    if (!levelsSet(composed.count).every((level) => {
+      const verdict = admitInterventionRange(level);
+      return verdict !== undefined && 'range' in verdict && verdict.range.meaning === 'likely_range';
+    })) continue;
     // The user's figure FOR THAT PART (or the option setting it), never the same number written about another quantity
     // ("Pro subscribers pay £49"; Codex buddy r1 F6).
     const theirs = (part: string): boolean => settingOf(part).every(({ option, level }) => {

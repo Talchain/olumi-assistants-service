@@ -45,6 +45,7 @@ import { countedNoun } from './counted-nouns.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { readCount } from './same-unit.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
@@ -1481,6 +1482,57 @@ export function centreRangeAt(sentence: string, amountSpan: { readonly end: numb
   const point = Math.abs(amount);
   if (!(low < point && point < high)) return undefined;
   return { low, high, text: range.text, end: 'centre' };
+}
+
+/** The user's own count forecast, not another quantity's range or a prior. Shared by construction and registration. */
+export function statedCountInterventionRange(
+  value: number, unit: string, countLabel: string, optionLabel: string, brief: string,
+  quantities: readonly { label: string; unit?: unknown }[],
+): { low: number; high: number; text: string } | undefined {
+  const noun = readCount(unit);
+  if (noun === null || value <= 0 || !Number.isFinite(value)) return undefined;
+  const others = quantities.filter(q => canonicalLabel(q.label) !== canonicalLabel(countLabel));
+  // A money rate cannot own a count's point, even when it shares the count's qualifier ("starter tier").
+  const scope: EntityScope = { target: [countLabel, optionLabel], others: others.map(q => q.label),
+    rivals: others.filter(q => readCount(q.unit) !== null).map(q => q.label), strict: true, requireNamed: true };
+  const qualifiers = wordsOf(countLabel).filter(w => !wordsOf(unit).some(u => sameWord(u, w)));
+  const ownClause = (sentence: string, span: { start: number; end: number }): string => {
+    const before = sentence.slice(0, span.start).match(/[^.!?;,:\n\u2013\u2014]*$/u)?.[0] ?? '';
+    const after = sentence.slice(span.end).match(/^[^.!?;,:\n\u2013\u2014]*/u)?.[0] ?? '';
+    return before + sentence.slice(span.start, span.end) + after;
+  };
+  const namesCount = (clause: string): boolean => {
+    const said = wordsOf(clause);
+    return said.some(w => sameWord(w, noun[noun.length - 1]!))
+      && qualifiers.every(q => said.some(w => sameWord(w, q)));
+  };
+  // No new subject, verb, conjunction or different unit may move the range to a second quantity.
+  const countPhrase = (text: string): boolean => {
+    const phrase = text.replace(/^[\s,]+|[\s,.!]+$/gu, '');
+    if (phrase === '') return true;
+    const read = readCount(phrase);
+    const own = wordsOf(`${countLabel} ${unit}`);
+    return read !== null && read[read.length - 1] === noun[noun.length - 1]
+      && wordsOf(phrase).every(w => w === 'new' || w === 'paying' || own.some(o => sameWord(o, w)));
+  };
+  const receipts: { low: number; high: number; text: string }[] = [];
+  for (const sentence of brief.split(/(?<=[.!?])\s+|\n+/u).map(s => s.trim()).filter(Boolean)) {
+    if (sentence.includes('?') || /\b(?:min(?:imum)?|max(?:imum)?|confidence|credible|guaranteed|worst|best)\b/iu.test(sentence)) continue;
+    const amounts = findStatedAmounts(sentence);
+    // An exact statement about this count vetoes a receipt, even if it contradicts the drafted point.
+    if (amounts.some(a => {
+      const span = figureTheUserWroteForSpan(a.magnitude, unit, sentence, { ...scope, at: a.index });
+      return span !== null && namesCount(ownClause(sentence, span)) && /\bexact(?:ly)?\b/iu.test(ownClause(sentence, span));
+    })) return undefined;
+    const span = figureTheUserWroteForSpan(value, unit, sentence, scope);
+    if (span === null || !namesCount(ownClause(sentence, span)) || amounts.filter(a => a.magnitude === value).length !== 1) continue;
+    const range = centreRangeAt(sentence, span, value, unit);
+    if (range === undefined) continue;
+    const at = sentence.indexOf(range.text, span.end);
+    if (!countPhrase(sentence.slice(span.end, at)) || !countPhrase(sentence.slice(at + range.text.length))) continue;
+    receipts.push({ low: range.low, high: range.high, text: sentence });
+  }
+  return receipts.length === 1 ? receipts[0] : undefined;
 }
 
 type LinkEffectFigures = { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };

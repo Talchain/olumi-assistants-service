@@ -83,6 +83,18 @@ const labels = (a?: string, b?: string) => ({
   ...(b !== undefined ? { label_after: b } : {}),
 });
 
+/** The target's frame owns its meaning; a relative change never takes the metric's unit. */
+function goalTarget(goal: NonNullable<RunInputSnapshot['goal']>): Value | null {
+  const raw = goal.target_raw;
+  if (raw === undefined) return null;
+  if (goal.frame === 'change_rel') {
+    const percent = Number((raw * 100).toFixed(12));
+    return { raw: `${percent >= 0 ? '+' : ''}${percent}% from today` };
+  }
+  if (goal.frame === 'change_abs') return { raw: `${raw >= 0 ? '+' : ''}${raw}${goal.unit ? ` ${goal.unit}` : ''} from today` };
+  return valueOf(raw, goal.unit);
+}
+
 /** The rows only — see {@link diffRunInputs} for whether they are the whole difference. */
 export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInputSnapshot): Row[] {
   return diffRunInputs(prior, current).rows;
@@ -250,11 +262,19 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
   // ── factor values ─────────────────────────────────────────────────────────
   const pF = byId(prior.factors, (f) => f.factor_id);
   const cF = byId(current.factors, (f) => f.factor_id);
+  // The producer records a goal entry even when it has no level. Without it, absence is unrecorded coverage,
+  // not evidence that the user added or removed a level. Both ends must attest their own goal-level coverage.
+  const goalLevelsRecorded = (prior.goal === null || pF.has(prior.goal.node_id))
+    && (current.goal === null || cF.has(current.goal.node_id));
+  if (!goalLevelsRecorded) complete = false;
   for (const factorId of unionIds(pF, cF)) {
     const pf = pF.get(factorId);
     const cf = cF.get(factorId);
-    const pair = authoredPair(pf, cf);
-    pushPair({ entity_kind: 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, pair);
+    const isGoalLevel = prior.goal?.node_id === factorId || current.goal?.node_id === factorId;
+    if (isGoalLevel && !goalLevelsRecorded) continue;
+    const levelValue = (f: typeof pf) => f?.raw === undefined && f?.encoded === undefined ? undefined : f;
+    const pair = isGoalLevel ? authoredPair(levelValue(pf), levelValue(cf)) : authoredPair(pf, cf);
+    pushPair({ entity_kind: isGoalLevel ? 'goal' : 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, pair);
     if (pf !== undefined && cf !== undefined && !factorAuthorshipExplained(pf, cf, pair)) complete = false;
   }
 
@@ -265,8 +285,15 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     if (pg !== null && cg !== null && pg.node_id === cg.node_id) {
       const base = { entity_kind: 'goal' as const, entity_id: cg.node_id, ...labels(pg.label, cg.label) };
       const v = (raw: number | string | undefined): Value | null => (raw === undefined ? null : { raw });
-      push(changeRow({ ...base, field: 'target' }, pg.target_raw !== undefined ? valueOf(pg.target_raw, pg.unit) : null,
-        cg.target_raw !== undefined ? valueOf(cg.target_raw, cg.unit) : null));
+      // Target identity is its frame and authored threshold, not the metric's unit. The encoded threshold remains
+      // in the residual: a rescale or an unexpressed threshold change still makes coverage partial, never a false
+      // target receipt. Compare before formatting so a unit adoption cannot manufacture a target change.
+      // A relative target (+10% from today) has no unit of its own, so adopting the metric's unit never changes it.
+      // An absolute or level target's meaning includes its unit (55000 GBP ≠ 55000 USD): there a unit edit IS a target change.
+      const unitMovesTarget = cg.frame !== 'change_rel' && pg.unit !== cg.unit;
+      if (pg.target_raw !== cg.target_raw || pg.frame !== cg.frame || unitMovesTarget) {
+        push(changeRow({ ...base, field: 'target' }, goalTarget(pg), goalTarget(cg)));
+      }
       if (pg.frame !== cg.frame) complete = false;
       // A unit-only edit (AIQ 5912905493) is its own row even when the target number is unchanged.
       push(changeRow({ ...base, field: 'unit' }, v(pg.unit), v(cg.unit)));

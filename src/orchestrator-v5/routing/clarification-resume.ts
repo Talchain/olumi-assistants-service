@@ -346,6 +346,7 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // register a target through another route — either way the answer must not
   // land on a graph the question was not asked about.
   elicit_goal_target: 'mutating',
+  elicit_goal_current_level: 'mutating', // Agent-only answer route; never the general short-confirm resumer.
 };
 
 const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set(
