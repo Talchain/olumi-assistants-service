@@ -59,6 +59,37 @@ const OPTION_FIRST = [
 ];
 
 describe('HARNESS 3: a provisional view tests the model, never chooses an option', () => {
+  it.each(['Tech lead should be explored first.', 'We should begin with Tech lead.'])(
+    'finding 2 RED: refuses the option recommendation %s after graph-label replacement', (line) => {
+      const graph = { nodes: [{ id: 'tech_lead', kind: 'option', label: 'Tech lead' }] };
+      for (const field of ['view', 'reasoning', 'confirm_step'] as const) {
+        expect(sanitiseProvisionalView({ ...VIEW, [field]: line }, graph)).toBeNull();
+        expect(sanitiseProvisionalView({ ...VIEW, [field]: line.replace('Tech lead', 'tech_lead') }, graph)).toBeNull();
+      }
+    },
+  );
+
+  it('finding 3 RED: permits measuring Tech lead hiring costs in every field', () => {
+    const graph = { nodes: [{ id: 'tech_lead', kind: 'option', label: 'Tech lead' }] };
+    for (const field of ['view', 'reasoning', 'confirm_step'] as const) {
+      const args = { ...VIEW, [field]: 'Test how much Tech lead hiring costs.' };
+      expect(sanitiseProvisionalView(args, graph)).toEqual(args);
+    }
+  });
+
+  it.each(['Test how hiring Tech lead affects costs.', 'Find out whether Tech lead hiring costs fit the assumption.'])(
+    'finding 3 measurement control: permits %s', (line) => {
+      const args = { ...VIEW, view: line };
+      expect(sanitiseProvisionalView(args, { nodes: [{ id: 'tech_lead', kind: 'option', label: 'Tech lead' }] })).toEqual(args);
+    },
+  );
+
+  it.each(['Hire Tech lead.', 'We should hire Tech lead.', "I'd explore Tech lead.", 'It is worth exploring Tech lead.'])(
+    'finding 3 advocacy control: still refuses %s', (line) => {
+      expect(sanitiseProvisionalView({ ...VIEW, view: line }, { nodes: [{ id: 'tech_lead', kind: 'option', label: 'Tech lead' }] })).toBeNull();
+    },
+  );
+
   it.each(OPTION_FIRST)('RED at base: refuses %s in every field and at Run JSON egress', async (line) => {
     for (const field of ['view', 'reasoning', 'confirm_step'] as const) {
       const args = { ...VIEW, [field]: line };

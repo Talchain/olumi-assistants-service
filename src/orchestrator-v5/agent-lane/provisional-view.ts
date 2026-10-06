@@ -58,6 +58,24 @@ export type ProvisionalViewCheck =
 // tool calls, Run-button JSON and their egress re-check all refuse them. Testing/measurement itself is allowed.
 const OPTION_PRIORITY = /\b(?:i\s+would|i['’]d)\s+(?:explore|try|pursue|choose|pick|select|hire|start\s+with)\b(?!\s+(?:testing|measuring|checking|finding\s+out)\b)[^.!?]*(?:\bfirst\b|\bstart\s+with\b)|\b(?:i\s+would|i['’]d)\s+start\s+with\s+(?!testing\b|measuring\b|checking\b|finding\s+out\b)|\bis\s+worth\s+(?:trying|exploring|pursuing)\s+first\b|\b(?:i\s+would|i['’]d)\s+(?:raise|hold|hire|choose|pick|select|recommend|favour|lean\s+towards)\b/iu;
 
+const OPTION_ACTION = '(?:explor(?:e|ed|ing)|try|trying|pursu(?:e|ed|ing)|choos(?:e|ing)|pick|select|hir(?:e|ed|ing)|(?:start|begin)\\s+with|recommend|favour|lean\\s+towards)';
+const OPTION_FIRST = /\bshould\s+be\s+explored\s+first\b|\bwe\s+should\s+begin\s+with\s+(?!(?:testing|measuring|checking|finding\s+out)\b)/iu;
+
+/** Match advice to act on an option, rather than an action word anywhere in a measurement question. */
+function recommendsOption(line: string, optionNames: readonly string[] = []): boolean {
+  if (OPTION_PRIORITY.test(line) || OPTION_FIRST.test(line)) return true;
+  return optionNames.some((name) => {
+    const option = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const named = `(?:a\\s+|an\\s+|the\\s+)?${option}(?=\\s|[.!?,;:]|$)`;
+    const advice = new RegExp(
+      `(?:^\\s*|[.!?;:]\\s*|\\b(?:and|then|worth|consider)\\s+|\\b(?:i|we|you)\\s+(?:should|would|could|must)\\s+|\\bi['’]d\\s+)${OPTION_ACTION}\\s+${named}`
+      + `|${option}\\s+(?:(?:should|could|must)\\s+(?:be\\s+)?|is\\s+worth\\s+)${OPTION_ACTION}\\b`,
+      'iu',
+    );
+    return advice.test(line);
+  });
+}
+
 /**
  * One line, sentence-final. A newline would let the model open a list, a heading or a second paragraph inside the
  * server's block, so every run of whitespace becomes one space before anything is counted.
@@ -80,7 +98,7 @@ export function checkProvisionalView(args: unknown): ProvisionalViewCheck {
     const limit = PROVISIONAL_VIEW_LIMITS[field];
     if (line.length > limit.chars) return { ok: false, field, problem: 'too_long', limit: limit.chars };
     if (sentenceCount(line) > limit.sentences) return { ok: false, field, problem: 'too_many_sentences', limit: limit.sentences };
-    if (OPTION_PRIORITY.test(line) || sentenceRanksOptions(line)) return { ok: false, field, problem: 'option_recommendation' };
+    if (recommendsOption(line) || sentenceRanksOptions(line)) return { ok: false, field, problem: 'option_recommendation' };
     out[field] = line;
   }
   return { ok: true, view: out as ProvisionalView };
@@ -271,8 +289,7 @@ export function sanitiseProvisionalView(
   for (const line of [view, reasoning, confirm]) {
     if (sentenceRanksOptions(line, labels)) return null;
     // Ordinary option mentions (e.g. asking for its cost) are allowed. Acting on an option is a recommendation.
-    if (optionNames.some((name) => line.toLocaleLowerCase('en-GB').includes(name))
-      && /\b(?:explor(?:e|ing)|try|trying|pursu(?:e|ing)|choos(?:e|ing)|pick|select|hir(?:e|ing)|start\s+with|recommend|favour|lean\s+towards)\b/iu.test(line)) return null;
+    if (recommendsOption(line, optionNames)) return null;
   }
   return checked.view;
 }

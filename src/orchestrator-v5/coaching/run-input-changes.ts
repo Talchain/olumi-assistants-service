@@ -262,11 +262,18 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
   // ── factor values ─────────────────────────────────────────────────────────
   const pF = byId(prior.factors, (f) => f.factor_id);
   const cF = byId(current.factors, (f) => f.factor_id);
+  // The producer records a goal entry even when it has no level. Without it, absence is unrecorded coverage,
+  // not evidence that the user added or removed a level. Both ends must attest their own goal-level coverage.
+  const goalLevelsRecorded = (prior.goal === null || pF.has(prior.goal.node_id))
+    && (current.goal === null || cF.has(current.goal.node_id));
+  if (!goalLevelsRecorded) complete = false;
   for (const factorId of unionIds(pF, cF)) {
     const pf = pF.get(factorId);
     const cf = cF.get(factorId);
-    const pair = authoredPair(pf, cf);
     const isGoalLevel = prior.goal?.node_id === factorId || current.goal?.node_id === factorId;
+    if (isGoalLevel && !goalLevelsRecorded) continue;
+    const levelValue = (f: typeof pf) => f?.raw === undefined && f?.encoded === undefined ? undefined : f;
+    const pair = isGoalLevel ? authoredPair(levelValue(pf), levelValue(cf)) : authoredPair(pf, cf);
     pushPair({ entity_kind: isGoalLevel ? 'goal' : 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, pair);
     if (pf !== undefined && cf !== undefined && !factorAuthorshipExplained(pf, cf, pair)) complete = false;
   }

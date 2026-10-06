@@ -194,14 +194,16 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
   const carried = input.statedLevelCarriedIds ?? new Set<string>();
   const factors = nodes.flatMap((n) => {
     const id = text(n.id);
-    const os = isRec(n.observed_state) ? n.observed_state : null;
+    const isGoal = id === goalId;
+    const os: Rec | null = isRec(n.observed_state) ? n.observed_state : isGoal ? {} : null;
     // A goal is also a measured quantity. Retain its authored current level in the existing value carrier;
-    // `goal.target_raw` remains the target, never this level. Older snapshots simply have no such value.
+    // `goal.target_raw` remains the target, never this level. An entry with no value explicitly records coverage
+    // of an absent goal level; no entry means an older snapshot did not record it, never a known absence.
     if (id === undefined || os === null) return [];
     const encoded = finite(os.value);
     // The AUTHORED figure only: a normalised `value` is never recorded as the user's raw (contract header).
     const raw = finite(os.raw_value) ?? text(os.display_value);
-    if (raw === undefined && encoded === undefined) return [];
+    if (raw === undefined && encoded === undefined && !isGoal) return [];
     return [{
       factor_id: id,
       ...(label(n.label) !== undefined ? { label: label(n.label) } : {}),

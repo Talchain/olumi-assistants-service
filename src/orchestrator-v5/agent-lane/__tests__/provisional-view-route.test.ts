@@ -38,6 +38,7 @@ const VIEW = {
 
 const SCENARIO = '5e3d2c1b-6f7a-4b8c-9d0e-1f2a3b4c5d6f';
 let readbackState: unknown = WITHHELD_STATE;
+let readbackGraph: unknown = FX.state.draft_graph;
 type Row = { id: string; turn_id: string; request_hash: string; assistant_message: string | null };
 const rows = new Map<string, Row>();
 const store = {
@@ -103,13 +104,13 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
       analysis_ready: FX.state.analysis_ready, analysis_state: readbackState,
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: FX.state.draft_graph, graph_hash: 'h-corpus', analysis_result: RESULT, analysis_state: readbackState, analysis_ready: FX.state.analysis_ready,
+      graph: readbackGraph, graph_hash: 'h-corpus', analysis_result: RESULT, analysis_state: readbackState, analysis_ready: FX.state.analysis_ready,
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); modelRequests.length = 0; readbackState = WITHHELD_STATE; });
+  beforeEach(() => { rows.clear(); modelRequests.length = 0; readbackState = WITHHELD_STATE; readbackGraph = FX.state.draft_graph; });
 
   let turnSeq = 0;
   let turnId = '';
@@ -234,6 +235,32 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
    * JSON `{answer, provisional_view}`, and the view goes to the SAME sidecar as the Agent's tool call, after the gate.
    */
   const pressRunAnswering = (answer: string, view: typeof VIEW | null) => pressRun(JSON.stringify({ answer, provisional_view: view }));
+
+  const withTechLead = () => {
+    const graph = FX.state.draft_graph as { nodes: unknown[] };
+    readbackGraph = { ...graph, nodes: [...graph.nodes, { id: 'tech_lead', kind: 'option', label: 'Tech lead' }] };
+  };
+
+  it.each(['Tech lead should be explored first.', 'We should begin with Tech lead.'])(
+    'finding 2 RED: final Run-button sidecar withholds %s', async (line) => {
+      withTechLead();
+      for (const field of ['view', 'reasoning', 'confirm_step'] as const) {
+        const r = await pressRunAnswering('The analysis cannot put an option forward yet.', { ...VIEW, [field]: line });
+        expect(r.statusCode).toBe(200);
+        const b = r.json() as Body;
+        expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
+        expect(b.assistant_text).not.toContain(line);
+      }
+    },
+  );
+
+  it('finding 3 RED: final Run-button sidecar retains a question about Tech lead hiring costs', async () => {
+    withTechLead();
+    const view = { ...VIEW, view: 'Test how much Tech lead hiring costs.' };
+    const r = await pressRunAnswering('The analysis cannot put an option forward yet.', view);
+    expect(r.statusCode).toBe(200);
+    expect((r.json() as Body)._agent.provisional_view).toEqual({ heading, ...view, because });
+  });
 
   it.each([
     'I would explore a Tech lead first, without committing to a hire yet.',

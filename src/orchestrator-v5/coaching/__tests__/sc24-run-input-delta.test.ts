@@ -42,22 +42,30 @@ import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_WITHHELD_CODES } from '../.
 // 0.71.0: every hand-built snapshot carries the SAME residual by default — "everything this snapshot does not record was
 // unchanged" — so these rows test the recorded fields. The residual's own rows (absent / different → partial) are below.
 const RESIDUAL = 'c'.repeat(64);
-const snap = (over: Partial<RunInputSnapshot> = {}, price = 59): RunInputSnapshot => ({
-  snapshot_version: 1,
-  sent_digest: 'a'.repeat(64),
-  residual_digest: RESIDUAL,
-  goal: { node_id: 'goal_mrr', label: 'Pro MRR', target_raw: 55000, unit: 'GBP per month', operator: '>=' },
-  options: [
-    { option_id: 'opt-a', label: 'Raise price', settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: price, unit: 'GBP', encoded: price }] },
-    { option_id: 'opt-b', label: 'Hold', is_baseline: true,
-      settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: 49, unit: 'GBP', encoded: 49, held: true }] },
-  ],
-  options_not_sent: [],
-  factors: [{ factor_id: 'fac_churn', label: 'Monthly churn', raw: 3.7, unit: '%', encoded: 0.037, source: 'user_override' }],
-  constraints: [],
-  links: [{ from: 'fac_price', to: 'fac_churn', mean: 0.4 }],
-  ...over,
-});
+const snap = (over: Partial<RunInputSnapshot> = {}, price = 59): RunInputSnapshot => {
+  const recorded: RunInputSnapshot = {
+    snapshot_version: 1,
+    sent_digest: 'a'.repeat(64),
+    residual_digest: RESIDUAL,
+    goal: { node_id: 'goal_mrr', label: 'Pro MRR', target_raw: 55000, unit: 'GBP per month', operator: '>=' },
+    options: [
+      { option_id: 'opt-a', label: 'Raise price', settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: price, unit: 'GBP', encoded: price }] },
+      { option_id: 'opt-b', label: 'Hold', is_baseline: true,
+        settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: 49, unit: 'GBP', encoded: 49, held: true }] },
+    ],
+    options_not_sent: [],
+    factors: [{ factor_id: 'fac_churn', label: 'Monthly churn', raw: 3.7, unit: '%', encoded: 0.037, source: 'user_override' }],
+    constraints: [],
+    links: [{ from: 'fac_price', to: 'fac_churn', mean: 0.4 }],
+    ...over,
+  };
+  // These are modern, fully recorded fixtures. An empty goal entry attests that no level was sent;
+  // legacy snapshots without this coverage are tested in change-goal-run-receipt.test.ts.
+  if (recorded.goal !== null && !recorded.factors.some((f) => f.factor_id === recorded.goal!.node_id)) {
+    recorded.factors = [...recorded.factors, { factor_id: recorded.goal.node_id }];
+  }
+  return recorded;
+};
 
 function fact(opts: {
   seed: string; hash: string; at: string; builds?: Record<string, string> | null;

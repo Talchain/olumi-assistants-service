@@ -78,6 +78,8 @@ describe('buildRunInputSnapshot — what the Run was sent', () => {
     // 0.73.0: each factor's authorship as the wire node carried it (`run-input-residual.ts` exception 4).
     const factorDigest = (id: string) => factorAuthorshipDigest((graph as unknown as { nodes: Record<string, unknown>[] }).nodes.find((n) => n.id === id)!, false);
     expect(s?.factors).toEqual([
+      // Explicit coverage of an absent goal level, rather than an omitted older recording.
+      { factor_id: 'goal_mrr', label: 'Pro MRR', authorship_digest: factorDigest('goal_mrr') },
       { factor_id: 'fac_price', label: 'Pro price', raw: 49, unit: 'GBP', encoded: 49, source: 'user_override', authorship_digest: factorDigest('fac_price') },
       { factor_id: 'fac_churn', label: 'Monthly churn', raw: 3.7, unit: '%', encoded: 0.037, source: 'cee_inference', authorship_digest: factorDigest('fac_churn') },
     ]);
