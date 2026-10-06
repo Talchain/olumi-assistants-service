@@ -40,7 +40,9 @@ describe('sentenceCountsLabel: the label is the counted phrase right after that 
   const LABEL = 'Café subscribers';
   it.each([
     ['"10 more café subscribers"', 'Every 10 more café subscribers adds about 1 percentage point of wholesale subscription revenue.', 10],
-    ['no change word', 'For every 10 café subscribers we add, revenue rises about 1 percentage point.', 10],
+    ['no change word, a comma closes the phrase', 'For every 10 café subscribers, revenue rises about 1 percentage point.', 10],
+    ['a modal opens the predicate', 'Every 10 more café subscribers would add about 1 percentage point of wholesale subscription revenue.', 10],
+    ['the label ends the sentence', 'Wholesale subscription revenue rises about 1 percentage point for every 10 café subscribers.', 10],
     ['a fewer change, punctuation after the label', 'With 10 fewer café subscribers, revenue falls about 1 percentage point.', -10],
   ])('YES, %s', (_why, said, figure) => {
     expect(sentenceCountsLabel(said, figure, LABEL)).toBe(true);
@@ -58,6 +60,10 @@ describe('sentenceCountsLabel: the label is the counted phrase right after that 
     // Codex r2: a possessive, or another counted thing, continues the phrase: not a complete counted phrase.
     ['a possessive continuation (Codex r2)', 'Every 10 more café subscribers\u2019 customers adds about 1 percentage point of wholesale subscription revenue.', 10],
     ['another counted noun follows', 'Every 10 more café subscribers customers adds about 1 percentage point of wholesale subscription revenue.', 10],
+    // sol r3: an UNKNOWN noun continues the phrase; so does a possessive next word. Only a demonstrated boundary counts.
+    ['an unknown noun continues the phrase (sol r3)', 'Every 10 more café subscribers support tickets adds about 1 percentage point of wholesale subscription revenue.', 10],
+    ['a possessive next word (sol r3)', 'Every 10 more café subscribers customers\u2019 orders adds about 1 percentage point of wholesale subscription revenue.', 10],
+    ['a clause word, not a demonstrated boundary (conservative)', 'For every 10 café subscribers we add, revenue rises about 1 percentage point.', 10],
   ])('NO, %s', (_why, said, figure) => {
     expect(sentenceCountsLabel(said, figure, LABEL)).toBe(false);
   });

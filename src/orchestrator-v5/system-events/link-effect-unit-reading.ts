@@ -4,7 +4,7 @@ import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-read
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
-import { afterChangeWord, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { afterChangeWord, isChangeWord, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import { singular, words } from '../agent-lane/same-unit.js';
 import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
 import { isPercentageLevelUnit, resolveMagnitudeFrame } from '../../cee/magnitude/link-effect.js';
@@ -67,12 +67,19 @@ export function sentenceCountsLabel(said: string, figure: number, label: unknown
   if (want.length === 0 || hits.length !== 1) return false;
   const hit = hits[0]!;
   // Closing punctuation only: a possessive mark is kept, so "café subscribers’ customers" never reads as the label.
-  const got = words(afterChangeWord(said.slice(hit.index + hit.matchedText.length))).map((w) => w.replace(/[.,;:!?"\u201c\u201d]+$/u, ''));
+  const raw = words(afterChangeWord(said.slice(hit.index + hit.matchedText.length)));
+  const got = raw.map((w) => w.replace(/[.,;:!?"\u201c\u201d]+$/u, ''));
   if (!want.every((w, i) => got[i] !== undefined && singular(got[i]!) === w)) return false;
-  // ⛔ Codex r2: a COMPLETE counted phrase. The next word may not be another counted thing ("café subscribers customers").
+  // ⛔ Codex r2 + sol r3: a COMPLETE counted phrase needs a DEMONSTRATED boundary, never "the next word is not a known
+  // noun" ("café subscribers support tickets" continues it). The label ends the sentence or its clause (closing
+  // punctuation), or the next word begins the statement's predicate: a change word the binder itself reads ("adds",
+  // "costs") or a modal ("would add"). Anything else, no reading.
   const next = got[want.length];
-  return next === undefined || !countedNoun(next);
+  return next === undefined || /[.,;:!?]$/u.test(raw[want.length - 1]!) || isChangeWord(next) || MODAL.test(next);
 }
+
+/** A modal that opens the predicate after a counted phrase ("10 more café subscribers would add …"): closed-class words. */
+const MODAL = /^(?:would|will|could|can|should|might|may|must)$/i;
 
 /** The reading the card shows and the writer stores: a typed-zero end's change is said in points (B3). */
 export function withPointsAtZero<E extends LinkEffectStatement>(effect: E, zero: readonly string[] | undefined, from: string, to: string): E {
