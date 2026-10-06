@@ -8,7 +8,7 @@ import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrat
 const load = vi.fn();
 vi.mock('../../build-turn-context.js', () => ({ loadScenarioAnalysisFactsForRead: (...a: unknown[]) => load(...a) }));
 
-import { withinBandMovesForRunDelta } from '../rerun-within-band.js';
+import { rerunPairReadForRunDelta, withinBandMovesForRunDelta } from '../rerun-within-band.js';
 
 const FROM = 'a'; const TO = 'b';
 const snap = (mean: number, digest: string): RunInputSnapshot => ({
@@ -46,6 +46,12 @@ describe('withinBandMovesForRunDelta', () => {
   it('a read that rejects names nothing', async () => {
     load.mockImplementation(async () => { throw new Error('db down'); });
     expect(await withinBandMovesForRunDelta('s', 'r', DELTA)).toEqual([]);
+  });
+  it.each([0, -1])('an exhausted shared budget (%s ms) starts no fallback fact read', async deadlineMs => {
+    load.mockImplementation(() => new Promise(() => {}));
+    const result = await rerunPairReadForRunDelta('s', 'r', DELTA, deadlineMs);
+    expect(result).toEqual({ withinBand: [], userWrittenLinks: new Set(), frameRefitLinks: new Set() });
+    expect(load).not.toHaveBeenCalled();
   });
   it('a delta that is not partial costs no read at all', async () => {
     expect(await withinBandMovesForRunDelta('s', 'r', { ...DELTA, input_coverage: 'complete' })).toEqual([]);

@@ -42,7 +42,7 @@ export async function rerunPairReadForRunDelta(
   const d = runDelta !== null && typeof runDelta === 'object' ? runDelta as { input_coverage?: unknown; input_changes?: unknown } : undefined;
   const hasStrengthRow = Array.isArray(d?.input_changes) && d.input_changes.some((r) =>
     r !== null && typeof r === 'object' && (r as { entity_kind?: unknown }).entity_kind === 'link' && (r as { field?: unknown }).field === 'strength');
-  if (d?.input_coverage !== 'partial' && !hasStrengthRow) return NOTHING;
+  if ((d?.input_coverage !== 'partial' && !hasStrengthRow) || deadlineMs <= 0) return NOTHING;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<RerunPairRead>((resolve) => { timer = setTimeout(() => resolve(NOTHING), deadlineMs); });
   const read = (async (): Promise<RerunPairRead> => {
