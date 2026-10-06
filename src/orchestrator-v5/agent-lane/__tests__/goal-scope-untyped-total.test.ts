@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { reconciliationPending, scopeIssueBlocks, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
+import { reconciliationPending, scopeIssueBlocks, scopeIssuesAfterWrite, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 import { goalScopeClaimInput } from '../../compose/goal-scope-claim-input.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
@@ -47,7 +47,7 @@ describe('(b) the served T1b graphs: who placed the Starter tier in the goal', (
   it('T1b minus that sentence (served brief 7): the Starter tier counts only under the total — disclosed in d5\'s words', () => {
     const components = untypedScopeComponents(without49(), GOAL);
     // Exactly the part the launch ADDS: not "Price rise" (a 0 % change the status quo holds) and not "Support capacity
-    // strain" (a cost the option brings, entering the goal negatively).
+    // strain" (a cost the option brings, entering the goal at −0.16; Science d5 #87 6007341975 (1): a part ADDS to the total).
     expect(components).toEqual(['Starter-tier monthly recurring revenue']);
     expect(untypedScopeDisclosure('monthly recurring revenue', components)).toBe(
       'I’ve read your goal, ‘monthly recurring revenue’, as the total across every tier, including ‘Starter-tier monthly recurring revenue’. If you meant only part of it, say which.');
@@ -111,6 +111,21 @@ describe('(b) an untyped scope question never gates a claim or a write', () => {
     expect(goalScopeClaimInput([untyped()], g)).toEqual({ status: 'clear', issues: [] });
     // Contrast: a typed question on the same graph still withholds.
     expect(goalScopeClaimInput([typed()], g).status).toBe('unresolved');
+  });
+
+  it('a typed scope written later SUPERSEDES a retained untyped question: the claim is withheld, never cleared (buddy r1 P1)', () => {
+    const g = with49();
+    // A typed total whose Starter share is still unknown: it cannot be recorded, so it is a blocking issue.
+    node(g, GOAL).goal_scope = { modelled: 'every tier', alternative: 'the existing plans only', extent: 'total', stated_in_brief: true,
+      source: { quote: 'monthly recurring revenue' },
+      component: { label: 'Starter tier', rate_id: 'price_increase', count_id: 'starter_subscribers', basis: 'unknown', source: { quote: 'Launch a starter tier' } } };
+    const after = scopeIssuesAfterWrite([untyped()], g, SCENARIO);
+    const scopeIssues = after.filter((p) => p.action.kind === 'reconcile_goal_scope');
+    expect(scopeIssues).toHaveLength(1);
+    expect(scopeIssues[0]!.action).toMatchObject({ kind: 'reconcile_goal_scope', goal_id: GOAL, expected: 'billing_basis' });
+    expect(goalScopeClaimInput(after, g).status).toBe('unresolved');
+    // Control: the same write with no retained question raises the same typed issue.
+    expect(goalScopeClaimInput(scopeIssuesAfterWrite([], g, SCENARIO), g).status).toBe('unresolved');
   });
 
   it('the write gates refuse a typed scope question and never an untyped one (proposeGoalCurrentLevel)', async () => {

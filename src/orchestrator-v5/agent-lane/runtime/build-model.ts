@@ -39,7 +39,7 @@ import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricNamesPartOutsideModelled, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -1855,18 +1855,31 @@ export async function buildModelFromBrief(
   // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
   // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
   // the five-question cap.
-  // ⭐ (b) (Science d5 #87 6006584860 / 6006646752; DL 6 Oct): the drafter's untyped scope question reads a plain goal as the
-  // TOTAL. It is never a withhold (`scopeIssueBlocks`), and it is said once, as the disclosure, only where material and not
-  // already stated by the user (`untypedScopeComponents`). Nothing material → nothing asked, assumed or pended. A metric that
-  // names the part the model does NOT measure ("Non-Pro MRR") keeps C46's assumption and question (ask (a), still non-blocking).
+  // ⭐ (b) (Science d5 #87 6006584860 / 6006646752; DL 6 Oct): the drafter's untyped scope question reads a goal that names
+  // no part (`metricReadsAsPlainTotal`) as the TOTAL. It is never a withhold (`scopeIssueBlocks`), and it is said once, as the
+  // disclosure, only where material and not already stated by the user (`untypedScopeComponents`). Nothing material →
+  // nothing asked, assumed or pended. Any other metric may name a part ("Starter MRR", "Non-Pro MRR"): it keeps C46's
+  // assumption and question (ask (a)), still non-blocking.
   const scopeLoss = admitted.loss.find((l) => /\.goal_scope$/.test(l.field_path));
   const scopeGoal = admitted.nodes.find((n) => n.kind === 'goal');
-  const scopeAsked = scopeLoss !== undefined && candidate.goal.scope
-    && metricNamesPartOutsideModelled(candidate.goal.metric, candidate.goal.scope.modelled, candidate.goal.scope.alternative)
+  const plainTotal = metricReadsAsPlainTotal(candidate.goal.metric);
+  // Science d5 #87 6007341975 (2): the disclosure keys on MATERIALITY, never on the drafter's declaration — a drafter's
+  // "no part-or-whole reading" (goal.scope null) is Olumi making the reading silently. Only a scope the BRIEF states is not.
+  const readsAsTotal = plainTotal && (scopeLoss !== undefined || !candidate.goal.scope);
+  const scopeAsked = scopeLoss !== undefined && !plainTotal
     ? { question: scopeLoss.reason, assumption: typeof scopeLoss.after === 'string' ? scopeLoss.after : undefined }
     : null;
+  if (readsAsTotal && candidate.goal.scope) {
+    // The drafter's own restatement of the part-or-whole question (Codex buddy r1 P2: it carried the C46 "… for the Pro plan
+    // only. Which did you mean?" through `unknowns`): the goal now reads as the total, so it is not asked beside the reading.
+    const [modelled, alternative] = [candidate.goal.scope.modelled, candidate.goal.scope.alternative].map((t) => t.trim().toLowerCase());
+    for (let i = openQuestions.length - 1; i >= 0; i--) {
+      const q = openQuestions[i]!.toLowerCase();
+      if (modelled !== '' && alternative !== '' && q.includes(modelled) && q.includes(alternative)) openQuestions.splice(i, 1);
+    }
+  }
   const untypedScopeWords = scopeAsked !== null ? scopeAsked.question
-    : scopeLoss !== undefined && scopeGoal !== undefined
+    : readsAsTotal && scopeGoal !== undefined
       ? (() => {
         const components = untypedScopeComponents({ nodes: admitted.nodes, edges: admitted.edges }, scopeGoal.id);
         return components.length > 0 ? untypedScopeDisclosure(candidate.goal.metric, components) : null;
@@ -2012,10 +2025,10 @@ export async function buildModelFromBrief(
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     ...(replayed ? { replayed: true } : {}),
     // The untyped question's ONE channel for a later answer (the existing reconcile path); it never gates (`scopeIssueBlocks`).
-    ...(candidate.goal.scope && untypedScopeWords !== null && goalNodes.find(n => n.kind === 'goal') ? {
+    ...(untypedScopeWords !== null && goalNodes.find(n => n.kind === 'goal') ? {
       pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
         goal_id: goalNodes.find(n => n.kind === 'goal')!.id, goal_label: candidate.goal.metric,
-        declared_scope: candidate.goal.scope, expected: 'scope',
+        ...(candidate.goal.scope ? { declared_scope: candidate.goal.scope } : {}), expected: 'scope',
         question: untypedScopeWords, operands: [], derivations: [] }),
     } : {}),
     nodes: admitted.nodes.length,

@@ -19,8 +19,9 @@
  *
  * ⭐ (b) SUPERSEDES THE PLAIN-TOTAL ASK (Science d5 #87 6006584860 / 6006646752; DL 6 Oct): a goal naming no part ("MRR",
  * "Total MRR") reads as the TOTAL — never Olumi's part-scope, never a withhold — and is said once only where an option adds a
- * part that counts only under the total (`untypedScopeComponents`; rows in `goal-scope-untyped-total.test.ts`). A metric that
- * names the part the model does NOT measure ("Non-Pro MRR") keeps the assumption and the question below (ask (a)).
+ * part that counts only under the total (`untypedScopeComponents`; rows in `goal-scope-untyped-total.test.ts`). Any other
+ * metric may name a part ("Starter MRR", "Non-Pro MRR", "Pro MRR"): it keeps the assumption and the question below (ask (a)),
+ * now non-blocking (`metricReadsAsPlainTotal`; Codex buddy r1 P1).
  */
 import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
@@ -165,8 +166,8 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     // The probe sees `full_label` (it is present here), and it is exactly the user's words.
     expect(goal.label).not.toBe(metric);
     expect(goal.full_label).toBe(metric);
-    // (b): "across every paid plan" names no part the model leaves out, so nothing is asked.
-    expect(questions(out)).toEqual([]);
+    // "… net of refunds and discounts …" is not a plain total, so C46's question stays (non-blocking).
+    expect(questions(out)).toHaveLength(1);
   });
 
   it('(b) (was RED ask-once): a plain total adds no question beside the drafter’s own; a part-named metric is asked ONCE, first', async () => {
@@ -179,8 +180,8 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     expect(notRepresented(part.out)[0]).toBe(SCOPE_ASSUMPTION.replace('"MRR"', '"Non-Pro MRR"'));
   });
 
-  it('(b) MATERIAL: an option that adds a tier only the total counts is disclosed ONCE, in Science\'s words, and never gates', async () => {
-    const wire = pricing('MRR', AMBIGUOUS);
+  const withStarterLaunch = (scope: Scope): Record<string, unknown> => {
+    const wire = pricing('MRR', scope);
     (wire.options as unknown[]).push({ label: 'Launch a Starter tier at £19', provenance: 'explicit', is_status_quo: null, changes: [],
       interventions: [{ factor_label: 'Starter plan price', value: 19, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] });
     (wire.factors as unknown[]).push(
@@ -190,7 +191,11 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     (wire.links as unknown[]).push(
       { from: 'Starter plan price', to: 'Starter subscribers', direction: 'negative', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
       { from: 'Starter subscribers', to: 'MRR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
-    const { out } = await build(wire);
+    return wire;
+  };
+
+  it('(b) MATERIAL: an option that adds a tier only the total counts is disclosed ONCE, in Science\'s words, and never gates', async () => {
+    const { out } = await build(withStarterLaunch(AMBIGUOUS));
     const words = 'I’ve read your goal, ‘MRR’, as the total across every tier, including ‘Starter subscribers’. If you meant only part of it, say which.';
     expect(allQuestions(out)[0]).toBe(words);
     // Said ONCE across every channel the reply is written from, and never as Olumi's part-scope.
@@ -201,6 +206,15 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     expect(pa).toMatchObject({ kind: 'reconcile_goal_scope', expected: 'scope', question: words });
     expect(pa.scope).toBeUndefined();
     expect(scopeIssueBlocks(pa)).toBe(false);
+  });
+
+  it('(b) MATERIAL with NO drafter declaration (Science d5 #87 6007341975 (2)): goal.scope null + a Starter tier created → disclosed', async () => {
+    const { out } = await build(withStarterLaunch(null));
+    const words = 'I’ve read your goal, ‘MRR’, as the total across every tier, including ‘Starter subscribers’. If you meant only part of it, say which.';
+    expect(allQuestions(out)[0]).toBe(words);
+    expect((out.pending_action as { action: { question: string; declared_scope?: unknown } }).action).toMatchObject({ question: words });
+    // Control: a scope the BRIEF states is the user's reading, not Olumi's — nothing is said.
+    expect(allQuestions((await build(withStarterLaunch(STATED_TOTAL))).out).filter((q) => q.includes('as the total across'))).toEqual([]);
   });
 
   it('RED: admission records the choice as a warning on the goal, with both readings', () => {
@@ -230,15 +244,39 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     expect(questions(out)).toEqual([]);
   });
 
-  it('(b) (was CONTROL N-a): a metric with only SOME of the modelled scope\'s words, or the total\'s, names no part left out — recorded, not asked', async () => {
+  it('CONTROL (N-a): a metric with only SOME of the modelled scope\'s words, or with the alternative\'s too, is still asked', async () => {
     const europe: Scope = { modelled: 'the Pro plan in Europe', alternative: 'all plans worldwide', stated_in_brief: false };
     const cases: [string, Scope][] = [['Pro MRR', europe], ['MRR across all plans, Pro included', AMBIGUOUS]];
     for (const [metric, scope] of cases) {
       const { out } = await build(pricing(metric, scope));
-      expect(questions(out), metric).toEqual([]);
-      // Admission still records the drafter's reading (the ledger is unchanged); only what is SAID moved.
+      expect(questions(out), metric).toHaveLength(1);
       expect(scopeLoss(admitCandidateModel(pricing(metric, scope) as unknown as CandidateModel)), metric).toHaveLength(1);
     }
+  });
+
+  it('ask (a) (Codex buddy r1 P1): a metric naming an ORDINARY part the model does not measure ("Starter MRR") is still asked', async () => {
+    const { out } = await build(pricing('Starter MRR', AMBIGUOUS));
+    expect(questions(out)).toEqual([SCOPE_QUESTION.replace('"MRR"', '"Starter MRR"')]);
+    expect(notRepresented(out)[0]).toBe(SCOPE_ASSUMPTION.replace('"MRR"', '"Starter MRR"'));
+    // …and it never gates: the answer channel is the untyped question.
+    const pa = (out.pending_action as { action: { expected: string; scope?: unknown } }).action;
+    expect(scopeIssueBlocks(pa as { kind: string; expected: string; scope?: unknown })).toBe(false);
+  });
+
+  it('(b): only a metric made of whole/measure/period words reads as the total — each is neither asked nor assumed', async () => {
+    for (const metric of ['MRR', 'Total MRR', 'monthly recurring revenue', 'Total monthly recurring revenue across all plans', '£20k MRR']) {
+      const { out } = await build(pricing(metric, AMBIGUOUS));
+      expect(questions(out), JSON.stringify(allQuestions(out))).toEqual([]);
+      expect(notRepresented(out).filter((l) => l.includes('assumption')), metric).toEqual([]);
+    }
+  });
+
+  it('(b) (Codex buddy r1 P2): the drafter\'s own restatement of the part-or-whole question is not asked beside a total reading', async () => {
+    const restated = 'Does "MRR" mean the Pro plan only or all plans together?';
+    const { out } = await build(pricing('MRR', AMBIGUOUS, [restated, 'How price-sensitive are current Pro subscribers?']));
+    expect(questions(out)).toEqual(['How price-sensitive are current Pro subscribers?']);
+    // Contrast: with no declared scope the drafter's question is its own, and it stays.
+    expect(questions((await build(pricing('MRR', null, [restated]))).out)).toEqual([restated]);
   });
 
   it('RED (a): a COMPLEMENT metric — the part the model does NOT measure — never counts as the modelled scope stated', async () => {

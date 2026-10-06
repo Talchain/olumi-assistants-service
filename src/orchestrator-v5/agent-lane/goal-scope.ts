@@ -158,7 +158,8 @@ export function untypedScopeComponents(graph: unknown, goalId: string): readonly
   for (const option of options.filter(o => o.is_baseline !== true)) {
     const id = String(option.id), reached = reach(id);
     if (!reached.has(goalId)) continue;
-    // A part ADDS to the total; a cost or strain the option brings ("Support capacity strain", negative) is an effect, not a tier.
+    // A part ADDS to the total; a cost or strain the option brings ("Support capacity strain", negative) is an effect, not a tier
+    // (Science d5 #87 6007341975 (1)).
     const entries = edges.filter(e => e.to === goalId && typeof e.from === 'string' && reached.has(e.from) && !baselineReach.has(e.from)
       && e.effect_direction !== 'negative')
       .map(e => String(e.from));
@@ -213,9 +214,16 @@ export function scopeIssuesAfterWrite(prior: readonly PendingAction[], graph: un
   const kept = prior.flatMap(p => { const r = refreshScopePending(p, graph); return r ? [r] : []; });
   for (const goal of nodesOf(graph).filter(n => n.kind === 'goal')) {
     const scope = scopeOf(goal.goal_scope);
-    if (!scope || kept.some(p => p.action.kind === 'reconcile_goal_scope' && p.action.goal_id === goal.id)) continue;
+    // Only a BLOCKING issue already held for this goal stands in for the typed one (`scopeIssueBlocks`).
+    if (!scope || kept.some(p => p.action.kind === 'reconcile_goal_scope' && p.action.goal_id === goal.id && scopeIssueBlocks(p.action))) continue;
     const check = goalScopeCheck(graph, String(goal.id), scope);
     if (scopeReadyToApprove(scope, check)) continue;
+    // A typed scope that cannot be recorded supersedes the drafter's untyped question for the same goal (Codex buddy r1 P1):
+    // the retained untyped one never blocks, so keeping it in place of the typed issue would clear the claim.
+    for (let i = kept.length - 1; i >= 0; i--) {
+      const a = kept[i]!.action;
+      if (a.kind === 'reconcile_goal_scope' && a.goal_id === goal.id) kept.splice(i, 1);
+    }
     kept.unshift(reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope', goal_id: String(goal.id), goal_label: String(goal.label),
       scope, expected: 'billing_basis', question: scopeQuestion(String(goal.label), scope, check), operands: check.operands, derivations: check.derivations }));
   }

@@ -1253,19 +1253,32 @@ function metricNamesScope(metric: string, modelled: string, alternative: string)
 }
 
 /**
- * ⭐ THE ONE UNTYPED SCOPE QUESTION THAT IS STILL ASKED (Science d5 #87 6006584860: keep the ask (a) only where the goal
- * names a component or share AND an option's effect lands outside it). The metric names the part the model does NOT
- * measure: a complement word the modelled scope lacks ("Non-Pro MRR" while the model measures the Pro plan), or a part
- * the modelled scope is the complement of ("Pro MRR" while the model measures "plans other than Pro"). A plain total
- * ("MRR", "Total MRR") names no part, reads as the TOTAL and is never asked here. PURE.
+ * Words that say WHICH quantity a goal is, never which PART of it: the measure, its period and money, plus the words that
+ * say the whole ("total", "all", "across every plan"). A metric made only of these names no part (Science d5 #87 6006584860).
  */
-export function metricNamesPartOutsideModelled(metric: string, modelled: string, alternative: string): boolean {
-  const said = scopeWords(metric);
-  const mine = scopeWords(modelled);
-  const other = scopeWords(alternative);
-  if ([...said].some((w) => SCOPE_COMPLEMENT.has(w) && !mine.has(w))) return true;
-  const own = [...mine].filter((w) => !other.has(w) && !SCOPE_COMPLEMENT.has(w));
-  return [...mine].some((w) => SCOPE_COMPLEMENT.has(w) && !said.has(w)) && own.some((w) => said.has(w));
+const PLAIN_TOTAL_WORDS = scopeWords([ // folded exactly as a metric is ('across' → 'acros', 'gross' → 'gros')
+  // the whole
+  'total', 'all', 'every', 'overall', 'whole', 'entire', 'combined', 'across', 'together', 'company', 'business', 'gross',
+  // the measure
+  'mrr', 'arr', 'revenue', 'recurring', 'income', 'sale', 'turnover', 'profit', 'margin', 'ebitda', 'cash', 'cost', 'spend',
+  'bookings', 'booking', 'billing', 'subscription', 'subscriber', 'customer', 'user', 'member', 'client', 'account',
+  'churn', 'retention', 'growth', 'net', 'value', 'order', 'conversion', 'signup',
+  // its period and money
+  'monthly', 'annual', 'annualised', 'annualized', 'yearly', 'quarterly', 'weekly', 'daily', 'month', 'year', 'quarter',
+  'week', 'day', 'gbp', 'usd', 'eur', 'k', 'm', 'bn',
+  // the generic part-nouns the whole is made of ("across all plans")
+  'plan', 'tier', 'product', 'segment', 'stream', 'source', 'line', 'channel', 'region', 'market',
+].join(' '));
+
+/**
+ * ⭐ A GOAL THAT NAMES NO PART READS AS THE TOTAL (Science d5 #87 6006584860; DL 6 Oct). True when every word of the metric
+ * is a whole/measure/period word: "MRR", "Total MRR", "monthly recurring revenue". Anything else may name a part ("Starter
+ * MRR", "Non-Pro MRR", "Pro MRR", "… net of refunds …"), and keeps C46's question (ask (a), non-blocking): asking is the
+ * safe side, and an untyped question never withholds (`scopeIssueBlocks`). PURE.
+ */
+export function metricReadsAsPlainTotal(metric: string): boolean {
+  const said = [...scopeWords(metric)];
+  return said.length > 0 && said.every((w) => PLAIN_TOTAL_WORDS.has(w) || /^\d+(k|m|bn)?$/.test(w));
 }
 
 /** `"A"`, `"A" and "B"`, `"A", "B" and "C"` — words, never ids. */
