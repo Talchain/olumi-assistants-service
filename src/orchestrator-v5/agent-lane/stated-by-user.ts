@@ -1138,6 +1138,18 @@ export function linkEffectQuoteContextMiss(quote: string, userText: string): 'qu
     ? 'question' as const : NEGATOR.test(sentence) ? 'denied' as const : null);
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
 }
+/**
+ * RT-19 (the no-direct-link guard, no-direct-link.ts): whether ONE clause of the user's message STATES a changed figure
+ * joining two labels, by the binder's own readers only: its whole sentence is no question or denial
+ * (`linkEffectQuoteContextMiss`), it names both labels (`names`, the caller's label matcher), and one figure in it is a
+ * level of neither ("coverage is 60%, no-shows are 8%" states levels, never an effect). Negative evidence only: it can
+ * stop that guard, never make a card.
+ */
+export function clauseStatesAChangedFigure(message: string, labelA: string, labelB: string,
+  names: (text: string, label: string) => boolean): boolean {
+  return sentencesOf(message.trim()).some((c) => linkEffectQuoteContextMiss(c, message) === null && names(c, labelA) && names(c, labelB)
+    && findLinkEffectAmounts(c).some((f) => !figureIsALevel(c, f, labelA) && !figureIsALevel(c, f, labelB)));
+}
 export function linkEffectTheUserStated(
   quote: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },

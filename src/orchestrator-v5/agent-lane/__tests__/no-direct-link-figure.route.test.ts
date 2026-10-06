@@ -3,8 +3,8 @@
  * Agent's improvised offer. Through the REAL `/agent/v1/turn` route, the model's output scripted locally (0 LLM): the served
  * r18d reply (no tool call, a band question for a NEW link) on the SERVED r18d graph (cut-5 pin b38592ed).
  * Rows: 19's exact sentence fires; CONTROLS that must not fire: the link exists, the tool ran (route), another card or run made
- * this turn, one node + a figure, an ambiguous or nested label, an option end, no path or a loop, a question with no figure (the
- * guard itself, same graph).
+ * this turn, one node + a figure, an ambiguous or nested label, an option end, no path or a loop, a question with or without a
+ * figure, two levels, a denial, a figure in a clause naming one end (the guard itself, same graph).
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -109,6 +109,10 @@ describe('the guard\'s own conditions on the served graph (each control must not
   it('fires on 19\'s sentence with no tool: exactly the door\'s words', () => {
     expect(noDirectLinkFigureReply(GRAPH, R18D, [])).toBe(DOOR);
   });
+  it('the same figure after a colon in a request to record it still fires (r18g\'s words, no tool)', () => {
+    const r18g = 'Record my figure for the link from Text reminder coverage to no-shows: each 10 percentage point rise in text reminder coverage lowers no-shows by about 1 percentage point of appointments.';
+    expect(noDirectLinkFigureReply(GRAPH, r18g, [])).toBe(DOOR);
+  });
   it('a read-only tool (get_canonical_state) does not stop it: exactly the door\'s words', () => {
     expect(noDirectLinkFigureReply(GRAPH, R18D, ['get_canonical_state'])).toBe(DOOR);
   });
@@ -118,6 +122,11 @@ describe('the guard\'s own conditions on the served graph (each control must not
     ['an analysis ran this turn (run_analysis)', R18D, ['run_analysis']],
     ['one node + a figure', 'No-shows are about 8% of appointments today.', []],
     ['a question with no figure', 'Does text reminder coverage affect no-shows?', []],
+    ['a what-if question WITH a figure', 'If text reminder coverage reached 90%, what would no-shows be?', []],
+    ['two levels ("is 60%", "are about 8%")', 'Text reminder coverage is 60% today and no-shows are about 8% of appointments.', []],
+    ['two levels ("is 60%", "run at 8%")', 'Our text reminder coverage is 60%; no-shows run at 8%.', []],
+    ['a denial', 'I do not think a 10 point rise in text reminder coverage lowers no-shows by 1 percentage point.', []],
+    ['the figure is in a clause naming one end only', 'Does text reminder coverage affect no-shows? We saw no-shows fall 2 points last year.', []],
     ['the link exists', 'Each 10 percentage point rise in reminder reach rate lowers no-shows by about 1 percentage point.', []],
     ['no path either way (coverage, online rescheduling)', 'Each 10 percentage point rise in text reminder coverage lowers online rescheduling availability by about 1 percentage point.', []],
     ['an option is one of the two (Send Text Reminders)', 'Send Text Reminders would lower no-shows by about 1 percentage point of appointments.', []],
