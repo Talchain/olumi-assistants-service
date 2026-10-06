@@ -153,6 +153,13 @@ export function untypedScopeComponents(graph: unknown, goalId: string): readonly
   });
   const baselineReach = new Set(options.filter(o => o.is_baseline === true)
     .flatMap(o => baselineHolds(String(o.id)).flatMap(h => [h, ...reach(h)])));
+  // ⭐ A part is one an option CREATES (Science d5 #87 6007341975 (2): "an option creates a segment that counts only under
+  // the total"): the entry must come from a factor that starts at zero (non-%) and that an option moves off zero. Served CI
+  // on 0b8aa563: with no status-quo option, "Pro plan price" (£49 today) and "Perceived value" were named as tiers.
+  const created = nodes.filter(n => typeof n.id === 'string' && rec(n.observed_state) && n.observed_state.value === 0
+    && typeof n.observed_state.unit === 'string' && n.observed_state.unit.trim() !== '%' && createdByOption(String(n.id)))
+    .map(n => String(n.id));
+  const fromCreated = new Set(created.flatMap(id => [id, ...reach(id)]));
   const reachesGoal = (id: string): boolean => id === goalId || reach(id).has(goalId);
   const components: string[] = [];
   for (const option of options.filter(o => o.is_baseline !== true)) {
@@ -161,7 +168,7 @@ export function untypedScopeComponents(graph: unknown, goalId: string): readonly
     // A part ADDS to the total; a cost or strain the option brings ("Support capacity strain", negative) is an effect, not a tier
     // (Science d5 #87 6007341975 (1)).
     const entries = edges.filter(e => e.to === goalId && typeof e.from === 'string' && reached.has(e.from) && !baselineReach.has(e.from)
-      && e.effect_direction !== 'negative')
+      && e.effect_direction !== 'negative' && fromCreated.has(String(e.from)))
       .map(e => String(e.from));
     if (entries.length === 0) continue;
     const onPath = edges.filter(e => typeof e.from === 'string' && typeof e.to === 'string' && (e.from === id || reached.has(e.from)) && reachesGoal(e.to));

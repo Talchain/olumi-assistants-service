@@ -85,6 +85,25 @@ describe('(b) the served T1b graphs: who placed the Starter tier in the goal', (
     expect(untypedScopeComponents(unmoved, GOAL)).toEqual([]);
   });
 
+  it('CONTROL (Science 6007341975 (2), CI 0b8aa563): with NO status-quo option only a part an option CREATES is named', () => {
+    const g = with49();
+    for (const e of g.edges) if (provenanceOf(e)?.magnitude === 'user_stated') delete provenanceOf(e).source_quote;
+    delete node(g, 'keep_pricing_as_it_is').is_baseline;
+    // Without a baseline every option entry is unreached by one; "Price increase" (a 0 % change) is still no part.
+    expect(untypedScopeComponents(g, GOAL)).toEqual(['Starter subscribers']);
+  });
+
+  it('CONTROL (6007088716 guard): a zero-held part DOWNSTREAM of a created one, which no option moves, is a status-quo path — not named', () => {
+    const g = with49();
+    delete provenanceOf(edge(g, 'starter_subscribers', GOAL)).source_quote;
+    g.nodes.push({ id: 'starter_upsell', kind: 'factor', label: 'Starter upsell', observed_state: { value: 0, unit: '£ per month' } });
+    g.edges.push(
+      { from: 'keep_pricing_as_it_is', to: 'starter_upsell' },
+      { from: 'starter_subscribers', to: 'starter_upsell', effect_direction: 'positive' },
+      { from: 'starter_upsell', to: GOAL, effect_direction: 'positive' });
+    expect(untypedScopeComponents(g, GOAL)).toEqual(['Starter subscribers']);
+  });
+
   it('the list rule: up to three named, then " and N more"', () => {
     const words = (c: string[]) => untypedScopeDisclosure('MRR', c);
     expect(words(['A'])).toBe('I’ve read your goal, ‘MRR’, as the total across every tier, including ‘A’. If you meant only part of it, say which.');
