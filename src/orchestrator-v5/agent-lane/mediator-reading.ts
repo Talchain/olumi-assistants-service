@@ -132,9 +132,15 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const gauge = (extra: { stored?: true; replaces?: string }): MediatorReading | null =>
       childUnit === undefined || childFrame === undefined || (extra.stored !== true && (!kidUnsized || !chainOnly)) ? null
         : { via: 'gauge', unit: childUnit, scale_frame: childFrame, child: childId, ...extra };
-    // After the user's answer, the stored gauge edge IS the reading (its parent is now the user's).
+    // After the user's answer, the stored gauge edge IS the reading (its parent is now the user's), but ONLY while it is
+    // still intact (Codex r2 P1): Olumi's ±1, no size of its own, no definition, and still a pure chain. A gauge someone
+    // has since edited (a band edit keeps the marker), or a later second parent or child of M, breaks it: no reading, so
+    // M has no unit again and a re-answer is refused, never written over the edit or across another path.
     if (isGaugeLink(kids[0])) {
-      const r = gauge({ stored: true });
+      const kidMean = isRec(kids[0]!.strength) ? (kids[0]!.strength as Rec).mean : undefined;
+      const intact = chainOnly && kidProvenance.magnitude === 'olumi_estimate' && kidProvenance.source !== 'user_specified'
+        && !isRec(kidProvenance.natural_effect) && kidProvenance.definitional !== true && (kidMean === 1 || kidMean === -1);
+      const r = intact ? gauge({ stored: true }) : null;
       if (r !== null) out.set(id, r);
       continue;
     }

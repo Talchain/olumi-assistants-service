@@ -441,8 +441,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // child's units, and M→child = ±1 (its stored sign) is written in the SAME mutation (never before, never asked apart).
   // brief3's fallback (6006685510 (2)): only the lever whose Olumi-sized link the answer replaces may answer.
   const mediated = readings.get(to);
-  // A stored gauge is rewritten in place (idempotent), so a later answer keeps its sign (Codex r1 P2).
-  const gauge = mediated?.via === 'gauge' ? mediated : undefined;
+  // Only a NEW gauge is written. A stored, intact one is never rewritten (Codex r2 P1): a later answer keeps its sign
+  // through the one statement rule (`linkEffectGaugeStatement`).
+  const gauge = mediated?.via === 'gauge' && mediated.stored !== true ? mediated : undefined;
   if (gauge?.replaces !== undefined && gauge.replaces !== from) return refuse('unit_mismatch');
   const gaugeEdge = gauge === undefined ? undefined
     : graph.edges.filter(isRec).find(e => e.from === to && e.to === gauge.child && isDirectedEdge(e as never));

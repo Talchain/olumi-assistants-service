@@ -255,6 +255,34 @@ describe('THE WRITER: (C) sized in the parent\'s unit; (B) one end-to-end answer
     if (again.kind !== 'mutated') return;
     expect(edge(again.mutatedGraph, 'price', 'strain').strength.mean * edge(again.mutatedGraph, 'strain', 'mrr').strength.mean * 200000 / 100).toBeCloseTo(-600, 6);
   });
+  it.each([
+    ['the user edited the gauge link (a band edit keeps the marker)', (g: Rec) => {
+      Object.assign(edge(g, 'strain', 'mrr'), { strength: { mean: -0.4, std: 0.1 } });
+      edge(g, 'strain', 'mrr').provenance = { ...edge(g, 'strain', 'mrr').provenance, source: 'user_specified' };
+    }],
+    ['a second parent was added to M later', (g: Rec) => {
+      g.nodes.push({ id: 'staff', kind: 'factor', label: 'Support staff' }); g.edges.push(placeholder('staff', 'strain', 0.2));
+    }],
+  ])('⛔ (B) STORED GAUGE BROKEN (Codex r2 P1): %s → no reading; a re-answer is refused and writes nothing', (_why, breakIt) => {
+    const first = write(gaugeGraph(), 'price', 'strain', { ...E2E }, E2E_QUOTE);
+    if (first.kind !== 'mutated') throw new Error(JSON.stringify(first));
+    const g = structuredClone(first.mutatedGraph) as Rec;
+    breakIt(g);
+    expect(mediatorReadings(g).has('strain')).toBe(false);
+    const before = JSON.stringify(g.edges);
+    const r = applyLinkEffectEdit(approved({ persistedGraph: g, from: 'price', to: 'strain', effect: { ...E2E, amount: -600 }, quote: E2E_QUOTE,
+      expected: { graph_hash: computeAnalysisAffectingGraphHash(g as never)!, edge_token: linkEffectEdgeToken(g, 'price', 'strain')! } }));
+    expect(r.kind).toBe('refused');
+    expect(JSON.stringify(g.edges)).toBe(before);
+  });
+  it('(B) CONTROL: an INTACT stored gauge is never rewritten by a re-answer (only the lever moves)', () => {
+    const first = write(gaugeGraph(), 'price', 'strain', { ...E2E }, E2E_QUOTE);
+    if (first.kind !== 'mutated') throw new Error(JSON.stringify(first));
+    const gaugeBefore = JSON.stringify(edge(first.mutatedGraph, 'strain', 'mrr'));
+    const again = write(first.mutatedGraph as Rec, 'price', 'strain', { ...E2E, amount: -600 }, E2E_QUOTE);
+    if (again.kind !== 'mutated') throw new Error(JSON.stringify(again));
+    expect(JSON.stringify(edge(again.mutatedGraph, 'strain', 'mrr'))).toBe(gaugeBefore);
+  });
   it('(B) the PATH sign governs: a positive end-to-end statement against a negative path is a sign conflict', () => {
     const r = write(gaugeGraph(), 'price', 'strain', { ...E2E, amount: 1200 }, 'every £1 on the price adds about £1,200 a month of MRR');
     expect(r).toMatchObject({ kind: 'refused', reason: 'sign_conflict' });
