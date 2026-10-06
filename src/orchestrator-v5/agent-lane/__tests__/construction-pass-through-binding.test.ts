@@ -182,8 +182,10 @@ describe('signTheSentenceSays on the served corpus', () => {
   });
 
   it('CONTROL: a mediator with TWO links onward is no pass-through — nothing is bound through it', async () => {
+    // The second link onward goes into a FACTOR: an unsupported RISK there is G1b's to take out (and challenge), after which
+    // the mediator IS a pass-through (construction-unsupported-mechanism.test.ts). The claim here is the pass-through rule's.
     const { edge } = await build(draft9({
-      extraRisks: [{ label: 'Reputation damage', provenance: 'inferred' }],
+      extraFactors: [{ label: 'Reputation damage', role: 'observable', baseline_known: false, baseline_value: 0, unit: 'GBP per month', provenance: 'inferred', plausible_max: 50000 }],
       extraLinks: [sized('MRR lost to price churn', 'Reputation damage', 'positive', null, null, 'inferred'),
         sized('Reputation damage', 'monthly recurring revenue', 'negative', null, null, 'inferred')],
     }));
