@@ -4,7 +4,7 @@ import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-read
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
-import { afterChangeWord, DENOMINATOR_DETERMINER, isChangeWord, levelDenominatorOf, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
+import { afterChangeWord, denominatorWords, isChangeWord, levelDenominatorOf, namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import { singular, words } from '../agent-lane/same-unit.js';
 import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
 import { isPercentageLevelUnit, resolveMagnitudeFrame } from '../../cee/magnitude/link-effect.js';
@@ -62,8 +62,10 @@ function pointsOrShareAsk(label: string, value: number, level: number | undefine
     const points = differing(level, level + value);
     const share = level * (value / 100);
     const shareTo = differing(level, level + share);
+    // Codex r1 P2: the share's own direction (a negative level turns a rise into a fall), never the stated figure's sign.
+    const shareWay = share < 0 ? 'fall' : 'rise';
     return `Is that a ${move}${points === undefined ? '' : ` (${level}% → ${points}%)`}, or ${by}% of today\u2019s ${level}% `
-      + `(a ${sayChange(Math.abs(share))}-point ${way}${shareTo === undefined ? '' : `: ${level}% → ${shareTo}%`})?`;
+      + `(a ${sayChange(Math.abs(share))}-point ${shareWay}${shareTo === undefined ? '' : `: ${level}% → ${shareTo}%`})?`;
   }
   const example = value < 0 ? `${10 + by}% → 10%` : `10% → ${10 + value}%`;
   return `Is that a ${move} (say ${example}), or ${by}% of today\u2019s level?`;
@@ -76,13 +78,20 @@ function pointsOrShareAsk(label: string, value: number, level: number | undefine
  * rule in `targetFigureOfAnotherQuantity`): never a subset, a superset ("appointments booked online") or a phrase that
  * runs on ("appointments for new patients"). "Of no-shows" or "of today's rate" is RELATIVE, never this.
  */
-function percentOfOwnDenominator(quote: string, a: StatedAmount, node: Rec): boolean {
+function percentOfOwnDenominator(quote: string, a: StatedAmount, node: Rec, amounts: readonly StatedAmount[]): boolean {
   const own = levelDenominatorOf(node);
   if (own.length === 0) return false;
+  // Codex r1 on #2651 P1-2: a D that names the quantity ITSELF ("% of no-shows" on "no-shows") makes "X% of no-shows" the
+  // RELATIVE reading (d5), never points.
+  const label = denominatorWords(String(node.label ?? ''));
+  if (label.length === own.length && label.every((w, i) => sameWord(w, own[i]!))) return false;
+  // Codex r1 P1-1: an occurrence binds to this end by its SIZE only, so it must be the one % of that size in the sentence;
+  // two (one per end) leave nothing saying which one carries "of D": no reading, so it asks.
+  if (amounts.filter((x) => x.kind === 'percent' && x.magnitude === a.magnitude).length !== 1) return false;
   const after = quote.slice(a.index + a.matchedText.length);
   const m = /^\s+of\s+((?:[\p{L}-]+\s*){1,8})/iu.exec(after);
   if (m === null) return false;
-  const said = [...m[1]!.matchAll(/[\p{L}]+/gu)].map((w) => w[0].toLowerCase()).filter((w) => !DENOMINATOR_DETERMINER.test(w));
+  const said = denominatorWords(m[1]!);
   if (said.length !== own.length || !said.every((w, i) => w === own[i])) return false;
   return /^\s*(?:$|[.,;:!?)\u2013\u2014]|-\s)/u.test(after.slice(m[0].length));
 }
@@ -350,7 +359,7 @@ export function prepareLinkEffectUnitReadings(
         if (level === 0) { points_at_zero.push(String(node.id)); continue; }
         // U3 (d5 (1)): "X% of {the level's own denominator}" is points in the user's own words: no question; the card says
         // points for approval and the writer stores the points reading, exactly as at a typed 0.
-        if (percentOfOwnDenominator(quote, literalPercent, node)) { points_at_zero.push(String(node.id)); continue; }
+        if (percentOfOwnDenominator(quote, literalPercent, node, amounts)) { points_at_zero.push(String(node.id)); continue; }
         asks.push(pointsOrShareAsk(label, value, level, frame));
         continue;
       }

@@ -34,7 +34,7 @@ import { computeGraphIdentityHash } from '../../context/graph-identity.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { dispatchTool, type ToolResult } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
-import { levelDenominatorOf } from '../stated-by-user.js';
+import { levelDenominatorOf, unitDenominatorWords } from '../stated-by-user.js';
 import { prepareLinkEffectUnitReadings } from '../../system-events/link-effect-unit-reading.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
@@ -234,5 +234,47 @@ describe('U3a: "X% of {the level\'s own denominator}" is points; every other % r
     const w = world(await levelled());
     const r = await w.caps.proposeLinkEffect!(ctxSaying(said), { ...args(said, -0.0001), per_source_change: -10 }) as Rec;
     expect(r.question).toBe('Is that a 0.0001-point rise in “no-shows” (8% → 8.0001%), or 0.0001% of today’s 8% (a 0.000008-point rise)?');
+  });
+});
+
+/** Codex r1 on #2651: each finding, on the door itself, with its contrast. */
+describe('U3a Codex r1: the reading binds to ONE end, never the quantity itself, never a split compound', () => {
+  const effect = (amount: number, per = 10, perUnit = 'score out of 100') => ({ amount, amount_unit: '%', per_source_change: per, per_source_change_unit: perUnit });
+  const withGoalReading = (g: Rec, unit: string): Rec => { goalOf(g).unit_reading = { unit, source: 'user_stated', source_quote: `About 8 ${unit}.` }; return g; };
+
+  it('P1-1: two 0.5% figures, one per end → neither is read as points (it asks); one figure → points (contrast)', async () => {
+    const g = await levelled();
+    const src = g.nodes.find((n: Rec) => n.id === SOURCE);
+    src.observed_state = { value: 0.3, raw_value: 30, unit: '%', cap: 100, source: 'user_override' };
+    src.unit_reading = { unit: '% of appointments', source: 'user_stated', source_quote: 'About 30% of appointments are rescheduled online.' };
+    const two = 'Each increase in rescheduling convenience by 0.5% of appointments, lowers no-shows by about 0.5%.'; // Codex r1's own
+    const out = prepareLinkEffectUnitReadings(g, SOURCE, GOAL, effect(-0.5, 0.5, '%'), two);
+    expect(out.points_at_zero ?? []).not.toContain(GOAL);
+    expect(out.ask).toBeDefined();
+    const one = sentence('0.5% of appointments.');
+    expect(prepareLinkEffectUnitReadings(await levelled(), SOURCE, GOAL, effect(-0.5), one).points_at_zero).toEqual([GOAL]);
+  });
+
+  it('P1-2: a reading that names the quantity ITSELF ("% of no-shows") → "0.5% of no-shows" is relative: it asks', async () => {
+    const g = withGoalReading(await levelled(), '% of no-shows');
+    const out = prepareLinkEffectUnitReadings(g, SOURCE, GOAL, effect(-0.5), sentence('0.5% of no-shows.'));
+    expect(out.points_at_zero).toBeUndefined();
+    expect(out.ask).toMatch(/^Is that a 0\.5-point fall in “no-shows”/);
+  });
+
+  it('P1-3: "all" is dropped only when it stands alone: "all-hands meetings" never reads as "hands meetings"', async () => {
+    expect(unitDenominatorWords('% of all-hands meetings')).toEqual(['all', 'hands', 'meetings']);
+    expect(unitDenominatorWords('% of all appointments')).toEqual(['appointments']);
+    const g = withGoalReading(await levelled(), '% of all-hands meetings');
+    expect(prepareLinkEffectUnitReadings(g, SOURCE, GOAL, effect(-0.5), sentence('0.5% of hands meetings.')).points_at_zero).toBeUndefined();
+    expect(prepareLinkEffectUnitReadings(g, SOURCE, GOAL, effect(-0.5), sentence('0.5% of all-hands meetings.')).points_at_zero).toEqual([GOAL]);
+  });
+
+  it('P2: the share is said in ITS own direction: at a user level of −1%, 2% of it is a fall', async () => {
+    const g = await levelled();
+    goalOf(g).observed_state = { ...goalOf(g).observed_state, value: -0.01, raw_value: -1, source: 'user_override' };
+    const said = 'Each 10-point rise in rescheduling convenience raises no-shows by about 2%.';
+    const out = prepareLinkEffectUnitReadings(g, SOURCE, GOAL, effect(2), said);
+    expect(out.ask).toBe('Is that a 2-point rise in “no-shows” (-1% → 1%), or 2% of today’s -1% (a 0.02-point fall: -1% → -1.02%)?');
   });
 });
