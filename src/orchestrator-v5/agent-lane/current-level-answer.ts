@@ -13,7 +13,8 @@ const records = (v: unknown): Rec[] => Array.isArray(v) ? v.map(rec).filter((r):
 const plain = (s: string): string => s.replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const names = (s: string, label: string): boolean => label.trim() !== '' && new RegExp(`(?:^|[^\\p{L}\\d])${escape(plain(label))}(?=$|[^\\p{L}\\d])`, 'u').test(plain(s));
-const UNCERTAIN = /\b(?:don['’]t know|do not know|not sure|unsure|no idea|don['’]t have|do not have|cannot|can['’]t|maybe|perhaps|guess|might|could|would|will)\b/i;
+const UNCERTAIN = /\b(?:don['’]t know|do not know|not sure|unsure|no idea|don['’]t have|do not have|cannot|can['’]t|maybe|perhaps|probably|possibly|likely|unlikely|presumably|apparently|I think|I believe|I suspect|guess|might|could|would|will)\b/i;
+const CONDITIONAL = /\b(?:if|unless|provided|providing|assuming|as long as|on condition|subject to)\b/i;
 const QUESTION = /\?|^\s*(?:what|why|how|when|where|which|who|can|could|should|would|is|are|do|does)\b/i;
 
 /** Bounded figure/unit spans from the person's own reply; never a host choice between the figures. */
@@ -46,7 +47,7 @@ function goalInState(state: unknown, ask: Ask): { label: string; unit?: string; 
 
 /** No chips/methods/preview/withheld tools reach this gate; callers preserve those existing routes. */
 export function currentLevelAnswerFirstCall(state: unknown, ask: Ask | null, typedMessage: string | null, otherForcedPath: boolean): typeof CURRENT_LEVEL_TOOL | undefined {
-  if (otherForcedPath || ask === null || typedMessage === null || UNCERTAIN.test(typedMessage)) return undefined;
+  if (otherForcedPath || ask === null || typedMessage === null || UNCERTAIN.test(typedMessage) || CONDITIONAL.test(typedMessage)) return undefined;
   const goal = goalInState(state, ask);
   if (goal === null) return undefined;
   const text = typedMessage.trim();
@@ -67,9 +68,10 @@ export function currentLevelAnswerFirstCall(state: unknown, ask: Ask | null, typ
       && e.unit !== goal.unit && names(unit, e.unit))) return undefined;
     if (goal.unit !== undefined && !readStatedGoalLevel(Number(match[2]!.replace(/,/g, '')), unit, { label: goal.label, unit: goal.unit }).ok) return undefined;
   }
-  // A labelled level, an answer consisting of figures/units, or a present delivery/capacity statement. Other facts fall through.
+  // Capacity verbs do not identify the metric: bind them to its label or the same ask's typed clarification figures.
   const remainder = figures.reduce((s, f) => s.replace(f, ''), text).replace(/\b(?:and|or|roughly|approximately|about|around)\b|[,.;]/gi, '').trim();
-  return names(text, goal.label) || remainder === '' || /^(?:we|our team)\s+(?:can\s+)?(?:fit|deliver|complete)\b/i.test(text)
+  const reading = ask.action.confirmation !== undefined && figures.every((f) => ask.action.figures?.some((held) => plain(held) === plain(f)));
+  return names(text, goal.label) || remainder === '' || (reading && /^(?:we|our team)\s+(?:can\s+)?(?:fit|deliver|complete)\b/i.test(text))
     || /^(?:today['’]s|the current|our current)\s+level\s+(?:is|of)\b/i.test(text) ? CURRENT_LEVEL_TOOL : undefined;
 }
 

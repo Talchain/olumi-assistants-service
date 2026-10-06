@@ -93,6 +93,27 @@ describe('producer, JSONB read and answer gate', () => {
     const a = latestCurrentLevelAsk([initialAsk()], SCENARIO, null);
     expect(currentLevelAnswerFirstCall(s, a, 'We can fit 6 developers into the team.', false)).toBeUndefined();
   });
+  it('F1: an unmodelled office capacity cannot answer the Productivity ask with no native unit', () => {
+    const a = latestCurrentLevelAsk([initialAsk()], SCENARIO, null);
+    expect(currentLevelAnswerFirstCall(state, a, 'We can fit 6 people in the office.', false)).toBeUndefined();
+  });
+  it('F1 CONTROL: a capacity answer names Productivity or repeats the same ask’s typed clarification reading', () => {
+    const a = latestCurrentLevelAsk([initialAsk()], SCENARIO, null);
+    expect(currentLevelAnswerFirstCall(state, a, `Productivity: ${SIZES}`, false)).toBe(CURRENT_LEVEL_TOOL);
+    expect(currentLevelAnswerFirstCall(state, a, SIZES, false)).toBeUndefined();
+    const clarified = latestCurrentLevelAsk([clarification(initialAsk(), SIZES, CHOICE)], SCENARIO, null);
+    expect(currentLevelAnswerFirstCall(state, clarified, SIZES, false)).toBe(CURRENT_LEVEL_TOOL);
+    expect(currentLevelAnswerFirstCall(state, clarified, 'We can fit 6 people in the office.', false)).toBeUndefined();
+  });
+  it.each([
+    'We can deliver 16 updates per sprint, probably.',
+    'We can deliver 16 updates per sprint if we hire someone.',
+    'Productivity: we can deliver 16 updates per sprint, probably.',
+    'Productivity: we can deliver 16 updates per sprint if we hire someone.',
+  ])('F2: "%s" is not an asserted current level', (message) => {
+    const a = latestCurrentLevelAsk([initialAsk()], SCENARIO, null);
+    expect(currentLevelAnswerFirstCall(state, a, message, false)).toBeUndefined();
+  });
   it('a restated estimate or an unrelated question does not retain an answer licence', () => {
     expect(clarification(initialAsk(), SIZES, 'I estimate 20 updates per sprint. Is that correct?')).toBeNull();
     expect(clarification(initialAsk(), SIZES, '16 small updates. What is your budget?')).toBeNull();
@@ -104,6 +125,7 @@ describe('the real Agent route and level door', () => {
   const choices: unknown[] = [];
   let calls = 0;
   let direct = false;
+  let levelArgs = { goal_label: GOAL, value: 16, unit: UNIT, user_stated: true };
   let naturalReply = 'Those figures are noted.';
   beforeAll(async () => {
     vi.resetModules();
@@ -115,7 +137,7 @@ describe('the real Agent route and level door', () => {
       const call = req.tool_choice?.name === CURRENT_LEVEL_TOOL || (direct && calls === 0);
       calls += 1;
       return new Response(JSON.stringify({ output: call ? [{ type: 'function_call', call_id: 'level-answer', name: CURRENT_LEVEL_TOOL,
-        arguments: JSON.stringify({ goal_label: GOAL, value: 16, unit: UNIT, user_stated: true }) }]
+        arguments: JSON.stringify(levelArgs) }]
         : [{ type: 'message', content: [{ type: 'output_text', text: naturalReply }] }] }), { status: 200 });
     }));
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
@@ -126,13 +148,14 @@ describe('the real Agent route and level door', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { pending = [initialAsk()]; priorUser = SIZES; priorAssistant = question; choices.length = 0; appends.length = 0; calls = 0; direct = false; naturalReply = 'Those figures are noted.'; });
+  beforeEach(() => { pending = [initialAsk()]; priorUser = SIZES; priorAssistant = question; choices.length = 0; appends.length = 0; calls = 0; direct = false; levelArgs = { goal_label: GOAL, value: 16, unit: UNIT, user_stated: true }; naturalReply = 'Those figures are noted.'; });
   const turn = (message: string) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     kind: 'message', scenario_id: SCENARIO, agent_session_id: `level-answer-${randomUUID()}`, message,
   } });
 
   it.each([
-    [SIZES, 'initial'],
+    [`Productivity: ${SIZES}`, 'initial'],
+    [SIZES, 'choice'],
     ['The latter.', 'choice'],
     ['Yes, how do they affect this decision?', 'figure'],
   ])('RED at base: "%s" forces and calls the level door, whose real result offers a card', async (message, phase) => {
@@ -160,15 +183,29 @@ describe('the real Agent route and level door', () => {
   });
 
   it.each([
-    'Our budget is £200,000.',
-    'Would 16 small updates per sprint be enough?',
-    "I don't know; not sure.",
-    'Productivity is 16% today.',
-  ])('MUST NOT CAPTURE: "%s" falls through with no forced level call', async (message) => {
+    ['Our budget is £200,000.', 200000, 'GBP'],
+    ['Would 16 small updates per sprint be enough?', 16, UNIT],
+    ["I don't know; not sure.", 16, UNIT],
+    ['Productivity is 16% today.', 16, '%'],
+    ['We can fit 6 people in the office.', 6, 'people'],
+    ['We can deliver 16 updates per sprint, probably.', 16, 'updates per sprint'],
+    ['We can deliver 16 updates per sprint if we hire someone.', 16, 'updates per sprint'],
+    ['Productivity: we can deliver 16 updates per sprint, probably.', 16, 'updates per sprint'],
+    ['Productivity: we can deliver 16 updates per sprint if we hire someone.', 16, 'updates per sprint'],
+    [SIZES, 16, UNIT],
+  ] as const)('F3 MUST NOT CAPTURE: "%s" is not forced to the level door (a forced call WOULD prepare a card here)', async (message, value, unit) => {
+    // The mock calls the level tool whenever the host forces it, with this row's figure, so a wrongly forced call
+    // produces a real prepared card and fails the card assertions below. The model's own unforced judgement is left
+    // to the door + the user's approval (DL ruling on #2681: no host refusal of model-selected level calls).
+    direct = false;
+    levelArgs = { goal_label: GOAL, value, unit, user_stated: true };
     const res = await turn(message);
     expect(res.statusCode, res.body).toBe(200);
     expect(choices[0]).toBeUndefined();
-    expect(res.json()._agent?.tool_calls ?? []).not.toContainEqual(expect.objectContaining({ name: CURRENT_LEVEL_TOOL }));
+    const b = res.json();
+    expect(b._agent?.tool_calls ?? []).not.toContainEqual(expect.objectContaining({ name: CURRENT_LEVEL_TOOL }));
+    expect(b.suggested_actions ?? []).not.toContainEqual(expect.objectContaining({ label: 'Record this current level' }));
+    expect(appends.some((w) => w.graph !== undefined)).toBe(false);
   });
 
   it('RED at base: the final delivered producer question is persisted atomically with the Agent answer', async () => {
