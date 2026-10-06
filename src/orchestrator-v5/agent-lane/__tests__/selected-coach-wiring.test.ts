@@ -16,7 +16,9 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // no longer says a user-named band is always "recorded as theirs" — a band the link already sits in records review and stays
 // Olumi's estimate (R11): 26f7e9c0… → 913872bf…, +210 bytes. The template sha above is unchanged.
 // AI HARNESS (2 Oct, RC 5950124321): none_measurable makes no claim; the sentence it was told to say is gone: 913872bf… → cd04fd8c….
-const HOST_SHA = '09f7b6acb78dae6a31ecb4d9b42e1a0211c1111f3788208c9ea39ccf52619619';
+// AI HARNESS W3 (6 Oct evening, Paul's headline ruling): the per-option headline is the chance of meeting the goal, never
+// the share of runs; chat quotes the screen's goal-chance display: 09f7b6ac… → f6cec112….
+const HOST_SHA = 'f6cec11296001521a78b8f067a08610dbd44b926f740941b88ae75c1f096f465';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -32,8 +34,9 @@ const HOST_SHA = '09f7b6acb78dae6a31ecb4d9b42e1a0211c1111f3788208c9ea39ccf526196
 // + GOAL_CHANCE_RANKING_INSTRUCTION appended after the naming rule (D3 step 2, DL 0df0e1 ruling C, 6 Oct): 29,212 → 29,958
 //   bytes (+1 space +745 = exactly the rule's bytes); Codex r2 widened it to every probability_of_goal and to the result being
 //   reported: 29,212 → 30,154 (+1 +941, exactly the rule). Template and host shas unchanged. Derived from the SENT body.
-const RENDERED_SHA = 'e04a2258c8ccf21a846eaeb2f655e707994be123bdbf747d5937dc6e06e77ee4';
-const RENDERED_BYTES = 30_246;
+// + W3 headline + goal-chance display (6 Oct evening): 30,246 → 31,346 bytes. Derived from the SENT body.
+const RENDERED_SHA = '37919ffdca07ef53dbec434ef026e85270410124ecea30f684f20ef607c7f748';
+const RENDERED_BYTES = 31_346;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
