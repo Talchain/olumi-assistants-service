@@ -317,7 +317,9 @@ export function linkEffectMediatorReadings(graph: unknown, from: string, to: str
   const source = readings.get(from);
   if (source?.via === 'sized_parents' && source.parents.length > 0) {
     out.push({ node_id: from, via: 'sized_parents', unit: source.unit, other_label: label(source.parents[0]!) });
-  } else if (source?.via === 'definitional_part' && source.child !== to) {
+  } else if (source?.via === 'definitional_part') {
+    // DL P2 (#2652): sizing the part → total link itself (an identity withdrawn, or none declared) still reads the part in
+    // the total's unit, so the card says it; the writer takes the answer in that unit either way.
     out.push({ node_id: from, via: 'definitional_part', unit: source.unit, other_label: label(source.child) });
   }
   const target = readings.get(to);

@@ -31,6 +31,7 @@ import { resolveMagnitudeFrame, unitOf, type MagnitudeNode } from '../../cee/mag
 import { POINTS_SPELLINGS, periodAdverb, periodNoun, type UnitPeriod } from '../../utils/unit-alphabet.js';
 import { carrierCompatible, readUnitParts, sameUnit, singular, words, type UnitParts } from './same-unit.js';
 import { licenceUnsizedLink } from './goal-certainty.js';
+import { currentDefinitionalCarrier } from '../goal-target/held-user-links.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -212,16 +213,14 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
   return out;
 }
 
-/** The unit a definitional ±1-per-1 link states at both ends, when its total carries that unit too; else undefined. */
+/**
+ * The unit of a CURRENT definitional link (`currentDefinitionalCarrier`: ±1 per 1, one unit, its size still the
+ * definition's), when its total carries that unit too; else undefined.
+ */
 function definitionalPartUnit(e: Rec, total: MagnitudeNode | undefined): string | undefined {
-  const p = isRec(e.provenance) ? e.provenance : undefined;
-  const ne = p?.definitional === true && isRec(p.natural_effect) ? p.natural_effect : undefined;
-  if (ne === undefined || typeof ne.amount !== 'number' || Math.abs(ne.amount) !== 1 || ne.per_source_change !== 1) return undefined;
-  const u = ne.amount_unit;
-  const per = ne.per_source_change_unit;
-  if (typeof u !== 'string' || u.trim() === '' || typeof per !== 'string' || (per !== u && !sameUnit(u, per))) return undefined;
+  const u = currentDefinitionalCarrier(e);
   const totalUnit = total === undefined ? undefined : unitOf(total);
-  return totalUnit !== undefined && (totalUnit === u || sameUnit(totalUnit, u)) ? u : undefined;
+  return u !== undefined && totalUnit !== undefined && (totalUnit === u || sameUnit(totalUnit, u)) ? u : undefined;
 }
 
 /**

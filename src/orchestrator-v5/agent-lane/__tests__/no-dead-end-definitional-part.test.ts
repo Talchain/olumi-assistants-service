@@ -14,6 +14,7 @@ import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectMediatorReadings, l
   type ApplyLinkEffectEditParams } from '../../system-events/link-effect-edit.js';
 import { prepareLinkEffectUnitReadings } from '../../system-events/link-effect-unit-reading.js';
 import { linkEffectReadingOf } from '../approval-chips.js';
+import { linkEffectRefusalWords } from '../runtime/agent-capabilities.js';
 import { unsizedLeaderGoalPaths, placeholderGoalWarning } from '../goal-certainty.js';
 import { mediatorReadings } from '../mediator-reading.js';
 
@@ -71,6 +72,9 @@ describe('THE ONE READER: a definitional part takes its total\'s unit', () => {
   it.each([
     ['a definitional link that is not ±1 per 1', (g: Rec) => { edge(g, 'lost', 'mrr').provenance.natural_effect.amount = -2; }],
     ['different units at its two ends', (g: Rec) => { edge(g, 'lost', 'mrr').provenance.natural_effect.per_source_change_unit = '£/year'; }],
+    // The ONE predicate is exact on the definition's own unit (the UI mirrors it with no unit grammar): two spellings of one
+    // unit are not a drafted definition.
+    ['two spellings of one unit at its two ends', (g: Rec) => { edge(g, 'lost', 'mrr').provenance.natural_effect.per_source_change_unit = 'GBP/month'; }],
     ['a total with no unit of its own', (g: Rec) => { delete g.nodes.find((n: Rec) => n.id === 'mrr').observed_state.unit; }],
     ['a total measured in another unit', (g: Rec) => { g.nodes.find((n: Rec) => n.id === 'mrr').observed_state.unit = 'customers'; }],
     ['a second out-link on the goal path', (g: Rec) => { g.edges.push(placeholder('lost', 'cost', 0.2)); }],
@@ -78,6 +82,10 @@ describe('THE ONE READER: a definitional part takes its total\'s unit', () => {
     ['a unit-bearing label that does not fit', (g: Rec) => { g.nodes.find((n: Rec) => n.id === 'lost').label = 'Lost hours per week'; }],
     // ⛔ Codex r1 P1: with no frame the writer cannot convert an answer (`unconvertible`), so no reading and no ask.
     ['a part with no frame of its own', (g: Rec) => { delete g.nodes.find((n: Rec) => n.id === 'lost').scale_frame; }],
+    // ⛔ DL / Codex r1 #2653: ONE current-definitional-carrier predicate. A band or strength edit keeps the flag but moves
+    // the size, so the link is no longer a definition: no part reading, whether its natural effect is kept or dropped.
+    ['a BAND-EDITED definitional link (flag and stale natural effect kept)', (g: Rec) => { edge(g, 'lost', 'mrr').strength = { mean: -0.3, std: 0.075 }; }],
+    ['a BAND-EDITED definitional link (natural effect dropped)', (g: Rec) => { edge(g, 'lost', 'mrr').strength = { mean: -0.3, std: 0.075 }; delete edge(g, 'lost', 'mrr').provenance.natural_effect; }],
   ])('no reading: %s', (_name, mutate) => {
     const g = partGraph();
     mutate(g);
@@ -111,6 +119,12 @@ describe('SERVED FA1 (e7, guest T1b draft 46d37fb7, CEE d619668a)', () => {
     const served = placeholderGoalWarning(notDefinitional(fx.graph, TO, 'monthly_recurring_revenue'), paths(), CODE);
     expect(served.message).toBe(fx.placeholder_warning.message);
     expect(served).not.toHaveProperty('first_ask');
+  });
+  it('⛔ BAND-EDITED twin of the served link (flag kept, size moved) → no part reading, the served words stand', () => {
+    const g = structuredClone(fx.graph);
+    edge(g, TO, 'monthly_recurring_revenue').strength = { mean: -0.3, std: 0.075 };
+    expect(mediatorReadings(g).get(TO)).toBeUndefined();
+    expect(placeholderGoalWarning(g, paths(), CODE).message).toBe(fx.placeholder_warning.message);
   });
   it('AS SERVED: the risk reads £/month off its definitional link into MRR → (C) words + `first_ask` on the served link', () => {
     expect(mediatorReadings(fx.graph).get(TO)).toEqual({ via: 'definitional_part', unit: '£/month', child: 'monthly_recurring_revenue' });
@@ -150,6 +164,13 @@ describe('THE WRITER: the answer the (C) ask invites', () => {
     expect(unsizedLeaderGoalPaths(r.mutatedGraph, ['o-spend'])).toEqual([]);
     expect(unsizedLeaderGoalPaths(g, ['o-spend']).flatMap((p) => p.links), 'CONTROL: before the answer it withheld').toEqual([{ from: 'cost', to: 'lost' }]);
   });
+  it('READER (agent-capabilities refusal words): a refused answer names the part\'s unit, so the Agent can ask in it', () => {
+    const say = (g: Rec) => linkEffectRefusalWords('unit_mismatch', g, { id: 'cost', label: 'Support cost' }, { id: 'lost', label: 'MRR lost to support strain' },
+      { amount_unit: 'customers', per_source_change_unit: '£/month' });
+    expect(say(partGraph())).toContain('"MRR lost to support strain" is measured in £/month');
+    // CONTROL: no part reading → the end has no unit, so the words send the user to the band control instead.
+    expect(say(notDefinitional(partGraph()))).toContain('has no unit or scale in this model yet');
+  });
   it('⛔ MUTANT GUARD (d5): with the out-link not definitional, the same answer is refused', () => {
     const r = write(notDefinitional(partGraph()), 'cost', 'lost', ANSWER, ANSWER_QUOTE);
     expect(r.kind).not.toBe('mutated');
@@ -187,6 +208,15 @@ describe('THE CARD: the reading is said for approval (d5 words)', () => {
     expect(card('GBP/month', '£/month')).toBeDefined();
     expect(card('customers', '£/month')).toBeUndefined();
     expect(card('£', '%')).toBeUndefined();
+  });
+  it('DL P2: sizing the part → total link itself names the part reading once (the writer reads the part in £/month)', () => {
+    const g = partGraph();
+    const effect = { amount: -1, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: '£/month' };
+    expect(write(g, 'lost', 'mrr', effect, 'each £1 a month lost to support strain is £1 a month of MRR lost').kind).toBe('mutated');
+    const words = linkEffectReadingOf({ operations: [{ op: 'set_link_effect', path: 'lost::mrr', value: { from: 'lost', to: 'mrr', effect,
+      quote: 'q', edge_token: 't', mediator_readings: linkEffectMediatorReadings(g, 'lost', 'mrr') } }] } as never,
+    { from: 'MRR lost to support strain', to: 'MRR' })!;
+    expect(words.split('as part of ‘MRR’, so it’s measured in £/month').length - 1).toBe(1);
   });
   it('CONTROL: not definitional → no part reading on the card', () => {
     expect(linkEffectMediatorReadings(notDefinitional(partGraph()), 'cost', 'lost').map((m) => m.via)).toEqual(['sized_parents']);

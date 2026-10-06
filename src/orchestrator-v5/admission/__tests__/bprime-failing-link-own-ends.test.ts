@@ -45,13 +45,16 @@ describe('B′ (c) names the failing link by its own two ends', () => {
     const g = withPriceLinkSized();
     const v = targetTestabilityOf(g);
     // R10 composition: P0's complete reason list; #2606's SAME first-link question below.
+    // ⭐ RE-PINNED (Science d5 #87 6010444174, on FA1 6010078697): "Starter-tier MRR" is a definitional part of MRR (+1 £/month
+    // per £/month), so it reads £/month and the upstream question is asked in its own ends' units. The ask and the writer
+    // must agree: the writer takes this answer in £/month (the old unitless question invited one it could not place).
     const link = 'a size for the links from Starter monthly price to Starter-tier monthly recurring revenue and from Starter subscribers to Starter-tier monthly recurring revenue';
     const sentence = notTargetTestableSentence(g, v);
     const tail = untestableTargetTail(g, v);
     expect(sentence).toBe(`Olumi can compare your options, but can't yet test them against your target (at least £150,000 / month), because it needs ${link}. `
-      + 'Roughly how much does Starter-tier monthly recurring revenue change when Starter monthly price changes?');
+      + 'Roughly how much does Starter-tier monthly recurring revenue change, in £/month, when Starter monthly price rises by £1 / subscriber / month?');
     expect(tail).toBe(`I can't yet say how likely any option is to keep monthly recurring revenue at or above £150,000 / month: I need ${link}. `
-      + 'Roughly how much does Starter-tier monthly recurring revenue change when Starter monthly price changes?');
+      + 'Roughly how much does Starter-tier monthly recurring revenue change, in £/month, when Starter monthly price rises by £1 / subscriber / month?');
     for (const s of [sentence, tail]) {
       expect(s).not.toContain('link from Starter monthly price to monthly recurring revenue');
       expect(s).not.toMatch(/how much monthly recurring revenue/);
