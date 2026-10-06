@@ -10,7 +10,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { notTargetTestableSentence, targetTestabilityOf, targetVerdictWithholdsTargetClaims, untestableTargetParts } from '../target-testability.js';
 import { mediatorReadings } from '../../agent-lane/mediator-reading.js';
+import { goalCertaintyDecisions } from '../../agent-lane/goal-certainty.js';
 import { linkEffectEndUnits } from '../../system-events/link-effect-edit.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 type Rec = Record<string, any>;
 const SERVED = (): Rec => JSON.parse(readFileSync(new URL('./fixtures/t1b-126k-c7878208-graph.json', import.meta.url), 'utf8'));
@@ -62,10 +64,58 @@ describe('T1b: two user bands through a level-less mediator size the path', () =
     expect(caseC(g)?.link).toEqual({ from: M, to: GOAL });
   });
 
-  it('CONTROL a link the user only DREW (no band set) is not a size → P5 (c) still asks', () => {
+  it('HASHED FIELDS ONLY (Codex r1 P1-1): the response-only `provenance_display` neither grants nor removes the size', () => {
     const g = SERVED();
+    for (const [from, to] of [['starter_support_cost', M], [M, GOAL]] as const) delete edge(g, from, to).provenance_display;
+    expect(computeAnalysisAffectingGraphHash(g as never)).toBe(computeAnalysisAffectingGraphHash(SERVED() as never));
+    expect(caseC(g)).toBeUndefined();
+  });
+
+  it('CONTROL the out-link is Olumi\'s estimate, not the user\'s → P5 (c) still asks', () => {
+    const g = SERVED();
+    edge(g, M, GOAL).provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate' };
     delete edge(g, M, GOAL).provenance_display;
     expect(caseC(g)?.link).toEqual({ from: M, to: GOAL });
+  });
+
+  it('CONTROL M is an operand of its child\'s identity (Codex r1 P1-3): the product does not cancel M\'s scale → identity_unconfirmed stays', () => {
+    const g = SERVED();
+    g.nodes.find((n: Rec) => n.id === GOAL).nonlinear_identity = { operation: 'product', factor_ids: [M, 'price_rise'], stated_in_brief: false };
+    expect(caseC(g)?.code).toBe('identity_unconfirmed');
+  });
+
+  it('CONTROL an option SETS M (Codex r1 P1-4): its level is set directly, so its scale does not cancel → P5 (c) still asks', () => {
+    const g = SERVED();
+    g.nodes.find((n: Rec) => n.id === M).kind = 'factor';
+    g.nodes.find((n: Rec) => n.id === 'launch_starter_tier').interventions[M] = { value: 0.5 };
+    expect(caseC(g)?.link).toEqual({ from: M, to: GOAL });
+  });
+
+  it('CONTROL an option is a PARENT of M, even one the user drew (Codex r1 P1-4): not a mediator between sized links → P5 (c) still asks', () => {
+    const g = SERVED();
+    g.edges.push({ from: 'launch_starter_tier', to: M, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8,
+      provenance: { source: 'user_specified' } });
+    expect(caseC(g)?.link).toEqual({ from: M, to: GOAL });
+  });
+
+  it('CONTROL M is a %-level the user limits (Codex r1 P1-5): a level frame, not a level-less mediator → P5 (c) still asks', () => {
+    const g = SERVED();
+    g.goal_constraints = [{ constraint_id: 'm-limit', node_id: M, operator: '<=', value: 20, unit: '%', value_frame: 'level' }];
+    expect(caseC(g)?.link).toEqual({ from: M, to: GOAL });
+  });
+
+  it('CERTAINTY (Codex r1 P1-2): a P(goal) = 1 through the banded path is EARNED, never "isn\'t sized"; Olumi\'s out-link → unearned (contrast)', () => {
+    const withIdentity = (g: Rec): Rec => {
+      g.nodes.find((n: Rec) => n.id === 'starter_support_cost').nonlinear_identity = { operation: 'product',
+        factor_ids: ['starter_subscribers', 'starter_support_cost_per_subscriber'] };
+      return g;
+    };
+    const decide = (g: Rec) => goalCertaintyDecisions(g, [{ option_id: 'launch_starter_tier', probability_of_goal: 1 }],
+      [{ node_id: 'starter_support_cost', evaluated: true, level_source: 'stated_level' }]);
+    expect(decide(withIdentity(SERVED()))).toEqual([expect.objectContaining({ option_id: 'launch_starter_tier', earned: true })]);
+    const contrast = withIdentity(SERVED());
+    edge(contrast, M, GOAL).provenance = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };
+    expect(decide(contrast)).toEqual([expect.objectContaining({ option_id: 'launch_starter_tier', earned: false })]);
   });
 
   it('CONTROL M with its own unit and level is not level-less → the link into the goal is asked in its ends\' units', () => {

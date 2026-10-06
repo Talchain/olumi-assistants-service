@@ -28,6 +28,8 @@ import { resolveMagnitudeFrame, unitOf, type MagnitudeNode } from '../../cee/mag
 import { POINTS_SPELLINGS, periodAdverb, periodNoun, type UnitPeriod } from '../../utils/unit-alphabet.js';
 import { carrierCompatible, readUnitParts, sameUnit, singular, words, type UnitParts } from './same-unit.js';
 import { licenceUnsizedLink } from './goal-certainty.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -89,34 +91,39 @@ function labelPeriods(label: unknown): Set<UnitPeriod> {
 const hasLevel = (n: Rec): boolean => isRec(n.observed_state)
   && ['value', 'raw_value', 'baseline'].some(k => { const v = (n.observed_state as Rec)[k]; return v !== undefined && v !== null; });
 
-/** The user sized this link: their figure (`user_stated` with its natural size), or a band they SET on the canvas (a link
- *  they only drew carries `user_specified` without `provenance_display: 'user_set'`, so it is not a band). */
-const userSizedLink = (e: Rec): boolean => {
-  const p = isRec(e.provenance) ? e.provenance : {};
-  return (p.magnitude === 'user_stated' && isRec(p.natural_effect)) || (p.source === 'user_specified' && e.provenance_display === 'user_set');
-};
-
 /**
  * ⭐ T1b (Science d5, 6 Oct, RT-18 class Q1): the user's own sizes on BOTH sides of a level-less mediator size the path,
- * because M's arbitrary scale cancels in β_in · β_out. The out-links (`M→child`, keyed `from→to`) of every level-less,
- * single-child M whose every in-link and its out-link the user sized (band or figure). P5 counts these as sized, so no
- * question is asked that M's missing unit makes unanswerable. A gauge never overwrites a user band (`kidUnsized` below).
+ * because M's arbitrary scale cancels in β_in · β_out. Every link (keyed `from→to`: each in-link and the out-link) of each
+ * level-less, single-child M whose links the user sized, read by `linkSizing` 'user' (their figure, a band they set, or
+ * the magnitude they drew the link with): `source` and `magnitude`, which the analysis hash covers, never a display field.
+ * Never (Codex r1 on #2648): an M an option sets (its level is then set directly), a %-level M, an M with its own
+ * identity, or an M its child multiplies (an operand: M's scale does not cancel through a product). P5 and goal certainty
+ * read these as sized, so no question is asked that M's missing unit makes unanswerable. A gauge never overwrites a user
+ * band (`kidUnsized` below).
  */
 export function userSizedLevelLessLinks(graph: unknown): ReadonlySet<string> {
   const out = new Set<string>();
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return out;
   const nodes = graph.nodes.filter(isRec);
   const edges = graph.edges.filter(isRec).filter(e => e.edge_type !== 'bidirected');
-  const kind = new Map(nodes.map(n => [n.id, n.kind] as const));
+  const byId = new Map(nodes.map(n => [n.id, n] as const));
+  const setByOption = new Set(nodes.filter(n => n.kind === 'option').flatMap(o => Object.keys(mergeInterventionSourceObjects(o))));
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
   for (const m of nodes) {
     if (typeof m.id !== 'string' || !['factor', 'risk', 'outcome'].includes(String(m.kind))) continue;
     const mv = view.get(m.id);
-    if (mv === undefined || unitOf(mv) !== undefined || hasLevel(m)) continue;
+    if (mv === undefined || unitOf(mv) !== undefined || hasLevel(m) || mv.percent_level === true) continue;
+    if (isRec(m.nonlinear_identity) || setByOption.has(m.id)) continue;
     const kids = edges.filter(e => e.from === m.id);
-    const parents = edges.filter(e => e.to === m.id && kind.get(e.from) !== 'option' && kind.get(e.from) !== 'decision');
-    if (kids.length !== 1 || parents.length === 0 || !userSizedLink(kids[0]!) || !parents.every(userSizedLink)) continue;
-    out.add(`${m.id}→${String(kids[0]!.to)}`);
+    const into = edges.filter(e => e.to === m.id);
+    if (kids.length !== 1 || into.length === 0) continue;
+    if (into.some(e => { const k = byId.get(e.from)?.kind; return k === 'option' || k === 'decision'; })) continue;
+    const child = byId.get(kids[0]!.to);
+    const operands = isRec(child?.nonlinear_identity) ? (child!.nonlinear_identity as Rec).factor_ids : undefined;
+    if (Array.isArray(operands) && operands.includes(m.id)) continue;
+    const chain = [...into, kids[0]!];
+    if (!chain.every(e => linkSizing(e) === 'user')) continue;
+    for (const e of chain) out.add(`${String(e.from)}→${String(e.to)}`);
   }
   return out;
 }
