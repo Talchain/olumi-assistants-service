@@ -303,11 +303,11 @@ describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared
       ['PM-NO-PREDICTION', `This will fail.\n${good}`],
       ['PM-PLAN-ONLY', good.replace(lines[1], `${lines[1]} ${second} also stalled.`)],
       ['PM-BLINDSPOT', good.slice(0, -1)],
-      ...['Hire a contractor is the best option here.', 'Option B comes out ahead.', 'We recommend the contractor.', 'The contractor leads.', 'We winner this.']
+      ...['Hire a contractor is the best option here.', 'Option B comes out ahead.', 'We recommend the contractor.', 'The contractor leads.', 'We winner this.', 'Option B wins.', 'Hire a contractor is the best.', 'Option B is ahead.', 'The contractor wins on cost.']
         .map(sentence => ['PM-NO-WINNER', `${sentence}\n${good}`]),
     ];
     // Ordinary pre-mortem prose must NOT trip the winner gate (DL review of #2675).
-    for (const ok of ['a missed hire leads to a slower launch.', 'Mitigate: line up quick wins in month one.', 'In the best case, churn stays flat.']) {
+    for (const ok of ['a missed hire leads to a slower launch.', 'Mitigate: line up quick wins in month one.', 'In the best case, churn stays flat.', 'Win back lapsed users before launch.', 'At best, the hire lands in month two.', 'The lead time on hiring doubled.', 'Small wins kept the team going.']) {
       const passes = settleMethodTurn(out, `${ok}\n${good}`);
       expect(passes.failed, ok).not.toContain('PM-NO-WINNER');
     }

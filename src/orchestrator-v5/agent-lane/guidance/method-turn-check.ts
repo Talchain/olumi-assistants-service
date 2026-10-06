@@ -118,7 +118,7 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
       ? items.every(item => new Set((inputs.current_option_labels ?? []).filter(label => labelMatches(item, [label])).map(normalise)).size <= 1)
       : !labelMatches(reply, otherOptions));
     check('PM-NO-WINNER', inputs.decision_level !== true
-      || !banned(reply, /\b(winners?|winning|recommend\w*|best (option|choice|bet|path|plan)|(comes?|came) out ahead|leads?(?! to\b))\b/iu, labels));
+      || !banned(reply, /\b(?:(?<!\b(?:quick|small|early|easy)\s)wins?(?![\s-]+(?:back|over)\b)(?!\s+(?:(?:new|more)\s+)?(?:customers?|clients?|deals?|business|subscribers?|users?)\b)|winners?|winning|recommend\w*|(?<!\b(?:at|our|your|their|its)\s)best(?![\s-]+(?:case|practice|effort)\b)|(?:comes?|came|is|are|was|pulls?|stays?|moves?)(?:\s+out)?\s+ahead(?!\s+of\b)|leads?(?!\s+(?:to|time)\b))\b/iu, labels));
     check('PM-BLINDSPOT', blindspotOk(reply));
   } else if (policy_id === 'RERUN-EXPLANATION') {
     check('RX-NAMES-CHANGES', (inputs.change_labels ?? []).slice(0, 3).every(label => labelMatches(reply, [label])));
