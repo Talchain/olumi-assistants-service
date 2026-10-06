@@ -63,13 +63,42 @@ import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } fr
 import { clampForPersist, refitFramesForStatedEffects } from '../refit-frames.js';
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
-import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { sameUnit } from '../same-unit.js';
+import { admitInterventionRange } from '../../intervention-range.js';
 import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedRange } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
+
+/**
+ * Carry only the range the user wrote immediately around THIS absolute count. The drafter supplies no range field:
+ * strip any such field and rebuild the receipt from one named user sentence. Reuses the link centre-range reader,
+ * but no link spread, ignorance prior or plausible_max is evidence for an option's count range.
+ */
+export function withCountInterventionRanges(model: CandidateModel, brief: string): CandidateModel {
+  const quantities = [{ label: model.goal.metric, unit: model.goal.unit }, ...model.factors, ...model.outcomes, ...(model.risks ?? [])];
+  return { ...model, options: model.options.map(option => ({ ...option, ...(option.interventions === undefined ? {} : {
+    interventions: option.interventions.map(intervention => {
+      const { range: _untrusted, ...point } = intervention;
+      const factors = model.factors.filter(f => canonicalLabel(f.label) === canonicalLabel(point.factor_label));
+      const factor = factors.length === 1 ? factors[0] : undefined;
+      const unit = factor?.unit;
+      if (typeof unit !== 'string'
+        || (point.unit !== undefined && !sameUnit(point.unit, unit))
+        || (point as typeof point & { value_kind?: string }).value_kind === 'additional'
+        || (point as typeof point & { derived_total?: boolean }).derived_total === true) return point;
+      const range = statedCountInterventionRange(point.value, unit, point.factor_label, option.label, brief, quantities);
+      if (range === undefined) return point;
+      const verdict = admitInterventionRange({ ...point, range: {
+        low: range.low, high: range.high, meaning: 'likely_range', source: 'brief_extraction', source_quote: range.text,
+      } });
+      return verdict !== undefined && 'range' in verdict ? { ...point, range: verdict.range } : point;
+    }),
+  }) })) };
+}
 
 /** The construction contract: the banked schema plus typed interventions. */
 /**
@@ -1460,7 +1489,7 @@ export async function buildModelFromBrief(
   // Desk 6b (lease check): every outcome and operand of an identity the mint WILL make (`mintOrFold`'s two product mints,
   // dry-run here, pure) is kept by the mechanism rule, so it never drops a part a product multiplies.
   const mintedLater = (c: CandidateModel) => {
-    const ids = withReconcilingProductIdentity(withRateCountProducts(c, brief).model, brief).identities ?? [];
+    const ids = withReconcilingProductIdentity(withRateCountProducts(withCountInterventionRanges(c, brief), brief).model, brief).identities ?? [];
     const named = new Set(ids.flatMap((i) => [canonicalLabel(i.outcome), ...i.factors.map(canonicalLabel)]));
     return (label: string): boolean => named.has(canonicalLabel(label));
   };
@@ -1487,7 +1516,7 @@ export async function buildModelFromBrief(
     const c = gap?.model ?? c1;
     const residual = gap?.residual ?? null;
     // (A) A rate × count drawn as two added links into an outcome is Olumi's product of the two (Science 6008551439 (A)).
-    const products = withRateCountProducts(c, brief).model;
+    const products = withRateCountProducts(withCountInterventionRanges(c, brief), brief).model;
     const minted = withReconcilingProductIdentity(products, brief);
     return minted !== products ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(products, brief), dropped, residual };
   };

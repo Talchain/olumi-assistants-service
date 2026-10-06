@@ -153,6 +153,9 @@ import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-ident
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
 import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from "../orchestrator/tools/encode-option-interventions.js";
+import { admitInterventionRange, interventionPoint } from "../orchestrator-v5/intervention-range.js";
+import { statedCountInterventionRange } from "../orchestrator-v5/agent-lane/stated-by-user.js";
+import { sameUnit } from "../orchestrator-v5/agent-lane/same-unit.js";
 import { assignEntityRefs } from "../orchestrator-v5/graph/entity-refs.js";
 import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
@@ -173,6 +176,39 @@ import {
   threadHoldsThroughMutatingCommit,
 } from "../orchestrator-v5/handlers/hold-thread-through.js";
 import type { PendingAction } from "../orchestrator-v5/session/pending-action.js";
+
+/** Create-only construction may retain a count range the brief itself states. Proposed ranges still need approval. */
+function onlyBriefStatedCountRanges(graph: GraphStateIngress, brief: string | undefined): boolean {
+  if (brief === undefined) return false;
+  const rec = (v: unknown): Record<string, unknown> | undefined =>
+    v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+  const quantities = graph.nodes.map(n => ({ label: n.label, unit: rec(n.observed_state)?.unit }));
+  const mirrors: unknown[] = Array.isArray(graph.options) ? graph.options : [];
+  for (const entry of [...graph.nodes, ...mirrors]) {
+    const row = rec(entry);
+    const cells = rec(row?.interventions);
+    if (cells === undefined) continue;
+    const options = graph.nodes.filter(n => n.id === row?.id && n.kind === 'option');
+    for (const [factorId, rawCell] of Object.entries(cells)) {
+      const cell = rec(rawCell);
+      if (cell?.range === undefined) continue;
+      if (options.length !== 1 || row?.label !== options[0]!.label) return false;
+      const factors = graph.nodes.filter(n => n.id === factorId && n.kind === 'factor');
+      if (factors.length !== 1) return false;
+      const factor = factors[0]!;
+      const unit = rec(factor.observed_state)?.unit ?? cell.unit;
+      const point = interventionPoint(cell);
+      const verdict = admitInterventionRange(cell);
+      if (typeof unit !== 'string' || point === undefined || verdict === undefined || !('range' in verdict)
+        || (cell.unit !== undefined && !sameUnit(cell.unit, unit))) return false;
+      const range = statedCountInterventionRange(point, unit, factor.label, options[0]!.label, brief, quantities);
+      if (range === undefined || !isDeepStrictEqual(cell.range, {
+        low: range.low, high: range.high, meaning: 'likely_range', source: 'brief_extraction', source_quote: range.text,
+      })) return false;
+    }
+  }
+  return true;
+}
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 
@@ -1114,7 +1150,8 @@ export default async function route(app: FastifyInstance) {
         turnClass: "direct_answer",
         source: "graph_registration",
       });
-      if (hasNewInterventionRanges(baseGraphForInvariants, projected)) {
+      if (hasNewInterventionRanges(baseGraphForInvariants, projected)
+        && !(callerExpectsNoGraph && onlyBriefStatedCountRanges(projected, brief.value))) {
         return reply.code(409).send(buildErrorV1('BAD_INPUT',
           'A new or changed likely range needs approval on its stored change card. Nothing was written.',
           { code: 'INTERVENTION_RANGE_APPROVAL_REQUIRED' }, requestId));

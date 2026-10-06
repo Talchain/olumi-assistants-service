@@ -36,6 +36,7 @@ import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsSco
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import type { InterventionV3T } from '../../schemas/cee-v3.js';
+import { admitInterventionRange } from '../intervention-range.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
@@ -151,6 +152,8 @@ export interface CandidateModel {
       value: number;
       unit?: string;
       provenance: string;
+      /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
+      range?: InterventionV3T['range'];
     }[];
     /**
      * Factors this option changes WITHOUT a stated level.
@@ -355,6 +358,7 @@ export interface ConstructedLevel {
    * not-modelled manifest credits no brief literal to a level below "high" (RT-4 class A, #2603).
    */
   value_confidence?: 'medium';
+  range?: InterventionV3T['range'];
 }
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
@@ -3722,6 +3726,8 @@ function admitOnce(
       const cap = capByFactorId.get(factorId);
       bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId),
         (iv as { derived_total?: unknown }).derived_total === true);
+      const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
+      if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
     }
     if (Object.keys(bundle).length > 0) interventionsByOption.set(optionId, bundle);
   }
