@@ -425,10 +425,10 @@ export async function applyFactorValueEdit(
         confirmation: review.assistant_text,
         coaching: null,
         stage: payload.stage,
-        handlerFacts: review.handler_facts as unknown as HandlerFact[],
+        handlerFacts: review.handler_facts,
       }),
       mutatedGraph: reviewedGraph,
-      handlerFacts: review.handler_facts as unknown as HandlerFact[],
+      handlerFacts: review.handler_facts,
       graph: reviewedParse.data,
       baseGraph: persistedGraph,
     };

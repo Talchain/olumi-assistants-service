@@ -28,7 +28,7 @@
 import { z } from 'zod';
 
 import { SetFactorValueHandlerFactSchema } from '@talchain/schemas/orchestrator';
-import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
@@ -1162,7 +1162,7 @@ export function recordFactorReview(
   at: string,
 ): {
   readonly assistant_text: string;
-  readonly handler_facts: readonly SetFactorValueHandlerFact[];
+  readonly handler_facts: HandlerFact[];
   readonly llm_calls_used: 0;
   readonly mutated_graph: unknown;
 } {
