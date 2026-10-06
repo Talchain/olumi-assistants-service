@@ -130,6 +130,9 @@ describe('the guard\'s own conditions on the served graph (each control must not
     const r18g = 'Record my figure for the link from Text reminder coverage to no-shows: each 10 percentage point rise in text reminder coverage lowers no-shows by about 1 percentage point of appointments.';
     expect(noDirectLinkFigureReply(GRAPH, r18g, turn())).toBe(DOOR);
   });
+  it('"A 10 percentage point rise …" (a change word AFTER the figure) still fires: exactly the door\'s words', () => {
+    expect(noDirectLinkFigureReply(GRAPH, 'A 10 percentage point rise in text reminder coverage would lower no-shows by about 1 point.', turn())).toBe(DOOR);
+  });
   it('a read-only tool (get_canonical_state) does not stop it: exactly the door\'s words', () => {
     expect(noDirectLinkFigureReply(GRAPH, R18D, turn(['get_canonical_state']))).toBe(DOOR);
   });
@@ -140,6 +143,7 @@ describe('the guard\'s own conditions on the served graph (each control must not
     ['a build ran this turn (build_model_from_brief)', R18D, ['build_model_from_brief']],
     ['a span, not a change (Codex r1)', 'Compare text reminder coverage and no-shows over 12 months.', []],
     ['a sum, not a change (Codex r1)', 'We allocated £500 to investigate text reminder coverage and no-shows.', []],
+    ['"a" before a sum and a span is no change (Codex r2)', 'We allocated a £500 budget for a 12 month study of text reminder coverage and no-shows.', []],
     ['the changes are about other quantities, in a clause naming neither end', 'Text reminder coverage is up and no-shows are down. Each 10 percentage point rise in staff hours cuts waiting time by about 1 point.', []],
     ['one change figure only (a level beside it)', 'Each 10 percentage point rise in text reminder coverage leaves no-shows at 8%.', []],
     ['one node + a figure', 'No-shows are about 8% of appointments today.', []],
