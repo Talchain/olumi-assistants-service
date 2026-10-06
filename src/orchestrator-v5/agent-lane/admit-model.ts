@@ -2737,6 +2737,14 @@ function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
 }
 
 /**
+ * A bare percent ("%", "percent", "per cent", "percentage"): on a relative change it is the CHANGE's own unit ("by 10%"),
+ * never a measure of the metric. A qualified percent ("% of appointments", "percentage points") names a measure, so no.
+ */
+export function isChangeOwnPercent(unit: unknown): boolean {
+  return typeof unit === 'string' && /^(?:%|percent|per\s+cent|percentage)$/i.test(unit.trim());
+}
+
+/**
  * ⭐ R1 S4-core — A GOAL TARGET STATED AS A CHANGE FROM TODAY (`@talchain/schemas` 0.61.0; ISL S2 served).
  *
  * The stored figure is the contract's: `change_rel` → the fraction r ("cut by 15%": the drafter's −15 → −0.15);
@@ -2775,7 +2783,15 @@ export function admitStatedGoalChange(
   readonly reading?: string;
 } {
   const frame = goal.frame === 'change_rel' ? 'change_rel' : 'change_abs';
-  const unit = goal.unit ? goal.unit : undefined;
+  /**
+   * ⛔ THE CHANGE'S "%" IS NEVER THE METRIC'S UNIT (DL 0df0e1 founder trace Q1, scenario 58bd5e71; PR A2). "Increase
+   * productivity by at least 10%" was drafted with unit "%", and this line copied it: productivity was stored as measured
+   * in %, so every later door refused the user's own level ("16 small" per sprint: `unit_mismatch`) and every Run asked
+   * for productivity "in %". On a relative change a bare percent names the CHANGE (the contract above: the unit is the
+   * METRIC's, the unit of its current level), so it is not written as the goal's unit: the metric's unit is unknown until
+   * a level states it. Only a level the user wrote in % (`notTheUsers === null` below) makes "%" the metric's own unit.
+   */
+  const unit = goal.unit && !(frame === 'change_rel' && isChangeOwnPercent(goal.unit)) ? goal.unit : undefined;
   const stored = frame === 'change_rel' ? raw / 100 : raw;
   const node: Partial<AdmittedNode> = { ...(unit ? { goal_threshold_unit: unit } : {}), goal_threshold_frame: frame, goal_threshold_raw: stored };
   const sign = raw > 0 ? '+' : '';
@@ -2823,9 +2839,11 @@ export function admitStatedGoalChange(
       `The current level of "${goal.metric}" (${level}) and a change of ${change} from it do not sit on a scale starting at ` +
       'zero, so no chance of reaching it can be shown. If either figure is wrong, say which and it can be corrected.' };
   }
+  // The level's unit is the metric's: read from the brief, or the unit the user wrote today's level in (a "%" level too).
+  const levelUnit = readUnit ?? (notTheUsers === null && goal.unit ? goal.unit : undefined);
   const withBase = {
     ...node,
-    ...(readUnit !== undefined ? { goal_threshold_unit: readUnit } : {}),
+    ...(levelUnit !== undefined ? { goal_threshold_unit: levelUnit } : {}),
     goal_threshold_cap: resolved.cap,
     goal_threshold_cap_provenance: resolved.provenance,
     goal_threshold: frame === 'change_rel' ? stored : stored / resolved.cap,
