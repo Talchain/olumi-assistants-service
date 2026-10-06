@@ -363,5 +363,33 @@ describe('S5t: the chat writer refits the frame a stated size needs, exactly as 
     expect(Math.abs(edge2(after, 'm', 'g').strength.mean)).not.toBe(1); // precondition: the refit broke the gauge
     expect(linkEffectRefitPostimageIsScoped(g, pre, after, { from: 'x', to: 'm' })).toBe(false);
   });
+
+  /**
+   * ⭐ 3rd RED row (DL 0df0e1; Acceptance j3rw-r17, CEE c175e908, scenario 49e22bef-9fb7-473c-9373-f59f45ed5b24): after #2632
+   * the nested label binds, but "3 customers per point" on the RISK "Customers lost to price rise" (frame 200) is β 1.5 and
+   * was refused ("the ranges, not your figure, prevent it"). A risk is computed from its parents, so v1 widens it (A4f).
+   * Fixture: wire turn-003's draft_graph.
+   */
+  it('RED (j3rw-r17): "Each one-percentage-point Price rise increases Customers lost to price rise by about 3 customers" commits', async () => {
+    const r17 = assignEntityRefs(projectGraphForPersistence(JSON.parse(readFileSync(new URL('./fixtures/s5t-j3rw-r17-graph.json', import.meta.url), 'utf8'))),
+      { nodes: [], edges: [] }).graph as Rec;
+    const said = 'Each one-percentage-point Price rise increases Customers lost to price rise by about 3 customers.';
+    const sibling = (g: Rec) => naturalPerUnit(g, edge2(g, 'customers_lost_to_price_rise', 'monthly_recurring_revenue'));
+    const siblingBefore = sibling(r17);
+    const w = world(r17);
+    const r = await w.caps.proposeLinkEffect!(ctxSaying(said), { from_label: 'Price rise', to_label: 'Customers lost to price rise', amount: 3,
+      amount_unit: 'customers', per_source_change: 1, per_source_change_unit: 'percentage points', quote: said }) as Rec;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const card = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
+      (id) => ({ proposal: w.proposals.get(id), result: r as never }))[0]!;
+    const out = await w.caps.authoriseChange({ ...ctxSaying(card.message), typed_approval_of: String(r.proposal_id),
+      typed_approval_words: card.message }, { proposal_id: String(r.proposal_id) }) as Rec;
+    expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    const stored = w.graph();
+    const e = edge2(stored, 'price_rise', 'customers_lost_to_price_rise');
+    expect(Math.abs(e.strength.mean)).toBeLessThanOrEqual(1);
+    expect(naturalPerUnit(stored, e)).toBeCloseTo(3, 9);
+    expect(sibling(stored)).toBeCloseTo(siblingBefore, 9); // still −£300 a month per customer lost
+  });
 });
 
