@@ -114,6 +114,21 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_FIGURES_PROBABILITY_UNUSABLE,
 ]);
 
+/**
+ * ⛔ G4/G5 PHASE 2 (DL 0df0e1, design-g4g6 Q3): the per-option blocks that DESCRIBE `probability_of_goal` — its simulation
+ * precision (Wilson interval, `n_informative`, `n_met`) and the tercile drivers of it. Each states or reveals the figure
+ * (`n_met / n_informative` IS it), so wherever CEE withholds `probability_of_goal` both go with it, at every site that
+ * deletes it by name. The Agent never reads either (no ruled Agent sentence exists): `optionRowsForAgent` always strips them.
+ */
+export const GOAL_CHANCE_COMPANION_KEYS = ['probability_of_goal_precision', 'probability_of_goal_drivers'] as const;
+
+/**
+ * ⛔ G4/G5 PHASE 2 (DL 0df0e1, design-g4g6 Q3): the `GOAL_CHANCE_LICENSED` record's main-driver claims
+ * (`goal-chance-licence.ts`). Like the blocks they are read from, they never reach the Agent: it reads the licence's form
+ * and ids (`goalChanceLicenceForAgent`), and no ruled Agent sentence about a "main driver" exists.
+ */
+export const GOAL_CHANCE_DRIVER_RECORD_KEYS = ['driver_by_option', 'no_driver_by_option'] as const;
+
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

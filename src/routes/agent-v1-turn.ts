@@ -89,9 +89,10 @@ import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/age
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct-link.js';
+import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-sentence-route.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
-import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -499,16 +500,47 @@ async function decisionLinesAskedOnce(
   const lines = decisionInputLines(graph, ctx);
   if (!lines.some(isDecisionInputAsk) || typeof store.readRecent !== 'function') return lines;
   try {
-    const recentReplies = (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
-      .filter((t) => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
-      .slice(0, RECENT_REPLIES_READ)
-      .map((t) => t.assistant_message)
-      .filter((m): m is string => typeof m === 'string');
+    const recentReplies = await recentAgentReplies(store, scenarioId, exceptTurnId);
     return recentReplies.length > 0 ? decisionInputLines(graph, { ...ctx, recentReplies }) : lines;
   } catch (err) {
     log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — the target ask is said');
     return lines;
   }
+}
+
+/**
+ * The Agent's own recent answers the user read (`isAgentAnswerRow`), newest first, at most `RECENT_REPLIES_READ`, the same
+ * window as the target ask's. `exceptTurnId` leaves out the row being replayed. Throws when the read fails; [] with no reader.
+ */
+async function recentAgentReplies(store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined): Promise<string[]> {
+  if (typeof store.readRecent !== 'function') return [];
+  return (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
+    .filter((t) => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
+    .slice(0, RECENT_REPLIES_READ)
+    .map((t) => t.assistant_message)
+    .filter((m): m is string => typeof m === 'string');
+}
+
+/**
+ * ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; Acceptance G1b d4): the recent answers a host line's closing question is checked against
+ * (`withoutAskedQuestion`). Read only when one of `lines` asks (`[]` otherwise); a failed read keeps every question, as the
+ * target ask does.
+ */
+async function repliesToCheckAsks(lines: readonly (string | null | undefined)[], store: RecentRowsReader, scenarioId: string,
+  exceptTurnId: string | undefined): Promise<string[]> {
+  if (!lines.some((l) => typeof l === 'string' && l.trimEnd().endsWith('?'))) return [];
+  try {
+    return await recentAgentReplies(store, scenarioId, exceptTurnId);
+  } catch (err) {
+    log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — owed questions are said');
+    return [];
+  }
+}
+
+/** `lines` with each already-asked closing question dropped, IN PLACE (a line that was only that question goes). */
+function askEachOnce(lines: string[], replies: readonly string[]): void {
+  if (replies.length === 0) return;
+  lines.splice(0, lines.length, ...lines.map((l) => withoutAskedQuestion(l, replies)).filter((l) => l.trim() !== ''));
 }
 
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
@@ -997,6 +1029,57 @@ export function unfinishedAnswerText(result: {
   return result.mutated
     ? 'Your model was updated, but my reply ran too long and was cut short, so I have not shown it. Ask me what changed.'
     : 'My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.';
+}
+
+/**
+ * ⛔ RT-7 (red team #87 5992627435; re-witnessed on 43e51050, turn 2ff3cc10): WHAT THE USER READS WHEN THE TURN HIT ITS
+ * HOP LIMIT. Six in-process refusals used every hop and the user read "Ask me again and I will continue" — false, since
+ * asking again replays the same refusals, and the typed reason was thrown away. Composed from the LAST refusal's typed
+ * fields only (a refusal's `detail`, `reason` and notes address the Agent, never the user); a changed model says so.
+ */
+export function hopLimitText(result: {
+  readonly tool_calls: readonly { readonly name: string }[];
+  readonly tool_results: readonly unknown[];
+  readonly mutated: boolean;
+}): string {
+  if (result.mutated) return 'Your model was updated, but I could not finish the rest within this turn. Ask me what changed.';
+  const last = [...result.tool_results].reverse().find((r): r is Record<string, unknown> =>
+    r !== null && typeof r === 'object' && (r as Record<string, unknown>).ok === false);
+  if (last !== undefined && typeof last.question === 'string' && last.question.trim() !== '') return last.question.trim();
+  const why = last?.refusal === 'nothing_to_set' ? nothingToSetReasons(last) : [];
+  return why.length > 0
+    ? `Nothing was changed. ${why.join(' ')}`
+    : 'I could not settle that within this turn, and nothing in your model was changed. Try asking for one change at a time.';
+}
+
+/** `nothing_to_set`'s typed reasons, in the user's terms (RT-7). */
+function nothingToSetReasons(r: Record<string, unknown>): string[] {
+  const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  const rec = (v: unknown): Record<string, unknown> => (v !== null && typeof v === 'object' ? v as Record<string, unknown> : {});
+  const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const sentence = (t: string): string => (/[.!?]$/.test(t) ? t : `${t}.`);
+  const out: string[] = [];
+  for (const u of list(r.unresolved).map(str)) if (/^(?:option|factor) "/.test(u)) out.push(`I could not find ${u} in your model.`);
+  for (const a of list(r.ambiguous_targets).map(rec)) {
+    const named = list(a.candidates).map(rec).filter(c => str(c.label) !== '').map(c => {
+      const links = list(c.connected_to).map(str).filter(l => l !== '');
+      return `“${str(c.label)}”${links.length > 0 ? ` (linked to ${links.join(', ')})` : ''}`;
+    });
+    if (str(a.requested) !== '' && named.length > 1) {
+      out.push(`More than one thing in your model is called “${str(a.requested)}”: ${named.join(' or ')}. Which do you mean?`);
+    }
+  }
+  for (const f of list(r.no_stated_range).map(rec)) {
+    const detail = str(f.detail);
+    if (detail !== '') out.push(sentence(detail.includes(str(f.factor)) ? detail : `${str(f.factor)}: ${detail}`));
+  }
+  for (const f of list(r.not_the_users_figure).map(rec)) {
+    if (str(f.factor) !== '' && str(f.option) !== '' && (typeof f.value === 'number' || str(f.value) !== '')) {
+      out.push(`${String(f.value)} for ${str(f.factor)} in ${str(f.option)} is not a figure you wrote, so it was not recorded as yours.`);
+    }
+  }
+  for (const a of list(r.already_set).map(str)) if (a !== '') out.push(sentence(a));
+  return out;
 }
 
 export function typedRunOf(body: Record<string, unknown>): boolean {
@@ -1942,7 +2025,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (decisionReviewReplay) {
         // Deterministic on the readback: today's bound Run gives the same review; a Run that moved gives today's (or the
         // unavailable reply). The SAME owner as the live turn, never a model call.
-        const review = decisionReviewFor(scenarioId, state);
+        const review = decisionReviewFor(scenarioId, { ...state, recentReplies: await repliesToCheckAsks(
+          [goalChanceWithheldForAgent(state.analysisResult)?.say], store, scenarioId, turnId) });
         replayText = review.reply;
         boundControl.push(...decisionReviewChips(review));
       } else if (whatChangesReplay) {
@@ -1989,6 +2073,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // MC D1 (c): the same #416 ask the live Run turn said, from the same readback.
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           if (askNow !== null) owedNow.push(askNow);
+          // ⭐ NEVER RE-ASK (G1b d4): the live Run turn's own rule, on the answers before the turn being replayed, at the live
+          // turn's own stage: before the root line and the basis, which the live turn adds after it (Codex r1 on #2664 P2).
+          askEachOnce(owedNow, await repliesToCheckAsks(owedNow, store, scenarioId, turnId));
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
           const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
           if (rootNow !== null) owedNow.push(rootNow);
@@ -2495,7 +2582,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
         limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
       }, selectedPermissions);
-      const goalChanceNow = goalChanceWithheldForAgent(st.analysisResult);
+      // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
+      const goalChanceRead = goalChanceWithheldForAgent(st.analysisResult);
+      const goalChanceAskedOnce = goalChanceRead === undefined ? ''
+        : withoutAskedQuestion(goalChanceRead.say, await repliesToCheckAsks([goalChanceRead.say], store, scenarioId, undefined));
+      const goalChanceNow = goalChanceRead === undefined || goalChanceAskedOnce === '' ? goalChanceRead : { ...goalChanceRead, say: goalChanceAskedOnce };
       const goalCertaintyNow = goalCertaintyForAgent(st.analysisResult, { scenario_id: scenarioId, analysis_state: st.analysisState },
         { raw: st.graph, analysis_state: st.analysisState, analysis_result: st.analysisResult,
           ...(st.goalCertainty !== undefined ? { goal_certainty: st.goalCertainty } : {}) });
@@ -2523,7 +2614,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...[...optionNameAliases(st.graph).values()].map((a) => a.display)])],
         runToolOutputLicensesLeader(selectedRun),
         graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''),
-        pairRead.withinBand, pairRead.userWrittenLinks);
+        pairRead.withinBand, pairRead.userWrittenLinks, pairRead.frameRefitLinks);
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
@@ -2864,6 +2955,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       let canonicalContext: Parameters<typeof runAgentTurn>[0]['canonicalContext'];
       let hostFirstCall: Parameters<typeof runAgentTurn>[0]['hostFirstCall'];
+      let linkSentenceTool: string | undefined;
       // RT-1: a failed state read leaves the selection unchecked (`could_not_check`), never silently dropped.
       selectionContext = agentSelectionContext(selectedElements, undefined);
       try {
@@ -2932,6 +3024,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const r = await readingWithin(reading, BRIEF_ROUTE_WAIT_MS);
           if (r !== null && r.build === true && (r.goal !== null || r.options.length > 0)) hostFirstCall = { name: 'build_model_from_brief', args: { brief: message } };
         }
+        // AI Harness: a TYPED sentence saying how strong ONE existing link is forces that link's door first (link-sentence-route.ts).
+        linkSentenceTool = linkSentenceFirstCall(st, typedNow, hostFirstCall !== undefined || methodTurn !== null || widenTurn !== null);
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
       }
@@ -2954,6 +3048,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             // Widen: ONE call, and its ONLY tool is the add-option door (forced below), so the turn ends in one card or none.
             : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
           ...(methodTurn?.kind === 'run' || widenRun !== undefined ? { maxHops: 1 } : {}),
+          // Before the widen and chip forcings below, which win if both were ever set.
+          ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
           ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
@@ -3008,7 +3104,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let text = result.stopped_reason === 'incomplete'
       ? unfinishedAnswerText(result)
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
-        ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
+        ? hopLimitText(result)
         : result.assistant_text;
     if (fastPath === undefined && result.stopped_reason === 'answered') narratorWords = result.assistant_text;
 
@@ -3033,7 +3129,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       log.info({
         scenario_id: scenarioId, dsk_protocol_id: methodTurn.context.dsk?.protocol_id ?? null,
-        dsk_not_cited: methodTurn.context.not_cited, plan_basis: methodTurn.context.plan.basis,
+        dsk_not_cited: methodTurn.context.not_cited, plan_basis: methodTurn.context.plan?.basis ?? null,
         passed: settled.passed, failed: settled.failed, target_kind: settled.target.kind,
         card: card?.tool ?? null, card_ok: issued?.ok === true, card_refusal: issued?.refusal,
       }, 'agent-lane: method turn settled');
@@ -3108,6 +3204,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // MC D1 (c): the Run's #416 ask, after its reason (never a bare "couldn't calculate it" with nothing to answer).
         ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
+    // ⭐ NEVER RE-ASK (DL 0df0e1, 6 Oct; G1b d4): an owed line's closing question already among the Agent's recent answers is
+    // not asked again; its reason is still said (the D1 target ask's rule, PANEL 5944136475, for every owed line).
+    askEachOnce(owed, await repliesToCheckAsks(owed, store, scenarioId, undefined));
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
      * 5788648244). A model-authored "Saved…" survived here on a turn that wrote
@@ -3182,7 +3281,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
     }
     if (decisionReviewRequested) {
-      decisionReviewTurn = decisionReviewFor(scenarioId, composedRead);
+      decisionReviewTurn = decisionReviewFor(scenarioId, { ...composedRead, recentReplies: await repliesToCheckAsks(
+        [goalChanceWithheldForAgent(composedRead.analysisResult)?.say], store, scenarioId, undefined) });
       text = decisionReviewTurn.reply;
       result = { ...result, assistant_text: text };
     }
@@ -3447,9 +3547,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && retainedScopeIssues.length === 0 && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
     const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
+    // ⭐ S5t-W (e7 #87 6011176086): an approval's text is the capability's OWN receipt (server-authored, already through
+    // `withoutAgentDirections` above), never model prose, so the completion-claim stripper — which exists for the model's
+    // words — never runs over it. It dropped "Recorded your figure … as you confirmed: "…" Olumi rescaled ‘…’ so your
+    // figure fits." whole (the quote ends `."`, so it was one sentence). The narrator still states what was saved.
     const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen' || fastPath === 'method'
       ? { text, status: null as string | null, stripped: [] as string[] }
-      : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
+      : fastPath === 'approve'
+        ? { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }), text }
+        : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
     // (B) A write landed on this turn → say whether the model can run now, from the readback's one verdict.

@@ -1,9 +1,10 @@
 import { nonEffectQuantitySpans } from '../../cee/factor-extraction/goal-label-target.js';
 import { statedEffectQuoteMatches, statedSwitchEffectQuoteMatches, type StatedEffectDetail } from '../../cee/provenance/stated-effect.js';
-import { moneyUnitScale, sameWord, sentenceNamesOtherQuantity } from './stated-by-user.js';
+import { centreRangeAt, sameWord, sentenceNamesOtherQuantity } from './stated-by-user.js';
+// The ONE centre-range reading lives in stated-by-user.ts (the answer door reads it too, without this module's
+// factor-extraction imports); re-exported for construction's callers.
+export { centreRangeAt };
 import { sameUnit } from './same-unit.js';
-import { unitPhraseFamily } from './unit-conflict.js';
-import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 
 export interface StatedSizeBindingLink {
@@ -83,7 +84,12 @@ export function bindStatedLinkSizes(
     return at;
   });
   const nodeById = new Map(nodes.map(n => [n.id, n]));
-  type Spans = { amount: { start: number; end: number }; per: { start: number; end: number } };
+  type Spans = {
+    amount: { start: number; end: number };
+    per: { start: number; end: number };
+    /** Set when a LEVEL CHANGE states the size (`stated-level-change.ts`): where its quantity is named. */
+    level?: { names: { start: number; end: number } };
+  };
   const pairs: { link: number; sentence: number; spans: Spans }[] = [];
   links.forEach((l, link) => {
     const d = l.natural_effect;
@@ -113,6 +119,10 @@ export function bindStatedLinkSizes(
     const spans = p.spans;
     if ([spans.amount, spans.per].some(span => excluded.some(e =>
       span.start + offsets[p.sentence]! < e.end && span.end + offsets[p.sentence]! > e.start))) return false;
+    // ⛔ A level change is the TARGET's only when the words it is written beside name the target (MC, bench §2a): "lift
+    // our enterprise win rate from 20% to about 30% and cut trial abandonment" never sizes ‘Trial abandonment’.
+    if (spans.level !== undefined
+      && !levelNamesTarget(l, sentences[p.sentence]!.slice(spans.level.names.start, spans.level.names.end))) return false;
     const d = l.natural_effect!;
     if (!sameUnit(d.amount_unit, nodeById.get(l.to)?.effect_unit ?? nodeById.get(l.to)?.unit)
       || (d.per_source_change_unit !== 'switch' && !sameUnit(d.per_source_change_unit, nodeById.get(l.from)?.change_unit ?? nodeById.get(l.from)?.unit))) return false;
@@ -143,7 +153,8 @@ export function bindStatedLinkSizes(
       if (typed !== undefined && typed.sign !== through.sign) return false;
       passThroughs?.push(through);
     }
-    const centre = centreRangeAt(sentences[p.sentence]!, spans.amount, d.amount, d.amount_unit);
+    // A range written around a level ("to about 30%, between 25% and 35%") is the LEVEL's, never a spread of the change.
+    const centre = spans.level === undefined ? centreRangeAt(sentences[p.sentence]!, spans.amount, d.amount, d.amount_unit) : undefined;
     if (centre !== undefined) centreRanges?.set(p.link, centre);
     return true;
   }).map(p => [p.link, sentences[p.sentence]! as string]));
@@ -177,6 +188,22 @@ export function bindStatedLinkSizes(
   }
 
   /**
+   * ⛔ THE LEVEL'S QUANTITY IS THE LINK'S TARGET (MC, bench §2a). EVERY word of the target's label that no other node or
+   * option label shares is said in the clause the level is written in: "step" and "abandonment" of ‘Integration-step
+   * abandonment’ in "about 30% of trial users abandon at that step today" (‘Integration bug fixed’ and ‘Fix integration
+   * bug’ share "integration"). "Trial" alone, in "lift our trial conversion from 20% to 30%", never names ‘Trial
+   * abandonment’. A target with no word of its own is never named, so its level change is never credited.
+   */
+  function levelNamesTarget(l: StatedSizeBindingLink, clause: string): boolean {
+    const label = nodeById.get(l.to)?.label;
+    if (typeof label !== 'string') return false;
+    const others = nodes.filter(n => n.id !== l.to).flatMap(n => (typeof n.label === 'string' ? tokens(n.label) : []));
+    const own = tokens(label).filter(w => !others.some(o => sameWord(o, w)));
+    const said = tokens(clause);
+    return own.length > 0 && own.every(w => said.some(s => s === w || sameWord(s, w)));
+  }
+
+  /**
    * (c) "Names the source": a word of its label that is not a switch word, a filler, or a word of the target ("starter
    * tier" in "the starter tier would win…"), or every such word of an option that sets it. The target is named whole.
    */
@@ -199,38 +226,6 @@ const FILLER = new Set(['the', 'and', 'of', 'to', 'for', 'in', 'on', 'with', 'at
 /** Words of two letters or more ("AI"), lower-cased, fillers dropped. */
 const tokens = (text: string): string[] => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 2 && !FILLER.has(w));
 
-/**
- * ⭐ THE RANGE THE USER WROTE AROUND THEIR FIGURE (Science d5 #87 6009282279; a8's shape ruling). "Each 1% price rise
- * loses about 2 customers, between 1 and 4" and "the starter tier would win about 150 new subscribers, between 80 and
- * 250" write the size as a point INSIDE a range: `{ low, high, text, end: 'centre' }`, the amount kept as the stated point.
- * Read only from the sentence that bound the link, at the bound amount:
- *  · the sentence's ONE "between a and b", written AFTER the amount, with no other figure between the two;
- *  · low < |amount| < high, strictly: an amount that IS an end is A4's (`writtenRangeFor`), never a centre;
- *  · both ends bare, or in pounds when the amount is money (read in the amount's own scale), and no other kind of unit
- *    written after the range ("between 1 and 4 months" is a time);
- * Nothing else writes a spread: no range written, none carried (never a default ±k around the point).
- */
-export function centreRangeAt(sentence: string, amountSpan: { readonly end: number }, amount: number, amountUnit: string): StatedRangeEnd | undefined {
-  if ((sentence.match(/\bbetween\b/giu) ?? []).length !== 1) return undefined;
-  const tail = sentence.slice(amountSpan.end);
-  const range = extractStatedLikelyRange(tail);
-  if (range === undefined) return undefined;
-  const at = tail.indexOf(range.text);
-  if (at < 0 || /\d/u.test(tail.slice(0, at))) return undefined;
-  // A range in ANOTHER kind of unit is not the size's ("between 1 and 4 months after launch": a time, never a count of
-  // customers; Codex buddy r1 F3): the word after its high end must not name a different family.
-  // Up to three words after it, to the next punctuation ("between 1 and 4 calendar months"; Codex buddy r2 F3).
-  const afterWords = tail.slice(at + range.text.length).match(/^[^.,;:!?\n]*/u)?.[0].match(/[A-Za-z%]+/gu)?.slice(0, 3) ?? [];
-  if (afterWords.some((w) => { const f = unitPhraseFamily(w); return f !== null && f !== unitPhraseFamily(amountUnit); })) return undefined;
-  const pounds = range.text.includes('£');
-  if (pounds && unitPhraseFamily(amountUnit) !== 'currency') return undefined;
-  const scale = pounds ? moneyUnitScale(amountUnit) : 1;
-  const low = range.low / scale;
-  const high = range.high / scale;
-  const point = Math.abs(amount);
-  if (!(low < point && point < high)) return undefined;
-  return { low, high, text: range.text, end: 'centre' };
-}
 
 /**
  * ⛔ WHICH WAY A PASS-THROUGH SENTENCE SAYS ITS FIGURE MOVES THE QUANTITY IT NAMES (Desk 6b #2644 Q3): "removes £300 a month

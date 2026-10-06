@@ -141,6 +141,22 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     }
   });
 
+  // NEVER RE-ASK parity (Codex r1 on #2664 P2): the live Run turn adds this line AFTER its never-re-ask rule, so it keeps its
+  // question even when an earlier answer asked it; a lost response must replay those same words, not a shorter line.
+  it('a lost Run response replays the live words after an earlier answer asked the root question (live = replay)', async () => {
+    const earlier = { turn_id: randomUUID(), request_hash: 'agent_turn:earlier', assistant_message: `${RUN_RESULT_READY_TEXT} ${SENTENCE}` };
+    store.readRecent.mockImplementation((async () => [earlier]) as never);
+    try {
+      const turnId = randomUUID();
+      const first = (await runTurn(turnId)).json() as Body;
+      expect(first.assistant_text, 'precondition: the live turn said the root line whole').toContain(SENTENCE);
+      const replay = (await runTurn(turnId)).json() as Body;
+      expect(replay.assistant_text).toBe(first.assistant_text);
+    } finally {
+      store.readRecent.mockImplementation(async () => []);
+    }
+  });
+
   it('CONTROL: the same risk with a figure → no treated-as-zero sentence', async () => {
     riskValued = true;
     const body = (await runTurn(randomUUID())).json() as Body;

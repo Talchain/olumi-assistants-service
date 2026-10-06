@@ -94,6 +94,8 @@ export interface MethodScienceInput {
    * quo, never an option taken out of the comparison (RC 5937065922 / 5937114487). It never licenses a leader.
    */
   readonly user_selected_option_id?: string | null;
+  /** Generic multi-option pre-mortem: ground the decision in the union of its own option paths. */
+  readonly decision_level?: boolean;
   /** The current graph, read ONLY for the limits on the plan's path. */
   readonly graph?: unknown;
 }
@@ -151,8 +153,10 @@ export interface MethodScienceContext {
   /**
    * The plan a pre-mortem stresses: the licensed leader, else the option the user explicitly chose, else none. A lone
    * option is never named on its own: a plan label needs a licence or the user's choice (PTL 5933036532 #5).
+   * Decision-level pre-mortems carry null here and use the union of own-option paths for grounding.
    */
   readonly plan: { readonly option_id: string; readonly label: string; readonly basis: PlanBasis } | null;
+  readonly decision_level?: boolean;
   readonly goal_label: string | null;
   readonly current_option_labels: readonly string[];
   readonly supplied_items: readonly SuppliedItem[];
@@ -224,10 +228,11 @@ function choosePlan(
  *   (2) factors on the plan's path (an end of one of those links) whose value is Olumi's estimate;
  *   (3) risks at either end of a link on the plan's path;
  *   (4) limits whose quantity sits on the plan's path.
+ * A decision-level pre-mortem uses the union of own-option paths, with the same ordering and item eligibility.
  * Ties break by id, in codepoint order.
  */
-function premortemItems(s: MethodScienceSignals, planId: string, graph: unknown): SuppliedItem[] {
-  const onPlan = s['model.goal_path_links'].filter((l) => l.option_ids.includes(planId));
+function premortemItems(s: MethodScienceSignals, planIds: readonly string[], graph: unknown): SuppliedItem[] {
+  const onPlan = s['model.goal_path_links'].filter((l) => l.option_ids.some(id => planIds.includes(id)));
   const distance = new Map<string, number>();
   for (const l of s['model.goal_path_links']) distance.set(l.link_id, l.goal_distance);
   for (const f of s['model.goal_path_factors']) distance.set(f.factor_id, f.goal_distance);
@@ -354,13 +359,18 @@ function adjudicate(
 export function methodScienceContext(input: MethodScienceInput): MethodScienceContext {
   const s = input.signals;
   const plan = input.method === 'pre_mortem' ? choosePlan(s, input.user_selected_option_id) : null;
-  const items = plan === null ? [] : premortemItems(s, plan.option_id, input.graph);
+  const decision = input.method === 'pre_mortem' && input.decision_level === true && plan === null
+    && s['run.leader_licensed'] === false && input.user_selected_option_id == null
+    && s['model.non_sq_option_ids'].length >= 2;
+  const items = decision ? premortemItems(s, s['model.non_sq_option_ids'], input.graph)
+    : plan === null ? [] : premortemItems(s, [plan.option_id], input.graph);
   const { citation, reason } = adjudicate(input, plan, items);
   return {
     method: input.method,
     dsk: citation,
     not_cited: reason,
     plan,
+    ...(decision ? { decision_level: true } : {}),
     goal_label: typeof s['model.goal_label'] === 'string' ? s['model.goal_label'] : null,
     current_option_labels: Object.values(s['model.option_labels']),
     supplied_items: items,

@@ -14,7 +14,7 @@
  * ⛔ The plan is never chosen for the user (PTL 5933036532 #5): the licensed leader, else the user's own pick. Both
  * writers of the pick (a choose_plan button, and a pre-mortem row whose copy names the user's option) converge on ONE
  * carrier, the chip id `planPickChipId(option_id)`, and ONE reader, `methodPressOf`. The pick lives for its own press
- * only: nothing is stored, so a later generic press asks again.
+ * only: nothing is stored. A generic press with multiple own options and no licensed leader stresses the decision.
  */
 import type { StageType } from '@talchain/schemas/boundary';
 
@@ -70,8 +70,8 @@ export interface MethodPress {
 
 /**
  * The pre-mortem press this request carries, or null when it carries none. A pick whose hash names no CURRENT own
- * option (removed, or taken out of the comparison, since the button was offered) reads as a generic press: the user
- * is asked again, never handed a plan they did not pick.
+ * option (removed, or taken out of the comparison, since the button was offered) carries no pick. It remains an
+ * option-naming press: the user is asked again, never handed a plan or decision subject they did not ask for.
  */
 export function methodPressOf(chipId: unknown, nonSqOptionIds: readonly string[]): MethodPress | null {
   if (chipId === PREMORTEM_PRESS_ID) return { pick: null };
@@ -162,7 +162,8 @@ export function canonicalStageOf(runKind: string | null, graph: unknown): StageT
 /** A method turn that runs: everything the route needs for the ONE model call and the check after it. */
 export interface RunMethodTurn {
   readonly kind: 'run';
-  readonly context: MethodScienceContext & { readonly plan: NonNullable<MethodScienceContext['plan']> };
+  /** A decision-level run has plan === null: no single option id is carried to science or the method. */
+  readonly context: MethodScienceContext;
   /** Appended to this turn's instructions only: never the user's message, so it is never handed on as history. */
   readonly directive: string;
   readonly check_inputs: MethodInputs;
@@ -196,7 +197,7 @@ const UNAVAILABLE_REPLY: Readonly<Record<UnavailableReason, (plan: string | null
   no_goal: () => 'I can\u2019t run the pre-mortem yet because your model has no goal to measure failure against. Add the goal first.',
   no_own_option: () => 'I can\u2019t run the pre-mortem yet because your model has no option of yours to stress-test. Add one first.',
   plan_unconfirmed: () => 'I can\u2019t run the pre-mortem because I couldn\u2019t confirm which option to stress-test. Press \u201cRun a pre-mortem\u201d again and pick one.',
-  no_grounded_item: (plan) => `I can\u2019t run the pre-mortem on ${plan === null ? 'that option' : `\u2018${plan}\u2019`} yet because nothing on its path is Olumi\u2019s estimate, a risk or a limit to stress-test.`,
+  no_grounded_item: (plan) => `I can\u2019t run the pre-mortem on ${plan === null ? 'this decision' : `\u2018${plan}\u2019`} yet because nothing on ${plan === null ? 'its option paths' : 'its path'} is Olumi\u2019s estimate, a risk or a limit to stress-test.`,
 };
 
 export function unavailableTurn(reason: UnavailableReason, plan: string | null = null): UnavailableTurn {
@@ -223,25 +224,27 @@ export function methodTurnFromSignals(chipId: unknown, s: TurnSignals, graph: un
   if (press === null) return null;
   if (s['model.goal_present'] !== true) return unavailableTurn('no_goal');
   if (s['model.non_sq_option_ids'].length === 0) return unavailableTurn('no_own_option');
-  const selector = selectorSignalsOf(s, press.pick);
+  const selector = { ...selectorSignalsOf(s, press.pick), 'user.generic_method_press': chipId === PREMORTEM_PRESS_ID };
   const selection = selectGuidance(selector, selector.guidance ?? {});
   if (selection.runs_method !== METHOD) return unavailableTurn('plan_unconfirmed');
   if (selection.mode === 'choose_plan') return choosePlan(selection.choices ?? [], s['model.option_labels']) ?? unavailableTurn('plan_unconfirmed');
+  const decision = selection.mode === 'decision_plan';
   const planId = methodPlanOf(selector);
-  if (planId === undefined) return unavailableTurn('plan_unconfirmed');
+  if (!decision && planId === undefined) return unavailableTurn('plan_unconfirmed');
+  if (decision && s['model.non_sq_option_ids'].some(id => !s['model.option_labels'][id])) return unavailableTurn('plan_unconfirmed');
   const context = methodScienceContext({
     method: 'pre_mortem',
     canonical_stage: canonicalStageOf(s['run.kind'], graph),
     signals: s,
     user_selected_option_id: press.pick,
+    ...(decision ? { decision_level: true } : {}),
     graph,
   });
   // ONE plan rule, two readers (RC's `methodPlanOf`, SCIENCE/DSK's `choosePlan`): if they ever disagree, nothing runs.
   const plan = context.plan;
-  if (plan === null || plan.option_id !== planId) return unavailableTurn('plan_unconfirmed');
-  if (context.supplied_items.length === 0) return unavailableTurn('no_grounded_item', plan.label);
-  const ctx = { ...context, plan };
-  return { kind: 'run', context: ctx, directive: methodDirective(ctx), check_inputs: checkInputsOf(ctx, graph) };
+  if (decision ? plan !== null || context.decision_level !== true : plan === null || plan.option_id !== planId) return unavailableTurn('plan_unconfirmed');
+  if (context.supplied_items.length === 0) return unavailableTurn('no_grounded_item', plan?.label ?? null);
+  return { kind: 'run', context, directive: methodDirective(context), check_inputs: checkInputsOf(context, graph) };
 }
 
 const quote = (label: string): string => `‘${label}’`;
@@ -277,10 +280,13 @@ const ITEM_CLASS: Readonly<Record<SuppliedItem['kind'], string>> = {
  * asserts a badge). The checker's rules are stated so a compliant draft passes; a draft that does not is replaced.
  */
 export function methodDirective(ctx: RunMethodTurn['context']): string {
-  const plan = quote(ctx.plan.label);
+  const plan = ctx.plan === null ? 'this decision' : quote(ctx.plan.label);
+  const decision = ctx.decision_level === true;
   return [
     'METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.',
-    `The plan to stress-test is ${plan}.${ctx.goal_label !== null ? ` The goal is ${quote(ctx.goal_label)}.` : ''}`,
+    `${decision ? 'Stress-test the whole decision' : `The plan to stress-test is ${plan}`}.${ctx.goal_label !== null ? ` The goal is ${quote(ctx.goal_label)}.` : ''}`,
+    ...(decision ? [CONTRACT.decision_plan.rule,
+      `The current option labels are: ${ctx.current_option_labels.map(quote).join(', ')}.`] : []),
     ...(ctx.dsk !== null
       ? [
           ctx.dsk.protocol_directive,
@@ -293,8 +299,8 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
     `Format: ${CONTRACT.format}`,
     'Each story rests on at least one of these items from the user’s model, highest priority first. Name the item in '
       + 'its own words; for a link, name both ends:',
-    ...ctx.supplied_items.map((item) => `- ${itemPhrase(item)} (${ITEM_CLASS[item.kind]})`),
-    `Name no option other than ${plan}. Outside an item's own name, use no percentage and none of these words: likely, `
+    ...ctx.supplied_items.map((item) => `- ${itemPhrase(item)} (${decision ? ITEM_CLASS[item.kind].replaceAll('this plan', 'an option') : ITEM_CLASS[item.kind]})`),
+    `${decision ? 'Each story names at most one option. Never name a winner, best option or recommendation.' : `Name no option other than ${plan}.`} Outside an item's own name, use no percentage and none of these words: likely, `
       + 'likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.',
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
     `At most ${POLICY.method_turns.shared.max_words} words.`,
@@ -313,7 +319,7 @@ function modelLabelsOf(graph: unknown): string[] {
 
 function checkInputsOf(ctx: RunMethodTurn['context'], graph: unknown): MethodInputs {
   return {
-    plan_label: ctx.plan.label,
+    ...(ctx.decision_level === true ? { decision_level: true } : { plan_label: ctx.plan?.label }),
     current_option_labels: ctx.current_option_labels,
     supplied_items: ctx.supplied_items.map(({ id, labels }) => ({ id, labels })),
     model_labels: modelLabelsOf(graph),
@@ -322,7 +328,7 @@ function checkInputsOf(ctx: RunMethodTurn['context'], graph: unknown): MethodInp
 
 export function fallbackReply(ctx: RunMethodTurn['context']): string {
   return FALLBACK_TEMPLATE
-    .replace('{plan}', ctx.plan.label)
+    .replace('‘{plan}’', ctx.plan === null ? 'this decision' : quote(ctx.plan.label))
     .replace('{first supplied item}', itemPhrase(ctx.supplied_items[0]));
 }
 

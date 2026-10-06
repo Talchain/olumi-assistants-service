@@ -237,9 +237,75 @@ export function goalChanceSayFromThisTurn(toolResults: readonly unknown[]): stri
  * operator) is not the sentence, so it is still owed.
  */
 export function sameWordsIn(text: string, sentence: string): boolean {
-  const plain = (t: string): string => t.replace(/[\u0027\u0022\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2032\u2033`]|\*\*|__|(?<![\w])[*_]|[*_](?![\w])/g, '')
-    .replace(/\s+/g, ' ').trim();
-  return plain(text).includes(plain(sentence));
+  return plainWords(text).includes(plainWords(sentence));
+}
+
+/** `t` with every quote mark and markdown emphasis mark removed and whitespace collapsed (`sameWordsIn`'s reading). */
+const plainWords = (t: string): string => t.replace(/[\u0027\u0022\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2032\u2033`]|\*\*|__|(?<![\w])[*_]|[*_](?![\w])/g, '')
+  .replace(/\s+/g, ' ').trim();
+
+/**
+ * A sentence break in a host line: ".", "!" or "?", a space, then a capital or an opening quote. Never after a dotted
+ * abbreviation a label may hold ("U.S.", "e.g."): splitting there made a fragment of the closing question (Codex r1 on #2664 P2).
+ */
+const SENTENCE_BREAK = /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:\p{L}\.){2,})\s+(?=[\p{Lu}\u2018\u201c"'])/u;
+/** A sentence or line break in an Agent reply (looser: the model's next sentence may open with anything). */
+const REPLY_BREAK = /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:\p{L}\.){2,})\s+|\n+/u;
+/** A quotation mark that OPENS a quote. */
+const OPENING_QUOTE = /[\u0022\u0027\u2018\u201A\u201B\u201C\u201E\u201F`]$/u;
+/**
+ * Whether a double quotation is still open at the end of `text` (“ … ”, or an odd number of straight "): a question
+ * quoted across a sentence break ("I won't ask “I need a size. …?”") is still a mention (Codex r2 on #2664 P1).
+ * Single quotes are not counted (’ is also the apostrophe); one opening right before the question is `OPENING_QUOTE`'s.
+ */
+function insideQuotation(text: string): boolean {
+  const count = (re: RegExp): number => (text.match(re) ?? []).length;
+  return count(/\u201C/gu) > count(/\u201D/gu) || count(/"/gu) % 2 === 1;
+}
+
+/**
+ * Whether `reply` ASKED `question`: one of its sentences or lines ends with the question's words (`plainWords`), and the
+ * question there starts a clause and is not inside a quotation. A reply that only MENTIONS the question did not ask
+ * it: "I won't ask “…?” again", "I will avoid asking “…?” until we agree the units" (Codex r1 on #2664 P1). Emphasis is
+ * forgiven: `**…?**`.
+ */
+function askedIn(reply: string, question: string): boolean {
+  const asked = plainWords(question);
+  if (asked === '') return false;
+  let from = 0;
+  return reply.split(REPLY_BREAK).some((part) => {
+    const start = Math.max(reply.indexOf(part, from), from);
+    from = start + part.length;
+    if (!plainWords(part).endsWith(asked)) return false;
+    // Where the question starts in this part: the shortest tail that reads as the question.
+    for (let at = part.length - 1; at >= 0; at -= 1) {
+      if (plainWords(part.slice(at)) !== asked) continue;
+      const before = part.slice(0, at).replace(/(?:\*\*|__|[*_\s])+$/u, '');
+      return !OPENING_QUOTE.test(before) && !/[\p{L}\p{N}]$/u.test(before) && !insideQuotation(reply.slice(0, start + at));
+    }
+    return true;
+  });
+}
+
+/**
+ * ⭐ NEVER RE-ASK WHAT IS ALREADY ASKED (DL 0df0e1, 6 Oct; Acceptance G1b d4, pd 22fe54b8): a host line's closing QUESTION
+ * already among the Agent's recent answers is still open, so it is not asked again; the line's reason is still said, since
+ * the Run withheld the chance THIS time too. d4: the user answered "about 2 customers per 1% rise" three times, in a unit the
+ * £/month link cannot hold, and every Run and every Explain asked the same question again. This is the D1 target ask's rule
+ * (PANEL 5944136475, `decision-input-ask.ts`) for every host line that ends in a question. A reason that shares the
+ * question's sentence ("I can't put “A” on the same scale as “B”: what unit is it in?", the identity ask) is still said, as
+ * its own sentence ("I can't put “A” on the same scale as “B”."; Codex r1 on #2664 P2). Returns '' when the whole line was
+ * that question; the line unchanged when it asks nothing, or asks something not yet asked (`askedIn`).
+ */
+export function withoutAskedQuestion(line: string, recentReplies: readonly string[]): string {
+  const body = line.trimEnd();
+  if (!body.endsWith('?') || recentReplies.length === 0) return line;
+  const sentences = body.split(SENTENCE_BREAK);
+  const question = sentences[sentences.length - 1]!;
+  if (!recentReplies.some((reply) => askedIn(reply, question))) return line;
+  const colon = question.lastIndexOf(': ');
+  const reason = colon > 0 && /^\p{Ll}/u.test(question.slice(colon + 2)) ? `${question.slice(0, colon).trimEnd()}.` : null;
+  return [...sentences.slice(0, -1), ...(reason !== null ? [reason] : [])].join(' ');
 }
 
 /**

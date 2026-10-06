@@ -26,10 +26,13 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
+import { nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
-import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
+import {
+  GOAL_CHANCE_COMPANION_KEYS, GOAL_CHANCE_DRIVER_RECORD_KEYS, GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures,
+} from '../../orchestrator/context/option-result-source.js';
 
 /**
  * WHOSE RANGE (AIQ ruling #72 5867782904, words ACK 5870069785; Core Stabilisation Plan §7). ISL echoes each
@@ -151,14 +154,17 @@ export function analysisResultForAgent(result: unknown): unknown {
   const enrichment = recordOf(block.enrichment);
   const out: Record<string, unknown> = { ...block };
   if (typeof block.summary === 'string') out.summary = withoutStrongestDriverClause(block.summary);
+  if ('inference_warnings' in block) out.inference_warnings = warningsForAgent(block.inference_warnings);
   if (enrichment !== undefined) {
     const { factor_sensitivity: _structural, ...rest } = enrichment;
     const withheld = runWithheldGoalFigures(enrichment);
     const outcomeHidden = keptOutcomeOptionIds(enrichment);
+    // ⭐ (9) chat and panel quote the same figure: a chance the licence displays at the nearest 5 reaches the Agent as displayed.
+    const shown = nearestFiveGoalChancesForAgent(block);
     const brief = recordOf(rest.decision_brief);
     let limitsRenamed = false;
     const rows = (value: unknown): unknown => {
-      const projected = optionRowsForAgent(value, withheld, outcomeHidden);
+      const projected = optionRowsForAgent(value, withheld, outcomeHidden, shown);
       if (projected.renamed) limitsRenamed = true;
       return projected.rows;
     };
@@ -193,6 +199,7 @@ export function analysisResultForAgent(result: unknown): unknown {
       }
       rest.results = results;
     }
+    if ('inference_warnings' in rest) rest.inference_warnings = warningsForAgent(rest.inference_warnings);
     out.enrichment = rest;
     if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
@@ -206,7 +213,9 @@ export function analysisResultForAgent(result: unknown): unknown {
  * together — never the goal's target) becomes `all_limits_hold_probability`; under #416's withhold no row keeps a
  * `probability_of_goal`. Not an array → unchanged.
  */
-function optionRowsForAgent(value: unknown, withheld: boolean, outcomeHidden: ReadonlySet<string> = new Set()): { rows: unknown; renamed: boolean } {
+function optionRowsForAgent(
+  value: unknown, withheld: boolean, outcomeHidden: ReadonlySet<string> = new Set(), shown: ReadonlyMap<string, number> = new Map(),
+): { rows: unknown; renamed: boolean } {
   if (!Array.isArray(value)) return { rows: value, renamed: false };
   let renamed = false;
   const rows = value.map((row) => {
@@ -235,9 +244,34 @@ function optionRowsForAgent(value: unknown, withheld: boolean, outcomeHidden: Re
       const { probability_of_goal: _withheld, ...others } = next;
       next = others;
     }
+    if (!withheld && id !== undefined && shown.has(id) && typeof next.probability_of_goal === 'number') {
+      next = { ...next, probability_of_goal: shown.get(id)! };
+    }
+    // ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal chance's precision and drivers NEVER reach the Agent, withheld or not —
+    // no ruled Agent sentence exists, and free prose about a "main driver" passes no guard. It reads the licence record only.
+    if (GOAL_CHANCE_COMPANION_KEYS.some((k) => k in next)) {
+      const others: Record<string, unknown> = { ...next };
+      for (const k of GOAL_CHANCE_COMPANION_KEYS) delete others[k];
+      next = others;
+    }
     return next;
   });
   return { rows, renamed };
+}
+
+/**
+ * ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal-chance licence's main-driver claims never reach the Agent, in either carrier
+ * (`enrichment.inference_warnings`, or a kept Run's `inference_warnings`). The rest of every record is untouched.
+ */
+function warningsForAgent(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((w) => {
+    const r = recordOf(w);
+    if (r === undefined || !GOAL_CHANCE_DRIVER_RECORD_KEYS.some((k) => k in r)) return w;
+    const kept: Record<string, unknown> = { ...r };
+    for (const k of GOAL_CHANCE_DRIVER_RECORD_KEYS) delete kept[k];
+    return kept;
+  });
 }
 
 /** What the Agent is told about the limits-only figure (AIQ 5887531086: its own fact, in the UI's register). */

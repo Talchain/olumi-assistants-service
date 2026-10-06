@@ -1,0 +1,834 @@
+{
+ "_provenance": "Real drafts only (DL 0df0e1 G1b bench, 6 Oct). price_count / point_count: the served drafts banked in output/dl-0df0e1/bench/bank/<case_id>/ (graph.json, graph_sha12; case.json brief). Served drafts keep no raw drafter output (bench ATTRIBUTION.md), so each candidate is reconstructed MECHANICALLY from the stored graph (labels, units, sizes, frames and option levels as stored; an outcome or risk takes the unit of a sized link at it). pass_through: the RAW drafter response (agent.construct, gpt-5.6-terra, 4 Oct 20:53Z) banked by MC's replay harness (live-draws-20261004/bank/a37cb5365062-d1-c1.json, served 24e9b102 prompt), with its brief (sha256 prefix a37cb5365062).",
+ "price_count": [
+  {
+   "case_id": "acc__g1-2633-predup-overlapMC_draft-1__52d4d576",
+   "graph_sha12": "ca99ae75d2f6",
+   "brief_sha12": "40e6cd53dd36",
+   "brief": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £126,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.",
+   "candidate": {
+    "goal": {
+     "metric": "monthly recurring revenue",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 126000,
+     "unit": "£/month",
+     "horizon_months": 9,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 120000,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Raise prices 10%",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Price rise",
+        "value": 10,
+        "value_kind": "absolute",
+        "unit": "%",
+        "provenance": "explicit"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Launch starter tier",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Starter monthly price",
+        "value": 49,
+        "value_kind": "absolute",
+        "unit": "£ per starter subscriber per month",
+        "provenance": "ai_proposed"
+       },
+       {
+        "factor_label": "Starter tier availability",
+        "value": 1,
+        "value_kind": "absolute",
+        "unit": "0-1",
+        "provenance": "ai_proposed"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Keep pricing as it is",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "is_status_quo": true
+     }
+    ],
+    "factors": [
+     {
+      "label": "Price rise",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "%",
+      "provenance": "inferred",
+      "plausible_max": 50
+     },
+     {
+      "label": "Starter tier availability",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "0-1",
+      "provenance": "inferred",
+      "plausible_max": 1
+     },
+     {
+      "label": "Starter monthly price",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "£ per starter subscriber per month",
+      "provenance": "inferred",
+      "plausible_max": 200
+     }
+    ],
+    "risks": [
+     {
+      "label": "MRR lost to price-rise churn",
+      "provenance": "inferred",
+      "unit": "£/month",
+      "plausible_max": 100000
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Customers lost to price rise",
+      "provenance": "inferred",
+      "unit": "customers",
+      "plausible_max": 200
+     },
+     {
+      "label": "Starter subscribers",
+      "provenance": "inferred",
+      "unit": "subscribers",
+      "plausible_max": 500
+     },
+     {
+      "label": "Starter-tier MRR",
+      "provenance": "inferred",
+      "unit": "£/month",
+      "plausible_max": 50000
+     }
+    ],
+    "links": [
+     {
+      "from": "Price rise",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1200,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "Price rise",
+      "to": "Customers lost to price rise",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 2,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "Customers lost to price rise",
+      "to": "MRR lost to price-rise churn",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 300,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "MRR lost to price-rise churn",
+      "to": "monthly recurring revenue",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": -1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": true
+     },
+     {
+      "from": "Starter tier availability",
+      "to": "Starter subscribers",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 150,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": null
+     },
+     {
+      "from": "Starter subscribers",
+      "to": "Starter-tier MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null
+     },
+     {
+      "from": "Starter monthly price",
+      "to": "Starter-tier MRR",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null
+     },
+     {
+      "from": "Starter-tier MRR",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": true
+     }
+    ],
+    "identities": [],
+    "unknowns": [],
+    "decision_question": null
+   }
+  },
+  {
+   "case_id": "acc__g1-2633s_draft-4__e7b8ee26",
+   "graph_sha12": "75c806589a0c",
+   "brief_sha12": "40e6cd53dd36",
+   "brief": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £126,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.",
+   "candidate": {
+    "goal": {
+     "metric": "monthly recurring revenue",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 126000,
+     "unit": "£/month",
+     "horizon_months": 9,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 120000,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Raise prices 10%",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Price increase",
+        "value": 10,
+        "value_kind": "absolute",
+        "unit": "%",
+        "provenance": "explicit"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Launch starter tier",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Starter-tier price",
+        "value": 49,
+        "value_kind": "absolute",
+        "unit": "£ per starter subscriber per month",
+        "provenance": "ai_proposed"
+       },
+       {
+        "factor_label": "Starter-tier availability",
+        "value": 1,
+        "value_kind": "absolute",
+        "unit": "binary",
+        "provenance": "explicit"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Keep pricing as it is",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "is_status_quo": true
+     }
+    ],
+    "factors": [
+     {
+      "label": "Price increase",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "%",
+      "provenance": "inferred",
+      "plausible_max": 100
+     },
+     {
+      "label": "Starter-tier availability",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "binary",
+      "provenance": "inferred",
+      "plausible_max": 1
+     },
+     {
+      "label": "Starter-tier price",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "£ per starter subscriber per month",
+      "provenance": "inferred",
+      "plausible_max": 200
+     }
+    ],
+    "risks": [
+     {
+      "label": "MRR lost to price-rise churn",
+      "provenance": "inferred",
+      "unit": "£/month",
+      "plausible_max": 300000
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Customers lost from price rise",
+      "provenance": "inferred",
+      "unit": "customers",
+      "plausible_max": 1000
+     },
+     {
+      "label": "Starter subscribers",
+      "provenance": "inferred",
+      "unit": "subscribers",
+      "plausible_max": 2000
+     },
+     {
+      "label": "Starter-tier monthly recurring revenue",
+      "provenance": "inferred",
+      "unit": "£/month",
+      "plausible_max": 250000
+     }
+    ],
+    "links": [
+     {
+      "from": "Price increase",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1200,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "Price increase",
+      "to": "Customers lost from price rise",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "Customers lost from price rise",
+      "to": "MRR lost to price-rise churn",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 300,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "MRR lost to price-rise churn",
+      "to": "monthly recurring revenue",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null
+     },
+     {
+      "from": "Starter-tier availability",
+      "to": "Starter subscribers",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 80,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": null
+     },
+     {
+      "from": "Starter subscribers",
+      "to": "Starter-tier monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 49,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "Starter-tier price",
+      "to": "Starter-tier monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null
+     },
+     {
+      "from": "Starter-tier monthly recurring revenue",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null
+     }
+    ],
+    "identities": [],
+    "unknowns": [],
+    "decision_question": null
+   }
+  },
+  {
+   "case_id": "acc__g1-2633t_draft-3__72af3e85",
+   "graph_sha12": "bafad44ef239",
+   "brief_sha12": "40e6cd53dd36",
+   "brief": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £126,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.",
+   "candidate": {
+    "goal": {
+     "metric": "monthly recurring revenue",
+     "operator": ">=",
+     "target_stated": true,
+     "value": 126000,
+     "unit": "£/month",
+     "horizon_months": 9,
+     "provenance": "explicit",
+     "frame": "level",
+     "baseline_known": true,
+     "baseline_value": 120000,
+     "baseline_provenance": "explicit",
+     "scope": null
+    },
+    "constraints": [],
+    "options": [
+     {
+      "label": "Raise prices 10%",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Price rise from current level",
+        "value": 10,
+        "value_kind": "absolute",
+        "unit": "%",
+        "provenance": "explicit"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Launch starter tier",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [
+       {
+        "factor_label": "Starter tier price",
+        "value": 49,
+        "value_kind": "absolute",
+        "unit": "£ per starter subscriber per month",
+        "provenance": "explicit"
+       },
+       {
+        "factor_label": "Starter tier active",
+        "value": 1,
+        "value_kind": "absolute",
+        "unit": "binary",
+        "provenance": "ai_proposed"
+       }
+      ],
+      "is_status_quo": null
+     },
+     {
+      "label": "Keep pricing as it is",
+      "provenance": "explicit",
+      "changes": [],
+      "interventions": [],
+      "is_status_quo": true
+     }
+    ],
+    "factors": [
+     {
+      "label": "Price rise from current level",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "%",
+      "provenance": "inferred",
+      "plausible_max": 100
+     },
+     {
+      "label": "Starter tier active",
+      "role": "controllable",
+      "baseline_known": false,
+      "baseline_value": 0,
+      "unit": "binary",
+      "provenance": "inferred",
+      "plausible_max": 1
+     },
+     {
+      "label": "Starter tier price",
+      "role": "controllable",
+      "baseline_known": true,
+      "baseline_value": 0,
+      "unit": "£ per starter subscriber per month",
+      "provenance": "inferred",
+      "plausible_max": 200
+     }
+    ],
+    "risks": [
+     {
+      "label": "Higher-than-expected price-rise churn",
+      "provenance": "inferred",
+      "unit": null
+     }
+    ],
+    "outcomes": [
+     {
+      "label": "Customers lost after price rise",
+      "provenance": "inferred",
+      "unit": "customers",
+      "plausible_max": 500
+     },
+     {
+      "label": "Starter subscribers",
+      "provenance": "inferred",
+      "unit": "subscribers",
+      "plausible_max": 500
+     },
+     {
+      "label": "Starter tier monthly recurring revenue",
+      "provenance": "inferred",
+      "unit": "£/month",
+      "plausible_max": 50000
+     }
+    ],
+    "links": [
+     {
+      "from": "Price rise from current level",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 1200,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "Price rise from current level",
+      "to": "Customers lost after price rise",
+      "direction": "positive",
+      "provenance": "explicit",
+      "effect_amount": 2,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "Customers lost after price rise",
+      "to": "monthly recurring revenue",
+      "direction": "negative",
+      "provenance": "explicit",
+      "effect_amount": -300,
+      "effect_per_source_change": 1,
+      "effect_provenance": "explicit",
+      "definitional": null
+     },
+     {
+      "from": "Price rise from current level",
+      "to": "Higher-than-expected price-rise churn",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null
+     },
+     {
+      "from": "Higher-than-expected price-rise churn",
+      "to": "monthly recurring revenue",
+      "direction": "negative",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null
+     },
+     {
+      "from": "Starter tier active",
+      "to": "Starter subscribers",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 150,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": null
+     },
+     {
+      "from": "Starter subscribers",
+      "to": "Starter tier monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null
+     },
+     {
+      "from": "Starter tier price",
+      "to": "Starter tier monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": null,
+      "effect_per_source_change": null,
+      "effect_provenance": null,
+      "definitional": null
+     },
+     {
+      "from": "Starter tier monthly recurring revenue",
+      "to": "monthly recurring revenue",
+      "direction": "positive",
+      "provenance": "inferred",
+      "effect_amount": 1,
+      "effect_per_source_change": 1,
+      "effect_provenance": "inferred",
+      "definitional": true
+     }
+    ],
+    "identities": [],
+    "unknowns": [],
+    "decision_question": null
+   }
+  }
+ ],
+ "point_count": {
+  "case_id": "acc__g1-fa9f_draft-8__d2f4f43d",
+  "graph_sha12": "fcc1591904b9",
+  "brief_sha12": "40e6cd53dd36",
+  "brief": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £126,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.",
+  "candidate": {
+   "goal": {
+    "metric": "monthly recurring revenue",
+    "operator": ">=",
+    "target_stated": true,
+    "value": 126000,
+    "unit": "£/month",
+    "horizon_months": 9,
+    "provenance": "explicit",
+    "frame": "level",
+    "baseline_known": true,
+    "baseline_value": 120000,
+    "baseline_provenance": "explicit",
+    "scope": null
+   },
+   "constraints": [],
+   "options": [
+    {
+     "label": "Raise prices 10%",
+     "provenance": "explicit",
+     "changes": [],
+     "interventions": [
+      {
+       "factor_label": "Price rise from current price",
+       "value": 10,
+       "value_kind": "absolute",
+       "unit": "%",
+       "provenance": "explicit"
+      }
+     ],
+     "is_status_quo": null
+    },
+    {
+     "label": "Launch starter tier",
+     "provenance": "explicit",
+     "changes": [],
+     "interventions": [
+      {
+       "factor_label": "Starter subscribers",
+       "value": 150,
+       "value_kind": "absolute",
+       "unit": "subscribers",
+       "provenance": "ai_proposed"
+      },
+      {
+       "factor_label": "Starter-tier monthly price",
+       "value": 49,
+       "value_kind": "absolute",
+       "unit": "£/subscriber/month",
+       "provenance": "ai_proposed"
+      }
+     ],
+     "is_status_quo": null
+    },
+    {
+     "label": "Keep pricing as it is",
+     "provenance": "explicit",
+     "changes": [],
+     "interventions": [],
+     "is_status_quo": true
+    }
+   ],
+   "factors": [
+    {
+     "label": "Price rise from current price",
+     "role": "controllable",
+     "baseline_known": true,
+     "baseline_value": 0,
+     "unit": "%",
+     "provenance": "inferred",
+     "plausible_max": 100
+    },
+    {
+     "label": "Starter subscribers",
+     "role": "controllable",
+     "baseline_known": true,
+     "baseline_value": 0,
+     "unit": "subscribers",
+     "provenance": "inferred",
+     "plausible_max": 1000
+    },
+    {
+     "label": "Starter-tier monthly price",
+     "role": "controllable",
+     "baseline_known": true,
+     "baseline_value": 0,
+     "unit": "£/subscriber/month",
+     "provenance": "inferred",
+     "plausible_max": 200
+    }
+   ],
+   "risks": [
+    {
+     "label": "Customers lost from price rise",
+     "provenance": "inferred",
+     "unit": "customers",
+     "plausible_max": 500
+    }
+   ],
+   "outcomes": [
+    {
+     "label": "Starter-tier monthly recurring revenue",
+     "provenance": "inferred",
+     "unit": "£/month",
+     "plausible_max": 50000
+    }
+   ],
+   "links": [
+    {
+     "from": "Price rise from current price",
+     "to": "monthly recurring revenue",
+     "direction": "positive",
+     "provenance": "explicit",
+     "effect_amount": 1200,
+     "effect_per_source_change": 1,
+     "effect_provenance": "explicit",
+     "definitional": null
+    },
+    {
+     "from": "Price rise from current price",
+     "to": "Customers lost from price rise",
+     "direction": "positive",
+     "provenance": "explicit",
+     "effect_amount": 2,
+     "effect_per_source_change": 1,
+     "effect_provenance": "explicit",
+     "definitional": null
+    },
+    {
+     "from": "Customers lost from price rise",
+     "to": "monthly recurring revenue",
+     "direction": "negative",
+     "provenance": "explicit",
+     "effect_amount": -300,
+     "effect_per_source_change": 1,
+     "effect_provenance": "explicit",
+     "definitional": null
+    },
+    {
+     "from": "Starter subscribers",
+     "to": "Starter-tier monthly recurring revenue",
+     "direction": "positive",
+     "provenance": "explicit",
+     "effect_amount": 49,
+     "effect_per_source_change": 1,
+     "effect_provenance": "explicit",
+     "definitional": null
+    },
+    {
+     "from": "Starter-tier monthly price",
+     "to": "Starter-tier monthly recurring revenue",
+     "direction": "positive",
+     "provenance": "inferred",
+     "effect_amount": null,
+     "effect_per_source_change": null,
+     "effect_provenance": null,
+     "definitional": null
+    },
+    {
+     "from": "Starter-tier monthly recurring revenue",
+     "to": "monthly recurring revenue",
+     "direction": "positive",
+     "provenance": "inferred",
+     "effect_amount": 1,
+     "effect_per_source_change": 1,
+     "effect_provenance": "inferred",
+     "definitional": true
+    }
+   ],
+   "identities": [],
+   "unknowns": [],
+   "decision_question": null
+  }
+ },
+ "pass_through": {
+  "source": "live-draws-20261004/bank/a37cb5365062-d1-c1.json",
+  "at": "2026-10-04T20:53:16.303Z",
+  "model": "gpt-5.6-terra",
+  "brief_sha12": "a37cb5365062",
+  "brief": "We are a B2B software company with £120,000 monthly recurring revenue from 400 customers paying £300 a month. Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is. Goal: reach at least £150,000 monthly recurring revenue within 9 months. Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn. Each 1% price rise loses about 2 customers, between 1 and 4. Each lost customer removes £300 a month of monthly recurring revenue. The starter tier would win about 150 new subscribers, between 80 and 250. Each starter subscriber adds £49 a month to monthly recurring revenue. Each starter subscriber costs about £6 a month in support. Keeping pricing as it is adds nothing.",
+  "response_text": "{\"goal\":{\"metric\":\"monthly recurring revenue\",\"operator\":\">=\",\"target_stated\":true,\"value\":150000,\"unit\":\"£/month\",\"horizon_months\":9,\"provenance\":\"explicit\",\"frame\":\"level\",\"baseline_known\":true,\"baseline_value\":120000,\"baseline_provenance\":\"explicit\",\"scope\":null},\"constraints\":[],\"options\":[{\"label\":\"Raise prices 10%\",\"provenance\":\"explicit\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Price rise from current price\",\"value\":10,\"value_kind\":\"additional\",\"unit\":\"%\",\"provenance\":\"explicit\"}],\"is_status_quo\":null},{\"label\":\"Launch starter tier\",\"provenance\":\"explicit\",\"changes\":[],\"interventions\":[{\"factor_label\":\"Starter subscribers\",\"value\":150,\"value_kind\":\"absolute\",\"unit\":\"subscribers\",\"provenance\":\"explicit\"}],\"is_status_quo\":null},{\"label\":\"Keep pricing as it is\",\"provenance\":\"explicit\",\"changes\":[],\"interventions\":[],\"is_status_quo\":true}],\"factors\":[{\"label\":\"Price rise from current price\",\"role\":\"controllable\",\"baseline_known\":true,\"baseline_value\":0,\"unit\":\"%\",\"provenance\":\"explicit\",\"plausible_max\":100},{\"label\":\"Starter subscribers\",\"role\":\"controllable\",\"baseline_known\":true,\"baseline_value\":0,\"unit\":\"subscribers\",\"provenance\":\"inferred\",\"plausible_max\":1000},{\"label\":\"Customers lost from price rise\",\"role\":\"observable\",\"baseline_known\":true,\"baseline_value\":0,\"unit\":\"customers\",\"provenance\":\"inferred\",\"plausible_max\":1000}],\"risks\":[{\"label\":\"MRR lost to price-rise churn\",\"provenance\":\"inferred\",\"unit\":\"£/month\",\"plausible_max\":500000}],\"outcomes\":[],\"links\":[{\"from\":\"Price rise from current price\",\"to\":\"monthly recurring revenue\",\"direction\":\"positive\",\"provenance\":\"explicit\",\"effect_amount\":1200,\"effect_per_source_change\":1,\"effect_provenance\":\"explicit\",\"definitional\":null},{\"from\":\"Price rise from current price\",\"to\":\"Customers lost from price rise\",\"direction\":\"positive\",\"provenance\":\"explicit\",\"effect_amount\":2,\"effect_per_source_change\":1,\"effect_provenance\":\"explicit\",\"definitional\":null},{\"from\":\"Customers lost from price rise\",\"to\":\"MRR lost to price-rise churn\",\"direction\":\"positive\",\"provenance\":\"explicit\",\"effect_amount\":300,\"effect_per_source_change\":1,\"effect_provenance\":\"explicit\",\"definitional\":null},{\"from\":\"MRR lost to price-rise churn\",\"to\":\"monthly recurring revenue\",\"direction\":\"negative\",\"provenance\":\"inferred\",\"effect_amount\":-1,\"effect_per_source_change\":1,\"effect_provenance\":\"inferred\",\"definitional\":true},{\"from\":\"Starter subscribers\",\"to\":\"monthly recurring revenue\",\"direction\":\"positive\",\"provenance\":\"explicit\",\"effect_amount\":49,\"effect_per_source_change\":1,\"effect_provenance\":\"explicit\",\"definitional\":null}],\"identities\":[],\"unknowns\":[\"Price-rise churn is stated as about 2 customers per 1% increase, with a range of 1 to 4. Confirm the expected churn rate to use for planning.\",\"Starter-tier acquisition is stated as about 150 subscribers, with a range of 80 to 250. Confirm the expected subscriber count and the timing of acquisition within the 9 months.\",\"The £6 per starter subscriber per month support cost affects profitability, not the stated monthly recurring revenue goal. Confirm whether the decision should instead optimise net recurring contribution or whether support cost is subject to a separate limit.\",\"The brief does not state when price-rise churn occurs or when starter subscribers begin paying; timing determines whether the £150,000/month target is reached within 9 months.\"],\"decision_question\":null}"
+ }
+}

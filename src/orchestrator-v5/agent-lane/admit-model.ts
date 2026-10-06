@@ -2737,6 +2737,32 @@ function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
 }
 
 /**
+ * A bare percent ("%", "percent", "per cent", "percentage"). A qualified percent ("% of appointments", "percentage
+ * points") names a measure, never only a change's size.
+ */
+export function isBarePercent(unit: unknown): boolean {
+  return typeof unit === 'string' && /^(?:%|percent|per\s+cent|percentage)$/i.test(unit.trim());
+}
+
+/**
+ * A quantity that is itself a percentage: its name says it is a rate, ratio, share or margin of something ("churn rate",
+ * "win rate", "conversion", "gross margin", "retention"), or holds a percent sign. Such a metric is MEASURED in %.
+ */
+const PERCENTAGE_QUANTITY = /%|\b(?:rates?|ratios?|shares?|margins?|churn|retention|conversions?|percent(?:age)?s?|proportions?|uptime|utili[sz]ation|occupancy|attrition|turnover|yields?|accuracy|coverage|penetration)\b/i;
+
+/**
+ * ⛔ THE "%" OF A RELATIVE CHANGE, NEVER THE QUANTITY'S OWN UNIT (DL 0df0e1 founder trace Q1; AIE review on #87 6016108422 (1)).
+ * True ONLY when the "%" is solely the size of a relative change on a quantity that is not a percentage: "increase
+ * productivity by at least 10%". A quantity measured in % keeps it as its unit: "cut churn rate by 10%" is a relative
+ * change of a % metric, and "win rate" or "conversion rate" are read in %. A level frame is never a change: its "%" is the
+ * level's own. Fail-closed toward the stored unit: any percentage-quantity word in the name keeps the "%".
+ */
+export function isChangeOwnPercent(goal: { readonly metric?: unknown; readonly unit?: unknown; readonly frame?: unknown }): boolean {
+  return goal.frame === 'change_rel' && isBarePercent(goal.unit)
+    && !(typeof goal.metric === 'string' && PERCENTAGE_QUANTITY.test(goal.metric));
+}
+
+/**
  * ⭐ R1 S4-core — A GOAL TARGET STATED AS A CHANGE FROM TODAY (`@talchain/schemas` 0.61.0; ISL S2 served).
  *
  * The stored figure is the contract's: `change_rel` → the fraction r ("cut by 15%": the drafter's −15 → −0.15);
@@ -2775,7 +2801,16 @@ export function admitStatedGoalChange(
   readonly reading?: string;
 } {
   const frame = goal.frame === 'change_rel' ? 'change_rel' : 'change_abs';
-  const unit = goal.unit ? goal.unit : undefined;
+  /**
+   * ⛔ THE CHANGE'S "%" IS NEVER THE METRIC'S UNIT (DL 0df0e1 founder trace Q1, scenario 58bd5e71; PR A2). "Increase
+   * productivity by at least 10%" was drafted with unit "%", and this line copied it: productivity was stored as measured
+   * in %, so every later door refused the user's own level ("16 small" per sprint: `unit_mismatch`) and every Run asked
+   * for productivity "in %". A "%" that is solely the size of a relative change on a quantity that is not a percentage
+   * names the CHANGE (the contract above: the unit is the METRIC's, the unit of its current level), so it is not written
+   * as the goal's unit: the metric's unit is unknown until a level states it (`isChangeOwnPercent`). A quantity measured
+   * in % ("cut churn rate by 10%") keeps "%", and so does a level the user wrote in % (`notTheUsers === null` below).
+   */
+  const unit = goal.unit && !isChangeOwnPercent(goal) ? goal.unit : undefined;
   const stored = frame === 'change_rel' ? raw / 100 : raw;
   const node: Partial<AdmittedNode> = { ...(unit ? { goal_threshold_unit: unit } : {}), goal_threshold_frame: frame, goal_threshold_raw: stored };
   const sign = raw > 0 ? '+' : '';
@@ -2823,9 +2858,11 @@ export function admitStatedGoalChange(
       `The current level of "${goal.metric}" (${level}) and a change of ${change} from it do not sit on a scale starting at ` +
       'zero, so no chance of reaching it can be shown. If either figure is wrong, say which and it can be corrected.' };
   }
+  // The level's unit is the metric's: read from the brief, or the unit the user wrote today's level in (a "%" level too).
+  const levelUnit = readUnit ?? (notTheUsers === null && goal.unit ? goal.unit : undefined);
   const withBase = {
     ...node,
-    ...(readUnit !== undefined ? { goal_threshold_unit: readUnit } : {}),
+    ...(levelUnit !== undefined ? { goal_threshold_unit: levelUnit } : {}),
     goal_threshold_cap: resolved.cap,
     goal_threshold_cap_provenance: resolved.provenance,
     goal_threshold: frame === 'change_rel' ? stored : stored / resolved.cap,
@@ -3919,6 +3956,44 @@ function admitOnce(
     goal.scale_frame = niceFrameAtLeast(top);
     return goal.id;
   })();
+  /**
+   * ⭐ G1b PASS-THROUGH (DL 0df0e1 bench: 5 of 77 drafts): a PART drafted as a definition of its TOTAL (±1 per 1 in one
+   * unit, `definitional: true`: the drafter's word, or (B)'s pass-through above) is sized on the two frames. A part whose
+   * frame is wider than its total's (raw draw a37cb d1: the drafter's £500,000 ‘MRR lost to price-rise churn’ against
+   * MRR's £187,500) gave |β| 2.67: D8 set the definition aside as a placeholder, `definitionalLink` refused it, and the
+   * first Run asked the user to size a definition. A frame is a choice of units, never a claim (S5t), and a part is never
+   * larger than its total: the part is measured on its total's frame, so the definition is typed on its own natural size
+   * and the construction refit (`refitFramesForStatedEffects`) fits every exact size around it.
+   * Only an OUTCOME or a RISK part (the refit widens those again where a user's size into it needs it; it never widens a
+   * factor, and a goal's threshold is framed on its own: Codex buddy r1 P1/P2), that holds nothing a frame normalises (no
+   * level of its own, no option level, no limit), and no Olumi-sized link into it that the narrower frame would push past
+   * ±1 (D8 would set THAT aside instead). Frames only narrow, so the pass over a chain of parts settles.
+   */
+  for (let moved = true, passes = 0; moved && passes <= resolvable.length; passes += 1) {
+    moved = false;
+    for (const l of resolvable) {
+      if (l.definitional !== true || typeof l.effect_amount !== 'number' || typeof l.effect_per_source_change !== 'number'
+        || l.effect_per_source_change === 0 || Math.abs(l.effect_amount / l.effect_per_source_change) !== 1) continue;
+      const part = nodeOf.get(l.from);
+      const total = nodeOf.get(l.to);
+      if (part === undefined || total === undefined || (part.kind !== 'outcome' && part.kind !== 'risk')
+        || part.observed_state !== undefined || optionLevelsById.has(part.id)
+        || model.constraints.some((c) => nodeIdForMetric(c.metric) === part.id)) continue;
+      const partFrame = resolveMagnitudeFrame(magnitudeNodeFor(part));
+      const totalFrame = resolveMagnitudeFrame(magnitudeNodeFor(total));
+      if (partFrame === undefined || totalFrame === undefined || !(partFrame > totalFrame)) continue;
+      const pushedPastOne = resolvable.some((x) => {
+        if (x === l || x.to !== part.id || userSizeEarned(x) || typeof x.effect_amount !== 'number'
+          || typeof x.effect_per_source_change !== 'number' || x.effect_per_source_change === 0) return false;
+        const from = nodeOf.get(x.from);
+        const sourceFrame = from === undefined ? undefined : resolveMagnitudeFrame(magnitudeNodeFor(from));
+        return sourceFrame !== undefined && Math.abs(x.effect_amount / x.effect_per_source_change) * sourceFrame / totalFrame > 1;
+      });
+      if (pushedPastOne) continue;
+      part.scale_frame = totalFrame;
+      moved = true;
+    }
+  }
   const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map(n => [n.id, magnitudeNodeFor(n)]));
   const sizing = new Map<string, LinkSizing>();
   for (const l of resolvable) {

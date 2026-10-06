@@ -36,7 +36,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
+import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
@@ -1931,6 +1931,8 @@ export async function buildModelFromBrief(
   openQuestions.unshift(...linksSetAside.flatMap((a) => setAsideLinkQuestion(a) ?? []));
   // d5's challenge where the user SEES it (DL: both seats; the server appends the first two to the reply).
   openQuestions.unshift(...mechanismsUnmodelled.map(unmodelledMechanismChallenge));
+  // G1b honesty: a cost the BRIEF states, taken off the revenue, is said in the user's words, ahead of Olumi's own challenges.
+  openQuestions.unshift(...droppedStatedCostLines(costsOffRevenue, brief));
   /**
    * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
    * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the

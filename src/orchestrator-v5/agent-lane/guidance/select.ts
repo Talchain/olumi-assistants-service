@@ -1,6 +1,6 @@
 import { POLICY } from './policy.js';
 import { renderCopy } from './render.js';
-import { methodPlanOf, planOf } from './plan.js';
+import { isDecisionPlan, methodPlanOf, planOf } from './plan.js';
 import { stateKeyHash } from './state-key.js';
 import type { GuidanceSignals, GuidanceState, GoalPathEdit, JsonValue, PolicyId, Priority, SelectedRow, Selection, StateKeyFields, SuppressionReason, Target, Variant } from './types.js';
 
@@ -191,7 +191,9 @@ export function selectGuidance(signals: GuidanceSignals, guidance: GuidanceState
       const item = honestLimitItem(signals);
       mode = { mode: 'honest_limit', ...(item ? { item } : {}) };
     }
-    if (requested === 'RC-PREMORTEM' && methodPlanOf(signals) === undefined && options.length >= 1) mode = { mode: 'choose_plan', choices: sorted(options) };
+    if (requested === 'RC-PREMORTEM' && methodPlanOf(signals) === undefined && options.length >= 1) {
+      mode = isDecisionPlan(signals) ? { mode: 'decision_plan' } : { mode: 'choose_plan', choices: sorted(options) };
+    }
     return { ...suppressAll('not_eligible'), runs_method: requested, ...mode };
   }
   const eligible: SelectedRow[] = [];
