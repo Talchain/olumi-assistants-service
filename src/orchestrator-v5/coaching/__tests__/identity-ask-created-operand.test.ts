@@ -7,7 +7,9 @@
  * discount") is still asked about today. Bound by node id and Science's exact words.
  */
 import { describe, it, expect } from 'vitest';
-import { composeIdentityAskForNode, composeIdentityNotEvaluatedAsk } from '../identity-not-evaluated-ask.js';
+import { readFileSync } from 'node:fs';
+import { composeIdentityAskForNode, composeIdentityNotEvaluatedAsk, LEVEL_WRITER_KINDS } from '../identity-not-evaluated-ask.js';
+import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 
 type Rec = Record<string, any>;
 const FORMULA = '“Starter-tier subscribers” × “Starter monthly price”';
@@ -113,5 +115,85 @@ describe('Codex buddy r1', () => {
     g.nodes[0].observed_state = { value: 0 };
     g.nodes[1].observed_state = { value: 150, unit: 'subscribers' };
     expect(composeIdentityAskForNode('starter_mrr', g)).toMatchObject({ reason: 'identity_frame_missing', chip_label: 'Give its unit' });
+  });
+});
+
+/**
+ * ⛔ NEVER ASK A LEVEL NO CONTROL CAN SAVE (DL 6 Oct, P1). Served: Acceptance G1 draft 11 (scenario fa05dd14, CEE 231affbe,
+ * full wire): the brief's "£6 a month in support" per starter subscriber was declared the user's product, over an OUTCOME
+ * ‘Starter subscribers’ with no level. Every Run was refused and asked "I need ‘Starter subscribers’: what is it today?";
+ * "None today… about 150 if it launches" got "The available controls cannot save today's count for that outcome", then the
+ * same ask after every Run ×3.
+ */
+describe('draft 11: no level is asked that no control can save', () => {
+  const served = (): Rec => structuredClone(JSON.parse(readFileSync(new URL('./fixtures/served-g1-draft11-231affbe.json', import.meta.url), 'utf8')).draft_graph);
+  const missing: Rec[] = [{ code: 'IDENTITY_NOT_EVALUATED',
+    identity: { node_id: 'starter_tier_support_cost', participants: ['starter_subscribers', 'support_cost_per_starter_subscriber'], withheld_reason: 'identity_operand_missing' } }];
+
+  it('PRECONDITION (served): the part is an OUTCOME with no level, the product is stated, and Launch reaches it', () => {
+    const g = served();
+    const part = g.nodes.find((n: Rec) => n.id === 'starter_subscribers');
+    expect(part).toMatchObject({ kind: 'outcome', label: 'Starter subscribers' });
+    expect(part.observed_state).toBeUndefined();
+    expect(g.nodes.find((n: Rec) => n.id === 'starter_tier_support_cost').nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: true });
+  });
+
+  it('RED (served draft 11): the refused Run asks NOTHING about ‘Starter subscribers’ — no "what is it today?", no chip that cannot save', () => {
+    expect(composeIdentityNotEvaluatedAsk(missing, served())).toBeNull();
+  });
+
+  it('CONTROL: the same part as a FACTOR (a writer can save it) is still asked — "0 today, since Launch would start it"', () => {
+    const g = served();
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').kind = 'factor';
+    const a = composeIdentityNotEvaluatedAsk(missing, g)!;
+    expect(a.assistant_text).toContain('‘Starter subscribers’ is 0 today, since ‘Launch starter tier’ would start it.');
+    // The brief already sized what the launch brings (‘Starter tier launched’ → ‘Starter subscribers’, 150): never asked again.
+    expect(a.assistant_text).not.toMatch(/How many|today\?/);
+    expect(a.chip_label).toBe('Use 0 today');
+  });
+
+  it('CONTROL: with that link unsized, the factor part is asked Science\'s ONE question', () => {
+    const g = served();
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').kind = 'factor';
+    const e = g.edges.find((x: Rec) => x.from === 'starter_tier_launched' && x.to === 'starter_subscribers');
+    delete e.provenance.natural_effect;
+    expect(composeIdentityNotEvaluatedAsk(missing, g)!.assistant_text)
+      .toContain('How many ‘Starter subscribers’ would ‘Launch starter tier’ lead to? A best guess and a range is fine.');
+  });
+
+  it('RED (after construction holds it at 0): #416 on the stored model asks nothing — with no stated level on the product, 0 is an ordinary level (ISL rule 3)', () => {
+    const g = served();
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').observed_state = { value: 0, source: 'cee_inference', extractionType: 'inferred' };
+    expect(composeIdentityAskForNode('starter_tier_support_cost', g)).toBeNull();
+  });
+
+  it('RED: a FACTOR part at Olumi\'s 0 under a product with NO stated level → #416 infers nothing (0 is an ordinary level there)', () => {
+    const g = served();
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').kind = 'factor';
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').observed_state = { value: 0, source: 'cee_inference' };
+    expect(composeIdentityAskForNode('starter_tier_support_cost', g)).toBeNull();
+  });
+
+  it('CONTROL: a product WITH a stated level still asks about a zero part (ISL withholds that one)', () => {
+    const g = served();
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').kind = 'factor';
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').observed_state = { value: 0, source: 'cee_inference' };
+    g.nodes.find((n: Rec) => n.id === 'starter_tier_support_cost').observed_state = { value: 0.036, raw_value: 900, unit: '£/month', source: 'brief_extraction' };
+    expect(composeIdentityAskForNode('starter_tier_support_cost', g)).toMatchObject({ reason: 'identity_zero_level' });
+  });
+
+  it('RED: ISL\'s zero-level refusal over an OUTCOME part → no "Is 0 right?" (no control can correct that 0)', () => {
+    const g = served();
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').observed_state = { value: 0, source: 'cee_inference' };
+    g.nodes.find((n: Rec) => n.id === 'starter_tier_support_cost').observed_state = { value: 0.036, raw_value: 900, unit: '£/month', source: 'brief_extraction' };
+    const zero: Rec[] = [{ code: 'IDENTITY_NOT_EVALUATED',
+      identity: { node_id: 'starter_tier_support_cost', participants: ['starter_subscribers', 'support_cost_per_starter_subscriber'], withheld_reason: 'identity_zero_level' } }];
+    expect(composeIdentityNotEvaluatedAsk(zero, g)).toBeNull();
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').kind = 'factor';
+    expect(composeIdentityNotEvaluatedAsk(zero, g)).toMatchObject({ reason: 'identity_zero_level' });
+  });
+
+  it('PARITY: the kinds a level is asked of are exactly the kinds set_factor_value can save', () => {
+    expect([...LEVEL_WRITER_KINDS]).toEqual([...SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS]);
   });
 });

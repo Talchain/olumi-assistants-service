@@ -36,7 +36,8 @@ const blocks = (warnings: Rec[]): Rec[] => [{ type: 'analysis_result', enrichmen
 const T1B = { nodes: [
   { id: 'mrr', kind: 'goal', label: 'Monthly recurring revenue' },
   { id: 'starter_mrr', kind: 'outcome', label: 'Starter-tier MRR', nonlinear_identity: { operation: 'product', factor_ids: ['starter_subscribers', 'starter_price'] } },
-  { id: 'starter_subscribers', kind: 'outcome', label: 'Starter-tier subscribers' },
+  // A FACTOR: a level a control can save (DL's P1 rule, `LEVEL_WRITER_KINDS`); the OUTCOME case asks nothing (below).
+  { id: 'starter_subscribers', kind: 'factor', label: 'Starter-tier subscribers' },
   { id: 'starter_price', kind: 'factor', label: 'Starter monthly price', observed_state: { value: 49, unit: 'GBP per month' } },
   { id: 'keep', kind: 'option', label: 'Keep pricing as it is', is_baseline: true },
   { id: 'launch', kind: 'option', label: 'Launch starter tier' },
@@ -90,6 +91,17 @@ describe('(b)+(c) the reply names the warning\'s own cause and its ask — never
     expect(words).not.toMatch(/run the analysis|run it again|what is it today/i);
   });
 
+  it('⛔ P1: the same #416 over an OUTCOME part (no control can give it a level) → PLoT\'s cause only, NO ask', () => {
+    const outcome = structuredClone(T1B) as Rec;
+    outcome.nodes.find((n: Rec) => n.id === 'starter_subscribers').kind = 'outcome';
+    const hold = goalFigureCoHoldOf(blocks([W416]), outcome)!;
+    expect(hold.ask).toBeUndefined();
+    const words = agentNoLeaderSentence(WITHHELD_LEADER_CAUSE_UNRECORDED, undefined, [], undefined, undefined, undefined, hold);
+    expect(words).toContain('because \'Starter-tier MRR\' depends on Starter-tier subscribers × Starter monthly price, '
+      + 'but this run couldn\'t calculate it that way');
+    expect(words).not.toMatch(/is 0 today|How many|what is it today|Use 0 today/);
+  });
+
   it('RED (rehearsal 8): #422 → its own cause, with no "run the analysis"', () => {
     const hold = goalFigureCoHoldOf(blocks([W422]), T1B)!;
     expect(agentNoLeaderSentence(WITHHELD_LEADER_CAUSE_UNRECORDED, undefined, [], undefined, undefined, undefined, hold)).toBe(
@@ -108,8 +120,22 @@ const SERVED_ASK = 'To work out “Monthly starter support cost” as “Starter
   + 'How many ‘Starter subscribers’ would ‘Launch starter tier’ lead to? A best guess and a range is fine.';
 
 describe('(c) on the chip Run turn itself (served witness, CEE b501eda4, draw 6: the reply said #416 and asked nothing)', () => {
-  it('RED: the served Run + graph → the ONE ask, in Science\'s words', () => {
-    expect(identityAskLineFor(SERVED.analysis_result, SERVED.graph)).toBe(SERVED_ASK);
+  it('⛔ P1 (DL 6 Oct, G1 draft 11): the served part is an OUTCOME no control can give a level, and the brief already sized the launch (150) — NOTHING is asked', () => {
+    expect(SERVED.graph.nodes.find((n: Rec) => n.id === 'starter_subscribers')).toMatchObject({ kind: 'outcome' });
+    expect(identityAskLineFor(SERVED.analysis_result, SERVED.graph)).toBeNull();
+  });
+
+  it('RED: the same Run with the part a FACTOR (a control can save it) → the ask, in Science\'s words (the launch\'s 150 never asked again)', () => {
+    const g = structuredClone(SERVED.graph) as Rec;
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').kind = 'factor';
+    expect(identityAskLineFor(SERVED.analysis_result, g)).toBe('To work out “Monthly starter support cost” as “Starter subscribers” × '
+      + '“Starter support cost per subscriber”: ‘Starter subscribers’ is 0 today, since ‘Launch starter tier’ would start it.');
+  });
+
+  it('RED (after construction holds the created part at 0): the stored model gives #416 no ask to infer — 0 is an ordinary level there', () => {
+    const g = structuredClone(SERVED.graph) as Rec;
+    g.nodes.find((n: Rec) => n.id === 'starter_subscribers').observed_state = { value: 0, source: 'cee_inference', extractionType: 'inferred' };
+    expect(identityAskLineFor(SERVED.analysis_result, g)).toBeNull();
   });
 
   it('the route owes it once: absent from the reply → owed; already said → not again; a later Run without it clears it', () => {

@@ -22,6 +22,7 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { sayLevel } from './bound-graph.js';
 import { sayFigure as sayLaneFigure } from '../agent-lane/say-figure.js';
+import { CREATION_VERB, reachesAlong } from '../agent-lane/option-creates.js';
 
 export const IDENTITY_NOT_EVALUATED_CODE = 'IDENTITY_NOT_EVALUATED';
 
@@ -110,8 +111,18 @@ const q = (label: string): string => `“${label}”`;
  * level nobody gave, so its operand is still asked about today.
  */
 // The option's OWN action (Codex buddy r1 P1): its label opens with the verb or with "new" ("Launch starter tier", "New
-// starter tier"). "Keep the new pricing" changes an existing level, so it is no creation evidence.
-const CREATION_VERB = /^\s*(?:launch(?:es|ed|ing)?|introduc(?:e|es|ed|ing)|start(?:s|ed|ing)?|(?:an? )?new)\b/i;
+// starter tier"). "Keep the new pricing" changes an existing level, so it is no creation evidence. ONE rule with
+// construction's created-part 0 (`option-creates.ts`).
+
+/**
+ * ⛔ NEVER ASK A LEVEL NO CONTROL CAN SAVE (DL 6 Oct; Acceptance G1 draft 11 on CEE 231affbe): "I need ‘Starter
+ * subscribers’: what is it today?" about an OUTCOME; the user answered "None today… about 150 if it launches", was told
+ * "The available controls cannot save today's count for that outcome", and every Run asked it again ×3. A level (today's,
+ * or the one an option sets) is saved only on a FACTOR — `set_factor_value`'s `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS` and
+ * the option-level writer's own target rule (`option-intervention-edit.ts`, `value_target_not_factor`). Kept equal to the
+ * former by a test row.
+ */
+export const LEVEL_WRITER_KINDS: readonly string[] = ['factor'];
 
 interface Creator {
   /** Every option that would start it, in node order; the ones whose own level is missing are asked (none dropped). */
@@ -125,17 +136,12 @@ function creatorOf(graph: unknown, operandId: string, storedZero: boolean): Crea
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(rec).filter((n): n is Rec => n !== null && typeof n.id === 'string');
   const edges = (Array.isArray(g?.edges) ? g.edges : []).map(rec)
     .filter((e): e is Rec => e !== null && typeof e.from === 'string' && typeof e.to === 'string');
-  const reaches = (from: string): boolean => {
-    const seen = new Set<string>([from]); const walk = [from];
-    while (walk.length > 0) {
-      const at = walk.pop()!;
-      for (const e of edges) if (e.from === at && !seen.has(e.to as string)) {
-        if (e.to === operandId) return true;
-        seen.add(e.to as string); walk.push(e.to as string);
-      }
-    }
-    return false;
-  };
+  const links = edges as unknown as { from: string; to: string }[];
+  const reaches = (from: string): boolean => reachesAlong(links, from, operandId);
+  // The option's amount is already in the model when a link INTO the operand that the option reaches carries a stated
+  // size (served draft 11: "Starter tier launched → Starter subscribers", 150 from the brief): it is never asked again.
+  const sizedInto = (from: string): boolean => edges.some((e) => e.to === operandId
+    && rec(rec(e.provenance)?.natural_effect) !== null && (e.from === from || reachesAlong(links, from, e.from as string)));
   const options: string[] = []; const missingLevel: string[] = [];
   let level: Creator['level'] = null;
   for (const o of nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && typeof n.label === 'string')) {
@@ -146,7 +152,7 @@ function creatorOf(graph: unknown, operandId: string, storedZero: boolean): Crea
     const value = finite(sets?.raw_value) ?? finite(sets?.value);
     const label = (o.label as string).trim();
     options.push(label);
-    if (value === null) missingLevel.push(label);
+    if (value === null) { if (!sizedInto(o.id as string)) missingLevel.push(label); }
     else level ??= { value, unit: typeof sets?.unit === 'string' ? sets.unit : '' };
   }
   return options.length === 0 ? null : { options, missingLevel, level };
@@ -252,6 +258,9 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
     case 'identity_operand_missing': {
       const missing = w.participants.filter((p) => levelOf(p) === null);
       if (missing.length === 0) return unstated();
+      // ⛔ No control can save a level on any other kind (`LEVEL_WRITER_KINDS`): a part like that is asked NOTHING, and
+      // neither is the rest, since answering them could not unblock the Run (the caller keeps the code's own copy).
+      if (missing.some((p) => !LEVEL_WRITER_KINDS.includes(String(byId.get(p)?.kind)))) return null;
       // Creation is judged PER operand (Codex buddy r1 P1): a created one is 0 today; any other is still asked about today.
       const asks = missing.flatMap((p) => {
         const created = creatorOf(graph, p, false);
@@ -281,6 +290,8 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
       const zeros = w.participants.filter((p) => levelOf(p) === 0);
       const zeroTarget = zeros.length === 0 && (w.stated === 0 || levelOf(w.nodeId) === 0);
       if (zeros.length === 0 && !zeroTarget) return unstated();
+      // ⛔ The same rule: a zero no control can correct is never asked about (a goal's own level has its writer).
+      if (zeroTarget ? target.kind !== 'goal' : zeros.some((p) => !LEVEL_WRITER_KINDS.includes(String(byId.get(p)?.kind)))) return null;
       const created = !zeroTarget && zeros.length === 1 ? creatorOf(graph, zeros[0]!, true) : null;
       if (created !== null) {
         const unit = rec(byId.get(zeros[0]!)?.observed_state)?.unit ?? created.level?.unit;
@@ -363,12 +374,20 @@ export function composeIdentityAskForNode(nodeId: string, graph: unknown): Ident
   const os = (id: string): Rec | null => rec(byId.get(id)?.observed_state);
   const level = (id: string): number | null => finite(os(id)?.raw_value) ?? finite(os(id)?.value);
   const unitless = (id: string): boolean => { const u = os(id)?.unit; return !(typeof u === 'string' && u.trim() !== ''); };
+  // A node PLoT can frame is never "missing" one, unit word or not (`resolveNodeFrame`: its level's cap, else its
+  // `scale_frame`, else its level pair). Served draft 11's ‘Starter subscribers’ has no unit but `scale_frame` 500.
+  const positive = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  const framed = (id: string): boolean => positive(os(id)?.cap) || positive(byId.get(id)?.scale_frame) || (positive(os(id)?.raw_value) && positive(os(id)?.value));
+  const lacksFrame = (id: string): boolean => unitless(id) && !framed(id);
   const target = byId.get(nodeId);
   // The identity NODE is framed too (ISL rule 1; Codex buddy r1 P2): its own unit, or a goal's target unit.
-  const targetUnitless = unitless(nodeId) && !(typeof target?.goal_threshold_unit === 'string' && target.goal_threshold_unit.trim() !== '');
+  const targetUnitless = lacksFrame(nodeId) && !(typeof target?.goal_threshold_unit === 'string' && target.goal_threshold_unit.trim() !== '');
+  // ISL rule 3: a zero operand withholds a product only when its node has a stated level (with none, 0 is an ordinary
+  // level — construction's created part, below). So a zero is inferred only against a stated target.
+  const statedTarget = level(nodeId) !== null;
   const reason: IdentityWithheldReason | null = operands.some((id) => level(id) === null) ? 'identity_operand_missing'
-    : operands.some((id) => level(id) === 0) ? 'identity_zero_level'
-      : operands.some(unitless) || targetUnitless ? 'identity_frame_missing' : null;
+    : statedTarget && operands.some((id) => level(id) === 0) ? 'identity_zero_level'
+      : operands.some(lacksFrame) || targetUnitless ? 'identity_frame_missing' : null;
   return reason === null ? null
     : composeIdentityNotEvaluatedAsk([{ code: IDENTITY_NOT_EVALUATED_CODE, identity: { node_id: nodeId, participants: operands, withheld_reason: reason } }], graph);
 }

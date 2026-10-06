@@ -25,6 +25,7 @@ import { inertRiskBranch } from '../../graph/inert-risk.js';
 import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from './product-goal-extra-parent.js';
 import { foldPassThroughRateOntoUsersPrice, sayRateOperandIsUsersPrice } from './product-goal-rate-operand.js';
 import { oneRoutePerEffect } from './one-route-per-effect.js';
+import { optionsCreating } from './option-creates.js';
 import { isChangeFrame } from './limit-frame.js';
 import {
   CEE_GOAL_THRESHOLD_FRAME,
@@ -4657,9 +4658,46 @@ function admitOnce(
       if (at !== null && defined.has(at[1]!)) loss.splice(i, 1);
     }
   }
+  /**
+   * ⭐ A PRODUCT PART AN OPTION CREATES IS 0 TODAY — OLUMI'S READING, SAID ONCE (Science d5 #87 6007736377 (i); DL 6 Oct,
+   * Acceptance G1 draft 11 on CEE 231affbe). The brief's "each starter subscriber costs about £6 a month in support" was
+   * declared as the user's product ‘Starter-tier support cost’ = ‘Starter subscribers’ × ‘Support cost per starter
+   * subscriber’. ‘Starter subscribers’ is an outcome, so no control can give it a level, and it had none. ISL refused
+   * EVERY Run (`identity_operand_missing`; a stated identity's refusal stands), and the user was asked a level they could
+   * not save, after every Run. A part with no level today that an option CREATES (`optionsCreating`: the option's own
+   * creation verb, and its path reaches the part) is 0 today: Olumi's reading (`cee_inference`, never the user's), said
+   * once among what was done with the brief, where the user can correct it. The same holds for Olumi's own product (served
+   * witness draw 6 on b501eda4: #416 withheld every option's chance over the same part). Only on a product whose node has
+   * no level of its own: with one, ISL's ratio needs every part above 0 (`identity_zero_level`), so the part is left to
+   * the ask. A part with any level, or one no option creates, is untouched.
+   */
+  const levelled = (n: AdmittedNode | undefined): boolean => typeof n?.observed_state?.value === 'number' && Number.isFinite(n.observed_state.value);
+  const statusQuoIds = new Set(levers.nodes.filter((n) => n.kind === 'option' && (declaredStatusQuoIds.has(n.id) || n.is_baseline === true)).map((n) => n.id));
+  const createdZero = new Map<string, { label: string; options: string[] }>();
+  for (const [carrierId, carrier] of carriers) {
+    if (carrier.operation !== 'product' || levelled(levers.nodes.find((n) => n.id === carrierId))) continue;
+    for (const partId of carrier.factor_ids) {
+      const part = levers.nodes.find((n) => n.id === partId);
+      if (part === undefined || levelled(part) || createdZero.has(partId)) continue;
+      const options = optionsCreating(levers.nodes, finalEdges, partId, statusQuoIds);
+      if (options.length > 0) createdZero.set(partId, { label: part.label, options });
+    }
+  }
+  for (const [id, z] of createdZero) {
+    const quoted = z.options.map((o) => `‘${o}’`);
+    const by = quoted.length === 1 ? quoted[0]! : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+    loss.push({
+      field_path: `nodes[${id}].created_part_zero`,
+      before: null,
+      after: { value: 0, created_by: [...z.options] },
+      reason: `‘${z.label}’ is 0 today, since ${by} would start it.`,
+      severity: 'info',
+    } as RepairEntry);
+  }
+  const atZero = (n: AdmittedNode): AdmittedNode => (createdZero.has(n.id) ? { ...n, observed_state: { value: 0, source: 'cee_inference' } } : n);
   const admittedNodes = carriers.size === 0
     ? levers.nodes
-    : levers.nodes.map((n) => (carriers.has(n.id) ? { ...n, nonlinear_identity: carriers.get(n.id)! } : n));
+    : levers.nodes.map((n) => (carriers.has(n.id) ? { ...atZero(n), nonlinear_identity: carriers.get(n.id)! } : atZero(n)));
 
   return {
     nodes: admittedNodes,
