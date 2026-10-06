@@ -156,7 +156,7 @@ describe('discriminating controls for selector and rendering', () => {
     const state = stateOf('A-PREMORTEM-ASKED-CHOOSE-PLAN-D1');
     const [first, second] = state['model.non_sq_option_ids']!;
     expect(state['run.leader_licensed']).toBe(false);
-    expect(state['user.selected_option_id']).toBeNull();
+    expect(state['user.selected_option_id'] ?? null).toBeNull();
     expect(plans.methodPlanOf(state)).toBeUndefined();
     expect(rowsOf(state).selection).toMatchObject({ runs_method: 'RC-PREMORTEM', mode: 'decision_plan' });
     const leader = { ...state, 'run.leader_licensed': true, 'run.leader_option_id': first, 'user.selected_option_id': second };

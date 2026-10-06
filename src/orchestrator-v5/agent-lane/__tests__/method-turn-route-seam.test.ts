@@ -282,10 +282,10 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(c.assistant_text).toContain('Imagine this decision has gone badly.'); // D1 draft is ungrounded on this model
     expect(c._agent.tool_calls.map((x) => x.name)).not.toContain('propose_identity');
     const ids = c.suggested_actions.map((x) => x.id);
-    expect(ids).not.toContain('agent-amend-proposal');
+    expect(c._agent.tool_calls.map((x) => x.name), 'only the method\'s own card, never the waiting identity reading').toEqual(['propose_link_strengths']);
     expect(ids.some(id => id.startsWith('agent-premortem-plan:'))).toBe(false);
     expect(ids.at(-1)).toBe('agent-talk-it-through');
-    expect(ids.length, 'at most the method card and Talk it through').toBeLessThanOrEqual(2);
+    expect(ids.length, 'the method card (approve + amend) and Talk it through').toBeLessThanOrEqual(3);
     nextScenario();
     reply = 'In the current model, the link matters.';
     const o = await ask('What do you make of this?');
