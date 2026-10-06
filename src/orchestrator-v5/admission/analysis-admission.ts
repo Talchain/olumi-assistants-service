@@ -163,6 +163,7 @@ import type { RunAdmission } from '../tools/handlers/analysis-ready-core.js';
 import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { computeAnalysisAffectingGraphHashSha256 } from '../context/graph-hash.js';
+import { unsizedLeaderGoalPaths } from '../agent-lane/goal-certainty.js';
 import type { CanonicalReadinessIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { pickGoalThresholdTrio } from '../../utils/goal-threshold-trio.js';
 import {
@@ -1122,11 +1123,18 @@ function toMissingInput(issue: CanonicalReadinessIssue): MissingImportantInput {
 function deriveMode(
   admission: RunAdmission,
   semanticSufficient: boolean,
+  graph: unknown,
 ): PermittedAnalysisMode {
   if (!admission.willProceed) {
     return admission.strict.safeToAnalyse ? 'exploratory' : 'none';
   }
-  return semanticSufficient ? 'comparative_leader' : 'quantified_provisional';
+  const optionIds = arrayOf(graph, 'nodes')
+    .filter((node) => node.kind === 'option' && typeof node.id === 'string')
+    .map((node) => node.id as string)
+    .filter((id) => !admission.plan.excluded_option_ids.includes(id));
+  // No run evaluations or scored interventions exist yet; use the licence's graph defaults.
+  return semanticSufficient && unsizedLeaderGoalPaths(graph, optionIds, undefined, undefined).length === 0
+    ? 'comparative_leader' : 'quantified_provisional';
 }
 
 /**
@@ -1290,7 +1298,7 @@ export function analysisAdmissionFrom(
   // the run cannot test withholds only the claims made AGAINST it (the goal chance, in the Run: `TARGET_CLAIM_FAILURES`),
   // never the ordering a run with no target shows. So the target verdict no longer lowers the mode. Its sentence still
   // reaches the user before any Run through the readiness view (`notTargetTestableSentence`, read from the graph).
-  const mode: PermittedAnalysisMode = deriveMode(admission, semanticSufficient);
+  const mode: PermittedAnalysisMode = deriveMode(admission, semanticSufficient, graph);
 
   // ⚠ `assessment.blockingIssues`, NOT `strict.issues`. `strict.issues` is the
   // EXHAUSTIVE record (carrier + blocking); this field is what is MISSING. And
