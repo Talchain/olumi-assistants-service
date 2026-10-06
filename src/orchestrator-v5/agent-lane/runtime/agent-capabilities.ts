@@ -1539,7 +1539,10 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
       return `Nothing was prepared: the user's figure is more than the analysis can represent on the range the model uses for "${from.label}"`
         + `${rangeOf(from.id)} and "${to.label}"${rangeOf(to.id)}, so it would be cut short. Repeat their figure in their own words, and say `
         + 'plainly that it is that range, not their figure, that stops it being used here. Never ask them to change their figure first, '
-        + 'and never shrink it yourself. That range cannot be changed from this conversation yet, so do not offer to change it.';
+        + 'and never shrink it yourself. Nothing was recorded. Then give them the one route that works today (S5t: never a refusal '
+        + 'with no way forward), in exactly these words: "You can set how strong this link is now: on the canvas, click the link from '
+        + `\u201c${from.label}\u201d to \u201c${to.label}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. `
+        + 'That records how strong you judge the link, not your figure."';
     }
     case 'out_of_domain':
       return `Nothing was prepared: across the options, the user's figure would take "${to.label}" outside the range it can hold. Repeat `
@@ -2762,6 +2765,8 @@ export function createAgentCapabilities(
         expected: { graph_hash: expectedHash, edge_token: item.edge_token }, quote: item.quote, reading_token: item.reading_token,
         ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}),
         ...(item.reversal !== undefined ? { reversal: item.reversal } : {}), ...(item.link_selected ? { link_selected: true } : {}),
+        // S5t: a frame refit only where the door admits one — ONE approved link goes to the `link_effect` door (below).
+        ...(approvedEffects.length === 1 ? { frameRefit: true as const } : {}),
         lastRunIdentityUse: approvedRead.identity_run_use ?? null });
       if (dry.kind === 'refused') {
         const from = { id: item.from, label: approvedRead.nodes.find((n) => n.id === item.from)?.label ?? item.from };
@@ -3492,7 +3497,9 @@ export function createAgentCapabilities(
           const dry = applyLinkEffectEdit({ persistedGraph: working, from: from.id, to: to.id, effect,
             expected: { graph_hash: expectedHash, edge_token: edgeToken }, quote: said,
             ...unitReadings, ...consent,
-            reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null });
+            reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null,
+            // S5t: a group of ONE is approved through the one-link door, the only door that admits a frame refit.
+            ...(grouped.length === 1 ? { frameRefit: true as const } : {}) });
           if (dry.kind === 'refused') {
             const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(working, from.id, to.id, g.identity_run_use ?? null) : null;
             fail(dry.reason, definition !== null ? `${definitionalLinkRefusalText(working, definition)} Tell the user exactly this.`
@@ -3607,7 +3614,8 @@ export function createAgentCapabilities(
         expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said,
         ...unitReadings, ...consent,
         // A dry run of the reading the card will show: its own token, so every refusal it returns is about the write.
-        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null });
+        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null,
+        frameRefit: true });
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,
