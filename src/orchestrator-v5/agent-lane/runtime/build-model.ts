@@ -36,7 +36,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { collapsedChainIssue, collapsedChains, costOffRevenueLine, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
+import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
 import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
@@ -1696,7 +1696,7 @@ export async function buildModelFromBrief(
             || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
             || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
           // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
-          chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted.edges, firstCandidate)) &&
+          chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted, firstCandidate)) &&
           // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
           (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
           // The collapsed quantity is the one risk the chain issue asks the retry to replace.
@@ -1723,8 +1723,7 @@ export async function buildModelFromBrief(
           // the brief's), nor a cost as off the revenue when the adopted model still links it in.
           const adoptedLabels = new Set([...retryCandidate.factors, ...retryCandidate.risks, ...retryCandidate.outcomes].map((q) => canonicalLabel(q.label)));
           mechanismsUnmodelled = mechanismsUnmodelled.filter((m) => !adoptedLabels.has(canonicalLabel(m.label)));
-          costsOffRevenue = costsOffRevenue.filter((c) => !retryCandidate.links.some((l) => canonicalLabel(l.from) === canonicalLabel(c.cost)
-            && canonicalLabel(l.to) === canonicalLabel(retryCandidate.goal.metric)));
+          costsOffRevenue = costsAgainst(costsOffRevenue, retryCandidate);
           size = retrySize;
           // ⛔ An adopted retry must not erase what the first pass had to disclose
           // (review 5822933692, B3): a retry that echoes the prepared candidate

@@ -67,21 +67,12 @@ function briefSupport(label: string, brief: string): number {
   return Math.max(0, ...sentencesOf(brief).map((s) => { const said = wordsOf(s).map(base); return content.filter((w) => said.some((x) => sameWord(x, w))).length / content.length; }));
 }
 /**
- * ⛔ A MECHANISM THE BRIEF STATES IN OTHER WORDS IS KEPT (Science d5 6011168471's contrast: "some existing customers may
- * downgrade to the starter tier" IS ‘MRR lost to starter cannibalisation’; Codex #2662 r1 P1-2). Paraphrase cannot be read
- * from words, so the rule fails safe: a brief sentence that writes NO figure (a qualitative statement, never one of the
- * facts the model sizes) and names any content word of the label beyond the goal's own and the generic loss words is
- * taken as the user's, and the mechanism is kept. Measured on every stored draft: it keeps none of the served invented
- * mechanisms (no T1b sentence without a figure names a starter, support or service word).
+ * ⚠ KNOWN LIMIT, NAMED (Codex #2662 r1 P1-2 → r2 P1-1): a mechanism the brief states only in OTHER words ("some existing
+ * customers may downgrade to the starter tier" for ‘MRR lost to starter cannibalisation’) is kept when the drafter CITES it
+ * ('explicit'), Science d5's own predicate ("no span the drafter cites and no brief sentence holding the label's content
+ * words"). Marked 'inferred', it is cut AND challenged by name, so the user can say it is theirs. A word-overlap keep was
+ * tried and refused: one shared word ("starter", "pricing") kept invented mechanisms the brief never states.
  */
-const GENERIC = new Set(['lost', 'lose', 'loss', 'losses', 'gain', 'gains', 'risk', 'risks', 'impact', 'effect', 'effects', 'change', 'changes']);
-function namedByAQualitativeSentence(label: string, goal: string, brief: string): boolean {
-  const goalWords = new Set([...wordsOf(goal), ...REVENUE].map(base));
-  const content = wordsOf(label).filter((w) => !FILLER.has(w) && !TIME.has(w) && !GENERIC.has(base(w)) && !goalWords.has(base(w))).map(base);
-  if (content.length === 0) return false;
-  return sentencesOf(brief).some((s) => !/\d/u.test(s) && wordsOf(s).map(base).some((x) => content.some((w) => sameWord(x, w))));
-}
-
 /** An irregular past form read as its verb ("deals WON" names a "win rate"), local to this reading; never `sameWord` itself. */
 const IRREGULAR: Record<string, string> = { won: 'win', lost: 'lose', paid: 'pay', sold: 'sell', bought: 'buy', grew: 'grow', grown: 'grow',
   spent: 'spend', kept: 'keep', held: 'hold', made: 'make', gave: 'give', given: 'give', brought: 'bring', left: 'leave', taken: 'take', took: 'take' };
@@ -201,8 +192,7 @@ export function withoutUnsupportedMechanisms(candidate: CandidateModel, brief: s
   }
   const risks = candidate.risks.filter((r) => k(r.label) !== k(goal) && r.provenance !== 'explicit' && r.analysis_participation !== 'retained_excluded'
     && !setByOption.has(k(r.label)) && !inIdentity.has(k(r.label)) && !limited.has(k(r.label)) && !briefFigureAt(r.label)
-    && briefSupport(r.label, brief) <= 0.5 && !namedByAQualitativeSentence(r.label, goal, brief) && !keep(r.label)
-    && intoGoalOnly(r.label) && reached.has(k(r.label)));
+    && briefSupport(r.label, brief) <= 0.5 && !keep(r.label) && intoGoalOnly(r.label) && reached.has(k(r.label)));
   const revenue = isRevenueGoal(goal);
   const labels = [...candidate.factors, ...candidate.risks, ...candidate.outcomes].map((q) => q.label);
   const reachedBefore = new Set(labels.filter((l) => reachesGoal(candidate, l)).map(k));
@@ -352,19 +342,38 @@ export function collapsedChainIssue(c: CollapsedChain): string {
 /**
  * Whether a retry draws a collapsed chain as the user's (DL: adopt ONLY then): both sentences are bound as the user's on
  * some registered link (`source_quote`), no drafted link still carries the product, the collapsed quantity is gone (node
- * and links), and every link the retry newly draws out of the chain's source is sized by the user (Codex #2662 r1 P1-3: a
- * retry that keeps the collapsed quantity at £599, or renames it, double counts the loss).
+ * and links), and every link the retry newly draws out of the chain's source REGISTERS as the user's size (Codex #2662 r1
+ * P1-3, r2 P1-2/P2-3: admission's `magnitude`, never the drafter's raw tag — a £599 tagged 'explicit' registers as Olumi's
+ * estimate, and a re-targeted link tagged 'ai_proposed' can register as the user's).
  */
-export function drawsChainAsTheUsers(c: CollapsedChain, retry: CandidateModel, registeredEdges: readonly { readonly provenance?: unknown }[], first: CandidateModel): boolean {
-  const quotes = new Set(registeredEdges.map((e) => (typeof e.provenance === 'object' && e.provenance !== null ? (e.provenance as Record<string, unknown>).source_quote : undefined))
-    .filter((q): q is string => typeof q === 'string'));
+export function drawsChainAsTheUsers(
+  c: CollapsedChain, retry: CandidateModel,
+  registered: { readonly nodes: readonly { readonly id?: unknown; readonly label?: unknown }[]; readonly edges: readonly { readonly from?: unknown; readonly to?: unknown; readonly provenance?: unknown }[] },
+  first: CandidateModel,
+): boolean {
+  const prov = (e: { readonly provenance?: unknown }): Record<string, unknown> => (typeof e.provenance === 'object' && e.provenance !== null ? e.provenance as Record<string, unknown> : {});
+  const quotes = new Set(registered.edges.map((e) => prov(e).source_quote).filter((q): q is string => typeof q === 'string'));
   const carriesProduct = retry.links.some((l) => typeof l.effect_amount === 'number' && typeof l.effect_per_source_change === 'number'
     && l.effect_per_source_change !== 0 && Math.abs(Math.abs(l.effect_amount / l.effect_per_source_change) - c.product) < 1e-9 * Math.max(1, c.product));
   const through = k(c.through);
   const throughGone = ![...retry.factors, ...retry.risks, ...retry.outcomes].some((q) => k(q.label) === through)
     && !retry.links.some((l) => k(l.from) === through || k(l.to) === through);
+  const idOf = new Map(registered.nodes.filter((n) => typeof n.label === 'string').map((n) => [k(n.label as string), n.id] as const));
   const before = new Set(first.links.filter((l) => k(l.from) === k(c.from)).map((l) => k(l.to)));
-  const newOutOfSourceAreTheUsers = retry.links.filter((l) => k(l.from) === k(c.from) && !before.has(k(l.to)))
-    .every((l) => (l.effect_provenance ?? null) === 'explicit' && typeof l.effect_amount === 'number');
+  const newOutOfSourceAreTheUsers = retry.links.filter((l) => k(l.from) === k(c.from) && !before.has(k(l.to))).every((l) => {
+    const e = registered.edges.find((x) => x.from === idOf.get(k(l.from)) && x.to === idOf.get(k(l.to)));
+    return e !== undefined && prov(e).magnitude === 'user_stated';
+  });
   return c.sentences.every((s) => quotes.has(s)) && !carriesProduct && throughGone && newOutOfSourceAreTheUsers;
+}
+
+/**
+ * The cost lines, read again against the model that registers (Codex #2662 r2 P2-4: an adopted retry can restore a causal
+ * route, or the accounting link itself). A cost the model links straight into the goal again is not said; one with any
+ * other way to the goal is said as not taken off pound for pound; one with none, as not changing it. Pure.
+ */
+export function costsAgainst(costs: readonly CostOffRevenue[], model: CandidateModel): CostOffRevenue[] {
+  const goal = k(model.goal.metric);
+  return costs.filter((c) => !model.links.some((l) => k(l.from) === k(c.cost) && k(l.to) === goal))
+    .map((c) => (reachesGoal(model, c.cost) ? { ...c, stillReaches: true } : { cost: c.cost, goal: c.goal }));
 }

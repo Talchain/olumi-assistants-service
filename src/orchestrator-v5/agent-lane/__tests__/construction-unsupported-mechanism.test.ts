@@ -382,10 +382,10 @@ describe('Codex r1: the buddy\'s inputs', () => {
     expect(w.mechanisms).toEqual([]);
     expect(w.model.factors.map((f) => f.label)).toEqual(expect.arrayContaining(['Support backlog', 'Delivery delay']));
   });
-  it('P1-2 (d5\'s own contrast, provenance as served): "some existing customers may downgrade to the starter tier" keeps ‘MRR lost to starter cannibalisation’', async () => {
+  it('⚠ KNOWN LIMIT (r1 P1-2, d5\'s predicate): a paraphrase the drafter marks \'inferred\' is cut, and CHALLENGED BY NAME (never silent); cited, it is kept (the d5 contrast CONTROL above)', async () => {
     const { r, g } = await build(FX['draft-2'], { brief: `${BRIEF} Some existing customers may downgrade to the starter tier.` });
-    expect(ids(g)).toContain('mrr_lost_to_starter_cannibalisation');
-    expect([...(r.open_questions ?? []), ...(r.not_represented ?? [])].filter((x: string) => x.includes('hasn’t modelled'))).toEqual([]);
+    expect(ids(g)).not.toContain('mrr_lost_to_starter_cannibalisation');
+    expect(r.open_questions).toContain(challenge('MRR lost to starter cannibalisation'));
   });
   it('P1-3: a retry that draws the user\'s chain but KEEPS the collapsed quantity (now £599) is never adopted', async () => {
     const { g, trace } = await build(FX['draft-4'], { retry: (x) => {
@@ -424,6 +424,50 @@ describe('Codex r1: the buddy\'s inputs', () => {
     expect(w.model.links.some((l) => l.from === 'Starter-tier support cost' && l.to === GOAL)).toBe(false);
     expect(w.costs).toEqual([{ cost: 'Starter-tier support cost', goal: GOAL, stillReaches: true }]);
     expect(costOffRevenueLine(w.costs)).toBe('‘Starter-tier support cost’ is a cost, so it isn’t taken off ‘monthly recurring revenue’ pound for pound; it would matter for profit.');
+  });
+});
+
+/** Codex buddy #2662 round 2 (gpt-6.1-sol, high, cap reached): each finding's own input, RED on 2d4165cb. */
+describe('Codex r2: the buddy\'s inputs', () => {
+  it('P1-1: a brief sentence about a DIFFERENT mechanism ("may downgrade to the starter tier") never keeps ‘Starter-tier service degradation’', async () => {
+    const { r, g } = await build(FX['draft-1'], { brief: `${BRIEF} Some existing customers may downgrade to the starter tier.` });
+    expect(ids(g)).not.toContain('starter_tier_service_degradation');
+    expect(r.open_questions).toContain(challenge('Starter-tier service degradation'));
+    expect(gates(g)).toEqual({ placeholder: [], target: 'testable', failures: [] });
+  });
+  it('P1-2: a renamed £599 route tagged \'explicit\' by the drafter registers as Olumi\'s estimate → never adopted', async () => {
+    const { trace } = await build(FX['draft-4'], { retry: (x) => {
+      const y = usersChain(x);
+      return { ...y, risks: [...y.risks, { label: 'MRR lost to churn', provenance: 'inferred' }],
+        links: [...y.links, L('Price rise', 'MRR lost to churn', 'positive', 599, 1, 'explicit'), L('MRR lost to churn', GOAL, 'negative', -1, 1, 'ai_proposed')] };
+    } });
+    expect(trace.outcome).not.toBe('adopted');
+  });
+  it('P2-3: the user\'s chain whose re-targeted link keeps the drafter\'s \'ai_proposed\' tag but REGISTERS as the user\'s is adopted', async () => {
+    const { g, trace } = await build(FX['draft-4'], { retry: (x) => {
+      const y = usersChain(x);
+      return { ...y, links: y.links.map((l: Rec) => (l.from === 'Price rise' && l.to === 'Customers lost to price rise' ? { ...l, provenance: 'inferred', effect_provenance: 'ai_proposed' } : l)) };
+    } });
+    expect(trace.outcome).toBe('adopted');
+    expect(g.edges.find((e: Rec) => e.from === 'price_rise' && e.to === 'customers_lost_to_price_rise')?.provenance).toMatchObject({ magnitude: 'user_stated', source_quote: S1 });
+    expect(ids(g)).not.toContain('mrr_lost_to_price_driven_churn');
+  });
+  it('P2-4: an adopted retry that restores the user\'s causal route from the cost is said against THAT model (not taken off pound for pound), never "doesn\'t change"', async () => {
+    const c = structuredClone(FX['draft-2']);
+    const raise = c.options.find((o: Rec) => o.label === 'Raise prices 10%');
+    const kept = raise.interventions; raise.interventions = []; raise.changes = ['Price rise'];
+    const brief = `${BRIEF} Support quality is currently 10 points. Each extra £100 of Starter-tier support cost lowers Support quality by 1 point. `
+      + 'Each extra Support quality point adds £100 a month to monthly recurring revenue.';
+    const { r, trace } = await build(c, { brief, retry: (x) => ({ ...x,
+      options: x.options.map((o: Rec) => (o.label === 'Raise prices 10%' ? { ...o, interventions: kept } : o)),
+      factors: [...x.factors, { label: 'Support quality', role: 'observable', baseline_known: true, baseline_value: 10, unit: 'points', provenance: 'explicit', plausible_max: 100 }],
+      outcomes: [...x.outcomes.filter((o: Rec) => o.label !== 'Starter-tier support cost'), { label: 'Starter-tier support cost', provenance: 'explicit', unit: 'GBP per month', plausible_max: 5000 }],
+      links: [...x.links, L('Starter tier subscribers', 'Starter-tier support cost', 'positive', 6, 1, 'explicit'),
+        L('Starter-tier support cost', 'Support quality', 'negative', -1, 100, 'explicit'), L('Support quality', GOAL, 'positive', 100, 1, 'explicit')] }) });
+    expect(trace.outcome, 'PRECONDITION: adopted').toBe('adopted');
+    const said = (r.not_represented ?? []).filter((x: string) => x.includes('‘Starter-tier support cost’'));
+    expect(said.filter((x: string) => x.includes('doesn’t change'))).toEqual([]);
+    expect(said.filter((x: string) => x.includes('pound for pound'))).toHaveLength(1);
   });
 });
 
