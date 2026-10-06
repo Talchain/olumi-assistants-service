@@ -517,6 +517,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           const {
             natural_effect: _naturalEffect,
             magnitude: _magnitude,
+            mean_projected: _projectedMean,
             reasoning: _reasoning,
             clamped_from: _clampedFrom,
             ...existingProvenance

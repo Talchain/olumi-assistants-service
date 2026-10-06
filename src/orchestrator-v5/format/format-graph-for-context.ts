@@ -43,7 +43,7 @@ import {
 } from '../../orchestrator/context/graph-compact.js';
 import type { ContextPackGraph } from '../context/context-pack-assembler.js';
 import { NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
-import { edgeBandFromMagnitude } from './edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from './edge-strength-bands.js';
 
 export interface DisplaySafeNode {
   readonly id: string;
@@ -453,8 +453,8 @@ const NEGLIGIBLE_BIDIRECTED_PHRASE = `negligible co-movement, ${BIDIRECTED_COMMO
  */
 const DIRECTED_RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
   NEGLIGIBLE_DIRECTED_PHRASE,
-  'weak positive link',
-  'weak negative link',
+  'slight positive link',
+  'slight negative link',
   'moderate positive link',
   'moderate negative link',
   'strong positive link',
@@ -485,8 +485,8 @@ const DIRECTED_RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
  */
 const BIDIRECTED_RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
   NEGLIGIBLE_BIDIRECTED_PHRASE,
-  `weak positive co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
-  `weak negative co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+  `slight positive co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
+  `slight negative co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
   `moderate positive co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
   `moderate negative co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
   `strong positive co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`,
@@ -497,7 +497,10 @@ const BIDIRECTED_RELATIONSHIP_PHRASES: ReadonlySet<string> = new Set([
 
 function asAllowedRelationship(value: unknown, isBidirected: boolean): string | undefined {
   const allowed = isBidirected ? BIDIRECTED_RELATIONSHIP_PHRASES : DIRECTED_RELATIONSHIP_PHRASES;
-  return typeof value === 'string' && allowed.has(value) ? value : undefined;
+  // A STORED legacy phrase in the enum's word ("weak positive link") is the same band, said the canvas's way: normalised,
+  // never dropped (dropping would fall back to "negligible link", a different and false claim).
+  const said = typeof value === 'string' && value.startsWith('weak ') ? `${CANVAS_BAND_WORD.weak} ${value.slice('weak '.length)}` : value;
+  return typeof said === 'string' && allowed.has(said) ? said : undefined;
 }
 
 /**
@@ -526,14 +529,14 @@ function extractNodeUnit(raw: RawNodeShape): string | undefined {
  *   0.85  → "very strong positive link"   (bands: the ONE edge-strength table,
  *   0.55  → "strong positive link"         `edge-strength-bands.ts` — the canvas's own
  *   0.30  → "moderate positive link"       cuts, so the Agent names a link as the canvas
- *  -0.10  → "weak negative link"            draws it)
+ *  -0.10  → "slight negative link"          draws it, in its words: CANVAS_BAND_WORD)
  *   0.02  → "negligible link"            (sign suppressed below NEAR_ZERO_INFLUENCE_THRESHOLD)
  */
 export function relationshipPhrase(signedStrength: number): string {
   if (!Number.isFinite(signedStrength)) return NEGLIGIBLE_DIRECTED_PHRASE;
   const abs = Math.abs(signedStrength);
   if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return NEGLIGIBLE_DIRECTED_PHRASE;
-  const band = edgeBandFromMagnitude(abs);
+  const band = CANVAS_BAND_WORD[edgeBandFromMagnitude(abs)];
   const sign = signedStrength < 0 ? 'negative' : 'positive';
   return `${band} ${sign} link`;
 }
@@ -564,7 +567,7 @@ export function bidirectedRelationshipPhrase(signedStrength: number): string {
   if (!Number.isFinite(signedStrength)) return NEGLIGIBLE_BIDIRECTED_PHRASE;
   const abs = Math.abs(signedStrength);
   if (abs < NEAR_ZERO_INFLUENCE_THRESHOLD) return NEGLIGIBLE_BIDIRECTED_PHRASE;
-  const band = edgeBandFromMagnitude(abs);
+  const band = CANVAS_BAND_WORD[edgeBandFromMagnitude(abs)];
   const sign = signedStrength < 0 ? 'negative' : 'positive';
   return `${band} ${sign} co-movement, ${BIDIRECTED_COMMON_CAUSE_QUALIFIER}`;
 }

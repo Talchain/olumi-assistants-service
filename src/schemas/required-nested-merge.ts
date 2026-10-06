@@ -151,3 +151,6 @@ export function mergeRequiredNestedWrite(
   }
   return { ...base, ...filtered };
 }
+
+/** R8 writer guard (#2613): ONE implementation, in the import-free `link-sizing`; this seam only re-exports it for graph-management. */
+export { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';

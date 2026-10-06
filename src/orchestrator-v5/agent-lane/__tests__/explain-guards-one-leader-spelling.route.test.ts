@@ -575,6 +575,52 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     expect((await coldState()).analysis).not.toHaveProperty('run_delta');
   });
 
+  // ⭐ S7 (D4 lease #87 6005636960; DL YES with conditions): a pair the model is NOT shown as licensed still gets Olumi's own
+  // leader-free record of what changed (`rerun_record`, rerun-explanation.ts), so the typed "what changed since the last run?"
+  // has the record. The pins above are unchanged: `run_delta` stays out of the model's input for these pairs.
+  const leaderFreePins = (record: Json) => {
+    expect(Object.keys(record).sort()).toEqual(['attribution_case', 'code_line', 'prior_withheld', 'use']);
+    for (const [field, value] of Object.entries(record)) {
+      const said = JSON.stringify(value);
+      for (const id of ['opt-a', 'opt-b']) expect(said, `${field} carries option id ${id}`).not.toContain(id);
+      expect(said, `${field} names a leader`).not.toMatch(/leader|leading_option/i);
+      expect(said, `${field} carries win probabilities`).not.toMatch(/win_probabilit/i);
+      expect(said, `${field} carries a share`).not.toMatch(/\d\s?%/);
+    }
+  };
+
+  it.each(['missing separation', 'near tie', 'withheld leaf'])('S7: canonical withheld %s → the typed loop and the cold read carry the leader-free rerun record, never the delta', async kind => {
+    const answer = await canonicalPair((facts) => {
+      const current = facts[1]!.result;
+      if (kind === 'missing separation') delete current.enrichment.robustness;
+      if (kind === 'near tie') current.enrichment.robustness.near_tie.is_tie = true;
+      if (kind === 'withheld leaf') current.constraint_verdict.may_name_leading_option = false;
+    });
+    expect(answer.current_read.run_delta, 'control: the wire delta exists').toBeDefined();
+    for (const state of [await ordinaryLoopState(), await coldState()]) {
+      expect(state.analysis).not.toHaveProperty('run_delta');
+      expect(state.rerun_record, 'the typed path has the record').toBeDefined();
+      leaderFreePins(state.rerun_record);
+    }
+  });
+
+  it('S7: the prior Run\u2019s restriction (withheld → licensed pair) → the record, leader-free; the current licence is not borrowed', async () => {
+    await canonicalPair((facts) => { facts[0]!.result.constraint_verdict.may_name_leading_option = false; });
+    expect(read.analysis_state.leader_claim.permitted).toBe(true);
+    const state = await ordinaryLoopState();
+    expect(state.analysis).not.toHaveProperty('run_delta');
+    leaderFreePins(state.rerun_record);
+  });
+
+  it('S7 TWIN (DL condition 2): a pair proven licensed at both ends → NO rerun record; the model sees the licensed delta exactly as before', async () => {
+    await canonicalPair();
+    const delta = read.current_read.run_delta;
+    for (const state of [await ordinaryLoopState(), await coldState()]) {
+      expect(state.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
+      expect(state).not.toHaveProperty('rerun_record');
+    }
+  });
+
   it('reader → ordinary/recovery inputs share the typed projection and preserve UI wire bytes', async () => {
     const answer = await canonicalPair();
     const delta = answer.current_read.run_delta!;
@@ -688,7 +734,15 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     expect(cold).not.toHaveProperty('goal');
     expect(cold).not.toHaveProperty('goals');
     const { run_delta: _delta, ...analysis } = cold.analysis;
-    expect(JSON.stringify({ ...cold, analysis })).toBe(JSON.stringify(baseline));
+    // ⚠ S7 (D4 lease #87 6005636960): the ONE intended difference. This pair's delta is not shown to the model as licensed,
+    // so the model gets Olumi's leader-free record of it instead, pinned by identity here. EVERYTHING ELSE stays byte-equal
+    // to the baseline: still no goal fabricated, nothing else moved.
+    const { rerun_record: rerunRecord, ...withoutRecord } = cold;
+    expect(baseline).not.toHaveProperty('rerun_record');
+    leaderFreePins(rerunRecord);
+    expect(rerunRecord.code_line).toBe('Nothing you entered changed.');
+    expect(JSON.stringify(rerunRecord)).not.toMatch(/\bgoal\b(?!_path)/i);
+    expect(JSON.stringify({ ...withoutRecord, analysis })).toBe(JSON.stringify(baseline));
   });
 
   it('D3-a: Explain on a current Run with an UNEARNED P(goal)=0 carries that option’s goal_certainty sentence', async () => {

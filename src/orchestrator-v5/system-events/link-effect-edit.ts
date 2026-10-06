@@ -36,7 +36,9 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
+import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -141,6 +143,33 @@ export interface LinkEndUnits {
   readonly storeAsStated?: boolean;
 }
 
+/** The strict NodeV3 carrier a disclosed reading is written as: ONE shape for the writer and every reader of its view. */
+function unitReadingCarrier(reading: LinkEffectUnitReading): { unit: string; source: 'user_stated'; source_quote: string } {
+  const { unit, source_quote } = reading.unit_reading;
+  return { unit, source: 'user_stated', source_quote };
+}
+
+/**
+ * The graph exactly as the writer reads it once the card's disclosed unit readings are applied (a copy; the input is
+ * untouched). The refusal's words read THIS view (red team #87 6004429045): read off the stored graph, an end whose unit
+ * the sentence itself stated looked unitless, and the user was told it "has no unit or scale".
+ */
+export function withLinkEffectUnitReadings(graph: unknown, readings: readonly LinkEffectUnitReading[] | undefined): unknown {
+  if (readings === undefined || readings.length === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return graph;
+  return { ...graph, nodes: graph.nodes.map((n) => {
+    const reading = isRec(n) ? readings.find((r) => r.node_id === n.id) : undefined;
+    return reading === undefined ? n : { ...(n as Rec), unit_reading: unitReadingCarrier(reading) };
+  }) };
+}
+
+/**
+ * ⭐ The points spellings an end whose change is in points may be stated in: U1's leaf (`POINTS_SPELLINGS`), plus the bare
+ * word, exactly as before. ONE list for BOTH arms (red team #87 6004429045: the target arm named only "pp"/"points", so
+ * "1 percentage point of wholesale subscription revenue" was refused 12/12 while the source arm took it). The writer's
+ * comparator folds no points spellings, so every one the leaf owns is named here, derived, never a new table.
+ */
+export const POINTS_STATED: readonly string[] = [...POINTS_SPELLINGS, 'points'];
+
 function hasAdoptedPercentUnit(node: Rec | undefined, magnitude: MagnitudeNode): boolean {
   const candidate = node?.unit_reading;
   const reading = isRec(candidate) ? candidate : undefined;
@@ -174,7 +203,7 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   const sourceOwn = present(unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
     targetUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
     ...(hasAdoptedPercentUnit(sourceEnd, sourceNode) || isPercentageLevelUnit(unitOf(sourceNode), resolveMagnitudeFrame(sourceNode))
-      || sourceNode.percent_level === true ? ['percentage points', 'pp', 'points'] : []));
+      || sourceNode.percent_level === true ? POINTS_STATED : []));
   // ⛔ The points-only rule applies to a % LEVEL target the graph marks `percent_level` from `goal_constraints`
   // (Science, #87 5993238492): "gross margin falls 2%" may mean 2 points or 2% of today's level, so a bare "%" for that
   // target is refused and the user is asked for points. A % goal not so marked keeps the pre-existing comparison
@@ -184,9 +213,9 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   const targetIsLevel = targetNode.percent_level === true || isPercentageLevelUnit(unitOf(targetNode), resolveMagnitudeFrame(targetNode));
   const levelPoints = targetIsLevel ? present(targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode))) : [];
   const targetOwn = [...(targetIsLevel
-    ? (levelPoints.length > 0 ? levelPoints : ['percentage points'])
+    ? (levelPoints.length > 0 ? levelPoints : [POINTS_UNIT])
     : present(unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))),
-    ...(hasAdoptedPercentUnit(targetEnd, targetNode) || targetIsLevel ? ['pp', 'points'] : [])];
+    ...(hasAdoptedPercentUnit(targetEnd, targetNode) || targetIsLevel ? POINTS_STATED : [])];
   const provenance = isRec(found.edge.provenance) ? found.edge.provenance : {};
   const stored = isRec(provenance.natural_effect) ? provenance.natural_effect : undefined;
   const storedUnit = (key: 'amount_unit' | 'per_source_change_unit'): string | undefined =>
@@ -197,6 +226,47 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
     source: { own: sourceOwn, ...(sourceAdopted !== undefined ? { adopted: sourceAdopted } : {}) },
     target: { own: targetOwn, ...(targetAdopted !== undefined ? { adopted: targetAdopted } : {}),
       ...(targetIsLevel && levelPoints.length === 0 ? { storeAsStated: true } : {}) },
+  };
+}
+
+/** An end the user stated by its node's own LABEL, read as that node's count unit (shown on the card for approval). */
+export interface LinkEffectLabelReading {
+  readonly node_id: string;
+  /** The user's words for the unit, exactly as the Agent passed them ("café subscribers"). */
+  readonly said: string;
+  /** The node's own unit the effect is now stated in ("cafés"). */
+  readonly unit: string;
+}
+
+/**
+ * ⭐ RT-6 row 1b (Science ruling #87 6005615422; red team 6005529714, 2 of 3 live sentences): "Every 10 more café
+ * subscribers adds …" names the SOURCE by its label, and the Agent passes those words as the unit. When an end's stated
+ * unit is none of its own but IS its node's label (`labelStandsForCountUnit`: identity, count units only), the effect is
+ * restated in the node's own unit and the reading is returned, so the card says it and the user approves it. It is never
+ * a silent credit. Both arms read the ONE matcher; an end already stated in one of its own units is untouched.
+ * ⛔ Codex r1: the Agent's unit alone proves nothing. The user's sentence (`said`) must COUNT the end by its label, right
+ * after that end's own figure (`sentenceCountsLabel`), or a head noun ("10 more subscribers") would map to "cafés".
+ */
+export function withLabelCountUnits(graph: unknown, from: string, to: string, effect: LinkEffectStatement, said: string):
+  { readonly effect: LinkEffectStatement; readonly label_readings: readonly LinkEffectLabelReading[] } {
+  const ends = linkEffectEndUnits(graph, from, to);
+  if (ends === null || !isRec(graph) || !Array.isArray(graph.nodes)) return { effect, label_readings: [] };
+  const nodes = graph.nodes.filter(isRec);
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  const readEnd = (id: string, stated: string, end: LinkEndUnits, figure: number): LinkEffectLabelReading | undefined => {
+    if (statedInOneOf(stated, [...end.own, end.adopted])) return undefined;
+    const label = nodes.find((n) => n.id === id)?.label;
+    const magnitude = view.get(id);
+    const unit = magnitude === undefined ? undefined : unitOf(magnitude);
+    return typeof unit === 'string' && labelStandsForCountUnit(stated, label, unit) && sentenceCountsLabel(said, figure, label)
+      ? { node_id: id, said: stated, unit } : undefined;
+  };
+  const source = readEnd(from, effect.per_source_change_unit, ends.source, effect.per_source_change);
+  const target = readEnd(to, effect.amount_unit, ends.target, effect.amount);
+  return {
+    effect: { ...effect, ...(source !== undefined ? { per_source_change_unit: source.unit } : {}),
+      ...(target !== undefined ? { amount_unit: target.unit } : {}) },
+    label_readings: [source, target].filter((r): r is LinkEffectLabelReading => r !== undefined),
   };
 }
 
@@ -300,8 +370,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
       const node = nodes.find(n => n.id === reading.node_id);
       if (node === undefined || (reading.node_id !== from && reading.node_id !== to)) return refuse('unit_mismatch');
       // Emit exactly the strict NodeV3 carrier. Extra keys silently drop the whole reading on register/reload.
-      const { unit, source_quote } = reading.unit_reading;
-      node.unit_reading = { unit, source: 'user_stated', source_quote };
+      node.unit_reading = unitReadingCarrier(reading);
     }
   }
 
@@ -354,8 +423,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance } };
   // Olumi's why, its old size, its clamp marker and its "holds by definition" claim describe OLUMI's figure, never the
   // user's (Review Desk; Codex buddy r1): `reasoning` would be read as the stated reason for a user-set link, a stale
-  // `clamped_from` keeps "cut short" asked, and `definitional` would call the user's size a definition.
-  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, definitional: _olumisDefinition, ...keptProvenance } = provenance;
+  // `clamped_from` keeps "cut short" asked, and `definitional` would call the user's size a definition. MC P0: a user size
+  // clears `mean_projected` (Olumi's projected-mean record) together with the mean/magnitude change, so the hash moves.
+  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, definitional: _olumisDefinition, mean_projected: _projectedMean, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
   // RT-6: an end taking this link's stored unit, or a newly disclosed sentence unit, keeps its change in the words

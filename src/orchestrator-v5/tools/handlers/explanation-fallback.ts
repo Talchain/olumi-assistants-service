@@ -39,7 +39,7 @@ import type {
 // rendered the runner-up gap as a magnitude; with those retired, the only
 // percentage this file may speak is an option's OWN win share.
 import { formatProbability } from '../../format/format-analysis-value.js';
-import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 import {
   formatSensitivityDirection,
   hasMaterialInfluence,
@@ -503,13 +503,14 @@ function nameableDrivers(
  * and as the Agent's context phrases it. Sensitivity prose keeps
  * `bandFromMagnitude` (a different quantity).
  *
- * Returns the bare adjective (`weak | moderate | strong | very strong`)
+ * Returns the bare adjective in the canvas's words (`slight | moderate | strong | very strong`)
  * because edge-strength sentences compose it with a noun ("a {band}
  * link") rather than a verb-phrase.
  */
 export function formatEdgeStrengthMagnitude(value: number): string {
-  if (!Number.isFinite(value)) return 'weak';
-  return edgeBandFromMagnitude(Math.abs(value));
+  // The canvas's word for each band (DL D4 row: ONE word per band; `weak` is the enum, "slight" is what users read).
+  if (!Number.isFinite(value)) return CANVAS_BAND_WORD.weak;
+  return CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(value))];
 }
 
 /**

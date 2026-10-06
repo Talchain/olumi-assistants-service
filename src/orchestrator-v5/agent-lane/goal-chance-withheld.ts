@@ -153,9 +153,10 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
     return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PLACEHOLDER_PATH_NOTE, option_ids: ids('option_ids') };
   }
-  // Gate 5 speaks alone too: CEE writes it only on a run nothing else withheld (`run-analysis.ts`).
-  if (warnings.every((w) => w.code === GOAL_FIGURES_PRODUCT_NOT_READ)) {
-    const w = warnings[0]!;
+  // Gate 5 covers EVERY option and keeps its existing explanation when a per-option path also withholds.
+  const product = warnings.find((w) => w.code === GOAL_FIGURES_PRODUCT_NOT_READ);
+  if (product !== undefined) {
+    const w = product;
     const words = typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
     return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PRODUCT_NOT_READ_NOTE, option_ids: ids('option_ids') };

@@ -55,10 +55,20 @@ describe('the verdict (0 LLM)', () => {
   it('Paul: no today\'s level (a) AND his goal is reached only through links nobody sized (c)', () => {
     expect(targetTestabilityOf(FIX.paul)).toEqual({ kind: 'not_testable', goal_id: 'securing_funding', failures: [
       { precondition: 'P1', case: 'a', code: 'missing_goal_baseline' },
-      // RE-PINNED, RT-10 B′ (Science d5 #2606): the (c) failure names the FAILING link by its own two ends. Here it is
-      // into the goal, so the goal is its far end and the words do not change.
       { precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Investment firm meetings', link_to: 'securing funding',
-        link: { from: 'investment_firm_meetings', to: 'securing_funding' } },
+        link: { from: 'investment_firm_meetings', to: 'securing_funding' }, links: [
+        { from: 'investment_firm_meetings', to: 'securing_funding' },
+        { from: 'angel_investor_meetings', to: 'securing_funding' },
+        { from: 'runway_exhaustion', to: 'securing_funding' },
+        { from: 'fac_existing_supporter_outreach', to: 'securing_funding' },
+        { from: 'fundraising_overhead', to: 'securing_funding' },
+        { from: 'investment_firm_outreach', to: 'investment_firm_meetings' },
+        { from: 'warm_connections_pursued', to: 'investment_firm_meetings' },
+        { from: 'warm_connections_pursued', to: 'angel_investor_meetings' },
+        { from: 'angel_investor_outreach', to: 'angel_investor_meetings' },
+        { from: 'fundraising_overhead', to: 'runway_exhaustion' },
+        { from: 'fundraising_overhead', to: 'investment_firm_outreach' },
+      ] },
     ] });
   });
 
@@ -66,7 +76,7 @@ describe('the verdict (0 LLM)', () => {
     expect(notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul))).toBe(
       // RE-PINNED, RT-10 B′ (Science's template edits, #87 5999608477): (c) names the canvas object, and the level
       // question is "What's today's level of {goal}?". The target words and every failing reason are unchanged.
-      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and a size for the link from Investment firm meetings to securing funding. What's today's level of securing funding?");
+      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and a size for the links from Investment firm meetings to securing funding, from Angel investor meetings to securing funding and from Runway exhaustion to securing funding and 8 more. What's today's level of securing funding?");
   });
 
   it('RED (MODEL GENERATION 5913996539): after G6 writes his £0, the target is STILL not testable — the £ path is missing', () => {
@@ -170,10 +180,11 @@ describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn gue
   });
   it('RED: m1 as served → not testable, (c), naming the price', () => {
     const v = targetTestabilityOf(M1);
-    // RE-PINNED, RT-10 B′ (Science d5 #2606): Olumi's guess is the price → churn link, UPSTREAM of mrr, so (c) names
-    // that link by its own ends (it used to say "the link from Pro plan price to mrr", a link the canvas does not have).
-    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: expect.stringMatching(/price/i),
-      link_to: 'Monthly churn rate', link: { from: 'pro_plan_price', to: 'monthly_churn_rate' } }]);
+    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Monthly churn rate', link_to: 'Paying subscribers at 12 months',
+      link: { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' }, links: [
+      { from: 'monthly_churn_rate', to: 'paying_subscribers_at_12_months' },
+      { from: 'pro_plan_price', to: 'monthly_churn_rate' },
+    ] }]);
     // RE-PINNED, RT-10 B′ R2: the verdict no longer caps the mode — m1 is admitted as it is without its target.
     expect(resolveAnalysisAdmission(M1).permitted_analysis_mode).toBe(resolveAnalysisAdmission(withoutTarget(M1)).permitted_analysis_mode);
     expect(reasonOf(resolveAnalysisAdmission(M1)).code).not.toBe('TARGET_NOT_TESTABLE');

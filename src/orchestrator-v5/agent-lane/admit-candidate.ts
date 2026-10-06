@@ -113,7 +113,7 @@ export interface AdmittedEdge {
    * for (`strength_mean`, the staleness key). Both absent on an edge that keeps today's projection unchanged.
    */
   /** `definitional`: the size holds by definition, checked (`definitionalLink`); absent on every other edge. */
-  provenance?: { source: string; reasoning?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; definitional?: true };
+  provenance?: { source: string; reasoning?: string; source_quote?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; definitional?: true; mean_projected?: true };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
 }
@@ -399,7 +399,9 @@ export function admitCandidateLinks(
         ? (link.existence_probability as number)
         : DEFAULT_EXISTS_PROBABILITY,
       effect_direction: link.direction,
-      provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance) },
+      provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance),
+        ...(!authored ? { mean_projected: true as const } : { magnitude: 'olumi_estimate' as const }),
+      },
     };
 
     const key = `${link.from}::${link.to}`;

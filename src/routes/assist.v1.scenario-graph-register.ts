@@ -1,3 +1,4 @@
+import { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
 import { isDeepStrictEqual } from 'node:util';
 import { GoalScopeIdentityConflict, assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, scopeIssuesAfterWrite, scopeOf } from '../orchestrator-v5/agent-lane/goal-scope.js';
 /**
@@ -333,7 +334,8 @@ function sameAnalysisNumbers(a: EdgeRecord, b: EdgeRecord): boolean {
  *   · a field the caller SENT is its statement and is never overwritten;
  *   · changed numbers mean the caller asserted new values (an import of a different model): nothing is carried and
  *     the edge stands as sent;
- *   · an ambiguous match (duplicate endpoint pairs on either side) carries nothing.
+ *   · an ambiguous match (duplicate endpoint pairs on either side) carries no other stored facts; the unchanged-size
+ *     mean_projected carrier is preserved separately below.
  * Nodes are not touched here: the witness measured them byte-identical across a UI re-register.
  *
  * Bound to the SAME server read as the CAS base, and applied BEFORE the persistence projection, the invariant checks
@@ -349,18 +351,43 @@ function withStoredEdgeFactsWhenUnstated<T extends { edges: ReadonlyArray<EdgeRe
   if (storedEdges.length === 0) return graph;
 
   let changed = false;
-  const edges = graph.edges.map((edge) => {
+  const edges = graph.edges.map((submittedEdge) => {
+    let edge = submittedEdge;
     const candidates = storedEdges.filter((s) => sameEdgeKey(edge, s));
+    const endpointMatches = storedEdges.filter((s) => s.from === edge.from && s.to === edge.to);
+    const incomingEndpoints = graph.edges.filter((e) => e.from === edge.from && e.to === edge.to);
+    // Edge ids are not hashed. A unique endpoint pair must keep its carrier even
+    // when the client assigns a new id; other stored facts still need the old key.
+    if (endpointMatches.length === 1 && incomingEndpoints.length === 1) {
+      const guarded = keepMeanProjectionWhenSizeUnchanged(endpointMatches[0], edge);
+      if (guarded !== edge) { edge = guarded; changed = true; }
+    } else {
+      // Ambiguous parallel links cannot be paired by order or count. Every
+      // unchanged size matching a stored carrier keeps it conservatively.
+      for (const prior of endpointMatches) {
+        if (!isEdgeRecord(prior.provenance) || !Object.hasOwn(prior.provenance, 'mean_projected')) continue;
+        const guarded = keepMeanProjectionWhenSizeUnchanged(prior, edge);
+        if (guarded !== edge) { edge = guarded; changed = true; break; }
+      }
+    }
     if (candidates.length !== 1) return edge;
     const match = candidates[0]!;
     if (graph.edges.filter((e) => sameEdgeKey(e, match)).length !== 1) return edge;
+    // Only the unique endpoint case may restore an absent old carrier. An
+    // unflagged id match must not undo the conservative duplicate carry above.
     if (!sameAnalysisNumbers(edge, match)) return edge;
 
     const carried: EdgeRecord = {};
     for (const field of CEE_OWNED_EDGE_FIELDS) {
-      if (Object.prototype.hasOwnProperty.call(edge, field)) continue;
+      if (Object.prototype.hasOwnProperty.call(submittedEdge, field)) continue;
       if (match[field] === undefined) continue;
       carried[field] = structuredClone(match[field]);
+      // Whole-provenance carry remains under full numeric equality, but an
+      // ambiguous stored id must not erase the carrier just preserved above.
+      const storedFact = carried[field];
+      if (field === 'provenance' && isEdgeRecord(storedFact) && isEdgeRecord(edge.provenance)) {
+        carried[field] = { ...storedFact, ...edge.provenance };
+      }
     }
     if (Object.keys(carried).length === 0) return edge;
     changed = true;

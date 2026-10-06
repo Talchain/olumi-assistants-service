@@ -1,3 +1,4 @@
+import { readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { readGoalScopeClaimInput, type GoalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { loadMostRecentPendingActionsIntegrityStrict } from '../orchestrator-v5/build-turn-context.js';
@@ -385,6 +386,9 @@ export async function readScenarioAnalysis(
     // The claim-bearing Run can be newer than the completed Run whose figures
     // are displayed. Any cause for its refusal must come from that Run too.
     const claimFact = newerClaimWithholds ? claimBearing!.fact as RunAnalysisHandlerFact : fact;
+    // An out-of-date Run still records why its comparison was withheld; read that attestation, not today's graph.
+    const unsizedCauseFact = claimFact ?? historical?.fact;
+    const unsizedCause = readUnsizedPathLeaderCause(unsizedCauseFact?.result);
 
     // ⭐ (B) THE ONE ADMISSION VERDICT — the SAME authority and the SAME
     // threading the turn replies use (`route-v2.ts` passes
@@ -474,9 +478,13 @@ export async function readScenarioAnalysis(
             })
             : null;
           return {
-            withheldBecauseUnrequested: (claimFact !== null && leaderWithheldOnlyBecauseUnrequested(claimFact)) || c46?.withheldBecauseUnrequested === true,
+            withheldBecauseUnrequested: (claimFact !== null && leaderWithheldOnlyBecauseUnrequested(claimFact))
+              || (unsizedCause !== undefined && unsizedCauseFact !== undefined && !wasAnalysisRequestedByUser(unsizedCauseFact))
+              || c46?.withheldBecauseUnrequested === true,
             withheldBecauseNonlinearIdentity: c46?.withheldBecauseNonlinearIdentity === true,
-            withheldWithoutConstraintCause: claimFact !== null && leaderWithheldWithoutConstraintCause(claimFact.result),
+            withheldBecauseUnsizedPath: unsizedCause,
+            withheldWithoutConstraintCause: claimFact !== null && (leaderWithheldWithoutConstraintCause(claimFact.result)
+              || unsizedPathLeaderWithheldWithoutConstraintCause(claimFact.result)),
             // F-LIMIT: judged on the SAME fact the permission above was read from (null when out of date), against the
             // limits the user ratified on this graph.
             ...(() => {

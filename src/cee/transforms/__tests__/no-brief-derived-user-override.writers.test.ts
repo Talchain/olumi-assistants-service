@@ -29,6 +29,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import ts from "typescript";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
 
@@ -337,4 +338,57 @@ describe("2.714 revert — the user_override writer set is DERIVED and pinned", 
     const revertedModule = files.map((f) => relative(SRC_ROOT, f));
     expect(revertedModule).not.toContain("cee/transforms/stated-value-honour.ts");
   });
+});
+
+// The original guard's observed_state literal cannot see edge sizing writers.
+// Science Fi, 5 Oct 2026, explicitly reviews a second provenance class here:
+// user_stated MEANS attested by C2 + W3 + C1 + SIGN-1; never user_override.
+// Derive actual object writes and sizeLink call sites with TypeScript's AST,
+// including shorthand user_stated. Comments and schema declarations are not writes.
+const REVIEWED_EDGE_SIZE_WRITERS: Readonly<Record<string, string>> = {
+  'cee/draft/records/projector.ts': 'existing records projector: effectForEdge requires a grounded stated quantity and unambiguous endpoint units/roles before sizeLink receives user_stated true; an existing independent writer, not changed by Fi',
+  'cee/magnitude/link-effect.ts': 'existing converter: emits user_stated magnitude only for its caller-earned user_stated size, preserving the natural effect',
+  'cee/magnitude/frame-defaulted-links.ts': 'existing converter caller: explicitly passes user_stated false; only projects Olumi sizes',
+  'orchestrator-v5/system-events/link-effect-edit.ts': 'existing user edit: a user_specified structured link effect, checked against the endpoints and converted unchanged',
+  'orchestrator-v5/agent-lane/admit-model.ts': 'Fi reviewed by Science 5 Oct 2026: user edit wins; existing strict label door unchanged OR one C2 sentence/link pair under W3, equal node units under C1, and SIGN-1/direction checks; stores that exact sentence as provenance.source_quote through the existing user_stated size path, never changes any value/sign/unit or stamps user_override',
+};
+
+function writesEdgeUserSize(file: string): boolean {
+  const text = readFileSync(file, 'utf8');
+  if (!text.includes('sizeLink') && !text.includes('user_stated')) return false;
+  const tree = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
+  let found = false;
+  const visit = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'sizeLink') found = true;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && ts.isPropertyAccessExpression(n.left) && n.left.name.text === 'magnitude'
+      && ts.isStringLiteral(n.right) && n.right.text === 'user_stated') found = true;
+    if (ts.isObjectLiteralExpression(n)) {
+      const names = n.properties.flatMap(p => p.name && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) ? [p.name.text] : []);
+      for (const p of n.properties) {
+        if (!p.name || (!ts.isIdentifier(p.name) && !ts.isStringLiteral(p.name))) continue;
+        if (p.name.text === 'magnitude' && ts.isPropertyAssignment(p)
+          && ts.isStringLiteral(p.initializer) && p.initializer.text === 'user_stated') found = true;
+        if (p.name.text === 'user_stated' && names.includes('effect_amount') && names.includes('direction')) found = true;
+      }
+    }
+    if (!found) ts.forEachChild(n, visit);
+  };
+  visit(tree);
+  return found;
+}
+
+describe('Science Fi — edge user_stated sizing writers are DERIVED and reviewed', () => {
+  it('pins every actual magnitude stamp or converter sizing door, including shorthand', () => {
+    const files = walkTypeScript(SRC_ROOT);
+    expect(files.length).toBeGreaterThan(100);
+    const writers = files.filter(writesEdgeUserSize).map(f => relative(SRC_ROOT, f)).sort();
+    expect(writers.length).toBeGreaterThan(0);
+    expect(writers).toEqual(Object.keys(REVIEWED_EDGE_SIZE_WRITERS).sort());
+    for (const justification of Object.values(REVIEWED_EDGE_SIZE_WRITERS)) {
+      expect(typeof justification).toBe('string');
+      expect(justification.trim().length).toBeGreaterThanOrEqual(20);
+    }
+  }, 60_000);
 });

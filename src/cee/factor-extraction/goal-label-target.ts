@@ -939,6 +939,23 @@ function canonicalise(text: string): string {
 }
 
 /**
+ * The spans the existing occurrence reader claims as a target or a level.
+ * Fi reuses its located occurrences and role verdicts; it never reparses a figure
+ * or excludes another occurrence merely because the two have equal values.
+ */
+export function nonEffectQuantitySpans(brief: string, labels: readonly string[], targets: readonly { label: string; value: number; unit: string }[] = []): { start: number; end: number }[] {
+  const pair = resolveStatedGoalPairSpan(brief);
+  return scanQuantities(brief).filter(occ => labels.some(label => {
+    const role = judgeOccurrence(brief, occ, label, 'absent', pair);
+    return (role.ok && targets.some(t => t.label === label
+      && sameQuantity(occ, { ...occ, value: classifyUnitScaleClass(t.unit) === 'percent' ? t.value / 100 : t.value, unit: t.unit })))
+      || role.refusal === 'stated_as_current_level'
+      || (role.refusal === 'limit_direction_not_representable' && targets.some(t => t.label === label
+        && sameQuantity(occ, { ...occ, value: classifyUnitScaleClass(t.unit) === 'percent' ? t.value / 100 : t.value, unit: t.unit })));
+  })).map(occ => ({ start: occ.index, end: occ.end }));
+}
+
+/**
  * Derive the goal target from the goal node's own label, attested against the
  * brief AND bound to a target statement in the user's words. See the module
  * header and the ROUND 5 block for why every half is required.

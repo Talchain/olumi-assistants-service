@@ -28,6 +28,7 @@ import {
   isAllowedRunAnalysisAssistantText,
   TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS,
 } from '../coaching/analysis-result-headline.js';
+import { legacyGoalWarning } from '../agent-lane/goal-certainty.js';
 import { goalReadingTailOf } from '../coaching/goal-reading-disclosure.js';
 
 /**
@@ -126,6 +127,16 @@ const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';
  */
 const TEMPLATE_SUFFIX_EXTRACT_RES: ReadonlyArray<RegExp> =
   TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map(({ source }) => new RegExp(source));
+/** Rebuild the Science sentence from the handler's graph and recorded link ids, never from reply prose. */
+function legacyFiguresDisclosureOf(outcome: unknown): string {
+  const source = (outcome as { __legacy_figures_source?: unknown }).__legacy_figures_source;
+  if (source === null || typeof source !== 'object') return '';
+  const { graph, links } = source as { graph?: unknown; links?: unknown };
+  if (!Array.isArray(links) || links.length === 0 || !links.every(l => l !== null && typeof l === 'object'
+    && typeof l.from === 'string' && typeof l.to === 'string')) return '';
+  return ` ${legacyGoalWarning(graph, links).message}`;
+}
+
 const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   if (
     outcome === null ||
@@ -137,7 +148,12 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   const candidate = (outcome as { assistant_text: unknown }).assistant_text;
   // ⭐ The goal-reading tail is REBUILT here from the handler's own graph, never taken from its text (AIQ 5895590866).
   const goalReadingTail = goalReadingTailOf(outcome);
-  if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail)) {
+  const legacyFiguresDisclosure = legacyFiguresDisclosureOf(outcome);
+  if (legacyFiguresDisclosure === '') {
+    if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail)) {
+      return candidate as string;
+    }
+  } else if (isAllowedRunAnalysisAssistantText(candidate, goalReadingTail, legacyFiguresDisclosure)) {
     return candidate as string;
   }
   // Review fix B6 (honesty floor): if the rejected composed summary carried a
