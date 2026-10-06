@@ -58,16 +58,21 @@ function pointsOrShareAsk(label: string, value: number, level: number | undefine
  * words begin with the label's words (case + `singular()` only). "Every 10 more café subscribers" counts "Café
  * subscribers"; "Every 10 more subscribers" does not, whatever unit the Agent passes.
  */
-export function sentenceCountsLabel(said: string, figure: number, label: unknown): boolean {
+export function sentenceCountsLabel(said: string, figure: number, label: unknown, otherEndFigure?: number): boolean {
   if (typeof label !== 'string' || !Number.isFinite(figure) || figure === 0) return false;
+  // ⛔ Codex r2: THIS end's own change occurrence, never any figure of its size. Equal source and target figures, or two
+  // figures of this size in the sentence, leave nothing saying which one counts this end: no reading, never a guess.
+  if (otherEndFigure !== undefined && Math.abs(otherEndFigure) === Math.abs(figure)) return false;
   const want = words(label).map(singular);
-  if (want.length === 0) return false;
-  return findLinkEffectAmounts(said).some((a) => {
-    if (Math.abs(a.magnitude) !== Math.abs(figure)) return false;
-    const got = words(afterChangeWord(said.slice(a.index + a.matchedText.length)))
-      .map((w) => singular(w.replace(/[.,;:!?"'\u2018\u2019\u201c\u201d]+$/u, '')));
-    return want.every((w, i) => got[i] === w);
-  });
+  const hits = findLinkEffectAmounts(said).filter((a) => Math.abs(a.magnitude) === Math.abs(figure));
+  if (want.length === 0 || hits.length !== 1) return false;
+  const hit = hits[0]!;
+  // Closing punctuation only: a possessive mark is kept, so "café subscribers’ customers" never reads as the label.
+  const got = words(afterChangeWord(said.slice(hit.index + hit.matchedText.length))).map((w) => w.replace(/[.,;:!?"\u201c\u201d]+$/u, ''));
+  if (!want.every((w, i) => got[i] !== undefined && singular(got[i]!) === w)) return false;
+  // ⛔ Codex r2: a COMPLETE counted phrase. The next word may not be another counted thing ("café subscribers customers").
+  const next = got[want.length];
+  return next === undefined || !countedNoun(next);
 }
 
 /** The reading the card shows and the writer stores: a typed-zero end's change is said in points (B3). */

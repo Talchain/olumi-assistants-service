@@ -49,7 +49,17 @@ describe('sentenceCountsLabel: the label is the counted phrase right after that 
     ['the head noun only (the Codex r1 bypass)', 'Every 10 more subscribers adds about 1 percentage point of wholesale subscription revenue.', 10],
     ['the label after ANOTHER figure', 'Every 10 more cafés adds about 1 percentage point, 5 café subscribers or not.', 10],
     ['the label nowhere after the figure', 'Every 10 more cafés adds about 1 percentage point of wholesale subscription revenue.', 10],
+    // Codex r2: two figures of this size; the label after the OTHER one (borrowed figure).
+    ['two figures of this size (Codex r2)', 'Every 10 more subscribers adds about 1 percentage point of wholesale subscription revenue, alongside 10 café subscribers.', 10],
+    // Codex r2: a possessive, or another counted thing, continues the phrase: not a complete counted phrase.
+    ['a possessive continuation (Codex r2)', 'Every 10 more café subscribers\u2019 customers adds about 1 percentage point of wholesale subscription revenue.', 10],
+    ['another counted noun follows', 'Every 10 more café subscribers customers adds about 1 percentage point of wholesale subscription revenue.', 10],
   ])('NO, %s', (_why, said, figure) => {
     expect(sentenceCountsLabel(said, figure, LABEL)).toBe(false);
+  });
+  it('NO, equal source and target figures (Codex r2): nothing says which one counts this end', () => {
+    const said = 'Every 10 more café subscribers adds about 10 percentage points of wholesale subscription revenue.';
+    expect(sentenceCountsLabel(said, 10, LABEL)).toBe(true);
+    expect(sentenceCountsLabel(said, 10, LABEL, 10)).toBe(false);
   });
 });
