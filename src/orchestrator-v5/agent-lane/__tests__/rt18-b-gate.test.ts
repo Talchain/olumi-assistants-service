@@ -12,8 +12,8 @@ import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/ut
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
-import { approvalChipsFor } from '../approval-chips.js';
-import { placeholderAskWords } from '../goal-certainty.js';
+import { approvalChipsFor, linkEffectReadingOf } from '../approval-chips.js';
+import { placeholderAskWords, placeholderGoalWarning } from '../goal-certainty.js';
 import { mediatorReadings } from '../mediator-reading.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { assignEntityRefs } from '../../graph/entity-refs.js';
@@ -83,19 +83,46 @@ const propose = (w: ReturnType<typeof world>, to: string, quote: string, unit: s
 const edge = (g: Rec, from: string, to: string): Rec => g.edges.find((e: Rec) => e.from === from && e.to === to);
 
 describe('RT-18 (cut 5): no (B) ask without a working answer, and never a click route to a link the model does not hold', () => {
-  it('GATE: the dental withhold asks no (B) "that way" question; the gauge links are offered as before (no gauge set)', () => {
+  it('GATE: the dental withhold asks no (B) "that way" question, yet the gauge path is still never offered link by link', () => {
     const g = DENTAL();
     expect(mediatorReadings(g).get('fee_related_patient_dissatisfaction')).toMatchObject({ via: 'gauge', child: 'no_shows' }); // precondition
     const links = [{ from: 'missed_appointment_fee', to: 'fee_related_patient_dissatisfaction' }, { from: 'fee_related_patient_dissatisfaction', to: 'no_shows' }];
     const words = placeholderAskWords(g, links);
     expect(words?.message ?? '').not.toMatch(/that way/);
     expect(words?.message ?? '').not.toMatch(/through ‘Fee-related patient dissatisfaction’/);
-    expect([...(words?.gaugeLinks ?? [])]).toEqual([]);
+    expect([...(words?.gaugeLinks ?? [])].sort()).toEqual(['fee_related_patient_dissatisfaction->no_shows', 'missed_appointment_fee->fee_related_patient_dissatisfaction']);
+  });
+  it('OFFER EXCLUSION (Codex r1 P2): with the question off, the withhold still offers no one-click on the gauge path\'s links', () => {
+    const links = [{ from: 'missed_appointment_fee', to: 'fee_related_patient_dissatisfaction' }, { from: 'fee_related_patient_dissatisfaction', to: 'no_shows' }];
+    const w = placeholderGoalWarning(DENTAL(), [{ option_id: '20_no_show_fee', links }], 'GOAL_FIGURES_PLACEHOLDER_PATH');
+    expect(w.message).not.toMatch(/that way/);
+    expect(w.message.length).toBeGreaterThan(0); // the unsized-link sentence, never empty
+    expect((w.acceptable_links ?? []).map((l) => `${l.from}->${l.to}`)).not.toContain('missed_appointment_fee->fee_related_patient_dissatisfaction');
+  });
+  it('AMBIGUOUS (Codex r1 P2): a duplicated id is said as ambiguous BEFORE any figure question, never a click route', async () => {
+    const raw = JSON.parse(readFileSync(new URL('./fixtures/rt18-dental-74cc7aea-graph.json', import.meta.url), 'utf8')) as Rec;
+    raw.nodes.push({ id: 'missed_appointment_fee', label: 'Other fee', kind: 'factor' });
+    const r = await propose(world(raw), 'no-shows', A1, 'percentage points');
+    expect(r).toMatchObject({ ok: false, refusal: 'target_ambiguous' });
+    expect(String(r.detail)).not.toMatch(/click the link/);
   });
   it('NO FALSE CLICK (RED on 179f0645): A1 sized as fee → no-shows is told the link does not exist, with no click route to it', async () => {
     const r = await propose(world(DENTAL()), 'no-shows', A1, 'percentage points');
     expect(r).toMatchObject({ ok: false, refusal: 'no_such_link' });
     expect(String(r.detail)).not.toMatch(/click the link from “Missed-appointment fee” to “no-shows”/);
+    // The EXACT user-visible words (DL condition 2): no route to the missing link; the next step is a link the canvas shows.
+    expect(r.detail).toBe('Nothing was prepared. Tell the user exactly this: "The model has no direct link from “Missed-appointment fee” to '
+      + '“no-shows”: “Missed-appointment fee” moves “no-shows” through “Financial deterrence of no-shows”. You can set how strong that first link '
+      + 'is now: on the canvas, click the link from “Missed-appointment fee” to “Financial deterrence of no-shows”, and under “How strong is this '
+      + 'effect?” choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, not your figure."');
+    expect(edge(DENTAL(), 'missed_appointment_fee', 'financial_deterrence_of_no_shows')).toBeDefined(); // the named route exists
+  });
+  it('NO PATH: a pair the model does not connect is offered the link to approve (propose_model_change), never a click route', async () => {
+    const r = await propose(world(DENTAL()), 'Patient appointment awareness', A2, '%');
+    expect(r).toMatchObject({ ok: false, refusal: 'no_such_link' });
+    expect(r.detail).toBe('Nothing was prepared. Tell the user exactly this: "The model has no link from “Missed-appointment fee” to “Patient '
+      + 'appointment awareness”, so there is no effect to record yet. If “Missed-appointment fee” does move “Patient appointment awareness”, I can add '
+      + 'that link for you to approve; your figure can then size it."');
   });
   it('A2 sized as fee → no-shows: the same honest no_such_link', async () => {
     const r = await propose(world(DENTAL()), 'no-shows', A2, '%');
@@ -128,13 +155,25 @@ describe('RT-18 (cut 5): no (B) ask without a working answer, and never a click 
     expect(JSON.stringify(r)).toMatch(/no_such_link/);
     expect(JSON.stringify(r)).not.toMatch(/click the link from \\u201cMissed-appointment fee\\u201d to \\u201cno-shows\\u201d|click the link from “Missed-appointment fee” to “no-shows”/);
   });
-  it('CARD CONTROL: a gauge answer in an unrelated unit (£) still builds no card (points meet % only)', async () => {
-    const said = 'Through fee-related patient dissatisfaction, each £1 rise in the missed-appointment fee costs us about £5 of no-shows.';
+  it('CARD RULE (Desk CR): points meet a "%" gauge reading; £, or points against a non-% reading, build no card', async () => {
+    // The REAL stored proposal of the through-M points answer (never a hand-built op), then one field changed per twin.
+    const said = 'Through fee-related patient dissatisfaction, each £1 rise in the missed-appointment fee raises no-shows by about 0.05 percentage points.';
     const w = world(DENTAL());
-    const r = await propose(w, M, said, '£');
-    const chips = r.ok === true ? approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
-      (id) => ({ proposal: w.proposals.get(id), result: r as never })) : [];
-    expect(chips).toEqual([]);
+    const r = await propose(w, M, said, 'percentage points');
+    expect(r.ok, JSON.stringify(r)).toBe(true); // never vacuous: the card rule is reached
+    const stored = w.proposals.get(String(r.proposal_id))!;
+    const labels = { from: FEE, to: M };
+    const twin = (amountUnit: string, readingUnit = '%') => {
+      const p = structuredClone(stored) as Rec;
+      p.operations[0].value.effect.amount_unit = amountUnit;
+      p.operations[0].value.mediator_readings[0].unit = readingUnit;
+      return linkEffectReadingOf(p as never, labels as never);
+    };
+    expect(twin('percentage points')).toBeDefined();
+    expect(twin('pp')).toBeDefined();
+    expect(twin('%')).toBeDefined();
+    expect(twin('£')).toBeUndefined();
+    expect(twin('percentage points', '% of appointments')).toBeUndefined();
   });
 });
 

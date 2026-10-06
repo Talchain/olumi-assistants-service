@@ -287,7 +287,7 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
 // `newFactorScopeIn` moved to `../figure-scope.ts` (one predicate for the Agent's doors and the chat writers, AIQ 5882852814).
 export { newFactorScopeIn };
 /** Exported for the no-dead-end rows only: the words a refused link-effect card gives the Agent. */
-export { linkEffectRefusalWords, linkEffectConsent };
+export { linkEffectRefusalWords, linkEffectConsent, linkEffectNoSuchLinkWords };
 
 /**
  * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
@@ -1466,6 +1466,41 @@ function stillReadUnitReadings(graph: unknown, item: { readonly from: string; re
   const fresh = prepareLinkEffectUnitReadings(graph, item.from, item.to, item.effect, item.quote, { link_selected: item.link_selected === true }).unit_readings;
   return item.unit_readings.filter((r) => fresh.some((f) => f.node_id === r.node_id && f.unit_reading.unit === r.unit_reading.unit
     && f.unit_reading.source_quote === r.unit_reading.source_quote));
+}
+
+/**
+ * ⭐ RT-18 (DL 0df0e1, cut 5): the words for a link the model does NOT hold. Never a click route to that link (the canvas
+ * does not show it); always a next step the user can take. If the source reaches the target through other links, the
+ * FIRST of them is named with its own canvas route (a link the canvas shows). Otherwise Olumi offers to add the link for
+ * approval (`propose_model_change`, add_edge), after which the figure can size it.
+ */
+function linkEffectNoSuchLinkWords(raw: unknown, from: { id: string; label: string }, to: { id: string; label: string }): string {
+  const g = raw as { nodes?: unknown[]; edges?: unknown[] } | null;
+  const nodes = (Array.isArray(g?.nodes) ? g.nodes : []) as Array<{ id?: unknown; kind?: unknown; label?: unknown }>;
+  const edges = (Array.isArray(g?.edges) ? g.edges : []) as Array<{ from?: unknown; to?: unknown; edge_type?: unknown }>;
+  const kind = new Map(nodes.map((n) => [n.id, n.kind] as const));
+  const walk = edges.filter((e) => e.edge_type !== 'bidirected' && kind.get(e.from) !== 'option' && kind.get(e.from) !== 'decision');
+  const reaches = (start: unknown): boolean => {
+    const seen = new Set<unknown>([start]);
+    for (const queue = [start]; queue.length > 0;) {
+      const at = queue.shift();
+      if (at === to.id) return true;
+      for (const e of walk) if (e.from === at && !seen.has(e.to)) { seen.add(e.to); queue.push(e.to); }
+    }
+    return false;
+  };
+  const first = walk.find((e) => e.from === from.id && e.to !== to.id && reaches(e.to));
+  const via = first === undefined ? undefined : nodes.find((n) => n.id === first.to);
+  if (via !== undefined) {
+    const v = typeof via.label === 'string' && via.label.trim() !== '' ? via.label : String(via.id);
+    return 'Nothing was prepared. Tell the user exactly this: '
+      + `"The model has no direct link from \u201c${from.label}\u201d to \u201c${to.label}\u201d: \u201c${from.label}\u201d moves \u201c${to.label}\u201d through \u201c${v}\u201d. `
+      + `You can set how strong that first link is now: on the canvas, click the link from \u201c${from.label}\u201d to \u201c${v}\u201d, and under `
+      + '\u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, not your figure."';
+  }
+  return 'Nothing was prepared. Tell the user exactly this: '
+    + `"The model has no link from \u201c${from.label}\u201d to \u201c${to.label}\u201d, so there is no effect to record yet. `
+    + `If \u201c${from.label}\u201d does move \u201c${to.label}\u201d, I can add that link for you to approve; your figure can then size it."`;
 }
 
 function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string },
@@ -3449,8 +3484,10 @@ export function createAgentCapabilities(
           // RT-18 (DL 0df0e1): a link the model does not hold is said FIRST. Every figure question below ends with the canvas
           // route "click the link from A to B", which must never name a link the canvas does not show.
           const held = linkEffectTargetOf(working, from.id, to.id);
-          if (held.kind === 'refused' && held.reason === 'edge_not_found') {
-            fail('no_such_link', `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.`);
+          if (held.kind === 'refused') {
+            // Codex r1 on #2641: EVERY refused lookup is said before a figure question (its words carry a click route).
+            if (held.reason === 'edge_not_found') fail('no_such_link', linkEffectNoSuchLinkWords(working, from, to));
+            else fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
             continue;
           }
           const miss = linkEffectQuoteContextMiss(entryQuote, text) ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label }, statedScope);
@@ -3574,9 +3611,11 @@ export function createAgentCapabilities(
       // RT-18 (DL 0df0e1): a link the model does not hold is said FIRST. Every figure question below ends with the canvas
       // route "click the link from A to B", which must never name a link the canvas does not show.
       const held = linkEffectTargetOf(g.raw, from.id, to.id);
-      if (held.kind === 'refused' && held.reason === 'edge_not_found') {
-        return { ok: false, mutated: false, refusal: 'no_such_link',
-          detail: `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.` };
+      if (held.kind === 'refused') {
+        // Codex r1 on #2641: EVERY refused lookup is said before a figure question (its words carry a click route).
+        return held.reason === 'edge_not_found'
+          ? { ok: false, mutated: false, refusal: 'no_such_link', detail: linkEffectNoSuchLinkWords(g.raw, from, to) }
+          : { ok: false, mutated: false, refusal: 'target_ambiguous', detail: linkEffectRefusalWords('target_ambiguous', g.raw, from, to) };
       }
       const miss = linkEffectQuoteContextMiss(quote, text) ?? linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
       if (miss === 'figures_not_in_statement') {
