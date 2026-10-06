@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { noDirectLinkFigureReply, noSuchLinkUserWords } from '../no-direct-link.js';
+import { noDirectLinkFigureReply, noSuchLinkUserWords, type NoDirectLinkTurn } from '../no-direct-link.js';
 
 type Item = Record<string, unknown>;
 const rows = new Map<string, { id: string; request_hash: string } & Record<string, unknown>>();
@@ -30,6 +30,12 @@ const store = {
   }),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
+/** A card from an EARLIER turn awaiting the user's approval (Codex r1 P1-2): the route's own reader, overridden per row. */
+let waitingProposal: string | undefined;
+vi.mock('../held-approval-offers.js', async (original) => {
+  const real = await original<typeof import('../held-approval-offers.js')>();
+  return { ...real, executableWaitingProposal: (...a: Parameters<typeof real.executableWaitingProposal>) => waitingProposal ?? real.executableWaitingProposal(...a) };
+});
 vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
   ...await original<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
@@ -60,7 +66,7 @@ async function freshApp(): Promise<FastifyInstance> {
 describe('the REAL turn route: the door\'s words replace an improvised offer, and only then', () => {
   let app: FastifyInstance;
   beforeEach(async () => {
-    rows.clear(); scripted = [];
+    rows.clear(); scripted = []; waitingProposal = undefined;
     vi.clearAllMocks();
     // ALL fetches are intercepted: no provider or Supabase connection is possible.
     vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
@@ -94,6 +100,14 @@ describe('the REAL turn route: the door\'s words replace an improvised offer, an
     expect(await say(said)).toContain('Noted. I can record that for you to approve.');
   });
 
+  it('CONTROL: a card from an earlier turn awaits approval → the Agent\'s own reply stands', async () => {
+    waitingProposal = 'prop_held_earlier';
+    scripted.push([messageItem(IMPROVISED, 'msg_waiting')]);
+    const text = await say(R18D);
+    expect(text).toContain('how strong would you describe it');
+    expect(text.startsWith(DOOR)).toBe(false);
+  });
+
   it('CONTROL: the tool ran this turn → the turn\'s own reply stands', async () => {
     const call = { type: 'function_call', id: 'fc_effect', call_id: 'c_effect', name: 'propose_link_effect', arguments: JSON.stringify({
       from_label: 'Text reminder coverage', to_label: 'no-shows', amount: -1, amount_unit: 'percentage points', per_source_change: 10,
@@ -105,21 +119,28 @@ describe('the REAL turn route: the door\'s words replace an improvised offer, an
   });
 });
 
+const turn = (tools: readonly string[] = [], extra: Partial<NoDirectLinkTurn> = {}): NoDirectLinkTurn =>
+  ({ tools, awaitingApproval: false, scopeQuestionOwed: false, ...extra });
+
 describe('the guard\'s own conditions on the served graph (each control must not fire)', () => {
   it('fires on 19\'s sentence with no tool: exactly the door\'s words', () => {
-    expect(noDirectLinkFigureReply(GRAPH, R18D, [])).toBe(DOOR);
+    expect(noDirectLinkFigureReply(GRAPH, R18D, turn())).toBe(DOOR);
   });
   it('the same figure after a colon in a request to record it still fires (r18g\'s words, no tool)', () => {
     const r18g = 'Record my figure for the link from Text reminder coverage to no-shows: each 10 percentage point rise in text reminder coverage lowers no-shows by about 1 percentage point of appointments.';
-    expect(noDirectLinkFigureReply(GRAPH, r18g, [])).toBe(DOOR);
+    expect(noDirectLinkFigureReply(GRAPH, r18g, turn())).toBe(DOOR);
   });
   it('a read-only tool (get_canonical_state) does not stop it: exactly the door\'s words', () => {
-    expect(noDirectLinkFigureReply(GRAPH, R18D, ['get_canonical_state'])).toBe(DOOR);
+    expect(noDirectLinkFigureReply(GRAPH, R18D, turn(['get_canonical_state']))).toBe(DOOR);
   });
   it.each([
     ['the tool ran', R18D, ['propose_link_effect']],
     ['another card-making tool ran (propose_model_change)', R18D, ['propose_model_change']],
     ['an analysis ran this turn (run_analysis)', R18D, ['run_analysis']],
+    ['a build ran this turn (build_model_from_brief)', R18D, ['build_model_from_brief']],
+    ['a span, not a change (Codex r1)', 'Compare text reminder coverage and no-shows over 12 months.', []],
+    ['a sum, not a change (Codex r1)', 'We allocated £500 to investigate text reminder coverage and no-shows.', []],
+    ['one change figure only (a level beside it)', 'Each 10 percentage point rise in text reminder coverage leaves no-shows at 8%.', []],
     ['one node + a figure', 'No-shows are about 8% of appointments today.', []],
     ['a question with no figure', 'Does text reminder coverage affect no-shows?', []],
     ['a what-if question WITH a figure', 'If text reminder coverage reached 90%, what would no-shows be?', []],
@@ -131,22 +152,34 @@ describe('the guard\'s own conditions on the served graph (each control must not
     ['no path either way (coverage, online rescheduling)', 'Each 10 percentage point rise in text reminder coverage lowers online rescheduling availability by about 1 percentage point.', []],
     ['an option is one of the two (Send Text Reminders)', 'Send Text Reminders would lower no-shows by about 1 percentage point of appointments.', []],
   ] as const)('CONTROL: %s → null', (_n, message, tools) => {
-    expect(noDirectLinkFigureReply(GRAPH, message, tools)).toBeNull();
+    expect(noDirectLinkFigureReply(GRAPH, message, turn(tools))).toBeNull();
   });
-  it('CONTROL: each reaches the other (a loop back to coverage) → the direction is unsaid → null', () => {
+  it.each([
+    ['a card awaits approval', { awaitingApproval: true }],
+    ['a scope question is owed', { scopeQuestionOwed: true }],
+  ] as const)('CONTROL: %s → null', (_n, extra) => {
+    expect(noDirectLinkFigureReply(GRAPH, R18D, turn([], extra))).toBeNull();
+  });
+  it('CONTROL: each reaches the other (no-shows → Staff time → coverage) → the direction is unsaid → null', () => {
+    const g = structuredClone(GRAPH) as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+    g.nodes.push({ id: 'staff_time', kind: 'factor', label: 'Staff time' });
+    g.edges.push({ from: 'no_shows', to: 'staff_time' }, { from: 'staff_time', to: 'text_reminder_coverage' });
+    expect(noDirectLinkFigureReply(g, R18D, turn())).toBeNull();
+  });
+  it('CONTROL: an option end, even where a path reaches it (reach rate → no-shows → Send Text Reminders) → null', () => {
     const g = structuredClone(GRAPH) as { edges: Record<string, unknown>[] };
-    g.edges.push({ from: 'no_shows', to: 'text_reminder_coverage' });
-    expect(noDirectLinkFigureReply(g, R18D, [])).toBeNull();
+    g.edges.push({ from: 'no_shows', to: 'send_text_reminders' });
+    expect(noDirectLinkFigureReply(g, 'Each 10 percentage point rise in reminder reach rate raises Send Text Reminders by about 1 point.', turn())).toBeNull();
   });
   it('CONTROL: one label inside the other ("Reminder coverage" in "text reminder coverage") → null', () => {
     const g = structuredClone(GRAPH) as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
     g.nodes.push({ id: 'reminder_coverage', kind: 'factor', label: 'Reminder coverage' });
     g.edges.push({ from: 'reminder_reach_rate', to: 'reminder_coverage' });
-    expect(noDirectLinkFigureReply(g, 'Each 10 percentage point rise in text reminder coverage lowers it by about 1 percentage point.', [])).toBeNull();
+    expect(noDirectLinkFigureReply(g, 'Each 10 percentage point rise in text reminder coverage lowers it by about 1 percentage point.', turn())).toBeNull();
   });
   it('CONTROL: an ambiguous label (two nodes share "Text reminder coverage") → null', () => {
     const g = structuredClone(GRAPH) as { nodes: Record<string, unknown>[] };
     g.nodes.push({ id: 'text_reminder_coverage_2', kind: 'factor', label: 'Text reminder coverage' });
-    expect(noDirectLinkFigureReply(g, R18D, [])).toBeNull();
+    expect(noDirectLinkFigureReply(g, R18D, turn())).toBeNull();
   });
 });

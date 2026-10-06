@@ -1139,16 +1139,17 @@ export function linkEffectQuoteContextMiss(quote: string, userText: string): 'qu
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
 }
 /**
- * RT-19 (the no-direct-link guard, no-direct-link.ts): whether ONE clause of the user's message STATES a changed figure
- * joining two labels, by the binder's own readers only: its whole sentence is no question or denial
- * (`linkEffectQuoteContextMiss`), it names both labels (`names`, the caller's label matcher), and one figure in it is a
- * level of neither ("coverage is 60%, no-shows are 8%" states levels, never an effect). Negative evidence only: it can
- * stop that guard, never make a card.
+ * RT-19 (the no-direct-link guard, no-direct-link.ts): whether ONE clause of the user's message states an EFFECT between two
+ * labels, by the binder's own readers only: its whole sentence is no question or denial (`linkEffectQuoteContextMiss`), it
+ * names both labels (`names`, the caller's label matcher), and it writes at least TWO figures as changes, by the binder's
+ * own change words ("each 10 point RISE", "BY about 1 point", "A £1 rise"). A level ("coverage is 60%"), a span ("over 12
+ * months") or a sum ("£500 to investigate") is no change (Codex r1 on the guard). Negative evidence only: it can stop that
+ * guard, never make a card.
  */
-export function clauseStatesAChangedFigure(message: string, labelA: string, labelB: string,
+export function clauseStatesTwoChanges(message: string, labelA: string, labelB: string,
   names: (text: string, label: string) => boolean): boolean {
   return sentencesOf(message.trim()).some((c) => linkEffectQuoteContextMiss(c, message) === null && names(c, labelA) && names(c, labelB)
-    && findLinkEffectAmounts(c).some((f) => !figureIsALevel(c, f, labelA) && !figureIsALevel(c, f, labelB)));
+    && findLinkEffectAmounts(c).filter((f) => figureWrittenAsAChange(c, f)).length >= 2);
 }
 export function linkEffectTheUserStated(
   quote: string,
@@ -1246,6 +1247,16 @@ const COPULA = /^(?:is|was|are|were|equals?|equalled|totals?|remains)$/i;
 const CHANGE_NOUN_OF = /^(?:rise|increase|cut|drop|fall|jump|change|reduction|decrease|gain|growth|loss|hike|swing)s?$/i;
 /** Anywhere in the sentence: SOMETHING changes (presence only; the Agent's args carry the direction, B2). */
 const CHANGE_STATED = /\b(?:ris(?:e|es|ing)|rose|rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|decreas(?:e|es|ed|ing)|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|cut(?:s|ting)?|los(?:e|es|ing|t)|loss|gain(?:s|ed|ing)?|wins?|winning|won|add(?:s|ed|ing)?|cost(?:s|ing)?|bring(?:s|ing)?|brought|knocks?|knocked|push(?:es|ed|ing)?|lift(?:s|ed|ing)?|lower(?:s|ed|ing)?|reduc(?:e|es|ed|ing)|boost(?:s|ed|ing)?|grow(?:s|ing|n)?|grew|shrink(?:s|ing)?|halv(?:e|es|ed|ing)|doubl(?:e|es|ed|ing)|clos(?:e|es|ed|ing)|shut(?:s|ting)?|spend(?:s|ing)?|spent|trim(?:s|med|ming)?|sav(?:e|es|ed|ing)|worth|up|down|off|more|less|fewer|extra|additional|every|each|per|by|jumps?|chang(?:e|es|ed|ing)|mov(?:e|es|ed|ing)|means?|shed(?:s|ding)?|put(?:s|ting)?)\b/i;
+
+/** A figure written AS a change, by the binder's own words: a change word straight after it, or (hedges skipped) before it. */
+function figureWrittenAsAChange(q: string, figure: StatedAmount): boolean {
+  if (CHANGE_AFTER.test(q.slice(figure.index + figure.matchedText.length))) return true;
+  const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
+  const words = [...(q.slice(0, start).split(/[,;:.!?]/).pop() ?? '').matchAll(/[\p{L}]+/gu)].map(m => m[0]);
+  while (words.length > 0 && HEDGE.test(words[words.length - 1]!)) words.pop();
+  const last = words[words.length - 1];
+  return last !== undefined && CHANGE_BEFORE.test(last);
+}
 
 function figureIsALevel(q: string, figure: StatedAmount, endLabel: string): boolean {
   const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);

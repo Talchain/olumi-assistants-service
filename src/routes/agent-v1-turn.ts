@@ -3494,7 +3494,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat);
     // ⭐ RT-19 (DL ruling (A), #87 6009566552): a figure for two ends with NO direct link, and no link-effect door this turn →
     // the door's own fixed words, never the Agent's improvised offer (a band for a new link the model would double-count).
-    const noDirectLink = fastPath === undefined ? noDirectLinkFigureReply(readbackGraph, message, result.tool_calls.map((c) => c.name)) : null;
+    const awaitingApproval = offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
+      || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined;
+    const noDirectLink = fastPath === undefined ? noDirectLinkFigureReply(readbackGraph, message, {
+      tools: result.tool_calls.map((c) => c.name), awaitingApproval, scopeQuestionOwed: rawScopeQuestion !== null }) : null;
     const narrationText = noDirectLink ?? withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
@@ -3514,8 +3517,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
-      awaitingApproval: offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
-        || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined,
+      awaitingApproval,
       // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
       builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
         || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)

@@ -10,13 +10,12 @@
  *
  * `noSuchLinkUserWords`: the ONE wording of "no such link" (the tool's `no_such_link` refusal wraps it unchanged).
  * `noDirectLinkFigureReply`: the host's guard. It fires ONLY when ALL hold:
- *   · no `propose_link_effect` ran this turn (the door already answered), and no other `propose_*` / `run_*` tool either:
- *     a card or a run made this turn keeps the Agent's own words about it (a read-only tool, e.g. `get_canonical_state`, does
- *     not stop the guard);
- *   · the message states a figure (`findLinkEffectAmounts`, the door's own figure reader), and ONE clause of it names both
- *     ends with a figure that is no level of either, its sentence no question or denial (`clauseStatesAChangedFigure`, the
- *     binder's own readers): "coverage is 60% and no-shows are 8%" or "if coverage reached 90%, what would no-shows be?"
- *     keeps the Agent's own reply;
+ *   · no tool but the read-only `get_canonical_state` ran this turn: `propose_link_effect` would have answered itself, and
+ *     a card, a build or a run keeps the Agent's own words about it, including any owed line deduped against them (Codex r1);
+ *   · no card awaits the user's approval and no scope question is owed (the reply stays about that step, Codex r1);
+ *   · ONE clause of the message names both ends and writes two figures as changes, its sentence no question or denial
+ *     (`clauseStatesTwoChanges`, the binder's own readers): "coverage is 60% and no-shows are 8%", "compare them over 12
+ *     months" or "if coverage reached 90%, what would no-shows be?" keeps the Agent's own reply;
  *   · it names exactly TWO nodes, both causal, by the existing label matcher (`messageNamesLabel`, link-size-ask), with
  *     two different labels, neither inside the other (an ambiguous label never fires);
  *   · those two have NO direct link of any kind, either way;
@@ -24,7 +23,7 @@
  */
 import { findLinkEffectAmounts } from './link-effect-figures.js';
 import { messageNamesLabel, STRUCTURAL_KINDS } from './link-size-ask.js';
-import { clauseStatesAChangedFigure } from './stated-by-user.js';
+import { clauseStatesTwoChanges } from './stated-by-user.js';
 
 type Edge = { from?: unknown; to?: unknown; edge_type?: unknown };
 type GNode = { id?: unknown; kind?: unknown; label?: unknown };
@@ -84,16 +83,26 @@ export function noSuchLinkUserWords(raw: unknown, from: { id: string; label: str
 const labelText = (n: GNode): string => (typeof n.label === 'string' ? n.label.trim() : '');
 const folded = (s: string): string => s.toLowerCase().replace(/[\u201c\u201d"\u2018\u2019'`]/g, '').replace(/\s+/g, ' ').trim();
 
+/** Tools that write, propose or run nothing. */
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set(['get_canonical_state']);
+
+/** This turn, as the route holds it when the reply is composed. */
+export interface NoDirectLinkTurn {
+  readonly tools: readonly string[];
+  readonly awaitingApproval: boolean;
+  readonly scopeQuestionOwed: boolean;
+}
+
 /** The guard (see the module note): the door's own words, or null when any condition does not hold. */
-export function noDirectLinkFigureReply(graph: unknown, message: string, toolCallNames: readonly string[]): string | null {
-  if (toolCallNames.some((n) => n.startsWith('propose_') || n.startsWith('run_'))) return null;
+export function noDirectLinkFigureReply(graph: unknown, message: string, turn: NoDirectLinkTurn): string | null {
+  if (!turn.tools.every((n) => READ_ONLY_TOOLS.has(n)) || turn.awaitingApproval || turn.scopeQuestionOwed) return null;
   if (findLinkEffectAmounts(message).length === 0) return null;
   const named = nodesOf(graph).filter((n) => messageNamesLabel(message, labelText(n)));
   if (named.length !== 2 || named.some((n) => STRUCTURAL_KINDS.has(n.kind))) return null;
   const [a, b] = named as [GNode, GNode];
   const [la, lb] = [folded(labelText(a)), folded(labelText(b))];
   if (la === lb || la.includes(lb) || lb.includes(la)) return null;
-  if (!clauseStatesAChangedFigure(message, labelText(a), labelText(b), messageNamesLabel)) return null;
+  if (!clauseStatesTwoChanges(message, labelText(a), labelText(b), messageNamesLabel)) return null;
   if (edgesOf(graph).some((e) => (e.from === a.id && e.to === b.id) || (e.from === b.id && e.to === a.id))) return null;
   const walk = causalWalk(graph);
   const ab = reachesIn(walk, a.id, b.id);
