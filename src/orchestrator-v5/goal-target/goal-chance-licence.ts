@@ -65,6 +65,13 @@ export interface GoalChanceLicence {
    * 0.9 → 10); absent when they differ (the words then say it is Olumi's estimate for each).
    */
   readonly user_link_existence?: { readonly links: number; readonly one_in?: number };
+  /**
+   * ⭐ D3 cut 6 INTERIM (Science d5 #87 6009272273 + amendment; DL adopted): present iff a compared option's goal path
+   * carries an existence < 1 the user did not set (any link but a held one or an identity). Every summary form (highest,
+   * either all-likely-to-miss, similar) can then be produced by Olumi's own existence prior, so the form is `each` and the
+   * words say why (c6 owns them). Per-option chances stay the headline.
+   */
+  readonly summary_withheld?: 'olumi_existence_assumption';
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -120,9 +127,13 @@ export function goalChanceLicenceOf(
   // H2: every option quoted and no superlative → the options within 10 points of the top have similar chances.
   const same = complete && !superlative && !allLikelyToMiss
     ? licensed.filter((id) => pct[leader]! - pct[id]! < SUPERLATIVE_GAP_POINTS) : [];
-  const form: GoalChanceForm = superlative
+  const summary: GoalChanceForm = superlative
     ? (allLikelyToMiss ? 'highest_all_likely_to_miss' : 'highest')
     : allLikelyToMiss ? 'all_likely_to_miss' : same.length >= 2 ? 'similar' : 'each';
+  // ⛔ INTERIM (d5 6009272273, DL adopted): a summary Olumi's own existence prior could have produced is not stated. J4 R17
+  // read "highest" at 50/35 with the prior and 46/46 without it; MC draft 7 flipped its leader.
+  const priorOnPath = summary !== 'each' && olumiExistenceOnGoalPath(graph, goalId, option_ids);
+  const form: GoalChanceForm = priorOnPath ? 'each' : summary;
   const existence = userLinkExistenceOn(graph, goalId, licensed);
   return {
     code: GOAL_CHANCE_LICENSED,
@@ -133,9 +144,10 @@ export function goalChanceLicenceOf(
     pct_by_option: pct,
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
-    ...(superlative ? { leader_option_id: leader, next_option_id: next } : {}),
+    ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit },
     ...(existence !== undefined ? { user_link_existence: existence } : {}),
+    ...(priorOnPath ? { summary_withheld: 'olumi_existence_assumption' as const } : {}),
   };
 }
 
@@ -164,6 +176,22 @@ function userLinkExistenceOn(graph: unknown, goalId: unknown, optionIds: readonl
  * never becomes "your link".
  */
 export function userStatedLinksBelowOne(graph: unknown, goalId: unknown, optionIds: readonly string[]): Rec[] {
+  return goalPathEdges(graph, goalId, optionIds).filter((e) => isUserStatedLink(e) && heldLinkOf(e) === null && belowOne(e));
+}
+
+/** The interim's predicate: a link on a compared option's goal path whose existence < 1 the user did not set (unheld). */
+export function olumiExistenceOnGoalPath(graph: unknown, goalId: unknown, optionIds: readonly string[]): boolean {
+  return goalPathEdges(graph, goalId, optionIds).some((e) => heldLinkOf(e) === null && belowOne(e));
+}
+
+const belowOne = (e: Rec): boolean =>
+  typeof e.exists_probability === 'number' && Number.isFinite(e.exists_probability) && e.exists_probability < 1;
+
+/**
+ * The directed, non-identity links on the options' paths to THE SCORED goal: reached from an option's intervened factors
+ * or out-links, and reaching the goal. An IDENTITY edge is fixed by ISL, never Bernoulli-gated (Codex r1 #2637).
+ */
+function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly string[]): Rec[] {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
@@ -194,10 +222,8 @@ export function userStatedLinksBelowOne(graph: unknown, goalId: unknown, optionI
     const id = byId.get(e.to)?.nonlinear_identity;
     return isRec(id) && Array.isArray(id.factor_ids) && id.factor_ids.includes(e.from);
   };
-  // ⭐ Hold-at-1.0 (d5 #87 6008807178): a link the Run holds at 1.0 is not Olumi's doubt; the SAME function the payload uses.
-  return directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && isUserStatedLink(e) && !identityEdge(e)
-    && heldLinkOf(e) === null
-    && typeof e.exists_probability === 'number' && Number.isFinite(e.exists_probability) && e.exists_probability < 1);
+  // ⭐ Hold-at-1.0 (d5 #87 6008807178): a held link is not Olumi's doubt; callers filter with the SAME `heldLinkOf`.
+  return directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && !identityEdge(e));
 }
 
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
