@@ -27,6 +27,7 @@
 import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -57,6 +58,13 @@ export interface GoalChanceLicence {
   readonly next_option_id?: string;
   /** The target as the user stated it: the UI says it in these words, never re-derives the comparator. */
   readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string };
+  /**
+   * ⭐ D3 cut 5 (DL 0df0e1; Science d5 #87 6008242694 / 6008252938): present iff a USER-STATED link on a licensed option's
+   * path to the goal carries an existence probability below 1 — the chances then also count Olumi's own assumption that
+   * the user's link might not hold. `one_in` is N when every such link shares one value p and 1 − p is 1/N (0.8 → 5,
+   * 0.9 → 10); absent when they differ (the words then say it is Olumi's estimate for each).
+   */
+  readonly user_link_existence?: { readonly links: number; readonly one_in?: number };
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
@@ -115,6 +123,7 @@ export function goalChanceLicenceOf(
   const form: GoalChanceForm = superlative
     ? (allLikelyToMiss ? 'highest_all_likely_to_miss' : 'highest')
     : allLikelyToMiss ? 'all_likely_to_miss' : same.length >= 2 ? 'similar' : 'each';
+  const existence = userLinkExistenceOn(graph, licensed);
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
@@ -126,7 +135,48 @@ export function goalChanceLicenceOf(
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(superlative ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit },
+    ...(existence !== undefined ? { user_link_existence: existence } : {}),
   };
+}
+
+/**
+ * The user-stated links (`linkSizing` = 'user', the estate's one sizing authority) that lie on a licensed option's path to
+ * the goal and carry `exists_probability` < 1; `undefined` when there are none. A link is on that path when its source is
+ * reached from the option's intervened factors and its target reaches the goal.
+ */
+function userLinkExistenceOn(graph: unknown, optionIds: readonly string[]): { links: number; one_in?: number } | undefined {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const goal = nodes.find((n) => n.kind === 'goal');
+  if (goal === undefined) return undefined;
+  const kindOf = new Map(nodes.map((n) => [n.id, n.kind] as const));
+  const walkable = (id: unknown): boolean => { const k = kindOf.get(id); return k !== undefined && k !== 'option' && k !== 'decision'; };
+  const directed = edges.filter((e) => e.edge_type !== 'bidirected');
+  // Nodes with a directed path to the goal (the goal included).
+  const toGoal = new Set<unknown>([goal.id]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of directed) if (toGoal.has(e.to) && !toGoal.has(e.from) && walkable(e.from)) { toGoal.add(e.from); grew = true; }
+  }
+  // Nodes reached from the licensed options: their intervened factors and their own out-links, then forward.
+  const reached = new Set<unknown>();
+  for (const id of optionIds) {
+    const option = nodes.find((n) => n.id === id);
+    const seeds = [...(isRec(option?.interventions) ? Object.keys(option!.interventions as Rec) : []),
+      ...directed.filter((e) => e.from === id).map((e) => e.to)];
+    for (const seed of seeds) if (walkable(seed)) reached.add(seed);
+  }
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of directed) if (reached.has(e.from) && !reached.has(e.to) && walkable(e.to)) { reached.add(e.to); grew = true; }
+  }
+  const held = directed.filter((e) => reached.has(e.from) && toGoal.has(e.to) && linkSizing(e) === 'user'
+    && typeof e.exists_probability === 'number' && Number.isFinite(e.exists_probability) && e.exists_probability < 1);
+  if (held.length === 0) return undefined;
+  const values = [...new Set(held.map((e) => e.exists_probability as number))];
+  const n = values.length === 1 && values[0]! < 1 ? 1 / (1 - values[0]!) : NaN;
+  const oneIn = Number.isFinite(n) && Math.abs(n - Math.round(n)) < 1e-6 && Math.round(n) >= 2 ? Math.round(n) : undefined;
+  return { links: held.length, ...(oneIn !== undefined ? { one_in: oneIn } : {}) };
 }
 
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
