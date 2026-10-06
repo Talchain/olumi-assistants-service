@@ -87,18 +87,34 @@ describe('D3 step 1 — the goal-chance seam gate', () => {
   });
 
   it('the threshold CEE holds on the goal (raw figure absent on an older graph) is the target the Run scored; NONE is not', () => {
-    const held = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR', goal_threshold: 0.8, goal_threshold_unit: '£/month' }], edges: [] };
+    const held = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR', goal_threshold: 0.8, goal_threshold_unit: '£/month', goal_direction: '>=' }], edges: [] };
     expect(goalChanceTargetCause(held, 'goal')).toBeNull();
     const none = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR' }], edges: [] }; // PLoT's synthesised target only
     expect(goalChanceTargetCause(none, 'goal')).toBe('no_stated_target');
   });
 
+  it('NO STATED DIRECTION: every chance withheld, typed, and the warning carries the "at least / at most {target}?" invite', () => {
+    const g = { nodes: [{ id: 'goal', kind: 'goal', label: 'MRR', goal_threshold_raw: 100000, goal_threshold: 0.8, goal_threshold_unit: '£/month' }], edges: [] };
+    const out = withholdUnusableGoalChances(envelope(0.15), g, 'goal') as Json;
+    expect(rowOf(out, 'a')).not.toHaveProperty('probability_of_goal');
+    expect(gateWarning(out)).toMatchObject({
+      causes: [{ option_id: 'a', cause: 'no_stated_direction' }, { option_id: 'b', cause: 'no_stated_direction' }],
+      invite: { kind: 'state_goal_direction', goal_node_id: 'goal', target: { value: 100000, unit: '£/month' } },
+    });
+    // A target stated as a CHANGE carries its direction in its sign ("cut by 20%"): stated, never invited.
+    const change = { nodes: [{ id: 'goal', kind: 'goal', label: 'Spend', goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.2,
+      goal_threshold: -0.2, goal_threshold_unit: '£/month' }], edges: [] };
+    expect(goalChanceTargetCause(change, 'goal')).not.toBe('no_stated_direction');
+    // CONTROL: a held comparator is a stated direction — nothing withheld, no invite.
+    const held = { nodes: [{ ...g.nodes[0], goal_direction: '>=' }], edges: [] };
+    expect(withholdUnusableGoalChances(envelope(0.15), held, 'goal')).toEqual(envelope(0.15));
+  });
+
   it('a target with no stated direction, or no unit, is not a stated target either', () => {
     const noDirection = { nodes: [{ id: 'goal', kind: 'goal', label: 'Revenue', goal_threshold_raw: 400, goal_threshold_unit: '£' }], edges: [] };
     const noUnit = { nodes: [{ id: 'goal', kind: 'goal', label: 'Revenue', goal_direction: '>=', goal_threshold_raw: 400 }], edges: [] };
-    // ⏸ `no_stated_direction` ships in STEP 2 with its one-click invitation (DL 0df0e1; c6): until then the Run's own sense
-    // stands and the headline's assumption line says so. Pinned so it cannot start withholding without the invitation.
-    expect(goalChanceTargetCause(noDirection, 'goal')).toBeNull();
+    // ⭐ STEP 2 (DL 0df0e1; c6): withheld WITH its one-click invitation (the row below pins the invite).
+    expect(goalChanceTargetCause(noDirection, 'goal')).toBe('no_stated_direction');
     expect(goalChanceTargetCause(noUnit, 'goal')).toBe('no_target_unit');
   });
 });
