@@ -43,7 +43,7 @@ import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
-import { bindStatedLinkSizes } from './stated-size-binding.js';
+import { bindStatedLinkSizes, type PassThroughBinding } from './stated-size-binding.js';
 import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
 export { bindStatedLinkSizes } from './stated-size-binding.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
@@ -3756,7 +3756,7 @@ function admitOnce(
    * `explicit` that no sentence carries is Olumi's estimate, never the user's. ONE predicate, read by the normalising
    * frame below AND by link sizing (CODEX CEE BUDDY 5922482284: an unwritten £100m tagged `explicit` once set the frame).
    */
-  // Fi is an ADDED door: the strict label-based sizeWritten check below is unchanged.
+  // Fi is an ADDED door: the strict label-based sizeWritten check below is unchanged (its retirement is its own PR).
   // The candidate effect fields are defined in each endpoint's own unit (D1).
   // Read those same units for C1; no unit is inferred from the brief.
   const magnitudeNodeFor = (n: AdmittedNode): MagnitudeNode => ({
@@ -3784,13 +3784,29 @@ function admitOnce(
   // Only a role-aware reader's located level is claimed here. Target/current/setting
   // occurrences are claimed by nonEffectQuantitySpans in the binding reader.
   const claimedLevelSpans = levelReading.value?.kind === 'adopt' && levelReading.value.span !== undefined ? [levelReading.value.span] : [];
+  const passThroughs: PassThroughBinding[] = [];
   const boundSizeSentences = bindStatedLinkSizes(resolvable.map((l, i) => ({
     from: l.from, to: l.to, effect_direction: l.direction, natural_effect: prospectiveEffects[i],
-  })), bindingNodes, brief, claimedLevelSpans);
+  })), bindingNodes, brief, claimedLevelSpans, passThroughs);
   const boundByLink = new Map([...boundSizeSentences].map(([index, sentence]) => [resolvable[index]!, sentence]));
+  /**
+   * ⭐ (B) THE MEDIATOR'S ONWARD LINK IS THE DEFINITION THE BOUND SENTENCE IMPLIES (Science d5 #87 6008551439 (B)): ±1 per
+   * 1, its typed sign, written as if the drafter had said it holds by definition, so the ONE definitional check
+   * (`definitionalLink`) types it on its own natural size. Olumi's reading, never the user's. The mediator is measured in
+   * the onward quantity's unit (Science 6006425419's gauge: a pound of ‘MRR lost’ is a pound of MRR).
+   */
+  for (const t of passThroughs) {
+    const onward = resolvable[t.onward]!;
+    resolvable[t.onward] = { ...onward, definitional: true, effect_amount: t.sign, effect_per_source_change: 1, effect_provenance: 'ai_proposed' };
+    const statedUnit = prospectiveEffects[t.link]?.amount_unit;
+    if (!unitById.has(onward.from) && typeof statedUnit === 'string') unitById.set(onward.from, statedUnit);
+  }
   const userSizeEarned = (l: CandidateLink): boolean => {
     if (l.provenance_source === 'user_specified') return true;
     if (boundByLink.has(l)) return true;
+    // ⚠ The `sizeWritten` door is RETIRED by Science 6008581742, in its own PR: Fi does not yet bind every sentence it
+    // covers ("cuts churn by 6 points" is not read as percentage points; a three-word noun such as "each qualified investor
+    // conversation" is not located), so retiring it here would demote real user figures.
     const source = nodeOf.get(l.from);
     const target = nodeOf.get(l.to);
     if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
