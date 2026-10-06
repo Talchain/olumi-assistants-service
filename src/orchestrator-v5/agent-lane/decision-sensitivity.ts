@@ -26,7 +26,8 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
-import { goalChanceDisplayForAgent, goalChanceDriverAvailabilityForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
+import { goalChanceDriverAvailabilityForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
+import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
@@ -148,10 +149,12 @@ export function tippingPointOf(enrichment: unknown): TippingPoint {
 }
 
 /** The run's `analysis_result` block as the Agent reads it: (i)–(iii) above. Never mutates its input. */
-export function analysisResultForAgent(result: unknown): unknown {
+export function analysisResultForAgent(result: unknown, graph?: unknown, current = true): unknown {
   const block = recordOf(result);
   if (block === undefined) return result;
   const enrichment = recordOf(block.enrichment);
+  const goalFacts = goalChanceFactsForAgent(block, graph, current);
+  const displays = goalFacts.goal_chance_display ?? {};
   const out: Record<string, unknown> = { ...block };
   if (typeof block.summary === 'string') out.summary = withoutStrongestDriverClause(block.summary);
   if ('inference_warnings' in block) out.inference_warnings = warningsForAgent(block.inference_warnings);
@@ -164,7 +167,7 @@ export function analysisResultForAgent(result: unknown): unknown {
     const brief = recordOf(rest.decision_brief);
     let limitsRenamed = false;
     const rows = (value: unknown): unknown => {
-      const projected = optionRowsForAgent(value, withheld, outcomeHidden, shown);
+      const projected = optionRowsForAgent(value, outcomeHidden, shown, displays);
       if (projected.renamed) limitsRenamed = true;
       return projected.rows;
     };
@@ -205,11 +208,15 @@ export function analysisResultForAgent(result: unknown): unknown {
   }
   out.decision_sensitivity = decisionSensitivityOf(enrichment);
   // CEE-owned facts stay outside enrichment's producer-prose filter. The licence, not EVPPI, owns this claim scope.
-  if (!runWithheldGoalFigures(block) && (enrichment === undefined || !runWithheldGoalFigures(enrichment))) {
-    const display = goalChanceDisplayForAgent(block);
+  Object.assign(out, goalFacts);
+  if (goalFacts.goal_chance_display !== undefined) {
     const availability = goalChanceDriverAvailabilityForAgent(block);
-    if (display !== undefined) out.goal_chance_display = display;
-    if (availability !== undefined) out.goal_chance_driver_availability = availability;
+    if (availability !== undefined) {
+      const options = availability.options.filter((o) => Object.hasOwn(displays, o.option_id));
+      out.goal_chance_driver_availability = { ...availability, options,
+        status: options.some((o) => o.status === 'available') ? 'available'
+          : options.every((o) => o.status === 'none_licensed') ? 'none_licensed' : 'not_recorded' };
+    }
   }
   out.tipping_point = tippingPointOf(enrichment);
   return out;
@@ -221,7 +228,8 @@ export function analysisResultForAgent(result: unknown): unknown {
  * `probability_of_goal`. Not an array → unchanged.
  */
 function optionRowsForAgent(
-  value: unknown, withheld: boolean, outcomeHidden: ReadonlySet<string> = new Set(), shown: ReadonlyMap<string, number> = new Map(),
+  value: unknown, outcomeHidden: ReadonlySet<string> = new Set(), shown: ReadonlyMap<string, number> = new Map(),
+  displays: Readonly<Record<string, string>> = {},
 ): { rows: unknown; renamed: boolean } {
   if (!Array.isArray(value)) return { rows: value, renamed: false };
   let renamed = false;
@@ -247,12 +255,14 @@ function optionRowsForAgent(
       next = { ...others, all_limits_hold_probability: joint };
       renamed = true;
     }
-    if (withheld && 'probability_of_goal' in next) {
+    const chancePermitted = id !== undefined && Object.hasOwn(displays, id);
+    if (!chancePermitted && 'probability_of_goal' in next) {
       const { probability_of_goal: _withheld, ...others } = next;
       next = others;
     }
-    if (!withheld && id !== undefined && shown.has(id) && typeof next.probability_of_goal === 'number') {
-      next = { ...next, probability_of_goal: shown.get(id)! };
+    if (chancePermitted && id !== undefined && typeof next.probability_of_goal === 'number') {
+      const whole = /^about (\d+)%$/.exec(displays[id]!);
+      next = { ...next, probability_of_goal: whole !== null ? Number(whole[1]) / 100 : shown.get(id) ?? next.probability_of_goal };
     }
     // ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal chance's precision and drivers NEVER reach the Agent, withheld or not —
     // no ruled Agent sentence exists, and free prose about a "main driver" passes no guard. It reads the licence record only.

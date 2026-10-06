@@ -196,7 +196,8 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
-import { goalChanceDisplayForAgent, goalChanceLicenceForAgent, nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
+import { nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
+import { goalChanceFactsForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
@@ -1644,19 +1645,14 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
   const current = rec(rec(g.analysis_state)?.run_state)?.kind === 'complete_current';
   const goalChance = current ? withGoalChance(g.analysis_result).goal_chance : undefined;
-  // W3 (DL #75 5902916137, AIQ 5902905975): a current Run that may name its leader carries each option's recorded
-  // model chance, as the Run chip's own result does. The retained history no longer holds that result (#2322), so
-  // without it the Agent said "not confirmed" beside a Goal panel showing 25%. A withheld leader keeps AI Quality's
-  // standing drop of per-option chances; an exact 0 or 1 travels only through its earned `goal_certainty` decision.
-  // The selected Run uses the same existing requested-Run licence, including separable provisional caveats.
+  // Leader permission governs comparison only. Each current option reads its own stored goal-chance entitlement.
   const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true });
   const selectedPermissions = current && g.analysis_result !== undefined && permissions.leader_may_be_named !== true
     ? withNonlinearIdentity(permissions, g.raw, g.identity_evaluated) : permissions;
-  const chancePermitted = current && goalChance === undefined && permissions.leader_may_be_named === true;
-  const goalChanceLicence = chancePermitted ? goalChanceLicenceForAgent(g.analysis_result) : undefined;
-  const goalChanceDisplay = chancePermitted ? goalChanceDisplayForAgent(g.analysis_result) : undefined;
+  const goalFacts = goalChanceFactsForAgent(g.analysis_result, g.raw, current);
+  const goalChanceDisplay = goalFacts.goal_chance_display;
   // ⭐ (9) chat and panel quote the same figure: a chance the licence displays at the nearest 5 is handed over as displayed.
-  const shownChance = chancePermitted ? nearestFiveGoalChancesForAgent(g.analysis_result) : new Map<string, number>();
+  const shownChance = nearestFiveGoalChancesForAgent(g.analysis_result);
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const optionNames = optionNameAliasesForCurrentRun(g);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
@@ -1670,13 +1666,15 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     if (typeof id !== 'string') return [];
     const label = row?.option_label ?? row?.label;
     const decision = byId.get(id);
+    const chancePermitted = goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id);
+    const whole = chancePermitted ? /^about (\d+)%$/.exec(goalChanceDisplay[id]!) : null;
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
       ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
       ...(chancePermitted && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
-        ? { probability_of_goal: shownChance.get(id) ?? row.probability_of_goal } : {}),
-      ...(decision !== undefined ? { goal_certainty: decision } : {}),
+        ? { probability_of_goal: whole !== null ? Number(whole[1]) / 100 : shownChance.get(id) ?? row.probability_of_goal } : {}),
+      ...(decision !== undefined && !Object.hasOwn(goalFacts.goal_chance_range_display ?? {}, id) ? { goal_certainty: decision } : {}),
     }];
   }) : [];
   // Participation belongs to the same selected, delivered current Run. Only labels come from this read's graph;
@@ -1700,8 +1698,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
     // ⭐ DL 0df0e1 ruling C (6 Oct): where each option's chance reaches the Agent, so does the Run's licence to compare them.
-    ...(chancePermitted && goalChanceLicence !== undefined ? { goal_chance_licence: goalChanceLicence } : {}),
-    ...(goalChanceDisplay !== undefined ? { goal_chance_display: goalChanceDisplay } : {}),
+    ...goalFacts,
     ...(participation !== undefined ? { option_participation: participation } : {}),
   } };
 }
@@ -8345,8 +8342,7 @@ export function createAgentCapabilities(
       onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, analysis_state: r.json.analysis_state, analysis_ready: r.json.analysis_ready, blocks,
         ...(r.json.run_delta !== undefined ? { run_delta: r.json.run_delta } : {}) });
       const permissions = claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready, { requested: true });
-      // ⛔ C46 (d): only a run that produced a result and withheld its leader is read against the model
-      // (one graph read); a named leader means the Run's own stamp found no product in the way.
+      // C46's existing read also supplies labels for a licensed range, even when a leader may be named.
       let graphForProduct: unknown;
       // C46 × R3-4: the carriers the run's engine evaluated, from the SAME graph read as the model.
       let evaluatedForProduct: ReadonlySet<string> | undefined;
@@ -8354,7 +8350,7 @@ export function createAgentCapabilities(
       let limitChecks: ReturnType<typeof limitChecksForAgent>;
       // The post-run graph read, when one was made (the goal-certainty rule reuses it).
       let postRunRead: GraphRead | null | undefined;
-      if (result !== undefined && permissions.leader_may_be_named !== true) {
+      if (result !== undefined && (permissions.leader_may_be_named !== true || goalChanceRangeDisplayForAgent(result, undefined) !== undefined)) {
         try {
           const read = await readGraph(ctx.scenario_id);
           postRunRead = read;
@@ -8402,7 +8398,10 @@ export function createAgentCapabilities(
         blockers: ready.blockers ?? [],
         options: ready.options ?? [],
         // ⛔ The Agent reads decision sensitivity from EVPPI only, never PLoT's structural ranking (`../decision-sensitivity.ts`).
-        ...(result !== undefined ? { result: analysisResultForAgent(result) } : {}),
+        ...(result !== undefined ? { result: analysisResultForAgent(result, graphForProduct ?? postRunRead?.raw,
+          (r.json.analysis_state as { run_state?: { kind?: string } } | undefined)?.run_state?.kind === 'complete_current'
+            && (postRunRead === undefined || (postRunRead !== null
+              && (postRunRead.analysis_state as { run_state?: { kind?: string } } | undefined)?.run_state?.kind === 'complete_current'))) } : {}),
         ...(runIdentity !== undefined ? { run_identity: runIdentity } : {}),
         // The typed leader permission for THIS run, read from its own wire verdict — so the Agent names a
         // leader only when `leader_may_be_named` (see the route's reporting instruction). `requested`: every
