@@ -3865,6 +3865,7 @@ function admitOnce(
     if (l.provenance_source === 'user_specified') return true;
     if (boundByLink.has(l)) return true;
     if (signRefusedLinks.has(l)) return false;
+    if (process.env.MC_DOOR_MEASURE !== 'open') return false; // MEASUREMENT ONLY (PR-2 lease): the door closed
     // ⚠ The `sizeWritten` door is RETIRED by Science 6008581742, in its own PR: Fi does not yet bind every sentence it
     // covers ("cuts churn by 6 points" is not read as percentage points; a three-word noun such as "each qualified investor
     // conversation" is not located), so retiring it here would demote real user figures.
