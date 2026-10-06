@@ -12,6 +12,7 @@ import { prepareLinkEffectUnitReadings } from '../link-effect-unit-reading.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken } from '../link-effect-edit.js';
 import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { clampForPersist, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
+import { heldLinkOf } from '../../goal-target/held-user-links.js';
 import { linkEffectRefusalWords } from '../../agent-lane/runtime/agent-capabilities.js';
 import { executeOptionInterventionBatch, linkEffectRefitPostimageIsScoped } from '../option-intervention-edit.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
@@ -437,5 +438,29 @@ describe('S5t receipt: a refit is said once, in Science\'s words', () => {
       amount_unit: 'customers', per_source_change: 1, per_source_change_unit: 'percentage points' });
     expect(times(String(out.follow_up), 'Olumi rescaled')).toBe(1);
     expect(String(out.follow_up)).toContain(SAID('Customers lost to price rise'));
+  });
+});
+
+/**
+ * ⭐ HOLD-AT-1.0 × S5t (Integrator chain check on #2643, sent to a8 6 Oct 04:4xZ): a user-stated sibling whose own range
+ * excludes zero is held at existence 1 with its range's spread (`heldLinkOf`). A refit rescales that sibling's β AND its
+ * stated `strength_mean` together, so it stays held and its held spread moves with β (× F_old / F_new): the user's range,
+ * in their own units, is unchanged. Mutant: the refit leaves `natural_effect.strength_mean` → no longer held → RED.
+ */
+describe('S5t × hold-at-1.0: a refit keeps a held user sibling held, its spread in natural units unchanged', () => {
+  it('HELD SIBLING: still held after the refit; held std × 3.5M / 5M', () => {
+    const g = FIXTURE();
+    const sib = edge2(g, 'integration_step_abandonment_rate', 'quarterly_revenue');
+    sib.provenance = { source: 'brief_extraction', magnitude: 'user_stated',
+      source_quote: 'Each 1% more integration-step abandonment costs about £10,000 a quarter, somewhere between £5,000 and £15,000.',
+      natural_effect: { ...sib.provenance.natural_effect, stated_range: { low: -15000, high: -5000 } } };
+    const before = heldLinkOf(sib);
+    expect(before, 'precondition: the sibling is held before the refit').not.toBeNull();
+    const r = write(g);
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    const after = heldLinkOf(edge2(r.mutatedGraph as Rec, 'integration_step_abandonment_rate', 'quarterly_revenue'));
+    expect(after).not.toBeNull();
+    expect(after!.std).toBeCloseTo(before!.std * (3500000 / 5000000), 12);
   });
 });
