@@ -38,7 +38,7 @@ import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
-import { targetTestabilityOf } from '../../admission/target-testability.js';
+import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
 import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
@@ -1395,6 +1395,23 @@ export function chancesWithheldByAGuess(drafted: { readonly nodes: readonly unkn
   return (verdict.failures ?? []).some((f) => f.code === 'goal_path_unsized' || f.code === 'goal_path_placeholder');
 }
 
+/**
+ * G1b's second condition: the options' ways to the goal carry a size the USER stated (`magnitude: 'user_stated'`). The
+ * ruling's class is a brief that says how its options work, where Olumi's extra mechanism is the one thing in the way.
+ * Where no option path carries a figure of the user's, the chances an unsized risk's absence would "unlock" rest on
+ * Olumi's own reading alone (R3/AIQ b3d11a92: ‘Customer backlash’ beside MRR = price × subscribers, with no route of the
+ * user's), so the drafted risk stays and is handled as before. Pure.
+ */
+export function goalPathsCarryTheUsersFigures(graph: { readonly nodes: readonly unknown[]; readonly edges: readonly unknown[] }): boolean {
+  const nodes = graph.nodes as readonly Record<string, unknown>[];
+  const options = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
+  const { paths } = reachedGoalPaths(graph, options, new Map(options.map((id) => [id, [id]])));
+  return paths.some((p) => p.links.some((l) => {
+    const prov = l.provenance;
+    return prov !== null && typeof prov === 'object' && (prov as Record<string, unknown>).magnitude === 'user_stated';
+  }));
+}
+
 export async function buildModelFromBrief(
   scenarioId: string,
   brief: string,
@@ -1480,7 +1497,7 @@ export async function buildModelFromBrief(
    * without them.
    * ⛔ ONLY WHERE IT IS WHAT STANDS BETWEEN THE USER AND PER-OPTION CHANCES (stand-in for MC 21, 6 Oct): the cut is applied
    * when, on a trial admission (this pass's own steps, pure), the drafted model's chances are withheld by a guess on a goal
-   * path and the cut model's are not. Anywhere else the drafted model stands: a short brief's model is Olumi's estimates
+   * path and the cut model's are not, AND the cut model's option paths carry a figure the user stated. Anywhere else the drafted model stands: a short brief's model is Olumi's estimates
    * throughout, so a cut there would only take a risk the user can see (DL #75 5916217417, Paul 30 Sep: "new models have
    * fewer risks"; `construction-keeps-drafted-risks.test.ts`) and change no result.
    */
@@ -1489,7 +1506,10 @@ export async function buildModelFromBrief(
     return { nodes: a.nodes, edges: a.edges };
   };
   const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
-  const cutApplies = unsupported.model !== candidate && chancesWithheldByAGuess(trialGraph(candidate)) && !chancesWithheldByAGuess(trialGraph(unsupported.model));
+  const cutApplies = unsupported.model !== candidate && (() => {
+    const after = trialGraph(unsupported.model);
+    return !chancesWithheldByAGuess(after) && goalPathsCarryTheUsersFigures(after) && chancesWithheldByAGuess(trialGraph(candidate));
+  })();
   if (cutApplies) candidate = unsupported.model;
   let mechanismsUnmodelled: readonly UnmodelledMechanism[] = cutApplies ? unsupported.mechanisms : [];
   let costsOffRevenue: readonly CostOffRevenue[] = cutApplies ? unsupported.costs : [];
