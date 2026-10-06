@@ -131,11 +131,18 @@ const booleanString = z
  * @param settingName - Name of the setting for logging
  * @param allowStaging - Whether to allow true in staging environment (default: true)
  */
+/**
+ * Settings the production-DEPLOYMENT lockdown (`isProductionDeployment`) leaves alone.
+ * The production LABEL (`getRuntimeEnv() === "prod"`) still locks every setting, these included.
+ * - CEE_MODEL_VERSIONS_ENABLED: versions are on in every deployment by ruling; an explicit
+ *   false remains the deploy-free off switch.
+ */
+const DEPLOYMENT_LOCKDOWN_EXEMPT: ReadonlySet<string> = new Set(["CEE_MODEL_VERSIONS_ENABLED"]);
+
 function createEnvEnforcedBoolean(
   defaultValue: boolean,
   settingName: string,
-  allowStaging: boolean = true,
-  lockOnProductionDeployment: boolean = true
+  allowStaging: boolean = true
 ) {
   return z
     .union([z.boolean(), z.string(), z.number(), z.undefined()])
@@ -158,7 +165,7 @@ function createEnvEnforcedBoolean(
 
       // Prod: always false, warn if override attempted. "Prod" is the production label OR the
       // declared production deployment (`isProductionDeployment`), unless the setting is exempt.
-      if (env === "prod" || (lockOnProductionDeployment && isProductionDeployment())) {
+      if (env === "prod" || (!DEPLOYMENT_LOCKDOWN_EXEMPT.has(settingName) && isProductionDeployment())) {
         if (requestedValue === true) {
           console.warn(`[SECURITY] ${settingName} cannot be enabled in production (forced to false)`);
           configOverrideEvents.push({
@@ -1386,9 +1393,7 @@ const ConfigSchema = z.object({
     // production lockdown; an explicit CEE_MODEL_VERSIONS_ENABLED=false in
     // the environment still disables it (rollback without a deploy), and the
     // routes answer an honest VERSIONS_DISABLED 503 in that posture.
-    // EXEMPT from the production-DEPLOYMENT lockdown (4th argument): versions are on in
-    // every deployment by ruling. The production LABEL (OLUMI_ENV=prod) still locks it, as before.
-    modelVersionsEnabled: createEnvEnforcedBoolean(true, "CEE_MODEL_VERSIONS_ENABLED", true, false),
+    modelVersionsEnabled: createEnvEnforcedBoolean(true, "CEE_MODEL_VERSIONS_ENABLED"),
   }),
 
   // ISL (Inference Service Layer) Configuration
