@@ -11,6 +11,7 @@ import { legacyEditFactsForFreshness } from '../../context/reconcile-scenario-an
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { maximalRunDeliveredRecord } from '@talchain/schemas/fixtures';
 import { randomUUID } from 'node:crypto';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -1927,5 +1928,84 @@ describe('readonly existing-scenario snapshot', () => {
   it.each([undefined, { ...row(), id: USER }, { ...row(), user_id: undefined }, { ...row(), user_id: '' }, { ...row(), analysis_invalidated_at: 'invalid' }])('refuses a malformed snapshot instead of fabricating a guest: %j', async (data) => {
     const { client } = makeClient({ selectResult: { data, error: null } });
     await expect(new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 }).readExistingScenario(SCENARIO)).rejects.toBeInstanceOf(SessionReadError);
+  });
+});
+
+// ─── 0.79 SD-1 Slice R (DL ruling #87, option A): the Run's `run_delivery` fact ─────────────────────────────────────────
+describe('SupabaseSessionStore.readNewestRunDeliveryFor (0.79, agent lane delivered record)', () => {
+  const RUN = 'run_slice_r_1';
+  const record = (over: Record<string, unknown> = {}) =>
+    ({ ...(structuredClone(maximalRunDeliveredRecord) as Record<string, unknown>), run_id: RUN, ...over });
+  const row = (result: unknown, factType = 'run_delivery') =>
+    ({ payload: { fact_type: factType, fact_version: 1, result }, noop: false });
+  const storeWith = (selectResult: { data?: unknown; error?: { message: string; code?: string } | null }) => {
+    const { client, selectCalls } = makeClient({ selectResult });
+    const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    return { store, selectCalls };
+  };
+
+  it('⭐ RED: reads ONLY this scenario\'s non-noop run_delivery rows for THIS Run, newest first, and returns the fact verbatim', async () => {
+    const { store, selectCalls } = storeWith({ data: [row({ run_id: RUN, record: record() })], error: null });
+    const got = await store.readNewestRunDeliveryFor(SCENARIO, RUN);
+    expect(got).toStrictEqual({ fact_type: 'run_delivery', fact_version: 1, noop: false, result: { run_id: RUN, record: record() } });
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0]!.table).toBe('v5_handler_facts');
+    expect(selectCalls[0]!.filters).toStrictEqual({
+      'eq:scenario_id': SCENARIO,
+      'eq:handler_id': 'run_delivery',
+      'eq:noop': false,
+      'eq:payload->result->>run_id': RUN,
+      'order:created_at': { ascending: false },
+      'order:id': { ascending: false },
+      limit: 1,
+    });
+  });
+
+  it('none recorded → null (never a throw)', async () => {
+    const { store } = storeWith({ data: [], error: null });
+    await expect(store.readNewestRunDeliveryFor(SCENARIO, RUN)).resolves.toBeNull();
+  });
+
+  it('a failed read THROWS — it never reads as "none recorded"', async () => {
+    const { store } = storeWith({ data: null, error: { message: 'boom', code: '57014' } });
+    await expect(store.readNewestRunDeliveryFor(SCENARIO, RUN)).rejects.toBeInstanceOf(SessionReadError);
+  });
+
+  it('refuses ANOTHER fact type stored under the run_delivery handler id, even one naming this Run', async () => {
+    const runAnalysis = row({
+      scenario_id: SCENARIO, run_id: RUN, leading_option_id: 'opt_a', summary: 'Option A leads.',
+      win_probabilities: { opt_a: 0.64, opt_b: 0.36 }, graph_hash_at_run: 'aaaaaaaaaaaaaaaa', computed_at: '2026-10-06T06:00:00.000Z',
+    }, 'run_analysis');
+    // Precondition: it IS a valid stored fact for this Run, so only the type check can refuse it.
+    const { HandlerFactSchema } = await import('@talchain/schemas/orchestrator');
+    expect(HandlerFactSchema.safeParse({ ...runAnalysis.payload, noop: false }).success).toBe(true);
+    const { store } = storeWith({ data: [runAnalysis], error: null });
+    await expect(store.readNewestRunDeliveryFor(SCENARIO, RUN)).rejects.toMatchObject({ code: 'run_delivery_corrupt' });
+  });
+
+  it.each([
+    ['a delivery for another Run', row({ run_id: 'run_other', record: record({ run_id: 'run_other' }) })],
+    ['a record naming another Run', row({ run_id: RUN, record: record({ run_id: 'run_other' }) })],
+    ['a record with an unknown key', row({ run_id: RUN, record: record({ blocks: [] }) })],
+  ])('refuses %s as run_delivery_corrupt (never served)', async (_name, bad) => {
+    const { store } = storeWith({ data: [bad], error: null });
+    await expect(store.readNewestRunDeliveryFor(SCENARIO, RUN)).rejects.toMatchObject({ code: 'run_delivery_corrupt' });
+  });
+
+  it('CENSUS: the UNFILTERED prior-facts read now admits a run_delivery row beside a run_analysis row (a 0.78 CEE threw here and lost the whole window)', async () => {
+    const delivery = {
+      id: 'fact-row-delivery', noop: false, handler_id: 'run_delivery', action_type: 'run_delivery',
+      v5_conversation_turn_id: 'turn-row-answer', created_at: '2026-10-06T06:00:01.000Z',
+      payload: { fact_type: 'run_delivery', fact_version: 1, result: { run_id: RUN, record: record() } },
+    };
+    const constraint = {
+      id: 'fact-row-constraint', noop: false, handler_id: 'add_constraint', action_type: 'add_constraint',
+      v5_conversation_turn_id: 'turn-row-run', created_at: '2026-10-06T06:00:00.000Z',
+      payload: { fact_type: 'add_constraint', fact_version: 1, result: { target_id: 'c1', status: 'applied', before: null,
+        after: { constraint_id: 'c1', node_id: 'goal-g', operator: '<=', value: 100 } } },
+    };
+    const { store } = storeWith({ data: [delivery, constraint], error: null });
+    const wrapped = await store.readFactsWithTurnFor(['turn-row-answer', 'turn-row-run']);
+    expect(wrapped.map((w) => w.fact.fact_type)).toStrictEqual(['run_delivery', 'add_constraint']);
   });
 });
