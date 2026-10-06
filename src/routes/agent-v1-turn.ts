@@ -115,6 +115,7 @@ import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js'
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
 import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
+import { runDeliveryFactFor } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
 import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
@@ -1069,7 +1070,28 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
   } };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+/**
+ * 0.79 SD-1 Slice R (DL #87 option A): the scenario read's selected Run, ONLY when `current_read` says it is
+ * `complete_current` and names it (CEE #2654): its `run_id`, the graph it ran against and when it was computed. The
+ * run_delivery writer records the turn's delivery against this Run only when it IS the Run this turn made.
+ */
+export interface ReadbackCurrentRun {
+  readonly runId: string;
+  readonly graphHashAtRun: string;
+  readonly computedAt: string;
+}
+
+export function readbackCurrentRun(raw: unknown): ReadbackCurrentRun | undefined {
+  const read = raw as { run_state?: { kind?: unknown; computed_at?: unknown } | null; run_id?: unknown; computed_against_hash?: unknown } | null | undefined;
+  if (read?.run_state?.kind !== 'complete_current') return undefined;
+  const { run_id: runId, computed_against_hash: graphHashAtRun } = read;
+  const computedAt = read.run_state.computed_at;
+  if (typeof runId !== 'string' || runId === '' || typeof graphHashAtRun !== 'string' || graphHashAtRun === ''
+    || typeof computedAt !== 'string' || computedAt === '') return undefined;
+  return { runId, graphHashAtRun, computedAt };
+}
+
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean; currentRun?: ReadbackCurrentRun }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1129,12 +1151,15 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
    * where nothing errors and everything looks broken.
    */
   let draftGraph: unknown;
+  /** 0.79 SD-1 Slice R: the read's selected Run, when it is current and identified (the run_delivery writer binds to it). */
+  let currentRun: ReadbackCurrentRun | undefined;
   /** The persisted graph as read — the leader wire gate reads its option ROSTER, never a verdict. */
   let graph: unknown;
   try {
     const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (after.status === 200) {
       graph = after.json.graph;
+      currentRun = readbackCurrentRun(after.json.current_read);
       scopeOpen = Array.isArray(after.json.goal_scope_reconciliation) && after.json.goal_scope_reconciliation.length > 0;
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
@@ -1285,7 +1310,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, scopeOpen };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, scopeOpen, ...(currentRun !== undefined ? { currentRun } : {}) };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -3796,6 +3821,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * no claim, no replay, no fence, exactly as before for everything else about an unnamed turn.
      */
     const answerGuidance = guidanceOnAnswer(wireBody.guidance as GuidanceWire | undefined, guidanceHistory, handledGuidancePress);
+    /**
+     * ⭐ 0.79 SD-1 Slice R — THE WRITER (DL #87 option A; label `writer-after-prod-0.79`): what this Run's turn
+     * DELIVERED, recorded on this answer row as an append-only `run_delivery` fact, so a reload or a second device shows
+     * the same "Olumi model review" cards (CEE #2654 serves it; DGAI adopts it). `wireBody` here IS the body sent (every
+     * reassignment precedes this line). Bound to the Run THIS turn made (its run_identity = the readback's current Run),
+     * and only within the readback's licence; any doubt omits, and the row is written exactly as before.
+     */
+    const runDelivery = runDeliveryFactFor({
+      sentBody: wireBody,
+      toolResults: result.tool_results,
+      currentRun: finalRead.currentRun,
+      licence: leaderLicenceFromState(analysisState, analysisReady),
+      graph: readbackGraph ?? null,
+      analysisReady,
+    });
+    if (runDelivery.kind === 'recorded' || runDelivery.reason !== 'no_run_this_turn') {
+      log.info({
+        event: 'v5.run_delivery', request_id: String(req.id), scenario_id: scenarioId,
+        ...(runDelivery.kind === 'recorded'
+          ? { outcome: 'recorded', block_count: runDelivery.record.phase3_blocks.length }
+          : { outcome: 'omitted', reason: runDelivery.reason }),
+      }, 'agent-lane: run_delivery');
+    }
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
@@ -3823,7 +3871,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           llm_calls_used: providerCallsMade()
             ?? (fastPath === 'approve' || fastPath === 'strengthen' ? 0 : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? 1 : 0) : result.hops + 1),
           duration_ms: Date.now() - startedAt,
-          handler_facts: [],
+          handler_facts: runDelivery.kind === 'recorded' ? [runDelivery.fact] : [],
           userMessage: message,
           assistantMessage: String(wireBody.assistant_text ?? text),
           ...(answerGuidance !== undefined ? { agent_guidance: answerGuidance } : {}),
