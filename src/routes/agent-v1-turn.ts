@@ -1,6 +1,7 @@
 import { refreshScopePending } from '../orchestrator-v5/agent-lane/goal-scope.js';
 import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { CURRENT_LEVEL_TOOL, currentLevelAnswerFirstCall, currentLevelAskOnAnswer, latestCurrentLevelAsk } from '../orchestrator-v5/agent-lane/current-level-answer.js';
+import { currentLevelAskForAnswerRow } from '../orchestrator-v5/agent-lane/current-level-ask-carry.js';
 /**
  * POST /agent/v1/turn — the OpenAI Agent mounted in the real PoC.
  *
@@ -2452,6 +2453,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
+    // Snapshot before any inner tool row: the outer answer carries/decrements this ask once,
+    // even when Run or Explain bypasses the Agent loop. Claim rows are excluded by the store.
+    let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
+    if (mode === 'full' && typeof store.readMostRecentPendingActions === 'function') {
+      try {
+        levelAsk = latestCurrentLevelAsk(await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }), scenarioId, userId);
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: current-level ask unreadable — ordinary routing');
+      }
+    }
+
     /**
      * ⭐ FAST PATH 2 — A TYPED APPROVAL IS APPLIED, NOT INTERPRETED (RC #63 5803960423 /
      * 5803995225). Measured in Paul's staging test: "Use as starting assumptions" took
@@ -2960,7 +2972,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
     let briefReadingOpen = false;
-    let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
     let levelAnswerTool: typeof CURRENT_LEVEL_TOOL | undefined;
     /** RT-1: set only on the path that runs the Agent with the selection; absent ⇒ no `_grounded_selection`. */
     let selectionContext: AgentSelectionContext | null | undefined;
@@ -3045,7 +3056,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Only the LAST row's typed ask may claim this answer; failed reads preserve ordinary routing.
         if (mode === 'full' && typedNow !== null && typeof store.readMostRecentPendingActions === 'function') {
           try {
-            levelAsk = latestCurrentLevelAsk(await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }), scenarioId, userId);
             levelAnswerTool = currentLevelAnswerFirstCall(st, levelAsk, typedNow,
               hostFirstCall !== undefined || methodTurn !== null || widenTurn !== null || withheldToolsOf(body).includes(CURRENT_LEVEL_TOOL));
           } catch (err) {
@@ -3923,10 +3933,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Every retained Run output becomes a neutral marker; superseded pairs leave with their reasoning as before.
     const sentText = String(wireBody.assistant_text ?? text);
     // Persist the producer's exact delivered question or its qualified clarification, after every egress gate.
-    const nextLevelAsk = mode === 'full' && fastPath !== 'method' ? currentLevelAskOnAnswer({
+    const levelAskAnswered = levelAnswerTool !== undefined || result.tool_calls.some(call => call.name === CURRENT_LEVEL_TOOL);
+    const deliveredLevelAsk = mode === 'full' && fastPath !== 'method' ? currentLevelAskOnAnswer({
       graph: readbackGraph, analysisResult, sentText, scenarioId, userId, emittedAtIso,
-      prior: levelAsk, answered: levelAnswerTool !== undefined, message,
+      prior: levelAsk, answered: levelAskAnswered, message,
       awaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
+    }) : null;
+    const nextLevelAsk = mode === 'full' ? currentLevelAskForAnswerRow({
+      prior: levelAsk, next: deliveredLevelAsk, answered: levelAskAnswered,
+      graph: readbackGraph, graphHash, nowMs: Date.parse(emittedAtIso),
     }) : null;
     if (nextLevelAsk !== null) {
       // The question precedes lower-priority Run offers; never displace an approval or a live hold.
