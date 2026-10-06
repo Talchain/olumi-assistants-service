@@ -27,7 +27,7 @@ function graph(): Rec {
     nodes: [
       { id: 'goal_mrr', kind: 'goal', label: 'Monthly recurring revenue' },
       { id: 'starter_subscribers', kind: 'factor', label: 'Starter subscribers', category: 'controllable',
-        observed_state: { value: 0, raw_value: 0, cap: 1000, unit: 'subscribers', source: 'cee_hypothesis' } },
+        observed_state: { value: 0, raw_value: 0, cap: 1000, unit: 'subscribers', source: 'cee_inference' } },
       { id: 'launch', kind: 'option', label: 'Launch starter tier', interventions: { starter_subscribers: {
         value: 0.15, raw_value: 150, unit: 'subscribers', source: 'cee_hypothesis',
         target_match: { node_id: 'starter_subscribers', match_type: 'exact_id', confidence: 'high' }, range: { ...RANGE },
@@ -69,7 +69,7 @@ describe('MC: quote-bound count range at real graph registration', () => {
     const saved = store.append.mock.calls[0]![0].graph;
     const reloaded = GraphV3.parse(JSON.parse(JSON.stringify(projectGraphForPersistence(saved))));
     expect(cell(reloaded)).toMatchObject({ raw_value: 150, range: RANGE });
-    expect(saved.options.find((o: Rec) => o.id === 'launch').interventions.starter_subscribers.range).toEqual(RANGE);
+    expect(cell(saved).range).toEqual(RANGE);
   });
 
   it.each([

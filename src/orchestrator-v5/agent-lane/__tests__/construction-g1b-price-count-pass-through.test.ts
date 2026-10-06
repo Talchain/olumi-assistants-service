@@ -60,6 +60,35 @@ const PRODUCTS: Record<string, { outcome: string; rate: string; count: string }>
   'acc__g1-2633t_draft-3__72af3e85': { outcome: 'Starter tier monthly recurring revenue', rate: 'Starter tier price', count: 'Starter subscribers' },
 };
 const RATE_UNIT = '£ per starter subscriber per month';
+const COUNT_FORECAST = 'The starter tier would win about 150 new subscribers, between 80 and 250.';
+const COUNT_RANGE = { low: 80, high: 250, meaning: 'likely_range', source: 'brief_extraction', source_quote: COUNT_FORECAST };
+
+function qualifiedPointCountDraft(): Rec {
+  const candidate = structuredClone(FX.point_count.candidate);
+  (candidate.factors as Rec[]).find((f) => f.label === 'Starter-tier monthly price')!.unit = RATE_UNIT;
+  ((candidate.options as Rec[]).find((o) => o.label === 'Launch starter tier')!.interventions as Rec[])
+    .find((i) => i.factor_label === 'Starter-tier monthly price')!.unit = RATE_UNIT;
+  return candidate;
+}
+
+/** Remove only this count's range clause; keep the real draft and every other brief figure unchanged. */
+function barePointBrief(): string {
+  const brief = FX.point_count.brief;
+  expect(brief).toContain(COUNT_FORECAST);
+  return brief.replace(COUNT_FORECAST, COUNT_FORECAST.replace(', between 80 and 250', ''));
+}
+
+function countIntervention(node: (label: string) => Rec): Rec {
+  return node('Launch starter tier').interventions[node('Starter subscribers').id];
+}
+
+function expectPointCountProduct(node: (label: string) => Rec): void {
+  expect(countIntervention(node)).toMatchObject({ raw_value: 150, unit: 'subscribers' });
+  expect(countIntervention(node).range).toEqual(COUNT_RANGE);
+  expect(node('Starter-tier monthly recurring revenue').nonlinear_identity).toEqual({
+    operation: 'product', factor_ids: [node('Starter-tier monthly price').id, node('Starter subscribers').id], stated_in_brief: false,
+  });
+}
 
 describe('price × count (2): a rate per a QUALIFIED count is Olumi\'s product, on real drafts', () => {
   it.each(FX.price_count.map((d) => [d.case_id, d] as const))('RED (%s): the outcome is Olumi\'s product of the rate × the count, by id', async (_id, d) => {
@@ -73,21 +102,31 @@ describe('price × count (2): a rate per a QUALIFIED count is Olumi\'s product, 
     expect((launch.interventions as Rec[]).map((i) => i.factor_label)).not.toContain(p.count);
   });
 
-  it('CONTROL (Science (A), real draft fa9f d8): Launch SETS the count to one figure (150) — still no product', async () => {
+  it('RED at base (Science (A), real draft fa9f d8): Launch SETS 150 with the user’s own 80–250 range — range and product survive', async () => {
     const d = FX.point_count;
     expect((d.candidate.options as Rec[]).find((o) => o.label === 'Launch starter tier')!.interventions.map((i: Rec) => `${i.factor_label}=${i.value}`))
       .toContain('Starter subscribers=150');
     const { node } = await build(JSON.stringify(d.candidate), d.brief);
+    expectPointCountProduct(node);
+  });
+
+  it('CONTROL (Science (A), real draft fa9f d8): the SAME draft with only the count range clause removed — still no product', async () => {
+    const d = FX.point_count;
+    expect((d.candidate.options as Rec[]).find((o) => o.label === 'Launch starter tier')!.interventions.map((i: Rec) => `${i.factor_label}=${i.value}`))
+      .toContain('Starter subscribers=150');
+    const { node } = await build(JSON.stringify(d.candidate), barePointBrief());
+    expect(countIntervention(node).range).toBeUndefined();
     expect(node('Starter-tier monthly recurring revenue').nonlinear_identity).toBeUndefined();
   });
 
-  it('CONTROL (Codex r1 P2): the point-set draft with the QUALIFIED rate ("£ per starter subscriber per month") — the second reading never bypasses Science (A)', async () => {
-    const d = FX.point_count;
-    const candidate = structuredClone(d.candidate);
-    (candidate.factors as Rec[]).find((f) => f.label === 'Starter-tier monthly price')!.unit = RATE_UNIT;
-    ((candidate.options as Rec[]).find((o) => o.label === 'Launch starter tier')!.interventions as Rec[])
-      .find((i) => i.factor_label === 'Starter-tier monthly price')!.unit = RATE_UNIT;
-    const { node } = await build(JSON.stringify(candidate), d.brief);
+  it('RED at base (Codex r1 P2): the point-set draft with the QUALIFIED rate ("£ per starter subscriber per month") — the user’s 80–250 range licenses the product', async () => {
+    const { node } = await build(JSON.stringify(qualifiedPointCountDraft()), FX.point_count.brief);
+    expectPointCountProduct(node);
+  });
+
+  it('CONTROL (Codex r1 P2, Science (A)): the SAME QUALIFIED-rate draft with only the count range clause removed — the second reading never bypasses Science (A)', async () => {
+    const { node } = await build(JSON.stringify(qualifiedPointCountDraft()), barePointBrief());
+    expect(countIntervention(node).range).toBeUndefined();
     expect(node('Starter-tier monthly recurring revenue').nonlinear_identity).toBeUndefined();
   });
 
