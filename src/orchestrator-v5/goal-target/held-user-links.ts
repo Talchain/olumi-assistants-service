@@ -12,6 +12,7 @@
  * per £1 is an accounting identity, not a 20% chance that Starter revenue isn't revenue. `validatedDefinition` below.
  */
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 
 type Rec = Record<string, any>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -33,7 +34,7 @@ function carriesStatedSize(e: Rec, beta: number): boolean {
  * is still that definition: ±1 per 1 in ONE unit at both ends (the hashed `natural_effect`), and the edge still carries that
  * β, or a verified stored clamp of it (`carriesStatedSize`). A strength or band write that keeps the flag but moves the size
  * (adjust-edge-strength keeps `definitional`) is no longer a definition. Returns the definition's unit, else undefined.
- * Read by the definitional part's unit (`mediatorReadings`, FA1) and, with the user-stated class, by the hold.
+ * Read by the definitional part's unit (`mediatorReadings`, FA1) and, through `validatedDefinition`, by the hold.
  */
 export function currentDefinitionalCarrier(e: unknown): string | undefined {
   if (!isRec(e) || !isRec(e.provenance) || e.provenance.definitional !== true) return undefined;
@@ -48,8 +49,9 @@ export function currentDefinitionalCarrier(e: unknown): string | undefined {
 }
 
 /**
- * The two ends of a link as the validated-definition test reads them: the labels, and each end's OWN unit when it has one.
- * Built once per graph (`endsOfGraph`) and passed to every reader, so no reader holds a link another does not.
+ * The two ends of a link as the validated-definition test reads them: the labels, and the unit each end's level is read in
+ * (`nodeUnitOf`, the reading `holdsByDefinition` already uses). Built once per graph (`endsOfGraph`) and passed to every
+ * reader, so no reader holds a link another does not.
  */
 export interface LinkEnds {
   readonly fromLabel: string | undefined;
@@ -58,24 +60,17 @@ export interface LinkEnds {
   readonly toUnit: string | undefined;
 }
 
-/**
- * Ends with no labels and no units: no link validates as a definition, so `heldLinkOf` reads the USER-only hold of
- * #2643/#2653. HISTORY ONLY (`graph-hash.ts` 'pre_definition' projection): a version recorded before the validated rule
- * is still that version. Never a Run, freshness or display reader: those pass `endsOfGraph(graph)`.
- */
-export const UNVALIDATED_ENDS: LinkEnds = Object.freeze({ fromLabel: undefined, toLabel: undefined, fromUnit: undefined, toUnit: undefined });
+/** Ends with no labels and no units: nothing validates against them (a non-record edge). */
+const UNVALIDATED_ENDS: LinkEnds = Object.freeze({ fromLabel: undefined, toLabel: undefined, fromUnit: undefined, toUnit: undefined });
 
 export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
-  const unitOf = (n: Rec | undefined): string | undefined => text(isRec(n?.observed_state) ? n!.observed_state.unit : undefined);
-  return (e) => {
-    if (!isRec(e)) return UNVALIDATED_ENDS;
-    const from = byId.get(e.from);
-    const to = byId.get(e.to);
-    return { fromLabel: text(from?.label), toLabel: text(to?.label), fromUnit: unitOf(from), toUnit: unitOf(to) };
-  };
+  const unitOf = nodeUnitOf(nodes);
+  return (e) => (isRec(e)
+    ? { fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label), fromUnit: unitOf(e.from), toUnit: unitOf(e.to) }
+    : UNVALIDATED_ENDS);
 }
 
 const QUANTITY_STOP = new Set(['a', 'an', 'the', 'of', 'to', 'from', 'for', 'in', 'on', 'per', 'by', 'and', 'or', 'with', 'at', 'into', 'its', 'their']);
@@ -98,16 +93,20 @@ export function labelHoldsQuantity(sourceLabel: string, targetLabel: string): bo
 }
 
 /**
- * ⭐ A VALIDATED DEFINITION (Science d5 #87 6011224941, correcting 6009797390's drafter-only clause; DL ruling): a CURRENT
- * definitional carrier (±1 per 1, ONE unit at both ends of its size, its β still carried) whose unit is each end's own
- * where that end has one, and whose source label holds the target's quantity words. WHOEVER flagged it. A flag that fails
- * any clause is not a definition: an Olumi link keeps its 0.8 and is disclosed. Returns the definition's unit, else
- * undefined. Exact unit strings, so the UI's mirror can read it with no unit grammar of its own.
+ * ⭐ A VALIDATED DEFINITION (Science d5 #87 6011224941, correcting 6009797390's drafter-only clause; DL ruling), WHOEVER
+ * flagged it:
+ *   1. a CURRENT definitional carrier (`currentDefinitionalCarrier`: ±1 per 1, one unit at both ends of its size, its β
+ *      still carried);
+ *   2. `sameUnit` at both ends: the link's own check, `holdsByDefinition` (DL #75 5916504679), so the target's level is
+ *      read in that unit and the source's too where its node carries one;
+ *   3. the source label holds the target's quantity words (`labelHoldsQuantity`).
+ * A flag that fails any clause is not a definition: an Olumi link keeps its 0.8 and is disclosed. Returns the
+ * definition's unit, else undefined.
  */
 export function validatedDefinition(e: unknown, ends: LinkEnds): string | undefined {
   const u = currentDefinitionalCarrier(e);
-  if (u === undefined) return undefined;
-  if ((ends.toUnit !== undefined && ends.toUnit !== u) || (ends.fromUnit !== undefined && ends.fromUnit !== u)) return undefined;
+  if (u === undefined || !isRec(e)) return undefined;
+  if (!holdsByDefinition(e, (id) => (id === e.to ? ends.toUnit : id === e.from ? ends.fromUnit : undefined))) return undefined;
   return ends.fromLabel !== undefined && ends.toLabel !== undefined && labelHoldsQuantity(ends.fromLabel, ends.toLabel) ? u : undefined;
 }
 
@@ -129,28 +128,44 @@ export function isUserStatedLink(e: unknown): boolean {
 }
 
 /**
- * The hold for one edge, or `null`. β is linear in the stated amount, so each end of the range maps through the size the
- * link carries: β(x) = x · strength_mean / amount. `natural_effect` is the user's size while it is current: every write of
- * the strength or the size drops or replaces it (refit-frames, CODEX 5925312387), and reframing rescales it with the edge.
+ * The hold for one edge, or `null`.
+ *   - ⭐ DEFINITIONAL (Science d5 #87 6011224941, correcting 6009797390's drafter-only clause): a VALIDATED definition (a
+ *     part → its total, ±1 per 1) is exact WHOEVER flagged it, so it holds with no range, at the structural minimum spread
+ *     (as on option → factor edges), never the ±50% default. The mechanism's doubt stays on the upstream causal link. A
+ *     flag that fails validation is not a definition, whoever flagged it (Codex r1 #2665 P1): an Olumi link keeps 0.8; a
+ *     user's link is an ordinary user link (held only by its own range, below).
+ *   - A link the USER stated whose own range excludes zero (#2643).
  */
 export function heldLinkOf(e: unknown, ends: LinkEnds): { readonly std: number } | null {
-  // ⭐ DEFINITIONAL (Science d5 #87 6011224941, correcting the drafter-only clause of 6009797390): a VALIDATED definition
-  // (a part → its total, ±1 per 1) is exact WHOEVER flagged it, so it holds with no range, at the structural minimum
-  // spread (as on option → factor edges), never the ±50% default. The mechanism's doubt stays on the upstream causal link.
   if (validatedDefinition(e, ends) !== undefined) return { std: DEFINITIONAL_STD };
+  return isUserStatedLink(e) ? rangeHold(e as Rec) : null;
+}
+
+/**
+ * HISTORY ONLY (`graph-hash.ts` 'pre_definition'): the hold as #2643 + #2653 computed it before the validated rule — the
+ * user's links only, their definitional flag held unvalidated. A model version or Run recorded then is still that one.
+ * Never a Run, freshness or display reader.
+ */
+export function heldLinkBeforeValidatedDefinition(e: unknown): { readonly std: number } | null {
   if (!isUserStatedLink(e)) return null;
-  // The user's OWN definitional link (stated, or quoted from their brief) holds as before (#2653; d5 6009797390 (a), which
-  // 6011224941 left standing): the user is the authority on what their total is made of, labels or not.
-  // ⛔ Codex r1 #2653 P1: only while the link still carries its definition (the ONE predicate): a band edit keeps the flag.
   if (currentDefinitionalCarrier(e) !== undefined) return { std: DEFINITIONAL_STD };
-  const ne = (e as Rec).provenance?.natural_effect;
+  return rangeHold(e as Rec);
+}
+
+/**
+ * A user link's RANGE hold. β is linear in the stated amount, so each end of the range maps through the size the link
+ * carries: β(x) = x · strength_mean / amount. `natural_effect` is the user's size while it is current: every write of the
+ * strength or the size drops or replaces it (refit-frames, CODEX 5925312387), and reframing rescales it with the edge.
+ */
+function rangeHold(e: Rec): { readonly std: number } | null {
+  const ne = e.provenance?.natural_effect;
   if (!isRec(ne) || !isRec(ne.stated_range)) return null;
   const { low, high } = ne.stated_range;
   if (!finite(low) || !finite(high) || !finite(ne.amount) || ne.amount === 0 || !finite(ne.strength_mean)) return null;
   // ⛔ CURRENT CARRIER ONLY (Codex r1 #2643 P1): a writer that changed the strength and kept `natural_effect` (a quoted
   // brief link sized by Olumi) leaves it stale. Held only while the link still carries the user's β, or a verified stored
   // clamp of it (|mean| 1, same sign, `clamped_from` = that β), the same rule `withStatedStrengths` applies.
-  if (!carriesStatedSize(e as Rec, ne.strength_mean)) return null;
+  if (!carriesStatedSize(e, ne.strength_mean)) return null;
   // Excludes zero: both ends strictly on one side. A range touching or crossing zero says the effect may not be there.
   if (!((low > 0 && high > 0) || (low < 0 && high < 0))) return null;
   const std = Math.abs((high - low) * (ne.strength_mean / ne.amount)) / RANGE_90_WIDTH_Z;
