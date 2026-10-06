@@ -1186,6 +1186,11 @@ export const BLOCK_PROSE_FIELDS: readonly string[] = [
   'reference_class',
   'counter_case',
   'review_trigger',
+  // ⭐ THE CHIP PROMPT (DL 0df0e1 6010662486; 7b's Codex r1 on #2654). The calibration card copies the model's question
+  // VERBATIM into `body` AND `action_prompt`, and the card ships on a withheld turn, so `body` was rewritten while the
+  // chip still carried the claim — which the user then sends as their own message. The wire enforcer OMITS the chip on
+  // a hit (never rewrites words into the user's mouth); the alarm reports it here. Pinned by action-prompt-egress.test.ts.
+  'action_prompt',
 ];
 
 function asRecord(value: unknown): Record<string, unknown> | null {
