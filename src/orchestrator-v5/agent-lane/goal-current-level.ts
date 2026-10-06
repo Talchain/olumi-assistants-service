@@ -55,7 +55,8 @@
  */
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
-import { admitStatedGoalLevel, admitStatedGoalLevelOnScale, isBarePercent, isChangeOwnPercent } from './admit-model.js';
+import { admitStatedGoalLevel, admitStatedGoalLevelOnScale, isChangeOwnPercent } from './admit-model.js';
+import { readPercentUnit } from './same-unit.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { retireNormalisingGoalFrame, rederiveGoalInLinks } from './normalising-goal-frame.js';
 import { frameOf } from './refit-frames.js';
@@ -588,7 +589,7 @@ export function levelUnitForChangeGoal(
   const inScope = goal.goal_threshold_frame === 'change_rel'
     && (stored === undefined || isChangeOwnPercent({ frame: 'change_rel', unit: stored, metric: label }))
     && (goal.goal_threshold_cap === undefined || goal.goal_threshold_cap === null)
-    && stated !== '' && !isBarePercent(stated) && unitPhraseFamily(stated) !== 'percent';
+    && stated !== '' && readPercentUnit(stated) === null && unitPhraseFamily(stated) !== 'percent';
   if (!inScope) return { ok: true };
   // The schema's own bound on a unit reading (`NodeV3.unit_reading.unit`): a unit it would drop is never adopted.
   if (stated.length > 40) {
@@ -603,7 +604,7 @@ export function levelUnitForChangeGoal(
     if (e.to !== goal.id) return false;
     const p = rec(e.provenance) ? e.provenance : {};
     const natural = rec(p.natural_effect) ? p.natural_effect : undefined;
-    return p.magnitude === 'user_stated' || p.definitional === true || (natural !== undefined && isBarePercent(natural.amount_unit));
+    return p.magnitude === 'user_stated' || p.definitional === true || (natural !== undefined && readPercentUnit(natural.amount_unit) !== null);
   });
   const rows = (Array.isArray(graph.goal_constraints) ? graph.goal_constraints.filter(rec) : []).filter((r) => r.node_id === goal.id);
   const level = rec(goal.observed_state) && typeof goal.observed_state.raw_value === 'number';
