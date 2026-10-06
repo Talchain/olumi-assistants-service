@@ -19,6 +19,7 @@ import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRe
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
+import { reframedNodeIds } from '../refit-frames.js';
 import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
 import { withinBandMovesForRunDelta } from '../rerun-within-band.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1468,6 +1469,16 @@ function stillReadUnitReadings(graph: unknown, item: { readonly from: string; re
     && f.unit_reading.source_quote === r.unit_reading.source_quote));
 }
 
+/**
+ * ⭐ S5t: the receipt's one sentence for a refit (Science d5 #87 6009444385, verbatim; DL adopted; c6 checks the guards).
+ * A frame is a choice of units, so every other link means the same; a band word read off β may not (cut-7 follow-up).
+ */
+export function frameRefitReceipt(nodes: readonly string[]): string {
+  const named = nodes.map((n) => `‘${n}’`);
+  const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return `Olumi rescaled ${list} so your figure fits. Your other links mean the same as before, though some strength words may read differently.`;
+}
+
 function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string },
   /** RT-6: the stated effect, when known, so a unit refusal names the END that failed. */
   effect?: { readonly amount_unit: string; readonly per_source_change_unit: string },
@@ -2836,11 +2847,14 @@ export function createAgentCapabilities(
         detail: 'These link sizes were sent, but reading the model back did not show all of them as recorded. Say exactly that; never say they were recorded or not recorded.' };
     }
     proposals.markApplied(parent.proposal_id, receipts);
+    // ⭐ S5t (Science d5 #87 6009444385, DL adopted): a frame the refit widened is said ONCE, in Science's words — read off
+    // the model before approval and the read-back above, never the writer's own account. Only the one-link door refits.
+    const reframed = approvedEffects.length === 1 ? reframedNodeIds(approvedRead.raw, check?.raw) : [];
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       follow_up: approvedEffects.length === 1
-        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'} Any earlier result is now out of date.`
+        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'}${reframed.length > 0 ? ` ${frameRefitReceipt(reframed.map(labelOf))}` : ''} Any earlier result is now out of date.`
         : `Recorded your figures for ${approvedEffects.length} links, from your words, as you confirmed. Any earlier result is now out of date.`,
     };
   };

@@ -393,3 +393,49 @@ describe('S5t: the chat writer refits the frame a stated size needs, exactly as 
   });
 });
 
+
+/**
+ * ⭐ THE RECEIPT SAYS A REFIT ONCE (Science d5 #87 6009444385, DL adopted for #2631). Band words read off β are frame
+ * artefacts, so the user is told once that Olumi rescaled the node and that their other links mean the same. Mutants: drop
+ * the sentence → RECEIPT and j3rw RED; say it without a refit → CONTROL RED.
+ */
+describe('S5t receipt: a refit is said once, in Science\'s words', () => {
+  const SAID = (node: string) => `Olumi rescaled ‘${node}’ so your figure fits. Your other links mean the same as before, though some strength words may read differently.`;
+  async function approve(g: Rec, said: string, args: Rec): Promise<{ out: Rec; stored: Rec }> {
+    const w = world(g);
+    const r = await w.caps.proposeLinkEffect!(ctxSaying(said), { ...args, quote: said } as never) as Rec;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const card = approvalChipsFor([{ name: 'propose_link_effect', ok: true, mutated: false, proposal_id: String(r.proposal_id) }],
+      (id) => ({ proposal: w.proposals.get(id), result: r as never }))[0]!;
+    const out = await w.caps.authoriseChange({ ...ctxSaying(card.message), typed_approval_of: String(r.proposal_id),
+      typed_approval_words: card.message }, { proposal_id: String(r.proposal_id) }) as Rec;
+    expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    return { out, stored: w.graph() };
+  }
+  const times = (text: string, part: string) => text.split(part).length - 1;
+
+  it('RECEIPT (investor turn-008): the widened goal is named once, after the recorded figure', async () => {
+    const { out, stored } = await approve(STORED(), QUOTE, { from_label: 'Enterprise win rate', to_label: 'quarterly revenue', ...S5T });
+    expect(stored.nodes.find((n: Rec) => n.id === 'quarterly_revenue').observed_state.cap).toBe(5000000); // precondition: refit
+    expect(times(String(out.follow_up), 'Olumi rescaled')).toBe(1);
+    expect(String(out.follow_up)).toContain(`${QUOTE}" ${SAID('quarterly revenue')} Any earlier result is now out of date.`);
+  });
+
+  it('CONTROL: a figure the frames already hold (£10,000 a point, β 0.29) is recorded with no rescale sentence', async () => {
+    const said = 'Every 1 percentage point more of Enterprise win rate adds about £10,000 per quarter.';
+    const { out, stored } = await approve(STORED(), said, { from_label: 'Enterprise win rate', to_label: 'quarterly revenue', ...S5T, amount: 10000 });
+    expect(stored.nodes.find((n: Rec) => n.id === 'quarterly_revenue').observed_state.cap).toBe(3500000); // precondition: no refit
+    expect(String(out.follow_up)).toContain('Recorded your figure');
+    expect(String(out.follow_up)).not.toContain('rescaled');
+  });
+
+  it('RECEIPT (j3rw-r17): the widened outcome is named once', async () => {
+    const r17 = assignEntityRefs(projectGraphForPersistence(JSON.parse(readFileSync(new URL('./fixtures/s5t-j3rw-r17-graph.json', import.meta.url), 'utf8'))),
+      { nodes: [], edges: [] }).graph as Rec;
+    const said = 'Each one-percentage-point Price rise increases Customers lost to price rise by about 3 customers.';
+    const { out } = await approve(r17, said, { from_label: 'Price rise', to_label: 'Customers lost to price rise', amount: 3,
+      amount_unit: 'customers', per_source_change: 1, per_source_change_unit: 'percentage points' });
+    expect(times(String(out.follow_up), 'Olumi rescaled')).toBe(1);
+    expect(String(out.follow_up)).toContain(SAID('Customers lost to price rise'));
+  });
+});

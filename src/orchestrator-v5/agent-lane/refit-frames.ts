@@ -232,6 +232,16 @@ export function refitKeepsOtherLinks(before: Rec, after: Rec, written: ReadonlyS
   return true;
 }
 
+/**
+ * ⭐ S5t receipt (Science d5 #87 6009444385, DL adopted): the nodes whose frame differs between two reads of the model, in
+ * `after`'s node order — what a refit actually moved, read off the stored graphs rather than the writer's own account.
+ */
+export function reframedNodeIds(before: unknown, after: unknown): string[] {
+  const nodesOf = (g: unknown): Rec[] => (g !== null && typeof g === 'object' && Array.isArray((g as Rec).nodes) ? (g as Rec).nodes : []);
+  const was = new Map(nodesOf(before).map((n) => [n.id, frameOf(n)]));
+  return nodesOf(after).filter((n) => typeof n.id === 'string' && was.has(n.id) && was.get(n.id) !== frameOf(n)).map((n) => n.id as string);
+}
+
 /** Links out of the contract (|β| > 1) between two framed nodes. */
 function cuts(g: Rec): Rec[] {
   const frames = new Map((g.nodes as Rec[]).map((n) => [n.id, frameOf(n)]));
