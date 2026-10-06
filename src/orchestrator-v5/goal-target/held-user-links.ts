@@ -12,7 +12,8 @@
  * per £1 is an accounting identity, not a 20% chance that Starter revenue isn't revenue. `validatedDefinition` below.
  */
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
-import { holdsByDefinition, nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
+import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
+import { sameUnit } from '../agent-lane/same-unit.js';
 
 type Rec = Record<string, any>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -50,8 +51,8 @@ export function currentDefinitionalCarrier(e: unknown): string | undefined {
 
 /**
  * The two ends of a link as the validated-definition test reads them: the labels, and the unit each end's level is read in
- * (`nodeUnitOf`, the reading `holdsByDefinition` already uses). Built once per graph (`endsOfGraph`) and passed to every
- * reader, so no reader holds a link another does not.
+ * (`nodeUnitOf`, the reading `holdsByDefinition` (DL #75) already uses). Built once per graph (`endsOfGraph`) and passed to
+ * every reader, so no reader holds a link another does not.
  */
 export interface LinkEnds {
   readonly fromLabel: string | undefined;
@@ -96,17 +97,17 @@ export function labelHoldsQuantity(sourceLabel: string, targetLabel: string): bo
  * ⭐ A VALIDATED DEFINITION (Science d5 #87 6011224941, correcting 6009797390's drafter-only clause; DL ruling), WHOEVER
  * flagged it:
  *   1. a CURRENT definitional carrier (`currentDefinitionalCarrier`: ±1 per 1, one unit at both ends of its size, its β
- *      still carried);
- *   2. `sameUnit` at both ends: the link's own check, `holdsByDefinition` (DL #75 5916504679), so the target's level is
- *      read in that unit and the source's too where its node carries one;
+ *      still carried or a verified stored clamp of it, so the saved link and the Run's restored copy agree; Codex r2 #2665);
+ *   2. `sameUnit` at both ends, as `holdsByDefinition` (DL #75 5916504679) reads them: the total's level is read in that
+ *      unit (REQUIRED), and the part's too where its node carries one;
  *   3. the source label holds the target's quantity words (`labelHoldsQuantity`).
  * A flag that fails any clause is not a definition: an Olumi link keeps its 0.8 and is disclosed. Returns the
  * definition's unit, else undefined.
  */
 export function validatedDefinition(e: unknown, ends: LinkEnds): string | undefined {
   const u = currentDefinitionalCarrier(e);
-  if (u === undefined || !isRec(e)) return undefined;
-  if (!holdsByDefinition(e, (id) => (id === e.to ? ends.toUnit : id === e.from ? ends.fromUnit : undefined))) return undefined;
+  if (u === undefined) return undefined;
+  if (ends.toUnit === undefined || !sameUnit(ends.toUnit, u) || (ends.fromUnit !== undefined && !sameUnit(ends.fromUnit, u))) return undefined;
   return ends.fromLabel !== undefined && ends.toLabel !== undefined && labelHoldsQuantity(ends.fromLabel, ends.toLabel) ? u : undefined;
 }
 

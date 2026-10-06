@@ -434,6 +434,18 @@ describe('the Run sends PLoT the validated definition at 1.0 / 0.01; causal link
       expect(edgeOf(wire, from, to), `${from} -> ${to}`).toMatchObject({ exists_probability: 0.8, strength: { std: edgeOf(g, from, to).strength.std } });
     }
   });
+  it('⛔ Codex r2 #2665 P1: a validated definition stored as a CLAMP (mean 1, clamped_from 2) holds on the saved link AND the wire', async () => {
+    const g = await servedGraph('fa1');
+    const e = edgeOf(g, 'starter_tier_mrr', GOAL);
+    e.strength = { mean: 1, std: 0.5 };
+    e.provenance.clamped_from = 2;
+    e.provenance.natural_effect.strength_mean = 2;
+    // The saved link (every reader of the persisted graph) and the licence: held, no longer Olumi's existence doubt.
+    expect(heldLinkOf(e, endsOfGraph(g)(e))).toEqual({ std: 0.01 });
+    // The Run restores the full β first, then holds it.
+    const { wire } = await plotGraphFor(g);
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 1, strength: { mean: 2, std: 0.01 } });
+  });
   it('TWIN (label): the same flag on ‘Pipeline value’ → MRR fails validation → sent at 0.8 with its own spread', async () => {
     const g = await servedGraph('fa1');
     nodeOf(g, 'starter_tier_mrr').label = 'Pipeline value';
