@@ -390,7 +390,7 @@ const refuse = (reason: LinkEffectRefusal): LinkEffectEditResult => ({ kind: 're
  * ⭐ THE GAUGE'S SIGN (MC 21: "M→child = ±1, its stored sign"): the stored child link's own orientation, read before the
  * write. ONE rule for the writer and the commit door (#2634 r1 P2), so the door never admits a gauge the writer would not write.
  */
-export function storedGaugeSign(edge: Record<string, unknown>): 1 | -1 {
+export function storedGaugeSign(edge: { readonly strength?: unknown; readonly effect_direction?: unknown }): 1 | -1 {
   const s = edge.strength as { mean?: unknown } | undefined;
   const mean = typeof s?.mean === 'number' && Number.isFinite(s.mean) ? s.mean : 0;
   const direction = edge.effect_direction === 'positive' || edge.effect_direction === 'negative' ? edge.effect_direction

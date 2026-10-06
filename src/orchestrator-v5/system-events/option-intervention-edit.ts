@@ -634,8 +634,8 @@ export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unk
     // bidirected pair shares the endpoints). r1 P2: carrying exactly the writer's sign, the stored child's own orientation.
     const at = before.edges.flatMap((e, i) => e.from === link.to && e.to === was.child && isDirectedEdge(e as never) ? [i] : []);
     if (at.length !== 1) continue;
-    const sign = storedGaugeSign(before.edges[at[0]!] as unknown as Record<string, unknown>);
-    const written = after.edges[at[0]!] as unknown as { strength?: { mean?: unknown }; effect_direction?: unknown } | undefined;
+    const sign = storedGaugeSign(before.edges[at[0]!]!);
+    const written = after.edges[at[0]!];
     if (written?.strength?.mean !== sign || written.effect_direction !== (sign < 0 ? 'negative' : 'positive')) continue;
     gauges.add(at[0]!);
   }
