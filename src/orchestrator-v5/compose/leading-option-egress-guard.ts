@@ -141,10 +141,13 @@ const MOST_SUPPORTED_LEADER_RE = new RegExp(
 );
 
 /** The ladder verb's classes (Desk 6b + DL, #2646): production verbs, and has/had (a held quantity). */
-const LADDER_VERB_SRC = String.raw`(?:gave|gives|give|giving|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|has|had|have|having)`;
+const LADDER_VERB_SRC = String.raw`(?:gave|gives|give|giving|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|has|had|have|having|end(?:s|ed|ing)?\s+up\s+with|result(?:s|ed|ing)?\s+in)`;
 const LADDER_PASSIVE_SRC = String.raw`(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)`;
 /** A weighting, a mechanism or the goal-chance copy: "the highest priority", "the highest influence", "the highest chance". */
-const NOT_A_RESULT_SRC = String.raw`(?!\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds)\b)`;
+// Codex #2660 r1+r2: a hyphenated compound whose HEAD names the thing ("the lowest-risk path", "the highest-cost
+// assumption"), or an input noun, is not a result. A compound with a result head ("the lowest-churn outcome", "the
+// highest-margin result") is still a claim.
+const NOT_A_RESULT_SRC = String.raw`(?!-[a-z]+\s+(?:paths?|routes?|steps?|checklists?|assumptions?|inputs?|estimates?|settings?|tests?)\b|\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds|assumptions?|inputs?|estimates?)\b)`;
 /**
  * A STATISTIC comparison ("produced the highest average outcome", "has the lowest modelled median") is v6 class C2 when
  * the sentence names its metric scope, and the served agent lane keeps it by that scope (`blankScopedMetricComparison`).
@@ -902,6 +905,9 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   'Raise to £59 came top on MRR in 62% of runs.',
   'Raise to £59 topped MRR in 62% of runs.',
   'Top on MRR was Raise to £59.',
+  // Desk 6b follow-up rows (DL 6010662486): "ends up with" / "resulted in".
+  'Raise to £59 ends up with the highest MRR.',
+  'Raise to £59 resulted in the lowest churn.',
   // <<< #2646 Desk 6b + DL
 ]);
 
@@ -1186,6 +1192,11 @@ export const BLOCK_PROSE_FIELDS: readonly string[] = [
   'reference_class',
   'counter_case',
   'review_trigger',
+  // ⭐ THE CHIP PROMPT (DL 0df0e1 6010662486; 7b's Codex r1 on #2654). The calibration card copies the model's question
+  // VERBATIM into `body` AND `action_prompt`, and the card ships on a withheld turn, so `body` was rewritten while the
+  // chip still carried the claim — which the user then sends as their own message. The wire enforcer OMITS the chip on
+  // a hit (never rewrites words into the user's mouth); the alarm reports it here. Pinned by action-prompt-egress.test.ts.
+  'action_prompt',
 ];
 
 function asRecord(value: unknown): Record<string, unknown> | null {

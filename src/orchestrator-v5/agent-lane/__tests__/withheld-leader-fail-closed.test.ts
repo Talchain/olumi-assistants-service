@@ -1506,6 +1506,9 @@ describe('ladder paraphrase classes (Desk 6b + DL, #2646)', () => {
     ['Raise to £59 produced the lowest churn.', 'lowest'],
     ['Raise to £59 delivered the lowest monthly cancellations.', 'lowest'],
     ['The lowest churn was delivered by Raise to £59.', 'lowest'],
+    ['Raise to £59 resulted in the lowest churn.', 'lowest'],
+    ['Hold delivered the lowest-churn outcome.', 'lowest'],
+    ['Raise to £59 ends up with the lowest churn.', 'lowest'],
     // has / had
     ['Raise to £59 had the lowest churn.', 'lowest'],
     ['Raise to £59 has the lowest churn.', 'lowest'],
@@ -1525,6 +1528,9 @@ describe('ladder paraphrase classes (Desk 6b + DL, #2646)', () => {
     'You want the lowest churn you can get.',
     'This gives the lowest priority to cost.',
     'Risk is lowest under the current assumptions.',
+    // Codex #2660 r1.
+    'This resulted in the lowest-risk path through the onboarding checklist.',
+    'We ended up with the lowest estimate for churn.',
     'The team topped up the budget.',
   ])('LEAVE: %s', (s) => {
     expect(sentenceRanksOptions(s)).toBe(false);
