@@ -38,14 +38,21 @@ describe('D3 step 2 — goalChanceLicenceOf', () => {
     expect('leader_option_id' in l).toBe(form === 'highest' || form === 'highest_all_likely_to_miss');
   });
 
-  it('EVERY OPTION OR NONE: one option without a chance (withheld upstream) licenses nothing', () => {
-    expect(goalChanceLicenceOf({ option_comparison: [{ option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 },
-      { option_id: 'c' }] }, G, GOAL)).toBeNull();
+  it('PER OPTION (d5 #87 6007421281): 3 options, 1 withheld for its own path → `each`, 2 lines + 1 withheld; no superlative', () => {
+    const l = goalChanceLicenceOf({ option_comparison: [{ option_id: 'a', probability_of_goal: 0.62 }, { option_id: 'b', probability_of_goal: 0.41 },
+      { option_id: 'c' }] }, G, GOAL)!;
+    // 62 vs 41 clears 10 points, but a superlative needs every option: the form is `each`, nobody is named.
+    expect(l).toMatchObject({ form: 'each', option_ids: ['a', 'b', 'c'], pct_by_option: { a: 62, b: 41 }, withheld_option_ids: ['c'] });
+    expect(l).not.toHaveProperty('leader_option_id');
+    expect(l.pct_by_option).not.toHaveProperty('c');
+    expect(goalChanceLicenceOf(env(['a', 0.62], ['b', 0.41], ['c', 0.2]), G, GOAL)).not.toHaveProperty('withheld_option_ids'); // CONTROL
     expect(goalChanceLicenceOf(env(['a', 0.62], ['b', 0.41], ['c', 0.2]), G, GOAL)?.form).toBe('highest'); // CONTROL: all three
+    // Every option withheld: nothing to say.
+    expect(goalChanceLicenceOf({ option_comparison: [{ option_id: 'a' }, { option_id: 'b' }] }, G, GOAL)).toBeNull();
   });
 
-  it('an EXACT 0 counts only where the Run earned it (the transport strips an unearned one)', () => {
-    expect(goalChanceLicenceOf(env(['a', 0.62], ['b', 0]), G, GOAL)).toBeNull();
+  it('an EXACT 0 counts only where the Run earned it (the transport strips an unearned one, so its line is withheld)', () => {
+    expect(goalChanceLicenceOf(env(['a', 0.62], ['b', 0]), G, GOAL)).toMatchObject({ form: 'each', withheld_option_ids: ['b'], pct_by_option: { a: 62 } });
     expect(goalChanceLicenceOf(env(['a', 0.62], ['b', 0]), G, GOAL, (id, p) => id === 'b' && p === 0)?.form).toBe('highest');
   });
 

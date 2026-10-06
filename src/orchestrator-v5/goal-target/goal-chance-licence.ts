@@ -8,8 +8,11 @@
  * (the keep-listed carrier — no new field, no schemas release, DL (b)), stored with the Run, so the turn and the reload
  * read the same decision.
  *
- *  · LICENSED — the goal states a level target with its direction and unit, and EVERY scored option still carries a
- *    finite goal chance in [0, 1] after every withhold (the seam gate runs first). A partial set licenses no comparison.
+ *  · LICENSED — the goal states a level target with its direction and unit, and at least one scored option still carries
+ *    a finite goal chance in [0, 1] after every withhold (the seam gate runs first).
+ *  · PER OPTION (Science d5 #87 6007421281): an option whose chance was withheld for its OWN path (no figure on its record,
+ *    or an exact 0/1 the Run did not earn, which the transport strips) loses only its own line — `withheld_option_ids`.
+ *    Only the superlative and every-option forms need every option: with any option withheld the form is `each`.
  *  · `form` — which of c6's ruled sentences applies, decided HERE on the DISPLAYED whole percentages:
  *      `highest`                    the top clears the next by ≥ 10 points (Science's interim rule until each option's
  *                                   informative-draw count arrives, step 2b) and is at least 1%;
@@ -39,10 +42,12 @@ export interface GoalChanceLicence {
   readonly severity: 'info';
   readonly message: string;
   readonly form: GoalChanceForm;
-  /** Every licensed option, in the model's option order (the order the Run's own records carry). */
+  /** Every scored option, in the model's option order (the order the Run's own records carry). */
   readonly option_ids: readonly string[];
-  /** Each option's DISPLAYED whole percentage — the figure the sentence quotes. */
+  /** Each LICENSED option's DISPLAYED whole percentage — the figure the sentence quotes. */
   readonly pct_by_option: Readonly<Record<string, number>>;
+  /** The options whose chance was withheld for their own path (model order); present only when non-empty. Form is `each`. */
+  readonly withheld_option_ids?: readonly string[];
   readonly leader_option_id?: string;
   readonly next_option_id?: string;
   /** The target as the user stated it: the UI says it in these words, never re-derives the comparator. */
@@ -76,22 +81,29 @@ export function goalChanceLicenceOf(
   // The Run's own option records, current-first: the first carrier that has any is the comparison.
   const records = readOptionResultSources(envelope).find((s) => s.length > 0) ?? [];
   const option_ids: string[] = [];
+  const licensed: string[] = [];
+  const withheld: string[] = [];
   const pct: Record<string, number> = {};
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
     const p = r.probability_of_goal;
-    if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 1) return null; // every option, or none
-    if ((p === 0 || p === 1) && !earned(id, p)) return null;
     option_ids.push(id);
+    // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
+    if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) { withheld.push(id); continue; }
+    // An unusable figure here means a withhold did not run: fail closed, say nothing.
+    if (!Number.isFinite(p) || p < 0 || p > 1) return null;
+    licensed.push(id);
     pct[id] = displayedGoalPct(p);
   }
-  if (option_ids.length < 2) return null;
+  if (option_ids.length < 2 || licensed.length === 0) return null;
 
-  const ranked = [...option_ids].sort((a, b) => pct[b]! - pct[a]!);
+  // Only the superlative and every-option forms need every option (d5 6007421281): any withheld option ⇒ `each`.
+  const complete = withheld.length === 0;
+  const ranked = [...licensed].sort((a, b) => pct[b]! - pct[a]!);
   const [leader, next] = ranked as [string, string];
-  const superlative = pct[leader]! >= 1 && pct[leader]! - pct[next]! >= SUPERLATIVE_GAP_POINTS;
-  const allLikelyToMiss = option_ids.every((id) => pct[id]! <= MORE_LIKELY_TO_MISS_PCT);
+  const superlative = complete && pct[leader]! >= 1 && pct[leader]! - pct[next]! >= SUPERLATIVE_GAP_POINTS;
+  const allLikelyToMiss = complete && licensed.every((id) => pct[id]! <= MORE_LIKELY_TO_MISS_PCT);
   const form: GoalChanceForm = superlative
     ? (allLikelyToMiss ? 'highest_all_likely_to_miss' : 'highest')
     : (allLikelyToMiss ? 'all_likely_to_miss' : 'each');
@@ -102,6 +114,7 @@ export function goalChanceLicenceOf(
     form,
     option_ids,
     pct_by_option: pct,
+    ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
     ...(superlative ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit },
   };
