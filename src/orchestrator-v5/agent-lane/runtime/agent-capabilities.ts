@@ -14,7 +14,7 @@
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
-import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
+import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
@@ -288,7 +288,7 @@ function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; reado
 // `newFactorScopeIn` moved to `../figure-scope.ts` (one predicate for the Agent's doors and the chat writers, AIQ 5882852814).
 export { newFactorScopeIn };
 /** Exported for the no-dead-end rows only: the words a refused link-effect card gives the Agent. */
-export { linkEffectRefusalWords, linkEffectConsent };
+export { linkEffectRefusalWords, linkEffectConsent, linkEffectNoSuchLinkWords };
 
 /**
  * The LIMIT door's scope (DL #2195 CHANGES_REQUIRED 5863720934, served journey-C budget limits): the user calls a limit
@@ -1477,6 +1477,53 @@ export function frameRefitReceipt(nodes: readonly string[]): string {
   const named = nodes.map((n) => `‘${n}’`);
   const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
   return `Olumi rescaled ${list} so your figure fits. Your other links mean the same as before, though some strength words may read differently.`;
+}
+
+/**
+ * ⭐ RT-18 (DL 0df0e1, cut 5): the words for a link the model does NOT hold. Never a click route to that link (the canvas
+ * does not show it); always a next step the user can take. If the source reaches the target through other links, the
+ * FIRST of them is named with its own canvas route (a link the canvas shows). Otherwise Olumi offers to add the link for
+ * approval (`propose_model_change`, add_edge), after which the figure can size it.
+ */
+function linkEffectNoSuchLinkWords(raw: unknown, from: { id: string; label: string }, to: { id: string; label: string }): string {
+  const g = raw as { nodes?: unknown[]; edges?: unknown[] } | null;
+  const nodes = (Array.isArray(g?.nodes) ? g.nodes : []) as Array<{ id?: unknown; kind?: unknown; label?: unknown }>;
+  const edges = (Array.isArray(g?.edges) ? g.edges : []) as Array<{ from?: unknown; to?: unknown; edge_type?: unknown }>;
+  const kind = new Map(nodes.map((n) => [n.id, n.kind] as const));
+  const walk = edges.filter((e) => e.edge_type !== 'bidirected' && kind.get(e.from) !== 'option' && kind.get(e.from) !== 'decision');
+  const reaches = (start: unknown): boolean => {
+    const seen = new Set<unknown>([start]);
+    for (const queue = [start]; queue.length > 0;) {
+      const at = queue.shift();
+      if (at === to.id) return true;
+      for (const e of walk) if (e.from === at && !seen.has(e.to)) { seen.add(e.to); queue.push(e.to); }
+    }
+    return false;
+  };
+  // Codex r2 on #2641: the named first link must be one the canvas edit can take: ONE edge of any type on that pair, and
+  // both ends one entity each that is not an option or the decision (else the strength edit refuses it as ambiguous).
+  const one = (id: unknown): boolean => nodes.filter((n) => n.id === id).length === 1;
+  const editable = (a: unknown, b: unknown): boolean => one(a) && one(b) && edges.filter((e) => e.from === a && e.to === b).length === 1
+    && !['option', 'decision'].includes(String(nodes.find((n) => n.id === b)?.kind));
+  const first = walk.find((e) => e.from === from.id && e.to !== to.id && editable(e.from, e.to) && reaches(e.to));
+  const via = first === undefined ? undefined : nodes.find((n) => n.id === first.to);
+  if (via !== undefined) {
+    const v = typeof via.label === 'string' && via.label.trim() !== '' ? via.label : String(via.id);
+    return 'Nothing was prepared. Tell the user exactly this: '
+      + `"The model has no direct link from \u201c${from.label}\u201d to \u201c${to.label}\u201d: \u201c${from.label}\u201d moves \u201c${to.label}\u201d through \u201c${v}\u201d. `
+      + `You can set how strong that first link is now: on the canvas, click the link from \u201c${from.label}\u201d to \u201c${v}\u201d, and under `
+      + '\u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, not your figure."';
+  }
+  // Codex r2 on #2641: a pair the model already holds as a SHARED CAUSE (bidirected) cannot take an added link
+  // (`propose_model_change` refuses already_present), so that offer is never made for it.
+  if (edges.some((e) => e.from === from.id && e.to === to.id)) {
+    return 'Nothing was prepared. Tell the user exactly this: '
+      + `"The model holds \u201c${from.label}\u201d and \u201c${to.label}\u201d as moved by a shared cause, not one moving the other, so there is `
+      + 'no effect to record. If you meant two other factors, name them and I\u2019ll check."';
+  }
+  return 'Nothing was prepared. Tell the user exactly this: '
+    + `"The model has no link from \u201c${from.label}\u201d to \u201c${to.label}\u201d, so there is no effect to record yet. `
+    + `If \u201c${from.label}\u201d does move \u201c${to.label}\u201d, I can add that link for you to approve; your figure can then size it."`;
 }
 
 function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: { id: string; label: string }, to: { id: string; label: string },
@@ -3465,6 +3512,15 @@ export function createAgentCapabilities(
           const stated = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
           // ONE scope for admission, the figure question and the recorded sentence, so they cannot read different units.
           const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to) };
+          // RT-18 (DL 0df0e1): a link the model does not hold is said FIRST. Every figure question below ends with the canvas
+          // route "click the link from A to B", which must never name a link the canvas does not show.
+          const held = linkEffectTargetOf(working, from.id, to.id);
+          if (held.kind === 'refused') {
+            // Codex r1 on #2641: EVERY refused lookup is said before a figure question (its words carry a click route).
+            if (held.reason === 'edge_not_found') fail('no_such_link', linkEffectNoSuchLinkWords(working, from, to));
+            else fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
+            continue;
+          }
           const miss = linkEffectQuoteContextMiss(entryQuote, text) ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label }, statedScope);
           if (miss === 'figures_not_in_statement') {
             // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510): ONE fixed
@@ -3585,6 +3641,15 @@ export function createAgentCapabilities(
       const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const statedEnds = { source: from.label, target: to.label };
       const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id), target_units: ownUnitsOf(to) };
+      // RT-18 (DL 0df0e1): a link the model does not hold is said FIRST. Every figure question below ends with the canvas
+      // route "click the link from A to B", which must never name a link the canvas does not show.
+      const held = linkEffectTargetOf(g.raw, from.id, to.id);
+      if (held.kind === 'refused') {
+        // Codex r1 on #2641: EVERY refused lookup is said before a figure question (its words carry a click route).
+        return held.reason === 'edge_not_found'
+          ? { ok: false, mutated: false, refusal: 'no_such_link', detail: linkEffectNoSuchLinkWords(g.raw, from, to) }
+          : { ok: false, mutated: false, refusal: 'target_ambiguous', detail: linkEffectRefusalWords('target_ambiguous', g.raw, from, to) };
+      }
       const miss = linkEffectQuoteContextMiss(quote, text) ?? linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
       if (miss === 'figures_not_in_statement') {
         // Never an improvised wording the recorder may refuse again (DL 0df0e1 ruling on Acceptance 6001583510, where Olumi's
@@ -8346,6 +8411,11 @@ export function createAgentCapabilities(
         ...(limitChecks !== undefined ? { limit_checks: { limits: limitChecks, note: LIMIT_CHECKS_NOTE } } : {}),
         // ⛔ PLoT #416: the goal's chance withheld on every option — the sentence to say and the rule (`../goal-chance-withheld.ts`).
         ...withGoalChance(result),
+        // ⭐ MC D1 (c): #416's ONE ask, from the graph this Run analysed (the read above), said after its reason by the route.
+        ...(() => {
+          const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) : null;
+          return say !== null ? { identity_ask_say: say } : {};
+        })(),
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
         // ⭐ The confirm card (`../identity-card.ts`), read from the same post-run read; a Run that made none offers none.
         ...(result !== undefined ? withIdentityCard(identityCardFor(ctx, postRunRead)) : {}),

@@ -1,5 +1,6 @@
 import { wasAnalysisRequestedByUser } from '../compose/unrequested-analysis-confinement.js';
-import { readUnsizedPathLeaderCause, unsizedPathLeaderWithheld, type UnsizedPathLeaderCause } from '../agent-lane/unsized-path-cause.js';
+import { readUnsizedPathLeaderCause, type UnsizedPathLeaderCause } from '../agent-lane/unsized-path-cause.js';
+import { goalFiguresLeaderWithheld } from '../../orchestrator/context/option-result-source.js';
 /**
  * T1 claim safety — THE fact-array read. ROADMAP 1.233 (the hoist).
  *
@@ -449,7 +450,8 @@ export function readMayNameLeadingOptionVerdictForFact(
   return {
     // ONE fact, ALL THREE answers, one narrow. Two `fact_type` checks would be
     // two chances to narrow differently on a single fact.
-    may_name_leading_option: readMayNameLeadingOptionFromResult(fact.result) && !unsizedPathLeaderWithheld(fact.result),
+    // MC D1: ANY goal-figure withhold that took the shares withholds the leader (the licence's own rule), never only (S)'s.
+    may_name_leading_option: readMayNameLeadingOptionFromResult(fact.result) && !goalFiguresLeaderWithheld(fact.result),
     constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
     // Same fact, same narrow, the producer's own discrimination.
     separation_withhold: separationWithholdFromRobustness(

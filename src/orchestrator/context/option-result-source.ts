@@ -172,6 +172,24 @@ export function goalFiguresWithheldWarnings(envelope: Record<string, unknown>): 
 }
 
 /**
+ * ⭐ THE RUN'S GOAL-FIGURE WITHHOLD THAT TOOK THE WIN SHARES WITH IT — the ONE rule the leader licence and the claim's
+ * entitlement read (MC D1, DL 6 Oct: served T1b rehearsals 8/13 named no cause, "separation_unavailable", and asked for a
+ * rerun that cannot help). RT-10 B′ R2: a withhold whose `withheld_claims` lists no `win_share` KEPT them and withholds no
+ * leader; any other withhold in the set did, in ANY order. Read off a Run's stored `result` (`result.enrichment`).
+ */
+export function goalFiguresLeaderWithheldWarning(result: unknown): Record<string, unknown> | undefined {
+  const envelope = readRecord(readRecord(result)?.enrichment);
+  if (envelope === null) return undefined;
+  const keptShares = (w: Record<string, unknown>): boolean =>
+    Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share');
+  return goalFiguresWithheldWarnings(envelope).find((w) => !keptShares(w));
+}
+
+export function goalFiguresLeaderWithheld(result: unknown): boolean {
+  return goalFiguresLeaderWithheldWarning(result) !== undefined;
+}
+
+/**
  * Every option whose identity is STRUCTURALLY SAFE, mapped to its win
  * probability.
  *

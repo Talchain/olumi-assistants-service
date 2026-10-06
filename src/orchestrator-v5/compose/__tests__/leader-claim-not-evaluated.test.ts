@@ -68,7 +68,7 @@ import {
   WITHHELD_RUN_OUT_OF_DATE,
   WITHHELD_NO_OPTION_MEETS_LIMIT,
   WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
-  WITHHELD_GOAL_SCOPE_UNRESOLVED,
+  WITHHELD_GOAL_SCOPE_UNRESOLVED, WITHHELD_NO_RESULT,
   composeAnalysisStateV1,
   leaderClaimReasonKind,
   readRawRobustnessFromResponseBody,
@@ -277,6 +277,8 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
           // 2026-09-26: F-LIMIT tier 2 — every option more likely than not to break it (DL #70 5850672588).
           WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
           WITHHELD_GOAL_SCOPE_UNRESOLVED,
+          // 2026-10-06: MC D1 (a) — a Run with no result is not evaluated, never a limit verdict (DL 0df0e1).
+          WITHHELD_NO_RESULT,
         ]),
       );
       expect(LEADER_CLAIM_REASON_KINDS[WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]).toBe('withheld');

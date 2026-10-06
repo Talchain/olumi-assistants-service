@@ -1,4 +1,4 @@
-import { readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
+import { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause } from '../orchestrator-v5/agent-lane/unsized-path-cause.js';
 import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { readGoalScopeClaimInput, type GoalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { loadMostRecentPendingActionsIntegrityStrict } from '../orchestrator-v5/build-turn-context.js';
@@ -484,7 +484,7 @@ export async function readScenarioAnalysis(
             withheldBecauseNonlinearIdentity: c46?.withheldBecauseNonlinearIdentity === true,
             withheldBecauseUnsizedPath: unsizedCause,
             withheldWithoutConstraintCause: claimFact !== null && (leaderWithheldWithoutConstraintCause(claimFact.result)
-              || unsizedPathLeaderWithheldWithoutConstraintCause(claimFact.result)),
+              || goalFiguresLeaderWithheldWithoutConstraintCause(claimFact.result)),
             // F-LIMIT: judged on the SAME fact the permission above was read from (null when out of date), against the
             // limits the user ratified on this graph.
             ...(() => {
