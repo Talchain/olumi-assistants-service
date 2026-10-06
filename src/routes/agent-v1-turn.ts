@@ -999,6 +999,57 @@ export function unfinishedAnswerText(result: {
     : 'My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.';
 }
 
+/**
+ * ⛔ RT-7 (red team #87 5992627435; re-witnessed on 43e51050, turn 2ff3cc10): WHAT THE USER READS WHEN THE TURN HIT ITS
+ * HOP LIMIT. Six in-process refusals used every hop and the user read "Ask me again and I will continue" — false, since
+ * asking again replays the same refusals, and the typed reason was thrown away. Composed from the LAST refusal's typed
+ * fields only (a refusal's `detail`, `reason` and notes address the Agent, never the user); a changed model says so.
+ */
+export function hopLimitText(result: {
+  readonly tool_calls: readonly { readonly name: string }[];
+  readonly tool_results: readonly unknown[];
+  readonly mutated: boolean;
+}): string {
+  if (result.mutated) return 'Your model was updated, but I could not finish the rest within this turn. Ask me what changed.';
+  const last = [...result.tool_results].reverse().find((r): r is Record<string, unknown> =>
+    r !== null && typeof r === 'object' && (r as Record<string, unknown>).ok === false);
+  if (last !== undefined && typeof last.question === 'string' && last.question.trim() !== '') return last.question.trim();
+  const why = last?.refusal === 'nothing_to_set' ? nothingToSetReasons(last) : [];
+  return why.length > 0
+    ? `Nothing was changed. ${why.join(' ')}`
+    : 'I could not settle that within this turn, and nothing in your model was changed. Try asking for one change at a time.';
+}
+
+/** `nothing_to_set`'s typed reasons, in the user's terms (RT-7). */
+function nothingToSetReasons(r: Record<string, unknown>): string[] {
+  const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  const rec = (v: unknown): Record<string, unknown> => (v !== null && typeof v === 'object' ? v as Record<string, unknown> : {});
+  const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const sentence = (t: string): string => (/[.!?]$/.test(t) ? t : `${t}.`);
+  const out: string[] = [];
+  for (const u of list(r.unresolved).map(str)) if (/^(?:option|factor) "/.test(u)) out.push(`I could not find ${u} in your model.`);
+  for (const a of list(r.ambiguous_targets).map(rec)) {
+    const named = list(a.candidates).map(rec).filter(c => str(c.label) !== '').map(c => {
+      const links = list(c.connected_to).map(str).filter(l => l !== '');
+      return `“${str(c.label)}”${links.length > 0 ? ` (linked to ${links.join(', ')})` : ''}`;
+    });
+    if (str(a.requested) !== '' && named.length > 1) {
+      out.push(`More than one thing in your model is called “${str(a.requested)}”: ${named.join(' or ')}. Which do you mean?`);
+    }
+  }
+  for (const f of list(r.no_stated_range).map(rec)) {
+    const detail = str(f.detail);
+    if (detail !== '') out.push(sentence(detail.includes(str(f.factor)) ? detail : `${str(f.factor)}: ${detail}`));
+  }
+  for (const f of list(r.not_the_users_figure).map(rec)) {
+    if (str(f.factor) !== '' && str(f.option) !== '' && (typeof f.value === 'number' || str(f.value) !== '')) {
+      out.push(`${String(f.value)} for ${str(f.factor)} in ${str(f.option)} is not a figure you wrote, so it was not recorded as yours.`);
+    }
+  }
+  for (const a of list(r.already_set).map(str)) if (a !== '') out.push(sentence(a));
+  return out;
+}
+
 export function typedRunOf(body: Record<string, unknown>): boolean {
   const chip = body['chip'] as { action_type?: unknown; id?: unknown } | null | undefined;
   // A "Test without this link" press is terminal SCI-DEEP whatever else the chip carries: never an ordinary Run.
@@ -3008,7 +3059,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let text = result.stopped_reason === 'incomplete'
       ? unfinishedAnswerText(result)
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
-        ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
+        ? hopLimitText(result)
         : result.assistant_text;
     if (fastPath === undefined && result.stopped_reason === 'answered') narratorWords = result.assistant_text;
 
