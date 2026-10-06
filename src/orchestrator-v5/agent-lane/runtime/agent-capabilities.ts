@@ -1586,6 +1586,16 @@ function linkEffectUnitAskWords(ask: string, from: { label: string }, to: { labe
     + 'choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, not your figure."';
 }
 
+/**
+ * ⭐ FU-1 (DL 0df0e1, "never re-ask what the user has closed"): a DENIAL ("It doesn't change.", "… does not lose us 50") ends
+ * the ask. Nothing is recorded and nothing is asked: the restatement ask itself promised "If “T” does not change, the link
+ * stays as it is", so asking again for "the figures you wrote" breaks that promise.
+ */
+function linkEffectDeniedWords(from: { label: string }, to: { label: string }): string {
+  return 'Nothing was prepared. Tell the user exactly this: "'
+    + `Nothing is recorded: the link from \u201c${from.label}\u201d to \u201c${to.label}\u201d stays as it is."`;
+}
+
 /** A stored card can carry only the strict, bounded NodeV3 unit reading of one of its own ends. */
 function isLinkEffectUnitReadings(value: unknown, from: string, to: string): value is readonly LinkEffectUnitReading[] | undefined {
   if (value === undefined) return true;
@@ -3494,6 +3504,10 @@ export function createAgentCapabilities(
             fail('not_the_users_figure', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label), from, to));
             continue;
           }
+          if (miss === 'denied') {
+            fail('not_the_users_statement', linkEffectDeniedWords(from, to));
+            continue;
+          }
           if (miss !== null) {
             fail('not_the_users_statement', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label,
               linkEffectFigureNotAChange(entryQuote, stated, { source: from.label, target: to.label }, statedScope.target_units)?.question), from, to));
@@ -3622,6 +3636,9 @@ export function createAgentCapabilities(
         // own suggested sentence was refused 3/3): ONE fixed question, said exactly, with the canvas route that always works.
         const ask = linkEffectStatementAsk(miss, from.label, to.label);
         return { ok: false, mutated: false, refusal: 'not_the_users_figure', question: ask, detail: linkEffectUnitAskWords(ask, from, to) };
+      }
+      if (miss === 'denied') {
+        return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss, detail: linkEffectDeniedWords(from, to) };
       }
       if (miss !== null) {
         const ask = linkEffectStatementAsk(miss, from.label, to.label, linkEffectFigureNotAChange(quote, statedEffect, statedEnds, statedScope.target_units)?.question);
