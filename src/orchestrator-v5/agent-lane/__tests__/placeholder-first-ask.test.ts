@@ -61,4 +61,39 @@ describe('first_ask: the one step the placeholder withhold asks first, typed', (
   it('CONTRAST: while a product blocks every option the words invite nothing, so nothing is asked first', () => {
     expect(warn(plainGraph(), 'o-raise', true)).not.toHaveProperty('first_ask');
   });
+
+  it('Codex r1 P1 (A, 180-character labels): the goal-level QUESTION survives in the words whenever first_ask names it', () => {
+    const g = plainGraph();
+    const goal = g.nodes.find((n: Rec) => n.id === 'mrr');
+    delete goal.observed_state;
+    goal.label = `Monthly recurring revenue ${'across every plan and region '.repeat(6)}`.slice(0, 180);
+    g.nodes.find((n: Rec) => n.id === 'price').label = `Pro plan price ${'for every seat on annual and monthly billing '.repeat(4)}`.slice(0, 180);
+    const w = warn(g, 'o-raise');
+    expect(w.first_ask).toEqual({ kind: 'goal_level', node_id: 'mrr' });
+    expect(w.message).toContain('I first need today\u2019s level of');
+    expect(w.message.length).toBeLessThanOrEqual(400);
+  });
+
+  it('Codex r1 P1 (guessed only): a link out of a limit-watched node into the goal is said, never asked — no invite, no first_ask', () => {
+    const g = { ...plainGraph(), goal_constraints: [{ node_id: 'price', operator: '<=', value: 0.8 }] };
+    const w = warn(g, 'o-raise');
+    expect(w).not.toHaveProperty('first_ask');
+    expect(w).not.toHaveProperty('acceptable_links');
+    expect(w.message).toContain('nobody has set yet.');
+    expect(w.message).not.toMatch(/\bSet (it|them)\b/);
+    // CONTRAST: the same link with no limit watching its source is asked, and named first.
+    expect(warn(plainGraph(), 'o-raise').message).toMatch(/\bSet it\b/);
+  });
+
+  it('Codex r1 P1 (mixed): first_ask is the first link the words name that the user CAN size — never the guessed one', () => {
+    const g = plainGraph();
+    g.nodes.push({ id: 'downtime', kind: 'factor', label: 'Migration downtime', observed_state: { value: 0.2, raw_value: 20, cap: 100, unit: 'hours', source: 'user_override' } });
+    g.nodes.find((n: Rec) => n.id === 'o-raise').interventions.downtime = { value: 0.3, raw_value: 30 };
+    g.edges = [placeholder('downtime', 'mrr', -0.2), placeholder('price', 'mrr', 0.4)];
+    g.goal_constraints = [{ node_id: 'downtime', operator: '<=', value: 0.5 }];
+    const w = warn(g, 'o-raise');
+    expect(w.first_ask).toEqual({ kind: 'link', from: 'price', to: 'mrr' });
+    expect(w.acceptable_links).toEqual([{ from: 'price', to: 'mrr' }]);
+    expect(w.message).toContain('\u2018Pro plan price\u2019');
+  });
 });

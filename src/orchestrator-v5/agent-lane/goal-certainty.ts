@@ -535,7 +535,9 @@ export function placeholderGoalWarning(
   const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
-  const said = productBlocks ? unsizedLinkStatement : unsizedLinkSentence;
+  // Codex r1 #2635 P1: the same when no named link can be ASKED (only a guessed link, or one from a node with no level): the
+  // AIQ rule says those are named, never asked, so the words invite nothing and `first_ask` is absent with them.
+  const said = productBlocks || asked.length === 0 ? unsizedLinkStatement : unsizedLinkSentence;
   const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
   const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
   const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
@@ -610,11 +612,14 @@ export function noDeadEndAsks(
   const goalView = typeof goal?.id === 'string' ? view.get(goal.id) : undefined;
   if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {
     const unit = unitOf(goalView);
-    const statement = unsizedLinkStatement(links.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+    const statementOf = (): string => unsizedLinkStatement(links.map((l) => ({ ...l, from_label: compact(labelOf(l.from)), to_label: compact(labelOf(l.to)) })));
     // Science d5 #87 6007354826: the bridge says WHY the level comes first (the link question needs the goal's unit).
-    const ask = fitted(() => `To size ${links.length > 1 ? 'them' : 'it'}, I first need today\u2019s level of ${q(String(goal.id))}.`
-      + ` What is it${unit !== undefined ? `, in ${unit}` : ''}?`);
-    return { message: fit([statement, ask]) || ask, gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id) } };
+    const askOf = (): string => `To size ${links.length > 1 ? 'them' : 'it'}, I first need today\u2019s level of ${q(String(goal.id))}.`
+      + ` What is it${unit !== undefined ? `, in ${unit}` : ''}?`;
+    // ⛔ THE ASK ALWAYS SURVIVES (Codex r1 #2635 P1): `first` names it, so the statement compacts WITH it and is dropped
+    // only when even compacted it leaves no room. Long labels used to keep the statement and drop the question.
+    const both = fitted(() => `${statementOf()} ${askOf()}`);
+    return { message: both.length <= 400 ? both : fitted(askOf), gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id) } };
   }
   const readings = mediatorReadings(graph);
   const unitOfNode = (id: unknown): string | undefined => { const v = view.get(id as string); return v === undefined ? undefined : unitOf(v); };
