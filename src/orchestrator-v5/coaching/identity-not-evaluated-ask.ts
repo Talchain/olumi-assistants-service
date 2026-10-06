@@ -22,6 +22,7 @@ import { classifyValueSource } from '../../cee/graph-readiness/obligation-proven
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { sayLevel } from './bound-graph.js';
 import { sayFigure as sayLaneFigure } from '../agent-lane/say-figure.js';
+import { CREATION_VERB, reachesAlong } from '../agent-lane/option-creates.js';
 
 export const IDENTITY_NOT_EVALUATED_CODE = 'IDENTITY_NOT_EVALUATED';
 
@@ -101,6 +102,85 @@ export function sayFigure(value: number, unit: unknown, label: string): string {
 }
 
 const q = (label: string): string => `“${label}”`;
+
+/**
+ * ⭐ AN OPERAND AN OPTION CREATES IS 0 TODAY — NEVER "WHAT IS IT TODAY?" (Science d5 #87 6007736377; DL 6 Oct, rehearsal 14
+ * on CEE 6ce136c: "I need ‘Starter-tier subscribers’: what is it today?" for a tier the brief says has not launched).
+ * Creation evidence ONLY: a stored typed 0, or an option whose label carries a creation verb (launch / introduce / start /
+ * new) and whose path reaches the operand. An option that merely targets it ("Offer a 10% discount") changes an existing
+ * level nobody gave, so its operand is still asked about today.
+ */
+// The option's OWN action (Codex buddy r1 P1): its label opens with the verb or with "new" ("Launch starter tier", "New
+// starter tier"). "Keep the new pricing" changes an existing level, so it is no creation evidence. ONE rule with
+// construction's created-part 0 (`option-creates.ts`).
+
+/**
+ * ⛔ NEVER ASK A LEVEL NO CONTROL CAN SAVE (DL 6 Oct; Acceptance G1 draft 11 on CEE 231affbe): "I need ‘Starter
+ * subscribers’: what is it today?" about an OUTCOME; the user answered "None today… about 150 if it launches", was told
+ * "The available controls cannot save today's count for that outcome", and every Run asked it again ×3. A level (today's,
+ * or the one an option sets) is saved only on a FACTOR — `set_factor_value`'s `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS` and
+ * the option-level writer's own target rule (its `value_target_not_factor` refusal). Kept equal to the
+ * former by a test row.
+ */
+export const LEVEL_WRITER_KINDS: readonly string[] = ['factor'];
+
+interface Creator {
+  /** Every option that would start it, in node order; the ones whose own level is missing are asked (none dropped). */
+  readonly options: readonly string[];
+  readonly missingLevel: readonly string[];
+  readonly level: { readonly value: number; readonly unit: string } | null;
+}
+
+function creatorOf(graph: unknown, operandId: string, storedZero: boolean): Creator | null {
+  const g = rec(graph);
+  const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(rec).filter((n): n is Rec => n !== null && typeof n.id === 'string');
+  const edges = (Array.isArray(g?.edges) ? g.edges : []).map(rec)
+    .filter((e): e is Rec => e !== null && typeof e.from === 'string' && typeof e.to === 'string');
+  const links = edges.map((e) => ({ from: e.from as string, to: e.to as string }));
+  const reaches = (from: string): boolean => reachesAlong(links, from, operandId);
+  // The option's amount is already in the model when a link INTO the operand that the option reaches carries a stated
+  // size (served draft 11: "Starter tier launched → Starter subscribers", 150 from the brief): it is never asked again.
+  const sizedInto = (from: string): boolean => edges.some((e) => e.to === operandId
+    && rec(rec(e.provenance)?.natural_effect) !== null && (e.from === from || reachesAlong(links, from, e.from as string)));
+  const options: string[] = []; const missingLevel: string[] = [];
+  let level: Creator['level'] = null;
+  for (const o of nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && typeof n.label === 'string')) {
+    const sets = rec(rec(o.interventions)?.[operandId]);
+    if (!(sets !== null || reaches(o.id as string))) continue;
+    if (!storedZero && !CREATION_VERB.test(o.label as string)) continue;
+    // (ii) the option's own level, when the brief states it (its span: "about 150, between 80 and 250").
+    const value = finite(sets?.raw_value) ?? finite(sets?.value);
+    const label = (o.label as string).trim();
+    options.push(label);
+    if (value === null) { if (!sizedInto(o.id as string)) missingLevel.push(label); }
+    else level ??= { value, unit: typeof sets?.unit === 'string' ? sets.unit : '' };
+  }
+  return options.length === 0 ? null : { options, missingLevel, level };
+}
+
+/** "How many" for a count, "How much" for money or a share (Science's words, (iii)). */
+function howMuch(unit: unknown): string {
+  const u = typeof unit === 'string' ? unit.trim() : '';
+  const lead = /^([^\s/]+)/.exec(u)?.[1] ?? '';
+  const money = CODE_TO_PREFIX_SYMBOL.has(lead.toUpperCase()) || [...CODE_TO_PREFIX_SYMBOL.values()].some((sym) => u.startsWith(sym));
+  return money || /%|percent|share|rate/i.test(u) ? 'How much' : 'How many';
+}
+
+const quotedList = (xs: readonly string[]): string => andList(xs.map((x) => `‘${x}’`));
+
+/**
+ * Science's words, verbatim: said once, then the ONE question only for the options whose own level is missing — every
+ * one of them (Codex buddy r1 P1: node order must never decide whether a needed question disappears).
+ */
+function createdOperandAsk(operand: string, creator: Creator, unit: unknown): { text: string; label: string; message: string } {
+  const zero = `‘${operand}’ is 0 today, since ${quotedList(creator.options)} would start it.`;
+  if (creator.missingLevel.length === 0) {
+    return { text: zero, label: 'Use 0 today', message: `Set ‘${operand}’ to 0 today: ${quotedList(creator.options)} would start it.` };
+  }
+  const each = creator.missingLevel.length > 1 ? ' each' : '';
+  const question = `${howMuch(unit)} ‘${operand}’ would ${quotedList(creator.missingLevel)}${each} lead to? A best guess and a range is fine.`;
+  return { text: `${zero} ${question}`, label: 'Give your best guess', message: `${question} Ask me for it.` };
+}
 const andList = (xs: readonly string[]): string =>
   xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 
@@ -178,6 +258,24 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
     case 'identity_operand_missing': {
       const missing = w.participants.filter((p) => levelOf(p) === null);
       if (missing.length === 0) return unstated();
+      // ⛔ No control can save a level on any other kind (`LEVEL_WRITER_KINDS`): a part like that is asked NOTHING, and
+      // neither is the rest, since answering them could not unblock the Run (the caller keeps the code's own copy).
+      if (missing.some((p) => !LEVEL_WRITER_KINDS.includes(String(byId.get(p)?.kind)))) return null;
+      // Creation is judged PER operand (Codex buddy r1 P1): a created one is 0 today; any other is still asked about today.
+      const asks = missing.flatMap((p) => {
+        const created = creatorOf(graph, p, false);
+        return created === null ? [] : [createdOperandAsk(labelOf(p)!, created, rec(byId.get(p)?.observed_state)?.unit ?? created.level?.unit)];
+      });
+      const notCreated = missing.filter((p) => creatorOf(graph, p, false) === null);
+      if (asks.length > 0) {
+        const rest = notCreated.length === 0 ? ''
+          : ` I also need ${andList(say(notCreated))}: what ${notCreated.length === 1 ? 'is it' : 'are they'} today?`;
+        const restOne = notCreated.length === 1;
+        return { reason: w.reason, node_id: w.nodeId, assistant_text: `To work out ${q(T)} ${asFormula}: ${asks.map((a) => a.text).join(' ')}${rest}`,
+          chip_label: notCreated.length > 0 ? (restOne ? 'Give its value' : 'Give the values') : asks[0]!.label,
+          chip_message: notCreated.length > 0
+            ? `What ${restOne ? 'is' : 'are'} ${andList(say(notCreated))} today? Ask me for ${restOne ? 'it' : 'them'}.` : asks[0]!.message };
+      }
       const one = missing.length === 1;
       return {
         reason: w.reason,
@@ -192,6 +290,15 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
       const zeros = w.participants.filter((p) => levelOf(p) === 0);
       const zeroTarget = zeros.length === 0 && (w.stated === 0 || levelOf(w.nodeId) === 0);
       if (zeros.length === 0 && !zeroTarget) return unstated();
+      // ⛔ The same rule: a zero no control can correct is never asked about (a goal's own level has its writer).
+      if (zeroTarget ? target.kind !== 'goal' : zeros.some((p) => !LEVEL_WRITER_KINDS.includes(String(byId.get(p)?.kind)))) return null;
+      const created = !zeroTarget && zeros.length === 1 ? creatorOf(graph, zeros[0]!, true) : null;
+      if (created !== null) {
+        const unit = rec(byId.get(zeros[0]!)?.observed_state)?.unit ?? created.level?.unit;
+        const ask = createdOperandAsk(labelOf(zeros[0]!)!, created, unit);
+        return { reason: w.reason, node_id: w.nodeId, assistant_text: `To work out ${q(T)} ${asFormula}: ${ask.text}`,
+          chip_label: ask.label, chip_message: ask.message };
+      }
       const named = zeroTarget ? q(T) : andList(say(zeros));
       const one = zeroTarget || zeros.length === 1;
       return {
@@ -248,4 +355,39 @@ export function readIdentityAsk(v: unknown): IdentityAsk | null {
   const [text, label, message, nodeId] = [s('assistant_text'), s('chip_label'), s('chip_message'), s('node_id')];
   if (!reasons.includes(r.reason) || text === null || label === null || message === null || nodeId === null) return null;
   return { reason: r.reason as IdentityAskReason, node_id: nodeId, assistant_text: text, chip_label: label, chip_message: message };
+}
+
+/**
+ * ⭐ MC D1 (c) (DL 6 Oct; Acceptance rehearsal 13 on CEE d40fd7b): PLoT #416 (`GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED`) names
+ * only the identity node it could not calculate, and the reply asked for nothing ("separation_unavailable", no invitation).
+ * The one ask that would let it is CEE's, from its OWN graph: the first reason the declared operands show — a level the
+ * model holds none of, a zero, then a missing unit — said by the same composer as ISL's typed reason. Null when the graph
+ * shows none of them (no ask is invented).
+ */
+export function composeIdentityAskForNode(nodeId: string, graph: unknown): IdentityAsk | null {
+  const nodes = rec(graph)?.nodes;
+  if (!Array.isArray(nodes)) return null;
+  const byId = new Map<string, Rec>();
+  for (const n of nodes.map(rec)) if (n !== null && typeof n.id === 'string') byId.set(n.id, n);
+  const operands = ids(rec(byId.get(nodeId)?.nonlinear_identity)?.factor_ids);
+  if (operands === null) return null;
+  const os = (id: string): Rec | null => rec(byId.get(id)?.observed_state);
+  const level = (id: string): number | null => finite(os(id)?.raw_value) ?? finite(os(id)?.value);
+  const unitless = (id: string): boolean => { const u = os(id)?.unit; return !(typeof u === 'string' && u.trim() !== ''); };
+  // A node PLoT can frame is never "missing" one, unit word or not (`resolveNodeFrame`: its level's cap, else its
+  // `scale_frame`, else its level pair). Served draft 11's ‘Starter subscribers’ has no unit but `scale_frame` 500.
+  const positive = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  const framed = (id: string): boolean => positive(os(id)?.cap) || positive(byId.get(id)?.scale_frame) || (positive(os(id)?.raw_value) && positive(os(id)?.value));
+  const lacksFrame = (id: string): boolean => unitless(id) && !framed(id);
+  const target = byId.get(nodeId);
+  // The identity NODE is framed too (ISL rule 1; Codex buddy r1 P2): its own unit, or a goal's target unit.
+  const targetUnitless = lacksFrame(nodeId) && !(typeof target?.goal_threshold_unit === 'string' && target.goal_threshold_unit.trim() !== '');
+  // ISL rule 3: a zero operand withholds a product only when its node has a stated level (with none, 0 is an ordinary
+  // level — construction's created part, below). So a zero is inferred only against a stated target.
+  const statedTarget = level(nodeId) !== null;
+  const reason: IdentityWithheldReason | null = operands.some((id) => level(id) === null) ? 'identity_operand_missing'
+    : statedTarget && operands.some((id) => level(id) === 0) ? 'identity_zero_level'
+      : operands.some(lacksFrame) || targetUnitless ? 'identity_frame_missing' : null;
+  return reason === null ? null
+    : composeIdentityNotEvaluatedAsk([{ code: IDENTITY_NOT_EVALUATED_CODE, identity: { node_id: nodeId, participants: operands, withheld_reason: reason } }], graph);
 }

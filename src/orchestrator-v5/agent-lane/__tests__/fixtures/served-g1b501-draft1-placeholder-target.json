@@ -1,0 +1,56 @@
+{
+ "_provenance": {
+  "source": "Acceptance g1-b501 draft-1 (scenario 6669f3e3), CEE 231affb, wire turn-002, 6 Oct 2026; pd acceptance/successor-20261005"
+ },
+ "analysis_result": {
+  "type": "analysis_result",
+  "enrichment": {
+   "inference_warnings": [
+    {
+     "code": "GOAL_FIGURES_PLACEHOLDER_PATH",
+     "links": [
+      {
+       "to": "monthly_recurring_revenue",
+       "from": "starter_tier_mrr"
+      },
+      {
+       "to": "mrr_lost_to_starter_support_strain",
+       "from": "starter_tier_support_cost"
+      }
+     ],
+     "message": "This comparison turns on the links from ‘Starter tier MRR’ to ‘monthly recurring revenue’ and from ‘Starter tier support cost’ to ‘MRR lost to starter support strain’, whose strengths nobody has set yet. Set them to see how much they matter.",
+     "node_ids": [
+      "starter_tier_mrr",
+      "monthly_recurring_revenue",
+      "starter_tier_support_cost",
+      "mrr_lost_to_starter_support_strain"
+     ],
+     "severity": "warning",
+     "option_ids": [
+      "launch_starter_tier"
+     ],
+     "win_shares_withheld": true
+    },
+    {
+     "say": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Starter tier MRR to monthly recurring revenue, from Starter monthly price to Starter tier MRR and from Starter tier support cost to MRR lost to starter support strain and 2 more. Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?",
+     "code": "GOAL_FIGURES_TARGET_NOT_TESTABLE",
+     "message": "Not shown. Olumi can compare your options, but can't yet test them against your target (at least £126,000 / month), because it needs a size for the links from Starter tier MRR to monthly recurring revenue and from Starter monthly price to Starter tier MRR and 3 more. Roughly how much monthly recurring revenue in £/month does a change in Starter tier MRR bring?",
+     "node_ids": [
+      "monthly_recurring_revenue"
+     ],
+     "severity": "warning",
+     "option_ids": [
+      "raise_prices_10",
+      "keep_pricing_as_it_is"
+     ],
+     "withheld_claims": [
+      "goal_probability",
+      "joint_probability",
+      "outcome",
+      "downside"
+     ]
+    }
+   ]
+  }
+ }
+}

@@ -1,4 +1,4 @@
-import { GOAL_FIGURES_PLACEHOLDER_PATH, goalFiguresWithheldWarnings } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, goalFiguresLeaderWithheld, goalFiguresWithheldWarnings } from '../../orchestrator/context/option-result-source.js';
 import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
 
 /** The Run caller records its licence fact; readers never walk the graph again. */
@@ -47,6 +47,15 @@ export function unsizedPathLeaderWithheld(result: unknown): boolean {
   const enrichment = record(record(result)?.enrichment);
   return enrichment !== null && goalFiguresWithheldWarnings(enrichment)
     .some(w => w.code === GOAL_FIGURES_PLACEHOLDER_PATH);
+}
+
+/**
+ * MC D1 (DL 6 Oct): ANY goal-figure withhold that took the win shares (`goalFiguresLeaderWithheld`, the licence's own rule)
+ * withholds the leader with the constraint permission passed — so the claim never reads "separation unavailable" or a limit
+ * verdict for it, and the reply names the warning's own cause (`goalFigureCoHoldOf`).
+ */
+export function goalFiguresLeaderWithheldWithoutConstraintCause(result: unknown): boolean {
+  return goalFiguresLeaderWithheld(result) && readMayNameLeadingOptionFromResult(result);
 }
 
 /** The constraint permission itself passed; the missing path cause must not become a constraint refusal. */

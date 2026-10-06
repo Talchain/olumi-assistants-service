@@ -19,6 +19,7 @@ import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-targ
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../format/edge-strength-bands.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 
@@ -348,12 +349,32 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
       ? `Roughly how much does ${to} change, in ${toUnit}, when ${lever} rises by ${sayFigure(1, fromUnit)}?`
       : `Roughly how much does ${to} change when ${lever} changes?`;
   };
+  /**
+   * ⭐ MC D1 (e) (DL 6 Oct; Acceptance rehearsal 15 on CEE 3ee87d3): the user had set this link as a BAND ("moderate",
+   * `user_specified`), and the next Run asked for its size as if they had set nothing. A band is not a size in the target's
+   * unit (strength-as-size stays banned), so it is still asked — after saying what they set (DL's words).
+   */
+  const bandTheUserSet = ((): string | null => {
+    // The link the question itself asks for (`linkQuestion`: the failing case's own link, else the first one it names).
+    const asked = failingLink?.link ?? failedLinks[0];
+    if (asked === undefined || !Array.isArray(graph.edges)) return null;
+    const edge = graph.edges.filter(isRec).find((e) => e.from === asked.from && e.to === asked.to);
+    const mean = isRec(edge?.strength) ? edge.strength.mean : undefined;
+    // The band edit's own stamp (`adjust-edge-strength.ts`): `source: 'user_specified'` + `provenance_display: 'user_set'`, and
+    // no stated size. A link the user only DREW carries the source but not the display, so it is never "set as" a band.
+    const userBand = isRec(edge?.provenance) && edge.provenance.source === 'user_specified' && edge?.provenance_display === 'user_set'
+      && edge.provenance.magnitude !== 'user_stated' && edge.provenance.natural_effect === undefined;
+    return userBand && typeof mean === 'number' && Number.isFinite(mean) ? CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(mean))] : null;
+  })();
+  const askedAfterTheBand = (question: string): string => bandTheUserSet === null ? question
+    : `You set this link as ${bandTheUserSet}. To test your ${figure} target I need it in ${unit || 'the goal unit'}: `
+      + `${question[0]!.toLowerCase()}${question.slice(1)}`;
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
     ? [`it needs today's level of ${name}`, "today's level", `What's today's level of ${name}?`]
     : c === 'c' ? [`it needs ${link}`, link,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
-      identityCase || lever === undefined ? null : linkQuestion()]
+      identityCase || lever === undefined ? null : askedAfterTheBand(linkQuestion())]
     : c === 'b' ? [`it can't yet test a '${typeof comparator === 'string' ? comparator : ''} ${figure}' target on ${name}`, null, null]
     : [`your target is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
       `${name} measured in ${unit || 'its own units'}`, `What's today's level of ${name}${unit !== '' ? `, in ${unit}` : ''}?`];
