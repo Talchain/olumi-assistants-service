@@ -45,7 +45,7 @@ import { agentV1TurnRoute, persistedFactorReviewFor } from '../../../routes/agen
 import legacyReviewRoute from '../../../routes/assist.v1.review.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { decisionReviewFor, factorReviewPressLine, DECISION_REVIEW_PRESS_ID } from '../decision-review-press.js';
-import { AGENT_LANE_ENRICH_MODEL } from '../factor-review.js';
+import { AGENT_LANE_ENRICH_MODEL, factorReviewSensitivity } from '../factor-review.js';
 import { guidanceHistoryOf } from '../turn-context/guidance-history.js';
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -64,7 +64,7 @@ const graph = {
 };
 const enrichment = (question = QUESTION) => ({ factor_id: 'price', sensitivity_rank: 1,
   observations: ['This factor affects the model result.'], perspectives: ['Evidence could test the assumption.'], confidence_question: question });
-const sensitivity = [{ factor_id: 'price', elasticity: 0.62, importance_rank: 1 }];
+const sensitivity = [{ factor_id: 'price', elasticity: 0.62, importance_rank: 1, influence_score: 0.62 }];
 const plotResponse = (withSensitivity = true) => ({ analysis_status: 'computed',
   meta: { seed_used: 42, n_samples: 1000, response_hash: 'h' }, response_hash: 'h',
   results: [],
@@ -141,6 +141,23 @@ describe('MC factor review served from the persisted Agent Run', () => {
   const press = () => agentApp.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     scenario_id: SCENARIO, turn_id: randomUUID(), message: 'Review this decision', source: 'chip_click', chip: { id: DECISION_REVIEW_PRESS_ID },
   } });
+
+  it('finding 1: authoritative influence ranks a above b despite intervention-zeroed elasticity', () => {
+    const rows = [
+      { factor_id: 'a', elasticity: 0, influence_rank: 1, influence_score: 0.9 },
+      { factor_id: 'b', elasticity: 0.2, influence_rank: 2, influence_score: 0.1 },
+    ];
+    expect(factorReviewSensitivity(rows)).toEqual([
+      { factor_id: 'a', elasticity: 0, rank: 1 }, { factor_id: 'b', elasticity: 0.2, rank: 2 },
+    ]);
+    const question = 'What evidence would test this assumption in this model?';
+    expect(factorReviewPressLine({
+      graph: { nodes: [{ id: 'a', kind: 'factor', label: 'Demand' }, { id: 'b', kind: 'factor', label: 'Cost' }] },
+      analysisResult: { enrichment: { factor_sensitivity: rows } },
+      factorEnrichments: ['a', 'b'].map((factor_id) => ({ ...enrichment(question), factor_id, sensitivity_rank: 1 })),
+    })).toBe(`The result moves most with ‘Demand’. A question to test it: ${question}`);
+    expect(factorReviewSensitivity([{ factor_id: 'b', elasticity: 0.2 }])).toEqual([]);
+  });
 
   it('(a) RED at base: an Agent Run stores the enrichment and the route serves exactly one rank-1 item', async () => {
     const { plot } = await runAndPersist();
