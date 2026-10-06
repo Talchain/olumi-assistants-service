@@ -27,7 +27,7 @@ import { goalOrderedLinks, reachedGoalPaths } from '../admission/target-testabil
 export { reachedGoalPaths } from '../admission/target-testability.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { sayFigure } from './say-figure.js';
+import { isTwoStateSource, sayFigure, sourceChangeWords } from './say-figure.js';
 import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
 import { sameUnit } from './same-unit.js';
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
@@ -658,7 +658,7 @@ export function noDeadEndAsks(
       : given.length > 0 ? `, on top of its effect through ${q(String(given[0]!.to))} that you already gave` : '';
     first ??= { kind: 'gauge', from: lever, through: String(m), to: String(r.child) };
     sentences.push(fitted(() => `This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which nobody has set yet.`
-      + ` Roughly how much would a ${oneOf(leverUnit)} rise in ${q(lever)} change ${q(r.child)} that way${onTop()}, in ${r.unit}?`
+      + ` Roughly how much would ${sourceChangeWords(q(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${q(r.child)} that way${onTop()}, in ${r.unit}?`
       + ' A best guess and a range is fine.'));
     for (const k of [key(lever, m), key(m, r.child)]) covered.add(k);
   }
@@ -670,7 +670,7 @@ export function noDeadEndAsks(
     first ??= { kind: 'link', from: l.from, to: l.to };
     sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
       + ` Olumi measures ${q(l.from)} in ${r.unit}, from its own estimate of the link from ${q(r.parents[0]!)}; correct that if it\u2019s wrong.`
-      + ` Roughly how much does each ${oneOf(r.unit)} of ${q(l.from)} change ${q(l.to)}, in ${childUnit}?`));
+      + ` Roughly how much does ${sourceChangeWords(q(l.from), r.unit, isTwoStateSource(nodes, l.from, r.unit)).eachOf} change ${q(l.to)}, in ${childUnit}?`));
     covered.add(key(l.from, l.to));
   }
   if (sentences.length === 0) return gaugeLinks.size > 0 ? { gaugeLinks } : undefined;
@@ -679,11 +679,6 @@ export function noDeadEndAsks(
   return { message: fit(sentences) || sentences[0]!, gaugeLinks, first: first! };
 }
 
-/** One of a unit, said singular ("1 week", never "1 weeks"; "£1" as `sayFigure` says it). */
-function oneOf(unit: string): string {
-  return sayFigure(1, unit).replace(/^1 (\p{L}+)\b/u, (_, w: string) => `1 ${w.endsWith('ies') ? `${w.slice(0, -3)}y`
-    : /(?:ss|sh|ch|x|z)es$/.test(w) ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w}`);
-}
 
 /** Every node with a directed path to the goal (options and the decision aside), the goal included. */
 function goalPathNodes(nodes: readonly Rec[], edges: readonly Rec[]): Set<unknown> {
