@@ -7,13 +7,11 @@
  * pair's moves to S7 (`withinBandLinkMovesForRunPair`). Internal only: never on the wire; coverage stays `partial`.
  * - The Runs' snapshots come ONLY from the reconciled durable record when it is authority (`complete` / `capped`). A
  *   degraded or conflicting record names nothing: the hot window is never a second source of a Run (buddy r1 FAIL 1).
- * - A user-write receipt may come from either (it only ever turns a neutral line into "You", and is bound to the pair's
- *   own two means).
+ * - A user-write receipt comes from the facts read WITH their rows' DB-stamped `created_at` (`priorFactsWithTurn`) and
+ *   counts only between the two Runs and for the pair's own two means; it only ever turns a neutral line into "You".
  * - Only a `partial` delta can carry such a move, so any other delta costs no read. A read that fails or outlasts
  *   `deadlineMs` names nothing (buddy r1: never strand the chip on a pending read).
  */
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
-
 import { loadScenarioAnalysisFactsForRead } from '../build-turn-context.js';
 import { withinBandLinkMovesForRunPair } from '../coaching/build-run-delta.js';
 import type { WithinBandLinkMove } from '../coaching/run-input-changes.js';
@@ -32,10 +30,10 @@ export async function withinBandMovesForRunDelta(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<WithinBandLinkMove[]>((resolve) => { timer = setTimeout(() => resolve([]), deadlineMs); });
   const read = (async (): Promise<WithinBandLinkMove[]> => {
-    const { factSet, hotWindow } = await loadScenarioAnalysisFactsForRead(scenarioId, requestId);
+    const { factSet, priorFactsWithTurn } = await loadScenarioAnalysisFactsForRead(scenarioId, requestId);
     if (!isScenarioAnalysisReasoningAuthority(factSet)) return [];
-    const receipts: readonly HandlerFact[] = [...factSet.facts, ...hotWindow.facts];
-    return withinBandLinkMovesForRunPair(factSet.facts, runDelta, receipts);
+    return withinBandLinkMovesForRunPair(factSet.facts, runDelta,
+      priorFactsWithTurn.map((f) => ({ fact: f.fact, created_at: f.fact_created_at })));
   })().catch((): WithinBandLinkMove[] => []);
   try {
     return await Promise.race([read, late]);

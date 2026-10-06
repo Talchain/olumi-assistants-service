@@ -78,6 +78,9 @@ const receipt = (beforeMean: number, afterMean: number, from = FROM, to = TO): H
 
 const T1 = '2026-10-06T01:10:30.878Z';
 const T2 = '2026-10-06T01:13:09.266Z';
+/** The receipt row's DB-stamped `created_at`: between the two Runs, as rehearsal10's turn-007 was. */
+const BETWEEN = '2026-10-06T01:12:00.000Z';
+const timed = (f: HandlerFact, created_at = BETWEEN) => ({ fact: f, created_at });
 const PRIOR_RUN = '3f7b2f1af0062d70a6940a7f4c4c53bc32fe744e602b8548220cf34a1aec8fc8';
 const CURRENT_RUN = '5731955b7bb4b30cf97b1dbcf369724d45a7e4fa9aa08b86870f8341ca81ab98';
 /** rehearsal10's pair: the user's restatement moves the mean in band AND its authorship (natural_effect lives there). */
@@ -106,7 +109,7 @@ describe('the producer → S7 chain on rehearsal10’s pair', () => {
     expect(delta.input_coverage).toBe('partial');
     expect(delta.input_changes).toEqual([]);
     expect(delta).not.toHaveProperty('within_band');
-    const moves = withinBandLinkMovesForRunPair(REHEARSAL10_FACTS, delta);
+    const moves = withinBandLinkMovesForRunPair(REHEARSAL10_FACTS, delta, [timed(receipt(0.4, 0.6))]);
     expect(moves).toEqual([{ from: FROM, to: TO, band: 'strong', author: 'user' }]);
     const plan = rerunExplanationPlan(delta, labelOf, ['Raise price', 'Hold'], true, Object.values(LABELS), moves)!;
     expect(plan.codeLine).toContain(NAMED_USER);
@@ -114,7 +117,7 @@ describe('the producer → S7 chain on rehearsal10’s pair', () => {
   });
 
   it('on turn-008’s wire delta: the named line, then "can’t confirm nothing else differed" — never a cause', () => {
-    const moves = withinBandLinkMovesForRunPair(REHEARSAL10_FACTS, WIRE_DELTA);
+    const moves = withinBandLinkMovesForRunPair(REHEARSAL10_FACTS, WIRE_DELTA, [timed(receipt(0.4, 0.6))]);
     const plan = rerunExplanationPlan(WIRE_DELTA, labelOf, ['Raise price', 'Hold'], true, Object.values(LABELS), moves)!;
     expect(plan.codeLine).toBe(`${NAMED_USER} ${RERUN_FALLBACK_LINES.unverified}`);
     expect(plan.inputs.attribution_case).not.toBe('C1_attributable');
@@ -127,7 +130,7 @@ describe('the producer → S7 chain on rehearsal10’s pair', () => {
 
   it('the typed Agent record carries the same line (rerunRecordForModel)', () => {
     const nodes = Object.entries(LABELS).map(([id, label]) => ({ id, label, kind: 'factor' }));
-    const moves = withinBandLinkMovesForRunPair(REHEARSAL10_FACTS, WIRE_DELTA);
+    const moves = withinBandLinkMovesForRunPair(REHEARSAL10_FACTS, WIRE_DELTA, [timed(receipt(0.4, 0.6))]);
     expect(rerunRecordForModel(WIRE_DELTA, false, nodes, [], moves)?.code_line).toBe(`${NAMED_USER} ${RERUN_FALLBACK_LINES.unverified}`);
   });
 });
@@ -135,7 +138,7 @@ describe('the producer → S7 chain on rehearsal10’s pair', () => {
 describe('who changed it: the pair’s persisted record, never a guess (DL; c6 words; buddy r1)', () => {
   const plan = (prior: Link, current: Link, receipts: readonly HandlerFact[] = []) => {
     const facts = [fact(CURRENT_RUN, T2, 'h-2', snap(current, 'd'.repeat(64))), fact(PRIOR_RUN, T1, 'h-1', snap(prior, 'c'.repeat(64)))];
-    const moves = withinBandLinkMovesForRunPair(facts, WIRE_DELTA, [...facts, ...receipts]);
+    const moves = withinBandLinkMovesForRunPair(facts, WIRE_DELTA, receipts.map((r) => timed(r)));
     return rerunExplanationPlan(WIRE_DELTA, labelOf, [], true, Object.values(LABELS), moves)!.codeLine;
   };
   const edited = link({ mean: 0.6, authorship_digest: EDIT_DIGEST });
@@ -150,6 +153,15 @@ describe('who changed it: the pair’s persisted record, never a guess (DL; c6 w
   it('a receipt for ANOTHER move of the same link (0.4 → 0.5), or another link, never counts', () => {
     expect(plan(link({}), edited, [receipt(0.4, 0.5)])).toContain(NAMED_NEUTRAL);
     expect(plan(link({}), edited, [receipt(0.4, 0.6, FROM, 'other_node')])).toContain(NAMED_NEUTRAL);
+  });
+  it('⭐ buddy r2 (c): the same 0.4 → 0.6 receipt written BEFORE the prior Run, or AFTER the current one, never counts', () => {
+    const facts = [fact(CURRENT_RUN, T2, 'h-2', snap(edited, 'd'.repeat(64))), fact(PRIOR_RUN, T1, 'h-1', snap(link({}), 'c'.repeat(64)))];
+    const lineWith = (created_at: string) => rerunExplanationPlan(WIRE_DELTA, labelOf, [], true, Object.values(LABELS),
+      withinBandLinkMovesForRunPair(facts, WIRE_DELTA, [timed(receipt(0.4, 0.6), created_at)]))!.codeLine;
+    expect(lineWith('2026-10-06T01:00:00.000Z')).toContain(NAMED_NEUTRAL);
+    expect(lineWith('2026-10-06T01:20:00.000Z')).toContain(NAMED_NEUTRAL);
+    expect(lineWith('not a time')).toContain(NAMED_NEUTRAL);
+    expect(lineWith(BETWEEN)).toContain(NAMED_USER);
   });
   it('a noop or refused receipt never counts', () => {
     const noop = { ...(receipt(0.4, 0.6) as Record<string, unknown>), noop: true } as unknown as HandlerFact;

@@ -5,7 +5,7 @@
  * Customers lost to price rise" inside its band, 0.4 → 0.6, and moved "Starter monthly price → Starter-tier MRR" from strong
  * to moderate). `run_delta` (verbatim below) named only the band edit, coverage `partial`, case C1. The typed answer read the
  * model-facing C1 and said "the current comparison attributes the difference to your edit". The projection now applies S7's
- * own rule: C1 only for complete coverage with exactly one non-goal row; any other C1 is checked as C2_unpaired.
+ * own rule: C1 only for complete coverage with exactly one non-goal row; any other C1 is checked as C5_unattributed.
  */
 import { describe, expect, it } from 'vitest';
 import type { RunDelta } from '@talchain/schemas/boundary';
@@ -40,9 +40,9 @@ const ONE_ROW = { entity_kind: 'option_setting', entity_id: 'fac_price', option_
   before: { raw: 59, unit: 'GBP' }, after: { raw: 60, unit: 'GBP' }, change: 'changed' };
 
 describe('the model-facing case', () => {
-  it('⭐ rehearsal12 (C1, partial, a band edit + an unstated in-band figure): the model reads C2, never C1', () => {
+  it('⭐ rehearsal12 (C1, partial, a band edit + an unstated in-band figure): the model reads C5 (unattributed), never C1', () => {
     const projected = projectModelFacingRunDelta(REHEARSAL12 as never);
-    expect(projected.attribution_case).toBe('C2_unpaired');
+    expect(projected.attribution_case).toBe('C5_unattributed');
     // Everything else the model reads is unchanged, and the stripped keys stay stripped.
     expect(projected.win_probabilities).toEqual(REHEARSAL12.win_probabilities);
     expect(projected).not.toHaveProperty('input_coverage');
@@ -58,8 +58,8 @@ describe('the model-facing case', () => {
     ['complete and no change at all', { input_coverage: 'complete', input_changes: [] }],
     ['partial with one row', { input_coverage: 'partial', input_changes: [ONE_ROW] }],
     ['not_recorded', { input_coverage: 'not_recorded', input_changes: undefined }],
-  ])('%s: checked as C2', (_name, over) => {
-    expect(modelFacingAttributionCase({ ...REHEARSAL12, ...over } as never)).toBe('C2_unpaired');
+  ])('%s: read as C5', (_name, over) => {
+    expect(modelFacingAttributionCase({ ...REHEARSAL12, ...over } as never)).toBe('C5_unattributed');
   });
   it('an already-projected delta (no coverage key) passes as it is — a second projection never moves a case', () => {
     const once = projectModelFacingRunDelta({ ...REHEARSAL12, input_coverage: 'complete', input_changes: [ONE_ROW] } as never);

@@ -497,24 +497,35 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
 export function withinBandLinkMovesForRunPair(
   facts: readonly HandlerFact[],
   runDelta: unknown,
-  /** Where the user-write receipts are looked for (`adjust_edge_strength`, both user link-edit paths). Default: `facts`. */
-  receiptFacts: readonly HandlerFact[] = facts,
+  /**
+   * The user-write receipts (`adjust_edge_strength`, both user link-edit paths), each with its row's DB-stamped
+   * `created_at`. A receipt counts only when it was written BETWEEN the two Runs (after the prior Run's `computed_at`,
+   * before the current's): an earlier identical move of the same link never credits this pair (buddy r2 (c)).
+   */
+  timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[] = [],
 ): WithinBandLinkMove[] {
   const d = asRecord(runDelta);
   const endpoints = asRecord(d?.endpoints);
   const priorId = asRecord(endpoints?.prior)?.run_id;
   const currentId = asRecord(endpoints?.current)?.run_id;
   if (d?.input_coverage !== 'partial' || typeof priorId !== 'string' || typeof currentId !== 'string' || priorId === currentId) return [];
-  const snapshotOf = (runId: string): ReturnType<typeof RunInputSnapshotSchema.parse> | null => {
+  const runOf = (runId: string): { snapshot: ReturnType<typeof RunInputSnapshotSchema.parse>; at: number | null } | null => {
     const found = facts.map(readRunInputs).filter((r) => r.runId === runId);
     if (found.length === 0 || found.some((r) => r.snapshot === null)) return null;
     const first = JSON.stringify(found[0]!.snapshot);
-    return found.every((r) => JSON.stringify(r.snapshot) === first) ? found[0]!.snapshot : null;
+    if (!found.every((r) => JSON.stringify(r.snapshot) === first)) return null;
+    const at = found[0]!.computedAt === null ? Number.NaN : Date.parse(found[0]!.computedAt);
+    return { snapshot: found[0]!.snapshot!, at: Number.isNaN(at) ? null : at };
   };
-  const prior = snapshotOf(priorId);
-  const current = snapshotOf(currentId);
-  return prior === null || current === null ? [] : linksMovedWithinBand(prior, current, (from, to, priorMean, currentMean) =>
-    receiptFacts.some((f) => userLinkWriteReceiptMatches(f, from, to, priorMean, currentMean)));
+  const prior = runOf(priorId);
+  const current = runOf(currentId);
+  if (prior === null || current === null) return [];
+  const between = (createdAt: string): boolean => {
+    const t = Date.parse(createdAt);
+    return prior.at !== null && current.at !== null && !Number.isNaN(t) && t > prior.at && t < current.at;
+  };
+  return linksMovedWithinBand(prior.snapshot, current.snapshot, (from, to, priorMean, currentMean) =>
+    timedReceipts.some((r) => between(r.created_at) && userLinkWriteReceiptMatches(r.fact, from, to, priorMean, currentMean)));
 }
 
 /**
