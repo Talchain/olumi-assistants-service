@@ -1274,7 +1274,7 @@
         },
         {
           "id": "PM-NO-WINNER",
-          "rule": "decision_plan only: no winner, winning, best, recommend (including inflections), wins, leads or ahead claim in Olumi's own text (shared.label_masking)"
+          "rule": "decision_plan only: no winner, winning, recommend (including inflections), 'best option/choice/bet/path/plan', 'comes out ahead' or bare 'lead(s)' (not 'leads to') claim in Olumi's own text; ordinary prose such as quick wins, in the best case or the months ahead is allowed (shared.label_masking)"
         },
         {
           "id": "PM-BLINDSPOT",
