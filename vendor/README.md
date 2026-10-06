@@ -7,19 +7,24 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.78.0.tgz` ← **THE CURRENT PIN — DRAFT, PRE-PUBLISH** (SD-1 cut 6: a link's size in the user's terms)
+### `talchain-schemas-0.78.0.tgz` ← **THE CURRENT PIN** (SD-1 cut 6: READER first; DL 0df0e1 6 Oct)
 
-⚠ Packed locally (`npm run build && npm pack`) from olumi-schemas PR #89 @ `9ac4a9b70c6ee03c91f7359c42f365c20e5b273c`,
-NOT the registry artefact. Before this PR leaves draft it is replaced by the published `@talchain/schemas@0.78.0`
-(the DL cuts the release), with its registry sha256 / sha1 / sha512 recorded here.
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.78.0/29c008b0e8ee596fa5ce6a02c79271a86d3dae7c`
+(registry `dist-tags.latest` = 0.78.0); registry gitHead `28f4eccc2eeb256cedeb98ecdf835e58764b5b91` = tag `v0.78.0`
+(olumi-schemas `main` after #89, DL merge; publish run 37406852540). **829,871 bytes.** Verified, all exact:
 
 ```
-sha256 a33a66851f6355d3d4f212f728cc35e829381d5365381cfacffbe7712cac285a   (local pack, superseded on publish)
+npm shasum (sha1)  29c008b0e8ee596fa5ce6a02c79271a86d3dae7c   (the registry download id)
+integrity (sha512) sha512-Lq+VKRiRM5qwRbRsEwmYSIkimOrbQSPjY3JVl8+BXmAqWbuRW+rzux3mSeT9bOSrx9Gbq4EHvdGFmU6V4Uz6ag==
+sha256             79789bb0c80478c097217a37fdd2a11028649820215f8b26be7949c2fae5111a   (the .sha256 sidecar)
 ```
 
-0.78.0 adds `RunInputLinkSchema.natural_effect?`, `RunInputField` `'effect'` and `RunInputValueSchema.per?`. ⛔ ORDER (DL,
-6 Oct): CEE vendors 0.78 as a READER first (this PR: the differ reads `natural_effect` and says `effect` rows; nothing
-writes it); the snapshot WRITE lands only once prod CEE serves 0.78, because CEE strictly re-parses stored facts.
+0.78.0 adds `RunInputLinkSchema.natural_effect?`, `RunInputField` `'effect'` + `RunInputValueSchema.per?`, and
+`RunAnalysisResultSchema.delivered_record?` (SD-1 Slice R). ⛔ ORDER (DL, 6 Oct): CEE vendors 0.78 as a READER first (this
+PR: the differ reads `natural_effect` and says `effect` rows; nothing writes it); every WRITE (#2638, label
+`writer-after-prod-0.78`) lands only once prod CEE serves 0.78, because CEE strictly re-parses stored facts and staging and
+prod share one database.
 
 ### `talchain-schemas-0.77.0.tgz` (historical — no longer vendored as of 0.78.0) (SPINE X8, a relationship the user stated is the user's)
 
