@@ -3927,9 +3927,10 @@ function admitOnce(
    * first Run asked the user to size a definition. A frame is a choice of units, never a claim (S5t), and a part is never
    * larger than its total: the part is measured on its total's frame, so the definition is typed on its own natural size
    * and the construction refit (`refitFramesForStatedEffects`) fits every exact size around it.
-   * Only a part that holds nothing a frame normalises (no level of its own, no option level, no limit) and no Olumi-sized
-   * link into it that the narrower frame would push past ±1 (D8 would set THAT aside instead). Frames only narrow, so the
-   * pass over a chain of parts settles.
+   * Only an OUTCOME or a RISK part (the refit widens those again where a user's size into it needs it; it never widens a
+   * factor, and a goal's threshold is framed on its own: Codex buddy r1 P1/P2), that holds nothing a frame normalises (no
+   * level of its own, no option level, no limit), and no Olumi-sized link into it that the narrower frame would push past
+   * ±1 (D8 would set THAT aside instead). Frames only narrow, so the pass over a chain of parts settles.
    */
   for (let moved = true, passes = 0; moved && passes <= resolvable.length; passes += 1) {
     moved = false;
@@ -3938,7 +3939,8 @@ function admitOnce(
         || l.effect_per_source_change === 0 || Math.abs(l.effect_amount / l.effect_per_source_change) !== 1) continue;
       const part = nodeOf.get(l.from);
       const total = nodeOf.get(l.to);
-      if (part === undefined || total === undefined || part.observed_state !== undefined || optionLevelsById.has(part.id)
+      if (part === undefined || total === undefined || (part.kind !== 'outcome' && part.kind !== 'risk')
+        || part.observed_state !== undefined || optionLevelsById.has(part.id)
         || model.constraints.some((c) => nodeIdForMetric(c.metric) === part.id)) continue;
       const partFrame = resolveMagnitudeFrame(magnitudeNodeFor(part));
       const totalFrame = resolveMagnitudeFrame(magnitudeNodeFor(total));

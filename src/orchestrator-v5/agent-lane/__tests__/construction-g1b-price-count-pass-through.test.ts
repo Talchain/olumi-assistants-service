@@ -81,6 +81,25 @@ describe('price × count (2): a rate per a QUALIFIED count is Olumi\'s product, 
     expect(node('Starter-tier monthly recurring revenue').nonlinear_identity).toBeUndefined();
   });
 
+  it('CONTROL (Codex r1 P2): the point-set draft with the QUALIFIED rate ("£ per starter subscriber per month") — the second reading never bypasses Science (A)', async () => {
+    const d = FX.point_count;
+    const candidate = structuredClone(d.candidate);
+    (candidate.factors as Rec[]).find((f) => f.label === 'Starter-tier monthly price')!.unit = RATE_UNIT;
+    ((candidate.options as Rec[]).find((o) => o.label === 'Launch starter tier')!.interventions as Rec[])
+      .find((i) => i.factor_label === 'Starter-tier monthly price')!.unit = RATE_UNIT;
+    const { node } = await build(JSON.stringify(candidate), d.brief);
+    expect(node('Starter-tier monthly recurring revenue').nonlinear_identity).toBeUndefined();
+  });
+
+  it('CONTROL (Codex r1 P1): a count counted in "pro subscribers" keeps its own qualifier — the starter rate proves no product with it', async () => {
+    const d = FX.price_count[1]!;
+    const p = PRODUCTS[d.case_id]!;
+    const candidate = structuredClone(d.candidate);
+    (candidate.outcomes as Rec[]).find((o) => o.label === p.count)!.unit = 'pro subscribers';
+    const { node } = await build(JSON.stringify(candidate), d.brief);
+    expect(node(p.outcome).nonlinear_identity).toBeUndefined();
+  });
+
   it('CONTROL: the brief does not state the starter price — the same real draft gets no product', async () => {
     const d = FX.price_count[1]!;
     const p = PRODUCTS[d.case_id]!;
@@ -137,5 +156,17 @@ describe('pass-through: a drafted definition is typed on its total\'s frame (raw
     expect(edge('Customers lost from price rise', PART).provenance).toMatchObject({ magnitude: 'olumi_estimate', natural_effect: { amount: 250, per_source_change: 1 } });
     expect(edge(PART, GOAL).provenance.magnitude).toBe('olumi_placeholder');
     expect(edge(PART, GOAL).provenance.definitional).toBeUndefined();
+  });
+
+  it('CONTROL (Codex r1 P1): the part drafted as a FACTOR (the refit never widens a factor) keeps its frame — the user\'s £300 per customer is never cut', async () => {
+    const response = JSON.parse(FX.pass_through.response_text) as Rec;
+    const risk = (response.risks as Rec[]).find((r) => r.label === PART)!;
+    response.risks = (response.risks as Rec[]).filter((r) => r !== risk);
+    (response.factors as Rec[]).push({ label: PART, role: 'observable', baseline_known: false, baseline_value: null, unit: risk.unit, provenance: 'inferred', plausible_max: risk.plausible_max });
+    const { graph, node, edge } = await build(JSON.stringify(response), FX.pass_through.brief);
+    expect(node(PART).kind).toBe('factor');
+    expect(node(PART).scale_frame).toBe(500000);
+    expect(edge('Customers lost from price rise', PART).provenance).toMatchObject({ magnitude: 'user_stated', natural_effect: { amount: 300, per_source_change: 1 } });
+    expect((graph.edges as Rec[]).filter((e) => e.provenance?.clamped_from !== undefined || Math.abs(e.strength?.mean ?? 0) > 1)).toEqual([]);
   });
 });

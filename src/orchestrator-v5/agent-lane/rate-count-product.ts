@@ -118,14 +118,17 @@ function rateDenominatorAsOnePhrase(unit: unknown): unknown {
 
 /**
  * A count's unit, QUALIFIED by its own label: the label ("Starter subscribers") where the unit reads as a count
- * ("subscribers") and the label reads as a count of that SAME noun, so a rate "per starter subscriber" names it. Anything
- * else (a money or unread unit, a label naming another noun: ‘Starter subscribers’ counted in "customers") keeps its
- * unit, and `unitsCompose`'s own rule (the denominator's noun is the count's, every word of it in the count) decides.
+ * ("subscribers") and the label reads as a count of that SAME noun that keeps EVERY word of the unit, so the label only
+ * adds qualifiers and a rate "per starter subscriber" names it. Anything else keeps its unit: a money or unread unit, a
+ * label naming another noun (‘Starter subscribers’ counted in "customers"), or a unit whose own qualifier the label does
+ * not carry (‘Starter subscribers’ counted in "pro subscribers": Codex buddy r1 P1). `unitsCompose`'s own rule (the
+ * denominator's noun is the count's, every word of it in the count) then decides.
  */
 function countQualifiedByLabel(label: string, unit: unknown): unknown {
   const byUnit = readCount(unit);
   const byLabel = readCount(label);
-  return byUnit !== null && byLabel !== null && byLabel[byLabel.length - 1] === byUnit[byUnit.length - 1] ? label : unit;
+  return byUnit !== null && byLabel !== null && byLabel[byLabel.length - 1] === byUnit[byUnit.length - 1]
+    && byUnit.every((w) => byLabel.includes(w)) ? label : unit;
 }
 
 /** Words that qualify nothing ("launch A new starter tier", "keep THE price"): never another entity's name. */
