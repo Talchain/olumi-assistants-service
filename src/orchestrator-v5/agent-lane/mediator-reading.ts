@@ -27,6 +27,7 @@ import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defau
 import { resolveMagnitudeFrame, unitOf, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
 import { POINTS_SPELLINGS, periodAdverb, periodNoun, type UnitPeriod } from '../../utils/unit-alphabet.js';
 import { carrierCompatible, readUnitParts, sameUnit, singular, words, type UnitParts } from './same-unit.js';
+import { licenceUnsizedLink } from './goal-certainty.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -127,8 +128,7 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const chainOnly = !operand && edges.filter(e => e.from === id).length === 1
       && edges.filter(e => e.to === id && walkable(e.from)).length === 1;
     const kidUnsized = !isRec(kidProvenance.natural_effect) && kidProvenance.definitional !== true
-      && (kidProvenance.magnitude === 'olumi_placeholder' || kidProvenance.mean_projected === true)
-      && kidProvenance.source !== 'user_specified';
+      && licenceUnsizedLink(kids[0]) && kidProvenance.source !== 'user_specified';
     const gauge = (extra: { stored?: true; replaces?: string }): MediatorReading | null =>
       childUnit === undefined || childFrame === undefined || (extra.stored !== true && (!kidUnsized || !chainOnly)) ? null
         : { via: 'gauge', unit: childUnit, scale_frame: childFrame, child: childId, ...extra };
@@ -143,7 +143,7 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const sized = parents.filter(e => isRec(e.provenance) && isRec(e.provenance.natural_effect));
     if (sized.length > 0) {
       // (C) Every sized parent is Olumi's estimate with a natural effect: never a placeholder, a projected mean or the user's.
-      if (!sized.every(e => (e.provenance as Rec).magnitude === 'olumi_estimate' && (e.provenance as Rec).mean_projected !== true)) continue;
+      if (!sized.every(e => (e.provenance as Rec).magnitude === 'olumi_estimate' && !licenceUnsizedLink(e))) continue;
       const units = sized.map(e => ((e.provenance as Rec).natural_effect as Rec).amount_unit);
       if (!units.every((u): u is string => typeof u === 'string' && u.trim() !== '')) continue;
       const u = units[0]!;

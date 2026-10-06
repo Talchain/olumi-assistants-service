@@ -54,7 +54,9 @@ function graph(provenance: R = { source: 'cee_hypothesis', mean_projected: true 
 }
 const hash = (g: R) => computeAnalysisAffectingGraphHash(g as never);
 const link = (g: R) => g.edges.find((e: R) => e.from === 'x' && e.to === 'g');
-const withholdWords = 'This comparison turns on the link from ‘Capacity’ to ‘Revenue’, whose strength nobody has set yet. Set it to see how much it matters.';
+// RE-PINNED (no-dead-end (A), MC 21 + Science d5, #2623): this fixture's goal has no frame, so the link into it cannot be
+// sized yet; the statement asks today's level first (the served P5 question), and the existing card records it.
+const withholdWords = 'This comparison turns on the link from ‘Capacity’ to ‘Revenue’, whose strength nobody has set yet. What\'s today\'s level of ‘Revenue’?';
 
 async function saveAndReload(g: R, facts: R[] = []): Promise<{ graph: R; facts: R[] }> {
   let row: R = {};
@@ -149,7 +151,9 @@ it('R8-6: three withholding links on two actual-move paths, duplicate endpoint, 
   const w = r.enrichment.inference_warnings.find((w: R) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
   expect(w.links).toEqual(expected);
   expect(w.node_ids).toEqual(['x', 'y', 'g']); // unchanged raw walk order, back-compat
-  expect(w.message).toBe('This comparison turns on the links from ‘Quality’ to ‘Revenue’, from ‘Capacity’ to ‘Revenue’ and from ‘Capacity’ to ‘Quality’, whose strengths nobody has set yet. Set them to see how much they matter.');
+  // RE-PINNED (no-dead-end (A), MC 21 + Science d5, #2623): this fixture's goal has no frame, so no link into it can be
+  // sized yet; the statement now asks today's level first (the served P5 question), and the existing card records it.
+  expect(w.message).toBe('This comparison turns on the links from ‘Quality’ to ‘Revenue’, from ‘Capacity’ to ‘Revenue’ and from ‘Capacity’ to ‘Quality’, whose strengths nobody has set yet. What\'s today\'s level of ‘Revenue’?');
   const cause = readUnsizedPathLeaderCause(r)!;
   expect(cause.links).toEqual(expected.map(l => ({ ...l,
     from_label: g.nodes.find((n: R) => n.id === l.from).label, to_label: g.nodes.find((n: R) => n.id === l.to).label })));

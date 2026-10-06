@@ -356,6 +356,18 @@ describe('THE WORDS: the card and the withhold ask', () => {
     expect(W(sizedParentGraph(), [{ from: 'cost', to: 'mrr' }], 'o-spend').message).toContain(
       'Olumi measures ‘Support cost’ in £/month, from its own estimate of the link from ‘Support budget’; correct that if it’s wrong.');
   });
+  it('⛔ (C) never asks a GUESSED link out of a node the user\'s limit watches (AIQ 5903604206): the generic words stand', () => {
+    const g = sizedParentGraph();
+    g.goal_constraints = [{ node_id: 'cost', operator: '<=', value: 9000, unit: '£/month', value_frame: 'level' }];
+    const w = W(g, [{ from: 'cost', to: 'mrr' }], 'o-spend');
+    expect(w.message).not.toContain('Olumi measures');
+    expect(w.message).toBe(unsizedLinkSentence(w.links.map(l => ({ ...l,
+      from_label: g.nodes.find((n: Rec) => n.id === l.from).label, to_label: g.nodes.find((n: Rec) => n.id === l.to).label }))));
+  });
+  it('the asked step is singular ("each 1 week", never "1 weeks")', () => {
+    const g = sizedParentGraph('weeks');
+    expect(W(g, [{ from: 'cost', to: 'mrr' }], 'o-spend').message).toContain('Roughly how much does each 1 week of');
+  });
   it("(A) withhold: a goal with no frame is asked today's level first (the served P5 question)", () => {
     const g = gaugeGraph();
     const goal = g.nodes.find((n: Rec) => n.id === 'mrr');
