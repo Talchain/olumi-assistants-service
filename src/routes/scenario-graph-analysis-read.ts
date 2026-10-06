@@ -127,6 +127,10 @@ import {
 import { evaluatedIdentityNodeIds, nodesUnderANonlinearIdentity, nonlinearIdentityLeaderClaimCause } from '../orchestrator-v5/agent-lane/admit-model.js';
 import { selectCanonicalAnalysisState } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
+import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
+import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
+import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
+import type { AnalysisReadyPayload } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 import {
   readMayNameLeadingOptionFromResult,
   readConstraintVerdictStateFromResult,
@@ -604,13 +608,24 @@ export async function readScenarioAnalysis(
     const permissions = claimPermissionsFrom(analysisState, analysisReady, { requested: true });
     params.onCurrentnessRead?.({ ...currentnessRead,
       ...(analysisReady === undefined || scopeInput.status === 'unavailable' ? {} : { permissions }) });
+    // The live readback consumes this same whole readiness payload. Preserve the
+    // existing stale-goal explanation; ordinary reads use the live freshness
+    // decorators, including its raw edit-token domain (not the selector's hash).
+    const graphHash = computeAnalysisAffectingGraphHash(params.graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) ?? undefined;
+    const readinessForRead = analysisReady === undefined ? undefined : withCurrentGraphHash(
+      withRunStateFreshness(
+        isGoalSnapshotStaleReason(derivation.reason) ? attachComputedAt(analysisReady, derivation) : analysisReady,
+        analysisState,
+        { graphHash, analysisResult: boundResult },
+      ),
+      graphHash,
+    ) as AnalysisReadyPayload;
     return {
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })
         : projectCurrentRead({
             analysisState, derivation, analysisResult: boundResult,
-            ...(analysisReady !== undefined && isGoalSnapshotStaleReason(derivation.reason)
-              ? { analysisReady: attachComputedAt(analysisReady, derivation) } : {}),
+            ...(readinessForRead !== undefined ? { analysisReady: readinessForRead } : {}),
             figures: projectSelectedRunFigures({
               scenarioId: params.scenarioId,
               runState: analysisState.run_state,
