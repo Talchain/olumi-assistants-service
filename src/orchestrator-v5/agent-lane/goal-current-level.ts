@@ -57,7 +57,8 @@ import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
 import { admitStatedGoalLevel, admitStatedGoalLevelOnScale } from './admit-model.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
-import { retireNormalisingGoalFrame } from './normalising-goal-frame.js';
+import { retireNormalisingGoalFrame, rederiveGoalInLinks } from './normalising-goal-frame.js';
+import { frameOf } from './refit-frames.js';
 import { figureTheUserWrote } from './stated-by-user.js';
 import { isAmountStatedInBrief, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
@@ -71,7 +72,7 @@ import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
 import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
-import { holdsPairableCeiling, pairGoalCeiling } from '../goal-target/goal-ceiling-pair.js';
+import { goalCeilingRow, holdsPairableCeiling, pairGoalCeiling } from '../goal-target/goal-ceiling-pair.js';
 import { isUnnamedCurrencyUnit, unitAlreadyOnGoal, unitNamingCurrency } from './unnamed-currency.js';
 import { scopeOf, identityConflictsWithScope, scopeSourcesAreUserWords, goalScopeCheck, scopeCanRecord, SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWithdrawalReading } from '../system-events/identity-confirm-edit.js';
@@ -628,6 +629,17 @@ export async function proposeGoalCurrentLevel(
   let normalisedLevel: number;
   let levelCap: number;
   if (levelOnItsOwnFrame) {
+    // ⛔ A ceiling the goal holds is never read as a floor (Codex buddy r1 on #2618 (c): the refusal the target path
+    // applies, `admitStatedGoalLevel`, kept on the level's own frame): an "at least" reading would score it the wrong way round.
+    const said = typeof args?.goal_is === 'string' ? OPERATOR_OF[args.goal_is] : undefined;
+    const ceiling = ceilingTakesTheLevelFrame ? goalCeilingRow(g.raw, goal.id) : undefined;
+    if (ceiling !== undefined && (said === '>=' || said === '>')) {
+      const limit = sayFigureExactly(ceiling.value, goalUnit ?? '') ?? String(ceiling.value);
+      return refuse('not_admitted',
+        `"${goal.label}" is held as a goal to stay ${ceiling.stated === '<' ? 'below' : 'at or below'} ${limit}, so a current level ` +
+        `read as reaching at least ${limit} would be scored the wrong way round, and it was not used. If the goal is to stay ` +
+        'under the target, say so and give the current level again.');
+    }
     /**
      * ⭐ THE LEVEL ON ITS OWN FRAME (DL #85 5930770727): the one cap rule, given the level as its only figure — the cap a
      * construction would give a goal whose only figure is this one. No comparator and no target are read: there are none.
@@ -1094,13 +1106,20 @@ export async function applyGoalCurrentLevel(
    * (`add-constraint.ts`). Without it the goal would carry BOTH frames, CEE reading the `scale_frame` and PLoT the `cap`
    * first, and the user's own sizes into the goal would be read on the wrong one. No `scale_frame` → the graph itself.
    */
+  // Read BEFORE this write: the frame every sized link into the goal was sized on.
+  const frameBefore = frameOf(approved.nodes.find((n) => n.id === op.path) as Record<string, unknown> | undefined);
   const unretired = { ...approved.raw, nodes } as Record<string, unknown> & { nodes: typeof nodes };
-  const graph = retireNormalisingGoalFrame(unretired);
+  const retiredOrSame = retireNormalisingGoalFrame(unretired);
   // ⭐ D3 step 1: a goal ceiling is (re)paired on the level this write carries, in this same write (Science #87
   // 6005138341): the ceiling came first (rt10b's order) or an earlier level framed it, so the new level renormalises it.
-  const ceilingPaired = holdsPairableCeiling(graph, op.path)
-    && pairGoalCeiling(graph, op.path) === 'paired';
-  const retired = graph !== unretired;
+  const ceilingPaired = holdsPairableCeiling(retiredOrSame, op.path)
+    && pairGoalCeiling(retiredOrSame, op.path) === 'paired';
+  const retired = retiredOrSame !== unretired;
+  // ⭐ …and the renormalised frame carries the links sized on the old one (Codex buddy r1 F3 on #2618): every user-sized or
+  // definitional link into the goal is re-derived onto the new frame from its unchanged natural size, as the target
+  // writer does when it moves the level frame (`add-constraint.ts`, D1 B). A retirement above has already re-derived.
+  const graph = ceilingPaired && !retired && frameBefore !== undefined
+    ? rederiveGoalInLinks(retiredOrSame, op.path, frameBefore) : retiredOrSame;
   const writtenGoal = (graph.nodes as readonly Record<string, unknown>[]).find((n) => n.id === op.path);
   const writtenOs = (writtenGoal?.observed_state ?? os) as { baseline?: unknown };
   const reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
@@ -1139,10 +1158,12 @@ export async function applyGoalCurrentLevel(
   const scopeHeld = !scope || (after !== null && stableStringify(goalScopeMeaning((after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.goal_scope)) === stableStringify(goalScopeMeaning(scope))
     && (!withdrawal || !(after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.nonlinear_identity));
   // The ceiling's pair is read back too: its figure, its cap and its threshold, exactly as this write carried them.
-  const pairNow = after?.nodes.find((n) => n.id === op.path) as { goal_threshold_raw?: unknown; goal_threshold_cap?: unknown; goal_threshold?: unknown } | undefined;
-  const pairWritten = writtenGoal as { goal_threshold_raw?: unknown; goal_threshold_cap?: unknown; goal_threshold?: unknown } | undefined;
-  const pairHeld = !ceilingPaired || (pairNow !== undefined && pairNow.goal_threshold_raw === pairWritten?.goal_threshold_raw
-    && pairNow.goal_threshold_cap === pairWritten?.goal_threshold_cap && pairNow.goal_threshold === pairWritten?.goal_threshold);
+  // Its comparator and frame too (Codex buddy r1 F6 on #2618): the same figures under a floor are not this pair.
+  type Pair = { goal_threshold_raw?: unknown; goal_threshold_cap?: unknown; goal_threshold?: unknown; goal_direction?: unknown; goal_threshold_frame?: unknown };
+  const pairNow = after?.nodes.find((n) => n.id === op.path) as Pair | undefined;
+  const pairWritten = writtenGoal as Pair | undefined;
+  const pairHeld = !ceilingPaired || (pairNow !== undefined && pairWritten !== undefined
+    && (['goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold', 'goal_direction', 'goal_threshold_frame'] as const).every((k) => pairNow[k] === pairWritten[k]));
   const landed = scopeHeld && pairHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {

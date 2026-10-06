@@ -31,6 +31,8 @@ import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { applyGoalTargetEdit } from '../../system-events/goal-target-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { pairGoalCeiling, holdsPairableCeiling } from '../../goal-target/goal-ceiling-pair.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 
 type Json = Record<string, any>;
 type Graph = { nodes: Json[]; edges: Json[]; goal_constraints?: Json[] } & Json;
@@ -182,6 +184,20 @@ describe('D3 step 1 — a goal ceiling is scored as ONE pair (threshold + minimi
     expect(goalOf(g).goal_threshold).toBeUndefined();
   });
 
+  it('MATERIAL (Science #87 6006079049 (2)): today\'s level AT a strict ceiling ("below 400", today 400) is sent as level = threshold, minimised and strict — ISL then scores the held option 0, never 1', async () => {
+    // ISL d74b5f6 tests/unit/test_goal_threshold_strict.py:46-48 pins the other half: at today = threshold, minimise → 1.0,
+    // minimise + strict → 0.0. Mutant M5 (no strict for "<") drops the key here, so ISL would score "below 400" as met at 400.
+    const below = clone(RT10B.graph_with_target);
+    goalOf(below).goal_direction = '<';
+    ownRows(below)[0]!.operator_as_stated = '<';
+    const g = await levelCard(below, 'We get about 400 cancellations a month right now.', { ...LEVEL, value: 400 });
+    const req = await plotRequestFor(g);
+    const sent = req.graph.nodes.find((n: Json) => n.id === GOAL);
+    expect(sent.observed_state.value).toBeCloseTo(sent.goal_threshold, 15);
+    expect(req.goal_direction).toBe('minimise');
+    expect(req.goal_threshold_strict).toBe(true);
+  });
+
   it('a % ceiling with no level pairs on the unit\'s own 100 (metric scale), not on headroom', async () => {
     const pct = clone(RT10B.graph_without_target);
     Object.assign(goalOf(pct), { label: 'monthly churn', goal_threshold_unit: '%' });
@@ -199,6 +215,8 @@ describe('D3 step 1 — a goal ceiling is scored as ONE pair (threshold + minimi
     expect(goalOf(floored).goal_threshold_raw).toBe(300); // PRECONDITION: the floor stamped the channel
     const g = await targetCard(floored, 'at_most', 400);
     expect(goalOf(g).goal_direction).toBe('<=');
+    // ONE target per goal (Science #87 6006079049 (1)): the floor's own row is retired in the same write, never a band.
+    expect(ownRows(g)).toEqual([expect.objectContaining({ operator: '<=', value: 400 })]);
     for (const k of ['goal_threshold_raw', 'goal_threshold', 'goal_threshold_cap', 'success_threshold', 'threshold_source']) expect(goalOf(g)[k], k).toBeUndefined();
     const req = await plotRequestFor(g);
     expect(req.goal_direction).toBe('minimise');
@@ -244,6 +262,94 @@ describe('D3 step 1 — a goal ceiling is scored as ONE pair (threshold + minimi
     expect(goalOf(control.graph()).observed_state.raw_value).toBe(360);
   });
 
+  it('the Agent\'s target card NAMES the target it replaces (Science #87 6006079049 (1)); no earlier target, no such sentence', async () => {
+    const card = async (graph: Graph): Promise<string> => {
+      const store = scenarioStore(graph);
+      const caps: AgentCapabilities = createAgentCapabilities(store.dispatch, new ProposalStore());
+      const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-d3-tcard', user_text: 'Keep monthly cancellations at most 400 a month.' };
+      const r = await dispatchTool('propose_goal_target', JSON.stringify({ constraint_type: 'at_most', value: 400, unit: UNIT, rationale: 'user stated' }), ctx, caps) as ToolResult & { public_label?: string };
+      expect(r.ok, JSON.stringify(r).slice(0, 600)).toBe(true);
+      return String(r.public_label);
+    };
+    const floored = await targetCard(RT10B.graph_without_target, 'at_least', 300);
+    expect(await card(floored)).toContain('This replaces your earlier target for "monthly cancellations" (at least 300');
+    expect(await card(RT10B.graph_without_target)).not.toContain('replaces');
+  });
+
+  it('buddy r1 F1: two own "<=" rows (admit-constraint appends both) — the card keeps ONE target row and pairs it; never a floor minimised', async () => {
+    const withLevel = await levelCard(RT10B.graph_without_target);
+    const floored = await targetCard(withLevel, 'at_least', 300);
+    expect(pairOf(floored)).toMatchObject({ raw: 300, direction: '>=' }); // PRECONDITION: a floor's figure held
+    const twoCeilings = clone(floored);
+    twoCeilings.goal_constraints = [...(twoCeilings.goal_constraints ?? []),
+      { constraint_id: 'gc-a', node_id: GOAL, operator: '<=', value: 400, unit: UNIT, label: 'a', provenance: 'explicit', value_frame: 'level' },
+      { constraint_id: 'gc-b', node_id: GOAL, operator: '<=', value: 500, unit: UNIT, label: 'b', provenance: 'explicit', value_frame: 'level' }];
+    const g = await targetCard(twoCeilings, 'at_most', 400);
+    expect(ownRows(g)).toEqual([expect.objectContaining({ operator: '<=', value: 400 })]);
+    // The ceiling's own figure on the level frame the goal holds (here the floor writer's 375: off scale, P2 withholds it).
+    const p = pairOf(g);
+    expect(p).toMatchObject({ raw: 400, success: 400, direction: '<=' });
+    expect(p.cap).toBe(p.levelCap);
+    expect((await plotRequestFor(g)).graph.nodes.find((n: Json) => n.id === GOAL).goal_threshold).toBeCloseTo(400 / p.levelCap, 12);
+    // …and with NO other-operator row: a paired ceiling plus a second own "<=" row, moved to 450 by the card.
+    const doubled = clone(await levelCard(RT10B.graph_with_target));
+    doubled.goal_constraints = [...doubled.goal_constraints!, { ...doubled.goal_constraints![0]!, constraint_id: 'gc-second', value: 500 }];
+    const moved = await targetCard(doubled, 'at_most', 450);
+    expect(ownRows(moved)).toEqual([expect.objectContaining({ operator: '<=', value: 450 })]);
+    expect(pairOf(moved)).toMatchObject({ raw: 450, cap: 650, direction: '<=' });
+  });
+
+  it('buddy r1 F1 (writer): a held ceiling with no ONE row to pair clears the channel — an earlier figure is never left beside it', () => {
+    const g = clone(RT10B.graph_with_target);
+    Object.assign(goalOf(g), { goal_threshold_raw: 300, goal_threshold: 300 / 650, goal_threshold_cap: 650, success_threshold: 300, threshold_source: 'user' });
+    g.goal_constraints = [...g.goal_constraints!, { ...g.goal_constraints![0]!, constraint_id: 'gc-dup', value: 500 }];
+    expect(pairGoalCeiling(g, GOAL)).toBe('unpaired');
+    for (const k of ['goal_threshold_raw', 'goal_threshold', 'goal_threshold_cap', 'success_threshold']) expect(goalOf(g)[k], k).toBeUndefined();
+  });
+
+  it('buddy r1 F2: a goal stated as a CHANGE is never paired, even beside its own level row — "reduce by 20%" stays as stated', () => {
+    const g = clone(RT10B.graph_with_target);
+    Object.assign(goalOf(g), { goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.2, goal_threshold: -0.2,
+      observed_state: { value: 0.8, baseline: 0.8, raw_value: 520, cap: 650, unit: UNIT, source: 'user_edited' } });
+    expect(holdsPairableCeiling(g, GOAL)).toBe(false);
+    expect(pairGoalCeiling(g, GOAL)).toBe('not_a_ceiling');
+    expect(goalOf(g)).toMatchObject({ goal_threshold_frame: 'change_rel', goal_threshold_raw: -0.2, goal_threshold: -0.2 });
+  });
+
+  it('buddy r1 F3: a new level renormalising the pair re-derives every user-sized link into the goal (natural size unchanged)', async () => {
+    const paired = clone(await levelCard(RT10B.graph_with_target));
+    const sized = paired.edges.find((e) => e.to === GOAL && e.from === 'active_customers')!;
+    Object.assign(sized, { strength: { mean: 100 / 650, std: 25 / 650 }, provenance: { ...sized.provenance, magnitude: 'user_stated' } });
+    const unsized = paired.edges.find((e) => e.to === GOAL && e.from === 'loyalty_discount_rate')!;
+    const unsizedBefore = clone(unsized.strength);
+    const g = await levelCard(paired, 'Correction: we get about 900 cancellations a month now.', { ...LEVEL, value: 900 });
+    expect(pairOf(g).cap).toBe(1125);
+    const after = (from: string) => g.edges.find((e) => e.to === GOAL && e.from === from)!;
+    expect(after('active_customers').strength.mean).toBeCloseTo(100 / 1125, 9);
+    expect(after('loyalty_discount_rate').strength).toEqual(unsizedBefore); // CONTROL: an Olumi-sized link is not the user's size
+  });
+
+  it('buddy r1 F4: a strictly scored "<" ceiling passes P3; a "<" with no threshold to score stays unscorable', async () => {
+    const below = clone(RT10B.graph_with_target);
+    goalOf(below).goal_direction = '<';
+    ownRows(below)[0]!.operator_as_stated = '<';
+    const p3 = (g: Graph) => {
+      const t = targetTestabilityOf(g) as { failures?: Array<{ precondition: string }> };
+      return (t.failures ?? []).filter((f) => f.precondition === 'P3');
+    };
+    expect(p3(below)).toHaveLength(1); // unpaired: no threshold, so nothing is scored strictly
+    expect(p3(await levelCard(below))).toEqual([]);
+  });
+
+  it('a level read as reaching AT LEAST the target beside a held ceiling is refused on the level\'s own frame too (nothing prepared)', async () => {
+    const store = scenarioStore(RT10B.graph_with_target);
+    const caps: AgentCapabilities = createAgentCapabilities(store.dispatch, new ProposalStore());
+    const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'req-d3-floorread', user_text: SAID };
+    const r = await dispatchTool('propose_goal_current_level', JSON.stringify({ ...LEVEL, goal_is: 'at_least' }), ctx, caps) as ToolResult & { refusal?: string; detail?: string };
+    expect(r).toMatchObject({ ok: false, refusal: 'not_admitted' });
+    expect(r.detail).toContain('at or below 400');
+  });
+
   it('CHANGING the ceiling re-pairs it on the same cap; replacing it with a floor leaves no ceiling threshold and no minimise', async () => {
     const paired = await levelCard(RT10B.graph_with_target);
     const moved = await targetCard(paired, 'at_most', 450);
@@ -251,6 +357,7 @@ describe('D3 step 1 — a goal ceiling is scored as ONE pair (threshold + minimi
     expect(pairOf(moved).threshold).toBeCloseTo(450 / 650, 12);
     const floored = await targetCard(paired, 'at_least', 300);
     expect(goalOf(floored).goal_direction).toBe('>=');
+    expect(ownRows(floored)).toEqual([expect.objectContaining({ operator: '>=', value: 300 })]); // the ceiling's row is retired
     expect(goalOf(floored).goal_threshold_raw).toBe(300);
     expect((await plotRequestFor(floored)).goal_direction).toBeUndefined();
   });

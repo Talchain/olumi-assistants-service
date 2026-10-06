@@ -200,6 +200,7 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
+import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 
@@ -2046,6 +2047,20 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // ⭐ D3 step 1 (DL 0df0e1, PL rec 5; #87 6006078553): LAST among the goal-figure withholds — a goal chance reaches a
+    // reader only as a finite probability in [0, 1] of meeting a STATED target (target, direction, unit; a ceiling scored
+    // minimised), else it is withheld with its typed cause (`goal-chance-gate.ts`), the brief's `goal_fit` with it.
+    {
+      const before = response;
+      response = withholdUnusableGoalChances(response, graphForAnalysis, snapshot.goal_node_id);
+      if (response !== before) {
+        log.info(
+          { event: 'run_analysis.goal_chance_withheld_unusable', request_id: invocation.requestId, scenario_id: args.scenario_id },
+          'run_analysis: a goal chance that is not a probability of meeting a stated target was withheld',
+        );
+      }
+    }
+
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
     // stated": PLoT's GOAL_DIRECTION_UNATTESTED is taken off the run it would mislabel, before the headline and the store.
     response = withoutDirectionUnattestedOnHeldFloor(response, heldGoalPointsUp(graphForAnalysis, snapshot.goal_node_id));
@@ -3695,12 +3710,8 @@ export function goalDirectionCorrectableByTarget(graph: unknown, goalNodeId: unk
     Array<{ kind?: unknown; goal_threshold_frame?: unknown; goal_threshold_raw?: unknown; threshold_source?: unknown; success_threshold?: unknown }>;
   if (matches.length !== 1) return false;
   const goal = matches[0]!;
-  if (goal.kind !== 'goal' || isChangeFrame(goal.goal_threshold_frame)) return false;
-  // ⛔ Codex r2 (#2600): the goal editor shows the user's stamp first (`success_threshold`, `threshold_source: 'user'`),
-  // and an "at most" at a figure that is not the HELD one clears the direction instead of holding it (add-constraint
-  // `ceilingMatchesHeldFigure`). Where the shown figure is not the held figure, no correction is promised.
-  const raw = goal.goal_threshold_raw;
-  const shown = goal.threshold_source === 'user' ? goal.success_threshold : undefined;
-  const isFiniteFigure = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-  return !(isFiniteFigure(raw) && isFiniteFigure(shown) && shown !== raw);
+  // ⭐ D3 step 1 (Science #87 6005138341 + 6006079049 (1)): an approved "at most" now REPLACES whatever figure the goal held
+  // (one target per goal) and holds its direction at ANY figure, so the door re-orders every level goal. The earlier
+  // exclusion (Codex r2 #2600: an "at most" beside a different held figure cleared the direction) went with that rule.
+  return goal.kind === 'goal' && !isChangeFrame(goal.goal_threshold_frame);
 }

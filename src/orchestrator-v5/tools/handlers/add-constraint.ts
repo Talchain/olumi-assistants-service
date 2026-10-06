@@ -1063,8 +1063,22 @@ export function createAddConstraintHandler(): HandlerFn {
       const cardGoalCeiling = cardIsAGoalCeiling ? (operatorAsStated ?? operator) : undefined;
       const directionDisagrees = (cardGoalDirection !== undefined && targetNode.goal_direction !== cardGoalDirection)
         || (cardGoalCeiling !== undefined && targetNode.goal_direction !== cardGoalCeiling);
+      // ⭐ D3 step 1 (Science #87 6006079049 (1)): ONE TARGET PER GOAL, no band. The approved card's row IS the goal's target,
+      // so every OTHER own target row on the goal (another operator; never a deadline row) is retired in this same write: a
+      // held "at least 300" never stays beside an approved "at most 400" as a second limit (a band needs ISL P(lo≤Y≤hi);
+      // parked). Two own rows on the card's operator are ONE target too (Codex buddy r1 F1 on #2618: the upsert set both to
+      // the card's row, so the pair had no one row to read): the card's row is kept once. A card that retires one is never
+      // a no-op.
+      const goalCard = invocation.holdsGoalDirection === true && targetNode.kind === 'goal';
+      const ownTarget = (c: { node_id: string; deadline_metadata?: unknown }): boolean =>
+        goalCard && c.node_id === targetId && c.deadline_metadata === undefined;
+      const retiresOtherTarget = (c: { node_id: string; operator: string; deadline_metadata?: unknown }): boolean =>
+        ownTarget(c) && c.operator !== operator;
+      const ownRows = (graph.goal_constraints ?? []).filter(ownTarget);
+      const retiresATarget = ownRows.some(retiresOtherTarget) || ownRows.filter((c) => c.operator === operator).length > 1;
       const rowValueUnchanged =
         !directionDisagrees &&
+        !retiresATarget &&
         existing !== undefined &&
         existing.value === newConstraint.value &&
         existing.unit === newConstraint.unit &&
@@ -1073,6 +1087,7 @@ export function createAddConstraintHandler(): HandlerFn {
         !userStampDisagrees;
       const nodeChannelUnchanged =
         !directionDisagrees &&
+        !retiresATarget &&
         ownsGoalThresholdChannel &&
         typeof targetNode.goal_threshold_raw === 'number' &&
         targetNode.goal_threshold_raw === params.value &&
@@ -1394,7 +1409,15 @@ export function createAddConstraintHandler(): HandlerFn {
             : valueUnchanged
               ? list
               : [...list, constraintParse.data];
-        clone.goal_constraints = next;
+        if (retiresATarget) {
+          let kept = false;
+          clone.goal_constraints = next.filter((c) => {
+            if (!ownTarget(c)) return true;
+            if (retiresOtherTarget(c) || kept) return false;
+            kept = true;
+            return true;
+          });
+        } else clone.goal_constraints = next;
         if (cardGoalCeiling !== undefined) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
           if (goalNode !== undefined) (goalNode as { goal_direction?: unknown }).goal_direction = cardGoalCeiling;

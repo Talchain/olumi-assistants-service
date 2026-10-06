@@ -19,6 +19,7 @@
  * is not changed here (MC P0's files; D3 step 1b after P0 merges).
  */
 import { readHeldGoalComparator } from './goal-direction.js';
+import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -53,31 +54,39 @@ export function goalCeilingRow(graph: unknown, goalId: string): GoalCeilingRow |
   };
 }
 
-/** The frame a ceiling is scored on: the goal's own level frame, else the % unit's own 100, else none. */
-export function ceilingFrameCap(goal: Rec, unit: string | undefined): { readonly cap: number; readonly provenance: 'level_frame' | 'metric_scale' } | null {
+/**
+ * The frame a ceiling is scored on: the goal's own level frame, else the % unit's own 100 (the one cap rule's metric-scale
+ * branch, never its headroom), else none.
+ */
+export function ceilingFrameCap(goal: Rec, unit: string | undefined, ceiling: number): { readonly cap: number; readonly provenance: 'level_frame' | 'metric_scale' } | null {
   const os = isRec(goal.observed_state) ? goal.observed_state : undefined;
   if (os !== undefined && finite(os.raw_value) && finite(os.cap) && os.cap > 0) return { cap: os.cap, provenance: 'level_frame' };
-  if (unit === '%') return { cap: 100, provenance: 'metric_scale' };
-  return null;
+  const scale = resolveGoalThresholdCapWithProvenance(undefined, ceiling, unit, undefined);
+  return scale?.provenance === 'metric_scale' ? { cap: scale.cap, provenance: 'metric_scale' } : null;
 }
 
 export type CeilingPairOutcome = 'paired' | 'unpaired' | 'not_a_ceiling';
 
 /**
- * Writes (or clears) the pair on the goal node of `graph`, IN PLACE — callers pass the clone they are about to write. A goal
- * holding a ceiling (`'<='`/`'<'`) beside its own ceiling row is paired on its frame, or its channel is cleared when there
- * is no frame. Any other goal is untouched (`'not_a_ceiling'`): a floor keeps its own writer.
+ * Writes (or clears) the pair on the goal node of `graph`, IN PLACE — callers pass the clone they are about to write. A
+ * level-frame goal holding a ceiling (`'<='`/`'<'`) beside ONE own ceiling row is paired on its frame; with no frame, or no
+ * one row to pair, its channel is cleared. Any other goal is untouched (`'not_a_ceiling'`): a floor keeps its own writer.
  */
 export function pairGoalCeiling(graph: unknown, goalId: string): CeilingPairOutcome {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId);
-  if (goal === undefined || goal.kind !== 'goal') return 'not_a_ceiling';
+  if (goal === undefined || goal.kind !== 'goal' || !onTheLevelFrame(goal)) return 'not_a_ceiling';
   const held = readHeldGoalComparator(graph, goalId);
   if (held !== '<=' && held !== '<') return 'not_a_ceiling';
   const row = goalCeilingRow(graph, goalId);
-  if (row === undefined || row.stated !== held) return 'not_a_ceiling';
+  // ⛔ A held ceiling with no ONE row to pair (none, two, or one stated otherwise) is never left beside an earlier figure
+  // (Codex buddy r1 F1 on #2618: two `<=` rows left a floor's 300 minimised against): the channel is cleared, unpaired.
+  if (row === undefined || row.stated !== held) {
+    for (const k of CHANNEL) delete goal[k];
+    return 'unpaired';
+  }
   const unit = row.unit ?? (typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : undefined);
-  const frame = ceilingFrameCap(goal, unit);
+  const frame = ceilingFrameCap(goal, unit, row.value);
   if (frame === null) {
     for (const k of CHANNEL) delete goal[k];
     return 'unpaired';
@@ -94,8 +103,19 @@ export function pairGoalCeiling(graph: unknown, goalId: string): CeilingPairOutc
   return 'paired';
 }
 
+/**
+ * ⛔ Only a goal on the LEVEL frame (or none stated) is paired (Codex buddy r1 F2 on #2618): a target stated as a CHANGE
+ * ("reduce by 20%", `change_rel`) stays exactly as stated, even beside a separate level row on the goal.
+ */
+function onTheLevelFrame(goal: Rec): boolean {
+  return goal.goal_threshold_frame === undefined || goal.goal_threshold_frame === 'level';
+}
+
 /** True when the goal holds a ceiling paired by this module: what the level card renormalises on a new level. */
 export function holdsPairableCeiling(graph: unknown, goalId: string): boolean {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const goal = nodes.find((n) => n.id === goalId);
+  if (goal === undefined || goal.kind !== 'goal' || !onTheLevelFrame(goal)) return false;
   const held = readHeldGoalComparator(graph, goalId);
   if (held !== '<=' && held !== '<') return false;
   const row = goalCeilingRow(graph, goalId);
