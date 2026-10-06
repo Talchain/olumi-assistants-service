@@ -37,6 +37,16 @@ describe('the upstream link question', () => {
     expect(text).toMatch(/ Roughly how much does Starter-tier monthly recurring revenue change, in £\/month, with Starter tier launched\?$/);
     expect(text).not.toMatch(/rises by 1|0 \/ 1/);
   });
+  it('SERVED: red team 19 c5j4-r2 Run 2 (pd red-team/github-87 @0b005aee) — the lever\'s unit only in observed_state, no scale_frame', () => {
+    // The served graph, unedited. Its lever has no `unit`, only `observed_state: { unit: '0/1' }`; the served reply asked
+    // "…when Starter tier launched rises by 1 0 / 1?".
+    const g = JSON.parse(readFileSync(new URL('./fixtures/served-c5j4-r2-starter-tier-switch.json', import.meta.url), 'utf8')) as Json;
+    const lever = g.nodes.find((n: Json) => n.id === 'starter_tier_launched');
+    expect([lever.unit ?? null, lever.observed_state?.unit, lever.scale_frame ?? null]).toEqual([null, '0/1', null]);
+    const text = notTargetTestableSentence(g, targetTestabilityOf(g)) ?? '';
+    expect(text).toContain('Roughly how much does Starter subscribers change, in subscribers, with Starter tier launched?');
+    expect(text).not.toMatch(/rises by 1|0 \/ 1/);
+  });
 });
 
 describe('the one helper', () => {
