@@ -21,6 +21,7 @@ import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-even
 import { isTwoStateSource, sayFigure, sourceChangeWords } from '../agent-lane/say-figure.js';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../format/edge-strength-bands.js';
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
+import { userSizedLevelLessLinks } from '../agent-lane/mediator-reading.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
 
 /** R3's preconditions (#77 5912916965). */
@@ -256,7 +257,10 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
       && olumiGuessedGoalLink(e, unitOf));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
-    const unconverted = identityForwarded ? [] : into.filter((e) => !sizedInGoalUnit(e, goalUnit, graph));
+    // ⭐ T1b (Science d5, 6 Oct, RT-18 class Q1): the user's sizes on both sides of a level-less mediator size the path (M's
+    // scale cancels), so its link into the goal is sized: never asked "per a change in" a node with no unit.
+    const userChain = userSizedLevelLessLinks(graph);
+    const unconverted = identityForwarded ? [] : into.filter((e) => !sizedInGoalUnit(e, goalUnit, graph) && !userChain.has(`${String(e.from)}→${String(e.to)}`));
     const links = goalOrderedLinks(graph, [...unconverted, ...guesses].flatMap(e =>
       typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []));
     const failing = links.length > 0 ? edges.find(e => e.from === links[0]!.from && e.to === links[0]!.to) : undefined;
