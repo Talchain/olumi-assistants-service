@@ -30,8 +30,9 @@ import { olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
 import { edgeBandFromStrengthBand, edgeBandStd } from '../format/edge-strength-bands.js';
 import { valueWriteAuthorshipDigests } from '../tools/handlers/run-input-residual.js';
 
-type Value = { raw: number | string | boolean; unit?: string };
 type Row = RunDeltaInputChange;
+/** One end of a row, as the contract types it (0.78: an `effect` end also carries `per`). */
+type Value = NonNullable<Row['before']>;
 
 const valueOf = (raw: number | string | boolean | undefined, unit: string | undefined): Value | null =>
   raw === undefined ? null : unit !== undefined ? { raw, unit } : { raw };
