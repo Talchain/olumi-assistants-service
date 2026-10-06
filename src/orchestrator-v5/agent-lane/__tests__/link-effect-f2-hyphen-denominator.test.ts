@@ -9,11 +9,13 @@
 import { describe, it, expect } from 'vitest';
 import { linkEffectTheUserStated, linkEffectQuoteContextMiss, bandTheUserWrote, directionTheWordsSay } from '../stated-by-user.js';
 
-const scope = (quantities: string[]) => ({ quantities, link_selected: false }) as never;
+const scope = (quantities: string[], targetUnits: string[]) => ({ quantities, link_selected: false, target_units: targetUnits }) as never;
 const DENTAL = ['No-show charge', 'no-shows', 'Patient dissatisfaction from charges', 'Appointment awareness'];
-const said = (q: string, source: string, target: string, amountUnit: string, perUnit: string, amount = 0.05, quantities?: string[]) =>
+// The target's own stored unit defaults to the proposed amount unit (they agree); rows about a disagreement pass their own.
+const said = (q: string, source: string, target: string, amountUnit: string, perUnit: string, amount = 0.05, quantities?: string[],
+  targetUnits: string[] = [amountUnit]) =>
   linkEffectTheUserStated(q, { amount, amount_unit: amountUnit, per_source_change: 1, per_source_change_unit: perUnit },
-    { source, target }, scope(quantities ?? [source, target])) ?? 'BINDS';
+    { source, target }, scope(quantities ?? [source, target], targetUnits)) ?? 'BINDS';
 
 describe('the red team\'s two dental answers card, in the ask\'s own unit', () => {
   const A1 = 'Through patient dissatisfaction, each £1 rise in the no-show charge raises no-shows by about 0.05 percentage points of appointments.';
@@ -68,12 +70,32 @@ describe('the amount unit\'s own denominator is the unit, never another quantity
   it('"0.05% of appointments" with unit "% of appointments" → BINDS', () => {
     expect(said('A £1 rise in Late fee would raise cancellations by about 0.05% of appointments.', 'Late fee', 'cancellations', '% of appointments', '£')).toBe('BINDS');
   });
+  it('A1 under a bare "percentage points" proposal, on a target kept in "% of appointments" → BINDS (the target\'s unit decides)', () => {
+    expect(said('Through patient dissatisfaction, each £1 rise in the no-show charge raises no-shows by about 0.05 percentage points of appointments.',
+      'No-show charge', 'no-shows', 'percentage points', '£', 0.05, DENTAL, ['% of appointments'])).toBe('BINDS');
+  });
   it.each([
     ['partial overlap: "% of appointments booked online"', 'A £1 rise in Late fee would raise cancellations by about 0.05% of appointments booked online.', '% of appointments'],
     ['"% of revenue" on a unit of "% of appointments"', 'A £1 rise in Late fee would raise cancellations by about 0.05% of revenue.', '% of appointments'],
     ['a unit with no denominator ("percentage points")', 'A £1 rise in Late fee would raise cancellations by about 0.05 percentage points of appointments.', 'percentage points'],
   ])('%s → figure_of_another_quantity', (_n, q, unit) => {
     expect(said(q, 'Late fee', 'cancellations', unit, '£')).toBe('figure_of_another_quantity');
+  });
+  it.each([
+    ['no stored unit on the target', '% of appointments', []],
+    ['the target kept in a unit with another denominator', '% of appointments', ['% of revenue']],
+    ['the Agent\'s proposal names another denominator', '% of revenue', ['% of appointments']],
+  ])('"0.05% of appointments" with %s → figure_of_another_quantity', (_n, amountUnit, targetUnits) => {
+    expect(said('A £1 rise in Late fee would raise cancellations by about 0.05% of appointments.', 'Late fee', 'cancellations', amountUnit as string, '£',
+      0.05, undefined, targetUnits as string[])).toBe('figure_of_another_quantity');
+  });
+  it('a phrase the scan cut short: "0.05% of appointments for new patients" → figure_of_another_quantity (buddy r1)', () => {
+    expect(said('A £1 rise in Late fee would raise cancellations by about 0.05% of appointments for new patients.', 'Late fee', 'cancellations', '% of appointments', '£'))
+      .toBe('figure_of_another_quantity');
+  });
+  it('Integrator: the Agent\'s unit "percentage points of net margin" on "gross margin" (kept in %) → figure_of_another_quantity', () => {
+    expect(said('A £1 rise in Late fee would raise gross margin by about 0.5 percentage points of net margin.', 'Late fee', 'gross margin',
+      'percentage points of net margin', '£', 0.5, undefined, ['%'])).toBe('figure_of_another_quantity');
   });
   it('net-margin twin: "0.5 percentage points of net margin" on "gross margin" stays refused', () => {
     expect(said('A £1 rise in Late fee would raise gross margin by about 0.5 percentage points of net margin.', 'Late fee', 'gross margin', 'percentage points', '£', 0.5))
@@ -119,5 +141,29 @@ describe('every other NEGATOR reader reads a hyphenated "no-" word as a word (th
     ['direction twin: a denial', () => directionTheWordsSay('never raises no-shows'), null],
   ])('%s', (_n, read, want) => {
     expect(read()).toBe(want);
+  });
+});
+
+describe('buddy r1: no stem guess, no punctuation escape, no denial erased', () => {
+  it('"shown" never names the end "Shows" (exact or plural forms only) → end_not_named', () => {
+    expect(said('A £1 rise in Show charge would raise them by about 2 per week, as shown in the chart.', 'Show charge', 'Shows', 'per week', '£', 2)).toBe('end_not_named');
+  });
+  it('control: "shows" does name "Shows" outside "Show charge" → BINDS', () => {
+    expect(said('A £1 rise in Show charge would raise shows by about 2 per week.', 'Show charge', 'Shows', 'per week', '£', 2)).toBe('BINDS');
+  });
+  it('"Revenue (tax)" is still a mention of "Revenue tax", never of "Revenue" → end_not_named', () => {
+    expect(said('A £1 rise in Revenue (tax) would raise them by about 2 per week.', 'Revenue tax', 'Revenue', 'per week', '£', 2)).toBe('end_not_named');
+  });
+  it('control: "revenue" outside "Revenue (tax)" names "Revenue" → BINDS', () => {
+    expect(said('A £1 rise in Revenue (tax) would raise revenue by about 2 per week.', 'Revenue tax', 'Revenue', 'per week', '£', 2)).toBe('BINDS');
+  });
+  it.each([
+    ['"not" is no form of the label "Notes"', 'A £1 rise in Late fee does not raise Notes by about 2 per week.', 'Notes'],
+    ['a label made only of negator words is never masked', 'A £1 rise in Late fee would raise No by about 2 per week.', 'No'],
+  ])('%s → denied', (_n, q, target) => {
+    expect(said(q, 'Late fee', target, 'per week', '£', 2)).toBe('denied');
+  });
+  it('control: the label "Notes" without a denial → BINDS', () => {
+    expect(said('A £1 rise in Late fee would raise Notes by about 2 per week.', 'Late fee', 'Notes', 'per week', '£', 2)).toBe('BINDS');
   });
 });
