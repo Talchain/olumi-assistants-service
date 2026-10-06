@@ -15,12 +15,13 @@ import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../../system-events/dispatch.js';
-import type { LinkEffectStatement } from '../../system-events/link-effect-edit.js';
+import { linkEffectEndUnits, statedInOneOf, type LinkEffectStatement } from '../../system-events/link-effect-edit.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 import { agentSelectionContext } from '../selection-context.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { POINTS_SPELLINGS } from '../../../utils/unit-alphabet.js';
 import type { AgentToolContext } from '../runtime/agent-tools.js';
 
 type Json = Record<string, any>;
@@ -93,6 +94,13 @@ export const NATURAL_SENTENCE_ROWS: readonly CorpusRow[] = [
     quote: 'Every new café that signs up brings in around £250 a month.',
     effect: effect(250, 'GBP per month', 1, 'cafés'),
     card: 'Record: +1 café on "Café subscribers" → +£250/month in "Wholesale subscription revenue": raising "Café subscribers" by 1 café raises "Wholesale subscription revenue" by £250/month. From your words: "Every new café that signs up brings in around £250 a month." I\'ve taken "Wholesale subscription revenue" to be in GBP/month, from your words.' + TAIL },
+  // ⛔ RED-TEAM row 1 (#87 6004429045, served 15057215: no card 3/3 live, unit_mismatch 12/12 replayed): the sentence
+  // WRITES its unit, "percentage point", for a target with none, and the reader adopts "%" (U2). The target arm named
+  // only "pp"/"points" while the source arm also named "percentage points": both now read U1's leaf (POINTS_SPELLINGS).
+  { id: 'RT1', fixture: 'b8143909', from: 'caf_subscribers', to: 'wholesale_subscription_revenue', selection: 'link',
+    quote: 'Every 10 more cafés adds about 1 percentage point of wholesale subscription revenue.',
+    effect: effect(1, 'percentage points', 10, 'cafés'),
+    card: 'Record: +10 cafés on "Café subscribers" → +1 percentage point in "Wholesale subscription revenue": raising "Café subscribers" by 10 cafés raises "Wholesale subscription revenue" by 1 percentage point. From your words: "Every 10 more cafés adds about 1 percentage point of wholesale subscription revenue." I\'ve taken "Wholesale subscription revenue" to be in %, from your words.' + TAIL },
   { id: 'F6', fixture: 'f0eb03ac', from: 'shops_operating', to: 'gross_margin',
     quote: 'Closing two shops would probably push gross margin up by about a point.',
     effect: effect(1, 'points', -2, 'shops'),
@@ -488,6 +496,55 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
 });
 
 // ⛔ Codex step-4 buddy r1 (5 Oct ~20:1xZ): two shapes #2605's other-quantity guard let through as WRONG-reading cards.
+describe('RT-6 row 1 (red team #87 6004429045): a unit the sentence WROTE is never called "no unit or scale"', () => {
+  const rt1 = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'RT1')!;
+  // The Agent sent the SOURCE's label as its unit (served, 3/3): the writer refuses that end. The target's "%" was read
+  // from the user's own "percentage point", so the words must not say it has none, and name the unit read.
+  it('a refusal on the source end never calls the target, whose unit the user just wrote, unitless', async () => {
+    const w = world(rt1); const before = w.graph();
+    const result = await propose(w, { ...rt1, effect: effect(1, 'percentage points', 10, 'café subscribers') });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false, refusal: 'unit_mismatch' });
+    expect(String(result.detail)).not.toMatch(/no unit or scale/);
+    expect(String(result.detail)).toContain('"Wholesale subscription revenue" is measured in %');
+    expect(String(result.detail)).toContain('"Café subscribers" in cafés');
+    expect(cardsFor(w, result)).toEqual([]);
+    noWrite(w, rt1, before);
+  });
+  // ⛔ CLASS: every points spelling U1's leaf owns cards the same sentence's reading (both arms read ONE list).
+  it.each([...POINTS_SPELLINGS])('target stated in "%s": a card, never unit_mismatch', async (unit) => {
+    const w = world(rt1);
+    const result = await propose(w, { ...rt1, effect: effect(1, unit, 10, 'cafés') });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)).toHaveLength(2);
+  });
+  // TEETH: the ONE list widens points spellings only. A % LEVEL end (S1's gross margin) still never takes a bare "%" or
+  // basis points at the writer's own comparator; the reader's question usually fires first, so this pins the list itself.
+  it('CONTROL: a % LEVEL target takes every leaf points spelling, never a bare "%" or basis points', () => {
+    const s1 = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'S1')!;
+    const ends = linkEffectEndUnits(fixture(s1), s1.from, s1.to)!;
+    for (const u of POINTS_SPELLINGS) expect(statedInOneOf(u, ends.target.own), u).toBe(true);
+    for (const u of ['%', 'percent', 'basis points', 'bps']) expect(statedInOneOf(u, ends.target.own), u).toBe(false);
+  });
+  // Codex r1: the same teeth through the REAL path. An established % LEVEL target, the user's literal points sentence, and
+  // the Agent's bare "%": refused at the writer's comparator, never carded.
+  it('CONTROL (real path): a points sentence the Agent sends as a bare "%" on a % LEVEL target gets no card', async () => {
+    const s1 = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'S1')!;
+    const w = world(s1); const before = w.graph();
+    const result = await propose(w, { ...s1, effect: effect(-0.5, '%', 1, 'percentage points') });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false });
+    expect(cardsFor(w, result)).toEqual([]);
+    noWrite(w, s1, before);
+  });
+  // ...and the SOURCE arm reads the same list (S1: a % level source stated in points).
+  it.each([...POINTS_SPELLINGS])('source stated in "%s": a card, never unit_mismatch', async (unit) => {
+    const s1 = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'S1')!;
+    const w = world(s1);
+    const result = await propose(w, { ...s1, effect: effect(-0.5, 'percentage points', 1, unit) });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)).toHaveLength(2);
+  });
+});
+
 describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never the end', () => {
   const headcount = { fixture: 'd39c05ba', from: 'developer_headcount', to: 'onboarding_drag' } as const;
   const resort = { fixture: 'lift', from: 'customers', to: 'revenue' } as const;

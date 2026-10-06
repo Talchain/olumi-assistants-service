@@ -37,6 +37,7 @@ import { isDirectedEdge } from '../../schemas/graph.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -141,6 +142,33 @@ export interface LinkEndUnits {
   readonly storeAsStated?: boolean;
 }
 
+/** The strict NodeV3 carrier a disclosed reading is written as: ONE shape for the writer and every reader of its view. */
+function unitReadingCarrier(reading: LinkEffectUnitReading): { unit: string; source: 'user_stated'; source_quote: string } {
+  const { unit, source_quote } = reading.unit_reading;
+  return { unit, source: 'user_stated', source_quote };
+}
+
+/**
+ * The graph exactly as the writer reads it once the card's disclosed unit readings are applied (a copy; the input is
+ * untouched). The refusal's words read THIS view (red team #87 6004429045): read off the stored graph, an end whose unit
+ * the sentence itself stated looked unitless, and the user was told it "has no unit or scale".
+ */
+export function withLinkEffectUnitReadings(graph: unknown, readings: readonly LinkEffectUnitReading[] | undefined): unknown {
+  if (readings === undefined || readings.length === 0 || !isRec(graph) || !Array.isArray(graph.nodes)) return graph;
+  return { ...graph, nodes: graph.nodes.map((n) => {
+    const reading = isRec(n) ? readings.find((r) => r.node_id === n.id) : undefined;
+    return reading === undefined ? n : { ...(n as Rec), unit_reading: unitReadingCarrier(reading) };
+  }) };
+}
+
+/**
+ * ⭐ The points spellings an end whose change is in points may be stated in: U1's leaf (`POINTS_SPELLINGS`), plus the bare
+ * word, exactly as before. ONE list for BOTH arms (red team #87 6004429045: the target arm named only "pp"/"points", so
+ * "1 percentage point of wholesale subscription revenue" was refused 12/12 while the source arm took it). The writer's
+ * comparator folds no points spellings, so every one the leaf owns is named here, derived, never a new table.
+ */
+export const POINTS_STATED: readonly string[] = [...POINTS_SPELLINGS, 'points'];
+
 function hasAdoptedPercentUnit(node: Rec | undefined, magnitude: MagnitudeNode): boolean {
   const candidate = node?.unit_reading;
   const reading = isRec(candidate) ? candidate : undefined;
@@ -174,7 +202,7 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   const sourceOwn = present(unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
     targetUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
     ...(hasAdoptedPercentUnit(sourceEnd, sourceNode) || isPercentageLevelUnit(unitOf(sourceNode), resolveMagnitudeFrame(sourceNode))
-      || sourceNode.percent_level === true ? ['percentage points', 'pp', 'points'] : []));
+      || sourceNode.percent_level === true ? POINTS_STATED : []));
   // ⛔ The points-only rule applies to a % LEVEL target the graph marks `percent_level` from `goal_constraints`
   // (Science, #87 5993238492): "gross margin falls 2%" may mean 2 points or 2% of today's level, so a bare "%" for that
   // target is refused and the user is asked for points. A % goal not so marked keeps the pre-existing comparison
@@ -184,9 +212,9 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   const targetIsLevel = targetNode.percent_level === true || isPercentageLevelUnit(unitOf(targetNode), resolveMagnitudeFrame(targetNode));
   const levelPoints = targetIsLevel ? present(targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode))) : [];
   const targetOwn = [...(targetIsLevel
-    ? (levelPoints.length > 0 ? levelPoints : ['percentage points'])
+    ? (levelPoints.length > 0 ? levelPoints : [POINTS_UNIT])
     : present(unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))),
-    ...(hasAdoptedPercentUnit(targetEnd, targetNode) || targetIsLevel ? ['pp', 'points'] : [])];
+    ...(hasAdoptedPercentUnit(targetEnd, targetNode) || targetIsLevel ? POINTS_STATED : [])];
   const provenance = isRec(found.edge.provenance) ? found.edge.provenance : {};
   const stored = isRec(provenance.natural_effect) ? provenance.natural_effect : undefined;
   const storedUnit = (key: 'amount_unit' | 'per_source_change_unit'): string | undefined =>
@@ -300,8 +328,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
       const node = nodes.find(n => n.id === reading.node_id);
       if (node === undefined || (reading.node_id !== from && reading.node_id !== to)) return refuse('unit_mismatch');
       // Emit exactly the strict NodeV3 carrier. Extra keys silently drop the whole reading on register/reload.
-      const { unit, source_quote } = reading.unit_reading;
-      node.unit_reading = { unit, source: 'user_stated', source_quote };
+      node.unit_reading = unitReadingCarrier(reading);
     }
   }
 
