@@ -1,0 +1,401 @@
+{
+ "_provenance": "Generated 6 Oct 2026 from CEE #2631 @41a5fc5303760367ca732f4118745ed1fe1c15f3: applyLinkEffectEdit(frameRefit) on the Integrator S5t fixture graphs (pd integrator/github-26 @82c575b6, output/integrator/s5t-crossrun-probe-20261006.test.ts.txt), then buildRunInputSnapshot on the graph before (s1) and after (s2). natural_effects: each edge provenance.natural_effect on both graphs, from->to: [before, after].",
+ "edited": "price_rise->customers_lost_to_price_rise",
+ "labels": {
+  "decision_monthly_recurring_revenue": "Decision: monthly recurring revenue",
+  "monthly_recurring_revenue": "monthly recurring revenue",
+  "raise_prices_10": "Raise prices 10%",
+  "launch_starter_tier": "Launch starter tier",
+  "keep_pricing_as_is": "Keep pricing as is",
+  "price_rise": "Price rise",
+  "starter_tier_availability": "Starter tier availability",
+  "customers_lost_to_price_rise": "Customers lost to price rise",
+  "starter_subscribers": "Starter subscribers"
+ },
+ "s1": {
+  "snapshot_version": 1,
+  "sent_digest": "cd06725b069a857cead93fb5c609bfa7fa49d71231c7a6d5d98ebfce8bb64e12",
+  "goal": {
+   "node_id": "monthly_recurring_revenue",
+   "label": "monthly recurring revenue",
+   "target_raw": 126000,
+   "unit": "\u00a3/month",
+   "operator": ">=",
+   "direction": "maximise",
+   "frame": "level"
+  },
+  "options": [],
+  "options_not_sent": [],
+  "factors": [
+   {
+    "factor_id": "price_rise",
+    "label": "Price rise",
+    "raw": 0,
+    "unit": "%",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "0ae9e7a657712eea5ce07c3931d47617362e51ba6f863267b6d70a42717e2e39"
+   },
+   {
+    "factor_id": "starter_tier_availability",
+    "label": "Starter tier availability",
+    "unit": "binary",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "14834320a8813e525d23f798c9d1d3ee26574ee9b0198e2754db76f7abcc96b3"
+   }
+  ],
+  "constraints": [],
+  "links": [
+   {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "raise_prices_10",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "launch_starter_tier",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "keep_pricing_as_is",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "raise_prices_10",
+    "to": "price_rise",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "launch_starter_tier",
+    "to": "starter_tier_availability",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "keep_pricing_as_is",
+    "to": "price_rise",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+   },
+   {
+    "from": "keep_pricing_as_is",
+    "to": "starter_tier_availability",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+   },
+   {
+    "from": "price_rise",
+    "to": "monthly_recurring_revenue",
+    "mean": 0.7619047619047619,
+    "std": 0.38095238095238093,
+    "exists_probability": 0.8,
+    "band": "very_strong",
+    "sizing": "user",
+    "authorship_digest": "311d2705fb9e8cbde36c49a0e3fe5f6dc8c1a55471128be8224ab12aa05668c9"
+   },
+   {
+    "from": "price_rise",
+    "to": "customers_lost_to_price_rise",
+    "mean": 1,
+    "std": 0.5,
+    "exists_probability": 0.8,
+    "band": "very_strong",
+    "sizing": "user",
+    "authorship_digest": "0533f6f0f67e48cb51061eaca1d0dfe94042b0ef748a478468efd8b7ce8a3225"
+   },
+   {
+    "from": "customers_lost_to_price_rise",
+    "to": "monthly_recurring_revenue",
+    "mean": -0.38095238095238093,
+    "std": 0.19047619047619047,
+    "exists_probability": 0.8,
+    "band": "moderate",
+    "sizing": "user",
+    "authorship_digest": "e3d4c16d454274b19a5816394c197070011d349c41348f89bcc008249a2a63cd"
+   },
+   {
+    "from": "starter_tier_availability",
+    "to": "starter_subscribers",
+    "mean": 0.3,
+    "std": 0.15,
+    "exists_probability": 0.8,
+    "band": "moderate",
+    "sizing": "user",
+    "authorship_digest": "990d3d5ee4a9c50776cce99b4b7b64e32c0e539a354f458db79a4f1ec232e467"
+   },
+   {
+    "from": "starter_subscribers",
+    "to": "monthly_recurring_revenue",
+    "mean": 0.15555555555555556,
+    "std": 0.07777777777777778,
+    "exists_probability": 0.8,
+    "band": "slight",
+    "sizing": "user",
+    "authorship_digest": "18ba99f0ffdada6c0450da3e19430ec83c7a5222b9fadc591e6412b1048f705f"
+   }
+  ]
+ },
+ "s2": {
+  "snapshot_version": 1,
+  "sent_digest": "cd06725b069a857cead93fb5c609bfa7fa49d71231c7a6d5d98ebfce8bb64e12",
+  "goal": {
+   "node_id": "monthly_recurring_revenue",
+   "label": "monthly recurring revenue",
+   "target_raw": 126000,
+   "unit": "\u00a3/month",
+   "operator": ">=",
+   "direction": "maximise",
+   "frame": "level"
+  },
+  "options": [],
+  "options_not_sent": [],
+  "factors": [
+   {
+    "factor_id": "price_rise",
+    "label": "Price rise",
+    "raw": 0,
+    "unit": "%",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "0ae9e7a657712eea5ce07c3931d47617362e51ba6f863267b6d70a42717e2e39"
+   },
+   {
+    "factor_id": "starter_tier_availability",
+    "label": "Starter tier availability",
+    "unit": "binary",
+    "encoded": 0,
+    "source": "cee_inference",
+    "authorship_digest": "14834320a8813e525d23f798c9d1d3ee26574ee9b0198e2754db76f7abcc96b3"
+   }
+  ],
+  "constraints": [],
+  "links": [
+   {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "raise_prices_10",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "launch_starter_tier",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "decision_monthly_recurring_revenue",
+    "to": "keep_pricing_as_is",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "raise_prices_10",
+    "to": "price_rise",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "launch_starter_tier",
+    "to": "starter_tier_availability",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "634ef8f9fa4fe63dd3f7329674c12cf6e56c8ef1cb1d72c9c2d26afc8677c4b1"
+   },
+   {
+    "from": "keep_pricing_as_is",
+    "to": "price_rise",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+   },
+   {
+    "from": "keep_pricing_as_is",
+    "to": "starter_tier_availability",
+    "mean": 1,
+    "std": 0.01,
+    "exists_probability": 1,
+    "band": "very_strong",
+    "sizing": "unmarked",
+    "authorship_digest": "246e2d9f558b73d089258a8f2a52e683ebcceae3be368746fe7cb2b7f9bb84a5"
+   },
+   {
+    "from": "price_rise",
+    "to": "monthly_recurring_revenue",
+    "mean": 0.7619047619047619,
+    "std": 0.38095238095238093,
+    "exists_probability": 0.8,
+    "band": "very_strong",
+    "sizing": "user",
+    "authorship_digest": "311d2705fb9e8cbde36c49a0e3fe5f6dc8c1a55471128be8224ab12aa05668c9"
+   },
+   {
+    "from": "price_rise",
+    "to": "customers_lost_to_price_rise",
+    "mean": 0.6000000000000001,
+    "std": 0.30000000000000004,
+    "exists_probability": 0.8,
+    "band": "strong",
+    "sizing": "user",
+    "authorship_digest": "739938da1d8fd0b7ca40d6728359988a5c7bea2e832642621e6245609089e323"
+   },
+   {
+    "from": "customers_lost_to_price_rise",
+    "to": "monthly_recurring_revenue",
+    "mean": -0.9523809523809523,
+    "std": 0.47619047619047616,
+    "exists_probability": 0.8,
+    "band": "very_strong",
+    "sizing": "user",
+    "authorship_digest": "ab20ab514dcdedf86cd4e6e4413a0c1ee8125bd4fdd4203a60029a16df9ec7a4"
+   },
+   {
+    "from": "starter_tier_availability",
+    "to": "starter_subscribers",
+    "mean": 0.3,
+    "std": 0.15,
+    "exists_probability": 0.8,
+    "band": "moderate",
+    "sizing": "user",
+    "authorship_digest": "990d3d5ee4a9c50776cce99b4b7b64e32c0e539a354f458db79a4f1ec232e467"
+   },
+   {
+    "from": "starter_subscribers",
+    "to": "monthly_recurring_revenue",
+    "mean": 0.15555555555555556,
+    "std": 0.07777777777777778,
+    "exists_probability": 0.8,
+    "band": "slight",
+    "sizing": "user",
+    "authorship_digest": "18ba99f0ffdada6c0450da3e19430ec83c7a5222b9fadc591e6412b1048f705f"
+   }
+  ]
+ },
+ "natural_effects": {
+  "customers_lost_to_price_rise->monthly_recurring_revenue": [
+   {
+    "amount": -300,
+    "amount_unit": "\u00a3/month",
+    "per_source_change": 1,
+    "per_source_change_unit": "customers"
+   },
+   {
+    "amount": -300,
+    "amount_unit": "\u00a3/month",
+    "per_source_change": 1,
+    "per_source_change_unit": "customers"
+   }
+  ],
+  "price_rise->customers_lost_to_price_rise": [
+   {
+    "amount": 2,
+    "amount_unit": "customers",
+    "per_source_change": 1,
+    "per_source_change_unit": "%"
+   },
+   {
+    "amount": 3,
+    "amount_unit": "customers",
+    "per_source_change": 1,
+    "per_source_change_unit": "%"
+   }
+  ],
+  "price_rise->monthly_recurring_revenue": [
+   {
+    "amount": 1200,
+    "amount_unit": "\u00a3/month",
+    "per_source_change": 1,
+    "per_source_change_unit": "%"
+   },
+   {
+    "amount": 1200,
+    "amount_unit": "\u00a3/month",
+    "per_source_change": 1,
+    "per_source_change_unit": "%"
+   }
+  ],
+  "starter_subscribers->monthly_recurring_revenue": [
+   {
+    "amount": 49,
+    "amount_unit": "\u00a3/month",
+    "per_source_change": 1,
+    "per_source_change_unit": "subscribers"
+   },
+   {
+    "amount": 49,
+    "amount_unit": "\u00a3/month",
+    "per_source_change": 1,
+    "per_source_change_unit": "subscribers"
+   }
+  ],
+  "starter_tier_availability->starter_subscribers": [
+   {
+    "amount": 150,
+    "amount_unit": "subscribers",
+    "per_source_change": 1,
+    "per_source_change_unit": "switch"
+   },
+   {
+    "amount": 150,
+    "amount_unit": "subscribers",
+    "per_source_change": 1,
+    "per_source_change_unit": "switch"
+   }
+  ]
+ }
+}

@@ -504,11 +504,60 @@ export function withinBandLinkMovesForRunPair(
    */
   timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[] = [],
 ): WithinBandLinkMove[] {
+  if (asRecord(runDelta)?.input_coverage !== 'partial') return [];
+  const pair = recordedRunPair(facts, runDelta, timedReceipts);
+  if (pair === null) return [];
+  return linksMovedWithinBand(pair.prior, pair.current, pair.userWrote);
+}
+
+/**
+ * ⭐ S7 TRUTH FLOOR (cut 6; DL 0df0e1 + Science d5 on #2631, 6 Oct): the links of a delta's `strength` rows that the USER
+ * wrote between its two Runs — a recorded user link-write receipt for that link, written between the Runs, moving it from
+ * exactly the prior Run's mean to the current's (`userLinkWriteReceiptMatches`). A band also moves when Olumi refits a frame
+ * (#2631) or a goal's level re-frames it (`normalising-goal-frame.ts`), and the snapshot carries no frames, so a band row
+ * is the user's change ONLY with such a receipt. Fail closed (`[]`) when the pair or its snapshots cannot be read.
+ */
+export function userWrittenLinksForRunPair(
+  facts: readonly HandlerFact[],
+  runDelta: unknown,
+  timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[] = [],
+): string[] {
+  const d = asRecord(runDelta);
+  const strengthLinks = (Array.isArray(d?.input_changes) ? d.input_changes : []).map(asRecord)
+    .filter((r): r is Record<string, unknown> => r !== null && r.entity_kind === 'link' && r.field === 'strength')
+    .map((r) => asRecord(r.link)).filter((l): l is Record<string, unknown> => l !== null && typeof l.from === 'string' && typeof l.to === 'string');
+  if (strengthLinks.length === 0) return [];
+  const pair = recordedRunPair(facts, runDelta, timedReceipts);
+  if (pair === null) return [];
+  const linkIn = (s: ReturnType<typeof RunInputSnapshotSchema.parse>, from: string, to: string) => s.links.find((l) => l.from === from && l.to === to);
+  const out: string[] = [];
+  for (const l of strengthLinks) {
+    const from = l.from as string; const to = l.to as string;
+    const pl = linkIn(pair.prior, from, to); const cl = linkIn(pair.current, from, to);
+    if (pl !== undefined && cl !== undefined && pair.userWrote(from, to, pl.mean, cl.mean)) out.push(`${from}->${to}`);
+  }
+  return out;
+}
+
+/**
+ * The two Runs a delta's `endpoints` name, read from THEIR OWN persisted facts (snapshots must agree across facts that
+ * share a run id), and the receipt test bound to them: a user link write recorded strictly between the two Runs, for the
+ * pair's own two means. `null` when either Run, its snapshot or its timing cannot be read.
+ */
+function recordedRunPair(
+  facts: readonly HandlerFact[],
+  runDelta: unknown,
+  timedReceipts: readonly { readonly fact: HandlerFact; readonly created_at: string }[],
+): {
+  prior: ReturnType<typeof RunInputSnapshotSchema.parse>;
+  current: ReturnType<typeof RunInputSnapshotSchema.parse>;
+  userWrote: (from: string, to: string, priorMean: number, currentMean: number) => boolean;
+} | null {
   const d = asRecord(runDelta);
   const endpoints = asRecord(d?.endpoints);
   const priorId = asRecord(endpoints?.prior)?.run_id;
   const currentId = asRecord(endpoints?.current)?.run_id;
-  if (d?.input_coverage !== 'partial' || typeof priorId !== 'string' || typeof currentId !== 'string' || priorId === currentId) return [];
+  if (typeof priorId !== 'string' || typeof currentId !== 'string' || priorId === currentId) return null;
   const runOf = (runId: string): { snapshot: ReturnType<typeof RunInputSnapshotSchema.parse>; at: number | null } | null => {
     const found = facts.map(readRunInputs).filter((r) => r.runId === runId);
     if (found.length === 0 || found.some((r) => r.snapshot === null)) return null;
@@ -519,13 +568,17 @@ export function withinBandLinkMovesForRunPair(
   };
   const prior = runOf(priorId);
   const current = runOf(currentId);
-  if (prior === null || current === null) return [];
+  if (prior === null || current === null) return null;
   const between = (createdAt: string): boolean => {
     const t = Date.parse(createdAt);
     return prior.at !== null && current.at !== null && !Number.isNaN(t) && t > prior.at && t < current.at;
   };
-  return linksMovedWithinBand(prior.snapshot, current.snapshot, (from, to, priorMean, currentMean) =>
-    timedReceipts.some((r) => between(r.created_at) && userLinkWriteReceiptMatches(r.fact, from, to, priorMean, currentMean)));
+  return {
+    prior: prior.snapshot,
+    current: current.snapshot,
+    userWrote: (from, to, priorMean, currentMean) =>
+      timedReceipts.some((r) => between(r.created_at) && userLinkWriteReceiptMatches(r.fact, from, to, priorMean, currentMean)),
+  };
 }
 
 /**
