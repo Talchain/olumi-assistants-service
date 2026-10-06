@@ -24,6 +24,22 @@ import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
 import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
+import { linkEffectSourceLevels } from './link-effect-figures.js';
+import { namesSourceOf } from './stated-by-user.js';
+import { POINTS_SPELLINGS } from '../../utils/unit-alphabet.js';
+import { statedInOneOf } from '../system-events/link-effect-edit.js';
+
+/**
+ * ⭐ RT-18 (served dental draft, 74cc7aea): a % level's change is said in POINTS, the writer's own rule (`POINTS_STATED`,
+ * link-effect-edit.ts), so "percentage points" meets a "%" reading. Without it the card for a points answer through a %
+ * gauge was never built, and the prepared change had no Approve.
+ */
+const POINTS_SAID: readonly string[] = [...POINTS_SPELLINGS, 'points'];
+// ⛔ Codex r1 #2652 P1: the card takes the WRITER's own unit rule (`statedInOneOf`), so an answer the door writes ("GBP/month"
+// against a £/month reading) never loses its card. Exact where the writer is exact: points never meet "% of appointments",
+// and £ never meets % (#2641's twins).
+const meetsReading = (stated: unknown, reading: string): boolean => stated === reading || statedInOneOf(stated, [reading])
+  || (reading.trim() === '%' && typeof stated === 'string' && POINTS_SAID.includes(stated.trim().toLowerCase().replace(/\s+/g, ' ')));
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -337,17 +353,61 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
 export function linkEffectReadingOf(proposal: StructuredProposal, labels: { readonly from: unknown; readonly to: unknown }): string | undefined {
   const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
     { from?: unknown; to?: unknown; effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown };
-      quote?: unknown; unit_readings?: unknown } : undefined;
+      quote?: unknown; unit_readings?: unknown; label_readings?: unknown; mediator_readings?: unknown; reversal?: unknown; link_selected?: unknown } : undefined;
   const e = op?.effect;
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
-    || typeof e.amount !== 'number' || typeof e.per_source_change !== 'number' || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') return undefined;
-  const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`}`;
-  const head = `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}"`;
-  if (op.unit_readings === undefined) return `${head} \u2014 from your words: "${op.quote}"`;
-  if (!Array.isArray(op.unit_readings) || op.unit_readings.length > 2) return undefined;
+    || typeof e.amount !== 'number' || !Number.isFinite(e.amount) || e.amount === 0
+    || typeof e.per_source_change !== 'number' || !Number.isFinite(e.per_source_change) || e.per_source_change === 0
+    || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string'
+    || (op.link_selected !== undefined && op.link_selected !== true)) return undefined;
+  const unsigned = (v: number, unit: string): string => figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`;
+  const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${unsigned(v, unit)}`;
+  let reversal = '';
+  if (op.reversal !== undefined) {
+    const r = op.reversal as { from?: unknown; to?: unknown } | null;
+    const direction = Math.sign(e.amount) * Math.sign(e.per_source_change) < 0 ? 'negative' : 'positive';
+    if (r === null || typeof r !== 'object' || Object.keys(r).length !== 2
+      || (r.from !== 'positive' && r.from !== 'negative') || r.to !== direction || r.from === r.to) return undefined;
+    reversal = `REVERSAL: this changes the link from ${r.from} to ${r.to}. `;
+  }
+  // ⭐ No-dead-end (B)/(C) (Science #87 6006425419, 6006548763, 6006685510): a level-less mediator's reading, said for
+  // approval. Strict: each item names one end, in the unit that end's figure now carries; anything else, no card.
+  if (op.mediator_readings !== undefined && (!Array.isArray(op.mediator_readings) || op.mediator_readings.length > 2)) return undefined;
+  const mediated: string[] = [];
+  let through: { readonly child: string; readonly mediator: string } | undefined;
+  for (const raw of (op.mediator_readings ?? []) as unknown[]) {
+    const item = raw as { node_id?: unknown; via?: unknown; unit?: unknown; other_label?: unknown; replaces?: unknown } | null;
+    if (item === null || typeof item !== 'object' || typeof item.node_id !== 'string' || (item.node_id !== op.from && item.node_id !== op.to)
+      || typeof item.unit !== 'string' || item.unit.trim() === '' || typeof item.other_label !== 'string' || item.other_label.trim() === ''
+      || Object.keys(item).some((k) => !['node_id', 'via', 'unit', 'other_label', 'replaces'].includes(k))
+      || (item.replaces !== undefined && (item.replaces !== true || item.via !== 'gauge'))) return undefined;
+    const end = item.node_id === op.from ? labels.from : labels.to;
+    if (item.via === 'sized_parents' && meetsReading(item.node_id === op.from ? e.per_source_change_unit : e.amount_unit, item.unit)) {
+      mediated.push(`Olumi measures \u2018${end}\u2019 in ${item.unit}, from its own estimate of the link from \u2018${item.other_label}\u2019; correct that if it\u2019s wrong.`);
+    } else if (item.via === 'definitional_part' && meetsReading(item.node_id === op.from ? e.per_source_change_unit : e.amount_unit, item.unit)) {
+      // FA1 (Science d5, 6 Oct): the part's unit is read off its definition, said here for approval.
+      mediated.push(`Olumi treats \u2018${end}\u2019 as part of \u2018${item.other_label}\u2019, so it\u2019s measured in ${item.unit}; correct that if it\u2019s wrong.`);
+    } else if (item.via === 'product' && meetsReading(item.node_id === op.from ? e.per_source_change_unit : e.amount_unit, item.unit)) {
+      // FA1-3 (DL, 6 Oct): a product's unit is read off its operands' units, said here for approval.
+      mediated.push(`Olumi measures \u2018${end}\u2019 in ${item.unit}, as ${item.other_label}; correct that if it\u2019s wrong.`);
+    } else if (item.via === 'gauge' && item.node_id === op.to && meetsReading(e.amount_unit, item.unit) && through === undefined) {
+      through = { child: item.other_label, mediator: end };
+      mediated.push(`Olumi treats \u2018${end}\u2019 as part of how \u2018${labels.from}\u2019 moves \u2018${item.other_label}\u2019, so your answer sizes the whole path.`
+        + (item.replaces === true ? ` Your answer replaces Olumi\u2019s own estimate for the link from \u2018${labels.from}\u2019 to \u2018${end}\u2019.` : ''));
+    } else return undefined;
+  }
+  // Through a gauge the user sized the PATH: the record names the quantity it reaches, through the mediator.
+  const reached = through === undefined ? `"${labels.to}"` : `"${through.child}" through "${through.mediator}"`;
+  const words = `${e.per_source_change < 0 ? 'lowering' : 'raising'} "${labels.from}" by ${unsigned(e.per_source_change, e.per_source_change_unit)} `
+    + `${e.amount < 0 ? 'lowers' : 'raises'} ${reached} by ${unsigned(e.amount, e.amount_unit)}`;
+  const levels = linkEffectSourceLevels(op.quote, namesSourceOf({ source: labels.from, target: labels.to }));
+  const transition = levels !== undefined && levels.change === e.per_source_change
+    ? ` Source change: ${levels.from}% \u2192 ${levels.to}% = ${signed(levels.change, levels.unit)}.` : '';
+  const head = `${reversal}Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in ${reached}: ${words}.${transition}`;
+  if (op.unit_readings !== undefined && (!Array.isArray(op.unit_readings) || op.unit_readings.length > 2)) return undefined;
   const disclosures: string[] = [];
   const seen = new Set<string>();
-  for (const raw of op.unit_readings) {
+  for (const raw of (op.unit_readings ?? []) as unknown[]) {
     const item = raw as { node_id?: unknown; unit_reading?: { unit?: unknown; source?: unknown; source_quote?: unknown } } | null;
     const reading = item?.unit_reading;
     if (item === null || typeof item !== 'object' || Object.keys(item).length !== 2 || typeof item.node_id !== 'string'
@@ -359,8 +419,31 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
     seen.add(item.node_id);
     disclosures.push(`I've taken "${item.node_id === op.from ? labels.from : labels.to}" to be in ${reading.unit}, from your words.`);
   }
-  return disclosures.length === 0 ? `${head} \u2014 from your words: "${op.quote}"`
-    : `${head}, from your words: "${op.quote}". ${disclosures.join(' ')}`;
+  // ⭐ RT-6 row 1b (Science #87 6005615422): an end the user named by its node's own LABEL is said back in that node's
+  // unit, for approval, never silently: "I've read that as +1 percentage point per 10 cafés (the unit of "Café
+  // subscribers")". Each reading must be exactly the unit the effect now carries at its end; anything else, no card.
+  if (op.label_readings !== undefined && (!Array.isArray(op.label_readings) || op.label_readings.length > 2)) return undefined;
+  const labelled: string[] = [];
+  for (const raw of (op.label_readings ?? []) as unknown[]) {
+    const item = raw as { node_id?: unknown; said?: unknown; unit?: unknown } | null;
+    if (item === null || typeof item !== 'object' || Object.keys(item).length !== 3 || typeof item.node_id !== 'string'
+      || (item.node_id !== op.from && item.node_id !== op.to) || typeof item.said !== 'string' || item.said.trim() === ''
+      || typeof item.unit !== 'string' || (item.node_id === op.from ? e.per_source_change_unit : e.amount_unit) !== item.unit) return undefined;
+    const label = item.node_id === op.from ? labels.from : labels.to;
+    if (labelled.includes(label)) return undefined;
+    labelled.push(label);
+  }
+  if (labelled.length > 0) {
+    // Codex r1: a negative source change keeps its sign ("−1 percentage point per −10 cafés"), never a reversed ratio.
+    const perWords = e.per_source_change < 0 ? signed(e.per_source_change, e.per_source_change_unit) : unsigned(e.per_source_change, e.per_source_change_unit);
+    disclosures.push(`I've read that as ${signed(e.amount, e.amount_unit)} per ${perWords} `
+      + `(the unit${labelled.length > 1 ? 's' : ''} of ${labelled.map((l) => `"${l}"`).join(' and ')}).`);
+  }
+  disclosures.push(...mediated);
+  // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.
+  return `${head} From your words: "${op.quote}"${/[.!?]$/.test(op.quote) ? '' : '.'}`
+    + (disclosures.length > 0 ? ` ${disclosures.join(' ')}` : '')
+    + ' Approve, or correct.';
 }
 
 /** The same card reading for one stored operation; kept separate so the single-link wording remains byte-for-byte. */
@@ -392,7 +475,8 @@ const LINK_EFFECT_APPROVE_PREFIX = 'Yes \u2014 ';
 export const linkEffectApproveMessage = (reading: string): string => `${LINK_EFFECT_APPROVE_PREFIX}${reading}`;
 /** The reading a link-effect card's words carry, or `undefined` for any other words. */
 export function readingOfLinkEffectApproval(message: unknown): string | undefined {
-  return typeof message === 'string' && message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+  return typeof message === 'string' && (message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+    || /^Yes \u2014 REVERSAL: this changes the link from (positive|negative) to (positive|negative)\. Record: /.test(message))
     ? message.slice(LINK_EFFECT_APPROVE_PREFIX.length) : undefined;
 }
 

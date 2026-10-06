@@ -42,6 +42,7 @@ import type { ScenarioReader } from '../tools/handlers/run-analysis.js';
 // T1 layer 3 — the guard's own scanner, reused here as the (d)-assertion
 // instrument so the route test and the guard cannot drift apart.
 import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
+import { ANY_LEAD_CLAUSE_RE } from './support/lead-clause.support.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
@@ -56,7 +57,10 @@ const RATIFIED_CONSTRAINT = {
 
 const READY_GRAPH = {
   nodes: [
-    { id: 'goal_growth', kind: 'goal', label: 'Customer growth', goal_threshold: 0.8 },
+    // `goal_threshold_unit`: D3 step 1's goal-chance gate shows `goal_fit` only beside a target WITH its unit (DL 0df0e1,
+    // PL rec 5); every targeted goal on the shared DB carries one (DL measured 770/770, 6 Oct). Hand-built graph.
+    // + `goal_direction` (D3 step 2: a goal chance needs a stated direction too; 78% of targeted goals hold one, DL measured).
+    { id: 'goal_growth', kind: 'goal', label: 'Customer growth', goal_threshold: 0.8, goal_threshold_unit: 'customers', goal_direction: '>=' },
     { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
     { id: 'opt_hire', kind: 'option', label: 'Hire Marketing Manager', interventions: { fac_capacity: 1 } },
     { id: 'opt_hold', kind: 'option', label: 'Hold', is_baseline: true, interventions: { fac_capacity: 0 } },
@@ -781,7 +785,7 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     // The withheld headline is why the confirmation opens with the locked
     // template rather than "Hire Marketing Manager currently leads".
     expect(turn.assistantText).not.toContain('currently leads');
-    expect(turn.assistantText).not.toContain('scored highest');
+    expect(turn.assistantText).not.toMatch(ANY_LEAD_CLAUSE_RE);
   });
 });
 
@@ -810,7 +814,7 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
  * exists: they reach this slot by one path.
  */
 const LEADING_OPTION_LANGUAGE: readonly RegExp[] = [
-  /explore the leading option/i,
+  /explore the most-supported option/i,
   /\bstill leads\b/i,
   /\bnow leads\b/i,
   /\bled before\b/i,
@@ -878,7 +882,7 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
       plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
-        expect(turn.coaching).toMatch(/explore the leading option/i);
+        expect(turn.coaching).toMatch(/explore the most-supported option/i);
       });
     });
 
@@ -1066,6 +1070,7 @@ describe('withhold paths: leader-presuming BLOCK PROSE must not reach the wire',
         // entries assert a leader, and `tip which option leads` is the phrasing
         // shared by FLIP_RISK_ISOLATED and FLIP_RISK_CORRELATED.
         expect(prose).not.toContain('tip which option leads');
+        expect(prose).not.toContain('could change the most-supported option on its own');
         expect(prose).not.toContain('leading option is ahead');
       });
 
@@ -1414,9 +1419,9 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
         // …and the strings themselves are off the SERIALISED bytes, not merely
         // off one parsed path.
         expect(turn.raw).not.toContain('currently leads');
-        expect(turn.raw).not.toContain('scored highest');
+        expect(turn.raw).not.toMatch(ANY_LEAD_CLAUSE_RE);
         expect(turn.raw).not.toContain('is slightly ahead');
-        expect(turn.raw).not.toContain('could change which option leads');
+        expect(turn.raw).not.toContain('could change the most-supported option');
         expect(turn.raw).not.toContain('slightly_ahead');
       });
 

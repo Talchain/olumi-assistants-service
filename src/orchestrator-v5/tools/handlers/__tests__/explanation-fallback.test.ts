@@ -89,7 +89,7 @@ describe('composeExplainResultsFallback', () => {
     // carries is its OWN win share, so the reader gets 62% and 27% rather than
     // their subtraction.
     expect(text).toContain('Hire Two Mid-Level');
-    expect(text).toContain("'Hire Two Mid-Level' scored highest in 27% of runs");
+    expect(text).toContain("'Hire Two Mid-Level' was supported by 27% of runs");
     expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivity values rendered as bucketed
     // lead-framing prose (formatSensitivityDirection composes adverb
@@ -126,13 +126,13 @@ describe('composeExplainResultsFallback', () => {
   });
 
   // S4 near-tie honesty (V5-WAVE-2 PR-A): a near-zero / sub-threshold margin
-  // must read as a close call, never "meaningful rather than marginal".
+  // must read as a close call, never "clearly separated in this model".
   // Regression for the baseline S4 contradiction where the explain fallback
   // said "ahead by 0 percentage points, so the lead is meaningful" while the
   // sibling flip fallback correctly said "effectively tied". Margin-only
   // near-tie (NEAR_TIE_PP_THRESHOLD = 1.0pp): 0 and 0.4 are near-tie; 12 is
   // decisive.
-  it('describes a 0pp margin as effectively tied, never "meaningful rather than marginal"', () => {
+  it('describes a 0pp margin as effectively tied, never "clearly separated in this model"', () => {
     const text = composeExplainResultsFallback({
       ...ANALYSIS,
       margin_pp: 0,
@@ -140,7 +140,10 @@ describe('composeExplainResultsFallback', () => {
     });
     expectNaturalProse(text);
     expect(text).toContain('effectively tied');
-    expect(text).not.toContain('meaningful rather than marginal');
+    expect(text).not.toContain('clearly separated in this model');
+    // Science d5 mutant row: a near tie carries NO runner-up line ("next most runs" / the runner's own share).
+    expect(text).toContain('so they are too close to tell apart without firming up the key assumptions.');
+    expect(text).not.toMatch(/next most runs|'Hire Two Mid-Level' (?:was supported by|came next)/);
     // The awkward "0 percentage points" non sequitur must not be cited.
     expect(text).not.toContain('0 percentage points');
     // Both option labels are named in the closeness sentence.
@@ -155,10 +158,10 @@ describe('composeExplainResultsFallback', () => {
       robustness_band: 'fragile',
     });
     expect(text).toContain('effectively tied');
-    expect(text).not.toContain('meaningful rather than marginal');
+    expect(text).not.toContain('clearly separated in this model');
   });
 
-  it('keeps the "meaningful rather than marginal" framing for a decisive margin (12pp), WITHOUT stating the gap', () => {
+  it('keeps the "clearly separated in this model" framing for a decisive margin (12pp), WITHOUT stating the gap', () => {
     const text = composeExplainResultsFallback({
       ...ANALYSIS,
       margin_pp: 12,
@@ -169,7 +172,7 @@ describe('composeExplainResultsFallback', () => {
     // This pin previously required '12 percentage points'; asserting its
     // ABSENCE here is what stops the fix being quietly reverted on the one arm
     // whose whole purpose is the decisive case.
-    expect(text).toContain('meaningful rather than marginal');
+    expect(text).toContain('clearly separated in this model');
     expect(text).not.toContain('12 percentage points');
     expect(text).not.toMatch(/percentage points?/i);
     expect(text).not.toContain('effectively tied');
@@ -237,7 +240,7 @@ describe('explain/flip near-tie agreement at the SSOT threshold boundary', () =>
     const explain = composeExplainResultsFallback(atBoundary);
     const flip = composeWhatWouldFlipFallback(atBoundary);
     expect(explain).toContain('effectively tied');
-    expect(explain).not.toContain('meaningful rather than marginal');
+    expect(explain).not.toContain('clearly separated in this model');
     expect(flip).toContain('effectively tied');
   });
 
@@ -250,7 +253,7 @@ describe('explain/flip near-tie agreement at the SSOT threshold boundary', () =>
     const explain = composeExplainResultsFallback(justAbove);
     const flip = composeWhatWouldFlipFallback(justAbove);
     expect(explain).not.toContain('effectively tied');
-    expect(explain).toContain('meaningful rather than marginal');
+    expect(explain).toContain('clearly separated in this model');
     expect(flip).not.toContain('effectively tied');
   });
 });
@@ -263,7 +266,7 @@ describe('explain/flip near-tie agreement at the SSOT threshold boundary', () =>
 // hard-coded `null` raw signal to `isNearTieByMargin` while flip passed the
 // real `rawRobustness`. So on a WIDER-than-threshold margin whose raw signal
 // carries `near_tie.is_tie === true`, flip said "effectively tied" while
-// explain said "the lead is meaningful rather than marginal" — the exact
+// explain said "the lead is clearly separated in this model" — the exact
 // contradiction PR #270 exists to kill, still live on the override path.
 //
 // These pin that BOTH composers, given the SAME projection + SAME raw signal,
@@ -286,7 +289,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     expect(flip).toContain('effectively tied');
     expect(explain).toContain('effectively tied');
     // The exact overclaim the divergence produced must be gone.
-    expect(explain).not.toContain('meaningful rather than marginal');
+    expect(explain).not.toContain('clearly separated in this model');
   });
 
   it('WITHOUT the raw override, the same wide margin is NOT a near-tie in either composer', () => {
@@ -295,7 +298,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     const explain = composeExplainResultsFallback(WIDE_OVERRIDE, null, null);
     const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, null);
     expect(explain).not.toContain('effectively tied');
-    expect(explain).toContain('meaningful rather than marginal');
+    expect(explain).toContain('clearly separated in this model');
     expect(flip).not.toContain('effectively tied');
   });
 
@@ -312,7 +315,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     expect(explain).toContain('effectively tied');
     expect(explain).not.toContain('sits in second place');
     // Union, never replace: the runner-up standing in its model-relative words (principle audit, 5 Oct).
-    expect(explain).not.toContain("'Hire Two Mid-Level' scored highest");
+    expect(explain).not.toMatch(/'Hire Two Mid-Level' (?:scored highest|was supported by)/);
     expect(explain).not.toContain("'Hire Two Mid-Level' came next");
     expect(flip).toContain('effectively tied');
   });
@@ -323,7 +326,7 @@ describe('explain/flip near-tie agreement on the raw near_tie override path', ()
     // request/routed paths (which pass no raw signal) are unchanged.
     const legacy = composeExplainResultsFallback(WIDE_OVERRIDE, null);
     expect(legacy).not.toContain('effectively tied');
-    expect(legacy).toContain('meaningful rather than marginal');
+    expect(legacy).toContain('clearly separated in this model');
     expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, undefined)).toBe(legacy);
     expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, null)).toBe(legacy);
   });
@@ -342,7 +345,7 @@ describe('composeWhatWouldFlipFallback', () => {
     // ROADMAP 2.1067 — this pin required '35 percentage points' ("the lead of
     // 35 percentage points would need to close"). The contender is named with
     // its OWN share instead; the subtraction is gone.
-    expect(text).toContain("'Hire Two Mid-Level' is the most likely contender to overtake it, with a probability of 27%");
+    expect(text).toContain("'Hire Two Mid-Level' was supported by the next most runs (27%)");
     expect(text).not.toMatch(/percentage points?/i);
     // Driver labels surfaced; sensitivities as bucketed lead-framing
     // prose. Thresholds align to bandFromMagnitude. No raw decimals.
@@ -426,7 +429,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     // say small/modest changes could shift which option leads.
     expect(text.toLowerCase()).toMatch(/fragile|sensitive/);
     expect(text.toLowerCase()).toMatch(/small (adjustments|changes)/);
-    expect(text.toLowerCase()).toMatch(/shift (which option leads|the (result|outcome))/);
+    expect(text.toLowerCase()).toMatch(/(?:shift|change) (which option leads|the most-supported option|the (result|outcome))/);
   });
 
   it('canonical fragile band alone (no raw signal) still triggers fragility-aware copy', () => {
@@ -617,11 +620,11 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     );
     expect(text).not.toMatch(/less likely to flip/i);
     expect(text).not.toMatch(UNLIKELY_TO_FLIP);
-    // Runner-up sentence must use the neutral "most likely contender"
-    // fallback when margin is non-finite — never "lead of Not available
-    // would need to close" (the bug improvement 1 fixed).
+    // Runner-up sentence: its own share in run-share words (Science d5, 6 Oct), never "most likely contender".
+    // When the margin is non-finite, never "lead of Not available would need to close" (the bug improvement 1
+    // fixed).
     expect(text).not.toMatch(/lead of .* would need to close/i);
-    expect(text).toMatch(/most likely contender to overtake/i);
+    expect(text).toMatch(/was supported by the next most runs/i);
   });
 
   it('Infinity margin: same neutral runner-up fallback, no broken numeric copy', () => {
@@ -635,7 +638,7 @@ describe('composeWhatWouldFlipFallback — robustness-honesty (chip-click path)'
     );
     expect(text).not.toMatch(/lead of .* would need to close/i);
     expect(text).not.toMatch(/Not available/i);
-    expect(text).toMatch(/most likely contender to overtake/i);
+    expect(text).toMatch(/was supported by the next most runs/i);
   });
 
   it('unknown projected band with no raw signal: omits closing robustness sentence', () => {
@@ -1068,7 +1071,7 @@ describe('composeWhatWouldFlipFallback — label-quoting + hedge-consolidation p
     const text = composeWhatWouldFlipFallback(ANALYSIS);
     expect(text).not.toMatch(/performing best/i);
     expect(text).not.toMatch(/\bbest\b/i);
-    expect(text).toMatch(/In this model, .+ scored highest/);
+    expect(text).toMatch(/In this model, .+ was supported by \d{1,3}% of runs/);
   });
 
   it('near-tie + fragile: the lead drops its trailing "could shift" hedge (one caveat only)', () => {
@@ -1125,7 +1128,7 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
   };
 
   const RAW_FRAGILE: RawRobustnessSignals = { level: 'fragile', near_tie_is_tie: false };
-  const CONTRADICTORY = /could shift which option leads/i;
+  const CONTRADICTORY = /could change the most-supported option/i;
   const NAMES_FRAGILITY = /picture appears fragile/i;
   const HONEST_NO_FLIP = /no single factor on its own reached a tipping point/i;
 
@@ -1160,8 +1163,12 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
     };
     const text = composeWhatWouldFlipFallback(FRAGILE_BAND, RAW_FRAGILE, concrete);
     expectNaturalProse(text);
-    expect(text).toMatch(/Engineering Capacity is the most likely single factor to change which option leads/i);
-    expect(text).toMatch(/clearest one to test/i);
+    expect(text).toMatch(/Of the factors we tested, Engineering Capacity has a tipping point on its own that would change the most-supported option/i);
+    // Science d5 (#87 6008424994): no superlative ranking of factors on this path.
+    const flipSentence = text.match(/Of the factors we tested[^.]*\./)?.[0] ?? '';
+    expect(flipSentence, 'PRECONDITION: the flip sentence is present').not.toBe('');
+    expect(flipSentence).not.toMatch(/\bmost likely\b|\bclosest\b/i);
+    expect(text).toMatch(/a clear one to test/i);
     expect(text).not.toMatch(HONEST_NO_FLIP);
   });
 

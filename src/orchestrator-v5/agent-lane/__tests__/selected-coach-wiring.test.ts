@@ -25,10 +25,17 @@ const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f6
 // + none_measurable makes no claim (AI HARNESS, RC 5950124321): 28,043 → 28,026 bytes.
 // + MODEL_RELATIVE_NAMING_INSTRUCTION appended after the reply-length sentence (WORDING BATCH, DL 0df0e1 lease, 5 Oct):
 //   28,026 → 28,835 bytes (+1 space +808). Rebuilt from the source literals, it reproduced the old pin b2653d0e… exactly first.
-const RENDERED_SHA = '2bc25cbaeafcca10580afc201b5c7e82cd223a877fe4a440aa5dfe4000ac629a';
-const RENDERED_BYTES = 28_835;
+// + the naming rule glosses N in positive words and bans the recommend stem even negated (WORDING, DL 0df0e1 cut 3,
+//   Acceptance rehearsal 2), and names an option in Part B's neutral form "N% of runs supported X" (Codex r1 #2614: "scored
+//   highest" is false on a minimise Run and inexact under split tie credit), and with no share makes no claim about how
+//   runs fell (Codex r2): 28,835 → 29,212 bytes (+377). Same rebuild, which reproduced 2bc25cba… exactly first.
+// + GOAL_CHANCE_RANKING_INSTRUCTION appended after the naming rule (D3 step 2, DL 0df0e1 ruling C, 6 Oct): 29,212 → 29,958
+//   bytes (+1 space +745 = exactly the rule's bytes); Codex r2 widened it to every probability_of_goal and to the result being
+//   reported: 29,212 → 30,154 (+1 +941, exactly the rule). Template and host shas unchanged. Derived from the SENT body.
+const RENDERED_SHA = '802027cdbcc2d91de209fcb1edbaf23a574899f375527ed7e14a491965554308';
+const RENDERED_BYTES = 30_154;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
-const NAMING_RULE_FORM = 'name it only as \u201cIn this model, \u2018X\u2019 scored highest in N% of runs\u201d';
+const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';

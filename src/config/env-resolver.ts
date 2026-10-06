@@ -126,6 +126,20 @@ export function isProduction(): boolean {
 }
 
 /**
+ * Is this process the declared production DEPLOYMENT? For security-sensitive gates.
+ *
+ * Deliberately NOT derived from OLUMI_ENV, NODE_ENV or the platform service name.
+ * The labels select runtime behaviour and an operator may run any deployment under
+ * any of them; a gate that must hold on the production deployment cannot be switched
+ * off by a label. The deployment declares itself once: OLUMI_DEPLOYMENT=production.
+ * Absent or any other value → false, so callers only ever ADD this to their existing
+ * check: it can close a gate, never open one.
+ */
+export function isProductionDeployment(): boolean {
+  return process.env.OLUMI_DEPLOYMENT?.toLowerCase().trim() === "production";
+}
+
+/**
  * Check if running in staging environment
  */
 export function isStaging(): boolean {

@@ -985,7 +985,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       // each option's OWN win share and keeps the qualitative verdict the
       // margin earns. Both halves are pinned so the gap cannot creep back in
       // as "and that is 24 points clear".
-      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' scored highest in 38% of runs, so the lead is meaningful rather than marginal");
+      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' was supported by 38% of runs, so the two are clearly separated in this model");
       expect(out.assistant_text).not.toMatch(/percentage points?/i);
       expect(out.assistant_text).toContain('Delivery risk');
       expect(out.assistant_text).toContain('Cost overrun risk');
@@ -1031,7 +1031,7 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
       // which quantified the gap between two win frequencies as a distance to
       // be travelled. The contender is still named (this surface answers "what
       // would flip it?") and now carries its OWN share instead.
-      expect(text).toContain("'Hire one senior engineer overseas' is the most likely contender to overtake it, with a probability of 38%");
+      expect(text).toContain("In this model, 'Hire one senior engineer overseas' was supported by the next most runs (38%)");
       expect(text).not.toMatch(/percentage points?/i);
       // Names the specific fragile assumption from fragile_edges[0] — no sign/causal claim.
       expect(text).toContain("One useful thing to check is the link from 'Delivery risk' to 'Successful launch': whether it holds as strongly as the model currently assumes");
@@ -1292,7 +1292,7 @@ describe('tryPostAnalysisAdviceGate — validation-priority beat (what to valida
         "The evidence that would most improve confidence is firmer support for 'Delivery risk', since it carries the most weight in this result",
       );
       // Validation must not re-assert a meaningful lead on a near-tie.
-      expect(text).not.toMatch(/meaningful rather than marginal/i);
+      expect(text).not.toMatch(/clearly separated in this model/i);
     }
   });
 
@@ -1419,7 +1419,7 @@ describe('tryPostAnalysisAdviceGate — degrade-gracefully (partial data)', () =
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' scored highest in");
+      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' was supported by");
       // Don't claim a margin we don't have
       expect(out.assistant_text).not.toContain('percentage points');
     }
@@ -2182,7 +2182,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
 // Near-tie + raw-robustness handling for post-analysis copy.
 //
 // Regression for the reported P0/P1 case: a ~0.05pp lead was described as
-// "meaningful rather than marginal" with "moderate" robustness. The
+// "clearly separated in this model" with "moderate" robustness. The
 // composer must:
 //   - treat |margin_pp| <= 1.0 as effectively tied,
 //   - honour `enrichment.robustness.near_tie.is_tie === true` as a strong
@@ -2206,7 +2206,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
   // Forbidden strength-claim strings on a near-tie / raw-fragile path. The
   // composer MUST NOT emit any of these when isNearTie or isRawFragile.
   const FORBIDDEN_STRENGTH_PHRASES: readonly RegExp[] = [
-    /meaningful rather than marginal/i,
+    /clearly separated in this model/i,
     /\bmeaningful lead\b/i,
     /\bstrongly favours\b/i,
     /\brobustness band is moderate\b/i,
@@ -2307,7 +2307,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('meaningful rather than marginal');
+      expect(out.assistant_text).toContain('clearly separated in this model');
       expect(out.assistant_text).not.toMatch(/effectively tied/i);
     }
   });
@@ -2328,7 +2328,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('meaningful rather than marginal');
+      expect(out.assistant_text).toContain('clearly separated in this model');
       expect(out.assistant_text).toContain('This result looks fairly stable, but it is worth checking the main assumptions before deciding');
       expect(out.assistant_text).not.toMatch(/robustness band/i);
     }
@@ -2384,7 +2384,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
       expect(text).toMatch(/the analysis treats .+ as a near[- ]tie/i);
       expect(text).not.toMatch(/one percentage point or less/i);
       expect(text).not.toMatch(/less than one percentage point/i);
-      expect(text).not.toContain('meaningful rather than marginal');
+      expect(text).not.toContain('clearly separated in this model');
     }
   });
 
@@ -2697,7 +2697,7 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toMatch(/effectively tied/i);
-      expect(out.assistant_text).not.toContain('meaningful rather than marginal');
+      expect(out.assistant_text).not.toContain('clearly separated in this model');
     }
   });
 
@@ -3144,7 +3144,7 @@ describe('tryPostAnalysisAdviceGate — what_would_flip richer evidence + honest
     if (out.matched) {
       const t = out.assistant_text;
       expect(t).toContain(
-        "This is a close call: 'Hire One Tech Lead' is narrowly ahead of 'Hire One Tech Lead and One Developer' by about 5 percentage points",
+        "This is a close call: in this model, 'Hire One Tech Lead' was supported by about 5 percentage points more of the runs than 'Hire One Tech Lead and One Developer'",
       );
       expect(t).not.toMatch(/effectively tied/i);
       expect(t).not.toMatch(/favoured option|performing best|\bbest\b/i);
@@ -3448,7 +3448,7 @@ describe('interpretation twins — GQPV parity (explain_results + meaning)', () 
       expect(t).not.toMatch(/treat the lead as provisional/i);
       expect(t).not.toMatch(/picture appears fragile/i);
       // No contradictory confidence.
-      expect(t).not.toMatch(/meaningful rather than marginal/i);
+      expect(t).not.toMatch(/clearly separated in this model/i);
       expect(t).not.toMatch(/It sits ahead of/);
     }
   });

@@ -194,6 +194,19 @@ describe('formatEdgeAdjustment', () => {
   });
 });
 
+describe('formatEdgeAdjustment — ONE word per band (DL D4 row; served s7-d4 said "from weak to moderate")', () => {
+  it('RED: the lowest band is said "slight", as the canvas and the rerun line say it, never "weak"', () => {
+    const text = formatEdgeAdjustment({ fromLabel: 'Current-plan MRR', toLabel: 'MRR', beforeMean: 0.1, afterMean: 0.3 });
+    expect(text).toContain('from slight to moderate');
+    expect(text).not.toMatch(/\bweak\b/);
+  });
+  it('a negative lowest band keeps its direction note', () => {
+    const text = formatEdgeAdjustment({ fromLabel: 'Price', toLabel: 'Churn', beforeMean: -0.1, afterMean: -0.3 });
+    expect(text).toContain('slight (negative)');
+    expect(text).not.toMatch(/\bweak\b/);
+  });
+});
+
 describe('formatEdgeStrengthConfirmed', () => {
   // ⛔ R3 5942069984: whose figure follows the STORED sizing after the write (`linkSizing`), never the act.
   it.each([

@@ -406,7 +406,7 @@ describe('read_results — the numbers the product computed and never showed', (
     const out = results(fresh());
     const line = out.split('\n').find((l) => l.includes('Plan Price -> Monthly Revenue'));
     expect(line).toContain('if this link is wrong');
-    expect(line).toContain('"Hold the current price" wins instead');
+    expect(line).toContain('the most runs would support "Hold the current price" instead');
     expect(line).toContain('0.58 of runs');
     expect(out).toContain('attributable to this link alone: 0.16');
   });

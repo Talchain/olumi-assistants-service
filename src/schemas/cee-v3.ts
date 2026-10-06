@@ -662,6 +662,8 @@ export const EdgeProvenanceV3 = z.object({
   reasoning: z.string().optional(),
   /** Who sized the link (magnitude contract D9); `source: 'user_specified'` wins at read time. A malformed value is dropped. */
   magnitude: z.enum(["user_stated", "olumi_estimate", "olumi_placeholder", "example_figure"]).optional().catch(undefined),
+  /** The Agent proposed this typed reading of the user's own figures, and the user confirmed its approval card. */
+  reading: z.enum(["agent_proposed_user_confirmed"]).optional().catch(undefined),
   /**
    * The size the link carries in natural units (magnitude contract; #70 5845713522). `strength_mean` is the β it was
    * written for: a reader says it only while the edge's mean equals it (R&C 5845818897). A malformed value is dropped.
@@ -673,14 +675,19 @@ export const EdgeProvenanceV3 = z.object({
     per_source_change_unit: z.string(),
     strength_mean: z.number().finite(),
     strength_mean_frame: z.literal("edge_strength"),
-    /** A4: `amount` is one end of this range the user wrote ("£1-2m"); said with it, never alone. Malformed: dropped. */
-    stated_range: z.object({ low: z.number().finite(), high: z.number().finite(), text: z.string().min(1), end: z.enum(["low", "high"]) }).optional().catch(undefined),
+    /**
+     * A4: `amount` is one end of this range the user wrote ("£1-2m"); said with it, never alone. `centre`: `amount` is the
+     * user's point inside it ("about 150, between 80 and 250"; d5 6009282279). Malformed: dropped.
+     */
+    stated_range: z.object({ low: z.number().finite(), high: z.number().finite(), text: z.string().min(1), end: z.enum(["low", "high", "centre"]) }).optional().catch(undefined),
   }).optional().catch(undefined),
   /**
    * The link holds BY DEFINITION, checked at construction (`definitionalLink`: ±1 in one unit, on the drafter's word; DL
    * #75 5916504679), so its size is not Olumi's guess. Only `true` or absent; anything else is dropped.
    */
   definitional: z.literal(true).optional().catch(undefined),
+  /** Producer projected the mean, independently of projected spread/existence. R8 predicate (c). */
+  mean_projected: z.literal(true).optional().catch(undefined),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
 

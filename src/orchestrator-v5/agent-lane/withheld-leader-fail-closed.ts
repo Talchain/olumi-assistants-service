@@ -1,3 +1,5 @@
+import { readUnsizedPathLeaderCause, unsizedLinkSentence } from './unsized-path-cause.js';
+import { placeholderAskWords } from './goal-certainty.js';
 /**
  * ⛔ AGENT LANE — WHEN THE LEADER IS WITHHELD, NO RANKING SENTENCE REACHES THE USER.
  *
@@ -75,7 +77,10 @@ import { goalChanceWithheldForAgent, sameWordsIn } from './goal-chance-withheld.
 import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
 import { leaderLicence } from '../compose/leader-licence.js';
 import {
+  WITHHELD_GOAL_PATH_UNSIZED,
   WITHHELD_CONSTRAINT_VERDICT,
+  WITHHELD_NO_RESULT,
+  NO_RESULT_RUN_KINDS,
   WITHHELD_LEADER_CAUSE_UNRECORDED,
   WITHHELD_NEAR_TIE,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
@@ -87,6 +92,7 @@ import {
   WITHHELD_SEPARATION_UNAVAILABLE,
   SEPARATION_NEAR_TIE,
 } from '../compose/analysis-state-v1.js';
+import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-ask.js';
 import {
   neutraliseEnforcementFalsePositiveSpans,
   optionLabelPattern,
@@ -220,6 +226,19 @@ const PCT = String.raw`(?<![\w.])\d+(?:[.,]\d+)?\s?(?:%|per\s?cent\b)`;
 /** A factor's own likelihood VALUE, not a win share: "the current 30% product-market-fit likelihood assumption" (served survey). */
 const LIKELIHOOD_INPUT = new RegExp(String.raw`${PCT}\s+(?:[\w'-]+\s+){0,3}?likel(?:y|ihood)\s+(?:assumption|estimate|input|parameter|value|figure)s?\b`, 'gi');
 
+const NOT_A_RESULT_SRC = String.raw`(?!\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance)\b)`;
+const LOWEST_LEADER_RE = new RegExp(
+  [
+    String.raw`\b(?:gave|gives|give|giving|came\s+out|comes\s+out|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|shows?|showed|reach(?:es|ed)?|has|had|have|having)\s+(?:the\s+)?lowest\b${NOT_A_RESULT_SRC}`,
+    String.raw`\bthe\s+lowest\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)\s+by)\b`,
+    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?lowest\s+(?:under|with|for)\s+(?!(?:the\s+)?(?:current|these|this|those|that|your|our|its|their|all|any|each|every|both|most|many|some)\b)`,
+  ].join('|'),
+  'i',
+);
+/** "{X} came top", "{X} was top on MRR", "Top on MRR was {X}" (Desk 6b + DL, #2646). */
+const TOP_LEADER_RE =
+  /\b(?:came|comes|coming)\s+(?:out\s+)?top\b|\b(?:was|is|were|are)\s+(?:the\s+)?top\s+(?:on|for)\b|(?:^|[.;:!?\n]\s*)top\s+(?:on|for)\s+[^.;:!?\n]{0,48}?\b(?:was|were|is|are|came)\b/i;
+
 /**
  * Ranking language. Each entry is ONE question — "does this sentence order the options or single
  * one out?" — asked of a sentence whose idioms and ranking-shaped labels have been blanked.
@@ -263,6 +282,12 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     re: /\bstronger\s+(?:than|option|choice|case|candidate|result|outcome|performer|position|bet|path|route|contender)\b|\b(?:perform(?:s|ed|ing)?|comes?\s+out|came\s+out|looks?|scor(?:e|es|ed|ing))\s+stronger\b/i,
   },
   { code: 'highest', re: /\bhighest\b/i },
+  // The lead ladder (d5 #87 6008589328): "gave the lowest {quantity}" names a leader as "highest" does. Bound to the
+  // ladder's verb classes (Review Desk 6b + DL, #2646: any production verb or has/had, fronted "The lowest churn came
+  // from X" / passive "…was produced by X", predicative "churn was lowest under X"), so "you want the lowest churn" (an
+  // aim) and "the lowest priority" (a weighting) still pass.
+  { code: 'lowest', re: LOWEST_LEADER_RE },
+  { code: 'top', re: TOP_LEADER_RE },
   {
     code: 'higher',
     re: /\b(?:ranks?|ranked|scor(?:e|es|ed|ing)|perform(?:s|ed|ing)?|comes?\s+out|came\s+out|finish(?:es|ed)?|rated?|sits?)\s+higher\b|\b(?:produces?|produced|producing|gives?|gave|delivers?|delivered|yields?|yielded|generates?|generated|achieves?|achieved|has|had|shows?|showed|returns?|returned|reaches|reached)\s+(?:a\s+|the\s+)?higher\b|\bhigher\s+(?:(?:modelled|expected|median|mean|projected|simulated|overall|#)\s+)*(?:mrr\s+)?(?:outcomes?|results?|scores?|chances?|probabilit(?:y|ies)|likelihood|win\s+(?:rates?|shares?))\b|\bhigher\s+than\s+(?:#|(?:the\s+)?(?:other|others|alternatives?|rest|both|either|all|keeping|phasing|raising|holding|staying))\b/i,
@@ -273,6 +298,8 @@ const RANKING_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegE
     re: /\bbetter\s+than\b|\bbetter\s+(?:option|choice|bet|path|route|outcome|result|performer|pick|alternative|fit|candidate|position|odds|chances?|prospects?)s?\b|\b(?:perform(?:s|ed|ing)?|do|does|did|doing|fare[sd]?|faring|scor(?:e|es|ed|ing)|comes?\s+out|came\s+out|fits?|fitted|works?|worked)\s+better\b/i,
   },
   { code: 'ahead', re: /\bahead\b/i },
+  // DL 0df0e1 6002469285 (Part B): the direction-neutral leader form, "N% of runs supported X" / "X would be supported by the most runs".
+  { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?|could\s+|still\s+)?support(?:s|ed|ing)?\b|\bsupported\s+by\s+[^.;!?]{0,48}?\b(?:runs?|simulations?|draws?)\b/i },
   /**
    * Served on bc09bb1 (Canonical 5845848896, AI Quality 5845776236): "Release to All Now is provisionally separated in
    * this model". ONE option as the subject — singular verbs only, since "the two options are separated by less than a
@@ -965,6 +992,9 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
     'because the options came out too close together on this run to tell apart; tell me what matters most to you between them',
   [WITHHELD_SEPARATION_UNAVAILABLE]:
     'because how far apart the options are was not established on this run; ask me to run the analysis and I will measure it',
+  // MC D1 (a): no Run produced a result, so nothing was checked — never a limit verdict.
+  [WITHHELD_NO_RESULT]:
+    'because no analysis has produced a result for this model yet; ask me to run it',
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]:
     'because this result could not be confirmed as an analysis of the model as it stands; run the analysis again',
   [WITHHELD_RUN_IDENTITY_CONFLICT]:
@@ -1031,7 +1061,6 @@ function estimateOnlyClause(limitVerdicts: StoredLimitVerdicts | undefined, limi
  * claim said a limit "was not shown to be met on this run" about a Run PLoT refused (served 651a7fd, journey C run 2).
  * Absent and `unknown_degraded` are not listed: they do not prove there is no result.
  */
-const NO_RESULT_RUN_KINDS: ReadonlySet<string> = new Set(['never_run', 'refused', 'blocked', 'running']);
 
 /** The run's own separation statement (`leader_claim.separation`); absent = not computed, never "near tie". */
 export function separationOf(analysisState: unknown): string | undefined {
@@ -1053,39 +1082,72 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
   return warnings.map((w) => (w as { code?: unknown } | null)?.code).filter((c): c is string => typeof c === 'string');
 }
 
-type GoalFigureCoHold = { readonly why: string; readonly action?: string };
+export type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
 
 /** The run's own goal-figure warning, kept separate from decision-brief limit warnings. */
-function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold | undefined {
+export function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold | undefined {
   if (!Array.isArray(blocks)) return undefined;
   const result = blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as
     { enrichment?: { inference_warnings?: unknown }; inference_warnings?: unknown } | undefined;
   const warnings = result?.enrichment?.inference_warnings ?? result?.inference_warnings;
   if (!Array.isArray(warnings)) return undefined;
-  const codes = warnings.filter((w): w is { code: string; node_ids?: unknown; message?: unknown } =>
+  const codes = warnings.filter((w): w is { code: string; node_ids?: unknown; message?: unknown; links?: unknown } =>
     typeof (w as { code?: unknown } | null)?.code === 'string');
+  // #2613 CR (b): the product cause comes first whenever it holds; no link is asked for while it still blocks.
   if (codes.some((w) => w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')) {
     return { why: 'Olumi has not read your goal as the product of your own figures, so its figures cannot yet support a comparison' };
   }
   const warning = codes.find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
-  if (warning === undefined) return undefined;
-  const ids = new Set(Array.isArray(warning.node_ids) ? warning.node_ids.filter((id): id is string => typeof id === 'string') : []);
-  const g = graph as { nodes?: unknown; edges?: unknown } | null;
+  if (warning === undefined) return ownGoalFigureCoHold(codes, graph);
+  const cause = readUnsizedPathLeaderCause(result);
+  const g = graph as { nodes?: unknown } | null;
   const nodes = Array.isArray(g?.nodes) ? g.nodes as Array<{ id?: unknown; label?: unknown }> : [];
-  const edges = Array.isArray(g?.edges) ? g.edges as Array<{ from?: unknown; to?: unknown }> : [];
-  const matches = edges.filter((e) => typeof e.from === 'string' && typeof e.to === 'string' && ids.has(e.from) && ids.has(e.to));
-  if (matches.length !== 1) return { why: 'Olumi has not sized a link on the way to your goal, so its figures cannot yet support a comparison' };
-  const label = (id: unknown): string => {
-    const value = nodes.find((n) => n.id === id)?.label;
-    return `‘${typeof value === 'string' && value.trim() !== '' ? value.trim() : String(id)}’`;
+  const label = (id: string): string => {
+    const value = nodes.find(n => n.id === id)?.label;
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : id;
   };
-  const link = `how ${label(matches[0]!.from)} moves ${label(matches[0]!.to)}`;
-  return {
-    why: `Olumi has not sized ${link}, so its figures cannot yet support a comparison`,
-    // Only the producer's own warning can attest that asking for this size is an available next step.
-    action: typeof warning.message === 'string' && warning.message.includes('Give a figure for')
-      ? `give a figure for ${link} and Olumi will use it` : undefined,
-  };
+  const ids = Array.isArray(warning.node_ids) ? warning.node_ids : [];
+  const oldEdges = (graph as { edges?: Array<{ from: string; to: string }> } | null)?.edges ?? [];
+  const legacyLinks = oldEdges.filter(l => ids.includes(l.from) && ids.includes(l.to));
+  const links = cause?.links ?? (cause !== undefined ? [cause] : Array.isArray(warning.links)
+    ? warning.links.flatMap(l => {
+      const link = l as { from?: unknown; to?: unknown } | null;
+      return typeof link?.from === 'string' && typeof link.to === 'string'
+        ? [{ from: link.from, to: link.to, from_label: label(link.from), to_label: label(link.to) }] : [];
+    }) : legacyLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })));
+  // No-dead-end (#2623): the reply says the SAME ask as the warning (one source), only for a Run that recorded the cause
+  // (never while a product gate withholds every option: no cause, no invitation).
+  const words = (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
+  return words !== '' ? { why: words, say: words } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
+}
+
+/**
+ * ⭐ MC D1 (b) (DL 6 Oct; Acceptance rehearsals 8 and 13): EVERY OTHER GOAL-FIGURE WITHHOLD THAT TOOK THE SHARES IS SAID IN
+ * ITS OWN WORDS, never "ask me to run the analysis and I will measure it" — the same model gives the same withhold. PLoT
+ * #416 (an identity the run could not calculate) carries the ONE ask that would let it (`composeIdentityAskForNode`);
+ * PLoT #422 (the user's own size cut to fit) and identical options say their own cause. A target-only or unusable-chance
+ * withhold keeps its own reader (the admission's clause / the goal-chance line).
+ */
+const OWN_WORDS_GOAL_FIGURE_CODES: ReadonlySet<string> = new Set([
+  'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED', 'GOAL_FIGURES_USER_EFFECT_CLAMPED', 'GOAL_FIGURES_OPTIONS_IDENTICAL',
+]);
+
+function ownGoalFigureCoHold(
+  codes: readonly { code: string; node_ids?: unknown; message?: unknown; withheld_claims?: unknown }[], graph: unknown,
+): GoalFigureCoHold | undefined {
+  const keptShares = (w: { withheld_claims?: unknown }): boolean =>
+    Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share');
+  const warning = codes.find((w) => OWN_WORDS_GOAL_FIGURE_CODES.has(w.code) && !keptShares(w));
+  if (warning === undefined || typeof warning.message !== 'string') return undefined;
+  const said = warning.message.replace(/^\s*Not shown\.\s*/, '').trim().replace(/[.!?]+$/, '');
+  // "because your size …": only an ordinary sentence-opening word drops its capital (Codex buddy r1 P2); a name ("Olumi",
+  // "MRR") or a quoted label ("'Starter-tier MRR' …") is kept as written.
+  const why = /^(?:Your|The|This|That|These|Those|A|An|It|Its)\b/.test(said) ? `${said[0]!.toLowerCase()}${said.slice(1)}` : said;
+  if (why === '') return undefined;
+  const nodeId = Array.isArray(warning.node_ids) && typeof warning.node_ids[0] === 'string' ? warning.node_ids[0] : undefined;
+  const ask = warning.code === 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED' && nodeId !== undefined
+    ? composeIdentityAskForNode(nodeId, graph) : null;
+  return ask === null ? { why } : { why, say: `${sentence(`because ${why}`)} ${ask.assistant_text}`, ask: ask.assistant_text };
 }
 
 /** Keyed by the admission's `permitted_analysis_mode` reason code, when the claim itself did not withhold. */
@@ -1192,6 +1254,8 @@ export function agentNoLeaderSentence(
   withheldReason: string | undefined, analysisReady: unknown, limitCauseCodes: readonly string[] = [], limitVerdicts?: StoredLimitVerdicts,
   limitAskIds?: ReadonlySet<string>, separation?: string, goalFigureCoHold?: GoalFigureCoHold,
 ): string {
+  if (goalFigureCoHold?.say !== undefined && (withheldReason === WITHHELD_GOAL_PATH_UNSIZED
+    || withheldReason === undefined || withheldReason === WITHHELD_SEPARATION_UNAVAILABLE || withheldReason === WITHHELD_LEADER_CAUSE_UNRECORDED)) return goalFigureCoHold.say;
   return sentence(agentNoLeaderClause(withheldReason, analysisReady, limitCauseCodes, limitVerdicts, limitAskIds, separation, goalFigureCoHold));
 }
 
@@ -1212,7 +1276,7 @@ function singleCauseClause(
   const admission = admissionClause(analysisReady);
   // A warning in an old Run is not a current blocker after the model changes. Only the claim's generic
   // separation/unrecorded states can be explained by this Run's goal-figure warning.
-  const goalWarningExplainsClaim = withheldReason === undefined || withheldReason === WITHHELD_SEPARATION_UNAVAILABLE
+  const goalWarningExplainsClaim = withheldReason === WITHHELD_GOAL_PATH_UNSIZED || withheldReason === undefined || withheldReason === WITHHELD_SEPARATION_UNAVAILABLE
     || withheldReason === WITHHELD_LEADER_CAUSE_UNRECORDED;
   if (admission !== undefined && goalFigureCoHold !== undefined && goalWarningExplainsClaim) {
     const why = admission.split(';')[0]!.trim();
@@ -1643,10 +1707,14 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const withheldReason = claimPermissionsFrom((response as { analysis_state?: unknown }).analysis_state, opts.analysisReady).withheld_reason
         ?? opts.leaderClaimWithheldReason;
       const noResult = runStateSaysNoResult((response as { analysis_state?: unknown }).analysis_state) && admissionClause(opts.analysisReady) === undefined;
+      const closingFor = (goalFigureCoHold: GoalFigureCoHold | undefined): string => agentNoLeaderSentence(withheldReason, opts.analysisReady,
+        limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
+        separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHold);
+      const coHold = noResult ? undefined : goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph);
+      // MC D1 (a), Codex buddy r1 P2: a Run with no result says that known cause, never "the reason is not recorded".
       const closing = noResult
-        ? sentence(REASON_NOT_RECORDED)
-        : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
-          separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph));
+        ? sentence(withheldReason === WITHHELD_NO_RESULT ? BY_WITHHELD_REASON[WITHHELD_NO_RESULT]! : REASON_NOT_RECORDED)
+        : closingFor(coHold);
       // A second wire pass must not parse a deterministic closing as fresh model prose. Node labels can contain
       // punctuation and ranking words, so splitting that closing into sentences can otherwise drop half and append it twice.
       const trimmed = text.trimEnd();
@@ -1685,8 +1753,20 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         const body = lostTypedSay
           ? [withoutTypedFragments.trimEnd(), typedSay].filter((part) => part !== '').join('\n\n')
           : withoutTypedFragments.trimEnd();
-        const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
-        next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
+        // #2613 buddy r5 P1: when the reply already says the typed goal reason and the closing repeats it, the closing
+        // drops ONLY that reason. Any other cause it carried (the admission's) is still said; nothing else is invented.
+        const typedReasonSaid = typedSay !== null && sameWordsIn(body, typedSay) && sameWordsIn(closing, typedSay);
+        // MC D1 (c), Codex buddy r1 P2: the #416 ask is said ONCE. When the reply already says the warning's cause (the
+        // protected goal-chance line) or already carries the ask (the route's owed line), only the missing half is added.
+        const causeSaid = coHold?.ask !== undefined && sameWordsIn(body, coHold.why);
+        const askSaid = coHold?.ask !== undefined && sameWordsIn(body, coHold.ask);
+        const closingToAdd = coHold?.ask !== undefined && (causeSaid || askSaid)
+          ? (causeSaid && askSaid ? '' : causeSaid ? coHold.ask : sentence(`because ${coHold.why}`))
+          : !typedReasonSaid ? closing
+            : admissionClause(opts.analysisReady) === undefined ? '' : closingFor(undefined);
+        const alreadySaid = (closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph))
+          || closingToAdd === '' || sameWordsIn(body, closingToAdd);
+        next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closingToAdd}` } as OlumiResponse;
         log.info(
           {
             event: 'agent_lane.withheld_leader_ranking_dropped',

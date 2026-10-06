@@ -81,7 +81,9 @@ function unsizedGraph(): Json {
 }
 
 /** Serialized bytes are the store boundary; no writer or commit function is replaced. */
-function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead?: string; useInProcessDoor?: boolean } = {}) {
+function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead?: string; useInProcessDoor?: boolean;
+  /** Changes the stored graph after approval's dry run, just before the real commit re-reads it (Codex r2 timing). */
+  beforeCommit?: (graph: Json) => Json } = {}) {
   let graphJson = JSON.stringify(initial);
   const proposals = new ProposalStore();
   const attempts: SessionTurnWrite[] = [];
@@ -112,6 +114,7 @@ function world(initial: Json = unsizedGraph(), options: { dropReadingOnAgentRead
   const commits: CommitOptionLevelsInput[] = [];
   const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
     commits.push(input);
+    if (options.beforeCommit !== undefined) graphJson = JSON.stringify(options.beforeCommit(graph()));
     if (options.useInProcessDoor === true) {
       session.store = store;
       try { return await commitOptionLevelsInProcess(input, 'rt6-real-in-process-door'); }
@@ -207,9 +210,9 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(Object.keys(nodeOf(cold, SOURCE).unit_reading).sort()).toEqual(['source', 'source_quote', 'unit']);
     expect(linkOf(cold).provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated', natural_effect: {
       amount: -2, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: 'percentage points' } });
-    expect(w.commits[0]!.link_effect?.quote).toBe(SAID_POINTS.slice(0, -1));
+    expect(w.commits[0]!.link_effect?.quote).toBe(SAID_POINTS);
     expect(w.rows[0]!.write.handler_facts[0]).toMatchObject({ fact_type: 'adjust_edge_strength',
-      result: { after: { stated_quote: SAID_POINTS.slice(0, -1) } } });
+      result: { after: { stated_quote: SAID_POINTS } } });
     expect(w.attempts[0]!.graph).toEqual(written);
     expect(nodeOf(cold, OTHER)).toEqual(nodeOf(before, OTHER));
     expect(w.proposals.outstanding(SCENARIO, null)).toEqual([]);
@@ -246,7 +249,8 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(nodeOf(w.graph(), TARGET)).not.toHaveProperty('goal_threshold_cap');
   });
 
-  it.each(['pp', 'points'] as const)('U2 literal %s of each label adopts % and the real writer sizes it', unitWords => {
+  // 'points' left this row (Science F1, #87 5999199710): bare "points" is points of a % only on a % quantity; see U2-points.
+  it.each(['pp', 'percentage points'] as const)('U2 literal %s of each label adopts % and the real writer sizes it', unitWords => {
     const graph = unsizedGraph();
     const said = `Each 5 ${unitWords} of footfall loss costs us about 2 ${unitWords} of gross margin.`;
     const effect = { ...EFFECT, amount_unit: unitWords, per_source_change_unit: unitWords };
@@ -532,6 +536,14 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
       reading('GBP/month', '£3 of revenue per month'));
   });
 
+  it('U2-points: bare "points" never makes an end of unknown unit a % (loyalty points); each end is asked, nothing adopted', () => {
+    const graph = unsizedGraph();
+    const said = 'Each 5 points of footfall loss costs us about 2 points of gross margin.';
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET, { ...EFFECT, amount_unit: 'points', per_source_change_unit: 'points' }, said);
+    expect(prepared.unit_readings).toEqual([]);
+    expect(prepared.ask).toBe('What unit is the 5 change in “Footfall loss from price rise” stated in; what unit is the 2 change in “Gross margin” stated in?');
+  });
+
   it('C1 existing own units govern: pp remains sizeable and no unit_reading is written', async () => {
     const graph = unsizedGraph();
     nodeOf(graph, SOURCE).observed_state = { value: 0, raw_value: 0, cap: 100, unit: '%', source: 'user_override' };
@@ -546,6 +558,119 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     const refused = await propose(mismatch, said, { ...EFFECT, per_source_change_unit: 'GBP' });
     expect(refused).toMatchObject({ ok: false, refusal: 'unit_mismatch' });
     expect(mismatch.attempts).toEqual([]);
+  });
+
+  describe('Science F1 (#87 5999199710, typed fields 17:3xZ): a % at the user\'s OWN 0 is points; any other level keeps the question', () => {
+    const BARE = { ...EFFECT, per_source_change_unit: '%' };
+    /** The source end's level as stored; the goal is a % level with no level of its own. */
+    const levelled = (observed_state: Json | undefined, targetState?: Json): Json => {
+      const graph = unsizedGraph();
+      if (observed_state !== undefined) nodeOf(graph, SOURCE).observed_state = observed_state;
+      nodeOf(graph, TARGET).goal_threshold_unit = '%';
+      if (targetState !== undefined) nodeOf(graph, TARGET).observed_state = targetState;
+      return projectGraphForPersistence(GraphV3.parse(graph)) as Json;
+    };
+    const ZERO_CARD = 'Record: +5 percentage points on "Footfall loss from price rise" → −2 percentage points in "Gross margin": '
+      + 'raising "Footfall loss from price rise" by 5 percentage points lowers "Gross margin" by 2 percentage points. '
+      + 'From your words: "Each 5% of footfall loss costs us about 2 percentage points of gross margin." Approve, or correct.';
+    const proposeAs = async (w: World, shape: 'single' | 'grouped', quote: string, effect: typeof EFFECT) => {
+      const args = { from_label: FOOTFALL, to_label: MARGIN, ...effect, quote };
+      return await w.caps.proposeLinkEffect!(ctxSaying(quote), shape === 'grouped' ? { links: [args] } : args) as Json;
+    };
+    it.each([
+      ['user-stated 0 (raw_value)', { value: 0, raw_value: 0, cap: 100, unit: '%', source: 'user_override' }],
+      ['user-stated 0 held as value only (no raw_value)', { value: 0, unit: '%', source: 'brief_extraction' }],
+    ] as const)('F1 %s: no question; the card says points, and the write is the points write', async (_name, os) => {
+      // Control: the same link sized from a sentence that SAYS points. The writer stores each end in its own unit (one
+      // point is one raw unit of a % level), so the points reading is identified by an identical stored size.
+      const control = world(levelled({ ...os }));
+      expect((await approve(control, await proposeAs(control, 'single', SAID_POINTS, EFFECT))).out).toMatchObject({ ok: true, applied: true });
+      const pointsLink = linkOf(projectGraphForPersistence(GraphV3.parse(control.graph())) as Json);
+      const w = world(levelled({ ...os }));
+      const r = await proposeAs(w, 'single', SAID_BARE, BARE);
+      expect(r, JSON.stringify(r)).toMatchObject({ ok: true, mutated: false });
+      const { card, out } = await approve(w, r);
+      expect(card.detail).toBe(ZERO_CARD);
+      expect(out, JSON.stringify(out)).toMatchObject({ ok: true, applied: true });
+      const cold = projectGraphForPersistence(GraphV3.parse(w.graph())) as Json;
+      expect(linkOf(cold).provenance.natural_effect).toEqual(pointsLink.provenance.natural_effect);
+      expect(linkOf(cold).strength).toEqual(pointsLink.strength);
+      expect(linkOf(cold).provenance).toMatchObject({ magnitude: 'user_stated', source_quote: SAID_BARE, reading: 'agent_proposed_user_confirmed' });
+      expect(nodeOf(cold, SOURCE)).not.toHaveProperty('unit_reading');
+      // The grouped door stores the same points reading. (A ONE-link grouped result shows no card on staging today:
+      // `linkEffectReadingFor` reads `result.link` for one operation. Pre-existing; a follow-up row, not this change.)
+      const g = world(levelled({ ...os }));
+      const grouped = await proposeAs(g, 'grouped', SAID_BARE, BARE);
+      expect(grouped, JSON.stringify(grouped)).toMatchObject({ ok: true, mutated: false });
+      expect((g.proposals.get(String(grouped.proposal_id))!.operations[0]!.value as Json).effect)
+        .toEqual({ ...BARE, per_source_change_unit: 'percentage points' });
+    });
+    it.each([
+      ['user-stated 30%: the example is the user\'s own level', { value: 0.3, raw_value: 30, cap: 100, unit: '%', source: 'user_override' },
+        'Is that a 5-point rise in “Footfall loss from price rise” (30% → 35%), or 5% of today’s 30% (a 1.5-point rise: 30% → 31.5%)?'],
+      ['Olumi-estimated 0 (cee_inference): no typed zero, generic example', { value: 0, raw_value: 0, cap: 100, unit: '%', source: 'cee_inference' },
+        'Is that a 5-point rise in “Footfall loss from price rise” (say 10% → 15%), or 5% of today’s level?'],
+      ['a 0 with no source: no typed zero, generic example', { value: 0, raw_value: 0, cap: 100, unit: '%' },
+        'Is that a 5-point rise in “Footfall loss from price rise” (say 10% → 15%), or 5% of today’s level?'],
+      ['Olumi-estimated 30%: never shown as today’s level', { value: 0.3, raw_value: 30, cap: 100, unit: '%', source: 'cee_inference' },
+        'Is that a 5-point rise in “Footfall loss from price rise” (say 10% → 15%), or 5% of today’s level?'],
+      ['user-stated 98%: points would pass 100%, so the generic example', { value: 0.98, raw_value: 98, cap: 100, unit: '%', source: 'user_override' },
+        'Is that a 5-point rise in “Footfall loss from price rise” (say 10% → 15%), or 5% of today’s level?'],
+    ] as const)('F1 contrast, %s: ONE question, nothing prepared or written', async (_name, os, question) => {
+      for (const shape of ['single', 'grouped'] as const) {
+        const w = world(levelled({ ...os }));
+        const r = await proposeAs(w, shape, SAID_BARE, BARE);
+        expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'unit_mismatch' });
+        expect(String(r.detail)).toContain(question);
+        if (shape === 'single') expect(r.question).toBe(question);
+        expect(w.attempts).toEqual([]); expect(w.commits).toEqual([]);
+      }
+    });
+    it('F1 each end on its own: the user\'s 0 settles the source; the target\'s Olumi-estimated level is still asked', async () => {
+      const w = world(levelled({ value: 0, raw_value: 0, cap: 100, unit: '%', source: 'user_override' },
+        { value: 0.54, raw_value: 54, cap: 100, unit: '%', source: 'cee_inference' }));
+      const said = 'Each 5% of footfall loss costs us about 2% of gross margin.';
+      const r = await proposeAs(w, 'single', said, { ...BARE, amount_unit: '%' });
+      expect(r.question).toBe('Is that a 2-point fall in “Gross margin” (say 12% → 10%), or 2% of today’s level?');
+      expect(w.attempts).toEqual([]);
+    });
+    /** The source with NO stored cap or scale_frame: the writer pins % on 100, so the reader must too (Codex r1 HIGH). */
+    const capless = (source: string | undefined): Json => {
+      const graph = unsizedGraph();
+      delete nodeOf(graph, SOURCE).scale_frame;
+      nodeOf(graph, SOURCE).observed_state = { value: 0, raw_value: 0, unit: '%', ...(source === undefined ? {} : { source }) };
+      nodeOf(graph, TARGET).goal_threshold_unit = '%';
+      return projectGraphForPersistence(GraphV3.parse(graph)) as Json;
+    };
+    it.each([['cee_inference'], [undefined]] as const)('F1 no stored cap, source %s: the pinned % frame still asks U3; nothing prepared', async source => {
+      const w = world(capless(source));
+      const r = await proposeAs(w, 'single', SAID_BARE, BARE);
+      expect(r.question, JSON.stringify(r)).toBe('Is that a 5-point rise in \u201cFootfall loss from price rise\u201d (say 10% \u2192 15%), or 5% of today\u2019s level?');
+      expect(w.attempts).toEqual([]);
+    });
+    it('F1 no stored cap, the user\'s 0: never the bare % card; the writer cannot size points off a frame of 1, so no card (follow-up row)', async () => {
+      const w = world(capless('user_override'));
+      const r = await proposeAs(w, 'single', SAID_BARE, BARE);
+      expect(r, JSON.stringify(r)).toMatchObject({ ok: false, mutated: false, refusal: 'unit_mismatch' });
+      expect(w.attempts).toEqual([]);
+      expect(applyLinkEffectEdit(writerParams(capless('user_override'), SAID_BARE, BARE))).toEqual({ kind: 'refused', reason: 'unit_mismatch' });
+    });
+    it.each([
+      ['Footfall loss rises by 5% and revenue moves from 20% to 25% while gross margin falls by 2 percentage points.'],
+      // Codex r2 HIGH: "rises" is a movement word, never a name for "Footfall loss from price RISE".
+      ['Footfall loss rises by 5% and revenue rises from 20% to 25% while gross margin falls by 2 percentage points.'],
+    ] as const)('Codex r1/r2 HIGH: another quantity\'s "from 20% to 25%" never settles, or is shown as, the source\'s change: %s', async said => {
+      const w = world(levelled({ value: 0, raw_value: 0, cap: 100, unit: '%', source: 'cee_inference' }));
+      const r = await proposeAs(w, 'single', said, BARE);
+      expect(r.question, JSON.stringify(r)).toBe('Is that a 5-point rise in \u201cFootfall loss from price rise\u201d (say 10% \u2192 15%), or 5% of today\u2019s level?');
+      expect(w.attempts).toEqual([]);
+    });
+    it('F1 writer: a forged reading that stores a bare % at the user\'s 0 is refused at commit (the card said points)', () => {
+      const graph = levelled({ value: 0, raw_value: 0, cap: 100, unit: '%', source: 'user_override' });
+      expect(applyLinkEffectEdit(writerParams(graph, SAID_BARE, BARE))).toEqual({ kind: 'refused', reason: 'unit_mismatch' });
+      const points = applyLinkEffectEdit(writerParams(graph, SAID_BARE, { ...BARE, per_source_change_unit: 'percentage points' }));
+      expect(points.kind, JSON.stringify(points)).toBe('mutated');
+    });
   });
 
   it.each(['observed level', 'other outgoing sized link', 'other incoming sized link'] as const)(
@@ -565,8 +690,11 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
       const r = await propose(w);
       expect(r, JSON.stringify(r)).toMatchObject({ ok: false, refusal: 'unit_mismatch' });
       // Never a dead end: an end step 2 may not adopt keeps step 1's Science-checked canvas route, verbatim.
+      // RE-PINNED (DL 0df0e1 item 3 on red team #87 6004429045): the sentence's "2 percentage points of gross margin" WAS
+      // read for the target, so only the source has no unit; the old words called both ends unitless, which was false.
+      expect(prepared.unit_readings.some(item => item.node_id === TARGET)).toBe(true);
       expect(String(r.detail)).toBe('Nothing was prepared. Tell the user exactly this: "'
-        + `\u201c${FOOTFALL}\u201d and \u201c${MARGIN}\u201d have no unit or scale in this model yet, so I can\u2019t record your figure from chat, `
+        + `\u201c${FOOTFALL}\u201d has no unit or scale in this model yet, so I can\u2019t record your figure from chat, `
         + `and nothing was recorded. You can set how strong this link is now: on the canvas, click the link from \u201c${FOOTFALL}\u201d `
         + `to \u201c${MARGIN}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. `
         + 'That records how strong you judge the link, not your figure."');
@@ -665,6 +793,40 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(result).toMatchObject({ kind: 'refused' });
     expect(nodeOf(now, SOURCE).unit_reading).toEqual(reading('GBP', 'Each £5'));
     expect(linkOf(now).provenance).not.toHaveProperty('natural_effect');
+  });
+
+  // Codex r1 on the RT-6 row-1 fix: the refusal's words read the writer's view, but ONLY readings a fresh read still
+  // makes. The source's approved % went stale (it now reads GBP, the analysis hash unchanged), the writer refused it,
+  // and the words must name what the model now holds, never put the refused % back.
+  it('stale adoption THROUGH APPROVAL: the refusal names the reading the model now holds, never the refused one', async () => {
+    const w = world();
+    const proposed = await propose(w);
+    expect(proposed, JSON.stringify(proposed)).toMatchObject({ ok: true });
+    const now = w.graph();
+    nodeOf(now, SOURCE).unit_reading = reading('GBP', 'Each £5');
+    expect(hashOf(now)).toBe(hashOf(w.graph()));
+    w.replace(now);
+    const { out } = await approve(w, proposed);
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false });
+    expect(String(out.detail)).not.toContain(`"${FOOTFALL}" in %`);
+    expect(String(out.detail)).toContain(`"${FOOTFALL}" in GBP`);
+    expect(String(out.detail)).not.toMatch(/no unit or scale/);
+    expect(w.attempts).toEqual([]);
+  });
+
+  // Codex r2: the same stale reading, arriving AFTER approval's dry run and before the real commit re-reads the graph.
+  // Whatever door answers (the commit's refusal, or its stale check), the words never put the refused % back.
+  it('stale adoption AT COMMIT: the words read the graph the commit refused on, never the refused %', async () => {
+    const w = world(unsizedGraph(), { beforeCommit: (g) => { nodeOf(g, SOURCE).unit_reading = reading('GBP', 'Each £5'); return g; } });
+    const proposed = await propose(w);
+    expect(proposed, JSON.stringify(proposed)).toMatchObject({ ok: true });
+    const { out } = await approve(w, proposed);
+    expect(out, JSON.stringify(out)).toMatchObject({ ok: false });
+    expect(w.commits).toHaveLength(1);
+    expect(String(out.detail)).not.toContain(`"${FOOTFALL}" in %`);
+    expect(String(out.detail)).toContain(`"${FOOTFALL}" in GBP`);
+    expect(String(out.detail)).not.toMatch(/no unit or scale/);
+    expect(linkOf(w.graph()).provenance).not.toHaveProperty('natural_effect');
   });
 
   it('readback checks each adopted unit by node id before reporting an applied approval', async () => {

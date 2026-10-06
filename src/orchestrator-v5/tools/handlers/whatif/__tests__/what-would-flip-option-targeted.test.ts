@@ -132,7 +132,7 @@ describe('what_would_flip — the answer addresses the option the user named', (
     expect(out.assistant_text).not.toContain('Hire Two Senior Engineers Locally');
     // And it is not the generic prose either (old and current openers).
     expect(out.assistant_text).not.toContain('currently leads');
-    expect(out.assistant_text).not.toMatch(/In this model, .+ scored highest/);
+    expect(out.assistant_text).not.toMatch(/In this model, .+ (?:scored highest|was supported by \d)/);
   });
 
   it('the named option IS the one that flips ⇒ an addressed answer', async () => {
@@ -180,7 +180,7 @@ describe('F1 at the HANDLER — the target may be the option that already won', 
         sonnetValid: true,
       }),
     );
-    expect(out.assistant_text).toContain('is already the leading option');
+    expect(out.assistant_text).toContain('is already the most-supported option');
     expect(out.assistant_text).not.toContain('in favour of');
     expect(out.assistant_text).not.toContain('Testing two or more factors together');
   });
@@ -198,7 +198,7 @@ describe('F1 at the HANDLER — the target may be the option that already won', 
     // Neither asserts it trails …
     expect(out.assistant_text).not.toContain('in favour of');
     // … nor confirms it leads.
-    expect(out.assistant_text).not.toContain('is already the leading option');
+    expect(out.assistant_text).not.toContain('is already the most-supported option');
     expect(out.assistant_text).toContain(
       'cannot say where Hire Two Senior Engineers Locally stands',
     );
@@ -236,7 +236,7 @@ describe('NO named option ⇒ existing behaviour, untouched', () => {
 
   it('the deterministic composer keeps the generic prose', async () => {
     const out = await handler(makeInvocation({ flipTargetOption: null, sonnetValid: false }));
-    expect(out.assistant_text).toMatch(/In this model, .+ scored highest/);
+    expect(out.assistant_text).toMatch(/In this model, .+ was supported by \d{1,3}% of runs\./);
     expect(out.assistant_text).toContain('would lead instead');
   });
 });

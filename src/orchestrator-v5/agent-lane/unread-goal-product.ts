@@ -123,11 +123,11 @@ export function unreadGoalProductWarning(
   const sum = `${sayFigure(p.rate.level, p.rate.unit)} × ${sayFigure(p.count.level, p.count.unit)} = ${sayFigure(product, p.goal.unit)}`;
   const message = `Not shown. Olumi has not read ‘${p.goal.label}’ as ‘${p.rate.label}’ × ‘${p.count.label}’ (${sum}, `
     + `${same ? '' : 'close to '}${p.goal.typed ? 'your' : 'the goal’s current'} ${sayFigure(p.goal.level, p.goal.unit)}), so this run can’t say how likely any option is `
-    + 'to reach the goal, what it would reach, or which option does best.';
+    + 'to reach the goal, what it would reach, or how the options compare in this model.';
   return {
     code,
     message: message.length <= 400 ? message
-      : `Not shown. Olumi has not read ‘${p.goal.label}’ as a product of your own figures, so this run can’t say how likely any option is to reach the goal, what it would reach, or which option does best.`,
+      : `Not shown. Olumi has not read ‘${p.goal.label}’ as a product of your own figures, so this run can’t say how likely any option is to reach the goal, what it would reach, or how the options compare in this model.`,
     severity: 'warning',
     node_ids: [p.goal.id, p.rate.id, p.count.id],
     option_ids: [...optionIds],

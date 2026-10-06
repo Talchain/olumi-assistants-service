@@ -15,6 +15,7 @@ import type { GraphV3T } from "../../schemas/cee-v3.js";
 import { resolveScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
+import { heldLinkOf } from "../../orchestrator-v5/goal-target/held-user-links.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
 import {
   observedValueAuthorship,
@@ -1002,7 +1003,8 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         from: edge.from,
         to: edge.to,
         strength: edge.strength?.mean ?? 0,
-        exists: edge.exists_probability ?? DEFAULT_EXISTS_PROBABILITY,
+        // Hold-at-1.0 (d5 #87 6008807178): the model reasons with the existence the Run USES, never a held link's stored doubt.
+        exists: heldLinkOf(edge) !== null ? 1 : edge.exists_probability ?? DEFAULT_EXISTS_PROBABILITY,
       };
 
       // Non-default only: `directed` is the default and is omitted, so a graph

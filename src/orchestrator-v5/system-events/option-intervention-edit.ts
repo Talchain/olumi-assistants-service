@@ -82,8 +82,11 @@ import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, type LinkEffectStatement } from './link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, storedGaugeSign, type LinkEffectReversal, type LinkEffectStatement } from './link-effect-edit.js';
 import type { LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { mediatorReadings, storedGaugesKept } from '../agent-lane/mediator-reading.js';
+import { isDirectedEdge } from '../../schemas/graph.js';
+import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
@@ -563,6 +566,8 @@ export interface ApprovedLinkEffect {
   readonly reading_token: string;
   /** Each disclosed end-unit reading, bound into the approval token and written atomically with this link. */
   readonly unit_readings?: readonly LinkEffectUnitReading[];
+  readonly reversal?: LinkEffectReversal;
+  readonly link_selected?: true;
 }
 
 /**
@@ -585,11 +590,46 @@ const LINK_WRITER_OWNED_EDGE_MEMBERS = ['strength', 'effect_direction', 'provena
 /**
  * ⛔ ONLY THE DECLARED LINKS MAY CHANGE, and on each only what the link writer owns. The size-by-chat door additionally
  * owns exactly each approved end's unit_reading: no other node field, other link, order or top-level field may move.
+ * The one exception is the GAUGE a declared link's answer writes (#2623 (B); below), admitted by identity.
  */
 export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unknown,
   links: readonly { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }[]): boolean {
+  return isEditableGraph(after) && linkWriteIsScoped(storedBefore, after, links);
+}
+
+/**
+ * ⭐ S5t (Science d5 #87 6007669630): the ONE-link door's postimage when the writer refit the frames. Two facts, each
+ * re-derived here, never taken from the writer:
+ *  1. the user's write itself (`refitFrom`, the link at its full β) changed only what the link writer owns on that link
+ *     (the same scope rule, without the [-1, 1] bound the refit exists to restore);
+ *  2. the stored graph is EXACTLY construction's refit of that write (`refitFramesForStatedEffects` as construction calls
+ *     it, then `clampForPersist`) — no chat-only rescale — and the stored base needed no refit of its own, so no other
+ *     link's size moves because of this sentence.
+ */
+export function linkEffectRefitPostimageIsScoped(storedBefore: unknown, refitFrom: unknown, after: unknown,
+  link: { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }): boolean {
+  if (!isEditableGraph(after) || !isRecordGraph(refitFrom)) return false;
+  if (refitFramesForStatedEffects(normaliseAbsenceOnly(storedBefore) as Record<string, unknown>).refits.length > 0) return false;
+  // r2 (Codex r1 on #2631, P1): ONE preimage. The scope rule and the recompute read the same canonical write, so a shape the
+  // projection repairs (an option's setting under `data.interventions`) can never pass one and escape the other.
+  const canonical = projectGraphForPersistence(refitFrom) as Record<string, unknown>;
+  if (!linkWriteIsScoped(storedBefore, canonical, [link])) return false;
+  const fitted = refitFramesForStatedEffects(canonical);
+  if (fitted.refits.length === 0) return false;
+  return isDeepStrictEqual(projectGraphForPersistence(clampForPersist(fitted.graph)), after)
+    && refitKeepsOtherLinks(canonical, after as Record<string, unknown>, new Set([`${link.from}→${link.to}`]))
+    && storedGaugesKept(canonical, after);
+}
+
+const isRecordGraph = (g: unknown): g is { nodes: unknown[]; edges: unknown[] } =>
+  typeof g === 'object' && g !== null && Array.isArray((g as { nodes?: unknown }).nodes) && Array.isArray((g as { edges?: unknown }).edges);
+
+/** The scope rule itself: `afterGraph` differs from the stored graph only in what the link writer owns on the declared links. */
+function linkWriteIsScoped(storedBefore: unknown, afterGraph: unknown,
+  links: readonly { from: string; to: string; unit_readings?: readonly LinkEffectUnitReading[] }[]): boolean {
   const before = normaliseAbsenceOnly(storedBefore);
-  if (!isEditableGraph(before) || !isEditableGraph(after) || links.length === 0) return false;
+  if (!isEditableGraph(before) || !isRecordGraph(afterGraph) || links.length === 0) return false;
+  const after = afterGraph as EditableGraph;
   if (new Set(links.map(l => `${l.from}::${l.to}`)).size !== links.length) return false;
   if (after.edges.length !== before.edges.length) return false;
   const restored = structuredClone(after);
@@ -612,11 +652,33 @@ export function linkStrengthsPostimageIsScoped(storedBefore: unknown, after: unk
     if (Object.hasOwn(was[0]!, 'unit_reading')) now[0]!.unit_reading = structuredClone(was[0]!.unit_reading);
     else delete now[0]!.unit_reading;
   }
+  // ⭐ #2623 (B) AT THE DOOR (Codex r1 on #2631; DL 0df0e1 ruling): one end-to-end answer through a level-less mediator also
+  // writes the GAUGE (M → child = ±1, `sized_by_identity: {op:'gauge'}`, Science 6006425419). Admitted ONLY for the child edge
+  // `mediatorReadings` names for a declared link's TARGET on the stored graph, only when that was not already the stored
+  // gauge, and only when the postimage reads it back as the intact stored gauge; on it, as on a declared link, only what
+  // the link writer owns may move. Any other edge that changed still refuses.
+  const gauges = new Set<number>();
+  const readBefore = mediatorReadings(before);
+  const readAfter = mediatorReadings(after);
+  for (const link of links) {
+    const was = readBefore.get(link.to);
+    if (was?.via !== 'gauge' || was.stored === true) continue;
+    const now = readAfter.get(link.to);
+    if (now?.via !== 'gauge' || now.child !== was.child || now.stored !== true) continue;
+    // #2634 r1 P1: the ONE directed child edge, by POSITION, never by an id string (ids may hold any character, and a
+    // bidirected pair shares the endpoints). r1 P2: carrying exactly the writer's sign, the stored child's own orientation.
+    const at = before.edges.flatMap((e, i) => e.from === link.to && e.to === was.child && isDirectedEdge(e as never) ? [i] : []);
+    if (at.length !== 1) continue;
+    const sign = storedGaugeSign(before.edges[at[0]!]!);
+    const written = after.edges[at[0]!];
+    if (written?.strength?.mean !== sign || written.effect_direction !== (sign < 0 ? 'negative' : 'positive')) continue;
+    gauges.add(at[0]!);
+  }
   for (let i = 0; i < restored.edges.length; i += 1) {
     const now = restored.edges[i]! as Record<string, unknown> & { from: string; to: string };
     const was = before.edges[i]! as Record<string, unknown> & { from: string; to: string };
     if (now.from !== was.from || now.to !== was.to) return false;
-    if (!links.some(l => l.from === was.from && l.to === was.to)) continue;
+    if (!links.some(l => l.from === was.from && l.to === was.to) && !gauges.has(i)) continue;
     for (const member of LINK_WRITER_OWNED_EDGE_MEMBERS) {
       if (Object.hasOwn(was, member)) now[member] = structuredClone(was[member]);
       else delete now[member];
@@ -715,6 +777,7 @@ async function applyApprovedLinkEffects(
     const written = applyLinkEffectEdit({ persistedGraph: working, from: link.from, to: link.to, effect: link.effect,
       expected: { graph_hash: graphHash, edge_token: link.edge_token }, quote: link.quote, reading_token: link.reading_token,
       unit_readings: link.unit_readings,
+      reversal: link.reversal, link_selected: link.link_selected,
       lastRunIdentityUse: ctx.lastRunIdentityUse });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: i };
     working = written.mutatedGraph;
@@ -934,10 +997,13 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     const written = applyLinkEffectEdit({ persistedGraph: before, from: linkEffect.from, to: linkEffect.to, effect: linkEffect.effect,
       expected: { graph_hash: input.expectedGraphHash, edge_token: linkEffect.edge_token }, quote: linkEffect.quote,
       reading_token: linkEffect.reading_token, unit_readings: linkEffect.unit_readings,
-      lastRunIdentityUse: input.lastRunIdentityUse ?? null });
+      reversal: linkEffect.reversal, link_selected: linkEffect.link_selected,
+      lastRunIdentityUse: input.lastRunIdentityUse ?? null, frameRefit: true });
     if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: 0 };
     const graph = projectGraphForPersistence(written.mutatedGraph);
-    if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, [linkEffect])) {
+    if (!isEditableGraph(graph) || !(written.refitFrom === undefined
+      ? linkStrengthsPostimageIsScoped(before, graph, [linkEffect])
+      : linkEffectRefitPostimageIsScoped(before, written.refitFrom, graph, linkEffect))) {
       return { kind: 'refused', reason: 'link_scope_mismatch' };
     }
     const appliedHash = computeAnalysisAffectingGraphHash(graph);

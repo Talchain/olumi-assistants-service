@@ -289,8 +289,8 @@ describe('conversational recitation — defaulted values', () => {
       // the reason `DEFAULTED_DISCLOSURE_TAIL` is exported at all — and it duly
       // drifted the first time the wording moved.
       expect(after).toContain(DEFAULTED_DISCLOSURE_TAIL);
-      // The recitation itself SURVIVES — qualified, not withheld.
-      expect(after).toContain('scored highest in');
+      // The recitation itself SURVIVES — qualified, not withheld (run-share words, Science d5 #87 6008589328).
+      expect(after).toMatch(/was supported by \d{1,3}% of runs/);
     });
 
     it('the explain fallback carries the same disclosure, from the same source', () => {

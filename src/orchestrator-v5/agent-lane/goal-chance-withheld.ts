@@ -21,6 +21,8 @@ import {
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
 } from '../../orchestrator/context/option-result-source.js';
 
+import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-ask.js';
+
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
 
 /** What the Agent is told when the run withheld the goal's chance. */
@@ -50,7 +52,7 @@ export const GOAL_CHANCE_WITHHELD_NOTE =
  */
 export const PLACEHOLDER_PATH_NOTE =
   'This run withheld the chance of reaching the goal for the options in `option_ids`, and for EVERY option the share of runs '
-  + 'in which it did best: they move with a link Olumi has not sized. Never state, estimate, rank or compare those figures, never '
+  + 'that supported it: they move with a link Olumi has not sized. Never state, estimate, rank or compare those figures, never '
   + 'quote those options’ estimated value for the goal itself, and never name a leading option. Say `say` once, as written, when '
   + 'you describe the run: it names the link, and asks for its size only where it does. Never ask the user to size a link `say` '
   + 'calls a guess. Other results of this run may be described as they are.';
@@ -61,7 +63,7 @@ export const PLACEHOLDER_PATH_NOTE =
  */
 export const PRODUCT_NOT_READ_NOTE =
   'This run withheld, for EVERY option, the chance of reaching the goal, the option’s estimated value for the goal itself, and '
-  + 'the share of runs in which it did best: the user’s own figures make the goal the product `say` names, and this run did not '
+  + 'the share of runs that supported it: the user’s own figures make the goal the product `say` names, and this run did not '
   + 'calculate it that way. Never state, estimate, rank or compare those figures, never name a leading option, and never say '
   + 'Olumi will calculate it that way. Say `say` once, as written, when you describe the run. Other results of this run may be '
   + 'described as they are.';
@@ -72,11 +74,31 @@ export const PRODUCT_NOT_READ_NOTE =
  * them — one option's own range — and forbids every comparative use: no rank, no leader, no better or worse.
  */
 export const OUTCOME_KEPT_NOTE =
-  'This run withheld, for EVERY option, the chance of reaching the goal’s target and the share of runs in which it did best: '
+  'This run withheld, for EVERY option, the chance of reaching the goal’s target and the share of runs that supported it: '
   + 'the target can’t be tested yet. Each option’s outcome for the goal (its centre and spread) is shown to the user on the '
   + 'results panel; you are not given those figures. Never quote or estimate an option’s outcome, never rank or order the '
   + 'options by their outcomes, never name a leading or best option, and never say one option is better or worse than another. '
   + 'Say `say` once, as written, when you describe the run.';
+
+/**
+ * ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8 CONFIRMED): the untestable target KEPT the ordering. Only the chance of
+ * reaching the target (and, unless the failures leave it in the goal's units, the outcome) is withheld; the shares and the
+ * leader are this run's findings and may be said as such, in the run's own direction.
+ */
+export const TARGET_ONLY_NOTE =
+  'This run withheld, for EVERY option, the chance of reaching the goal’s target and each option’s outcome for the goal: the '
+  + 'target can’t be tested yet. The share of runs that supported each option IS a result of this run: say it, if at all, as a '
+  + 'finding of this model in the goal’s own direction (where lower is better, the option that came out lowest), always said as '
+  + '‘in this model’, never as a chance of reaching the target and never as a recommendation. Never state, estimate, rank or compare a chance of reaching the '
+  + 'target, and never quote or estimate an option’s outcome. Say `say` once, as written, when you describe the run.';
+/** The same, where the failures leave each option's outcome in the goal's units (P2/P3/P4 only): the panel shows it. */
+export const TARGET_ONLY_OUTCOME_KEPT_NOTE =
+  'This run withheld, for EVERY option, the chance of reaching the goal’s target: the target can’t be tested yet. Each option’s '
+  + 'outcome for the goal is shown to the user on the results panel; you are not given those figures, so never quote or estimate '
+  + 'one, never rank or order the options by those outcomes, and never say one option is better or worse than another (DL #2448 '
+  + 'condition (1)). The share of runs that supported each option IS a result of this run: say it, if at all, as a finding of this model '
+  + 'in the goal’s own direction (where lower is better, the option that came out lowest), always said as ‘in this model’, never '
+  + 'as a chance of reaching the target and never as a recommendation. Say `say` once, as written, when you describe the run.';
 
 /**
  * ⛔ GATE 1 v2 (DL 5 Oct, #2574): options the Run could not tell apart split their wins, so EVERY option's share of runs
@@ -84,7 +106,7 @@ export const OUTCOME_KEPT_NOTE =
  * Every outcome stays, but identical options share one, so they are never compared with each other.
  */
 export const OPTIONS_IDENTICAL_NOTE =
-  'This run withheld, for EVERY option, the share of runs in which it did best, so no option may be called leading or best; '
+  'This run withheld, for EVERY option, the share of runs that supported it, so no option may be called leading or best; '
   + 'and, for the options in `option_ids`, the chance of reaching the goal: those options came out identical in this model, so '
   + 'the run cannot tell them apart. Never state, estimate, rank or compare those figures, never name a leading option, and never '
   + 'say one of the options in `option_ids` is better or worse than another. Say `say` once, as written, when you describe the '
@@ -133,12 +155,23 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
     return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PLACEHOLDER_PATH_NOTE, option_ids: ids('option_ids') };
   }
-  // Gate 5 speaks alone too: CEE writes it only on a run nothing else withheld (`run-analysis.ts`).
-  if (warnings.every((w) => w.code === GOAL_FIGURES_PRODUCT_NOT_READ)) {
-    const w = warnings[0]!;
+  // Gate 5 covers EVERY option and keeps its existing explanation when a per-option path also withholds.
+  const product = warnings.find((w) => w.code === GOAL_FIGURES_PRODUCT_NOT_READ);
+  if (product !== undefined) {
+    const w = product;
     const words = typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
     return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PRODUCT_NOT_READ_NOTE, option_ids: ids('option_ids') };
+  }
+  // RT-10 B′ R2: every withhold is the untestable target and it KEPT the shares (no `win_share` withheld) → the target-only
+  // licence, and the reply says the B′ tail the warning carries (`say`, from `untestableTargetParts`).
+  const targetOnly = warnings.every((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE
+    && Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share'));
+  if (targetOnly) {
+    const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
+    const tail = warnings.map((w) => (typeof w.say === 'string' ? w.say.trim() : '')).find((t) => t !== '');
+    const outcomeWithheld = warnings.some((w) => (w.withheld_claims as unknown[]).includes('outcome'));
+    return { withheld: true, say: tail ?? OPENING, node_ids: nodeIds, note: outcomeWithheld ? TARGET_ONLY_NOTE : TARGET_ONLY_OUTCOME_KEPT_NOTE };
   }
   // F1b [R1]: every withhold is the untestable target with the outcome KEPT → the outcome-kept licence, never the ban on
   // quoting an option's value (which would contradict the outcomes the panel now shows).
@@ -154,8 +187,12 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
       .map((w) => (typeof w.message === 'string' ? w.message.trim() : '')).find((m) => m !== '');
     return words === undefined ? '' : words.replace(UI_OPENING, '').trim();
   };
-  const reason = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED)]
-    .filter((r) => r !== '').join(' ');
+  // ⭐ MC D1 (f) (DL 6 Oct; Acceptance g1-b501 drafts 1 and 6, full wire on CEE 231affb): a placeholder path beside an
+  // untestable target that KEPT the shares fell through to the bare opening, so the chat asked nothing answerable while
+  // the panel named a link. The placeholder's own words ARE its one ask ("… whose strengths nobody has set yet. Set them
+  // to see how much they matter."), so they are said here, after any PLoT reason; the target's own question is not added.
+  const reason = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED),
+    reasonFor(GOAL_FIGURES_PLACEHOLDER_PATH)].filter((r) => r !== '').join(' ');
   const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
   return { withheld: true, say: reason === '' ? OPENING : `${OPENING} ${reason}`, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
 }
@@ -171,7 +208,13 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
  */
 export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
   const say = goalChanceSayFromThisTurn(toolResults);
-  return say !== null && !sameWordsIn(replyText, say) ? say : null;
+  if (say === null || sameWordsIn(replyText, say)) return null;
+  // MC D1 (Codex buddy r2 P2): a composite line (the opening + a warning's own words) owes only what the reply does not
+  // already carry — the Agent quoting the placeholder's "Set them …" must not get it a second time.
+  if (say.startsWith(OPENING) && say.length > OPENING.length && sameWordsIn(replyText, say.slice(OPENING.length).trim())) {
+    return sameWordsIn(replyText, OPENING) ? null : OPENING;
+  }
+  return say;
 }
 
 /** The latest Run this turn's typed sentence; a later Run without a warning clears an earlier one. */
@@ -197,4 +240,34 @@ export function sameWordsIn(text: string, sentence: string): boolean {
   const plain = (t: string): string => t.replace(/[\u0027\u0022\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2032\u2033`]|\*\*|__|(?<![\w])[*_]|[*_](?![\w])/g, '')
     .replace(/\s+/g, ' ').trim();
   return plain(text).includes(plain(sentence));
+}
+
+/**
+ * ⭐ MC D1 (c) ON THE RUN TURN ITSELF (served witness on CEE b501eda4, draw 6, #87 6008006944): the chip Run's reply is
+ * Olumi's fixed line plus the owed lines, so PLoT #416's reason was said ("'Monthly starter support cost' depends on … ×
+ * …, but this run couldn't calculate it that way") and nothing asked — the fail-closed closing only speaks when ranking
+ * prose is dropped. The ONE ask that would let the identity be worked out (`composeIdentityAskForNode`, from the graph the
+ * Run analysed) is its own owed line, after the reason; null when the Run carries no #416 or the graph shows no ask.
+ */
+export function identityAskLineFor(result: unknown, graph: unknown): string | null {
+  const block = recordOf(result);
+  if (block === undefined) return null;
+  const warning = [recordOf(block.enrichment)?.inference_warnings, block.inference_warnings]
+    .flatMap((w) => (Array.isArray(w) ? w : [])).map(recordOf)
+    .find((w) => w?.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED);
+  const nodeId = Array.isArray(warning?.node_ids) && typeof warning.node_ids[0] === 'string' ? warning.node_ids[0] : undefined;
+  return nodeId === undefined ? null : composeIdentityAskForNode(nodeId, graph)?.assistant_text ?? null;
+}
+
+/** The latest Run this turn's typed identity ask (`identity_ask_say` on its tool result), unless the reply already says it. */
+export function identityAskLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
+  let say: string | undefined;
+  for (const r of toolResults) {
+    const rec = recordOf(r);
+    if (typeof rec?.identity_ask_say === 'string' && rec.identity_ask_say.trim() !== '') say = rec.identity_ask_say;
+    // Any later Run clears it — one with a result or one without (Codex buddy r2 P1: a no-result Run after the operand
+    // was set must not repeat the earlier "is 0 today … how many …?").
+    else if (typeof rec?.ran === 'boolean') say = undefined;
+  }
+  return say !== undefined && !sameWordsIn(replyText, say) ? say : null;
 }

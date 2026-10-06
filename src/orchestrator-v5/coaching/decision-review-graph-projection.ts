@@ -68,6 +68,7 @@ import {
   type GraphV3Compact,
 } from '../../orchestrator/context/graph-compact.js';
 import { observedValueAuthorship } from '../../cee/transforms/provenance-display.js';
+import { heldLinkOf, withHeldUserLinks } from '../goal-target/held-user-links.js';
 
 /** How the projection was obtained. Reported in telemetry; never user-facing. */
 export type DecisionReviewGraphSource =
@@ -237,9 +238,13 @@ function readEdgeReasoning(edge: Record<string, unknown>): Record<string, unknow
  * declared, and an UNdeclared one is excluded by construction — which is right,
  * since `NodeV3` strips those anyway.
  */
-const GOAL_THRESHOLD_FIELDS: readonly string[] = Object.keys(NodeV3.shape).filter((key) =>
-  key.startsWith('goal_threshold'),
-);
+const GOAL_THRESHOLD_FIELDS: readonly string[] = [
+  ...Object.keys(NodeV3.shape).filter((key) => key.startsWith('goal_threshold')),
+  // ⭐ D3 step 1 (census BLIND carrier): the comparator of the stated target travels WITH the threshold it qualifies.
+  // A paired ceiling ("at most 400") is stamped on the goal node like a floor, so a threshold handed over without its
+  // `goal_direction` reads as "reach 400" — the reviewing model could call the goal "well short of its target".
+  'goal_direction',
+];
 
 function readGoalThreshold(node: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -374,7 +379,10 @@ function projectEdgePreserving(raw: unknown): Record<string, unknown> | null {
   } else if (typeof edge.strength === 'number' && Number.isFinite(edge.strength)) {
     out.strength = edge.strength;
   }
-  if (typeof edge.exists_probability === 'number' && Number.isFinite(edge.exists_probability)) {
+  // Hold-at-1.0 (Codex r1 #2643): the reviewer reads the existence the Run USES for a held user link.
+  if (heldLinkOf(edge) !== null) {
+    out.exists = 1;
+  } else if (typeof edge.exists_probability === 'number' && Number.isFinite(edge.exists_probability)) {
     out.exists = edge.exists_probability;
   } else if (typeof edge.exists === 'number' && Number.isFinite(edge.exists)) {
     out.exists = edge.exists;
@@ -463,7 +471,8 @@ export function projectRunGraphForDecisionReview(
     const nodes = Array.isArray(enrichmentGraph.nodes) ? enrichmentGraph.nodes : [];
     const edges = Array.isArray(enrichmentGraph.edges) ? enrichmentGraph.edges : [];
     return {
-      graph: enrichmentGraph,
+      // Hold-at-1.0 (Codex r1 #2643): the same effective existence on the enrichment branch.
+      graph: withHeldUserLinks(enrichmentGraph),
       via: 'enrichment',
       node_count: nodes.length,
       edge_count: edges.length,

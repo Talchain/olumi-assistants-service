@@ -18,7 +18,10 @@ import {
   NODE_REQUIRED_NESTED_FIELDS,
   describeNonObjectWrite,
   isPlainObjectWrite,
+  keepMeanProjectionWhenSizeUnchanged,
   mergeRequiredNestedWrite,
+  UserFigureHeldError,
+  userFigureMovedRefusal,
 } from '../../schemas/required-nested-merge.js';
 import {
   CANDIDATE_BUILD_FAILED,
@@ -85,6 +88,8 @@ export interface UpdateEdgeFieldPayload {
  * to CANDIDATE_BUILD_FAILED (keeping `code` inside MUTATION_REASON_CODES).
  */
 function toBlocker(err: unknown): MutationBlocker {
+  // F1: the refusal's own words, under the existing build-failed code (held, fail-closed; no new wire literal).
+  if (err instanceof UserFigureHeldError) return { code: CANDIDATE_BUILD_FAILED, readable: err.refusal };
   if (err instanceof D1HandlerError) {
     switch (err.code) {
       case 'GRAPH_INVARIANT_VIOLATED':
@@ -365,12 +370,18 @@ export function buildUpdateEdgeFieldCandidate(
           `Edge ${payload.from_node} -> ${payload.to_node} not found in graph.`,
         );
       }
+      const before = structuredClone(edge);
       setTunableFieldPath(
         edge as Record<string, unknown>,
         payload.field,
         payload.to,
         EDGE_REQUIRED_NESTED_FIELDS,
       );
+      Object.assign(edge, keepMeanProjectionWhenSizeUnchanged(before, edge));
+      // ⭐ F1 — the applier's own check (`patch-applier.ts` `applyUpdateEdge`), so the two merges stay in parity: a move
+      // of a link holding the user's figure is refused, never adopted as the applied view.
+      const figureMoved = userFigureMovedRefusal(before, edge);
+      if (figureMoved !== null) throw new UserFigureHeldError(figureMoved);
       return { before: null, after: { from: payload.from_node, to: payload.to_node } };
     });
     return { candidate: exposeCandidate(mutatedGraph) };

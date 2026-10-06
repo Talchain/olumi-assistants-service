@@ -211,7 +211,7 @@ describe('PR #788 R1 — flipClaimPosture JOIN through the REAL route + REAL tur
     // …replaced by the no-flip variant — present ONLY if the turn-executor
     // threading line executed (deleting it reverts to the old copy).
     expect(body.assistant_text).toMatch(
-      /no single factor we tested would change which option leads on its own/i,
+      /no single factor we tested would change the most-supported option on its own/i,
     );
   });
 });

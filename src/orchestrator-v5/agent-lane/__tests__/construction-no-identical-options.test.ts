@@ -28,7 +28,7 @@ import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js
 import { labelMatchesBaseline } from '../../../cee/transforms/analysis-ready.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { subtractMagnitudeDelta } from './magnitude-delta.js';
-import { asServedBeforeOneForm } from './fixtures/one-form-levels.js';
+import { asProjectedMeanCapture, asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 
 // ── the served corpus ────────────────────────────────────────────────────────
 type Level = { value: number; source?: string };
@@ -192,11 +192,11 @@ const RESTAMPED_BY_2355: Record<string, readonly (readonly [string, string])[]> 
   'f-20260926T020217Z': [['59_with_ai_release', 'ai_feature_availability']],
   'f-20260926T001627Z': [['raise_to_59_with_release', 'ai_feature_release_availability']],
 };
-const after2355 = <G extends SGraph>(g: G, key: string): G => ({
+const after2355 = <G extends SGraph>(g: G, key: string, beforeMagnitudeSubtraction: SGraph): G => asProjectedMeanCapture({
   ...g,
   edges: g.edges.map((e) => ((RESTAMPED_BY_2355[key] ?? []).some(([f, t]) => e.from === f && e.to === t)
     ? { ...e, provenance: { ...e.provenance, source: 'cee_hypothesis' } } : e)),
-});
+}, beforeMagnitudeSubtraction);
 /**
  * Base (cb1778b) predates the limit frame (#1919): admission now stamps each limit's `value_frame` right
  * after `provenance` (`admit-constraint.ts`). Every served limit here is a level, so what registers is
@@ -294,7 +294,7 @@ describe.each([
     const { graph: sizedGraph } = await build(draft());
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     const graph = unsized(withoutG1(asServedBeforeOneForm(sizedGraph, run.brief.draft_graph), G1_WITH_HORIZON));
-    const served = after2355(run.brief.draft_graph, key);
+    const served = after2355(run.brief.draft_graph, key, sizedGraph);
     expect(withoutOption(graph, TEST_ID).nodes).toEqual(withoutOption(served, TEST_ID).nodes);
     expect(withoutOption(graph, TEST_ID).edges).toEqual(withoutOption(served, TEST_ID).edges);
     expect(statedLimits(graph)).toEqual(statedLimits(served));
@@ -302,7 +302,7 @@ describe.each([
 
   it('RED: everything else is byte-identical to what base registers — only the test option and its edges are gone', async () => {
     const { graph } = await build(draft());
-    const base = after2355(baseGraph(key), key);
+    const base = after2355(baseGraph(key), key, graph);
     expect(optionIds(base)).toContain(TEST_ID);
     expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, base), G1_WITH_HORIZON)))).toBe(JSON.stringify(framedBase(withoutOption(base, TEST_ID))));
   });
@@ -383,8 +383,8 @@ describe('controls — what the rule must never touch', () => {
     expect(optionIds(graph)).toContain(olumiId);
     // Served before P2 A5: option levels are read back in the served short form (`one-form-levels.ts`).
     expect(withoutG1(asServedBeforeOneForm(graph, run.brief.draft_graph), G1_NO_HORIZON_WORDS).nodes).toEqual(olumisKnownLevels(run.brief.draft_graph.nodes));
-    expect(unsized(graph).edges).toEqual(after2355(run.brief.draft_graph, key).edges);
-    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, after2355(baseGraph(key), key)), G1_NO_HORIZON_WORDS)))).toBe(JSON.stringify(framedBase(after2355(baseGraph(key), key))));
+    expect(unsized(graph).edges).toEqual(after2355(run.brief.draft_graph, key, graph).edges);
+    expect(JSON.stringify(unsized(withoutG1(asServedBeforeOneForm(graph, after2355(baseGraph(key), key, graph)), G1_NO_HORIZON_WORDS)))).toBe(JSON.stringify(framedBase(after2355(baseGraph(key), key, graph))));
     expect(out).not.toHaveProperty('options_withheld');
     expect(questions(out).filter((q) => q.startsWith('I left out ') || q.startsWith('What makes '))).toEqual([]);
   });

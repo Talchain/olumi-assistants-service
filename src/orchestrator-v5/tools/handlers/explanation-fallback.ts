@@ -39,7 +39,7 @@ import type {
 // rendered the runner-up gap as a magnitude; with those retired, the only
 // percentage this file may speak is an option's OWN win share.
 import { formatProbability } from '../../format/format-analysis-value.js';
-import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 import {
   formatSensitivityDirection,
   hasMaterialInfluence,
@@ -106,7 +106,7 @@ const CANONICAL_FRAGILE_BAND = 'fragile';
  * would be the hand-maintained-mirror class (CLAUDE.md trap 12).
  */
 export const ATTESTED_NO_FLIP_SENTENCE =
-  'Within the tested range, no single factor on its own reached a tipping point that would change which option leads.';
+  'Within the tested range, no single factor on its own reached a tipping point that would change the most-supported option.';
 
 /**
  * SINGLE near-tie derivation shared by BOTH deterministic post-analysis
@@ -367,31 +367,30 @@ export function composeRobustnessVerdict(
   let margin_clause: string | null = null;
   if (leading && runner) {
     const runnerP = runner.probability;
-    const runnerPFragment =
-      typeof runnerP === 'number' && Number.isFinite(runnerP)
-        ? `, with a probability of ${formatProbability(runnerP)}`
-        : '';
-    // Principle audit (5 Oct): the runner-up's own share in the headline's verb, never "second place".
-    const runnerStanding =
-      typeof runnerP === 'number' && Number.isFinite(runnerP)
-        ? ` scored highest in ${formatProbability(runnerP)} of runs`
-        : ' came next';
+    // ⭐ Science d5 (#87, 6 Oct; WORDING c6): the runner-up's own share in the lead ladder's verb, never "a probability"
+    // (a run share is not a chance), never "most likely contender" or "overtake". These lines live only in the PERMITTED
+    // voice: on a withheld turn the gate sees "supported by … runs" (`runs_supported`) and the withheld voice replaces
+    // the reply wholesale, so "the next most runs" is said only where the leader is licensed.
+    const hasRunnerP = typeof runnerP === 'number' && Number.isFinite(runnerP);
+    const runnerNextMost =
+      `In this model, ${quoteLabel(runner.label)} was supported by the next most runs${hasRunnerP ? ` (${formatProbability(runnerP)})` : ''}.`;
+    const runnerStanding = hasRunnerP ? ` was supported by ${formatProbability(runnerP)} of runs` : ' came next';
     if (marginCat === 'near_tie') {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied, so the lead is too close to call without firming up the key assumptions.`
+          ? `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied, so they are too close to tell apart without firming up the key assumptions.`
           : `${quoteLabel(leading.label)} and ${quoteLabel(runner.label)} are effectively tied.`;
     } else if (marginCat === 'clear' && finiteMargin !== null) {
       margin_clause =
         mode === 'explain'
-          ? `${quoteLabel(runner.label)}${runnerStanding}, so the lead is meaningful rather than marginal.`
-          : `${quoteLabel(runner.label)} is the most likely contender to overtake it${runnerPFragment}.`;
+          ? `${quoteLabel(runner.label)}${runnerStanding}, so the two are clearly separated in this model.`
+          : runnerNextMost;
     } else {
       // indeterminate: no finite margin and not a near-tie.
       margin_clause =
         mode === 'explain'
           ? `${quoteLabel(runner.label)}${runnerStanding}.`
-          : `${quoteLabel(runner.label)} is the most likely contender to overtake it.`;
+          : runnerNextMost;
     }
   }
 
@@ -422,11 +421,11 @@ export function composeRobustnessVerdict(
     // finite (clear) margin.
     if (stabilityCat === 'fragile') {
       stability_clause =
-        'The picture appears fragile, so even small adjustments to the strongest drivers could shift which option leads.';
+        'The picture appears fragile, so even small adjustments to the strongest drivers could change the most-supported option.';
       stability_implies_flippability = true;
     } else if (marginCat === 'near_tie') {
       stability_clause =
-        'The result is sensitive to small movements in the strongest drivers, so the leading option could change without much shifting.';
+        'The result is sensitive to small movements in the strongest drivers, so the most-supported option could change without much shifting.';
       stability_implies_flippability = true;
     } else if (
       marginCat === 'clear'
@@ -503,13 +502,14 @@ function nameableDrivers(
  * and as the Agent's context phrases it. Sensitivity prose keeps
  * `bandFromMagnitude` (a different quantity).
  *
- * Returns the bare adjective (`weak | moderate | strong | very strong`)
+ * Returns the bare adjective in the canvas's words (`slight | moderate | strong | very strong`)
  * because edge-strength sentences compose it with a noun ("a {band}
  * link") rather than a verb-phrase.
  */
 export function formatEdgeStrengthMagnitude(value: number): string {
-  if (!Number.isFinite(value)) return 'weak';
-  return edgeBandFromMagnitude(Math.abs(value));
+  // The canvas's word for each band (DL D4 row: ONE word per band; `weak` is the enum, "slight" is what users read).
+  if (!Number.isFinite(value)) return CANVAS_BAND_WORD.weak;
+  return CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(value))];
 }
 
 /**
@@ -535,7 +535,7 @@ export function composeExplainResultsFallback(
     // projection because the precondition bypass already guards the
     // no-analysis case. If the assembler produced no leading option even
     // with an analysis fact present, fall through to a generic line.
-    return 'The analysis has finished, but the leading option could not be summarised from the available data. Would you like to explore what would change this result?';
+    return 'The analysis has finished, but the most-supported option could not be summarised from the available data. Would you like to explore what would change this result?';
   }
 
   const leading = projection.leading_option;
@@ -564,7 +564,8 @@ export function composeExplainResultsFallback(
 
   sentences.push(
     // Principle audit (5 Oct): a finding about this model in the Run headline's verb, never "performs best".
-    `In this model, ${leading.label} scored highest in ${formatProbability(leading.probability)} of runs.`,
+    // The lead ladder's run-share words (Science d5 #87 6008589328), as the runner-up line beside it says them.
+    `In this model, ${leading.label} was supported by ${formatProbability(leading.probability)} of runs.`,
   );
 
   if (verdict.margin_clause !== null) {
@@ -673,7 +674,7 @@ export function composeWhatWouldFlipFallback(
   // is set on the projection.
 
   sentences.push(
-    `In this model, ${quoteLabel(leading.label)} scored highest in ${formatProbability(leading.probability)} of runs.`,
+    `In this model, ${quoteLabel(leading.label)} was supported by ${formatProbability(leading.probability)} of runs.`,
   );
 
   // Margin sentence (near-tie "effectively tied" / clear "would need to close"
@@ -744,11 +745,13 @@ export function composeWhatWouldFlipFallback(
     const concrete = namedEntries.map((e) => e.factor_label);
     if (concrete.length === 1) {
       sentences.push(
-        `${concrete[0]} is the most likely single factor to change which option leads, so it is the clearest one to test.`,
+        // Science d5 (#87 6008424994): the order is the producer's, not a ranking this path measured, so it says only
+        // what the finite-threshold filter guarantees. No "most likely", no "closest".
+        `Of the factors we tested, ${concrete[0]} has a tipping point on its own that would change the most-supported option, so it is a clear one to test.`,
       );
     } else if (concrete.length >= 2) {
       sentences.push(
-        `${concrete[0]} and ${concrete[1]} are the most likely single factors to change which option leads, so they are the clearest ones to test.`,
+        `Of the factors we tested, ${concrete[0]} and ${concrete[1]} each have a tipping point on their own that would change the most-supported option, so they are clear ones to test.`,
       );
     }
 
@@ -769,7 +772,7 @@ export function composeWhatWouldFlipFallback(
     }
   } else if (flipVerdict === 'insufficient_data') {
     sentences.push(
-      'The analysis did not isolate a single-factor tipping point here, so it is not clear that any one change on its own would change which option leads.',
+      'The analysis did not isolate a single-factor tipping point here, so it is not clear that any one change on its own would change the most-supported option.',
     );
   } else if (
     verdict.stability_clause !== null
@@ -812,7 +815,7 @@ export function composeWhatWouldFlipFallback(
  * find, assert it is there, transform — so a copy edit fails LOUD at module
  * load instead of silently producing a sentence nobody reviewed.
  */
-const ATTESTED_NO_FLIP_LEADER_CLAUSE = ' that would change which option leads.';
+const ATTESTED_NO_FLIP_LEADER_CLAUSE = ' that would change the most-supported option.';
 
 /**
  * {@link ATTESTED_NO_FLIP_SENTENCE} with its leader clause removed.

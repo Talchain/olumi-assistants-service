@@ -393,6 +393,20 @@ describe('0.70.0 · link rows in the user\'s terms (band, who sized it)', () => 
     expect(d.input_changes).toEqual([{ ...LINK, field: 'sizing', before: { raw: 'placeholder' }, after: { raw: 'olumi_accepted' }, change: 'changed' }]);
   });
 
+  it('HOLD (6b on #2643; S7): placeholder at 0.8 → the user sizes it "20 to 40" → held at 1 with the range\'s spread: the sizing row states it, complete', () => {
+    const d = pairOf(withLink({ mean: 0.3, std: 0.15, exists_probability: 0.8, band: 'moderate', sizing: 'placeholder' }),
+      withLink({ mean: 0.3, std: 0.0912, exists_probability: 1, band: 'moderate', sizing: 'user' }));
+    expect(d.input_coverage).toBe('complete');
+    expect(d.input_changes).toEqual([{ ...LINK, field: 'sizing', before: { raw: 'placeholder' }, after: { raw: 'user' }, change: 'changed' }]);
+  });
+
+  it('HOLD CONTRASTS: existence 0.8 → 1 with NO sizing move, or to a non-user sizing, or to 0.95 → partial', () => {
+    const was = { mean: 0.3, std: 0.15, exists_probability: 0.8, band: 'moderate' as const };
+    expect(pairOf(withLink({ ...was, sizing: 'user' }), withLink({ ...was, std: 0.0912, exists_probability: 1, sizing: 'user' })).input_coverage).toBe('partial');
+    expect(pairOf(withLink({ ...was, sizing: 'placeholder' }), withLink({ ...was, exists_probability: 1, sizing: 'olumi_accepted' })).input_coverage).toBe('partial');
+    expect(pairOf(withLink({ ...was, sizing: 'placeholder' }), withLink({ ...was, exists_probability: 0.95, sizing: 'user' })).input_coverage).toBe('partial');
+  });
+
   it('RED: a band move (moderate → strong) is a `strength` row with the contract\'s band literals — never the β', () => {
     // The spread that moves WITH the band is the writer's own (`olumiSpreadForMean`): 0.1 × 0.55 / 0.3.
     const followed = olumiSpreadForMean({ oldMean: 0.3, oldStd: 0.1, newMean: 0.55 });
@@ -664,6 +678,25 @@ describe('R3 gap (a) · prior_withheld from the withholder\'s own record that it
     const env = { ...envelope([{ option_id: 'opt-c', win_probability: 0.6 }, { option_id: 'opt-d', win_probability: 0.4 }], '111'),
       inference_warnings: [{ code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'm', severity: 'warning', win_shares_withheld: true }] };
     expect(reason([CURRENT(), prior(env)])).toEqual([0, 'no_matched_option']);
+  });
+
+  it('a marked path withhold with retained matching shares lends no prior leader or numeric comparison', () => {
+    const env = { ...envelope(SHARES, '111'),
+      inference_warnings: [{ code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'm', severity: 'warning', win_shares_withheld: true }] };
+    const out = buildRunDelta({ priorFacts: [CURRENT(), prior(env)], mayNameLeadingOption: true });
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(out.delta.win_probabilities).toEqual([]);
+    expect(out.delta.win_probabilities_unavailable).toBeUndefined();
+    expect(out.delta.leader).not.toHaveProperty('prior_leading_option_id');
+  });
+
+  it('retained disjoint shares under a marked path withhold do not override the prior constraint refusal', () => {
+    const env = { ...envelope([{ option_id: 'opt-c', win_probability: 0.6 }, { option_id: 'opt-d', win_probability: 0.4 }], '111'),
+      inference_warnings: [{ code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'm', severity: 'warning', win_shares_withheld: true }] };
+    const denied = prior(env);
+    if (denied.fact_type !== 'run_analysis') throw new Error('the prior is not a Run');
+    denied.result.constraint_verdict = { may_name_leading_option: false, constraint_verdict_state: 'evaluated_infeasible' };
+    expect(reason([CURRENT(), denied])).toEqual([0, 'prior_withheld']);
   });
 
   it('CONTROL: THIS Run withheld too → no reason (nothing can be compared yet)', () => {

@@ -64,10 +64,11 @@ import {
   WITHHELD_RUN_IDENTITY_CONFLICT,
   WITHHELD_UNREQUESTED_ANALYSIS,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
+  WITHHELD_GOAL_PATH_UNSIZED,
   WITHHELD_RUN_OUT_OF_DATE,
   WITHHELD_NO_OPTION_MEETS_LIMIT,
   WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
-  WITHHELD_GOAL_SCOPE_UNRESOLVED,
+  WITHHELD_GOAL_SCOPE_UNRESOLVED, WITHHELD_NO_RESULT,
   composeAnalysisStateV1,
   leaderClaimReasonKind,
   readRawRobustnessFromResponseBody,
@@ -265,6 +266,8 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
           // 2026-09-26: C46 stage 1 — the leader's sign on a product the analysis only adds up
           // (AI Quality #70 5842580505: kind `withheld`, no schemas member).
           WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
+          // MC P0 R7: the caller-stated unsized goal path (agreed free-string code; kind withheld).
+          WITHHELD_GOAL_PATH_UNSIZED,
           // 2026-09-26: P1-d — an out-of-date run with no stated cause (AI Quality #70 5850056041:
           // kind `not_evaluated`, no schemas member).
           WITHHELD_RUN_OUT_OF_DATE,
@@ -274,6 +277,8 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
           // 2026-09-26: F-LIMIT tier 2 — every option more likely than not to break it (DL #70 5850672588).
           WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
           WITHHELD_GOAL_SCOPE_UNRESOLVED,
+          // 2026-10-06: MC D1 (a) — a Run with no result is not evaluated, never a limit verdict (DL 0df0e1).
+          WITHHELD_NO_RESULT,
         ]),
       );
       expect(LEADER_CLAIM_REASON_KINDS[WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]).toBe('withheld');

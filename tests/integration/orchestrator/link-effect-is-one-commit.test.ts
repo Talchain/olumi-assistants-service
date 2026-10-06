@@ -170,8 +170,10 @@ describe('⭐ a user-stated link effect is ONE commit through the real level doo
     rows.clear();
     const effects = [
       { from: 'pro_plan_price', to: 'pro_plan_paying_subscribers', effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'GBP per month' }, quote: 'Every £1 on the Pro plan price loses us about 50 Pro plan paying subscribers' },
-      { from: 'monthly_churn', to: 'pro_plan_paying_subscribers', effect: { amount: -40, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'percent per month' }, quote: 'Every 1% monthly churn loses about 40 Pro plan paying subscribers' },
-      { from: 'feature_delivery_scope', to: 'monthly_churn', effect: { amount: -0.75, amount_unit: 'percentage points', per_source_change: 100, per_source_change_unit: 'percent of proposed release' }, quote: 'Every 100% increase in Feature delivery scope loses about 0.75 percentage points of Monthly churn' },
+      // RT-6 step 3 (Science U3/F1): a bare % on a % level is asked at commit too, so these two state their source change in
+      // points (as link-effect-grouped); was "Every 1% monthly churn…" / "Every 100% increase in…".
+      { from: 'monthly_churn', to: 'pro_plan_paying_subscribers', effect: { amount: -40, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'percentage points' }, quote: 'Every 1 percentage point of monthly churn loses about 40 Pro plan paying subscribers' },
+      { from: 'feature_delivery_scope', to: 'monthly_churn', effect: { amount: -0.75, amount_unit: 'percentage points', per_source_change: 100, per_source_change_unit: 'percentage points' }, quote: 'Every 100 percentage point increase in Feature delivery scope loses about 0.75 percentage points of Monthly churn' },
     ].map((item) => ({ ...item, edge_token: linkEffectEdgeToken(persisted, item.from, item.to)!, reading_token: linkEffectReadingToken(item) }));
     const res = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, base_graph_hash: baseHash(), turn_id: 'agent-authorise:grouped-3', links: [], levels: [], link_effects: effects } as never, 'req-grouped-3');
     expect(res.status, JSON.stringify(res)).toBe('committed');
@@ -183,7 +185,11 @@ describe('⭐ a user-stated link effect is ONE commit through the real level doo
     expect(facts.map((fact) => fact.result.after.stated_quote)).toEqual(effects.map((effect) => effect.quote));
     for (const effect of effects) {
       const edge = (persisted as { edges: Array<Record<string, unknown>> }).edges.find((candidate) => candidate.from === effect.from && candidate.to === effect.to)!;
-      expect(edge.provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated', natural_effect: effect.effect });
+      // The user's two figures exactly, and each source in its OWN stored unit (a point is one raw unit of a % level): the
+      // units staging asserted here before the points wording (Codex buddy r2: keep the unit coverage).
+      const sourceUnit = ({ pro_plan_price: 'GBP per month', monthly_churn: 'percent per month', feature_delivery_scope: 'percent of proposed release' } as Record<string, string>)[effect.from];
+      expect(edge.provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated',
+        natural_effect: { ...effect.effect, per_source_change_unit: sourceUnit } });
     }
   });
 });

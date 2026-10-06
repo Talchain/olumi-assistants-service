@@ -141,7 +141,12 @@ const FILLER_SRC = String.raw`[^,.!?;:]{0,22}?`;
  * neutralisation can only ever REMOVE a match, never manufacture one.
  */
 const GAP_FALSE_POSITIVE_SPANS: readonly RegExp[] = [
-  /\b(?:driven|caused|explained|supported|underpinned|helped|hurt|shaped|informed|affected|influenced|accompanied|offset|dominated|amplified|dampened)\s+by\b/gi,
+  /\b(?:driven|caused|explained|underpinned|helped|hurt|shaped|informed|affected|influenced|accompanied|offset|dominated|amplified|dampened)\s+by\b/gi,
+  // "supported by" is the lead ladder's own run-share verb (Science d5, 6 Oct), so it is causal ("supported by strong
+  // demand", "supported by 17 percentage points of improvement in conversion") UNLESS a figure is followed by a
+  // comparison in the same clause: "X was supported by (approximately) 17 percentage points more than Y" is the gap
+  // statistic wearing the new vocabulary and must reach the binder (Codex buddy #2646 r1 F2, r2 F1/F2).
+  /\bsupported\s+by\b(?![^.;:!?\n]{0,24}?\d[^.;:!?\n]{0,60}?\b(?:more|fewer|less)\b)/gi,
   /\b(?:gross|net|operating|profit|contribution|ebitda|ebit|retention|churn)\s+margins?\b/gi,
   /\bmargins?\s+of\s+(?:error|safety)\b/gi,
   // The accounting sense again, this time WITHOUT a qualifier in front —
@@ -223,7 +228,7 @@ function neutralise(text: string): string {
  * `QTY_SRC` does not match it and the ratified-correct sentence still passes.
  * What is now caught is only the gap form, which is what this reader is for.
  */
-const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|wins|winning|won|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|scor(?:e|es|ed|ing)\s+highest|outperforms?|outperforming|outranks?|beats?|beating)`;
+const GAP_BINDER_SRC = String.raw`(?:leads?|leading|led|wins|winning|won|ahead|in\s+front|on\s+top|trails?|trailing|trailed|behind|lags?|lagging|margin|gap|performs?\s+best|scor(?:e|es|ed|ing)\s+highest|came\s+out\s+lowest|(?:gave|gives|give|giving)\s+the\s+(?:highest|lowest)(?:\s+[^,.!?;:]{1,48}?)?|supported|outperforms?|outperforming|outranks?|beats?|beating)`;
 
 /**
  * Bounded and ordered: the FIRST match is what rides the log's primary `reason`

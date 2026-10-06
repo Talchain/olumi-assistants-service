@@ -49,7 +49,8 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
-import { statedEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
+import { statedEffectQuoteMatches, statedEffectSpansInText, statedSwitchEffectQuoteMatches, statedTargetAmountSpans } from "../provenance/stated-effect.js";
+import { readUnitParts } from "../../orchestrator-v5/agent-lane/same-unit.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -1493,7 +1494,21 @@ function collectBriefNaturalEffectCandidates(
     const provenance = edge.provenance;
     if (provenance === null || typeof provenance !== "object" || Array.isArray(provenance)) continue;
     const p = provenance as Record<string, unknown>;
-    if (p.source !== "brief_extraction" || p.magnitude !== "user_stated") continue;
+    // ⭐ WHO SIZED IT, not where the link came from (MC P0 F5, PR-U2a): `magnitude: 'user_stated'` is the user's own size
+    // — written by construction (`cee/magnitude/link-effect.ts`, userSizeEarned), the records projector (quoted) and a
+    // size said back in CHAT (`link-effect-edit.ts`, source `user_specified`). Science ruled the chat size is credited by
+    // the SAME one-span C3 binding as every other user_stated edge (Science ruling #87 6003878735, citing RT-6 B4 5998132756):
+    // the user repeating their brief figure to size a link must not leave "What I was given" saying it is missing.
+    // An Olumi estimate never counts.
+    if (p.magnitude !== "user_stated") continue;
+    // ⛔ ...but WHO STAMPED IT decides how much the stamp alone proves (Codex r1 on #2610, P1). Construction's label door
+    // (`admit-model.ts` userSizeEarned) stamps a size when its amount is written about EITHER endpoint, so "Monthly
+    // revenue is £75,000 a month" earns a £75,000-per-switch effect on an inferred Campaign → Revenue link the user never
+    // sized. An INFERRED link (any source but the two below) is therefore credited only through a brief sentence that
+    // verifies its WHOLE effect: MC P0's Fi receipt (`source_quote`) or a records `quote`. A link the brief itself states
+    // (`brief_extraction`) keeps #2601's quote-less one-span rule; a size said in chat (`user_specified`) keeps Science's.
+    const chatSized = p.source === "user_specified";
+    const quoteLessWarrant = chatSized || p.source === "brief_extraction";
     const effect = p.natural_effect;
     if (effect === null || typeof effect !== "object" || Array.isArray(effect)) continue;
     const natural = effect as Record<string, unknown>;
@@ -1507,18 +1522,53 @@ function collectBriefNaturalEffectCandidates(
     // AIE capture-b43bb79e/c1). The served agent route admits a stated size WITHOUT a `provenance.quote`
     // (`admit-candidate.ts:116` has no such field), so requiring one made this whole route dead on the default path:
     // "£75,000 a year" and "£12,000 upfront" read `absent` while two edges held them, and the coach told the user
-    // they "aren't represented". The warrant without a quote is the writer's own rule: `magnitude: 'user_stated'`
-    // is written ONLY on the user's own size (`value-warrant-guard.ts:810`), and the figure binds to the one place the
-    // brief states it (below). A quote that IS present must still be the user's words verbatim and must still match
+    // they "aren't represented". The warrant without a quote is the writer's stamp, `magnitude: 'user_stated'`, held
+    // to the limit above (quote-less, it counts only on a link the brief states or a chat size), and the figure binds
+    // to the one place the brief states it (below). A quote that IS present must still be the user's words verbatim and must still match
     // the whole effect.
-    const quote = typeof p.quote === "string" && p.quote.length > 0 ? p.quote : null;
-    if (quote !== null && !briefText.includes(quote)) continue;
+    // The edge's quote: the records projector writes `quote`; MC P0's Fi door writes `source_quote` — the ONE brief
+    // sentence its C2 binding validated (MC 5 Oct). A `source_quote` that is not in the brief (a size said in CHAT) is
+    // not brief evidence, so that edge binds as a quote-less one (one-span C3; Science ruling #87 6003878735).
+    const sourceQuote = typeof p.source_quote === "string" && p.source_quote.length > 0 && briefText.includes(p.source_quote)
+      ? p.source_quote
+      : null;
+    let quote = typeof p.quote === "string" && p.quote.length > 0 ? p.quote : sourceQuote;
+    if (quote !== null && !briefText.includes(quote)) {
+      if (!chatSized) continue;
+      quote = null;
+    }
 
     const amount = natural.amount;
     const amountUnit = natural.amount_unit;
     const perSourceChange = natural.per_source_change;
     const perSourceChangeUnit = natural.per_source_change_unit;
     if (typeof amount !== "number" || typeof amountUnit !== "string") continue;
+    const quoteVerified =
+      quote !== null &&
+      typeof perSourceChange === "number" &&
+      typeof perSourceChangeUnit === "string" &&
+      // A switch's quote writes its target figure only ("would win about 150 new subscribers"): the same matcher the
+      // binder stored it by (Codex buddy r1 F7, #2644).
+      (statedEffectQuoteMatches(quote, {
+        amount,
+        amount_unit: amountUnit,
+        per_source_change: perSourceChange,
+        per_source_change_unit: perSourceChangeUnit,
+      }) || statedSwitchEffectQuoteMatches(quote, {
+        amount,
+        amount_unit: amountUnit,
+        per_source_change: perSourceChange,
+        per_source_change_unit: perSourceChangeUnit,
+      }));
+    // ⛔ A RESIZE IN CHAT KEEPS THE OLD EVIDENCE (Codex r1 on #2610, P2): `link-effect-edit.ts` replaces `natural_effect`
+    // and keeps the rest of the provenance, so a Fi link resized from £1,200 to £2,000 still carries the £1,200 sentence.
+    // That sentence no longer describes the link's size. On a chat-sized link it is stale, never a veto: the link binds
+    // quote-less like any chat size. Any other link whose quote fails is not credited.
+    if (quote !== null && !quoteVerified) {
+      if (!chatSized) continue;
+      quote = null;
+    }
+    if (quote === null && !quoteLessWarrant) continue;
     // ⛔ Without a quote, nothing says WHICH written figure the edge holds (Codex r1 on #2601: "Pension contributions are
     // £75,000 a month" was credited to the spending edge too). So the edge binds to the ONE place the brief states its
     // amount in its declared currency AND period, read by the quote check's own reader: "£75,000 a month" is not
@@ -1529,17 +1579,20 @@ function collectBriefNaturalEffectCandidates(
       if (spans.length !== 1) continue;
       boundSpan = spans[0];
     }
-    const quoteVerified =
-      quote !== null &&
-      typeof perSourceChange === "number" &&
-      typeof perSourceChangeUnit === "string" &&
-      statedEffectQuoteMatches(quote, {
+    // ⛔ FA-R3 (Codex r2 on #2604): a VERIFIED quote binds its candidates to the numerals inside the quote's ONE place in
+    // the brief. Once "annually" verifies, an unbound quoted edge would also credit "Pension contributions are £75,000".
+    let sourceSpan: { start: number; end: number } | undefined;
+    if (quoteVerified) {
+      const spans = statedEffectSpansInText(briefText, quote!, {
         amount,
         amount_unit: amountUnit,
-        per_source_change: perSourceChange,
-        per_source_change_unit: perSourceChangeUnit,
+        per_source_change: perSourceChange as number,
+        per_source_change_unit: perSourceChangeUnit as string,
       });
-    if (quote !== null && !quoteVerified) continue;
+      if (spans === null) continue;
+      boundSpan = spans.target;
+      sourceSpan = spans.source ?? undefined;
+    }
     const effectDirection = edge.effect_direction;
     const signedEffect = Math.sign(amount) * Math.sign(typeof perSourceChange === "number" ? perSourceChange : 1);
     if (
@@ -1547,7 +1600,12 @@ function collectBriefNaturalEffectCandidates(
       (effectDirection === "negative" && signedEffect >= 0)
     ) continue;
     if (typeof amount === "number" && Number.isFinite(amount) && typeof amountUnit === "string" && amountUnit.trim().length > 0) {
-      const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(amountUnit);
+      // The ONE grammar reads the edge's unit (Codex r1 on #2604, P2): "pounds/year", "GBP p.a." and "£k/year" are money
+      // with their scale, exactly as the span binding read them; the older currency reader stays the fallback.
+      const parts = readUnitParts(amountUnit);
+      const { kind, currencyCode, multiplier } = parts !== null && parts.kind === "currency"
+        ? { kind: "currency" as const, currencyCode: parts.code ?? undefined, multiplier: parts.scale }
+        : readCurrencyUnitWithQualifiers(amountUnit);
       out.push({
         nodeId: to,
         label: targetLabel,
@@ -1564,7 +1622,7 @@ function collectBriefNaturalEffectCandidates(
     // The SOURCE-side figure is a stated figure only when the quote proved the user wrote it. Without a quote it is
     // the producer's encoding (an option's on/off is `100 %`), never something the user said — so it is not offered.
     if (
-      quoteVerified &&
+      quoteVerified && sourceSpan !== undefined &&
       typeof perSourceChange === "number" && Number.isFinite(perSourceChange) &&
       typeof perSourceChangeUnit === "string" && perSourceChangeUnit.trim().length > 0
     ) {
@@ -1577,6 +1635,7 @@ function collectBriefNaturalEffectCandidates(
         currencyCode: currencyCode ?? null,
         declaredUnit: perSourceChangeUnit,
         carrier: "edge_effect",
+        boundSpan: sourceSpan,
       });
     }
   }

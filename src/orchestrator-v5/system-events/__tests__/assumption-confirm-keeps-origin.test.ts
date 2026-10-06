@@ -46,8 +46,11 @@ const nodeOf = (g: unknown) => (g as { nodes: Array<{ id: string; observed_state
 
 async function canvasConfirm(observed: Os): Promise<{ os: Os; same: boolean }> {
   const base = graphWith(observed);
+  // SD-1 (#2617): the confirm a client sends is the SET of the number the factor shows, plus the intent: DGAI #2543's
+  // builder (`factorValueEdit.ts:636-655`) on this capless percent sends the stored raw_value and unit verbatim, so a
+  // confirm is checked against the stored figure. The rows still pin the adoption marker, not the event's shape.
   const payload = { kind: 'system_event', scenario_id: SCENARIO_ID, turn_id: '77777777-7777-4777-8777-777777777777', stage: 'analyse',
-    event: { kind: 'factor_value_edit', target_id: TARGET, field: 'value', intent: 'confirm_current', value: 3.2 } } as unknown as SystemEventTurnPayload;
+    event: { kind: 'factor_value_edit', target_id: TARGET, field: 'value', intent: 'confirm_current', value: 3.2, raw_value: 3.2, unit: '%' } } as unknown as SystemEventTurnPayload;
   const r = await applyFactorValueEdit({ payload, event: payload.event as never, requestId: 'req-confirm', persistedGraph: base, priorFacts: [] } as never);
   expect(r.kind, JSON.stringify(r)).toBe('mutated');
   const g = (r as { mutatedGraph: unknown }).mutatedGraph;

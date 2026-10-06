@@ -1,3 +1,5 @@
+import { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
+import { userFigureMovedRefusal } from '../cee/magnitude/user-figure-held.js';
 /**
  * Pure Patch Applier
  *
@@ -29,7 +31,9 @@ export type PatchApplyErrorCode =
   | 'EDGE_NOT_FOUND'
   | 'NODE_ALREADY_EXISTS'
   | 'EDGE_ALREADY_EXISTS'
-  | 'INVALID_OPERATION';
+  | 'INVALID_OPERATION'
+  /** F1 (#87 6006627551): the write would move the strength of a link holding the user's own figure (`user-figure-held.ts`). */
+  | 'USER_FIGURE_HELD';
 
 export class PatchApplyError extends Error {
   constructor(
@@ -203,6 +207,7 @@ function applyUpdateEdge(graph: GraphV3T, op: PatchOperation): void {
     throw new PatchApplyError('EDGE_NOT_FOUND', `Edge "${from}" → "${to}" not found`);
   }
 
+  const before = structuredClone(edge);
   const updates = op.value as Record<string, unknown>;
   // Guard: prevent overwriting edge identity fields. Required NESTED OBJECT
   // fields are pulled out separately because a shallow Object.assign would
@@ -252,6 +257,13 @@ function applyUpdateEdge(graph: GraphV3T, op: PatchOperation): void {
       [field]: mergeRequiredNestedWrite(readNestedField(edge, field), incoming),
     });
   }
+  // R8: generic patches cannot clear the un-hashed carrier while retaining the size.
+  Object.assign(edge, keepMeanProjectionWhenSizeUnchanged(before, edge));
+  // ⭐ F1 (#87 6006627551; DL Review Desk class check): this merge keeps `natural_effect` while the strength moves, so on a
+  // link holding the user's own figure it would leave a figure that no longer describes the link — and it cannot carry
+  // the user's replace. Refused, on the candidate clone (nothing is written), in the link writer's own words.
+  const figureMoved = userFigureMovedRefusal(before, edge);
+  if (figureMoved !== null) throw new PatchApplyError('USER_FIGURE_HELD', figureMoved);
 }
 
 // ============================================================================

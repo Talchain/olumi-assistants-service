@@ -662,6 +662,8 @@ export interface TurnExecutorRunResult {
   mayNameLeadingOption: boolean;
   /** Read from the same selected claim fact as mayNameLeadingOption. */
   mayNameLeadingOptionConstraintVerdictState: ConstraintVerdictState | null;
+  leaderWithheldBecauseUnsizedPath?: import('./agent-lane/unsized-path-cause.js').UnsizedPathLeaderCause;
+  leaderWithheldBecauseUnrequested?: boolean;
   /**
    * WHERE `mayNameLeadingOption` came from. Additive, diagnostic, REQUIRED —
    * same doctrine as the field above: an optional here is a latent forgetting
@@ -16724,6 +16726,8 @@ export async function runTurnExecutor(
       // alarm a licensed no-op there. See the declaration above.
       mayNameLeadingOption: mayNameLeadingOptionForRun,
       mayNameLeadingOptionConstraintVerdictState: mayNameLeadingOptionVerdictForRun.constraint_verdict_state,
+      leaderWithheldBecauseUnsizedPath: mayNameLeadingOptionVerdictForRun.unsized_path_cause,
+      leaderWithheldBecauseUnrequested: mayNameLeadingOptionVerdictForRun.unsized_path_unrequested,
       // …and WHERE that boolean came from. Taken off the SAME verdict object the
       // boolean above is taken off, so the value and its evidence cannot
       // describe different reads — the identical single-derivation rule the

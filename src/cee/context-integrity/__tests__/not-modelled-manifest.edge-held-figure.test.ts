@@ -138,12 +138,21 @@ describe("served c1: a figure held in an edge's natural_effect is in the model",
     expect(twice.at("£75,000", brief.length + yearly.indexOf("£")).verdict).toBe("absent");
   });
 
-  it("(i) IDENTITY PAIR: the served upfront £12,000 is credited; an appended annual £12,000 is not", () => {
+  // ⛔ RE-PINNED ON PURPOSE (PR-U1, Science U-GRAMMAR C3 + ruling 5999661911 (ii)). #2601 bound edges with the strict
+  // C1 `sameUnit`, so a periodless "GBP" edge refused "£12,000 a year". Under C3 a part only ONE side states is no
+  // conflict, so that annual figure is as compatible with the edge as the upfront one: two places, and the edge cannot
+  // say which, so NEITHER is credited. The identity pair now turns on a part BOTH sides state.
+  it("(i) IDENTITY PAIR: a periodless edge cannot pick between two £12,000s; an edge that states its period can", () => {
     const { brief, graph } = fresh();
     const insurance = " Annual insurance is £12,000 a year.";
+    const appended = brief.length + insurance.indexOf("£");
+    const both = rows(brief + insurance, graph);
+    expect(both.at("£12,000", AT["£12,000"]).verdict).toBe("absent");
+    expect(both.at("£12,000", appended).verdict).toBe("absent");
+    (edgeTo(graph, SCHEDULING).provenance.natural_effect as Record<string, unknown>).amount_unit = "GBP/month";
     const r = rows(brief + insurance, graph);
     expect(r.at("£12,000", AT["£12,000"])).toMatchObject({ verdict: "in_model", matched_node_id: SCHEDULING });
-    expect(r.at("£12,000", brief.length + insurance.indexOf("£")).verdict).toBe("absent");
+    expect(r.at("£12,000", appended).verdict).toBe("absent");
   });
 
   it("(j) SIGN: a verified quote that writes the sign (−£75,000) still matches the signed edge", () => {

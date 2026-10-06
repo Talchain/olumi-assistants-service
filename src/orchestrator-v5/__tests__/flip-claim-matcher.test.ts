@@ -27,12 +27,12 @@ describe('the matcher SEES the shipped assertive copy (trap 13)', () => {
     ['headline', ' The result is not yet robust — small changes could flip it.'],
     [
       'advice-gate explain',
-      'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
+      'The picture appears fragile, so even small adjustments to the strongest factor could change the most-supported option.',
     ],
     ['advice-gate improvement', ' The picture appears fragile, so even small adjustments could shift it.'],
     [
       'advice-gate near-tie',
-      ' The result is effectively tied, so smaller adjustments could change which option leads.',
+      ' The result is effectively tied, so smaller adjustments could change the most-supported option.',
     ],
     ['meaning / explain driver beat', 'The order could shift with movement on “Risk”.'],
     ['composeAdvice next-step', 'The biggest thing to examine next is Risk, because it could change the result.'],
@@ -44,8 +44,8 @@ describe('the matcher SEES the shipped assertive copy (trap 13)', () => {
 describe('the matcher does NOT fire on a denial', () => {
   it.each([
     [
-      'A2 single-factor denial (which option leads)',
-      'The picture appears fragile, so the size of the gap is sensitive to the strongest factor — though no single factor we tested would change which option leads on its own.',
+      'A2 single-factor denial (the most-supported option)',
+      'The picture appears fragile, so the size of the gap is sensitive to the strongest factor — though no single factor we tested would change the most-supported option on its own.',
     ],
     [
       'A2 single-factor denial (the order)',
@@ -53,7 +53,7 @@ describe('the matcher does NOT fire on a denial', () => {
     ],
     [
       'the pre-existing explanation-fallback precedent',
-      'Within the tested range, no single factor on its own reached a tipping point that would change which option leads.',
+      'Within the tested range, no single factor on its own reached a tipping point that would change the most-supported option.',
     ],
     [
       'A3 driver beat, re-aimed',
@@ -67,12 +67,12 @@ describe('the matcher does NOT fire on a denial', () => {
 describe('the stripper does NOT over-strip (the control that keeps the above honest)', () => {
   it('an assertive claim SURVIVES stripping', () => {
     const assertive =
-      'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.';
+      'The picture appears fragile, so even small adjustments to the strongest factor could change the most-supported option.';
     expect(FLIP_CLAIM_CORE_REGEX.test(stripNegatedFlipClaims(assertive))).toBe(true);
     // …and the structural voice survives stripping too.
     expect(
       FLIP_CLAIM_STRUCTURAL_REGEX.test(
-        stripNegatedFlipClaims('A sensitivity check shows how far it can move before the leading option changes.'),
+        stripNegatedFlipClaims('A sensitivity check shows how far it can move before the most-supported option changes.'),
       ),
     ).toBe(true);
   });
@@ -80,7 +80,7 @@ describe('the stripper does NOT over-strip (the control that keeps the above hon
   it('a denial followed by a REAL claim in the same text is still caught', () => {
     // The A3 defect shape verbatim: a denial and an assertion side by side.
     const mixed =
-      'though no single factor we tested would change which option leads on its own. The order could shift with movement on “Risk”.';
+      'though no single factor we tested would change the most-supported option on its own. The order could shift with movement on “Risk”.';
     expect(assertsFlippability(mixed)).toBe(true);
   });
 

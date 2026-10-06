@@ -90,6 +90,9 @@ export interface AgentToolContext {
   readonly scenario_id: string;
   readonly authenticated_user_id: string | null;
   readonly request_id: string;
+  /** RT-1 selection, resolved from the REQUEST against canonical state, never tool args or model output. */
+  readonly grounded_selection?: { readonly element_ids: readonly string[]; readonly unresolved: 'none' | 'not_in_model' | 'could_not_check' };
+  readonly grounded_links?: readonly { readonly from: string; readonly to: string }[];
   /**
    * The user's own words in this conversation (its user messages, this turn's last), bound by the route — never
    * from model output. A figure is recorded as the user's only when it is written here (`stated-by-user.ts`);
@@ -356,11 +359,19 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Record how much an EXISTING link moves its target, as the user\u2019s own figures, when the user has just said it in numbers '
       + '(for example "every \u00a31 on the price loses us about 50 subscribers"). This does NOT change anything: it prepares ONE change and '
       + 'returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
-      + 'Give both figures exactly as the user wrote them: `amount` is the change in the link\u2019s TARGET (negative when it falls), '
-      + '`per_source_change` the change in its SOURCE, each in that end\u2019s unit as get_canonical_state gives it. `quote` is the '
-      + 'user\u2019s ONE statement from THIS message that says it, copied exactly: the words that give both figures, name both ends '
-      + 'and say which way. Never use this for a figure the user did not write; for a strength '
-      + 'said in words ("strong"), use propose_link_strength. When the result is withheld because links are unsized, ask for all the listed sizes in ONE message, in plain words with units. When the user gives figures for several links, call propose_link_effect ONCE with all of them. Never invent a figure. Where the context lists Olumi\u2019s own estimate in units, you may offer it and include it only if the user says to use it.',
+      + 'Both magnitudes must be the user\u2019s own figures in ONE statement from THIS message. Deterministic number words '
+      + 'are accepted ("two", "one and a half", "half a point", "about a point"); explicit percent levels such as '
+      + '"from 8% to 4%" state a -4-point change. Never choose a figure from a range or invent a missing figure. '
+      + '`amount` is your proposed signed change in the TARGET (negative when it falls); `per_source_change` is your '
+      + 'proposed signed change in the SOURCE, each in its own unit. The approval card shows this reading in symbols '
+      + 'AND words, with the verbatim quote, and explicitly discloses a reversal of the stored link direction. '
+      + '`quote` is the user\u2019s complete statement copied exactly. It must identify both ends, unless the REQUEST\u2019s '
+      + 'canvas selection grounds this link or both ends; do not infer selection from your own output. A question or '
+      + 'denial is not a statement. A bare % needs the returned clarification: never resolve it yourself into points '
+      + 'or a money change. A literal currency period ("per month", "a month", "a week", "a year") can supply an '
+      + 'eligible unitless end\u2019s unit. Show the exact card and ask the user to approve or correct; nothing is recorded '
+      + 'without approval. For a strength said in words ("strong"), use propose_link_strength. When several links need '
+      + 'sizes, ask for them in ONE message; when the user supplies several sizes, call propose_link_effect ONCE with all of them.',
     parameters: {
       ...obj({
       links: { type: 'array', minItems: 1, maxItems: 12, description: 'Several existing links to size in one approval; use instead of the single-link fields when the user gave several figures.', items: obj({
@@ -372,11 +383,11 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       }, ['from_label', 'to_label', 'amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'quote']), },
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
-      amount: { type: 'number', description: 'The change in the TARGET the user stated, signed (negative when it falls).' },
+      amount: { type: 'number', description: 'Your proposed signed reading of the user\u2019s target magnitude (negative when it falls), disclosed on the approval card.' },
       amount_unit: { type: 'string', description: 'The target\u2019s unit (for a percentage level, "percentage points").' },
-      per_source_change: { type: 'number', description: 'The change in the SOURCE the user stated it for (non-zero).' },
+      per_source_change: { type: 'number', description: 'Your proposed signed reading of the user\u2019s source magnitude (non-zero), disclosed on the approval card.' },
       per_source_change_unit: { type: 'string', description: 'The source\u2019s unit.' },
-      quote: { type: 'string', description: 'The user\u2019s own words from THIS message, copied exactly.' },
+      quote: { type: 'string', description: 'The user\u2019s complete statement from THIS message, copied exactly with its punctuation.' },
       }, []),
       oneOf: [
         { required: ['links'] },

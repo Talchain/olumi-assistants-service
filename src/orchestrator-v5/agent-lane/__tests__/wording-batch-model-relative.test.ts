@@ -93,10 +93,10 @@ describe('W-HEAD: the Run headline names the option only in this model, and is n
     return template({ assistant_text: text });
   };
   const SHAPES: ReadonlyArray<[string, string]> = [
-    ['Case C (caution, no margin)', 'Hire A scored highest in this model, but treat this as provisional: the result is sensitive to Quality.'],
-    ['Case C (link caution)', 'Hire A scored highest in this model, but treat this as provisional: it rests heavily on how much Price changes Revenue.'],
-    ['Case B (driver, no margin)', 'Hire A scored highest in this model because Cost is the strongest driver.'],
-    ['Case E (floor)', 'Hire A scored highest in this model.'],
+    ['Case C (caution, no margin)', 'Hire A was supported by the most runs of this model, but treat this as provisional: the result is sensitive to Quality.'],
+    ['Case C (link caution)', 'Hire A was supported by the most runs of this model, but treat this as provisional: it rests heavily on how much Price changes Revenue.'],
+    ['Case B (driver, no margin)', 'Hire A was supported by the most runs of this model because Cost is the strongest driver.'],
+    ['Case E (floor)', 'Hire A was supported by the most runs of this model.'],
   ];
 
   it('Case E, built by the real builder, is the new floor and reaches the wire verbatim', () => {
@@ -112,7 +112,7 @@ describe('W-HEAD: the Run headline names the option only in this model, and is n
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(text).toBe('Option A scored highest in this model.');
+    expect(text).toBe('Option A was supported by 29% of runs of this model.');
     expect(forward(text!)).toBe(text);
   });
 
@@ -142,14 +142,14 @@ describe('explain and flip fallbacks: the leader and runner-up are said in this 
 
   it('explain fallback: exact leader sentence and the runner-up in its own share', () => {
     const text = composeExplainResultsFallback(ANALYSIS, null, null);
-    expect(text).toContain('In this model, Hire Senior Engineer scored highest in 62% of runs.');
-    expect(text).toContain("'Hire Two Mid-Level' scored highest in 27% of runs");
+    expect(text).toContain('In this model, Hire Senior Engineer was supported by 62% of runs.');
+    expect(text).toContain("'Hire Two Mid-Level' was supported by 27% of runs");
     expect(text).not.toMatch(/performs best|currently leads|second place/);
   });
 
   it('flip fallback: exact leader sentence', () => {
     const text = composeWhatWouldFlipFallback(ANALYSIS, null, null, null);
-    expect(text).toContain("In this model, 'Hire Senior Engineer' scored highest in 62% of runs.");
+    expect(text).toContain("In this model, 'Hire Senior Engineer' was supported by 62% of runs.");
     expect(text).not.toMatch(/performs best|currently leads/);
   });
 });
@@ -188,7 +188,7 @@ describe('SERVED BYTES (DL Review Desk on #2588): the served rerun capture (CEE 
   it("today's builder on the served envelope says the caution in the new words, and the served-shape summary is forwarded verbatim", () => {
     expect(built).not.toBeNull();
     expect(built).toContain('it rests heavily on how much Price per seat changes Monthly revenue');
-    expect(built).toContain('scored highest in 84% of runs of this model');
+    expect(built).toContain('was supported by 84% of runs of this model');
     expect(built).not.toContain('is fragile');
     const summary = `${built}${SCAFFOLD}`;
     expect(forward(summary)).toBe(summary);

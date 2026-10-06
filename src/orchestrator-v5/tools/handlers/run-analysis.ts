@@ -1,3 +1,5 @@
+import { appendLegacyFiguresAfterLeaderSentence } from '../../coaching/analysis-result-headline.js';
+import { goalOrderedLinks } from '../../admission/target-testability.js';
 /**
  * V5 `run_analysis` handler (slice C2) — first real handler on the C1 spine.
  *
@@ -46,9 +48,10 @@ import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js'
 import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
-import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
-import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
-import { targetTestabilityOf, targetNotTestableWarning } from '../../admission/target-testability.js';
+import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../../agent-lane/unsized-path-cause.js';
+import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
 import type {
@@ -181,7 +184,7 @@ import {
   decideAnalysisScaleBlock,
 } from '../plot-intervention-scale.js';
 import { wireInterventionRangePlan } from '../../intervention-range.js';
-import { optionIdOf } from '../../../orchestrator/context/placeholder-parts.js';
+import { nodeUnitOf, optionIdOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isRecommendableOption } from './recommendable-option.js';
 import { detectIdenticalArms } from './identical-arms.js';
 import {
@@ -199,9 +202,12 @@ import {
 // headline ON them, and then discarded both — so this handler could only ever
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
-import { heldGoalPointsUp, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
+import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
+import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
+import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
+import { withHeldUserLinks } from '../../goal-target/held-user-links.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -1098,8 +1104,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis sent stored clamps at their full size (wire copy only; ids only)',
       );
     }
+    // ⭐ HOLD-AT-1.0 (Science d5 #87 6008807178 / 6008817484; D3 cut 6): a user-stated link whose own range excludes zero is
+    // sent at exists_probability 1.0 with its range's spread, on this wire copy only. AFTER the clamp restore, which
+    // rescales a restored std. The licence's existence flag reads the SAME function (`heldLinkOf`).
+    const heldWireGraph = withHeldUserLinks(statedWireGraph);
+    if (heldWireGraph !== statedWireGraph) {
+      log.info(
+        { event: 'run_analysis.user_links_held_at_one', request_id: invocation.requestId, scenario_id: args.scenario_id },
+        'run_analysis held user-stated links whose range excludes zero at existence 1.0 (wire copy only; ids only)',
+      );
+    }
     const plotPayload: Record<string, unknown> = {
-      graph: statedWireGraph,
+      graph: heldWireGraph,
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -1168,6 +1184,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ R1 S4 (B) (#72 5879602608): a HELD strict floor ("MRR above £85k") is scored strictly past its target — ISL
     // `goal_threshold_strict` (ISL #209), forwarded by PLoT. Only where the run maximises and the goal carries a
     // threshold (`resolveGoalThresholdStrict`, the rule admission reads too); otherwise no key, byte-identical.
+    // ⭐ D3 step 1: and a held strict CEILING ("below 400") where the run minimises, strictly below its threshold.
     if (resolveGoalThresholdStrict(graphForAnalysis, snapshot.goal_node_id)) {
       plotPayload.goal_threshold_strict = true;
     }
@@ -1955,39 +1972,24 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
 
     // ⛔ (S) THE GOAL'S CHANCE, PER OPTION (DL #75 5902570568; AIQ 5902548598): an option whose path into the goal runs
-    // through an `olumi_placeholder` has its goal figures withheld HERE, before any reader, and every win share and the
+    // through a link nobody sized has its goal figures withheld HERE (R4 shared P5 walk), before any reader, and every win share and the
     // leader with them (`withholdOptionGoalFigures`). A run PLoT already withheld (#416 / #422) says its own reason.
     const envelope = response as Record<string, unknown>;
+    let withheldBecauseUnsizedPath: UnsizedPathLeaderCause | undefined;
+    let legacyFiguresDisclosure = '';
+    let legacyFiguresLinks: Array<{ from: string; to: string }> = [];
     if (!runWithheldGoalFigures(envelope)) {
       const scoredIds = [...new Set(readOptionResultSources(envelope).flat().map((r) => (typeof r.option_id === 'string' ? r.option_id : r.id))
         .filter((id): id is string => typeof id === 'string' && id !== ''))];
       const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
-      const scored = new Map(finalWireOptions.flatMap((o) => {
-        const rec = o as Record<string, unknown>;
-        const id = typeof rec.option_id === 'string' ? rec.option_id : typeof rec.id === 'string' ? rec.id : undefined;
-        const iv = rec.interventions !== null && typeof rec.interventions === 'object' && !Array.isArray(rec.interventions)
-          ? rec.interventions as Record<string, unknown> : undefined;
-        return id !== undefined && iv !== undefined ? [[id, iv] as const] : [];
-      }));
-      const goalPaths = placeholderGoalPaths(graphForAnalysis, scoredIds, evaluations, scored);
-      if (goalPaths.length > 0) {
-        response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
-          placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH));
-        log.info(
-          {
-            event: 'run_analysis.goal_figures_withheld_for_placeholder_paths',
-            request_id: invocation.requestId,
-            scenario_id: args.scenario_id,
-            // Redacted: ids only.
-            withheld: goalPaths.map((p) => ({ option_id: p.option_id, links: p.links.length })),
-          },
-          'run_analysis: goal figures withheld for the options an unsized Olumi link moves',
-        );
-      }
+      const scoredInterventions = new Map(finalWireOptions.map(o => [optionIdOf(o as Record<string, unknown>) ?? '', o.interventions as Record<string, unknown>]));
+      const goalPaths = unsizedLeaderGoalPaths(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
       // ⛔ GATE 5 (DL #75 5904272507): the user's own levels make the goal rate × count within 5%, and this run did not
       // evaluate that product, so its goal figures come from a walk those figures contradict. Every option, the leader too.
-      const unread = runWithheldGoalFigures(response as Record<string, unknown>) ? null : unreadGoalProduct(graphForAnalysis);
+      const unread = unreadGoalProduct(graphForAnalysis);
+      let productGateWithholds = false;
       if (unread !== null && scoredIds.length > 0) {
+        productGateWithholds = true;
         response = withholdOptionGoalFigures(response, new Set(scoredIds),
           unreadGoalProductWarning(unread, scoredIds, GOAL_FIGURES_PRODUCT_NOT_READ));
         log.info(
@@ -2001,12 +2003,48 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           'run_analysis: goal figures withheld: the user\'s own figures make the goal a product this run did not evaluate',
         );
       }
+      if (goalPaths.length > 0) {
+        const allLinks = goalOrderedLinks(graphForAnalysis, goalPaths.flatMap(p => p.links));
+        const first = allLinks[0]!;
+        const label = (id: string): string => {
+          const node = readGraphNodesForCostAsk(graphForAnalysis).find(n => n.id === id);
+          return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label : id;
+        };
+        // ⛔ #2613 CR (b), DL 0df0e1 + e8: the stated cause follows the withhold's precedence. Gate 5 has already withheld
+        // every option, so sizing a link could not lift it: the product cause is said, and no link is asked for.
+        if (!productGateWithholds) {
+          withheldBecauseUnsizedPath = { ...first, from_label: label(first.from), to_label: label(first.to),
+            links: allLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })),
+          };
+        }
+        response = withholdOptionGoalFigures(response, new Set(goalPaths.map((p) => p.option_id)),
+          placeholderGoalWarning(graphForAnalysis, goalPaths, GOAL_FIGURES_PLACEHOLDER_PATH, productGateWithholds));
+        log.info(
+          {
+            event: 'run_analysis.goal_figures_withheld_for_placeholder_paths',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            // Redacted: ids only.
+            withheld: goalPaths.map((p) => ({ option_id: p.option_id, links: p.links.length })),
+          },
+          'run_analysis: goal figures withheld for the options an unsized Olumi link moves',
+        );
+      }
+      // #2613 CR (b): no "Set your own…" disclosure while Gate 5 withholds every figure it would describe.
+      const legacyLinks = productGateWithholds ? [] : legacyLeaderGoalLinks(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
+      if (legacyLinks.length > 0) {
+        const warning = legacyGoalWarning(graphForAnalysis, legacyLinks);
+        response = appendInferenceWarning(response, warning);
+        legacyFiguresDisclosure = ` ${warning.message}`;
+        legacyFiguresLinks = warning.links;
+      }
     }
 
-    // ⛔ DR ROW 4 (AIQ #2371 5914730220 / 5915342964): a target this run can't test (the verdict that capped the admission's
-    // mode at `exploratory`) has no goal chance for ANY option, as it has no leader or share. Runs after every earlier
-    // withhold, and withholds whatever options STILL show a goal figure: (S) is per option, so "something was withheld"
-    // never means "every chance is gone" (AIQ's executed run: m1 + one option's placeholder lever kept £59's 0.9929).
+    // ⛔ DR ROW 4 (AIQ #2371 5914730220 / 5915342964): a target this run can't test has no goal chance for ANY option.
+    // ⭐ RT-10 B′ R2 (Science #87 5999608477; DL e8): only the claims against the target go; the leader and the shares stay,
+    // as on a run with no target. Runs after every earlier withhold, and withholds whatever options STILL show a goal
+    // figure: (S) is per option, so "something was withheld" never means "every chance is gone" (AIQ's executed run: m1 +
+    // one option's placeholder lever kept £59's 0.9929).
     {
       const before = response;
       response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis);
@@ -2042,6 +2080,20 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         },
         'run_analysis: comparison withheld: two or more options came out identical',
       );
+    }
+
+    // ⭐ D3 step 1 (DL 0df0e1, PL rec 5; #87 6006078553): LAST among the goal-figure withholds — a goal chance reaches a
+    // reader only as a finite probability in [0, 1] of meeting a STATED target (target, direction, unit; a ceiling scored
+    // minimised), else it is withheld with its typed cause (`goal-chance-gate.ts`), the brief's `goal_fit` with it.
+    {
+      const before = response;
+      response = withholdUnusableGoalChances(response, graphForAnalysis, snapshot.goal_node_id);
+      if (response !== before) {
+        log.info(
+          { event: 'run_analysis.goal_chance_withheld_unusable', request_id: invocation.requestId, scenario_id: args.scenario_id },
+          'run_analysis: a goal chance that is not a probability of meeting a stated target was withheld',
+        );
+      }
     }
 
     // ⭐ A9 RESIDUAL (MG lease #75 5923478493): a goal the user held as a floor ("at least £1m") is not "no objective sense
@@ -2142,9 +2194,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // against the same bytes. Falls back to the persisted graph for snapshots
     // that carry the constraints only there. Hoisted so the identity telemetry
     // below can report what we actually asked for.
+    // ⭐ RT-10 B′ R2 at T1 (Science d5, 5 Oct): the goal's OWN target row, while the target can't be tested, is the
+    // target, not a limit: its claims are withheld and said once under GOAL_FIGURES_TARGET_NOT_TESTABLE (above), so it
+    // never also withholds the leader here. Bound by the row's identity (`untestableGoalTargetRowId`); a deadline row,
+    // another node's limit and a testable target's row stay. It still travels to PLoT unchanged.
+    const runEvaluations = (response as Record<string, unknown>).identity_evaluations;
+    const untestableTargetRowId = untestableGoalTargetRowId(graphForAnalysis, Array.isArray(runEvaluations) ? runEvaluations : undefined);
     const ratifiedConstraints = readRatifiedConstraints(
       snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
-    );
+    ).filter((c) => c.constraint_id !== untestableTargetRowId);
     // ONE verdict, five states, each declaring whether a leading option may be
     // named. Both withholding predicates (never evaluated / the leader breaks a
     // checked limit) and the seam's third answer (we could not reconcile which
@@ -2368,6 +2426,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // opens. `goal_target_edit` refuses a CHANGE target (`goal_is_a_change`, the same `isChangeFrame`), so there the
       // assumption is stated with no correction promised.
       goal_direction_correctable: goalDirectionCorrectableByTarget(graphForAnalysis, snapshot.goal_node_id),
+      // ⭐ RT-10 B′ (DL e8 condition 1): the lead says "came out lowest for {goal}" only when THIS Run sent minimise, read
+      // off the very payload PLoT received (`plotPayload.goal_direction`, set once above), never re-derived.
+      ...(plotPayload.goal_direction === 'minimise'
+        ? { minimised_goal_label: readGoalLabel(graphForAnalysis, snapshot.goal_node_id) ?? undefined } : {}),
+      // ⭐ LEAD LADDER (Science d5 #87 6008589328): the goal's label and unit off the graph this Run used. With a unit the
+      // lead names the goal's QUANTITY ("gave the highest {quantity}"); without one it says the share ("was supported by").
+      goal_label: readGoalLabel(graphForAnalysis, snapshot.goal_node_id) ?? undefined,
+      goal_unit: (() => {
+        const nodes = (graphForAnalysis as { nodes?: unknown })?.nodes;
+        return Array.isArray(nodes) ? nodeUnitOf(nodes)(snapshot.goal_node_id) : undefined;
+      })(),
       // T1: withhold the confident "{X} currently leads" claim while any
       // ratified condition is unchecked. A recommendation must not exist
       // unless every user-ratified hard constraint is decision-grade.
@@ -2658,6 +2727,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis — goal certainty not recorded on the Run (absent = not recorded; the Run itself stands)',
       );
     }
+    // ⭐ D3 step 2 (DL 0df0e1 #87 6006078553; d5; c6): the goal chance's OWN licence, decided here and stored with the Run
+    // (`goal-chance-licence.ts`): one `info` record the UI renders by identity. After the certainty decision, so an exact
+    // 0 or 1 counts only where this Run earned it.
+    response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, (optionId, p) =>
+      goalCertainty.recorded && goalCertainty.decisions.some((d) => d.option_id === optionId && d.probability_of_goal === p && d.earned));
 
     const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
       snapshot.rawPersistedGraph,
@@ -2784,9 +2858,19 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ AIQ 5895379601 (1): Olumi's readings of the goal (its direction, its today level) are said once, through the
     // predicates the Run acts on (`goal-reading-disclosure.ts`), on the graph this Run analysed. The forwarder admits
     // them only as its own rebuild from `__goal_reading_source` (AIQ 5895590866 (2), exact equality).
-    const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id);
+    // ⭐ #2644 (Science d5 6009457214): an inferred product THIS Run evaluated is one of Olumi's readings the chance rests on.
+    const runIdentityEvaluations = Array.isArray((response as Record<string, unknown>).identity_evaluations)
+      ? (response as Record<string, unknown>).identity_evaluations as unknown[] : undefined;
+    const goalReadingDisclosure = buildGoalReadingDisclosure(graphForAnalysis, snapshot.goal_node_id, runIdentityEvaluations);
     const identicalArmsDisclosure = buildIdenticalArmsDisclosure(identicalArms);
-    const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
+    const disclosedHeadline = headline !== null
+      ? appendLegacyFiguresAfterLeaderSentence(headline, legacyFiguresDisclosure) : null;
+    const composedSummary = (() => {
+      const summary = `${headline ?? template}${goalReadingDisclosure}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}${inferredValueDisclosure}${separabilityDisclosure}${identicalArmsDisclosure}`;
+      return disclosedHeadline !== null && headline !== null
+        ? disclosedHeadline + summary.slice(headline.length) : summary;
+    })();
+    const summary = composedSummary;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -2814,6 +2898,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ),
       nonlinearIdentityWithhold,
     );
+    // Record the caller's internal cause before the single owned projection/validation boundary.
+    if (withheldBecauseUnsizedPath !== undefined) {
+      response = { ...response, [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath };
+    }
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -2990,8 +3078,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         : {}),
       // Internal channel — the graph and goal the goal-reading tail was built from, so the registry forwarder can
       // rebuild that exact tail and admit nothing else (`goalReadingTailOf`). Only when a reading spoke.
+      // Server-only source for exact disclosure validation, using the same
+      // complete link list and labels that produced this Run's warning.
+      ...(legacyFiguresDisclosure !== ''
+        ? { __legacy_figures_source: { graph: graphForAnalysis, links: legacyFiguresLinks } }
+        : {}),
       ...(goalReadingDisclosure !== ''
-        ? { __goal_reading_source: { graph: graphForAnalysis, goal_node_id: snapshot.goal_node_id } }
+        ? { __goal_reading_source: { graph: graphForAnalysis, goal_node_id: snapshot.goal_node_id,
+          ...(runIdentityEvaluations !== undefined ? { identity_evaluations: runIdentityEvaluations } : {}) } }
         : {}),
       // GO(A) — the cell whose native value would make the withheld limit
       // checkable. Server-only: the turn-executor arms it as an
@@ -3642,8 +3736,9 @@ function goalFigureOptions(envelope: unknown): { scored: string[]; shown: string
 
 /**
  * ⛔ DR ROW 4 IN THE RUN (AIQ #2371 5914730220 / 5915342964): when the goal's target can't be tested
- * (`targetVerdictCapsOrdering`), every option that STILL shows a goal figure after the earlier withholds has it withheld
- * under `GOAL_FIGURES_TARGET_NOT_TESTABLE` (the leader and shares go with it). Options an earlier withhold already took keep
+ * (`targetVerdictWithholdsTargetClaims`), every option that STILL shows a goal figure after the earlier withholds has its
+ * claims AGAINST THE TARGET withheld under `GOAL_FIGURES_TARGET_NOT_TESTABLE`. ⛔ RT-10 B′ R2 (Science #87 5999608477; DL
+ * e8 CONFIRMED): the shares, the leader and the brief STAY (`keepOrdering`), exactly as on a run with no target. Options an earlier withhold already took keep
  * that withhold's own reason. Returns `response` itself when nothing is left to withhold or the target is testable. Pure.
  */
 export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown): E {
@@ -3652,7 +3747,9 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   // (the whole-run arm); a run an earlier withhold already emptied keeps that withhold's reason alone.
   const ids = shown.length > 0 ? shown : runWithheldGoalFigures(response as Record<string, unknown>) ? [] : scored;
   if (ids.length === 0) return response;
-  const verdict = targetTestabilityOf(graph);
+  // THIS Run's identity evaluations, as (S) reads them: an inferred product the Run evaluated is exact (Science d5, #2644).
+  const evaluations = (response as Record<string, unknown>).identity_evaluations;
+  const verdict = targetTestabilityOf(graph, Array.isArray(evaluations) ? evaluations : undefined);
   const warning = targetNotTestableWarning(graph, verdict, ids, GOAL_FIGURES_TARGET_NOT_TESTABLE);
   // ⭐ F1b [R1] (contract §2; L2(a) "option outcome distributions always show when computed"): when every failure is
   // about how the TARGET is stated (P2 off scale, P3 comparator, P4 unit), the goal has today's level and every path size
@@ -3663,7 +3760,7 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   if (warning === null) return response;
   // DL [R1] condition: each kept figure carries its sizing label — the options resting on Olumi's accepted estimates.
   const accepted = keepOutcome ? optionsRestingOnAcceptedOlumiSizes(graph, ids) : [];
-  return withholdOptionGoalFigures(response, new Set(ids), accepted.length > 0 ? { ...warning, rests_on_accepted_olumi: accepted } : warning, { keepOutcome });
+  return withholdOptionGoalFigures(response, new Set(ids), accepted.length > 0 ? { ...warning, rests_on_accepted_olumi: accepted } : warning, { keepOutcome, keepOrdering: true });
 }
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */
@@ -3683,12 +3780,8 @@ export function goalDirectionCorrectableByTarget(graph: unknown, goalNodeId: unk
     Array<{ kind?: unknown; goal_threshold_frame?: unknown; goal_threshold_raw?: unknown; threshold_source?: unknown; success_threshold?: unknown }>;
   if (matches.length !== 1) return false;
   const goal = matches[0]!;
-  if (goal.kind !== 'goal' || isChangeFrame(goal.goal_threshold_frame)) return false;
-  // ⛔ Codex r2 (#2600): the goal editor shows the user's stamp first (`success_threshold`, `threshold_source: 'user'`),
-  // and an "at most" at a figure that is not the HELD one clears the direction instead of holding it (add-constraint
-  // `ceilingMatchesHeldFigure`). Where the shown figure is not the held figure, no correction is promised.
-  const raw = goal.goal_threshold_raw;
-  const shown = goal.threshold_source === 'user' ? goal.success_threshold : undefined;
-  const isFiniteFigure = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-  return !(isFiniteFigure(raw) && isFiniteFigure(shown) && shown !== raw);
+  // ⭐ D3 step 1 (Science #87 6005138341 + 6006079049 (1)): an approved "at most" now REPLACES whatever figure the goal held
+  // (one target per goal) and holds its direction at ANY figure, so the door re-orders every level goal. The earlier
+  // exclusion (Codex r2 #2600: an "at most" beside a different held figure cleared the direction) went with that rule.
+  return goal.kind === 'goal' && !isChangeFrame(goal.goal_threshold_frame);
 }

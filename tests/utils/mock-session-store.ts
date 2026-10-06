@@ -129,6 +129,7 @@ export function createMockSessionStore(
     // rather than as a degraded read, which is a different product state.
     readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
     readNewestAnalysisFactFor: async () => null,
+    readNewestRunDeliveryFor: async () => null,
     invalidateScoped: async (_scenarioId, scope) => ({
       scope,
       entries_invalidated: [],

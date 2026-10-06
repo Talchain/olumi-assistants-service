@@ -96,6 +96,13 @@ export const GOAL_FIGURES_TARGET_NOT_TESTABLE = 'GOAL_FIGURES_TARGET_NOT_TESTABL
  */
 export const GOAL_FIGURES_OPTIONS_IDENTICAL = 'GOAL_FIGURES_OPTIONS_IDENTICAL';
 
+/**
+ * ⭐ D3 step 1 (DL 0df0e1, PL rec 5): a goal chance that is not a finite probability in [0, 1] of meeting a STATED target
+ * (target, direction, unit; a ceiling scored minimised). Written by `run_analysis` (`goal-chance-gate.ts`) for the
+ * options it names, each with its typed cause; the ordering and the outcome stay (the target claims only).
+ */
+export const GOAL_FIGURES_PROBABILITY_UNUSABLE = 'GOAL_FIGURES_PROBABILITY_UNUSABLE';
+
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
@@ -104,6 +111,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_OPTIONS_IDENTICAL,
+  GOAL_FIGURES_PROBABILITY_UNUSABLE,
 ]);
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -154,8 +162,31 @@ export function runWithheldGoalFigures(envelope: Record<string, unknown>): boole
 
 /** That warning (the first), or `undefined`. */
 export function goalFiguresWithheldWarning(envelope: Record<string, unknown>): Record<string, unknown> | undefined {
+  return goalFiguresWithheldWarnings(envelope)[0];
+}
+
+/** EVERY goal-figure withhold on the envelope, in carrier order (RT-10 B′: a reader that must not depend on order). */
+export function goalFiguresWithheldWarnings(envelope: Record<string, unknown>): Record<string, unknown>[] {
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
-  return filterObjectEntries(warnings).find((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
+  return filterObjectEntries(warnings).filter((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
+}
+
+/**
+ * ⭐ THE RUN'S GOAL-FIGURE WITHHOLD THAT TOOK THE WIN SHARES WITH IT — the ONE rule the leader licence and the claim's
+ * entitlement read (MC D1, DL 6 Oct: served T1b rehearsals 8/13 named no cause, "separation_unavailable", and asked for a
+ * rerun that cannot help). RT-10 B′ R2: a withhold whose `withheld_claims` lists no `win_share` KEPT them and withholds no
+ * leader; any other withhold in the set did, in ANY order. Read off a Run's stored `result` (`result.enrichment`).
+ */
+export function goalFiguresLeaderWithheldWarning(result: unknown): Record<string, unknown> | undefined {
+  const envelope = readRecord(readRecord(result)?.enrichment);
+  if (envelope === null) return undefined;
+  const keptShares = (w: Record<string, unknown>): boolean =>
+    Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('win_share');
+  return goalFiguresWithheldWarnings(envelope).find((w) => !keptShares(w));
+}
+
+export function goalFiguresLeaderWithheld(result: unknown): boolean {
+  return goalFiguresLeaderWithheldWarning(result) !== undefined;
 }
 
 /**
@@ -309,4 +340,13 @@ export function winnerOptionResultSource(
     if (hasUsableWinProbability(source)) return source;
   }
   return sources[0] ?? [];
+}
+
+/** Append a structured producer warning without letting string composers read its carrier. */
+export function appendInferenceWarning<E>(envelope: E, warning: Record<string, unknown>): E {
+  if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const current = envelope as Record<string, unknown>;
+  return { ...current, inference_warnings: [
+    ...(Array.isArray(current.inference_warnings) ? current.inference_warnings : []), warning,
+  ] } as E;
 }

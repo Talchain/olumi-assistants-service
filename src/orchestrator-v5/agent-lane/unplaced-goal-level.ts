@@ -39,6 +39,7 @@ import { unitPhraseFamily } from './unit-conflict.js';
 export type BriefGoalLevel =
   | {
       readonly kind: 'adopt';
+      readonly span?: { readonly start: number; readonly end: number };
       /** The figure in the GOAL'S OWN unit (its scale applied: "£45k" is 45 on a "£k/month" goal). */
       readonly value: number;
       /** The amount exactly as the brief writes it ("£45k"). */
@@ -159,11 +160,14 @@ export function briefGoalLevel(candidate: CandidateModel, brief: string | null |
   // (AIQ 5897443539) held "Monthly spend is £45k" on a factor ("AWS-equivalent monthly cloud spend") as well, and the
   // goal "Monthly spend" had no level. A figure whose phrase names another quantity is refused above, wherever it sits.
   if (!phraseNamesOnlyTheGoal(brief, a, metric)) return refused;
-  return {
+  const reading: BriefGoalLevel = {
     kind: 'adopt',
     value: a.magnitude / scale,
     written: a.matchedText,
     quote: clause.length <= QUOTE_MAX ? clause : `${clause.slice(0, QUOTE_MAX - 1)}…`,
     ...(goalUnit !== goal.unit ? { unit: goalUnit } : {}),
   };
+  // Internal receipt of the located occurrence; the established reading's enumerable/wire shape is unchanged.
+  Object.defineProperty(reading, 'span', { value: { start: a.index, end: a.index + a.matchedText.length } });
+  return reading;
 }

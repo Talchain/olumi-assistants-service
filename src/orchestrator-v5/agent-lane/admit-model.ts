@@ -1,3 +1,6 @@
+// Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
+export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
+import { statedEffectQuoteMatches, statedSwitchEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
 /**
  * Agent lane — whole-candidate admission.
  *
@@ -22,6 +25,7 @@ import { inertRiskBranch } from '../../graph/inert-risk.js';
 import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from './product-goal-extra-parent.js';
 import { foldPassThroughRateOntoUsersPrice, sayRateOperandIsUsersPrice } from './product-goal-rate-operand.js';
 import { oneRoutePerEffect } from './one-route-per-effect.js';
+import { optionsCreating } from './option-creates.js';
 import { isChangeFrame } from './limit-frame.js';
 import {
   CEE_GOAL_THRESHOLD_FRAME,
@@ -39,9 +43,14 @@ import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
+import { bindStatedLinkSizes, type PassThroughBinding } from './stated-size-binding.js';
+import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
+export { bindStatedLinkSizes } from './stated-size-binding.js';
+import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
+export { canonicalLabel, TODAY_LEVEL, TODAY_UNIT } from './model-primitives.js';
 import { admitCandidateLinks, definitionalLink, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
-import { resolveMagnitudeFrame, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { resolveMagnitudeFrame, naturalAmountUnitOf, sourceUnitWords, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
@@ -544,9 +553,6 @@ export function slugId(label: string): string {
     .slice(0, MAX_ID);
   return base.length > 0 ? base : 'node';
 }
-
-/** Same words, ignoring case and spacing — the test for "the same thing". */
-export const canonicalLabel = (label: string): string => label.trim().toLowerCase().replace(/\s+/g, ' ');
 
 /** A copied question is 8 to 240 characters once its whitespace is collapsed; anything else is not taken as one. */
 const DECISION_QUESTION_MIN_CHARS = 8;
@@ -1248,6 +1254,38 @@ function metricNamesScope(metric: string, modelled: string, alternative: string)
   return own.length > 0 && own.every((w) => said.has(w)) && !theirs.some((w) => said.has(w));
 }
 
+/** Words that say the WHOLE ("total", "all", "across every plan"). Folded exactly as a metric is ('across' → 'acros'). */
+const WHOLE_WORDS = scopeWords(['total', 'all', 'every', 'overall', 'whole', 'entire', 'combined', 'across', 'together'].join(' '));
+/**
+ * Words that say WHICH quantity a goal is, never which part of it: the measure and its money. Its PERIOD ("monthly",
+ * "MRR", "year") is read from the one unit alphabet (`periodNoun` / `periodAdverb`), never a list of its own.
+ */
+const MEASURE_WORDS = scopeWords([
+  'revenue', 'recurring', 'income', 'sale', 'turnover', 'profit', 'margin', 'ebitda', 'cash', 'cost', 'spend',
+  'bookings', 'booking', 'billing', 'subscription', 'subscriber', 'customer', 'user', 'member', 'client', 'account',
+  'churn', 'retention', 'growth', 'gross', 'net', 'value', 'order', 'conversion', 'signup', 'gbp', 'usd', 'eur', 'k', 'm', 'bn',
+].join(' '));
+const isPeriodWord = (w: string): boolean => periodNoun(w) !== null || periodAdverb(w) !== null;
+/**
+ * The generic part-nouns a whole is made of. They say the whole only beside a whole word ("across all plans"); alone they
+ * may name one part ("Product revenue", "Channel revenue": Codex buddy r2 P1).
+ */
+const PART_NOUNS = scopeWords(['plan', 'tier', 'product', 'segment', 'stream', 'source', 'line', 'channel', 'region', 'market'].join(' '));
+
+/**
+ * ⭐ A GOAL THAT NAMES NO PART READS AS THE TOTAL (Science d5 #87 6006584860 / 6007341975; DL 6 Oct). True when every word
+ * of the metric is a measure/period/money word, a whole word, or a part-noun beside a whole word: "MRR", "Total MRR",
+ * "monthly recurring revenue", "total revenue across all plans". Anything else may name a part ("Starter MRR", "Business
+ * customer MRR", "Product revenue", "… net of refunds …") and keeps C46's question (ask (a), non-blocking): asking is the
+ * safe side, and an untyped question never withholds (`scopeIssueBlocks`). PURE.
+ */
+export function metricReadsAsPlainTotal(metric: string): boolean {
+  const said = [...scopeWords(metric)];
+  const whole = said.some((w) => WHOLE_WORDS.has(w));
+  return said.length > 0 && said.every((w) => MEASURE_WORDS.has(w) || isPeriodWord(w) || WHOLE_WORDS.has(w) || (whole && PART_NOUNS.has(w))
+    || /^\d+(k|m|bn)?$/.test(w));
+}
+
 /** `"A"`, `"A" and "B"`, `"A", "B" and "C"` — words, never ids. */
 const quotedList = (items: readonly string[]): string => {
   const q = items.map((s) => `"${s}"`);
@@ -1398,13 +1436,29 @@ function markProductIdentities(
   }
   const levelRefused = new Map<CandidateIdentity, string[]>();
   const levelled = (id: string): boolean => { const t = todayOf(id); return t !== undefined && t !== 0; };
+  /**
+   * ⭐ AN EVIDENCED CREATION-0 IS A LEVEL WHEN NOTHING STATES THE PRODUCT'S OWN (Science d5 #87 6008551439 (A), amending
+   * 6006376889 (b)). The refusal above exists because ISL withholds a product over a missing or zero part, so PLoT then
+   * withholds every option's goal chance with no question (R3 5898443502). ISL withholds a ZERO part only against a
+   * stated level on the product (its rule 3, AIQ #72 5881596876: "with no stated target … a zero operand is an ordinary
+   * level"). So a part at 0 today, or with no level, that an option CREATES (`optionsCreating`: its own creation verb,
+   * and its path reaches the part) is not refused under a product whose node states no level; construction holds a
+   * level-less one at 0 (`created_part_zero`, below), and ISL works the product out exactly.
+   */
+  const statusQuoOptions = new Set(nodes.filter((n) => n.kind === 'option' && (declaredStatusQuo.has(n.id) || n.is_baseline === true)).map((n) => n.id));
+  const createdAtZero = (part: string, d: CandidateIdentity): boolean => {
+    const t = todayOf(part);
+    const product = resolve(d.outcome);
+    if ((t !== undefined && t !== 0) || product === undefined || todayOf(product) !== undefined) return false;
+    return optionsCreating(nodes, edges, part, statusQuoOptions).length > 0;
+  };
   for (let changed = true; changed;) {
     changed = false;
     for (const d of declared) {
       if (d.provenance === 'explicit' || d.operation !== 'product' || levelRefused.has(d)) continue;
       const parts = [...new Set((Array.isArray(d.factors) ? d.factors : []).map((f) => resolve(f)).filter((id): id is string => id !== undefined))];
       const missing = parts.filter((id) => {
-        if (levelled(id)) return false;
+        if (levelled(id) || createdAtZero(id, d)) return false;
         if (kindOf.get(id) === 'factor') return true;
         // An outcome counts only when a product refused here was to give it its level: one no product declares is left
         // as before (the served MRR "Pro paying subscribers", journey C's tally), unmeasured against ISL.
@@ -2343,8 +2397,6 @@ function sayKeptLoop(loopLabels: readonly string[], links: readonly KeptLoopLink
  * change-versus-level classification whose corpus must come from served captures, not from
  * this file's author, so it is not guessed here.
  */
-export const TODAY_LEVEL = 100;
-export const TODAY_UNIT = '% of today';
 function restateSignedPercentChanges(model: CandidateModel): {
   model: CandidateModel;
   restated: { label: string; frame: number }[];
@@ -2997,6 +3049,7 @@ function admitOnce(
   // ⛔ A goal read as a two-part product gets no third direct parent: a non-money factor's Olumi-sized link is re-pointed
   // through the volume operand; an addend is left as drafted (`product-goal-extra-parent.ts`, R3 5902616543, C46 rule 7).
   const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(foldedModel, brief);
+  const levelReading = { value: null as BriefGoalLevel | null };
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
@@ -3114,7 +3167,7 @@ function admitOnce(
         // ⭐ R1 S4-core: a target stated as a CHANGE from today is written as one (`admitStatedGoalChange`); a level
         // target takes the path below, unchanged.
         if (model.goal.frame === 'change_abs' || model.goal.frame === 'change_rel') {
-          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, goalLevelFromBrief(model));
+          const change = admitStatedGoalChange(model.goal, raw, goalLevelStated, (levelReading.value = goalLevelFromBrief(model)));
           if (change.reading !== undefined) {
             loss.push({
               field_path: `nodes[${slugId(model.goal.metric)}].goal_level_reading`,
@@ -3719,8 +3772,102 @@ function admitOnce(
    * `explicit` that no sentence carries is Olumi's estimate, never the user's. ONE predicate, read by the normalising
    * frame below AND by link sizing (CODEX CEE BUDDY 5922482284: an unwritten £100m tagged `explicit` once set the frame).
    */
+  // Fi is an ADDED door: the strict label-based sizeWritten check below is unchanged (its retirement is its own PR).
+  // The candidate effect fields are defined in each endpoint's own unit (D1).
+  // Read those same units for C1; no unit is inferred from the brief.
+  const magnitudeNodeFor = (n: AdmittedNode): MagnitudeNode => ({
+    label: n.label, kind: n.kind, scale_frame: n.scale_frame,
+    observed_state: n.observed_state as MagnitudeNode['observed_state'],
+    goal_threshold_cap: n.goal_threshold_cap, goal_threshold_unit: n.goal_threshold_unit,
+    unit: unitById.get(n.id) ?? null, option_levels: optionLevelsById.get(n.id) ?? [],
+    ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
+    ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
+  });
+  // Validate the converter's prospective STORED tuple, including percentage points.
+  const prospectiveEffects = resolvable.map(l => {
+    const source = nodeOf.get(l.from), target = nodeOf.get(l.to);
+    return source === undefined || target === undefined || l.direction === 'unknown' ? undefined
+      : sizeLink({ direction: l.direction, effect_amount: l.effect_amount,
+          effect_per_source_change: l.effect_per_source_change, user_stated: true },
+        magnitudeNodeFor(source), magnitudeNodeFor(target)).natural_effect;
+  });
+  const bindingNodes = nodes.map(n => {
+    const own = n.observed_state?.unit ?? (n.kind === 'goal' ? n.goal_threshold_unit : undefined) ?? unitById.get(n.id);
+    return { id: n.id, label: n.label, kind: n.kind, goal_threshold_raw: n.goal_threshold_raw, goal_threshold_unit: n.goal_threshold_unit, unit: own,
+      ...(typeof own === 'string' ? { effect_unit: naturalAmountUnitOf(magnitudeNodeFor(n)),
+        change_unit: sourceUnitWords(magnitudeNodeFor(n), resolveMagnitudeFrame(magnitudeNodeFor(n))) } : {}) };
+  });
+  // Only a role-aware reader's located level is claimed here. Target/current/setting
+  // occurrences are claimed by nonEffectQuantitySpans in the binding reader.
+  const claimedLevelSpans = levelReading.value?.kind === 'adopt' && levelReading.value.span !== undefined ? [levelReading.value.span] : [];
+  const passThroughs: PassThroughBinding[] = [];
+  // A switch is also named by the options that set it (Science 6008844683 (c)): "Launch starter tier" sets ‘launched’.
+  const settersOf = new Map<string, string[]>();
+  for (const o of model.options) for (const i of o.interventions ?? []) {
+    const id = ids.get(i.factor_label);
+    if (id !== undefined) settersOf.set(id, [...(settersOf.get(id) ?? []), o.label]);
+  }
+  const centreRanges = new Map<number, StatedRangeEnd>();
+  const signRefused: { readonly through: PassThroughBinding; readonly said: 1 | -1 | null }[] = [];
+  const directSignRefused: { readonly link: number; readonly sentence: string }[] = [];
+  const boundSizeSentences = bindStatedLinkSizes(resolvable.map((l, i) => ({
+    from: l.from, to: l.to, effect_direction: l.direction, natural_effect: prospectiveEffects[i],
+  })), bindingNodes, brief, claimedLevelSpans, { passThroughs, settersOf, centreRanges, signRefused, directSignRefused });
+  // ⛔ A direct bind drawn the other way from the user's sentence is never theirs, and that is SAID (DL #2644 pilot).
+  for (const r of directSignRefused) {
+    const link = resolvable[r.link]!;
+    const label = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+    loss.push({
+      field_path: `edges[${link.from}->${link.to}].stated_sign`,
+      before: { direction: link.direction },
+      after: null,
+      reason: `“${r.sentence}” is not recorded as your figure for ‘${label(link.from)}’ → ‘${label(link.to)}’: that link is drawn to `
+        + 'run the other way from what you wrote. Check which way it runs.',
+      severity: 'warn',
+    } as RepairEntry);
+  }
+  // ⛔ A pass-through whose path runs the other way from the user's sentence is never typed, and that is SAID (Desk 6b Q3).
+  for (const { through: r, said } of signRefused) {
+    const into = resolvable[r.link]!;
+    const onward = resolvable[r.onward]!;
+    const label = (id: string): string => nodes.find((n) => n.id === id)?.label ?? id;
+    // Desk 6b: a verb Olumi cannot read gets its own words, never the false "drawn to run the other way".
+    const why = said === null
+      ? `Olumi can't tell from it which way it moves ‘${label(onward.to)}’. Say whether it adds to ‘${label(onward.to)}’ or takes away from it.`
+      : `the links ‘${label(into.from)}’ → ‘${label(into.to)}’ → ‘${label(onward.to)}’ are drawn to run the other way from what you wrote. `
+        + 'Check which way each of them runs.';
+    loss.push({
+      field_path: `edges[${into.from}->${onward.to}].pass_through_sign`,
+      before: { via: label(into.to) },
+      after: null,
+      reason: `“${r.sentence}” is not recorded through ‘${label(into.to)}’: ${why}`,
+      severity: 'warn',
+    } as RepairEntry);
+  }
+  const boundByLink = new Map([...boundSizeSentences].map(([index, sentence]) => [resolvable[index]!, sentence]));
+  // The range the bound sentence writes around the user's figure (`centreRangeAt`), read where the size is.
+  const centreByLink = new Map([...centreRanges].map(([index, range]) => [resolvable[index]!, range]));
+  /**
+   * ⭐ (B) THE MEDIATOR'S ONWARD LINK IS THE DEFINITION THE BOUND SENTENCE IMPLIES (Science d5 #87 6008551439 (B)): ±1 per
+   * 1, its typed sign, written as if the drafter had said it holds by definition, so the ONE definitional check
+   * (`definitionalLink`) types it on its own natural size. Olumi's reading, never the user's. The mediator is measured in
+   * the onward quantity's unit (Science 6006425419's gauge: a pound of ‘MRR lost’ is a pound of MRR).
+   */
+  for (const t of passThroughs) {
+    const onward = resolvable[t.onward]!;
+    resolvable[t.onward] = { ...onward, definitional: true, effect_amount: t.sign, effect_per_source_change: 1, effect_provenance: 'ai_proposed' };
+    const statedUnit = prospectiveEffects[t.link]?.amount_unit;
+    if (!unitById.has(onward.from) && typeof statedUnit === 'string') unitById.set(onward.from, statedUnit);
+  }
+  // A link whose pass-through ran the other way from the sentence is not the user's by the door either (Desk 6b Q3).
+  const signRefusedLinks = new Set([...signRefused.map((r) => resolvable[r.through.link]!), ...directSignRefused.map((r) => resolvable[r.link]!)]);
   const userSizeEarned = (l: CandidateLink): boolean => {
     if (l.provenance_source === 'user_specified') return true;
+    if (boundByLink.has(l)) return true;
+    if (signRefusedLinks.has(l)) return false;
+    // ⚠ The `sizeWritten` door is RETIRED by Science 6008581742, in its own PR: Fi does not yet bind every sentence it
+    // covers ("cuts churn by 6 points" is not read as percentage points; a three-word noun such as "each qualified investor
+    // conversation" is not located), so retiring it here would demote real user figures.
     const source = nodeOf.get(l.from);
     const target = nodeOf.get(l.to);
     if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
@@ -3772,18 +3919,7 @@ function admitOnce(
     goal.scale_frame = niceFrameAtLeast(top);
     return goal.id;
   })();
-  const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
-    label: n.label,
-    kind: n.kind,
-    scale_frame: n.scale_frame,
-    observed_state: n.observed_state as MagnitudeNode['observed_state'],
-    goal_threshold_cap: n.goal_threshold_cap,
-    goal_threshold_unit: n.goal_threshold_unit,
-    unit: unitById.get(n.id) ?? null,
-    option_levels: optionLevelsById.get(n.id) ?? [],
-    ...(percentLevelIds.has(n.id) ? { percent_level: true } : {}),
-    ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
-  }]));
+  const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map(n => [n.id, magnitudeNodeFor(n)]));
   const sizing = new Map<string, LinkSizing>();
   for (const l of resolvable) {
     if (l.direction === 'unknown' || typeof l.strength_mean === 'number') continue;
@@ -3793,8 +3929,9 @@ function admitOnce(
     const levelUnit = target.observed_state?.unit ?? target.unit ?? target.goal_threshold_unit;
     const user_stated = userSizeEarned(l);
     // A4: a size the brief writes only as one END of a range is said with that range (a user's own edit never is).
+    // The bound sentence's range AROUND the figure first ("about 150, between 80 and 250"; d5 6009282279), else A4's end.
     const range = user_stated && l.provenance_source !== 'user_specified'
-      ? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
+      ? centreByLink.get(l) ?? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
         source: source.label,
         sourceUnit: source.unit,
         others: quantityLabels.filter((q) => q !== source.label),
@@ -3816,6 +3953,16 @@ function admitOnce(
   }
 
   const linkResult = admitCandidateLinks(resolvable, sizing);
+  // Reviewed Fi writer: carry the very sentence C2/W3/C1/SIGN-1 validated, through
+  // the existing stored statement field. User edits retain their own provenance.
+  for (const [link, sentence] of boundByLink) {
+    if (link.provenance_source === 'user_specified') continue;
+    const edge = linkResult.edges.find(e => e.from === link.from && e.to === link.to);
+    if (edge?.provenance?.magnitude === 'user_stated'
+      && edge.provenance.natural_effect !== undefined
+      && (statedEffectQuoteMatches(sentence, edge.provenance.natural_effect)
+        || statedSwitchEffectQuoteMatches(sentence, edge.provenance.natural_effect))) edge.provenance.source_quote = sentence;
+  }
 
   // decision -> option edges are TOPOLOGY, not causal belief. They use the
   // canonical structural constant and are deliberately NOT marked `defaulted`
@@ -4377,7 +4524,7 @@ function admitOnce(
         exists_probability: DEFAULT_EXISTS_PROBABILITY,
         // The same structured provenance every other machine-authored edge
         // carries — a repaired link is a hypothesis, and must read as one.
-        provenance: { source: 'cee_hypothesis' },
+        provenance: { source: 'cee_hypothesis', mean_projected: true },
         defaulted: true,
       } as AdmittedEdge);
       loss.push({
@@ -4590,9 +4737,46 @@ function admitOnce(
       if (at !== null && defined.has(at[1]!)) loss.splice(i, 1);
     }
   }
+  /**
+   * ⭐ A PRODUCT PART AN OPTION CREATES IS 0 TODAY — OLUMI'S READING, SAID ONCE (Science d5 #87 6007736377 (i); DL 6 Oct,
+   * Acceptance G1 draft 11 on CEE 231affbe). The brief's "each starter subscriber costs about £6 a month in support" was
+   * declared as the user's product ‘Starter-tier support cost’ = ‘Starter subscribers’ × ‘Support cost per starter
+   * subscriber’. ‘Starter subscribers’ is an outcome, so no control can give it a level, and it had none. ISL refused
+   * EVERY Run (`identity_operand_missing`; a stated identity's refusal stands), and the user was asked a level they could
+   * not save, after every Run. A part with no level today that an option CREATES (`optionsCreating`: the option's own
+   * creation verb, and its path reaches the part) is 0 today: Olumi's reading (`cee_inference`, never the user's), said
+   * once among what was done with the brief, where the user can correct it. The same holds for Olumi's own product (served
+   * witness draw 6 on b501eda4: #416 withheld every option's chance over the same part). Only on a product whose node has
+   * no level of its own: with one, ISL's ratio needs every part above 0 (`identity_zero_level`), so the part is left to
+   * the ask. A part with any level, or one no option creates, is untouched.
+   */
+  const levelled = (n: AdmittedNode | undefined): boolean => typeof n?.observed_state?.value === 'number' && Number.isFinite(n.observed_state.value);
+  const statusQuoIds = new Set(levers.nodes.filter((n) => n.kind === 'option' && (declaredStatusQuoIds.has(n.id) || n.is_baseline === true)).map((n) => n.id));
+  const createdZero = new Map<string, { label: string; options: string[] }>();
+  for (const [carrierId, carrier] of carriers) {
+    if (carrier.operation !== 'product' || levelled(levers.nodes.find((n) => n.id === carrierId))) continue;
+    for (const partId of carrier.factor_ids) {
+      const part = levers.nodes.find((n) => n.id === partId);
+      if (part === undefined || levelled(part) || createdZero.has(partId)) continue;
+      const options = optionsCreating(levers.nodes, finalEdges, partId, statusQuoIds);
+      if (options.length > 0) createdZero.set(partId, { label: part.label, options });
+    }
+  }
+  for (const [id, z] of createdZero) {
+    const quoted = z.options.map((o) => `‘${o}’`);
+    const by = quoted.length === 1 ? quoted[0]! : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+    loss.push({
+      field_path: `nodes[${id}].created_part_zero`,
+      before: null,
+      after: { value: 0, created_by: [...z.options] },
+      reason: `‘${z.label}’ is 0 today, since ${by} would start it.`,
+      severity: 'info',
+    } as RepairEntry);
+  }
+  const atZero = (n: AdmittedNode): AdmittedNode => (createdZero.has(n.id) ? { ...n, observed_state: { value: 0, source: 'cee_inference' } } : n);
   const admittedNodes = carriers.size === 0
     ? levers.nodes
-    : levers.nodes.map((n) => (carriers.has(n.id) ? { ...n, nonlinear_identity: carriers.get(n.id)! } : n));
+    : levers.nodes.map((n) => (carriers.has(n.id) ? { ...atZero(n), nonlinear_identity: carriers.get(n.id)! } : atZero(n)));
 
   return {
     nodes: admittedNodes,

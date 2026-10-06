@@ -108,6 +108,79 @@ import {
 import { splitIntoRedactableUnits } from './redactable-units.js';
 
 /**
+ * Cut 6 (WORDING BATCH; DL 0df0e1 #2639 6008917488, after two Review Desk rounds): the run-share leader adjective.
+ *
+ * TRIGGER: most/best/more/better-supported (an -ly adverb or "well" may sit between: "most strongly supported", "most
+ * well-supported"), "the most support", "supported most". Any verb, any noun: "X remains the most supported", "Most supported: X", "the best-supported
+ * option", "X has the most support". Enumerating verb forms was whack-a-mole; this fails closed.
+ *
+ * LEAVE, and only these:
+ *   - a negated OPTION subject opens the same clause (or comma segment) and is the trigger's own subject: only a
+ *     copula, one optional adverb (clearly/really/currently/yet/now/still) and "the" sit between — "no option is the",
+ *     "no single option is", "none (of the options) is", "neither (option) is", "not one / not a single (option) is".
+ *     It must be an OPTION subject: "no single factor … would change the most-supported option" still presupposes a
+ *     leader, and a label such as "No New Hire" is not a negator.
+ *   - "there is / there's no (single|clear|one)" directly before the trigger.
+ * The adjective on another noun ("the most-supported assumption") is an accepted over-block: no CEE emitter or prompt
+ * uses it (grep at 37c9f0bf, in the PR body).
+ */
+const MOST_SUPPORTED_NEGATED_OPTION_SUBJECT =
+  String.raw`(?:no(?:\s+single)?\s+(?:option|one|choice)s?|none(?:\s+of\s+(?:the|them|these|those)(?:\s+(?:options|choices))?)?` +
+  String.raw`|neither(?:\s+(?:option|one|choice))?|not\s+(?:one|a\s+single)(?:\s+(?:option|choice))?)`;
+const MOST_SUPPORTED_LEADER_RE = new RegExp(
+  // The negated subject must be the trigger's own subject: clause-opening, then ONLY a copula and one optional adverb
+  // before it (DL #2639 6009295813). A wider span let "No option beats X as the most supported option" through.
+  String.raw`(?<!(?:^|[.;:!?,\n])\s*(?:[-*•]\s*)?${MOST_SUPPORTED_NEGATED_OPTION_SUBJECT}\s+(?:is|are|was|were)\s+` +
+    String.raw`(?:(?:clearly|really|currently|yet|now|still)\s+)?(?:the\s+)?)` +
+    String.raw`(?<!\bthere(?:['’]s|\s+(?:is|are|was|were))\s+no\s+(?:(?:single|clear|one)\s+)?)` +
+    // The span takes a following option noun, so the roster-aware reader's question and postfix-"if" checks see what
+    // comes after the whole phrase ("…the most-supported option?"), exactly as they do for "the leading option".
+    String.raw`\b(?:(?:most|best|more|better)[-\s]+(?:(?:[a-z]+ly|well)[-\s]+)?supported(?:\s+(?:options?|ones?|choices?))?` +
+    String.raw`|the\s+most\s+support|supported\s+most)\b`,
+  'i',
+);
+
+/** The ladder verb's classes (Desk 6b + DL, #2646): production verbs, and has/had (a held quantity). */
+const LADDER_VERB_SRC = String.raw`(?:gave|gives|give|giving|produc(?:e|es|ed|ing)|deliver(?:s|ed|ing)?|yield(?:s|ed|ing)?|generat(?:e|es|ed|ing)|achiev(?:e|es|ed|ing)|return(?:s|ed|ing)?|earn(?:s|ed|ing)?|brings?|brought|bringing|record(?:s|ed|ing)?|has|had|have|having)`;
+const LADDER_PASSIVE_SRC = String.raw`(?:given|produced|delivered|yielded|generated|achieved|returned|earned|brought|recorded)`;
+/** A weighting, a mechanism or the goal-chance copy: "the highest priority", "the highest influence", "the highest chance". */
+const NOT_A_RESULT_SRC = String.raw`(?!\s+(?:priority|priorities|importance|weight|weighting|attention|emphasis|consideration|influence|impact|effect|sensitivity|uncertainty|confidence|leverage|variance|chances?|probabilit(?:y|ies)|likelihood|odds)\b)`;
+/**
+ * A STATISTIC comparison ("produced the highest average outcome", "has the lowest modelled median") is v6 class C2 when
+ * the sentence names its metric scope, and the served agent lane keeps it by that scope (`blankScopedMetricComparison`).
+ * This context-free reader cannot see the scope, so it leaves the statistic form alone, exactly as on the base (served
+ * caf7d1a/pricing-1). The ladder's own lead names a QUANTITY ("the highest monthly recurring revenue"), never this form.
+ */
+const NOT_A_STATISTIC_SRC = String.raw`(?!\s+(?:(?:modelled|average|mean|median|expected|simulated|normalised)\s+)+(?:median|mean|average|outcome|value|score)s?\b)`;
+const RUN_SHARE_SRC = String.raw`\bin\s+(?:the\s+most|\d{1,3}(?:\.\d+)?\s?%)\s+(?:of\s+(?:the\s+)?)?(?:runs?|simulations?)\b`;
+/** A scope, not an option: "risk is highest under the current assumptions". */
+const NOT_AN_OPTION_SCOPE_SRC = String.raw`(?!(?:the\s+)?(?:current|these|this|those|that|your|our|its|their|all|any|each|every|both|most|many|some)\b)`;
+const GAVE_THE_EXTREME_RE = new RegExp(
+  [
+    // Active: "X gave / produced / had the highest|lowest {q}".
+    String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:highest|lowest)\b${NOT_A_RESULT_SRC}${NOT_A_STATISTIC_SRC}`,
+    // "the most|least {q}", only with a run share: "X gave the most MRR in 62% of runs".
+    String.raw`\b${LADDER_VERB_SRC}\s+the\s+(?:most|least)\b[^.;:!?\n]{0,60}?${RUN_SHARE_SRC}`,
+    // Fronted with a run share: "The highest {q} came from X in 81% of runs".
+    String.raw`\b(?:highest|lowest)\b[^.;:!?\n]{0,80}?${RUN_SHARE_SRC}`,
+    // Fronted, no share: "The lowest churn came from X" / "The highest MRR was produced by X" / "The most MRR came from X".
+    String.raw`\bthe\s+(?:highest|lowest|(?:most|least)(?!\s+(?:of|runs?|support)\b))\b${NOT_A_RESULT_SRC}[^.;:!?\n]{0,48}?\b(?:(?:came|comes|coming)\s+from|(?:was|is|were|are)\s+${LADDER_PASSIVE_SRC}\s+by)\b`,
+    // Predicative: "churn was lowest under X", "MRR is highest with X".
+    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?(?:highest|lowest)\s+(?:under|with|for)\s+${NOT_AN_OPTION_SCOPE_SRC}`,
+  ].join('|'),
+  'i',
+);
+const CAME_TOP_RE = new RegExp(
+  [
+    String.raw`\b(?:came|comes|coming)\s+(?:out\s+)?top\b`,
+    String.raw`\b(?:was|is|were|are)\s+(?:the\s+)?top\s+(?:on|for)\b`,
+    String.raw`(?:^|[.;:!?\n]\s*)top\s+(?:on|for)\s+[^.;:!?\n]{0,48}?\b(?:was|were|is|are|came)\b`,
+    String.raw`\btop(?:s|ped)\b(?!\s+up\b)[^.;:!?\n]{0,60}?${RUN_SHARE_SRC}`,
+  ].join('|'),
+  'i',
+);
+
+/**
  * Copy that NAMES or PRESUMES a leading option.
  *
  * Sourced from the G-CEE-1 walk's own matcher (`raw/matcher.py`), which is the
@@ -129,12 +202,19 @@ import { splitIntoRedactableUnits } from './redactable-units.js';
 const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re: RegExp }> = [
   { code: 'leads', re: /\bleads\b/i },
   { code: 'leading_option', re: /\bleading\s+option/i },
+  // Cut 6 (Science d5 #87 6008249324): the copy now names the run-share leader as "the most-supported option". It
+  // presupposes a leader exactly as "the leading option" did, so the withheld gate must SEE it. DL 0df0e1 (#2639
+  // 6008917488): the ADJECTIVE is the trigger, not a noun or verb list — fail closed. See MOST_SUPPORTED_LEADER_RE.
+  { code: 'most_supported_option', re: MOST_SUPPORTED_LEADER_RE },
   { code: 'the_lead', re: /\bthe\s+lead\b/i },
   { code: 'which_option_leads', re: /\bwhich\s+option\s+leads\b/i },
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
   { code: 'best_option', re: /\bbest\s+option\b/i },
   { code: 'winner', re: /\bwinners?\b/i },
-  { code: 'ahead', re: /\b(?:is|are|was|were)\s+ahead\b/i },
+  // DL 0df0e1 follow-up (#2639 family): the adverb slot ("is just / a little / still ahead") the band list could not
+  // see. NO timeline exemption ("ahead of schedule / plan / time"): a context-free reader cannot tell an option named
+  // "Plan" from a plan (Codex buddy #2646 r1 F3), so those stay caught exactly as on the base.
+  { code: 'ahead', re: /\b(?:is|are|was|were)\s+(?:(?:[a-z]+ly|just|well|still|now|a\s+little|a\s+bit)\s+)?ahead\b/i },
   { code: 'top_choice', re: /\btop\s+(?:choice|option)\b/i },
   /**
    * SECOND RECORDED DIVERGENCE from the walk's matcher — and the one that
@@ -292,6 +372,34 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * leading option just as surely without scoring anything.
    */
   { code: 'scored_highest', re: /\bscor(?:e|es|ed|ing)\s+highest\b/i },
+  /**
+   * ⭐ RT-10 B′ (DL e8 condition 1): the deterministic headline of a Run that SENT minimise leads with "{option} came out
+   * lowest for {goal} in N% of runs of this model" (`analysis-result-headline.ts`, `MINIMISED_LEAD_PREFIX`). Added WITH
+   * that template and pinned by its derived control (`coaching/__tests__/bprime-minimise-lead.test.ts` drives the real
+   * builder and asserts `textNamesLeadingOption` sees every leader-naming output), so a withheld leader cannot leave
+   * through the new verb.
+   */
+  { code: 'came_out_lowest', re: /\bcame\s+out\s+lowest\b/i },
+  /**
+   * ⭐ THE LEAD LADDER'S RUNG 1/2 VERB (Science d5 #87 6008589328): "{X} gave the highest|lowest {quantity} in N% of runs
+   * of this model" names the run-share leader exactly as "scored highest" did, so the withheld gate must SEE it and the
+   * paraphrases the ladder invites (Review Desk 6b + DL, #2646): any production verb or has/had ("produced the lowest
+   * churn", "had the highest MRR"), "the most|least {q}" bound to a run share, the fronted and passive forms ("The
+   * lowest churn came from X", "The highest MRR was produced by X"), and the predicative ("churn was lowest under X").
+   * Rung 3 ("was supported by") is `runs_supported`'s. A weighting or a mechanism ("the highest priority", "has the
+   * highest influence") and the goal-chance copy ("the highest chance of meeting your goal", its own licence) are not
+   * this code's.
+   */
+  { code: 'gave_the_extreme', re: GAVE_THE_EXTREME_RE },
+  /** "{X} came top", "{X} was top on MRR", "Top on MRR was {X}", "{X} topped MRR in 62% of runs" (Desk 6b, #2646). */
+  { code: 'came_top', re: CAME_TOP_RE },
+  /**
+   * ⭐ THE DIRECTION-NEUTRAL FORM (DL 0df0e1 #87 6002469285, Part B): where a composer cannot see the Run's sent
+   * direction, it names an option as "{N}% of runs supported {X}", "{X} would be supported by the most runs if …", "the
+   * option the most runs supported" or "{X} was supported by … runs" (a plurality, never "most runs" bare). Added WITH those composers, for the same reason as `scored_highest` above: a new leader verb the
+   * alarm cannot read would switch redaction off for it.
+   */
+  { code: 'runs_supported', re: /\b(?:runs?|simulations?|draws?)\s+(?:would\s+(?:still\s+)?|could\s+|still\s+)?support(?:s|ed|ing)?\b|\bsupported\s+by\s+[^.;!?]{0,48}?\b(?:runs?|simulations?|draws?)\b/i },
   { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
 ];
 
@@ -738,6 +846,63 @@ const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
   'Standardise on MacBook Pro comes out ahead, leading in 44% of simulations.',
   'Double Down on SMB is slightly ahead.',
   'Standardise on Dell XPS performs best, with a probability of 56%.',
+  // Cut 6 CATCH twin (d5): the new vocabulary, naming an option.
+  'Hire Marketing Manager is the most-supported option in this model.',
+  // Cut 6 Review Desk + DL (#2639): the adjective with any verb or noun.
+  'Hire Marketing Manager is the most supported in this model.',
+  'The two most-supported options are Hire Marketing Manager and Hold.',
+  'Hire Marketing Manager was the most-supported one.',
+  'The most supported is Hire Marketing Manager.',
+  'Hire Marketing Manager is most supported in this model.',
+  'Hire Marketing Manager remains the most supported.',
+  'Hire Marketing Manager comes out most supported.',
+  'Hire Marketing Manager comes out as the most supported.',
+  'Hire Marketing Manager ends up the most-supported.',
+  'Most supported: Hire Marketing Manager.',
+  'The most-supported choice is Hire Marketing Manager.',
+  'Hire Marketing Manager stays the most-supported choice.',
+  'The most supported here is Hire Marketing Manager.',
+  'Hire Marketing Manager is the best-supported option.',
+  'Hire Marketing Manager has the most support in this model.',
+  'Hire Marketing Manager is the more supported of the two.',
+  'Hire Marketing Manager is supported most often.',
+  'Hire Marketing Manager is now the most supported.',
+  'Of the options, Hire Marketing Manager is most supported.',
+  'Hire Marketing Manager is the most strongly supported option.',
+  'The option most supported by the runs is Hire Marketing Manager.',
+  "Hire Marketing Manager's the most supported.",
+  'No New Hire is the most supported in this model.',
+  // Review Desk round 3 (#2639 @1c3c70b6).
+  'No option beats Hire Marketing Manager as the most supported option.',
+  'Neither option changes much and Hire Marketing Manager is the most supported.',
+  'None of them come close so Hire Marketing Manager is the most supported.',
+  'Hire Marketing Manager is the most well supported option.',
+  'Hire Marketing Manager is the most well-supported option.',
+  'Hire Marketing Manager is better supported than Outsource.',
+  // The lead ladder's rung 1/2 verb (d5 #87 6008589328), numbered, shed and fronted.
+  'Raise to £59 gave the highest monthly recurring revenue in 62% of runs of this model.',
+  'Raise to £59 gave the lowest churn in the most runs of this model.',
+  'The highest monthly recurring revenue came from Raise to £59 in 62% of runs.',
+  // The `ahead` adverb slot (DL follow-up, r18's class).
+  'Raise prices 10% is just ahead.',
+  'Raise prices 10% is a little ahead.',
+  // No timeline exemption: an option named "Plan B" is a contest.
+  'Raise prices 10% is ahead of Plan B.',
+  'Raise prices 10% is slightly ahead of Plan B in this model.',
+  // >>> #2646 Desk 6b + DL: the ladder verb's paraphrase classes (active, has/had, most+share, fronted, passive,
+  // predicative, top). Each class has its own CATCH rows in lead-ladder-egress.test.ts.
+  'Raise to £59 produced the lowest churn.',
+  'Raise to £59 delivered the highest MRR.',
+  'Raise to £59 yields the highest MRR.',
+  'Raise to £59 had the highest MRR.',
+  'Raise to £59 gave the most MRR in 62% of runs.',
+  'The lowest churn came from Raise to £59.',
+  'The highest MRR was produced by Raise to £59.',
+  'Churn was lowest under Raise to £59.',
+  'Raise to £59 came top on MRR in 62% of runs.',
+  'Raise to £59 topped MRR in 62% of runs.',
+  'Top on MRR was Raise to £59.',
+  // <<< #2646 Desk 6b + DL
 ]);
 
 function assertEnforcerIsNarrowerThanAlarm(): void {

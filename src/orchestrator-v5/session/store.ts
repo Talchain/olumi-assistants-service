@@ -15,6 +15,7 @@
 import type {
   ConversationTurnClass,
   HandlerFact,
+  RunDeliveryHandlerFact,
   V5ActionType,
 } from '@talchain/schemas/orchestrator';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
@@ -598,6 +599,13 @@ export interface SessionStore {
    * two independently timed views of one scenario authority.
    */
   readNewestAnalysisFactFor?(scenarioId: string): Promise<HandlerFact | null>;
+  /**
+   * 0.79 (SD-1 Slice R on the agent lane; DL ruling #87, option A): the NEWEST non-noop `run_delivery` fact recorded for
+   * THIS Run (`result.run_id`), or `null` when none is recorded. What the Run's turn delivered, for the scenario read to
+   * serve under its own gates. Throws `SessionReadError` on a failed or unparseable read; the caller omits.
+   * Optional: callers read omission as "not recorded".
+   */
+  readNewestRunDeliveryFor?(scenarioId: string, runId: string): Promise<RunDeliveryHandlerFact | null>;
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**

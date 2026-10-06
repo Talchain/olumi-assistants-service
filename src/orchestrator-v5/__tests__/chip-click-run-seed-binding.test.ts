@@ -58,8 +58,14 @@ const served = JSON.parse(readFileSync(new URL('../agent-lane/__tests__/fixtures
 const happy = JSON.parse(readFileSync('tests/fixtures/plot/v2-run-golden-happy.json', 'utf8')) as V2RunResponseEnvelope;
 const DRAW_KEY = 'd'.repeat(64);
 
-function harness() {
+function harness(opts: { goalLevelOlumis?: boolean } = {}) {
   const graph = structuredClone(served.graph);
+  // MC D1 (b): the served goal level is the USER's, so Gate 5 withholds every comparison on this graph (no leader, so no
+  // "explore the leading option"). The first-analysis rows need a Run whose leader CAN be named: the same graph with the
+  // goal's level Olumi's, which Gate 5 does not read as the user's product.
+  if (opts.goalLevelOlumis === true) {
+    for (const n of graph.nodes as Rec[]) if (n.kind === 'goal' && n.observed_state) n.observed_state = { ...n.observed_state, source: 'cee_inference' };
+  }
   graph.nodes.find((n: Rec) => n.id === 'keep_current_price')!.interventions = {
     pro_plan_price: { value: 0.245, raw_value: 49, unit: 'GBP/month', source: 'brief_extraction' },
   };
@@ -333,7 +339,7 @@ describe('C1 durable history — a Run that aged out of the hot window still len
   });
 
   it('B13 (CODEX P2-4): the prior SHOWN Run aged out → no "first analysis" coaching on the Run that pairs with it', async () => {
-    const h = harness();
+    const h = harness({ goalLevelOlumis: true });
     await h.run('turn-a');
     await new Promise((r) => setTimeout(r, 5));
     h.setPrice(60);
@@ -344,7 +350,7 @@ describe('C1 durable history — a Run that aged out of the hot window still len
   });
 
   it('B13c (control): a genuinely first Run → FIRST_ANALYSIS_COMPLETE as today', async () => {
-    const h = harness();
+    const h = harness({ goalLevelOlumis: true });
     const a = await h.run('turn-a');
     expect(JSON.stringify(a)).toContain('FIRST_ANALYSIS_COMPLETE');
   });

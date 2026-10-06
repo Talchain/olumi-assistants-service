@@ -124,8 +124,16 @@ const BRIEF_TEXT =
   'We are at £3M ARR across 200 customers and want to keep our revenue retention rate above 110% ' +
   'while holding churn under 4% with 20 engineers and 18 months of runway.';
 
-/** ARM A — the DERIVED target: the goal node, fed by other nodes. */
 const DERIVED_GOAL_ID = 'goal_nrr';
+/**
+ * ARM A — the DERIVED target: an outcome fed by other nodes. RE-PINNED, RT-10 B′ R2 at T1 (Science d5, 5 Oct): the
+ * session's limit sat on the GOAL with no target figure on it, so it was the goal's own TARGET row, and while that
+ * target can't be tested it is not a T1 limit at all (its only message is the target sentence; pinned in
+ * `bprime-run-own-direction.test.ts`). The class this file guards — a limit on a node PLoT can't anchor because something
+ * feeds it, where restating the limit can never land — is kept on a fed outcome: the same step-3 rule
+ * (`constraint-gap-disclosure.ts`, a directed incoming edge), kind-agnostic.
+ */
+const DERIVED_TARGET_ID = 'out_retention';
 /** ARM B — the ROOT target: carries a value and nothing feeds it. */
 const ROOT_TARGET_ID = 'fac_nrr_today';
 
@@ -163,8 +171,10 @@ const DERIVED_TARGET_GRAPH = {
     { from: 'fac_pricing', to: DERIVED_GOAL_ID },
     { from: 'out_retention', to: DERIVED_GOAL_ID },
     { from: 'risk_downgrade', to: DERIVED_GOAL_ID },
+    // The derived target is fed (a directed incoming edge): PLoT's anchor resolution returns null for it.
+    { from: 'fac_churn', to: DERIVED_TARGET_ID },
   ],
-  goal_constraints: [goalConstraint(DERIVED_GOAL_ID)],
+  goal_constraints: [goalConstraint(DERIVED_TARGET_ID)],
 };
 
 /**
@@ -194,10 +204,11 @@ const MIXED_TARGET_GRAPH = {
   nodes: [
     { id: DERIVED_GOAL_ID, kind: 'goal', label: 'Net Revenue Retention' },
     { id: ROOT_TARGET_ID, kind: 'factor', label: 'Revenue Retention Today', observed_state: 1.05 },
+    { id: DERIVED_TARGET_ID, kind: 'outcome', label: 'Retained Revenue' },
   ],
-  edges: [{ from: ROOT_TARGET_ID, to: DERIVED_GOAL_ID }],
+  edges: [{ from: ROOT_TARGET_ID, to: DERIVED_GOAL_ID }, { from: ROOT_TARGET_ID, to: DERIVED_TARGET_ID }, { from: DERIVED_TARGET_ID, to: DERIVED_GOAL_ID }],
   goal_constraints: [
-    goalConstraint(DERIVED_GOAL_ID),
+    goalConstraint(DERIVED_TARGET_ID),
     {
       ...goalConstraint(ROOT_TARGET_ID),
       constraint_id: SECOND_CONSTRAINT_ID,
@@ -349,7 +360,7 @@ describe('a limit on an UNANCHORABLE target is not told to restate itself', () =
     // Bound by identity to the persisted contract field. r1225 un-fixed
     // trust-spine board #1 by relaxing exactly this; nothing here may.
     expect(v.may_name_leading_option).toBe(false);
-    expect(v.summary).not.toContain('scored highest against your goal in');
+    expect(v.summary).not.toContain('was supported by');
   });
 
   it('ARM B (OPPOSITE-DIRECTION TWIN): a ROOT target is NOT given the derived-target cause', async () => {

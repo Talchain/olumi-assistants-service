@@ -235,6 +235,16 @@ export const WITHHELD_UNREQUESTED_ANALYSIS = 'unrequested_analysis_withheld';
  * takes the field only when the constraint verdict permits and the run was requested.
  */
 export const WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN = 'nonlinear_identity_sign_unproven';
+/** The Run withheld comparison through a caller-identified goal link nobody sized. */
+export const WITHHELD_GOAL_PATH_UNSIZED = 'goal_path_unsized';
+/**
+ * ⭐ MC D1 (DL 6 Oct; Acceptance rehearsal 9 on CEE 1c88f3c): NO RUN PRODUCED A RESULT (`never_run`, `running`, `refused`,
+ * `blocked`), so nothing was checked. The chain's default used to name it `constraint_verdict_withheld` — a limit verdict
+ * on a brief with no limit, for a Run that had returned a question. WE DID NOT LOOK — so it classifies `not_evaluated`.
+ */
+export const WITHHELD_NO_RESULT = 'analysis_no_result';
+/** The run states that hold no result: ONE definition, read by the claim here and by the reply's closing. */
+export const NO_RESULT_RUN_KINDS: ReadonlySet<string> = new Set(['never_run', 'refused', 'blocked', 'running']);
 
 /**
  * ⛔ P1-d (AI Quality #70 5850056041, DL 5850069309) — THE RUN IS OUT OF DATE, and no caller stated why its leader
@@ -328,6 +338,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_LEADER_CAUSE_UNRECORDED]: 'withheld',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
   [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'withheld',
+  [WITHHELD_GOAL_PATH_UNSIZED]: 'withheld',
   [WITHHELD_GOAL_SCOPE_UNRESOLVED]: 'withheld',
   [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'withheld',
   [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'withheld',
@@ -336,6 +347,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
   [WITHHELD_RUN_IDENTITY_CONFLICT]: 'not_evaluated',
   [WITHHELD_RUN_OUT_OF_DATE]: 'not_evaluated',
+  [WITHHELD_NO_RESULT]: 'not_evaluated',
 };
 
 /**
@@ -546,6 +558,8 @@ export interface AnalysisStateComposeInput {
    * changes; `withheldBecauseUnrequested` outranks it (see WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN).
    */
   readonly withheldBecauseNonlinearIdentity?: boolean;
+  /** Stated by the Run licence caller, including the first failing link's ids and labels. Never re-derived here. */
+  readonly withheldBecauseUnsizedPath?: import('../agent-lane/unsized-path-cause.js').UnsizedPathLeaderCause;
   /** The selected Run withheld its leader with no applicable constraint verdict; the cause remains unrecorded. */
   readonly withheldWithoutConstraintCause?: boolean;
   /**
@@ -960,9 +974,11 @@ export function composeLeaderClaim(
   // A newer partial/refused Run supersedes the older success's claim, but
   // supplies no usable robustness verdict for the displayed older figures.
   // This is a known withhold, not an unperformed separation check.
-  if (newerDegradedRun) {
+  if (newerDegradedRun && input.withheldBecauseUnsizedPath === undefined) {
     return { permitted: false, withheld_reason: WITHHELD_LEADER_CAUSE_UNRECORDED };
   }
+  // R7: a caller-stated path cause is known even on this superseding Run; it follows the reason chain below.
+  // The displayed older Run's robustness cannot license or describe separation on that newer Run.
   /**
    * ⛔ F-LIMIT × BF9 (DL #72 5863859943; owner Canonical 5863888216) — AN F-LIMIT TIER REFUSES THE CLAIM, not only names
    * the reason. The persisted leader verdict entitles any leader above rule 4's infeasibility floor (P ≤ 0.05), so on
@@ -979,8 +995,8 @@ export function composeLeaderClaim(
   // stale turn ships no result block (prose-grounding-block.ts), and `rawRobustness: null` used to publish
   // `separation_unavailable` here while the read route, judging the same Run, published `analysis_out_of_date`.
   const entitled = input.mayNameLeadingOption === true && !everyOptionBreaksLimit
-    && runState.kind !== 'complete_stale';
-  const raw: RawRobustnessSignals | null = input.rawRobustness;
+    && runState.kind !== 'complete_stale' && !newerDegradedRun;
+  const raw: RawRobustnessSignals | null = newerDegradedRun ? null : input.rawRobustness;
   const separationKnown = raw !== null;
   const separates = separationEstablishedFromRobustness(raw);
 
@@ -1003,7 +1019,10 @@ export function composeLeaderClaim(
     // supplied only when the constraint verdict itself permitted — so `constraint_verdict_withheld`
     // keeps the field while a limit withholds (AI Quality option (i), #70 5842615260).
     claim.withheld_reason = !entitled
-      ? input.withheldBecauseUnrequested === true
+      // MC D1: no result → nothing was checked, never a limit verdict (and no cause read off a run that did not run).
+      ? NO_RESULT_RUN_KINDS.has(runState.kind)
+        ? WITHHELD_NO_RESULT
+      : input.withheldBecauseUnrequested === true
         ? WITHHELD_UNREQUESTED_ANALYSIS
         // F-LIMIT: what every option does against a limit holds whatever the ranking — but only of the revision the
         // run analysed, so never on an out-of-date run.
@@ -1013,6 +1032,9 @@ export function composeLeaderClaim(
           ? WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT
         : input.withheldBecauseNonlinearIdentity === true
           ? WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN
+          // The Run caller attests its unsized link; this cause outranks staleness too.
+          : input.withheldBecauseUnsizedPath !== undefined
+            ? WITHHELD_GOAL_PATH_UNSIZED
           // P1-d: an out-of-date run is not "withheld for a limit" (see WITHHELD_RUN_OUT_OF_DATE).
           : runState.kind === 'complete_stale'
             ? WITHHELD_RUN_OUT_OF_DATE

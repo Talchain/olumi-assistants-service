@@ -1,4 +1,4 @@
-import { reconciliationPending } from '../goal-scope.js';
+import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
  *
@@ -36,10 +36,13 @@ import { reconciliationPending } from '../goal-scope.js';
 
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
-import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
+import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
+import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
+import { reachedGoalPaths, targetTestabilityOf } from '../../admission/target-testability.js';
+import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine, setAsideLinkLine, setAsideLinkQuestion } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -53,6 +56,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
 import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
+import { withRateCountProducts } from '../rate-count-product.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -1364,10 +1368,49 @@ export type ConstructionTrace =
   | {
     readonly retried: true;
     /** What the retry was asked about: an oversized draft, and the counts of each issue class handed to it. */
-    readonly reasons: { readonly size: boolean; readonly mechanism: number; readonly coverage: number; readonly loop: number; readonly range: number };
+    readonly reasons: { readonly size: boolean; readonly mechanism: number; readonly coverage: number; readonly loop: number; readonly range: number; readonly chain?: number };
     /** `adopted`: the retry's model registered · `kept_first`: an adoption gate refused it · `retry_failed`: the call or its parse threw. */
     readonly outcome: 'adopted' | 'kept_first' | 'retry_failed';
   };
+
+/**
+ * G1b's gate (stand-in for MC 21, 6 Oct): whether a Run of this graph would withhold the options' chances because a link on a
+ * goal path is only Olumi's guess. The Run's own two readers (`run-analysis.ts`: the placeholder paths, and the target's P5
+ * codes), each product read as evaluated, as a Run that evaluates it does. Pure.
+ */
+export function chancesWithheldByAGuess(drafted: { readonly nodes: readonly unknown[]; readonly edges: readonly unknown[] }): boolean {
+  // The Run reads the graph its participation guard hands PLoT (`run-analysis-participation-guard.ts`, the one literal): a
+  // node kept out of the calculation, and every link at it, is not there (the £85k draft's kept-out price risk).
+  const out = new Set((drafted.nodes as readonly Record<string, unknown>[])
+    .filter((n) => n.analysis_participation === 'retained_excluded' && n.kind !== 'goal').map((n) => n.id));
+  const nodes = (drafted.nodes as readonly Record<string, unknown>[]).filter((n) => !out.has(n.id));
+  const graph = { nodes, edges: (drafted.edges as readonly Record<string, unknown>[]).filter((e) => !out.has(e.from) && !out.has(e.to)) };
+  const options = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
+  const evaluations = nodes.filter((n) => n.nonlinear_identity !== null && typeof n.nonlinear_identity === 'object').map((n) => {
+    const i = n.nonlinear_identity as Record<string, unknown>;
+    return { node_id: n.id, evaluated: true, operation: i.operation, factor_ids: i.factor_ids };
+  });
+  if (unsizedLeaderGoalPaths(graph, options, evaluations).length > 0) return true;
+  const verdict = targetTestabilityOf(graph, evaluations) as { failures?: readonly { code?: unknown }[] };
+  return (verdict.failures ?? []).some((f) => f.code === 'goal_path_unsized' || f.code === 'goal_path_placeholder');
+}
+
+/**
+ * G1b's second condition: the options' ways to the goal carry a size the USER stated (`magnitude: 'user_stated'`). The
+ * ruling's class is a brief that says how its options work, where Olumi's extra mechanism is the one thing in the way.
+ * Where no option path carries a figure of the user's, the chances an unsized risk's absence would "unlock" rest on
+ * Olumi's own reading alone (R3/AIQ b3d11a92: ‘Customer backlash’ beside MRR = price × subscribers, with no route of the
+ * user's), so the drafted risk stays and is handled as before. Pure.
+ */
+export function goalPathsCarryTheUsersFigures(graph: { readonly nodes: readonly unknown[]; readonly edges: readonly unknown[] }): boolean {
+  const nodes = graph.nodes as readonly Record<string, unknown>[];
+  const options = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
+  const { paths } = reachedGoalPaths(graph, options, new Map(options.map((id) => [id, [id]])));
+  return paths.some((p) => p.links.some((l) => {
+    const prov = l.provenance;
+    return prov !== null && typeof prov === 'object' && (prov as Record<string, unknown>).magnitude === 'user_stated';
+  }));
+}
 
 export async function buildModelFromBrief(
   scenarioId: string,
@@ -1414,13 +1457,15 @@ export async function buildModelFromBrief(
   // ⛔ AN OPTION AND A QUANTITY NEVER SHARE A NAME (`keepOptionsAndQuantitiesApart`, Canvas #72 5884644099): admission
   // makes same-named entities one node, so the factor an option sets vanished into the option. Renamed before any read.
   const apart = keepOptionsAndQuantitiesApart(candidate);
+  // Desk 6b (lease check): every outcome and operand of an identity the mint WILL make (`mintOrFold`'s two product mints,
+  // dry-run here, pure) is kept by the mechanism rule, so it never drops a part a product multiplies.
+  const mintedLater = (c: CandidateModel) => {
+    const ids = withReconcilingProductIdentity(withRateCountProducts(c, brief).model, brief).identities ?? [];
+    const named = new Set(ids.flatMap((i) => [canonicalLabel(i.outcome), ...i.factors.map(canonicalLabel)]));
+    return (label: string): boolean => named.has(canonicalLabel(label));
+  };
   // ⛔ A level the brief states for a factor is the user's, whatever the drafter tagged it (R3 5896630173 (2)).
   candidate = creditStatedFactorLevels(apart.model, brief);
-  let keptApart = apart.renamed;
-  let notToldApart = apart.ambiguous;
-  const firstCandidate = candidate;
-  let preparation = prepareProvisionalCandidate(candidate);
-  candidate = preparation.candidate;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
   // A link size is the user's only where the brief writes it ABOUT THIS LINK (AIQ #2383 5916497454; P0 PARTNER #2389): the
@@ -1441,9 +1486,39 @@ export async function buildModelFromBrief(
     const gap = withoutGapResidual(c1, brief);
     const c = gap?.model ?? c1;
     const residual = gap?.residual ?? null;
-    const minted = withReconcilingProductIdentity(c, brief);
-    return minted !== c ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(c, brief), dropped, residual };
+    // (A) A rate × count drawn as two added links into an outcome is Olumi's product of the two (Science 6008551439 (A)).
+    const products = withRateCountProducts(c, brief).model;
+    const minted = withReconcilingProductIdentity(products, brief);
+    return minted !== products ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(products, brief), dropped, residual };
   };
+  /**
+   * ⭐ G1b (Science d5 #87 6011168471; DL ruling 6 Oct): a mechanism the brief neither sizes nor says is not drafted onto the
+   * goal path, and is challenged; a cost never feeds a revenue goal. Before any read, so the retry is drafted from the model
+   * without them.
+   * ⛔ ONLY WHERE IT IS WHAT STANDS BETWEEN THE USER AND PER-OPTION CHANCES (stand-in for MC 21, 6 Oct): the cut is applied
+   * when, on a trial admission (this pass's own steps, pure), the drafted model's chances are withheld by a guess on a goal
+   * path and the cut model's are not, AND the cut model's option paths carry a figure the user stated. Anywhere else the drafted model stands: a short brief's model is Olumi's estimates
+   * throughout, so a cut there would only take a risk the user can see (DL #75 5916217417, Paul 30 Sep: "new models have
+   * fewer risks"; `construction-keeps-drafted-risks.test.ts`) and change no result.
+   */
+  const trialGraph = (c: CandidateModel) => {
+    const a = admitCandidateModel(mintOrFold(prepareProvisionalCandidate(c).candidate).model, {}, brief, goalLevelTheUserWrote(c, brief), writtenAgain, (x) => briefGoalLevel(x, brief), sizeWritten, sizeRangeEnd);
+    return { nodes: a.nodes, edges: a.edges };
+  };
+  const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
+  const cutApplies = unsupported.model !== candidate && (() => {
+    const after = trialGraph(unsupported.model);
+    return !chancesWithheldByAGuess(after) && goalPathsCarryTheUsersFigures(after) && chancesWithheldByAGuess(trialGraph(candidate));
+  })();
+  if (cutApplies) candidate = unsupported.model;
+  let mechanismsUnmodelled: readonly UnmodelledMechanism[] = cutApplies ? unsupported.mechanisms : [];
+  let costsOffRevenue: readonly CostOffRevenue[] = cutApplies ? unsupported.costs : [];
+  let keptApart = apart.renamed;
+  let notToldApart = apart.ambiguous;
+  let linksSetAside = apart.setAside;
+  const firstCandidate = candidate;
+  let preparation = prepareProvisionalCandidate(candidate);
+  candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
@@ -1526,7 +1601,10 @@ export async function buildModelFromBrief(
   const loopsAsked = needsSizeRetry ? [] : loops;
   // A4: a written money range no link carries (never on the size route, where the retry only sheds).
   const rangesAsked = needsSizeRetry ? [] : uncarriedRangeIssues(brief, admitted, candidate);
-  const asked = [...repairIssues(preparation), ...loopsAsked, ...rangesAsked];
+  // ⭐ d4 (Science d5 (2), DL 6 Oct): the user's two statements collapsed into one Olumi figure are asked of the retry, drawn
+  // as the user wrote them. Adopted ONLY when both bind as the user's and the product is gone; otherwise the first stands.
+  const chainsAsked = needsSizeRetry ? [] : collapsedChains(candidate, brief);
+  const asked = [...repairIssues(preparation), ...loopsAsked, ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -1537,6 +1615,7 @@ export async function buildModelFromBrief(
       coverage: sayCoverageGaps(preparation).length,
       loop: loopsAsked.length,
       range: rangesAsked.length,
+      chain: chainsAsked.length,
     };
     trace = { retried: true, reasons, outcome: 'kept_first' };
     try {
@@ -1563,8 +1642,13 @@ export async function buildModelFromBrief(
       });
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
+        const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: keptApart, setAside: linksSetAside }, retryApart);
+        // The retry is held to the same rule: a mechanism it re-drafts with nothing from the brief is taken out again.
+        // (Only where the first draft's cut applied: elsewhere the retry is read exactly as before.)
+        const retryUnsupported = cutApplies ? withoutUnsupportedMechanisms(retryHeld.model, brief, mintedLater(retryHeld.model))
+          : { model: retryHeld.model, mechanisms: [], costs: [] };
         const retryRaw = keepLimitedQuantityAuthor(
-          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryApart.model, brief), firstCandidate, preparation.baseline_gaps),
+          neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryUnsupported.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
@@ -1609,10 +1693,14 @@ export async function buildModelFromBrief(
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
             || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)
             // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
-            || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)) &&
+            || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
+            || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
+          // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
+          chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted, firstCandidate)) &&
           // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
           (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
-          (asked.length === 0 || retainsRiskHypotheses(candidate, retryCandidate, needsSizeRetry)) &&
+          // The collapsed quantity is the one risk the chain issue asks the retry to replace.
+          (asked.length === 0 || retainsRiskHypotheses({ ...candidate, risks: candidate.risks.filter((r) => !chainsAsked.some((c) => canonicalLabel(c.through) === canonicalLabel(r.label))) }, retryCandidate, needsSizeRetry)) &&
           // A compaction may shed what the model added, never what a kept option does; a repair may not shed an action.
           (needsSizeRetry ? compactionKeepsWhatOptionsDo(candidate, retryCandidate) : keepsEveryAction(candidate, retryCandidate))
         ) {
@@ -1625,8 +1713,17 @@ export async function buildModelFromBrief(
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
           gapResidual = retryIdentity.residual;
-          keptApart = retryApart.renamed;
+          keptApart = retryHeld.renamed;
           notToldApart = retryApart.ambiguous;
+          linksSetAside = retryHeld.setAside;
+          // What the first draft took out stays said; the retry's own are added once.
+          mechanismsUnmodelled = [...mechanismsUnmodelled, ...retryUnsupported.mechanisms.filter((m) => !mechanismsUnmodelled.some((x) => canonicalLabel(x.label) === canonicalLabel(m.label)))];
+          costsOffRevenue = [...costsOffRevenue, ...retryUnsupported.costs.filter((c) => !costsOffRevenue.some((x) => canonicalLabel(x.cost) === canonicalLabel(c.cost)))];
+          // ⛔ Never said as not modelled when the adopted model carries it (Codex #2662 r1 P2-4: a retry may draw it again as
+          // the brief's), nor a cost as off the revenue when the adopted model still links it in.
+          const adoptedLabels = new Set([...retryCandidate.factors, ...retryCandidate.risks, ...retryCandidate.outcomes].map((q) => canonicalLabel(q.label)));
+          mechanismsUnmodelled = mechanismsUnmodelled.filter((m) => !adoptedLabels.has(canonicalLabel(m.label)));
+          costsOffRevenue = costsAgainst(costsOffRevenue, retryCandidate);
           size = retrySize;
           // ⛔ An adopted retry must not erase what the first pass had to disclose
           // (review 5822933692, B3): a retry that echoes the prepared candidate
@@ -1728,12 +1825,28 @@ export async function buildModelFromBrief(
       }) as AdmittedModel['loss'][number])],
     };
   }
-  if (keptApart.length > 0) {
+  if (keptApart.length > 0 || linksSetAside.length > 0) {
     admitted = {
       ...admitted,
       loss: [...admitted.loss, ...keptApart.map((k) => ({
         field_path: `nodes[${slugId(k.to)}].label_kept_apart`, before: k.from, after: k.to, reason: keptApartLine(k), severity: 'info',
+      }) as AdmittedModel['loss'][number]), ...linksSetAside.map((a) => ({
+        field_path: `edges[${slugId(a.option)}->${slugId(a.to)}].link_set_aside`, before: { from: a.option, to: a.to }, after: null,
+        reason: setAsideLinkLine(a), severity: 'warn',
       }) as AdmittedModel['loss'][number])],
+    };
+  }
+  if (mechanismsUnmodelled.length > 0 || costsOffRevenue.length > 0) {
+    admitted = {
+      ...admitted,
+      loss: [...admitted.loss, ...mechanismsUnmodelled.map((m) => ({
+        field_path: `nodes[${slugId(m.label)}].mechanism_not_modelled`, before: { label: m.label }, after: null,
+        reason: unmodelledMechanismChallenge(m), severity: 'warn',
+      }) as AdmittedModel['loss'][number]), ...(costsOffRevenue.length === 0 ? [] : [{
+        field_path: `edges[${slugId(costsOffRevenue[0]!.cost)}->${slugId(costsOffRevenue[0]!.goal)}].cost_not_revenue`,
+        before: { costs: costsOffRevenue.map((c) => c.cost), to: costsOffRevenue[0]!.goal }, after: null,
+        reason: costOffRevenueLine(costsOffRevenue), severity: 'info',
+      } as AdmittedModel['loss'][number]])],
     };
   }
   const heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
@@ -1814,6 +1927,10 @@ export async function buildModelFromBrief(
   openQuestions.unshift(...unlevelledProductQuestions(admitted));
   // AIQ 5888943993 (1)(c): the carrier folded into the goal, and any Olumi addition left out, said where the user sees it.
   if (foldedCarrier !== null) openQuestions.unshift(...foldedCarrierLines(foldedCarrier));
+  // ⭐ DL (dental): a link set aside between an option and its renamed namesake is asked where the user always sees it.
+  openQuestions.unshift(...linksSetAside.flatMap((a) => setAsideLinkQuestion(a) ?? []));
+  // d5's challenge where the user SEES it (DL: both seats; the server appends the first two to the reply).
+  openQuestions.unshift(...mechanismsUnmodelled.map(unmodelledMechanismChallenge));
   /**
    * ⛔ AN OPTION WITHHELD AS INDISTINCT IS SAID WHERE THE USER ALWAYS SEES IT (DL #70 5842400604: "never a
    * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
@@ -1855,7 +1972,41 @@ export async function buildModelFromBrief(
   // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
   // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
   // the five-question cap.
-  openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
+  // ⭐ (b) (Science d5 #87 6006584860 / 6006646752; DL 6 Oct): the drafter's untyped scope question reads a goal that names
+  // no part (`metricReadsAsPlainTotal`) as the TOTAL. It is never a withhold (`scopeIssueBlocks`), and it is said once, as the
+  // disclosure, only where material and not already stated by the user (`untypedScopeComponents`). Nothing material →
+  // nothing asked, assumed or pended. Any other metric may name a part ("Starter MRR", "Non-Pro MRR"): it keeps C46's
+  // assumption and question (ask (a)), still non-blocking.
+  const scopeLoss = admitted.loss.find((l) => /\.goal_scope$/.test(l.field_path));
+  const scopeGoal = admitted.nodes.find((n) => n.kind === 'goal');
+  const plainTotal = metricReadsAsPlainTotal(candidate.goal.metric);
+  // Science d5 #87 6007341975 (2): the disclosure keys on MATERIALITY, never on the drafter's declaration — a drafter's
+  // "no part-or-whole reading" (goal.scope null) is Olumi making the reading silently. Only a scope the BRIEF states is not.
+  const readsAsTotal = plainTotal && (scopeLoss !== undefined || !candidate.goal.scope);
+  const scopeAsked = scopeLoss !== undefined && !plainTotal
+    ? { question: scopeLoss.reason, assumption: typeof scopeLoss.after === 'string' ? scopeLoss.after : undefined }
+    : null;
+  if (readsAsTotal && candidate.goal.scope) {
+    // The drafter's own restatement of the part-or-whole question (Codex buddy r1 P2: it carried the C46 "… for the Pro plan
+    // only. Which did you mean?" through `unknowns`): the goal now reads as the total, so it is not asked beside the reading.
+    // A restatement names the goal AND both readings AND asks which: an evidence question about the two populations ("can
+    // the Pro plan only estimate apply to all plans together?") names no goal and stays (Codex buddy r2 P2).
+    const [modelled, alternative, metric] = [candidate.goal.scope.modelled, candidate.goal.scope.alternative, candidate.goal.metric]
+      .map((t) => t.trim().toLowerCase());
+    for (let i = openQuestions.length - 1; i >= 0; i--) {
+      const q = openQuestions[i]!.toLowerCase();
+      if (modelled !== '' && alternative !== '' && metric !== '' && q.includes(modelled) && q.includes(alternative) && q.includes(metric)
+        && /\b(or|whether|which)\b/.test(q)) openQuestions.splice(i, 1);
+    }
+  }
+  const untypedScopeWords = scopeAsked !== null ? scopeAsked.question
+    : readsAsTotal && scopeGoal !== undefined
+      ? (() => {
+        const components = untypedScopeComponents({ nodes: admitted.nodes, edges: admitted.edges }, scopeGoal.id);
+        return components.length > 0 ? untypedScopeDisclosure(candidate.goal.metric, components) : null;
+      })()
+      : null;
+  if (untypedScopeWords !== null) openQuestions.unshift(untypedScopeWords);
 
   // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
   // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
@@ -1994,11 +2145,12 @@ export async function buildModelFromBrief(
     mutated: true,
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     ...(replayed ? { replayed: true } : {}),
-    ...(candidate.goal.scope && admitted.loss.some(l => /\.goal_scope$/.test(l.field_path)) && goalNodes.find(n => n.kind === 'goal') ? {
+    // The untyped question's ONE channel for a later answer (the existing reconcile path); it never gates (`scopeIssueBlocks`).
+    ...(untypedScopeWords !== null && goalNodes.find(n => n.kind === 'goal') ? {
       pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
         goal_id: goalNodes.find(n => n.kind === 'goal')!.id, goal_label: candidate.goal.metric,
-        declared_scope: candidate.goal.scope, expected: 'scope',
-        question: admitted.loss.find(l => /\.goal_scope$/.test(l.field_path))!.reason, operands: [], derivations: [] }),
+        ...(candidate.goal.scope ? { declared_scope: candidate.goal.scope } : {}), expected: 'scope',
+        question: untypedScopeWords, operands: [], derivations: [] }),
     } : {}),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
@@ -2056,10 +2208,9 @@ export async function buildModelFromBrief(
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as
       // its `full_label`, so the assumption would read back as the user's metric (re-verification of
       // d2362e9d, item e). Its question is asked first in `open_questions`, above.
-      ...admitted.loss
-        .filter((l) => /\.goal_scope$/.test(l.field_path))
-        .map((l) => l.after)
-        .filter((a): a is string => typeof a === 'string'),
+      // (b): a plain total's disclosure is said ONCE, in `open_questions` above, never repeated here. Only the part-named
+      // metric (ask (a)) still says the modelled part as Olumi's assumption.
+      ...(scopeAsked?.assumption !== undefined ? [scopeAsked.assumption] : []),
       // A goal read as a two-part product: an extra direct parent re-pointed or taken out (`product-goal-extra-parent.ts`).
       ...admitted.loss.filter((l) => /\.rate_operand\./.test(l.field_path)).map((l) => l.reason),
       ...admitted.loss.filter((l) => /\.extra_parent\./.test(l.field_path)).map((l) => l.reason),
@@ -2106,7 +2257,13 @@ export async function buildModelFromBrief(
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual)$|\.observed_state\.baseline$/.test(l.field_path))
+        // `created_part_zero`: a stated product's part an option creates, held at 0 today as Olumi's reading (Science
+        // 6007736377 (i), `admit-model.ts`): said once here, so the user can correct it.
+        // `pass_through_sign`: the user's sentence not recorded through Olumi's mediator, because the drawn path runs the
+        // other way from it (Desk 6b #2644 Q3, `stated-size-binding.ts`): said, with what to check.
+        // `stated_sign`: the user's sentence not recorded on a link drawn the other way from it (DL #2644 pilot): said.
+        // `link_set_aside`: a link an option could hold, set aside beside its renamed namesake and asked (DL, dental).
+        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

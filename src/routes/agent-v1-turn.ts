@@ -29,6 +29,7 @@ import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.j
 import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
+import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
 import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
@@ -87,9 +88,10 @@ import { decisionInputLines, isDecisionInputAsk, textAtRest, withB3LinesAtRest, 
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
+import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct-link.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
-import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -541,17 +543,46 @@ export const REPLY_LENGTH_INSTRUCTION =
  * `agent.interpret`, whose instructions begin with AGENT_INSTRUCTIONS. It grants nothing: whether a leader may be named
  * is still #34's `claim_permissions.leader_may_be_named`, and the wire gates still drop a ranking on a withheld turn.
  * N is the option's share of runs in which it scored highest, never `probability_of_goal` (#35's "reaches the target").
+ * ⛔ POSITIVE MEANING, NO "RECOMMEND" (DL 0df0e1, Acceptance rehearsal 2): the interpret narration glossed N as "…not a
+ * recommendation or a 54% chance of meeting your target". The recommend stem is HARD even negated (J1 ruling), so the rule
+ * gives N's meaning in positive words and bans the stem outright. Codex r1 #2614: "scored highest" is false for a
+ * minimise Run (it came out lowest) and inexact when tied runs split their credit, and the agent cannot rely on knowing
+ * the Run's direction, so the rule names an option in Part B's neutral form (DL 6002469285): "N% of runs supported X".
+ * Codex r2 #2614: a single option can be named with NO share (run-analysis selectLeadingOptionId accepts a lone row
+ * without win_probability), so with no share the rule makes no claim about how runs fell at all.
  */
 export const MODEL_RELATIVE_NAMING_INSTRUCTION =
-  'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, \u2018X\u2019 scored highest in N% of runs\u201d, '
-  + 'with X its display label and N the share of model runs in which it scored highest, taken from the result; N is never its chance of reaching the goal. '
-  + 'If the result gives no such share, say \u201cIn this model, \u2018X\u2019 scored highest\u201d. Keep any provisional or limit condition the rules above require in that same sentence. '
+  'Naming an option: when the rules above let you name a leading option, name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d, '
+  + 'with X its display label and N the share of model runs credited to it, taken from the result; N is never its chance of reaching the goal. '
+  + 'That form holds whichever way the goal points and when runs tie, so use it rather than saying the option scored highest or came out lowest. '
+  + 'When you say what N means, say it as what it is: \u201cThat share is the part of this model\u2019s runs that supported it, not its chance of meeting your target.\u201d '
+  + 'Never write recommend or recommendation in any form, not even to deny it. '
+  + 'If the result gives no such share, make no claim about how runs fell: say what the result rests on instead. Keep any provisional or limit condition the rules above require in that same sentence. '
   + 'Never name an option as leading, ahead, favoured, on top or winning in other words, and never without \u201cin this model\u201d. '
   + 'Never call a result, finding, option or link \u201cfragile\u201d: say what the result rests on instead, in the result\u2019s own terms, '
   + 'such as the assumption its decision_sensitivity names when measured, and whose figure it is.';
 
+/**
+ * ⭐ D3 step 2, DL 0df0e1 ruling C (6 Oct): step 2 puts each option's licensed chance of meeting the goal in front of the
+ * model (`saved_run_options[].probability_of_goal`), so the model is told, typed, how far it may compare them: the Run's
+ * own licence (`analysis.goal_chance_licence`, CEE's ≥ 10-point rule, Science d5), never its own reading of the figures.
+ * Words follow Wording c6 (6 Oct): "similar chances" below the rule. The egress guard is cut 6.
+ */
+export const GOAL_CHANCE_RANKING_INSTRUCTION =
+  'Comparing options by their chance of meeting the goal (any probability_of_goal you are given, including goal_certainty): only as '
+  + 'the GOAL_CHANCE_LICENSED record of the result you are reporting allows (CURRENT MODEL STATE analysis.goal_chance_licence, or that '
+  + 'record among a run result\u2019s inference_warnings), never by your own reading of the figures; a licence from an earlier result never '
+  + 'speaks for a newer one. '
+  + 'If its form is highest or highest_all_likely_to_miss, you may say that the option whose option_id is its leader_option_id has the highest '
+  + 'chance of meeting the goal in this model, naming it by its display label. '
+  + 'If its form is similar, say the options in its similar_option_ids have similar chances of meeting the goal in this model; never say one is '
+  + 'higher, ahead or more likely. '
+  + 'For any other form, or with no such licence, give each option\u2019s chance in its recorded order and never rank, order or single '
+  + 'out options by it.';
+
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
-  '{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION].join(' '),
+  '{{MODE_AND_AUTHORITY}}',
+  [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' '),
 );
 
 /**
@@ -2006,6 +2037,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
           const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
           const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
+          // MC D1 (c): the same #416 ask the live Run turn said, from the same readback.
+          const askNow = identityAskLineFor(state.analysisResult, state.graph);
+          if (askNow !== null) owedNow.push(askNow);
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
           const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
           if (rootNow !== null) owedNow.push(rootNow);
@@ -2531,12 +2565,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // CODE LINE from the selected delta's TYPED rows; the model only says why, and its sentences pass RC's checker beside
       // that line. `null` (no delta: a first Run) leaves this path exactly as it was.
       const graphNodes = Array.isArray((st.graph as { nodes?: unknown } | null)?.nodes) ? (st.graph as { nodes: { id?: unknown; kind?: unknown; label?: unknown }[] }).nodes : [];
+      // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
+      // from the pair's own persisted Run facts (never on the wire).
+      const pairRead = await rerunPairReadForRunDelta(scenarioId, String(req.id), currentRead?.run_delta);
       const rerunPlan = rerunExplanationPlan(currentRead?.run_delta,
         (id) => { const n = graphNodes.find((x) => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; },
         [...new Set([...graphNodes.filter((n) => n.kind === 'option' && typeof n.label === 'string').map((n) => n.label as string),
           ...[...optionNameAliases(st.graph).values()].map((a) => a.display)])],
         runToolOutputLicensesLeader(selectedRun),
-        graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''));
+        graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''),
+        pairRead.withinBand, pairRead.userWrittenLinks);
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
@@ -2954,7 +2992,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (methodTurn?.kind === 'run') budget = interpretBudget();
       result = await runAgentTurn(
         {
-          ctx: toolCtx,
+          ctx: { ...toolCtx, ...(selectionContext != null ? { grounded_selection: selectionContext.grounded,
+            ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) },
           history,
           message,
           instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}`
@@ -3117,6 +3156,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
         // ⛔ A withheld goal chance's reason is said as written, unless the Agent already said it (AIQ 5887805333 (3)).
         ...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
+        // MC D1 (c): the Run's #416 ask, after its reason (never a bare "couldn't calculate it" with nothing to answer).
+        ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
     /**
      * ⛔ WHAT WAS SAVED IS STATED BY OLUMI, FROM THE TOOL RESULTS (RC #63
@@ -3501,8 +3542,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Display first, while the raw ask is intact. With no IDs the replacement is identical;
     // otherwise the id-free form cannot recreate the raw ask. The caveat cannot contain it,
     // so the scanner-pinned second display call is a no-op after dedupe and placement.
-    const scopedNarration = explainRobustnessCaveat === null ? scopedNarrationRaw
-      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat);
+    // ⭐ RT-19 (DL ruling (A), #87 6009566552): a figure for two ends with NO direct link, and no link-effect door this turn →
+    // the door's own fixed words, never the Agent's improvised offer (a band for a new link the model would double-count).
+    // They stand in for the narration before the display call, so every owed line below composes with them unchanged.
+    const awaitingApproval = offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
+      || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined;
+    const noDirectLink = fastPath === undefined ? noDirectLinkFigureReply(readbackGraph, message, {
+      tools: result.tool_calls.map((c) => c.name), awaitingApproval, scopeQuestionOwed: rawScopeQuestion !== null }) : null;
+    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
+      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat));
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
@@ -3522,8 +3570,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
-      awaitingApproval: offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
-        || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined,
+      awaitingApproval,
       // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
       builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
         || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)

@@ -13,6 +13,7 @@ import { GOAL_FIGURES_PLACEHOLDER_PATH as PLACEHOLDER, GOAL_PROBABILITY_IDENTITY
 import { TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS } from '../../../coaching/analysis-result-headline.js';
 import { detectIdenticalArms } from '../identical-arms.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
+import { ANY_LEAD_CLAUSE_RE } from '../../../__tests__/support/lead-clause.support.js';
 
 /**
  * DL GATE 1 v2 (5 Oct 2026): two arms the Run could not tell apart split each other's wins, so the comparison is withheld
@@ -263,7 +264,8 @@ describe('gate 1 v2 — run_analysis path', () => {
     const warning = (enrichment.inference_warnings as Rec[]).find((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL);
     expect(warning?.option_ids).toEqual(['carry_on', 'hire_two']);
     expect(outcome.assistant_text).toContain(BASELINE_LINE);
-    expect(outcome.assistant_text).not.toMatch(/currently leads|scored highest/);
+    expect(outcome.assistant_text).not.toMatch(/currently leads/);
+    expect(outcome.assistant_text).not.toMatch(ANY_LEAD_CLAUSE_RE);
   });
 
   it('Codex r3 P1: every robustness carrier goes with the comparison (synthesis + per-row); a distinct Run keeps them', async () => {

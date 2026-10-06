@@ -40,7 +40,7 @@ import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orche
 export type RangeSource = 'olumi_assumed' | 'yours';
 const RANGE_OF: Readonly<Record<string, RangeSource>> = { template: 'olumi_assumed', user: 'yours' };
 export const olumiAssumedRangeSay = (label: string): string =>
-  `Within the range Olumi assumed for ${label}, ${label} could change which option leads. Do you know ${label} more precisely?`;
+  `Within the range Olumi assumed for ${label}, ${label} could change how the options compare. Do you know ${label} more precisely?`;
 
 export type DecisionSensitivity =
   | {

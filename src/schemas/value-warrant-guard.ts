@@ -806,11 +806,14 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
     decision:
       "ACCEPTED — its warrant is inherited from the object it sits in, by its one writer's rule. `stated_range` lives " +
       "INSIDE `natural_effect`: `low` and `high` are in `natural_effect.amount_unit` (the size's own unit, in the size's " +
-      "own scale), and `amount` equals one of them by construction (`end`). Its SOURCE is `text` — the range exactly " +
-      "as the user wrote it — and its authorship is `provenance.magnitude: 'user_stated'`: admission writes it ONLY " +
-      "on the user's own size, and only when ONE written span about this link's source carries the range " +
-      "(`writtenRangeFor`, stated-by-user.ts). It is a WORDS field (what the reply and the card say beside the " +
-      "amount), never an analysis input: out of the analysis hash (graph-hash.ts picks natural_effect fields by name).",
+      "own scale), and `amount` equals one of them (`end` 'low'/'high') or lies strictly inside them (`end` 'centre'). " +
+      "Its SOURCE is `text` — the range exactly as the user wrote it — and its authorship is " +
+      "`provenance.magnitude: 'user_stated'`: admission writes it ONLY on the user's own size, and only when ONE written " +
+      "span about this link's source carries the range (`writtenRangeFor`, stated-by-user.ts), or the very sentence " +
+      "that bound the size writes it around that figure (`centreRangeAt`, stated-size-binding.ts; d5 6009282279). " +
+      "The range itself is not hashed (graph-hash.ts picks natural_effect fields by name), but it IS an analysis input " +
+      "once #2643's hold reads it: a held link's effective existence and its range-derived spread are projected into the " +
+      "hash there (#2643 @a59c9e10), read at Run-input time and never written back (Desk 6b, #2644).",
   },
   {
     id: "unwarranted:cee.EdgeV3::provenance.natural_effect.stated_range.high",

@@ -57,8 +57,8 @@ function proposal(strength: number): ProposalAction {
 }
 
 /** The Agent's REAL writer, as `confirm-is-review-not-authorship.test.ts` drives it. */
-async function handlerSet(graph: unknown, strength: number): Promise<GraphV3T> {
-  const invocation = {
+function invocationFor(graph: unknown, strength: number, replaces: boolean): HandlerInvocation {
+  return {
     context: { session_id: SCENARIO_ID, stage: 'frame', request_id: 'req-clamp', prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
     payload: { kind: 'message', scenario_id: SCENARIO_ID, turn_id: '11111111-1111-4111-8111-111111111399', stage: 'frame', message: 'set the link' },
     requestId: 'req-clamp',
@@ -66,8 +66,13 @@ async function handlerSet(graph: unknown, strength: number): Promise<GraphV3T> {
     orientationText: '',
     proposal: proposal(strength),
     graphForTurn: graph,
+    // ⭐ F1 (#87 6006627551): moving a link that holds the user's own figure needs their explicit replace.
+    ...(replaces ? { edgeStrengthReplacesUserFigureAuthority: true } : {}),
   } as unknown as HandlerInvocation;
-  const outcome = await createAdjustEdgeStrengthHandler()(invocation);
+}
+
+async function handlerSet(graph: unknown, strength: number, replaces = false): Promise<GraphV3T> {
+  const outcome = await createAdjustEdgeStrengthHandler()(invocationFor(graph, strength, replaces));
   expect(outcome.mutated_graph, JSON.stringify(outcome).slice(0, 300)).toBeDefined();
   return outcome.mutated_graph as GraphV3T;
 }
@@ -81,12 +86,22 @@ describe('a clamp marker goes with the stored size it was written for', () => {
     expect(sent(clampedGraph())).toBe(FULL);
   });
 
+  // ⭐ F1: the stored link holds the user's own (clamped) figure, so the first move is their explicit replace.
   it('RED (CODEX 1): 1 → 0.3 → 1 through the REAL writer sends the author\'s 1, never the old 3', async () => {
-    const once = await handlerSet(clampedGraph(), 0.3);
+    const once = await handlerSet(clampedGraph(), 0.3, true);
     expect(edgeOf(once).provenance).not.toHaveProperty('clamped_from');
     const twice = await handlerSet(once, 1);
     expect(edgeOf(twice).strength.mean).toBe(1);
     expect(sent(twice)).toBe(1);
+  });
+
+  it('⭐ F1: without the user\'s replace, the clamped figure is theirs and a move is refused — nothing written', async () => {
+    const graph = clampedGraph();
+    const before = structuredClone(graph);
+    await expect(createAdjustEdgeStrengthHandler()(invocationFor(graph, 0.3, false))).rejects.toMatchObject({
+      details: { reason: 'user_figure_held' },
+    });
+    expect(graph).toStrictEqual(before);
   });
 
   it('a REVIEW (a set to the value already stored) changes nothing the user authored: the marker stays and still speaks', async () => {
