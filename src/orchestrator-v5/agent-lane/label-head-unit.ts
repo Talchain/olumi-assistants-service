@@ -46,6 +46,13 @@ export function labelHead(label: string): string | undefined {
 /** No vocabulary of count nouns: only THIS label's head, beside THIS figure. */
 export function labelHeadUnitAt(quote: string, a: StatedAmount, label: string, otherLabel: string): LabelHeadReading | undefined {
   if (a.kind === 'percent') return undefined; // U3: never 40 cancellations from 40%.
+  // A qualified monetary part ("MRR lost to support strain") is not the whole named beside £300 ("of MRR").
+  // Dropping its action AND qualifier would manufacture the part's unit without its definitional reading.
+  // Keep count actions ("each appointment cancelled in advance") and unqualified money heads ("losses avoided").
+  const qualifier = PREPOSITION.exec(label);
+  if (a.kind === 'currency' && qualifier !== null
+    && tokens(label.slice(0, qualifier.index)).findIndex(w => ACTION.test(w)) > 0
+    && periodNoun(tokens(label.slice(qualifier.index + qualifier[0].length))[0] ?? '') === null) return undefined;
   const head = labelHead(label);
   if (head === undefined || sameNoun(head, labelHead(otherLabel) ?? '')) return undefined;
   const end = a.index + a.matchedText.length;

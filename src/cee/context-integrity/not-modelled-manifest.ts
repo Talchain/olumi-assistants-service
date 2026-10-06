@@ -2076,7 +2076,7 @@ function classifyStatedKind(q: Quantity, spans: readonly ConstraintSpan[]): Stat
 
 const SCOPE = {
   searched:
-    "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word or a verified user unit receipt, calendar dates and fiscal periods",
+    "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods",
   // ⚠ DERIVED FROM `CANDIDATE_COLLECTIONS`, NOT RESTATED. This sentence is
   // USER-VISIBLE COPY describing what we searched, and it was WRONG: it read
   // "node, edge and option values" while `collectCandidates` walks only
@@ -2089,6 +2089,17 @@ const SCOPE = {
     `${CANDIDATE_COLLECTIONS.map((c) => c.replace(/s$/, "")).join(" and ")} values, caps, units, labels and encoding maps`,
   ],
   prose_surface: ["coaching cards", "draft warnings", "validation warnings"],
+  excluded_from_search: [
+    "bare numbers carrying no unit, currency or percent sign",
+    "everything in not_tracked",
+  ],
+} as const;
+
+// Describe the receipt exception only when it actually adds a verified quantity to this manifest.
+const RECEIPTED_SCOPE = {
+  ...SCOPE,
+  searched:
+    "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word or a verified user unit receipt, calendar dates and fiscal periods",
   excluded_from_search: [
     "bare numbers carrying no unit, currency or percent sign, unless a quoted effect and user unit receipt verify their own count unit",
     "everything in not_tracked",
@@ -2146,13 +2157,17 @@ export function deriveNotModelledManifest(
 
   const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
   const quantities = extractStatedQuantities(briefText);
+  let supplemented = false;
   for (const candidate of surfaces.candidates) {
     const q = candidate.receiptedQuantity;
     // Keep the existing scanner's literal when it already covers this numeral; never duplicate an item.
     if (q !== undefined && !quantities.some(existing => existing.at < q.at + q.literal.length
-      && existing.at + existing.literal.length > q.at)) quantities.push(q);
+      && existing.at + existing.literal.length > q.at)) {
+      quantities.push(q);
+      supplemented = true;
+    }
   }
-  quantities.sort((a, b) => a.at - b.at);
+  if (supplemented) quantities.sort((a, b) => a.at - b.at);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 
   const items: NotModelledItem[] = [];
@@ -2204,7 +2219,7 @@ export function deriveNotModelledManifest(
     schema: NOT_MODELLED_SCHEMA,
     status: "derived",
     unavailable_reason: null,
-    scope: SCOPE,
+    scope: supplemented ? RECEIPTED_SCOPE : SCOPE,
     quantities: {
       // Tallies count EVERY quantity found, not just the reported slice.
       total: quantities.length,
