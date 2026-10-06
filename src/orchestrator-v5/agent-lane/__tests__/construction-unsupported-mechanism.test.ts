@@ -320,7 +320,19 @@ describe('only a risk that is a side consequence is taken, and never one whose r
     return c;
   };
   it('CONTROL: the same unsupported mechanism drafted as an OUTCOME (structure, not a risk) is never taken', () => {
-    expect(withoutUnsupportedMechanisms(asOutcome() as never, BRIEF).mechanisms).toEqual([]);
+    const c = asOutcome();
+    const w = withoutUnsupportedMechanisms(c as never, BRIEF);
+    expect(w.mechanisms).toEqual([]);
+    expect(w.model.outcomes.map((o) => o.label)).toContain('Starter-tier service degradation');
+    expect(w.model.links.filter((l) => l.from === 'Starter-tier service degradation' || l.to === 'Starter-tier service degradation')).toHaveLength(2);
+  });
+  it('CONTROL: an irregular past form reads as its verb ("Accounts lost" is named by "we could lose accounts") → kept', () => {
+    const c = structuredClone(FX['draft-2']);
+    const at = (x: string) => (x === 'MRR lost to starter cannibalisation' ? 'Accounts lost' : x);
+    c.risks = c.risks.map((x: Rec) => ({ ...x, label: at(x.label) }));
+    c.links = c.links.map((l: Rec) => ({ ...l, from: at(l.from), to: at(l.to) }));
+    expect(withoutUnsupportedMechanisms(c as never, BRIEF).mechanisms.map((m) => m.label), 'PRECONDITION: unnamed, it is taken').toEqual(['Accounts lost']);
+    expect(withoutUnsupportedMechanisms(c as never, `${BRIEF} We could lose accounts.`).mechanisms).toEqual([]);
   });
   it('CONTROL: a risk with a link into anything but the goal is part of a chain the model reads → kept', () => {
     const c = structuredClone(FX['draft-1']);
