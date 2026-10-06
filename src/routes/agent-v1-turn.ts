@@ -3490,15 +3490,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Display first, while the raw ask is intact. With no IDs the replacement is identical;
     // otherwise the id-free form cannot recreate the raw ask. The caveat cannot contain it,
     // so the scanner-pinned second display call is a no-op after dedupe and placement.
-    const scopedNarration = explainRobustnessCaveat === null ? scopedNarrationRaw
-      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat);
     // ⭐ RT-19 (DL ruling (A), #87 6009566552): a figure for two ends with NO direct link, and no link-effect door this turn →
     // the door's own fixed words, never the Agent's improvised offer (a band for a new link the model would double-count).
+    // They stand in for the narration before the display call, so every owed line below composes with them unchanged.
     const awaitingApproval = offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
       || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined;
     const noDirectLink = fastPath === undefined ? noDirectLinkFigureReply(readbackGraph, message, {
       tools: result.tool_calls.map((c) => c.name), awaitingApproval, scopeQuestionOwed: rawScopeQuestion !== null }) : null;
-    const narrationText = noDirectLink ?? withDecisionInputAskDisplay(scopedNarration, readbackGraph);
+    const scopedNarration = noDirectLink ?? (explainRobustnessCaveat === null ? scopedNarrationRaw
+      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat));
+    const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       && claimPermissionsFrom(analysisState, analysisReady, { requested: fastPath === 'run' }).leader_may_be_named
