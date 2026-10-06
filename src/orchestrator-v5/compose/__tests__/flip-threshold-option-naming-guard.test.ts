@@ -167,8 +167,10 @@ describe('2.267 D-2 — the guard suppresses a NAME, not the surface', () => {
     const run = WITNESS.controls.runB;
     const card = onlyFlipCard(factFor(run));
     expect(card.body).toBe(run.decision_review_flip_thresholds[0]!.narrative);
+    // The producer's own narrative, passed through byte-identical (it named no option), so it keeps the producer's
+    // words. Only the rebuilt fallback body (rows above and below) carries cut 6's wording.
     expect(card.body).toBe(
-      'If Operational Readiness Level increases from 50% to 77%, the most-supported option would change.',
+      'If Operational Readiness Level increases from 50% to 77%, the leading option would change.',
     );
   });
 

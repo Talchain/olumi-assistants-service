@@ -1162,7 +1162,9 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
     expectNaturalProse(text);
     expect(text).toMatch(/Of the factors we tested, Engineering Capacity has a tipping point on its own that would change the most-supported option/i);
     // Science d5 (#87 6008424994): no superlative ranking of factors on this path.
-    expect(text).not.toMatch(/\bmost likely\b|\bclosest\b/i);
+    const flipSentence = text.match(/Of the factors we tested[^.]*\./)?.[0] ?? '';
+    expect(flipSentence, 'PRECONDITION: the flip sentence is present').not.toBe('');
+    expect(flipSentence).not.toMatch(/\bmost likely\b|\bclosest\b/i);
     expect(text).toMatch(/a clear one to test/i);
     expect(text).not.toMatch(HONEST_NO_FLIP);
   });
