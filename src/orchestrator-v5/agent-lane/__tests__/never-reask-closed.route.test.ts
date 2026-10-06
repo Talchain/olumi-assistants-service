@@ -168,6 +168,28 @@ describe('the Run\'s withheld-chance question is asked once (served d4), through
     expect(await runChip(turnId)).toBe(live);
   });
 
+  /** "Review this decision" (no model call): the press's own typed lines on the bound Run. */
+  const reviewPress = async (turnId: string = randomUUID()): Promise<string> => {
+    const { DECISION_REVIEW_PRESS_ID } = await import('../decision-review-press.js');
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: SCENARIO, turn_id: turnId,
+      message: 'Review this decision', source: 'chip_click', chip: { id: DECISION_REVIEW_PRESS_ID } } });
+    expect(r.statusCode, r.body).toBe(200);
+    return plain((r.json() as { assistant_text: string }).assistant_text);
+  };
+
+  it('⭐ Review press: once asked, the reason alone — live and replayed alike; CONTROL: asked when it was not', async () => {
+    const before = await reviewPress();
+    expect(before).toContain(plain(REASON));
+    expect(before).toContain(QUESTION);
+    history = [answerRow(1, D4.first_run_reply)];
+    const turnId = randomUUID();
+    const live = await reviewPress(turnId);
+    expect(live).toContain(plain(REASON));
+    expect(live).not.toContain(QUESTION);
+    history = [{ ...answerRow(9, [...rows.values()].at(-1)?.assistant_message ?? ''), turn_id: turnId }, answerRow(1, D4.first_run_reply)];
+    expect(await reviewPress(turnId)).toBe(live);
+  });
+
   it('CONTROL: ANOTHER question in the history does not silence this one', async () => {
     history = [answerRow(1, 'Roughly how much does Starter tier subscribers change, in subscribers, when Starter price rises by £1?')];
     const text = await runChip();
