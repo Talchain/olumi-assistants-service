@@ -89,6 +89,38 @@ function labelPeriods(label: unknown): Set<UnitPeriod> {
 const hasLevel = (n: Rec): boolean => isRec(n.observed_state)
   && ['value', 'raw_value', 'baseline'].some(k => { const v = (n.observed_state as Rec)[k]; return v !== undefined && v !== null; });
 
+/** The user sized this link: their figure (`user_stated` with its natural size), or a band they SET on the canvas (a link
+ *  they only drew carries `user_specified` without `provenance_display: 'user_set'`, so it is not a band). */
+const userSizedLink = (e: Rec): boolean => {
+  const p = isRec(e.provenance) ? e.provenance : {};
+  return (p.magnitude === 'user_stated' && isRec(p.natural_effect)) || (p.source === 'user_specified' && e.provenance_display === 'user_set');
+};
+
+/**
+ * ⭐ T1b (Science d5, 6 Oct, RT-18 class Q1): the user's own sizes on BOTH sides of a level-less mediator size the path,
+ * because M's arbitrary scale cancels in β_in · β_out. The out-links (`M→child`, keyed `from→to`) of every level-less,
+ * single-child M whose every in-link and its out-link the user sized (band or figure). P5 counts these as sized, so no
+ * question is asked that M's missing unit makes unanswerable. A gauge never overwrites a user band (`kidUnsized` below).
+ */
+export function userSizedLevelLessLinks(graph: unknown): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return out;
+  const nodes = graph.nodes.filter(isRec);
+  const edges = graph.edges.filter(isRec).filter(e => e.edge_type !== 'bidirected');
+  const kind = new Map(nodes.map(n => [n.id, n.kind] as const));
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  for (const m of nodes) {
+    if (typeof m.id !== 'string' || !['factor', 'risk', 'outcome'].includes(String(m.kind))) continue;
+    const mv = view.get(m.id);
+    if (mv === undefined || unitOf(mv) !== undefined || hasLevel(m)) continue;
+    const kids = edges.filter(e => e.from === m.id);
+    const parents = edges.filter(e => e.to === m.id && kind.get(e.from) !== 'option' && kind.get(e.from) !== 'decision');
+    if (kids.length !== 1 || parents.length === 0 || !userSizedLink(kids[0]!) || !parents.every(userSizedLink)) continue;
+    out.add(`${m.id}→${String(kids[0]!.to)}`);
+  }
+  return out;
+}
+
 /** Every mediator reading of a graph, by node id. Pure; one pass. */
 export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
   const out = new Map<string, MediatorReading>();
