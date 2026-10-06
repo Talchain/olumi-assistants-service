@@ -318,7 +318,11 @@ export function rerunRecordForModel(
   return {
     code_line: leaksPairLeaderOrShare(plan.codeLine, wireDelta) ? RERUN_NO_CHANGE_LINES.unknown : plan.codeLine,
     prior_withheld: plan.inputs.prior_withheld === true,
-    attribution_case: plan.inputs.attribution_case ?? 'C2_unpaired',
+    // ⛔ SEVERAL CHANGES ARE CREDITED TOGETHER, NEVER ONE OF THEM (DL follow-up on #2616 APPROVE, 6 Oct 00:2xZ): on a
+    // prior-withheld C1 pair the plan keeps C1 (its UNWITHHELD line credits the changes collectively), but the typed rule
+    // reads C1 as licence to say WHICH change did it. With more than one named change, the record says C2_unpaired, so the
+    // model may credit them together (the code line) and never single one out. One change keeps the plan's case.
+    attribution_case: plan.changes.length > 1 ? 'C2_unpaired' : plan.inputs.attribution_case ?? 'C2_unpaired',
     // The chip's own movement guard travels too (Codex buddy r1, P2): no option has figures in both Runs → no movement.
     use: plan.inputs.no_matched_figures === true ? `${TYPED_RERUN_RECORD_RULE}${NO_MATCHED_FIGURES_RULE}` : TYPED_RERUN_RECORD_RULE,
   };
