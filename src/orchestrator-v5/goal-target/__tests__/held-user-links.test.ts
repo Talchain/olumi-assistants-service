@@ -5,8 +5,8 @@
  * persisted graph is untouched. No range → no hold (never mean ± k·std: circular).
  */
 import { describe, expect, it } from 'vitest';
-import { heldLinkOf, withHeldUserLinks } from '../held-user-links.js';
-import { goalChanceLicenceOf, userStatedLinksBelowOne } from '../goal-chance-licence.js';
+import { endsOfGraph, heldLinkOf, labelHoldsQuantity, validatedDefinition, withHeldUserLinks, type LinkEnds } from '../held-user-links.js';
+import { goalChanceLicenceOf, olumiExistenceOnGoalPath, userStatedLinksBelowOne } from '../goal-chance-licence.js';
 
 type Rec = Record<string, any>;
 /** The user wrote "20 to 40 subscribers per £1"; the low end (20) is the size the link carries (A4), β 0.3 on its frame. */
@@ -18,12 +18,14 @@ const userLink = (from: string, to: string, ne: Rec | undefined, exists = 0.8): 
   from, to, strength: { mean: ne?.strength_mean ?? 0.6, std: 0.15 }, exists_probability: exists,
   provenance: { source: 'user_specified', magnitude: 'user_stated', ...(ne !== undefined ? { natural_effect: ne } : {}) },
 });
+/** A causal link's rows need no ends: only a definition reads the labels and each end's unit. */
+const NO_ENDS: LinkEnds = { fromLabel: undefined, toLabel: undefined, fromUnit: undefined, toUnit: undefined };
 const sdOf = (low: number, high: number): number => Math.abs(0.3 * (high / 20) - 0.3 * (low / 20)) / 3.29;
 
 describe('hold-at-1.0: a user link whose own range excludes zero holds on the Run input', () => {
   it('HELD: user-sized, range 20 to 40 → exists 1.0, sd_β = |β(40) − β(20)| / 3.29, the mean stays the stated β', () => {
     const e = userLink('price', 'subs', ranged(20, 40));
-    expect(heldLinkOf(e)).toEqual({ std: sdOf(20, 40) });
+    expect(heldLinkOf(e, NO_ENDS)).toEqual({ std: sdOf(20, 40) });
     const g = withHeldUserLinks({ nodes: [], edges: [e] });
     expect(g.edges[0].exists_probability).toBe(1);
     expect(g.edges[0].strength.std).toBeCloseTo(sdOf(20, 40), 12);
@@ -31,29 +33,29 @@ describe('hold-at-1.0: a user link whose own range excludes zero holds on the Ru
     expect(g.edges[0].strength.mean).toBe(0.3);
   });
   it('a NEGATIVE range (−40 to −20) excludes zero too → held', () => {
-    expect(heldLinkOf(userLink('price', 'churn', ranged(-40, -20, -40)))).toEqual({ std: sdOf(-40, -20) });
+    expect(heldLinkOf(userLink('price', 'churn', ranged(-40, -20, -40)), NO_ENDS)).toEqual({ std: sdOf(-40, -20) });
   });
   it('CONTRAST: a range that STRADDLES zero (−5 to 10) → not held, the edge is byte-identical', () => {
     const e = userLink('price', 'subs', ranged(-5, 10, 10));
-    expect(heldLinkOf(e)).toBeNull();
+    expect(heldLinkOf(e, NO_ENDS)).toBeNull();
     const g = { nodes: [], edges: [e] };
     expect(withHeldUserLinks(g)).toBe(g);
   });
   it('a range touching zero (0 to 10) does not exclude it → not held', () => {
-    expect(heldLinkOf(userLink('price', 'subs', ranged(0, 10, 10)))).toBeNull();
+    expect(heldLinkOf(userLink('price', 'subs', ranged(0, 10, 10)), NO_ENDS)).toBeNull();
   });
   it('NO RANGE → no hold, whatever the size or spread (never mean ± k·std)', () => {
     const ne = ranged(20, 40);
     delete ne.stated_range;
-    expect(heldLinkOf(userLink('price', 'subs', ne))).toBeNull();
-    expect(heldLinkOf(userLink('price', 'subs', undefined))).toBeNull();
+    expect(heldLinkOf(userLink('price', 'subs', ne), NO_ENDS)).toBeNull();
+    expect(heldLinkOf(userLink('price', 'subs', undefined), NO_ENDS)).toBeNull();
   });
   it('CLASS: an Olumi estimate carrying a range → not held; a brief-quoted link → held; brief WITHOUT its quote → not', () => {
     const olumi = { ...userLink('price', 'subs', ranged(20, 40)), provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: ranged(20, 40) } };
-    expect(heldLinkOf(olumi)).toBeNull();
+    expect(heldLinkOf(olumi, NO_ENDS)).toBeNull();
     const brief = { ...userLink('price', 'subs', ranged(20, 40)), provenance: { source: 'brief_extraction', source_quote: 'each £1 brings 20 to 40 subscribers', natural_effect: ranged(20, 40) } };
-    expect(heldLinkOf(brief)).toEqual({ std: sdOf(20, 40) });
-    expect(heldLinkOf({ ...brief, provenance: { ...brief.provenance, source_quote: '  ' } })).toBeNull();
+    expect(heldLinkOf(brief, NO_ENDS)).toEqual({ std: sdOf(20, 40) });
+    expect(heldLinkOf({ ...brief, provenance: { ...brief.provenance, source_quote: '  ' } }, NO_ENDS)).toBeNull();
   });
   it('the PERSISTED graph is never written: the input is not mutated and a held graph is a new object', () => {
     const e = userLink('price', 'subs', ranged(20, 40));
@@ -70,7 +72,7 @@ describe('hold-at-1.0: a user link whose own range excludes zero holds on the Ru
       strength_mean_frame: 'edge_strength', stated_range: { low: 80, high: 250, text: 'about 150, between 80 and 250', end: 'centre' } };
     const e = userLink('switch', 'subs', ne);
     const sd = Math.abs(beta150 * 250 / 150 - beta150 * 80 / 150) / 3.29;
-    expect(heldLinkOf(e)?.std).toBeCloseTo(sd, 12);
+    expect(heldLinkOf(e, NO_ENDS)?.std).toBeCloseTo(sd, 12);
     const out = withHeldUserLinks({ nodes: [], edges: [e] });
     expect(out.edges[0]).toMatchObject({ exists_probability: 1, strength: { mean: beta150 } });
   });
@@ -190,10 +192,10 @@ describe('the model reasons with the existence the Run USES (d5: every reader th
  */
 describe('held-link parity fixture (shared with DGAI)', () => {
   const FIXTURE_SHA256 = 'dd32c259b407929952f709596158cd5142e53870b339c083b053bb688ac581dd';
-  const load = async (): Promise<{ bytes: Buffer; rows: Array<{ name: string; edge: Rec; held: boolean }> }> => {
+  const load = async (): Promise<{ bytes: Buffer; rows: Array<{ name: string; edge: Rec; ends?: LinkEnds; held: boolean }> }> => {
     const { readFileSync } = await import('node:fs');
     const bytes = readFileSync(new URL('./fixtures/held-link-parity.json', import.meta.url));
-    return { bytes, rows: (JSON.parse(bytes.toString('utf8')) as { rows: Array<{ name: string; edge: Rec; held: boolean }> }).rows };
+    return { bytes, rows: (JSON.parse(bytes.toString('utf8')) as { rows: Array<{ name: string; edge: Rec; ends?: LinkEnds; held: boolean }> }).rows };
   };
   it('held-link parity fixture digest: the bytes are the ones DGAI pins', async () => {
     const { createHash } = await import('node:crypto');
@@ -203,7 +205,7 @@ describe('held-link parity fixture (shared with DGAI)', () => {
     const { rows } = await load();
     expect(rows.filter((r) => r.held).length).toBeGreaterThan(0);
     expect(rows.filter((r) => !r.held).length).toBeGreaterThan(0);
-    for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge) !== null }).toEqual({ name: r.name, held: r.held });
+    for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge, r.ends ?? NO_ENDS) !== null }).toEqual({ name: r.name, held: r.held });
   });
 });
 
@@ -224,7 +226,7 @@ describe('Codex r1 #2643: identity, currency and the decision reviewer read the 
   });
   it('P1 currency: a writer that moved the strength and kept natural_effect leaves it STALE → not held', () => {
     const e = { ...userLink('price', 'subs', ranged(20, 40)), strength: { mean: 0.6, std: 0.15 } };
-    expect(heldLinkOf(e)).toBeNull();
+    expect(heldLinkOf(e, NO_ENDS)).toBeNull();
   });
   it('P2 decision review: both branches read the existence the Run uses (fallback projection and enrichment graph)', async () => {
     const { projectRunGraphForDecisionReview } = await import('../../coaching/decision-review-graph-projection.js');
@@ -266,43 +268,230 @@ describe('Codex r2 #2643: history recorded before the hold still validates; fres
   });
 });
 
+
 /**
- * ⭐ DEFINITIONAL HOLD (Science d5 #87, 6 Oct; DL follow-up to 6008807178(2)): a link typed definitional (a part → its
- * total, +1 per 1) that the USER stated or quoted holds at 1.0 with no range, at the structural minimum spread 0.01 — never
- * the ±50% default. A drafter-only definitional flag is Olumi's, so it stays at 0.8 (disclosed). Point causal links stay.
+ * ⭐ DEFINITIONAL HOLD, CORRECTED (Science d5 #87 6011224941, correcting 6009797390's drafter-only clause; DL 07:46Z): a
+ * VALIDATED definitional link holds at existence 1.0 with std 0.01 WHOEVER drew it. Validated: a current definitional
+ * carrier (±1 per 1, one unit at both ends of its size, its β still carried), each end's OWN unit (where it has one) that
+ * unit, and the source label holding the target's quantity words. 0.8 / ±50% on "Starter-tier MRR" → "MRR" said "a 20% chance
+ * Starter revenue isn't revenue"; the mechanism's doubt stays on the upstream CAUSAL links, which keep Olumi's 0.8.
+ * The user's own definitional link (stated, or quoted) still holds as #2653 made it.
  */
-describe('definitional hold: the user\'s own definitional link is not doubted', () => {
+describe('definitional hold: the user\'s own definitional link is not doubted (#2653, unchanged)', () => {
   // A definition as drafted: +1 £/month per £/month, its β carried by the edge (the ONE current-carrier predicate).
   const DEF_NE = { amount: 1, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: '£/month', strength_mean: 1, strength_mean_frame: 'edge_strength' };
   const definitional = (provenance: Rec): Rec => ({ from: 'part', to: 'total', strength: { mean: 1, std: 0.5 }, exists_probability: 0.8,
     provenance: { definitional: true, natural_effect: { ...DEF_NE }, ...provenance } });
-  it('QUOTED definitional (brief, with its quote) → held at 1.0 with std 0.01', () => {
+  it('QUOTED definitional (brief, with its quote) → held at 1.0 with std 0.01, labels or not', () => {
     const e = definitional({ source: 'brief_extraction', magnitude: 'olumi_estimate', source_quote: '<quote>' });
-    expect(heldLinkOf(e)).toEqual({ std: 0.01 });
+    expect(heldLinkOf(e, NO_ENDS)).toEqual({ std: 0.01 });
     expect(withHeldUserLinks({ nodes: [], edges: [e] }).edges[0]).toMatchObject({ exists_probability: 1, strength: { mean: 1, std: 0.01 } });
   });
-  it('USER-STATED definitional → held at 1.0 with std 0.01', () => {
-    expect(heldLinkOf(definitional({ source: 'user_specified', magnitude: 'user_stated' }))).toEqual({ std: 0.01 });
-  });
-  it('CONTRAST: a DRAFTER-ONLY definitional flag (Olumi\'s) → not held, stays 0.8', () => {
-    const e = definitional({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
-    expect(heldLinkOf(e)).toBeNull();
-    expect(withHeldUserLinks({ nodes: [], edges: [e] }).edges[0].exists_probability).toBe(0.8);
+  it('USER-STATED definitional → held at 1.0 with std 0.01, even where the labels would not validate', () => {
+    const e = definitional({ source: 'user_specified', magnitude: 'user_stated' });
+    expect(heldLinkOf(e, NO_ENDS)).toEqual({ std: 0.01 });
+    expect(heldLinkOf(e, { fromLabel: 'Pipeline value', toLabel: 'Revenue', fromUnit: undefined, toUnit: undefined })).toEqual({ std: 0.01 });
   });
   it('⛔ Codex r1 P1: a USER BAND EDIT keeps the flag but moves the size → not a definition, not held', () => {
     const edited = definitional({ source: 'user_specified', magnitude: 'user_stated' });
     edited.strength = { mean: -0.3, std: 0.075 };
-    expect(heldLinkOf(edited)).toBeNull();
+    expect(heldLinkOf(edited, NO_ENDS)).toBeNull();
     delete edited.provenance.natural_effect;
-    expect(heldLinkOf(edited), 'and with its natural effect dropped').toBeNull();
+    expect(heldLinkOf(edited, NO_ENDS), 'and with its natural effect dropped').toBeNull();
     expect(withHeldUserLinks({ nodes: [], edges: [edited] }).edges[0]).toMatchObject({ exists_probability: 0.8, strength: { std: 0.075 } });
   });
   it('CONTRAST: a definitional flag on a link that is not ±1 per 1 is not a definition → not held', () => {
     const e = definitional({ source: 'user_specified', magnitude: 'user_stated' });
     e.provenance.natural_effect.amount = 2;
-    expect(heldLinkOf(e)).toBeNull();
+    expect(heldLinkOf(e, NO_ENDS)).toBeNull();
   });
   it('CONTRAST: a POINT causal user link (no range, not definitional) → not held, stays 0.8', () => {
-    expect(heldLinkOf(userLink('price', 'subs', undefined))).toBeNull();
+    expect(heldLinkOf(userLink('price', 'subs', undefined), NO_ENDS)).toBeNull();
+  });
+});
+
+describe('the label clause (d5 6011224941): the source label holds every content word of the target\'s quantity', () => {
+  it.each([
+    ['Starter-tier monthly recurring revenue', 'monthly recurring revenue', true],
+    ['Quarterly revenue lost to AI delivery distraction', 'quarterly revenue', true],
+    ['Starter-tier MRR', 'monthly recurring revenue', true],
+    ['MRR lost to starter support strain', 'monthly recurring revenue', true],
+    ['Enterprise revenues', 'Revenue', true],
+    ['Pipeline value', 'revenue', false],
+    ['Support cost', 'MRR', false],
+    ['Starter churn', 'monthly recurring revenue', false],
+    ['Starter-tier subscribers', 'monthly recurring revenue', false],
+    ['', 'revenue', false],
+  ] as const)('%s → %s: %s', (source, target, holds) => {
+    expect(labelHoldsQuantity(source, target)).toBe(holds);
+  });
+});
+
+/** The SERVED T1b drafts that carry Olumi's drafter-only definition (rg -l "Starter-tier" under fixtures; read verbatim). */
+const SERVED_T1B = {
+  // e7 FA1, guest T1b draft 46d37fb7 on CEE d619668a: ‘Starter-tier MRR’ → MRR (+1) and ‘MRR lost to starter support strain’ → MRR (−1).
+  fa1: '../../agent-lane/__tests__/fixtures/fa1-served-graph.json',
+  // red team 19, guest T1b near tie on CEE 328d01fe: ‘Starter-tier monthly recurring revenue’ → MRR (+1), units 'GBP/month'.
+  ts2: '../../admission/__tests__/fixtures/ts2-near-tie-served-graph.json',
+} as const;
+const GOAL = 'monthly_recurring_revenue';
+const servedGraph = async (key: keyof typeof SERVED_T1B): Promise<Rec> => {
+  const { readFileSync } = await import('node:fs');
+  return structuredClone((JSON.parse(readFileSync(new URL(SERVED_T1B[key], import.meta.url), 'utf8')) as { graph: Rec }).graph);
+};
+const edgeOf = (g: Rec, from: string, to: string): Rec => {
+  const e = (g.edges as Rec[]).find((x) => x.from === from && x.to === to);
+  expect(e, `${from} -> ${to} is in the graph`).toBeDefined();
+  return e!;
+};
+const nodeOf = (g: Rec, id: string): Rec => (g.nodes as Rec[]).find((n) => n.id === id)!;
+
+describe('a VALIDATED drafter-only definition holds at 1.0 / 0.01 (the predicate, on the served drafts)', () => {
+  it('PRECONDITION: each served link is Olumi\'s drafter-only definition at the 0.8 prior', async () => {
+    for (const [key, from] of [['fa1', 'starter_tier_mrr'], ['fa1', 'mrr_lost_to_starter_support_strain'], ['ts2', 'starter_tier_monthly_recurring_revenue']] as const) {
+      const e = edgeOf(await servedGraph(key), from, GOAL);
+      expect(e).toMatchObject({ exists_probability: 0.8, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', definitional: true } });
+    }
+  });
+  it.each([
+    ['fa1', 'starter_tier_mrr', '£/month'],
+    ['fa1', 'mrr_lost_to_starter_support_strain', '£/month'],
+    ['ts2', 'starter_tier_monthly_recurring_revenue', 'GBP/month'],
+  ] as const)('%s %s → MRR: validated in %s, held {std 0.01}', async (key, from, unit) => {
+    const g = await servedGraph(key);
+    const e = edgeOf(g, from, GOAL);
+    expect(validatedDefinition(e, endsOfGraph(g)(e))).toBe(unit);
+    expect(heldLinkOf(e, endsOfGraph(g)(e))).toEqual({ std: 0.01 });
+  });
+  it('CONTROL: no CAUSAL link on the served drafts holds (Olumi\'s and the brief\'s point links keep their prior)', async () => {
+    for (const key of ['fa1', 'ts2'] as const) {
+      const g = await servedGraph(key);
+      const endsOf = endsOfGraph(g);
+      const held = (g.edges as Rec[]).filter((e) => heldLinkOf(e, endsOf(e)) !== null).map((e) => `${e.from}->${e.to}`);
+      const definitions = (g.edges as Rec[]).filter((e) => e.provenance?.definitional === true).map((e) => `${e.from}->${e.to}`);
+      expect(held).toEqual(definitions);
+    }
+  });
+});
+
+describe('the Run sends PLoT the validated definition at 1.0 / 0.01; causal links and failed flags keep 0.8 (served T1b)', () => {
+  /** The REAL `run_analysis` handler over the served draft (PLoT faked at the transport): the graph PLoT receives. */
+  const plotGraphFor = async (graph: Rec): Promise<{ wire: Rec; persisted: Rec }> => {
+    const { readFileSync } = await import('node:fs');
+    const { vi } = await import('vitest');
+    const { GraphV3 } = await import('../../../schemas/cee-v3.js');
+    const { mergeInterventionSourceObjects } = await import('../../../orchestrator/tools/analysis-ready-helper.js');
+    const { createRunAnalysisHandler } = await import('../../tools/handlers/run-analysis.js');
+    const minimal = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/plot/v2-run-golden-minimal.json', import.meta.url), 'utf8'));
+    const parsed = GraphV3.parse(graph) as unknown as Rec;
+    const options = (parsed.nodes as Rec[]).filter((n) => n.kind === 'option').map((n) => ({
+      id: n.id, option_id: n.id, label: n.label, interventions: mergeInterventionSourceObjects(n as never),
+    }));
+    const snapshot = { graph: parsed, options, goal_node_id: GOAL, rawPersistedGraph: structuredClone(parsed) };
+    const runMock = vi.fn(async () => structuredClone(minimal));
+    const handler = createRunAnalysisHandler({ plotClient: { run: runMock, validatePatch: vi.fn().mockResolvedValue({}) }, scenarioReader: async () => snapshot } as never);
+    await handler({ payload: { scenario_id: 'a8d3f1b2-7c4e-4d5a-9b6c-1e2f3a4b5c6d' }, requestId: 'req-vd', signal: new AbortController().signal, context: {}, orientationText: '' } as never).catch((x: unknown) => x);
+    expect(runMock).toHaveBeenCalledTimes(1);
+    return { wire: ((runMock.mock.calls as unknown[][])[0]![0] as { graph: Rec }).graph, persisted: snapshot.rawPersistedGraph };
+  };
+
+  it('⭐ RED (T1b fa1): ‘Starter-tier MRR’ → MRR is sent at existence 1.0, std 0.01, its β unchanged; the stored link keeps 0.8', async () => {
+    const g = await servedGraph('fa1');
+    const beta = edgeOf(g, 'starter_tier_mrr', GOAL).strength.mean;
+    const { wire, persisted } = await plotGraphFor(g);
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 1, strength: { mean: beta, std: 0.01 } });
+    expect(edgeOf(wire, 'mrr_lost_to_starter_support_strain', GOAL)).toMatchObject({ exists_probability: 1, strength: { std: 0.01 } });
+    expect(edgeOf(persisted, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 0.8, strength: { std: edgeOf(g, 'starter_tier_mrr', GOAL).strength.std } });
+  });
+  it('⭐ RED (T1b ts2): ‘Starter-tier monthly recurring revenue’ → MRR (GBP/month) is sent at existence 1.0, std 0.01', async () => {
+    const { wire } = await plotGraphFor(await servedGraph('ts2'));
+    expect(edgeOf(wire, 'starter_tier_monthly_recurring_revenue', GOAL)).toMatchObject({ exists_probability: 1, strength: { std: 0.01 } });
+  });
+  it('CONTROL: the CAUSAL Olumi links into and around the part keep 0.8 and their own spread (the doubt stays upstream)', async () => {
+    const g = await servedGraph('fa1');
+    const { wire } = await plotGraphFor(g);
+    for (const [from, to] of [['starter_tier_monthly_price', 'starter_tier_mrr'], ['starter_tier_subscribers', 'starter_tier_mrr'],
+      ['monthly_starter_support_cost', 'mrr_lost_to_starter_support_strain']] as const) {
+      expect(edgeOf(wire, from, to), `${from} -> ${to}`).toMatchObject({ exists_probability: 0.8, strength: { std: edgeOf(g, from, to).strength.std } });
+    }
+  });
+  it('TWIN (label): the same flag on ‘Pipeline value’ → MRR fails validation → sent at 0.8 with its own spread', async () => {
+    const g = await servedGraph('fa1');
+    nodeOf(g, 'starter_tier_mrr').label = 'Pipeline value';
+    const { wire } = await plotGraphFor(g);
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 0.8, strength: { std: edgeOf(g, 'starter_tier_mrr', GOAL).strength.std } });
+  });
+  it('TWIN (unit at the total): the size in £/week into a total in £/month fails validation → 0.8', async () => {
+    const g = await servedGraph('fa1');
+    const ne = edgeOf(g, 'starter_tier_mrr', GOAL).provenance.natural_effect;
+    ne.amount_unit = '£/week';
+    ne.per_source_change_unit = '£/week';
+    const { wire } = await plotGraphFor(g);
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL).exists_probability).toBe(0.8);
+  });
+  it('TWIN (unit at the part): a part measured in its own other unit (subscribers) fails validation → 0.8', async () => {
+    const g = await servedGraph('fa1');
+    nodeOf(g, 'starter_tier_mrr').observed_state = { value: 0, raw_value: 0, unit: 'subscribers' };
+    const { wire } = await plotGraphFor(g);
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL).exists_probability).toBe(0.8);
+  });
+  it('TWIN (not ±1 per 1): the flag on +2 per 1 is not a definition → 0.8', async () => {
+    const g = await servedGraph('fa1');
+    edgeOf(g, 'starter_tier_mrr', GOAL).provenance.natural_effect.amount = 2;
+    const { wire } = await plotGraphFor(g);
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL).exists_probability).toBe(0.8);
+  });
+});
+
+describe('every reader that shows existence reads the SAME validated hold (served T1b fa1)', () => {
+  it('graph-compact and serialise show 1 for the definition and 0.8 for the causal control; the EDIT view keeps the stored 0.8', async () => {
+    const g = await servedGraph('fa1');
+    const { compactGraph } = await import('../../../orchestrator/context/graph-compact.js');
+    const { compactGraph: serialiseCompact, editCompactGraph } = await import('../../../orchestrator/context/serialise.js');
+    const compact = compactGraph(g as never).edges as Rec[];
+    expect(compact.find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL)?.exists).toBe(1);
+    expect(compact.find((e) => e.from === 'starter_tier_monthly_price' && e.to === 'starter_tier_mrr')?.exists).toBe(0.8);
+    const serialised = serialiseCompact(g as never).edges as Rec[];
+    expect(serialised.find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL)?.exists_probability).toBe(1);
+    expect(serialised.find((e) => e.from === 'starter_tier_monthly_price' && e.to === 'starter_tier_mrr')?.exists_probability).toBe(0.8);
+    expect((editCompactGraph(g as never).edges as Rec[]).find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL)?.exists_probability).toBe(0.8);
+  });
+  it('the decision reviewer\'s fallback projection reads exists 1 for the definition, 0.8 for the causal control', async () => {
+    const g = await servedGraph('fa1');
+    const { projectRunGraphForDecisionReview } = await import('../../coaching/decision-review-graph-projection.js');
+    const edges = (projectRunGraphForDecisionReview({}, g) as Rec).graph.edges as Rec[];
+    expect(edges.find((e) => e.from === 'starter_tier_mrr' && e.to === GOAL)).toMatchObject({ exists: 1 });
+    expect(edges.find((e) => e.from === 'starter_tier_monthly_price' && e.to === 'starter_tier_mrr')).toMatchObject({ exists: 0.8 });
+  });
+  it('the licence: with every causal goal-path link at 1, the definitions are no longer Olumi\'s existence doubt; at 0.8 the control still is', async () => {
+    const g = await servedGraph('fa1');
+    const options = ['raise_prices_10', 'launch_starter_tier', 'keep_pricing_as_it_is'];
+    for (const e of g.edges as Rec[]) if (e.provenance?.definitional !== true) e.exists_probability = 1;
+    expect(olumiExistenceOnGoalPath(g, GOAL, options)).toBe(false);
+    edgeOf(g, 'starter_tier_monthly_price', 'starter_tier_mrr').exists_probability = 0.8;
+    expect(olumiExistenceOnGoalPath(g, GOAL, options)).toBe(true);
+  });
+});
+
+describe('analysis identity: a validated definition is an input change; history recorded under the user-only hold still validates', () => {
+  it('the current hash differs from the user-only (pre_definition) projection on the served draft, and that history validates', async () => {
+    const { computeAnalysisAffectingGraphHashSha256 } = await import('../../context/graph-hash.js');
+    const { matchesHistoricalAnalysisIdentity } = await import('../../context/graph-identity.js');
+    const g = await servedGraph('fa1');
+    // A ranged user link too, so the user-only projection differs from the pre-hold one and cannot validate it by accident.
+    const user = edgeOf(g, 'price_rise_from_current_level', GOAL);
+    user.provenance = { source: 'user_specified', magnitude: 'user_stated',
+      natural_effect: { amount: 6000, amount_unit: '£/month', per_source_change: 10, per_source_change_unit: '%', strength_mean: user.strength.mean,
+        strength_mean_frame: 'edge_strength', stated_range: { low: 4000, high: 8000, text: '£4,000 to £8,000', end: 'centre' } } };
+    const recordedUnderUserHold = computeAnalysisAffectingGraphHashSha256(g as never, 'pre_definition')!;
+    expect(recordedUnderUserHold).not.toBe(computeAnalysisAffectingGraphHashSha256(g as never, 'pre_hold')); // PRECONDITION
+    expect(recordedUnderUserHold).not.toBe(computeAnalysisAffectingGraphHashSha256(g as never));
+    expect(matchesHistoricalAnalysisIdentity(g as never, recordedUnderUserHold)).toBe(true);
+  });
+  it('CONTRAST (no churn): a graph with no validated definition hashes the same under both projections', async () => {
+    const { computeAnalysisAffectingGraphHashSha256 } = await import('../../context/graph-hash.js');
+    const g = await servedGraph('fa1');
+    for (const e of g.edges as Rec[]) if (e.provenance?.definitional === true) delete e.provenance.definitional;
+    expect(computeAnalysisAffectingGraphHashSha256(g as never, 'pre_definition')).toBe(computeAnalysisAffectingGraphHashSha256(g as never));
   });
 });

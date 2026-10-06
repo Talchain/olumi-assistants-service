@@ -27,7 +27,7 @@
 import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
-import { heldLinkOf, isUserStatedLink } from './held-user-links.js';
+import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -177,12 +177,14 @@ function userLinkExistenceOn(graph: unknown, goalId: unknown, optionIds: readonl
  * never becomes "your link".
  */
 export function userStatedLinksBelowOne(graph: unknown, goalId: unknown, optionIds: readonly string[]): Rec[] {
-  return goalPathEdges(graph, goalId, optionIds).filter((e) => isUserStatedLink(e) && heldLinkOf(e) === null && belowOne(e));
+  const endsOf = endsOfGraph(graph);
+  return goalPathEdges(graph, goalId, optionIds).filter((e) => isUserStatedLink(e) && heldLinkOf(e, endsOf(e)) === null && belowOne(e));
 }
 
 /** The interim's predicate: a link on a compared option's goal path whose existence < 1 the user did not set (unheld). */
 export function olumiExistenceOnGoalPath(graph: unknown, goalId: unknown, optionIds: readonly string[]): boolean {
-  return goalPathEdges(graph, goalId, optionIds).some((e) => heldLinkOf(e) === null && belowOne(e));
+  const endsOf = endsOfGraph(graph);
+  return goalPathEdges(graph, goalId, optionIds).some((e) => heldLinkOf(e, endsOf(e)) === null && belowOne(e));
 }
 
 const belowOne = (e: Rec): boolean =>
