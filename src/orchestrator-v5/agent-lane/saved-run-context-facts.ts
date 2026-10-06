@@ -35,6 +35,8 @@ export function savedRunContextFacts(
     ? limitChecksForAgent(read.raw, read.limit_verdicts) : undefined;
   return {
     selected_run_reference: selected.id,
+    ...(projected.goal_chance_driver_availability !== undefined
+      ? { goal_chance_driver_availability: projected.goal_chance_driver_availability } : {}),
     ...(read.run_delta !== undefined && runToolOutputLicensesLeader({ claim_permissions: permissions })
       ? { run_delta: projectModelFacingRunDelta(read.run_delta) } : {}),
     leader_limit_risks_note: 'Each probability is the chance that its recorded option meets the named limit, not its chance of breaching it. '
