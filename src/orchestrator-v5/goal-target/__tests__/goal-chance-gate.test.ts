@@ -59,7 +59,8 @@ describe('D3 step 1 — the goal-chance seam gate', () => {
     for (const id of ['a', 'b']) expect(rowOf(out, id)).not.toHaveProperty('probability_of_goal');
     expect(out.decision_brief.analysis_summary).not.toHaveProperty('goal_fit');
     expect((out.inference_warnings as Json[])).toEqual([expect.objectContaining({
-      code: GOAL_FIGURES_NO_STATED_TARGET, severity: 'info', option_ids: ['a', 'b'], cause: 'no_stated_target', goal_fit_removed: true })]);
+      code: GOAL_FIGURES_NO_STATED_TARGET, severity: 'info', option_ids: ['a', 'b'], cause: 'no_stated_target', goal_fit_removed: true,
+      invite: { kind: 'state_goal_target', goal_node_id: GOAL } })]);
     // Every other figure stays (shares, outcome, the leader), and no reader is told a target "could not be tested".
     expect(rowOf(out, 'a')).toMatchObject({ win_probability: 0.7, outcome: { mean: 0.5, p10: 0.4, p90: 0.6 } });
     expect(out.decision_brief.analysis_summary.leading_option).toBe('a');

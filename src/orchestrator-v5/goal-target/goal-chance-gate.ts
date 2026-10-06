@@ -90,7 +90,7 @@ export const GOAL_FIT_UNUSABLE = 'GOAL_FIT_UNUSABLE';
  */
 export const GOAL_FIGURES_NO_STATED_TARGET = 'GOAL_FIGURES_NO_STATED_TARGET';
 
-function stripGoalChancesWithNoTarget(env: Rec): Rec {
+function stripGoalChancesWithNoTarget(env: Rec, goalId: unknown): Rec {
   const removed: string[] = [];
   const strip = (rows: unknown): unknown => (!Array.isArray(rows) ? rows : rows.map((row) => {
     if (!isRec(row) || !('probability_of_goal' in row)) return row;
@@ -124,6 +124,8 @@ function stripGoalChancesWithNoTarget(env: Rec): Rec {
     code: GOAL_FIGURES_NO_STATED_TARGET, severity: 'info',
     message: 'The goal has no stated target, so no option has a chance of meeting one to show.',
     option_ids: removed, cause: 'no_stated_target' satisfies GoalChanceUnusable, ...(fitRemoved ? { goal_fit_removed: true } : {}),
+    // ⭐ D3 STEP 2 (DL 0df0e1; c6): the invitation that resolves it — "Give ‘{goal}’ a target …" through the existing target door.
+    ...(typeof goalId === 'string' ? { invite: { kind: 'state_goal_target', goal_node_id: goalId } } : {}),
   }];
   return out;
 }
@@ -137,7 +139,7 @@ const MESSAGE = 'Not shown. The chance of meeting your goal could not be read as
 export function withholdUnusableGoalChances<E>(envelope: E, graph: unknown, goalId: unknown): E {
   if (!isRec(envelope)) return envelope;
   const targetCause = goalChanceTargetCause(graph, goalId);
-  if (targetCause === 'no_stated_target') return stripGoalChancesWithNoTarget(envelope) as E;
+  if (targetCause === 'no_stated_target') return stripGoalChancesWithNoTarget(envelope, goalId) as E;
   const causes = new Map<string, GoalChanceUnusable>();
   for (const record of readOptionResultSources(envelope).flat()) {
     if (!isRec(record) || !('probability_of_goal' in record) || record.probability_of_goal === undefined) continue;
