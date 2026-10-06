@@ -152,6 +152,25 @@ describe('S7 on e7\'s Run pair: a link the refit only rescaled is no change', ()
   });
 });
 
+describe('the equal-natural-size rule (#2647\'s band-row rule, now also for a move inside one band)', () => {
+  /** Each Run's links with the natural size its graph held (the 0.78 member #2638 records from cut 7). */
+  const withNe = (s: Rec, g: Rec): Rec => {
+    const out = structuredClone(s);
+    for (const l of out.links as Rec[]) { const ne = edgeOf(g, `${l.from}->${l.to}`)?.provenance?.natural_effect; if (ne) l.natural_effect = { amount: ne.amount, amount_unit: ne.amount_unit, per_source_change: ne.per_source_change, per_source_change_unit: ne.per_source_change_unit }; }
+    return out;
+  };
+  it('⭐ RED: both Runs record the siblings at the same natural size → no within-band move, with no receipt at all', () => {
+    const { facts, delta } = pair(withNe(S1, G4), withNe(S2, G5));
+    expect(withinBandLinkMovesForRunPair(facts, delta, []).map((m) => `${m.from}->${m.to}`).filter((k) => SIBLINGS.includes(k))).toEqual([]);
+  });
+  it('CONTROL: a different natural size on one sibling keeps its within-band move', () => {
+    const s2 = withNe(S2, G5);
+    (s2.links as Rec[]).find((l) => `${l.from}->${l.to}` === SIBLINGS[0])!.natural_effect.amount = -6000;
+    const { facts, delta } = pair(withNe(S1, G4), s2);
+    expect(withinBandLinkMovesForRunPair(facts, delta, []).map((m) => `${m.from}->${m.to}`)).toContain(SIBLINGS[0]);
+  });
+});
+
 describe('a refit move that crosses a band: no row is said and none is counted', () => {
   // The investor sibling's β crosses a band when the goal frame grows enough: e7's pair with the sibling's band moved.
   const s1 = structuredClone(S1); const s2 = structuredClone(S2);
