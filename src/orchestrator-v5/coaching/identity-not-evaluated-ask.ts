@@ -109,9 +109,16 @@ const q = (label: string): string => `“${label}”`;
  * new) and whose path reaches the operand. An option that merely targets it ("Offer a 10% discount") changes an existing
  * level nobody gave, so its operand is still asked about today.
  */
-const CREATION_VERB = /\b(launch(?:es|ed|ing)?|introduc(?:e|es|ed|ing)|start(?:s|ed|ing)?|new)\b/i;
+// The option's OWN action (Codex buddy r1 P1): its label opens with the verb or with "new" ("Launch starter tier", "New
+// starter tier"). "Keep the new pricing" changes an existing level, so it is no creation evidence.
+const CREATION_VERB = /^\s*(?:launch(?:es|ed|ing)?|introduc(?:e|es|ed|ing)|start(?:s|ed|ing)?|(?:an? )?new)\b/i;
 
-interface Creator { readonly option: string; readonly level: { readonly value: number; readonly unit: string } | null }
+interface Creator {
+  /** Every option that would start it, in node order; the ones whose own level is missing are asked (none dropped). */
+  readonly options: readonly string[];
+  readonly missingLevel: readonly string[];
+  readonly level: { readonly value: number; readonly unit: string } | null;
+}
 
 function creatorOf(graph: unknown, operandId: string, storedZero: boolean): Creator | null {
   const g = rec(graph);
@@ -129,16 +136,20 @@ function creatorOf(graph: unknown, operandId: string, storedZero: boolean): Crea
     }
     return false;
   };
+  const options: string[] = []; const missingLevel: string[] = [];
+  let level: Creator['level'] = null;
   for (const o of nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && typeof n.label === 'string')) {
     const sets = rec(rec(o.interventions)?.[operandId]);
     if (!(sets !== null || reaches(o.id as string))) continue;
     if (!storedZero && !CREATION_VERB.test(o.label as string)) continue;
     // (ii) the option's own level, when the brief states it (its span: "about 150, between 80 and 250").
     const value = finite(sets?.raw_value) ?? finite(sets?.value);
-    const unit = typeof sets?.unit === 'string' ? sets.unit : '';
-    return { option: (o.label as string).trim(), level: value === null ? null : { value, unit } };
+    const label = (o.label as string).trim();
+    options.push(label);
+    if (value === null) missingLevel.push(label);
+    else level ??= { value, unit: typeof sets?.unit === 'string' ? sets.unit : '' };
   }
-  return null;
+  return options.length === 0 ? null : { options, missingLevel, level };
 }
 
 /** "How many" for a count, "How much" for money or a share (Science's words, (iii)). */
@@ -149,13 +160,19 @@ function howMuch(unit: unknown): string {
   return money || /%|percent|share|rate/i.test(u) ? 'How much' : 'How many';
 }
 
-/** Science's words, verbatim: said once, then the ONE question only when the option's own level is missing. */
+const quotedList = (xs: readonly string[]): string => andList(xs.map((x) => `‘${x}’`));
+
+/**
+ * Science's words, verbatim: said once, then the ONE question only for the options whose own level is missing — every
+ * one of them (Codex buddy r1 P1: node order must never decide whether a needed question disappears).
+ */
 function createdOperandAsk(operand: string, creator: Creator, unit: unknown): { text: string; label: string; message: string } {
-  const zero = `‘${operand}’ is 0 today, since ‘${creator.option}’ would start it.`;
-  if (creator.level !== null) {
-    return { text: zero, label: 'Use 0 today', message: `Set ‘${operand}’ to 0 today: ‘${creator.option}’ would start it.` };
+  const zero = `‘${operand}’ is 0 today, since ${quotedList(creator.options)} would start it.`;
+  if (creator.missingLevel.length === 0) {
+    return { text: zero, label: 'Use 0 today', message: `Set ‘${operand}’ to 0 today: ${quotedList(creator.options)} would start it.` };
   }
-  const question = `${howMuch(unit)} ‘${operand}’ would ‘${creator.option}’ lead to? A best guess and a range is fine.`;
+  const each = creator.missingLevel.length > 1 ? ' each' : '';
+  const question = `${howMuch(unit)} ‘${operand}’ would ${quotedList(creator.missingLevel)}${each} lead to? A best guess and a range is fine.`;
   return { text: `${zero} ${question}`, label: 'Give your best guess', message: `${question} Ask me for it.` };
 }
 const andList = (xs: readonly string[]): string =>
@@ -235,12 +252,20 @@ export function composeIdentityNotEvaluatedAsk(critiques: unknown, graph: unknow
     case 'identity_operand_missing': {
       const missing = w.participants.filter((p) => levelOf(p) === null);
       if (missing.length === 0) return unstated();
-      const created = missing.length === 1 ? creatorOf(graph, missing[0]!, false) : null;
-      if (created !== null) {
-        const unit = rec(byId.get(missing[0]!)?.observed_state)?.unit ?? created.level?.unit;
-        const ask = createdOperandAsk(labelOf(missing[0]!)!, created, unit);
-        return { reason: w.reason, node_id: w.nodeId, assistant_text: `To work out ${q(T)} ${asFormula}: ${ask.text}`,
-          chip_label: ask.label, chip_message: ask.message };
+      // Creation is judged PER operand (Codex buddy r1 P1): a created one is 0 today; any other is still asked about today.
+      const asks = missing.flatMap((p) => {
+        const created = creatorOf(graph, p, false);
+        return created === null ? [] : [createdOperandAsk(labelOf(p)!, created, rec(byId.get(p)?.observed_state)?.unit ?? created.level?.unit)];
+      });
+      const notCreated = missing.filter((p) => creatorOf(graph, p, false) === null);
+      if (asks.length > 0) {
+        const rest = notCreated.length === 0 ? ''
+          : ` I also need ${andList(say(notCreated))}: what ${notCreated.length === 1 ? 'is it' : 'are they'} today?`;
+        const restOne = notCreated.length === 1;
+        return { reason: w.reason, node_id: w.nodeId, assistant_text: `To work out ${q(T)} ${asFormula}: ${asks.map((a) => a.text).join(' ')}${rest}`,
+          chip_label: notCreated.length > 0 ? (restOne ? 'Give its value' : 'Give the values') : asks[0]!.label,
+          chip_message: notCreated.length > 0
+            ? `What ${restOne ? 'is' : 'are'} ${andList(say(notCreated))} today? Ask me for ${restOne ? 'it' : 'them'}.` : asks[0]!.message };
       }
       const one = missing.length === 1;
       return {
@@ -338,9 +363,12 @@ export function composeIdentityAskForNode(nodeId: string, graph: unknown): Ident
   const os = (id: string): Rec | null => rec(byId.get(id)?.observed_state);
   const level = (id: string): number | null => finite(os(id)?.raw_value) ?? finite(os(id)?.value);
   const unitless = (id: string): boolean => { const u = os(id)?.unit; return !(typeof u === 'string' && u.trim() !== ''); };
+  const target = byId.get(nodeId);
+  // The identity NODE is framed too (ISL rule 1; Codex buddy r1 P2): its own unit, or a goal's target unit.
+  const targetUnitless = unitless(nodeId) && !(typeof target?.goal_threshold_unit === 'string' && target.goal_threshold_unit.trim() !== '');
   const reason: IdentityWithheldReason | null = operands.some((id) => level(id) === null) ? 'identity_operand_missing'
     : operands.some((id) => level(id) === 0) ? 'identity_zero_level'
-      : operands.some(unitless) ? 'identity_frame_missing' : null;
+      : operands.some(unitless) || targetUnitless ? 'identity_frame_missing' : null;
   return reason === null ? null
     : composeIdentityNotEvaluatedAsk([{ code: IDENTITY_NOT_EVALUATED_CODE, identity: { node_id: nodeId, participants: operands, withheld_reason: reason } }], graph);
 }

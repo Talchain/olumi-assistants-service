@@ -1,5 +1,5 @@
 // Stored Run binding consumes these pure readers through its existing sanctioned agent-lane seam.
-export { readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
+export { goalFiguresLeaderWithheldWithoutConstraintCause, readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from './unsized-path-cause.js';
 import { statedEffectQuoteMatches } from '../../cee/provenance/stated-effect.js';
 /**
  * Agent lane — whole-candidate admission.

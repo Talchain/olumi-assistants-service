@@ -21,6 +21,8 @@ import {
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
 } from '../../orchestrator/context/option-result-source.js';
 
+import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-ask.js';
+
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
 
 /** What the Agent is told when the run withheld the goal's chance. */
@@ -228,4 +230,32 @@ export function sameWordsIn(text: string, sentence: string): boolean {
   const plain = (t: string): string => t.replace(/[\u0027\u0022\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2032\u2033`]|\*\*|__|(?<![\w])[*_]|[*_](?![\w])/g, '')
     .replace(/\s+/g, ' ').trim();
   return plain(text).includes(plain(sentence));
+}
+
+/**
+ * ⭐ MC D1 (c) ON THE RUN TURN ITSELF (served witness on CEE b501eda4, draw 6, #87 6008006944): the chip Run's reply is
+ * Olumi's fixed line plus the owed lines, so PLoT #416's reason was said ("'Monthly starter support cost' depends on … ×
+ * …, but this run couldn't calculate it that way") and nothing asked — the fail-closed closing only speaks when ranking
+ * prose is dropped. The ONE ask that would let the identity be worked out (`composeIdentityAskForNode`, from the graph the
+ * Run analysed) is its own owed line, after the reason; null when the Run carries no #416 or the graph shows no ask.
+ */
+export function identityAskLineFor(result: unknown, graph: unknown): string | null {
+  const block = recordOf(result);
+  if (block === undefined) return null;
+  const warning = [recordOf(block.enrichment)?.inference_warnings, block.inference_warnings]
+    .flatMap((w) => (Array.isArray(w) ? w : [])).map(recordOf)
+    .find((w) => w?.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED);
+  const nodeId = Array.isArray(warning?.node_ids) && typeof warning.node_ids[0] === 'string' ? warning.node_ids[0] : undefined;
+  return nodeId === undefined ? null : composeIdentityAskForNode(nodeId, graph)?.assistant_text ?? null;
+}
+
+/** The latest Run this turn's typed identity ask (`identity_ask_say` on its tool result), unless the reply already says it. */
+export function identityAskLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
+  let say: string | undefined;
+  for (const r of toolResults) {
+    const rec = recordOf(r);
+    if (typeof rec?.identity_ask_say === 'string' && rec.identity_ask_say.trim() !== '') say = rec.identity_ask_say;
+    else if (rec?.ran === true) say = undefined;
+  }
+  return say !== undefined && !sameWordsIn(replyText, say) ? say : null;
 }

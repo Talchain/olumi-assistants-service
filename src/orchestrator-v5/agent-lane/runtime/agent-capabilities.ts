@@ -14,7 +14,7 @@
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
-import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
+import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
@@ -8320,6 +8320,11 @@ export function createAgentCapabilities(
         ...(limitChecks !== undefined ? { limit_checks: { limits: limitChecks, note: LIMIT_CHECKS_NOTE } } : {}),
         // ⛔ PLoT #416: the goal's chance withheld on every option — the sentence to say and the rule (`../goal-chance-withheld.ts`).
         ...withGoalChance(result),
+        // ⭐ MC D1 (c): #416's ONE ask, from the graph this Run analysed (the read above), said after its reason by the route.
+        ...(() => {
+          const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) : null;
+          return say !== null ? { identity_ask_say: say } : {};
+        })(),
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
         // ⭐ The confirm card (`../identity-card.ts`), read from the same post-run read; a Run that made none offers none.
         ...(result !== undefined ? withIdentityCard(identityCardFor(ctx, postRunRead)) : {}),

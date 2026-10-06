@@ -1063,7 +1063,7 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
   return warnings.map((w) => (w as { code?: unknown } | null)?.code).filter((c): c is string => typeof c === 'string');
 }
 
-export type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string };
+export type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
 
 /** The run's own goal-figure warning, kept separate from decision-brief limit warnings. */
 export function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold | undefined {
@@ -1121,13 +1121,14 @@ function ownGoalFigureCoHold(
   const warning = codes.find((w) => OWN_WORDS_GOAL_FIGURE_CODES.has(w.code) && !keptShares(w));
   if (warning === undefined || typeof warning.message !== 'string') return undefined;
   const said = warning.message.replace(/^\s*Not shown\.\s*/, '').trim().replace(/[.!?]+$/, '');
-  // "because your size …": a sentence-initial word drops its capital; a quoted label ("'Starter-tier MRR' …") is kept.
-  const why = /^[A-Z][a-z]/.test(said) ? `${said[0]!.toLowerCase()}${said.slice(1)}` : said;
+  // "because your size …": only an ordinary sentence-opening word drops its capital (Codex buddy r1 P2); a name ("Olumi",
+  // "MRR") or a quoted label ("'Starter-tier MRR' …") is kept as written.
+  const why = /^(?:Your|The|This|That|These|Those|A|An|It|Its)\b/.test(said) ? `${said[0]!.toLowerCase()}${said.slice(1)}` : said;
   if (why === '') return undefined;
   const nodeId = Array.isArray(warning.node_ids) && typeof warning.node_ids[0] === 'string' ? warning.node_ids[0] : undefined;
   const ask = warning.code === 'GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED' && nodeId !== undefined
     ? composeIdentityAskForNode(nodeId, graph) : null;
-  return ask === null ? { why } : { why, say: `${sentence(`because ${why}`)} ${ask.assistant_text}` };
+  return ask === null ? { why } : { why, say: `${sentence(`because ${why}`)} ${ask.assistant_text}`, ask: ask.assistant_text };
 }
 
 /** Keyed by the admission's `permitted_analysis_mode` reason code, when the claim itself did not withhold. */
@@ -1690,9 +1691,11 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const closingFor = (goalFigureCoHold: GoalFigureCoHold | undefined): string => agentNoLeaderSentence(withheldReason, opts.analysisReady,
         limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
         separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHold);
+      const coHold = noResult ? undefined : goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph);
+      // MC D1 (a), Codex buddy r1 P2: a Run with no result says that known cause, never "the reason is not recorded".
       const closing = noResult
-        ? sentence(REASON_NOT_RECORDED)
-        : closingFor(goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph));
+        ? sentence(withheldReason === WITHHELD_NO_RESULT ? BY_WITHHELD_REASON[WITHHELD_NO_RESULT]! : REASON_NOT_RECORDED)
+        : closingFor(coHold);
       // A second wire pass must not parse a deterministic closing as fresh model prose. Node labels can contain
       // punctuation and ranking words, so splitting that closing into sentences can otherwise drop half and append it twice.
       const trimmed = text.trimEnd();
@@ -1734,8 +1737,14 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         // #2613 buddy r5 P1: when the reply already says the typed goal reason and the closing repeats it, the closing
         // drops ONLY that reason. Any other cause it carried (the admission's) is still said; nothing else is invented.
         const typedReasonSaid = typedSay !== null && sameWordsIn(body, typedSay) && sameWordsIn(closing, typedSay);
-        const closingToAdd = !typedReasonSaid ? closing
-          : admissionClause(opts.analysisReady) === undefined ? '' : closingFor(undefined);
+        // MC D1 (c), Codex buddy r1 P2: the #416 ask is said ONCE. When the reply already says the warning's cause (the
+        // protected goal-chance line) or already carries the ask (the route's owed line), only the missing half is added.
+        const causeSaid = coHold?.ask !== undefined && sameWordsIn(body, coHold.why);
+        const askSaid = coHold?.ask !== undefined && sameWordsIn(body, coHold.ask);
+        const closingToAdd = coHold?.ask !== undefined && (causeSaid || askSaid)
+          ? (causeSaid && askSaid ? '' : causeSaid ? coHold.ask : sentence(`because ${coHold.why}`))
+          : !typedReasonSaid ? closing
+            : admissionClause(opts.analysisReady) === undefined ? '' : closingFor(undefined);
         const alreadySaid = (closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph))
           || closingToAdd === '' || sameWordsIn(body, closingToAdd);
         next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closingToAdd}` } as OlumiResponse;

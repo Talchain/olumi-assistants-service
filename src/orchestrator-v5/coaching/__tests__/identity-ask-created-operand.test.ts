@@ -7,7 +7,7 @@
  * discount") is still asked about today. Bound by node id and Science's exact words.
  */
 import { describe, it, expect } from 'vitest';
-import { composeIdentityNotEvaluatedAsk } from '../identity-not-evaluated-ask.js';
+import { composeIdentityAskForNode, composeIdentityNotEvaluatedAsk } from '../identity-not-evaluated-ask.js';
 
 type Rec = Record<string, any>;
 const FORMULA = '“Starter-tier subscribers” × “Starter monthly price”';
@@ -80,5 +80,38 @@ describe('identity_zero_level: a STORED typed 0 is creation evidence', () => {
     g.edges = g.edges.filter((e: Rec) => e.from !== 'opt');
     g.nodes[1].observed_state = { value: 0, unit: 'subscribers' };
     expect(composeIdentityNotEvaluatedAsk(critique('identity_zero_level'), g)!.assistant_text).toContain('Is 0 right, or what is it?');
+  });
+});
+
+describe('Codex buddy r1', () => {
+  it('P1: "Keep the new pricing" is no creation — "new" counts only as the option\'s own opening word', () => {
+    expect(composeIdentityNotEvaluatedAsk(critique('identity_operand_missing'), t1b('Keep the new pricing', LEVEL))!.assistant_text).toContain('what is it today?');
+    expect(composeIdentityNotEvaluatedAsk(critique('identity_operand_missing'), t1b('New starter tier', LEVEL))!.assistant_text).toContain('is 0 today, since ‘New starter tier’ would start it.');
+  });
+
+  it('P1: creation is judged PER operand — the created one is 0 today, the other is still asked about today', () => {
+    const g = t1b('Launch starter tier', LEVEL);
+    delete g.nodes[2].observed_state;
+    expect(composeIdentityNotEvaluatedAsk(critique('identity_operand_missing'), g)!.assistant_text).toBe(
+      `To work out “Starter-tier MRR” as ${FORMULA}: ‘Starter-tier subscribers’ is 0 today, since ‘Launch starter tier’ would start it. `
+      + 'I also need “Starter monthly price”: what is it today?');
+  });
+
+  it('P1: two creators, one with its level and one without — the missing level is asked in EITHER node order', () => {
+    const g = t1b('Launch starter tier', null);
+    g.nodes.push({ id: 'intro', kind: 'option', label: 'Introduce a Starter tier', interventions: { starter_subscribers: LEVEL } });
+    g.edges.push({ from: 'intro', to: 'starter_subscribers' });
+    const reversed = { ...g, nodes: [...g.nodes].reverse() };
+    for (const graph of [g, reversed]) {
+      expect(composeIdentityNotEvaluatedAsk(critique('identity_operand_missing'), graph)!.assistant_text)
+        .toContain('How many ‘Starter-tier subscribers’ would ‘Launch starter tier’ lead to? A best guess and a range is fine.');
+    }
+  });
+
+  it('P2: #416 on an identity whose NODE has no unit asks for that unit', () => {
+    const g = t1b('Raise prices 10%', null);
+    g.nodes[0].observed_state = { value: 0 };
+    g.nodes[1].observed_state = { value: 150, unit: 'subscribers' };
+    expect(composeIdentityAskForNode('starter_mrr', g)).toMatchObject({ reason: 'identity_frame_missing', chip_label: 'Give its unit' });
   });
 });
