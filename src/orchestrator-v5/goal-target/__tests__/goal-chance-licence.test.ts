@@ -27,11 +27,11 @@ describe('D3 step 2 — goalChanceLicenceOf', () => {
   });
 
   it.each([
-    ['about the same (4 points apart)', [0.45, 0.41], 'about_the_same'],
+    ['similar (4 points apart)', [0.45, 0.41], 'similar'],
     ['highest, every option at or under 40%', [0.30, 0.15], 'highest_all_likely_to_miss'],
     ['all likely to miss, no superlative', [0.35, 0.31], 'all_likely_to_miss'],
     ['BOUNDARY: 52 vs 42 displayed is 10 points → highest', [0.515, 0.42], 'highest'],
-    ['BOUNDARY: 51 vs 42 displayed is 9 points → about the same (the raw gap 0.094 is never read)', [0.514, 0.42], 'about_the_same'],
+    ['BOUNDARY: 51 vs 42 displayed is 9 points → similar (the raw gap 0.094 is never read)', [0.514, 0.42], 'similar'],
   ] as const)('%s', (_n, [a, b], form) => {
     const l = goalChanceLicenceOf(env(['a', a], ['b', b]), G, GOAL)!;
     expect(l.form).toBe(form);
@@ -40,11 +40,11 @@ describe('D3 step 2 — goalChanceLicenceOf', () => {
 
   it('H2 (DL 0df0e1 6 Oct; Rehearsal12 48 / 43 / <1): the options within 10 points of the top, in MODEL order — never ranked', () => {
     const l = goalChanceLicenceOf(env(['keep', 0.004], ['raise', 0.43], ['starter', 0.48]), G, GOAL)!;
-    expect(l).toMatchObject({ form: 'about_the_same', option_ids: ['keep', 'raise', 'starter'], same_option_ids: ['raise', 'starter'],
+    expect(l).toMatchObject({ form: 'similar', option_ids: ['keep', 'raise', 'starter'], similar_option_ids: ['raise', 'starter'],
       pct_by_option: { keep: 0, raise: 43, starter: 48 } });
     expect(l).not.toHaveProperty('leader_option_id');
-    // CONTROL: 10 points apart is the superlative, never "about the same".
-    expect(goalChanceLicenceOf(env(['a', 0.52], ['b', 0.42]), G, GOAL)).not.toHaveProperty('same_option_ids');
+    // CONTROL: 10 points apart is the superlative, never "similar".
+    expect(goalChanceLicenceOf(env(['a', 0.52], ['b', 0.42]), G, GOAL)).not.toHaveProperty('similar_option_ids');
   });
 
   it('PER OPTION (d5 #87 6007421281): 3 options, 1 withheld for its own path → `each`, 2 lines + 1 withheld; no superlative', () => {

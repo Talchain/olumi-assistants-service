@@ -18,8 +18,8 @@
  *                                   informative-draw count arrives, step 2b) and is at least 1%;
  *      `highest_all_likely_to_miss` that, and every option is at or under 40%;
  *      `all_likely_to_miss`         every option at or under 40%, no superlative;
- *      `about_the_same`             H2 (DL 0df0e1 6 Oct, from d5's interim rule: below 10 points, "about the same chance"):
- *                                   every option quoted, no superlative — `same_option_ids` names every option within 10
+ *      `similar`                    H2 (DL 0df0e1 6 Oct, d5 interim rule: below 10 points; c6 words "similar chances"):
+ *                                   every option quoted, no superlative — `similar_option_ids` names every option within 10
  *                                   displayed points of the top, in the model's order (never ranked);
  *      `each`                       an option withheld for its own path: each option's line, in the model's order.
  *    ORDER COUNTS AS A SUPERLATIVE (d5 6005640764): only the two `highest` forms license an order by goal chance.
@@ -37,7 +37,7 @@ export const SUPERLATIVE_GAP_POINTS = 10;
 /** c6's "more likely to miss your goal than meet it" family: every displayed chance at or under this. */
 export const MORE_LIKELY_TO_MISS_PCT = 40;
 
-export type GoalChanceForm = 'highest' | 'highest_all_likely_to_miss' | 'all_likely_to_miss' | 'about_the_same' | 'each';
+export type GoalChanceForm = 'highest' | 'highest_all_likely_to_miss' | 'all_likely_to_miss' | 'similar' | 'each';
 export type GoalChanceComparator = 'at_least' | 'above' | 'at_most' | 'below';
 
 export interface GoalChanceLicence {
@@ -51,8 +51,8 @@ export interface GoalChanceLicence {
   readonly pct_by_option: Readonly<Record<string, number>>;
   /** The options whose chance was withheld for their own path (model order); present only when non-empty. Form is `each`. */
   readonly withheld_option_ids?: readonly string[];
-  /** `about_the_same` only: the options within 10 displayed points of the top, in the model's order (≥ 2). */
-  readonly same_option_ids?: readonly string[];
+  /** `similar` only: the options within 10 displayed points of the top, in the model's order (≥ 2). */
+  readonly similar_option_ids?: readonly string[];
   readonly leader_option_id?: string;
   readonly next_option_id?: string;
   /** The target as the user stated it: the UI says it in these words, never re-derives the comparator. */
@@ -109,12 +109,12 @@ export function goalChanceLicenceOf(
   const [leader, next] = ranked as [string, string];
   const superlative = complete && pct[leader]! >= 1 && pct[leader]! - pct[next]! >= SUPERLATIVE_GAP_POINTS;
   const allLikelyToMiss = complete && licensed.every((id) => pct[id]! <= MORE_LIKELY_TO_MISS_PCT);
-  // H2: every option quoted and no superlative → the options within 10 points of the top have about the same chance.
+  // H2: every option quoted and no superlative → the options within 10 points of the top have similar chances.
   const same = complete && !superlative && !allLikelyToMiss
     ? licensed.filter((id) => pct[leader]! - pct[id]! < SUPERLATIVE_GAP_POINTS) : [];
   const form: GoalChanceForm = superlative
     ? (allLikelyToMiss ? 'highest_all_likely_to_miss' : 'highest')
-    : allLikelyToMiss ? 'all_likely_to_miss' : same.length >= 2 ? 'about_the_same' : 'each';
+    : allLikelyToMiss ? 'all_likely_to_miss' : same.length >= 2 ? 'similar' : 'each';
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
@@ -123,7 +123,7 @@ export function goalChanceLicenceOf(
     option_ids,
     pct_by_option: pct,
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
-    ...(form === 'about_the_same' ? { same_option_ids: same } : {}),
+    ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(superlative ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit },
   };
