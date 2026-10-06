@@ -112,10 +112,11 @@ export interface GoalChanceDriver {
   /** `link_strength` only (ruling 3, no number): the chance falls when the link is weaker / stronger than its assumed size. */
   readonly strength?: 'weaker' | 'stronger';
   /**
-   * `factor_value` only: the cut on the falling side (`low_upper_value` for `low`, `high_lower_value` for `high`), in the
-   * user's units: PLoT's denormalised `*_display` when it carries one (a capped factor), else the row's own value.
+   * `factor_value` only: the cut on the falling side in the USER's units, exactly as PLoT sent it (`low_upper_display` for
+   * `low`, `high_lower_display` for `high`), with its `display_unit`. Never ISL's model-scale `*_value` (DL addendum 3).
    */
   readonly cut_value?: number;
+  readonly cut_unit?: string;
   /** `factor_value` and `link_existence`: the DISPLAYED chance on the falling side, at that group's own step (ruling 5). */
   readonly pct_if_side?: number;
   readonly pct_if_side_rounding?: GoalChanceDisplayRounding;
@@ -216,12 +217,14 @@ export function goalChanceDriverOf(record: Rec, optionId: string, graph: unknown
     if (!unitInterval(pl) || !unitInterval(ph) || !positiveCount(nl) || !positiveCount(nh)) return none('none');
     const side = fallingSide(pl, ph, 'low' as const, 'high' as const);
     if (side === null) return none('none');
-    const key = side === 'low' ? 'low_upper_value' : 'high_lower_value';
-    const display = top[`${key}_display`];
-    const cut = finite(display) ? display : finite(top[key]) ? top[key] as number : undefined;
-    if (cut === undefined) return none('no_cut_value');
+    // ⛔ DL addendum (3), DGAI P3: the cut is quoted ONLY in the user's units, as PLoT sent it (`low_upper_display` /
+    // `high_lower_display` + `display_unit`). ISL's raw `*_value` is on the model's scale: NEVER a fallback. An uncapped
+    // factor, or a cut outside the factor's range, has no display cut → no claim.
+    const cut = top[side === 'low' ? 'low_upper_display' : 'high_lower_display'];
+    const unit = top.display_unit;
+    if (!finite(cut) || typeof unit !== 'string' || unit.trim() === '') return none('no_cut_value');
     return { driver: {
-      quantity_id, kind: 'factor_value', factor_id: factorId, side, cut_value: cut,
+      quantity_id, kind: 'factor_value', factor_id: factorId, side, cut_value: cut, cut_unit: unit,
       ...groupPct(side === 'low' ? pl : ph, side === 'low' ? nl : nh),
       authored_by: factorAuthor(graph, envelope, factorId, top),
     } };

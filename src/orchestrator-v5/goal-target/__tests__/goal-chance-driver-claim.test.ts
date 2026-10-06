@@ -40,7 +40,7 @@ const precision = (p: number, lo: number, hi: number, n = 1000): Json => ({
 const factorRow = (over: Json = {}): Json => ({
   quantity_id: 'active_customers', kind: 'factor_value', p_goal_if_low: 0.30, p_goal_if_high: 0.55, n_low: 333, n_high: 333,
   spread: 0.25, status: 'resolved', spread_noise_floor: 0.08, correlated: false,
-  low_upper_value: 0.35, low_upper_value_display: 7000, high_lower_value: 0.45, high_lower_value_display: 9000, ...over,
+  low_upper_value: 0.35, high_lower_value: 0.45, low_upper_display: 7000, high_lower_display: 9000, display_unit: 'customers', ...over,
 });
 const strengthRow = (from: string, to: string, over: Json = {}): Json => ({
   quantity_id: `${from}->${to}`, from, to, kind: 'link_strength', p_goal_if_low: 0.30, p_goal_if_high: 0.50, n_low: 300, n_high: 300,
@@ -59,10 +59,10 @@ const env = (...rows: Json[]): Json => ({ option_comparison: rows, inference_war
 const licence = (e: Json, graph: Json = G): Json => goalChanceLicenceOf(e, graph, GOAL) as unknown as Json;
 
 describe('P2b ruling 1–2 — the main driver is the TOP row only, quoted on the side where the chance falls', () => {
-  it('RED: a resolved top factor row → its driver, the LOW side (0.30 < 0.55), the low cut in the user\'s units (*_display)', () => {
+  it('RED: a resolved top factor row → its driver, the LOW side (0.30 < 0.55), the low cut in the user\'s units (low_upper_display)', () => {
     const l = licence(env(opt('a', 0.62, { probability_of_goal_drivers: driversBlock([factorRow()]) }), opt('b', 0.41)));
     expect(l.driver_by_option.a).toMatchObject({ quantity_id: 'active_customers', kind: 'factor_value', factor_id: 'active_customers',
-      side: 'low', cut_value: 7000 });
+      side: 'low', cut_value: 7000, cut_unit: 'customers' });
     // The falling side's own chance at that group's own step (n = 333 → Wilson half-width > 2.5 → nearest 5).
     expect(wilsonHalfWidthPoints(0.30, 333)).toBeGreaterThan(2.5);
     expect(l.driver_by_option.a).toMatchObject({ pct_if_side: 30, pct_if_side_rounding: 'nearest_5' });
@@ -70,10 +70,22 @@ describe('P2b ruling 1–2 — the main driver is the TOP row only, quoted on th
     expect(l.no_driver_by_option).toEqual({ b: 'none' });
   });
 
-  it('the HIGH side when the chance falls there (0.60 → 0.20), with the high cut; no *_display → the row\'s own value', () => {
-    const row = factorRow({ p_goal_if_low: 0.60, p_goal_if_high: 0.20, high_lower_value_display: undefined, high_lower_value: 0.45 });
+  it('CONTROL (addendum 3): the HIGH side when the chance falls there (0.60 → 0.20) → the high DISPLAY cut and its unit', () => {
+    const row = factorRow({ p_goal_if_low: 0.60, p_goal_if_high: 0.20 });
     const l = licence(env(opt('a', 0.62, { probability_of_goal_drivers: driversBlock([row]) }), opt('b', 0.41)));
-    expect(l.driver_by_option.a).toMatchObject({ side: 'high', cut_value: 0.45 });
+    expect(l.driver_by_option.a).toMatchObject({ side: 'high', cut_value: 9000, cut_unit: 'customers' });
+  });
+
+  it('RED (addendum 3): RAW model-scale cuts only (no *_display / display_unit: uncapped, or outside the range) → no_cut_value, never the raw value', () => {
+    for (const over of [
+      { low_upper_display: undefined, high_lower_display: undefined, display_unit: undefined },
+      { low_upper_display: undefined },
+      { display_unit: undefined },
+    ]) {
+      const l = licence(env(opt('a', 0.62, { probability_of_goal_drivers: driversBlock([factorRow(over)]) }), opt('b', 0.41)));
+      expect(l.no_driver_by_option).toMatchObject({ a: 'no_cut_value' });
+      expect(l).not.toHaveProperty('driver_by_option');
+    }
   });
 
   it('RED: a below_resolution top row → no_driver below_resolution, never the resolved row under it', () => {
@@ -97,7 +109,7 @@ describe('P2b ruling 1–2 — the main driver is the TOP row only, quoted on th
   });
 
   it('a resolved factor row with no cut on its falling side → no_cut_value', () => {
-    const row = factorRow({ low_upper_value: undefined, low_upper_value_display: undefined });
+    const row = factorRow({ low_upper_value: undefined, low_upper_display: undefined });
     expect(licence(env(opt('a', 0.62, { probability_of_goal_drivers: driversBlock([row]) }), opt('b', 0.41))).no_driver_by_option)
       .toMatchObject({ a: 'no_cut_value' });
   });
