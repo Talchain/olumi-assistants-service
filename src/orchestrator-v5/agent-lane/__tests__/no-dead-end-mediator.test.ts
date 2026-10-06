@@ -194,6 +194,9 @@ describe('THE WRITER: (C) sized in the parent\'s unit; (B) one end-to-end answer
       effect: { amount: -1200, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: '£/month' }, quote: 'each £1 a month of strain loses £1,200 a month',
       expected: { graph_hash: computeAnalysisAffectingGraphHash(gaugeGraph() as never)!, edge_token: linkEffectEdgeToken(gaugeGraph(), 'strain', 'mrr')! } }));
     expect(r.kind).toBe('refused');
+    // Both doors: the writer's end units give strain NO unit as a source, and the unit door never adopts one for it.
+    expect(linkEffectEndUnits(gaugeGraph(), 'strain', 'mrr')!.source.own).toEqual([]);
+    expect(linkEffectEndUnits(gaugeGraph(), 'price', 'strain')!.target.own, 'CONTROL: as the TARGET of the answer, it is measured').toContain('£/month');
   });
   it("brief3 FALLBACK: the answer REPLACES Olumi's estimate on the lever's link (its natural_effect is the user's)", () => {
     const r = write(sizedParentGraph('£ over 2 years'), 'budget', 'cost',
