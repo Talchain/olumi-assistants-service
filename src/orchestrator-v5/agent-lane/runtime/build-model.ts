@@ -1,4 +1,4 @@
-import { reconciliationPending } from '../goal-scope.js';
+import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
  *
@@ -39,7 +39,7 @@ import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricNamesPartOutsideModelled, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -1855,7 +1855,24 @@ export async function buildModelFromBrief(
   // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
   // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
   // the five-question cap.
-  openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
+  // ⭐ (b) (Science d5 #87 6006584860 / 6006646752; DL 6 Oct): the drafter's untyped scope question reads a plain goal as the
+  // TOTAL. It is never a withhold (`scopeIssueBlocks`), and it is said once, as the disclosure, only where material and not
+  // already stated by the user (`untypedScopeComponents`). Nothing material → nothing asked, assumed or pended. A metric that
+  // names the part the model does NOT measure ("Non-Pro MRR") keeps C46's assumption and question (ask (a), still non-blocking).
+  const scopeLoss = admitted.loss.find((l) => /\.goal_scope$/.test(l.field_path));
+  const scopeGoal = admitted.nodes.find((n) => n.kind === 'goal');
+  const scopeAsked = scopeLoss !== undefined && candidate.goal.scope
+    && metricNamesPartOutsideModelled(candidate.goal.metric, candidate.goal.scope.modelled, candidate.goal.scope.alternative)
+    ? { question: scopeLoss.reason, assumption: typeof scopeLoss.after === 'string' ? scopeLoss.after : undefined }
+    : null;
+  const untypedScopeWords = scopeAsked !== null ? scopeAsked.question
+    : scopeLoss !== undefined && scopeGoal !== undefined
+      ? (() => {
+        const components = untypedScopeComponents({ nodes: admitted.nodes, edges: admitted.edges }, scopeGoal.id);
+        return components.length > 0 ? untypedScopeDisclosure(candidate.goal.metric, components) : null;
+      })()
+      : null;
+  if (untypedScopeWords !== null) openQuestions.unshift(untypedScopeWords);
 
   // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
   // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
@@ -1994,11 +2011,12 @@ export async function buildModelFromBrief(
     mutated: true,
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     ...(replayed ? { replayed: true } : {}),
-    ...(candidate.goal.scope && admitted.loss.some(l => /\.goal_scope$/.test(l.field_path)) && goalNodes.find(n => n.kind === 'goal') ? {
+    // The untyped question's ONE channel for a later answer (the existing reconcile path); it never gates (`scopeIssueBlocks`).
+    ...(candidate.goal.scope && untypedScopeWords !== null && goalNodes.find(n => n.kind === 'goal') ? {
       pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
         goal_id: goalNodes.find(n => n.kind === 'goal')!.id, goal_label: candidate.goal.metric,
         declared_scope: candidate.goal.scope, expected: 'scope',
-        question: admitted.loss.find(l => /\.goal_scope$/.test(l.field_path))!.reason, operands: [], derivations: [] }),
+        question: untypedScopeWords, operands: [], derivations: [] }),
     } : {}),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
@@ -2056,10 +2074,9 @@ export async function buildModelFromBrief(
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as
       // its `full_label`, so the assumption would read back as the user's metric (re-verification of
       // d2362e9d, item e). Its question is asked first in `open_questions`, above.
-      ...admitted.loss
-        .filter((l) => /\.goal_scope$/.test(l.field_path))
-        .map((l) => l.after)
-        .filter((a): a is string => typeof a === 'string'),
+      // (b): a plain total's disclosure is said ONCE, in `open_questions` above, never repeated here. Only the part-named
+      // metric (ask (a)) still says the modelled part as Olumi's assumption.
+      ...(scopeAsked?.assumption !== undefined ? [scopeAsked.assumption] : []),
       // A goal read as a two-part product: an extra direct parent re-pointed or taken out (`product-goal-extra-parent.ts`).
       ...admitted.loss.filter((l) => /\.rate_operand\./.test(l.field_path)).map((l) => l.reason),
       ...admitted.loss.filter((l) => /\.extra_parent\./.test(l.field_path)).map((l) => l.reason),

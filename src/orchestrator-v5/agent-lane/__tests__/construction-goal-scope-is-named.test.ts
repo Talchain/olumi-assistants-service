@@ -16,6 +16,11 @@
  * `full_label` (re-verification of d2362e9d, item e). A brief that states its scope ("total MRR"), or
  * a metric whose own words already name the modelled part ("Pro MRR"), is not asked (N-a). Every candidate passes the REAL strict schema and is served
  * through `buildModelFromBrief` -> `/graph/register` -> `GraphV3.parse`. Bound by node id.
+ *
+ * ⭐ (b) SUPERSEDES THE PLAIN-TOTAL ASK (Science d5 #87 6006584860 / 6006646752; DL 6 Oct): a goal naming no part ("MRR",
+ * "Total MRR") reads as the TOTAL — never Olumi's part-scope, never a withhold — and is said once only where an option adds a
+ * part that counts only under the total (`untypedScopeComponents`; rows in `goal-scope-untyped-total.test.ts`). A metric that
+ * names the part the model does NOT measure ("Non-Pro MRR") keeps the assumption and the question below (ask (a)).
  */
 import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
@@ -23,6 +28,7 @@ import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { BUILD_INSTRUCTIONS, buildCandidateSchema, buildModelFromBrief, retrySchemaPinningGoal, type CallStructuredModel } from '../runtime/build-model.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { scopeIssueBlocks } from '../goal-scope.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
@@ -117,7 +123,7 @@ const SCOPE_QUESTION =
   'measures it for the Pro plan only. Which did you mean?';
 
 describe('an unstated scope is named in the goal and asked, never silently picked', () => {
-  it('RED (B2): bare "MRR" measured on the Pro plan: the user\'s label is kept, and the scope is said as OLUMI\'S assumption', async () => {
+  it('(b) (was RED B2): bare "MRR" with the Pro plan modelled: the user\'s label is kept, it reads as the TOTAL, and no part is assumed', async () => {
     const { graph, out } = await build(pricing('MRR', AMBIGUOUS));
     const plain = await build(pricing('MRR', null));
     const goal = graph.nodes.find((n) => n.id === 'mrr')!;
@@ -129,9 +135,12 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     // (e) Not on the node at all: the description is untouched, exactly as with no scope question.
     expect(goal.description).toBeUndefined();
     expect(before.description).toBeUndefined();
-    // The modelled scope is SAID, first, worded as Olumi's assumption; the plain build says nothing of it.
-    expect(notRepresented(out)[0]).toBe(SCOPE_ASSUMPTION);
-    expect(notRepresented(plain.out).filter((l) => l.includes('assumption'))).toEqual([]);
+    // (b): a plain total is never Olumi's part-scope, and no option here adds a part, so nothing is said or asked —
+    // exactly as with no scope question at all.
+    const scopeSaid = (o: Record<string, unknown>) => [...notRepresented(o), ...allQuestions(o)].filter((l) => /assumption|Pro plan only|as the total across/.test(l));
+    expect(scopeSaid(out)).toEqual([]);
+    expect(scopeSaid(plain.out)).toEqual([]);
+    expect(questions(out)).toEqual(questions(plain.out));
     // The goal's provenance is untouched: the brief's metric stays the brief's.
     expect(goal.provenance).toBe('from_brief');
     expect(goal.provenance).toBe(before.provenance);
@@ -156,14 +165,42 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     // The probe sees `full_label` (it is present here), and it is exactly the user's words.
     expect(goal.label).not.toBe(metric);
     expect(goal.full_label).toBe(metric);
-    expect(questions(out)).toHaveLength(1);
+    // (b): "across every paid plan" names no part the model leaves out, so nothing is asked.
+    expect(questions(out)).toEqual([]);
   });
 
-  it('RED: the question is asked ONCE, first, in the existing open_questions channel, beside the drafter’s own', async () => {
+  it('(b) (was RED ask-once): a plain total adds no question beside the drafter’s own; a part-named metric is asked ONCE, first', async () => {
     const { out } = await build(pricing('MRR', AMBIGUOUS, ['How price-sensitive are current Pro subscribers?']));
-    expect(questions(out)).toEqual([SCOPE_QUESTION, 'How price-sensitive are current Pro subscribers?']);
-    // Merged with staging #1939: the scope question leads, the deadline question second, then the drafter's.
-    expect(allQuestions(out)).toEqual([SCOPE_QUESTION, deadlineQuestion('MRR'), 'How price-sensitive are current Pro subscribers?']);
+    expect(allQuestions(out)).toEqual([deadlineQuestion('MRR'), 'How price-sensitive are current Pro subscribers?']);
+    // Ask (a): "Non-Pro MRR" while the model measures the Pro plan leads, the deadline question second, then the drafter's.
+    const part = await build(pricing('Non-Pro MRR', AMBIGUOUS, ['How price-sensitive are current Pro subscribers?']));
+    const partQuestion = SCOPE_QUESTION.replace('"MRR"', '"Non-Pro MRR"');
+    expect(allQuestions(part.out)).toEqual([partQuestion, deadlineQuestion('Non-Pro MRR'), 'How price-sensitive are current Pro subscribers?']);
+    expect(notRepresented(part.out)[0]).toBe(SCOPE_ASSUMPTION.replace('"MRR"', '"Non-Pro MRR"'));
+  });
+
+  it('(b) MATERIAL: an option that adds a tier only the total counts is disclosed ONCE, in Science\'s words, and never gates', async () => {
+    const wire = pricing('MRR', AMBIGUOUS);
+    (wire.options as unknown[]).push({ label: 'Launch a Starter tier at £19', provenance: 'explicit', is_status_quo: null, changes: [],
+      interventions: [{ factor_label: 'Starter plan price', value: 19, value_kind: 'absolute', unit: 'GBP', provenance: 'explicit' }] });
+    (wire.factors as unknown[]).push(
+      // No Starter tier today: its price starts at £0, so "Keep Pro at £49" holding it is no baseline path (served T1b shape).
+      { label: 'Starter plan price', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'GBP', provenance: 'explicit', plausible_max: 200 },
+      { label: 'Starter subscribers', role: 'observable', baseline_known: false, baseline_value: 0, unit: 'subscribers', provenance: 'ai_proposed', plausible_max: 2000 });
+    (wire.links as unknown[]).push(
+      { from: 'Starter plan price', to: 'Starter subscribers', direction: 'negative', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null },
+      { from: 'Starter subscribers', to: 'MRR', direction: 'positive', provenance: 'inferred', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
+    const { out } = await build(wire);
+    const words = 'I’ve read your goal, ‘MRR’, as the total across every tier, including ‘Starter subscribers’. If you meant only part of it, say which.';
+    expect(allQuestions(out)[0]).toBe(words);
+    // Said ONCE across every channel the reply is written from, and never as Olumi's part-scope.
+    expect([...allQuestions(out), ...notRepresented(out)].filter((l) => l === words)).toHaveLength(1);
+    expect(notRepresented(out).filter((l) => /assumption|Pro plan only/.test(l))).toEqual([]);
+    // The ONE answer channel carries the same words, and it is untyped: it never gates the Run, the licence or a write.
+    const pa = (out.pending_action as { action: { kind: string; expected: string; scope?: unknown; question: string } }).action;
+    expect(pa).toMatchObject({ kind: 'reconcile_goal_scope', expected: 'scope', question: words });
+    expect(pa.scope).toBeUndefined();
+    expect(scopeIssueBlocks(pa)).toBe(false);
   });
 
   it('RED: admission records the choice as a warning on the goal, with both readings', () => {
@@ -186,20 +223,20 @@ describe('an unstated scope is named in the goal and asked, never silently picke
     }
   });
 
-  it('CONTROL (N-a): a metric naming the OTHER reading ("Total MRR") while the model measures the Pro plan is still asked', async () => {
+  it('(b) (was CONTROL N-a): "Total MRR" while the model measures the Pro plan reads as the total — no assumption, no question', async () => {
     const { graph, out } = await build(pricing('Total MRR', AMBIGUOUS));
     expect(goalOf(graph).label).toBe('Total MRR');
-    expect(notRepresented(out)[0]).toContain('Olumi\'s assumption');
-    expect(questions(out)).toHaveLength(1);
-    expect(questions(out)[0]).toContain('covers the Pro plan only or all plans together');
+    expect(notRepresented(out).filter((l) => l.includes('assumption'))).toEqual([]);
+    expect(questions(out)).toEqual([]);
   });
 
-  it('CONTROL (N-a): a metric with only SOME of the modelled scope\'s words, or with the alternative\'s too, is still asked', async () => {
+  it('(b) (was CONTROL N-a): a metric with only SOME of the modelled scope\'s words, or the total\'s, names no part left out — recorded, not asked', async () => {
     const europe: Scope = { modelled: 'the Pro plan in Europe', alternative: 'all plans worldwide', stated_in_brief: false };
     const cases: [string, Scope][] = [['Pro MRR', europe], ['MRR across all plans, Pro included', AMBIGUOUS]];
     for (const [metric, scope] of cases) {
       const { out } = await build(pricing(metric, scope));
-      expect(questions(out), metric).toHaveLength(1);
+      expect(questions(out), metric).toEqual([]);
+      // Admission still records the drafter's reading (the ledger is unchanged); only what is SAID moved.
       expect(scopeLoss(admitCandidateModel(pricing(metric, scope) as unknown as CandidateModel)), metric).toHaveLength(1);
     }
   });

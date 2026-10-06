@@ -1252,6 +1252,22 @@ function metricNamesScope(metric: string, modelled: string, alternative: string)
   return own.length > 0 && own.every((w) => said.has(w)) && !theirs.some((w) => said.has(w));
 }
 
+/**
+ * ⭐ THE ONE UNTYPED SCOPE QUESTION THAT IS STILL ASKED (Science d5 #87 6006584860: keep the ask (a) only where the goal
+ * names a component or share AND an option's effect lands outside it). The metric names the part the model does NOT
+ * measure: a complement word the modelled scope lacks ("Non-Pro MRR" while the model measures the Pro plan), or a part
+ * the modelled scope is the complement of ("Pro MRR" while the model measures "plans other than Pro"). A plain total
+ * ("MRR", "Total MRR") names no part, reads as the TOTAL and is never asked here. PURE.
+ */
+export function metricNamesPartOutsideModelled(metric: string, modelled: string, alternative: string): boolean {
+  const said = scopeWords(metric);
+  const mine = scopeWords(modelled);
+  const other = scopeWords(alternative);
+  if ([...said].some((w) => SCOPE_COMPLEMENT.has(w) && !mine.has(w))) return true;
+  const own = [...mine].filter((w) => !other.has(w) && !SCOPE_COMPLEMENT.has(w));
+  return [...mine].some((w) => SCOPE_COMPLEMENT.has(w) && !said.has(w)) && own.some((w) => said.has(w));
+}
+
 /** `"A"`, `"A" and "B"`, `"A", "B" and "C"` — words, never ids. */
 const quotedList = (items: readonly string[]): string => {
   const q = items.map((s) => `"${s}"`);
