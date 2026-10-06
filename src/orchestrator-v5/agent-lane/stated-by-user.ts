@@ -41,8 +41,7 @@ import { unitPhraseFamily } from './unit-conflict.js';
 import { unitFamilyOf } from '../routing/value-unit-resolution.js';
 import { countedNoun } from './counted-nouns.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
-// A function the module calls only inside functions: `stated-size-binding.ts` imports this module back, which is safe here.
-import { centreRangeAt } from './stated-size-binding.js';
+import { extractStatedLikelyRange } from '../../cee/context-integrity/not-modelled-manifest.js';
 import type { StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
@@ -1417,6 +1416,39 @@ export function linkEffectFigureNotAChange(
     }
   }
   return undefined;
+}
+
+/**
+ * ⭐ THE RANGE THE USER WROTE AROUND THEIR FIGURE (Science d5 #87 6009282279; a8's shape ruling). "Each 1% price rise
+ * loses about 2 customers, between 1 and 4" and "the starter tier would win about 150 new subscribers, between 80 and
+ * 250" write the size as a point INSIDE a range: `{ low, high, text, end: 'centre' }`, the amount kept as the stated point.
+ * Read only from the sentence that bound the link, at the bound amount:
+ *  · the sentence's ONE "between a and b", written AFTER the amount, with no other figure between the two;
+ *  · low < |amount| < high, strictly: an amount that IS an end is A4's (`writtenRangeFor`), never a centre;
+ *  · both ends bare, or in pounds when the amount is money (read in the amount's own scale), and no other kind of unit
+ *    written after the range ("between 1 and 4 months" is a time);
+ * Nothing else writes a spread: no range written, none carried (never a default ±k around the point).
+ */
+export function centreRangeAt(sentence: string, amountSpan: { readonly end: number }, amount: number, amountUnit: string): StatedRangeEnd | undefined {
+  if ((sentence.match(/\bbetween\b/giu) ?? []).length !== 1) return undefined;
+  const tail = sentence.slice(amountSpan.end);
+  const range = extractStatedLikelyRange(tail);
+  if (range === undefined) return undefined;
+  const at = tail.indexOf(range.text);
+  if (at < 0 || /\d/u.test(tail.slice(0, at))) return undefined;
+  // A range in ANOTHER kind of unit is not the size's ("between 1 and 4 months after launch": a time, never a count of
+  // customers; Codex buddy r1 F3): the word after its high end must not name a different family.
+  // Up to three words after it, to the next punctuation ("between 1 and 4 calendar months"; Codex buddy r2 F3).
+  const afterWords = tail.slice(at + range.text.length).match(/^[^.,;:!?\n]*/u)?.[0].match(/[A-Za-z%]+/gu)?.slice(0, 3) ?? [];
+  if (afterWords.some((w) => { const f = unitPhraseFamily(w); return f !== null && f !== unitPhraseFamily(amountUnit); })) return undefined;
+  const pounds = range.text.includes('£');
+  if (pounds && unitPhraseFamily(amountUnit) !== 'currency') return undefined;
+  const scale = pounds ? moneyUnitScale(amountUnit) : 1;
+  const low = range.low / scale;
+  const high = range.high / scale;
+  const point = Math.abs(amount);
+  if (!(low < point && point < high)) return undefined;
+  return { low, high, text: range.text, end: 'centre' };
 }
 
 type LinkEffectFigures = { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
