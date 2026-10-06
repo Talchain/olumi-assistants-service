@@ -216,7 +216,8 @@ describe('rule 3: a cost quantity never enters a revenue goal as accounting; a c
   it('CONTROL (d5 mutant): an outside SPEND that moves revenue ("Competitor ad spend", drawn negative, unsized) is causal: kept', async () => {
     const c = structuredClone(FX['draft-2']);
     c.factors.push({ label: 'Competitor ad spend', role: 'external', baseline_known: false, baseline_value: 0, unit: 'GBP per month', provenance: 'inferred', plausible_max: 100000 });
-    c.links.push(L('Competitor ad spend', GOAL, 'negative'));
+    // Reached from an option (competitors answer the starter tier), so rule 3 reads its link: only the spend words keep it.
+    c.links.push(L('Starter tier subscribers', 'Competitor ad spend', 'positive'), L('Competitor ad spend', GOAL, 'negative'));
     // The brief names it (so rule 1 keeps it): only rule 3 could bar it.
     const { r, g } = await build(c, { brief: `${BRIEF} Competitors spend heavily on ads.` });
     expect(g.edges.some((e: Rec) => e.from === 'competitor_ad_spend' && e.to === 'monthly_recurring_revenue')).toBe(true);
