@@ -30,7 +30,7 @@ import { userSizedLevelLessLinks } from './mediator-reading.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from './say-figure.js';
 import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
-import { sameUnit } from './same-unit.js';
+import { readUnitParts, sameUnit } from './same-unit.js';
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.js';
 
@@ -677,6 +677,15 @@ export function noDeadEndAsks(
     const childUnit = unitOfNode(l.to) ?? (partOf?.via === 'definitional_part' ? partOf.unit : undefined);
     if (childUnit === undefined) continue;
     first ??= { kind: 'link', from: l.from, to: l.to };
+    // X2 (served re-draw 2, N1): a percent borrowed from Olumi's incoming estimate is not this unitless
+    // source's own measure. Use the link's existing qualitative writer instead of inventing a per-1% ask.
+    if (r.via === 'sized_parents' && unitOfNode(l.from) === undefined && readUnitParts(r.unit)?.kind === 'percent') {
+      sentences.push(fitted(() => `This comparison turns on how strongly ${q(l.from)} affects ${q(l.to)}, which nobody has set yet.`
+        + ` On the canvas, click the link from ${q(l.from)} to ${q(l.to)}; under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong.`
+        + ' That records your judgement of the link\u2019s strength.'));
+      covered.add(key(l.from, l.to));
+      continue;
+    }
     const why = r.via === 'product' ? `as ${q(r.operands[0])} \u00d7 ${q(r.operands[1])}` : `from its own estimate of the link from ${q(r.parents[0]!)}`;
     sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
       + ` Olumi measures ${q(l.from)} in ${r.unit}, ${why}; correct that if it\u2019s wrong.`
