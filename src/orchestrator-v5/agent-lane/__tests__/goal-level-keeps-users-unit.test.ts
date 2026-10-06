@@ -46,6 +46,9 @@ import type { HandlerInvocation } from '../../tools/registry.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { linkEffectEndUnits } from '../../system-events/link-effect-edit.js';
+import { prepareLinkEffectUnitReadings } from '../../system-events/link-effect-unit-reading.js';
+import { nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
 
 type Node = { id: string; kind: string; label: string; observed_state?: Record<string, unknown>; unit_reading?: unknown } & Record<string, unknown>;
 type Graph = { nodes: Node[]; edges: unknown[] } & Record<string, unknown>;
@@ -135,9 +138,21 @@ describe('the level card keeps the user\'s "of what" as the goal\'s reading, thr
     expect(computeAnalysisAffectingGraphHash(stored as never)).toBe(computeAnalysisAffectingGraphHash(control.stored as never));
   });
 
+  it('the base after the figure, sentence-final ("No-shows are about 8% of appointments.") → the same reading', async () => {
+    const said = 'No-shows are about 8% of appointments.';
+    const { op } = await proposeAndApprove(said);
+    expect((op.value as { unit_reading?: unknown }).unit_reading).toStrictEqual({ ...READING, source_quote: said });
+  });
+
   it.each([
     ['no "of" in the user\'s words', 'About 8% are no-shows today.'],
     ['two bases for the same figure', 'About 8% of appointments and 8% of patients are no-shows.'],
+    // Codex r1 (#2642): another figure's base is never borrowed, and D is never a predicate, a cut-off phrase or a count.
+    ['the base belongs to another sentence\'s figure', 'No-shows are 8% today. 8% of patients are late.'],
+    ['a predicate, not a base', 'About 8% of appointments become no-shows.'],
+    ['a phrase with no demonstrated end', 'About 8% of appointments booked online this week are no-shows.'],
+    ['a second, numbered base for the same figure', 'About 8% of appointments are no-shows, and 8% of our 200 patients are late.'],
+    ['the sentence never names the goal', 'About 8% of appointments are missed.'],
   ])('twin: %s → no reading carried or written', async (_n, said) => {
     const { op, applied, stored } = await proposeAndApprove(said);
     expect(op.value as Record<string, unknown>).not.toHaveProperty('unit_reading');
@@ -158,6 +173,15 @@ describe('the level card keeps the user\'s "of what" as the goal\'s reading, thr
     expect(applied.detail).toContain('How "no-shows" is read changed after this was prepared');
     expect(h.appends).toHaveLength(0);
     expect(goalOf(await h.reload()).unit_reading).toStrictEqual(goalOf(raced).unit_reading);
+  });
+
+  it('a goal kept in "percentage points" (no level share) never takes a reading (Codex r1 P1: the link writer reads it)', async () => {
+    const pp = clone(SERVED);
+    goalOf(pp).goal_threshold_unit = 'percentage points';
+    const h = await harness(pp, SAID);
+    const r = await h.call('propose_goal_current_level', LEVEL) as Proposed;
+    if (r.ok) expect(h.proposals.get(String(r.proposal_id))!.operations[0]!.value as Record<string, unknown>).not.toHaveProperty('unit_reading');
+    else expect(r).not.toHaveProperty('proposal_id');
   });
 
   it('a different reading the user gave earlier is never replaced: unit_mismatch, nothing prepared', async () => {
@@ -185,6 +209,27 @@ describe('the binder reads D from the reading (levelDenominatorOf, the ONE funct
     expect(linkEffectTheUserStated(A1, effect, ends, scope(control.stored))).toBe('figure_of_another_quantity');
     const ask = linkEffectFigureNotAChange(A1, effect, ends, ownUnitsOf(goalOf(control.stored)))?.question;
     expect(ask).toBe('What is that as a change in “no-shows”? 0.05 percentage points of appointments reads as a figure for appointments.');
+  });
+});
+
+describe('the CLASS (DL condition 3): every other reader of the goal\'s unit reads the same with and without the reading', () => {
+  it('for every link into the goal: linkEffectEndUnits, prepareLinkEffectUnitReadings and nodeUnitOf are byte-identical', async () => {
+    const { stored } = await proposeAndApprove(SAID);
+    const without = clone(stored);
+    delete goalOf(without).unit_reading;
+    const into = (stored.edges as { from: string; to: string }[]).filter((e) => e.to === GOAL);
+    expect(into.length, 'the goal has links into it').toBeGreaterThan(0);
+    const effect = { amount: 0.05, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: '£' };
+    for (const e of into) {
+      expect(JSON.stringify(linkEffectEndUnits(stored, e.from, e.to))).toBe(JSON.stringify(linkEffectEndUnits(without, e.from, e.to)));
+      expect(linkEffectEndUnits(stored, e.from, e.to), `${e.from} → ${e.to} is read`).not.toBeNull();
+      for (const quote of [A1, 'A £1 rise raises no-shows by about 0.05%.']) {
+        expect(JSON.stringify(prepareLinkEffectUnitReadings(stored, e.from, e.to, effect, quote)))
+          .toBe(JSON.stringify(prepareLinkEffectUnitReadings(without, e.from, e.to, effect, quote)));
+      }
+    }
+    expect(nodeUnitOf(stored.nodes)(GOAL)).toBe('%');
+    expect(nodeUnitOf(without.nodes)(GOAL)).toBe('%');
   });
 });
 

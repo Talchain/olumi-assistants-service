@@ -59,7 +59,7 @@ import { admitStatedGoalLevel, admitStatedGoalLevelOnScale } from './admit-model
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { retireNormalisingGoalFrame, rederiveGoalInLinks } from './normalising-goal-frame.js';
 import { frameOf } from './refit-frames.js';
-import { figureTheUserWrote, unitDenominatorWords } from './stated-by-user.js';
+import { figureTheUserWrote, sameWord, wordsOf } from './stated-by-user.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { isAmountStatedInBrief, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
@@ -536,8 +536,11 @@ function noteAdoptedUnit(goalLabel: string, stored: string | undefined, adopted:
 /** The goal's unit as the USER read it: the NodeV3 `unit_reading` carrier, always theirs here. */
 export type UserUnitReading = { readonly unit: string; readonly source: 'user_stated'; readonly source_quote: string };
 
-const NOT_IN_D = /^(?:are|is|was|were|will|would|could|should|have|has|had|do|does|did|while|and|but|or|which|that|who|when|if|as|so|for|than|to|this|these|those|next|last|each|every|per|a|an|in|on|at|by|with|from|today|now|currently|still|already)$/i;
+/** The words that close D: "8% of appointments ARE no-shows". Anything else after D, or none, is no demonstrated end. */
+const CLOSES_D = /^(?:are|is|was|were)$/i;
 const DETERMINER = /^(?:the|our|their|its|your|my|all)$/i;
+/** Never a word of D: a clause, time or verb word means the phrase is not a plain base ("this week", "become", "today"). */
+const NOT_IN_D = /^(?:will|would|could|should|have|has|had|do|does|did|become|becomes|became|get|gets|got|while|and|but|or|which|that|who|when|if|as|so|for|than|to|this|these|those|next|last|each|every|per|a|an|in|on|at|by|with|from|today|now|currently|still|already|week|weeks|month|months|year|years|day|days|quarter|quarters)$/i;
 
 /** The sentence `index` sits in, verbatim with its closing mark (a decimal point never ends one), at most 500 characters. */
 function sentenceAt(text: string, index: number): string {
@@ -549,29 +552,38 @@ function sentenceAt(text: string, index: number): string {
 }
 
 /**
- * ⭐ THE USER'S OWN "OF WHAT" FOR A GOAL KEPT IN A BARE % (DL 0df0e1 ruling (a′) on RT-18; Science #87 6008791322).
- * "About 8% of appointments are no-shows today" on a goal stored in "%" reads the goal in "% of appointments": the user's
- * words, kept as the goal's `unit_reading` — a READING (schema 0.67.0): no value, level, target, unit or cap moves, so
- * the goal's scale (cap 100 for "%") and every number the analysis reads stay byte-identical. Only when the goal's unit is
- * a bare percent, the user wrote THIS figure as "N% of D" with ONE D (one to four words, ending at its clause), and D fits
- * the carrier. Anything else: no reading, never a guess (the binder then asks for the change in the goal itself).
+ * ⭐ THE USER'S OWN "OF WHAT" FOR A GOAL KEPT IN "%" (DL 0df0e1 ruling (a′) on RT-18; Science #87 6008791322).
+ * "About 8% of appointments are no-shows today" on a goal stored in "%" reads the goal as "% of appointments": the user's
+ * words, kept as the goal's `unit_reading`, a READING (schema 0.67.0) where no value, level, target, unit or cap moves.
+ * ONLY when every one of these holds; otherwise no reading, never a guess (the binder then asks for the change itself):
+ *   · the goal's unit is exactly "%" (the unit the cap rule scales on 100; a points or rate unit is not a level share,
+ *     and a reading there would change how the link writer reads that end — Codex r1 P1 on #2642);
+ *   · the user wrote THIS figure as a percentage exactly ONCE in the conversation (two would leave which one unsaid);
+ *   · that sentence names the goal, and the figure is followed by "of D";
+ *   · D ENDS where it is demonstrated: at "are/is/was/were", or at the clause's end. One to four plain words, none a
+ *     goal word, a number, or a clause, time or verb word ("8% of appointments become no-shows", "…booked online this
+ *     week are…", "8% of our 200 patients" all abstain).
  */
-export function statedPercentOfReading(goalUnit: string | undefined, raw: number, userText: string | undefined): UserUnitReading | undefined {
-  if (goalUnit === undefined || unitPhraseFamily(goalUnit) !== 'percent' || unitDenominatorWords(goalUnit).length > 0) return undefined;
+export function statedPercentOfReading(goal: { readonly label: string; readonly unit: string | undefined }, raw: number, userText: string | undefined): UserUnitReading | undefined {
+  if (goal.unit?.trim() !== '%') return undefined;
   const text = userText ?? '';
-  const found = new Map<string, string>();
-  for (const m of text.matchAll(/(?<![\d.,])(\d[\d,]*(?:\.\d+)?)\s*(?:%|percent\b|per\s+cent\b)\s+of\s+([\p{L}][\p{L}'\u2019-]*(?:\s+[\p{L}][\p{L}'\u2019-]*){0,6})/giu)) {
-    if (Number(m[1]!.replace(/,/g, '')) !== raw) continue;
-    const words: string[] = [];
-    for (const w of m[2]!.split(/\s+/)) { if (NOT_IN_D.test(w)) break; words.push(w); }
-    const d = words.filter(w => !DETERMINER.test(w)).map(w => w.toLowerCase());
-    const unit = `% of ${d.join(' ')}`;
-    if (d.length === 0 || d.length > 4 || unit.length > 40) continue;
-    found.set(unit, sentenceAt(text, m.index!));
-  }
-  if (found.size !== 1) return undefined;
-  const [unit, quote] = [...found][0]!;
-  return { unit, source: 'user_stated', source_quote: quote };
+  const occurrences = [...text.matchAll(/(?<![\d.,])(\d[\d,]*(?:\.\d+)?)\s*(?:%|percent\b|per\s+cent\b)/giu)]
+    .filter(m => Number(m[1]!.replace(/,/g, '')) === raw);
+  if (occurrences.length !== 1) return undefined;
+  const occ = occurrences[0]!;
+  const sentence = sentenceAt(text, occ.index!);
+  const goalWords = wordsOf(goal.label);
+  const sentenceWords = wordsOf(sentence);
+  if (goalWords.length === 0 || !goalWords.some(g => sentenceWords.some(w => sameWord(g, w)))) return undefined;
+  const of = /^\s+of\s+([^.,;:!?\n]*)/iu.exec(text.slice(occ.index! + occ[0].length));
+  if (of === null) return undefined;
+  const words = of[1]!.trim().split(/\s+/).filter(w => w !== '');
+  const closeAt = words.findIndex(w => CLOSES_D.test(w));
+  const run = (closeAt === -1 ? words : words.slice(0, closeAt)).filter(w => !DETERMINER.test(w));
+  if (run.length === 0 || run.length > 4) return undefined;
+  if (run.some(w => !/^[\p{L}][\p{L}'\u2019-]*$/u.test(w) || NOT_IN_D.test(w) || wordsOf(w).some(x => goalWords.some(g => sameWord(g, x))))) return undefined;
+  const unit = `% of ${run.join(' ').toLowerCase()}`;
+  return unit.length > 40 ? undefined : { unit, source: 'user_stated', source_quote: sentence };
 }
 
 /** The goal's own reading by the USER, if it holds one (an Olumi reading is not theirs). */
@@ -677,7 +689,7 @@ export async function proposeGoalCurrentLevel(
 
   // ── THE USER'S "OF WHAT", kept as the goal's reading (`statedPercentOfReading`). One they already gave is kept; a
   // different one is never silently replaced.
-  const statedReading = statedPercentOfReading(goalUnit, raw, ctx.user_text);
+  const statedReading = statedPercentOfReading({ label: goal.label, unit: goalUnit }, raw, ctx.user_text);
   const heldReading = usersReadingOf(goal);
   if (statedReading !== undefined && heldReading !== undefined && heldReading.unit !== statedReading.unit) {
     return refuse('unit_mismatch',
@@ -1127,8 +1139,7 @@ export async function applyGoalCurrentLevel(
   const unitReading = carriedReading === undefined ? undefined : NodeV3.shape.unit_reading.safeParse(carriedReading);
   if (carriedReading !== undefined && (unitReading === undefined || !unitReading.success || unitReading.data === undefined
     || unitReading.data.source !== 'user_stated' || stableStringify(unitReading.data) !== stableStringify(carriedReading)
-    || now.goal_threshold_unit === null || unitPhraseFamily(now.goal_threshold_unit) !== 'percent'
-    || unitDenominatorWords(now.goal_threshold_unit).length > 0 || usersReadingOf(goal) !== undefined)) {
+    || now.goal_threshold_unit?.trim() !== '%' || usersReadingOf(goal) !== undefined)) {
     return notApplied(`How "${goal.label}" is read changed after this was prepared, so nothing was written. Read the model again and propose afresh.`);
   }
   const readingToWrite = unitReading?.success === true ? unitReading.data : undefined;
