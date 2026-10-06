@@ -65,7 +65,8 @@ import type { GraphV3T } from '../../orchestrator/types.js';
 import { config } from '../../config/index.js';
 import { OPTION_FRAMING_WARNING_ID } from '../../cee/draft/records/option-framing-recovery.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
-import { loadMostRecentPendingActions } from '../build-turn-context.js';
+import { GraphStaleWriteError, loadMostRecentPendingActions, loadPersistedScenarioStateStrict } from '../build-turn-context.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import {
   appendLapseNotice,
   emitHoldLapseTelemetry,
@@ -587,6 +588,15 @@ export async function dispatchDraftGraph(
 ): Promise<DispatchDraftGraphResult> {
   const { payload, requestId, request } = params;
   const startedAt = Date.now();
+
+  // Bind the write before the provider runs, using the same trusted-base
+  // policy as edit dispatch. A failed read is not evidence of an empty model.
+  const draftBase = config.features.graphCas.requiresExpectedHash
+    ? await loadPersistedScenarioStateStrict(payload.scenario_id)
+    : undefined;
+  const expectedGraphCasHashes = draftBase !== undefined
+    ? computeExpectedGraphCasHashes(draftBase.graph)
+    : undefined;
 
   // C2 — the brief the pipeline drafts from. `payload.message` except on
   // the explicit-generate path, where route-v2 assembled the real brief
@@ -1155,16 +1165,10 @@ export async function dispatchDraftGraph(
         llm_calls_used: 1 + m2LlmCallsUsed,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
-        // A3 graph CAS observe-mode: the draft path is DELIBERATELY
-        // uninstrumented — no expectedGraphIdentityHash / expectedGraph
-        // AnalysisHash are threaded (undefined). This path performs no
-        // server-side persisted-graph read (it never runs buildTurnContext),
-        // and manufacturing an expected base from request input would violate
-        // the trusted-base rule (graph-cas-conflict.ts). The CAS hook
-        // therefore categorises draft writes as `first_write` on fresh
-        // scenarios and `no_expected`/`not_instrumented` on redrafts — that
-        // IS the coverage metric for this path, not a gap to "fix" by
-        // trusting the request.
+        // Only graph writes carry the base; null is known first-draft absence.
+        ...(draftGraphForCommit != null && draftBase !== undefined
+          ? { ...expectedGraphCasHashes, baseGraphForInvariants: draftBase.graph }
+          : {}),
         graph: draftGraphForCommit ?? undefined,
         briefText: briefTextForCommit,
         // HOLD-WIPE fix: thread the (validated) prior pendings so the commit
@@ -1429,6 +1433,9 @@ export async function dispatchDraftGraph(
       ...(diagnosticTrace !== undefined ? { diagnosticTrace } : {}),
     };
   } catch (err) {
+    // Preserve the store's typed CAS refusal for the route's existing 409
+    // refresh/reconfirm contract, rather than turning it into an infra retry.
+    if (err instanceof GraphStaleWriteError) throw err;
     // Route maps commitPerformed=false → HTTP 500 INTERNAL_ERROR (retryable: true).
     // Client sees the generic retry prompt; the response built below is server-side only.
     log.error(

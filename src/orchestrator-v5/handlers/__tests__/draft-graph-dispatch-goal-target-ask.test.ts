@@ -13,7 +13,8 @@ vi.mock('../../commit.js', () => ({
   commitDirectAnswer: vi.fn(),
   computeRequestHash: vi.fn().mockReturnValue('sha256:testhash'),
 }));
-vi.mock('../../build-turn-context.js', () => ({
+vi.mock('../../build-turn-context.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../build-turn-context.js')>(),
   buildTurnContext: vi.fn(),
   loadMostRecentPendingActions: vi.fn().mockResolvedValue([]),
   loadPersistedGraphStrict: vi.fn(),
