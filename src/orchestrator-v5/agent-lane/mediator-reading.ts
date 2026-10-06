@@ -6,7 +6,7 @@
  * goal path runs through a mediator Olumi drafted with no unit and no level ("Annual security audit gross profit",
  * "Online rescheduling failures"). The user cannot size the link out of it: the writer has no unit to read their words in.
  *
- * Two readings, never stored on the node (`data.unit` is outside the analysis hash, DL 5999243055):
+ * Three readings, never stored on the node (`data.unit` is outside the analysis hash, DL 5999243055):
  *   · `sized_parents` (C): every sized parent link is Olumi's estimate with a natural effect, and they agree on ONE unit U
  *     that U-GRAMMAR reads. A sized parent already fixes M's scale, so U is M's unit; M keeps its own frame. Derived from
  *     the parents' hashed `natural_effect.amount_unit`, so a corrected parent unit re-derives it (the answered child link
@@ -17,6 +17,9 @@
  *     gauge edge is the reading's evidence. brief3's fallback (d5 6006685510 (2)): when (C) is refused ONLY because U-GRAMMAR
  *     cannot read U, and M's one sized parent is the lever's own link, the gauge applies and the answer replaces Olumi's
  *     estimate on that link (`replaces`).
+ *   · `definitional_part` (FA1, Science d5 6 Oct): M's one goal-path out-link is a definition (±1 per 1, one unit at both
+ *     ends) into a total that has that unit, so M is measured in it. Only where no other reading applies; never from a
+ *     non-definitional link. It lets (C) ask, and the writer take, a link INTO such a part.
  *
  * Common conditions: M is a factor, risk or outcome on a goal path, not the goal; it has no unit and no level; it has
  * exactly ONE child on the goal path. A unit-bearing label (a currency token, %, a points spelling, or "per <noun>") is
@@ -40,7 +43,9 @@ export type MediatorReading =
     readonly stored?: true;
     /** brief3's fallback: the lever whose Olumi-sized link into M the answer replaces. */
     readonly replaces?: string;
-  };
+  }
+  /** FA1 (Science d5, 6 Oct): M is a definitional part of its one child, so it is measured in that total's unit. */
+  | { readonly via: 'definitional_part'; readonly unit: string; readonly child: string };
 
 /** The provenance marker of a gauge link (Science 6006425419). */
 export const GAUGE_OP = 'gauge' as const;
@@ -177,7 +182,44 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const r = gauge({});
     if (r !== null) out.set(id, r);
   }
+  // ⭐ FA1 (Acceptance e7; Science d5 ruling, 6 Oct): a DEFINITIONAL PART takes its total's unit. M meets the common
+  // conditions, has no other reading, and its ONE goal-path out-link is a definition, ±1 per 1 in one unit at both ends (the
+  // hashed `natural_effect`), into a total that has that unit of its own. Olumi's definitional flag is enough: the card the
+  // user approves says the reading. Never from a non-definitional link, whatever its figure.
+  for (const m of nodes) {
+    const id = m.id;
+    if (typeof id !== 'string' || out.has(id) || id === goal.id || !['factor', 'risk', 'outcome'].includes(String(m.kind)) || !reaches.has(id)) continue;
+    const mv = view.get(id);
+    if (mv === undefined || unitOf(mv) !== undefined || hasLevel(m)) continue;
+    const kids = edges.filter(e => e.from === id && reaches.has(e.to));
+    if (kids.length !== 1 || typeof kids[0]!.to !== 'string') continue;
+    const childId = kids[0]!.to as string;
+    const unit = definitionalPartUnit(kids[0]!, view.get(childId));
+    const parts = unit === undefined ? null : readUnitParts(unit);
+    if (unit === undefined || parts === null) continue;
+    const label = labelUnitParts(m.label);
+    if (label !== null && !labelFitsUnit(label, parts)) continue;
+    const periods = labelPeriods(m.label);
+    if (periods.size > 1 || (periods.size === 1 && parts.period !== null && !periods.has(parts.period))) continue;
+    // A sized parent that states M in another unit is a conflict, never a choice.
+    const parentUnits = edges.filter(e => e.to === id && walkable(e.from) && isRec(e.provenance) && isRec(e.provenance.natural_effect))
+      .map(e => ((e.provenance as Rec).natural_effect as Rec).amount_unit);
+    if (parentUnits.some(u => typeof u !== 'string' || (u !== unit && !sameUnit(unit, u)))) continue;
+    out.set(id, { via: 'definitional_part', unit, child: childId });
+  }
   return out;
+}
+
+/** The unit a definitional ±1-per-1 link states at both ends, when its total carries that unit too; else undefined. */
+function definitionalPartUnit(e: Rec, total: MagnitudeNode | undefined): string | undefined {
+  const p = isRec(e.provenance) ? e.provenance : undefined;
+  const ne = p?.definitional === true && isRec(p.natural_effect) ? p.natural_effect : undefined;
+  if (ne === undefined || typeof ne.amount !== 'number' || Math.abs(ne.amount) !== 1 || ne.per_source_change !== 1) return undefined;
+  const u = ne.amount_unit;
+  const per = ne.per_source_change_unit;
+  if (typeof u !== 'string' || u.trim() === '' || typeof per !== 'string' || (per !== u && !sameUnit(u, per))) return undefined;
+  const totalUnit = total === undefined ? undefined : unitOf(total);
+  return totalUnit !== undefined && (totalUnit === u || sameUnit(totalUnit, u)) ? u : undefined;
 }
 
 /**
