@@ -3919,6 +3919,42 @@ function admitOnce(
     goal.scale_frame = niceFrameAtLeast(top);
     return goal.id;
   })();
+  /**
+   * ⭐ G1b PASS-THROUGH (DL 0df0e1 bench: 5 of 77 drafts): a PART drafted as a definition of its TOTAL (±1 per 1 in one
+   * unit, `definitional: true`: the drafter's word, or (B)'s pass-through above) is sized on the two frames. A part whose
+   * frame is wider than its total's (raw draw a37cb d1: the drafter's £500,000 ‘MRR lost to price-rise churn’ against
+   * MRR's £187,500) gave |β| 2.67: D8 set the definition aside as a placeholder, `definitionalLink` refused it, and the
+   * first Run asked the user to size a definition. A frame is a choice of units, never a claim (S5t), and a part is never
+   * larger than its total: the part is measured on its total's frame, so the definition is typed on its own natural size
+   * and the construction refit (`refitFramesForStatedEffects`) fits every exact size around it.
+   * Only a part that holds nothing a frame normalises (no level of its own, no option level, no limit) and no Olumi-sized
+   * link into it that the narrower frame would push past ±1 (D8 would set THAT aside instead). Frames only narrow, so the
+   * pass over a chain of parts settles.
+   */
+  for (let moved = true, passes = 0; moved && passes <= resolvable.length; passes += 1) {
+    moved = false;
+    for (const l of resolvable) {
+      if (l.definitional !== true || typeof l.effect_amount !== 'number' || typeof l.effect_per_source_change !== 'number'
+        || l.effect_per_source_change === 0 || Math.abs(l.effect_amount / l.effect_per_source_change) !== 1) continue;
+      const part = nodeOf.get(l.from);
+      const total = nodeOf.get(l.to);
+      if (part === undefined || total === undefined || part.observed_state !== undefined || optionLevelsById.has(part.id)
+        || model.constraints.some((c) => nodeIdForMetric(c.metric) === part.id)) continue;
+      const partFrame = resolveMagnitudeFrame(magnitudeNodeFor(part));
+      const totalFrame = resolveMagnitudeFrame(magnitudeNodeFor(total));
+      if (partFrame === undefined || totalFrame === undefined || !(partFrame > totalFrame)) continue;
+      const pushedPastOne = resolvable.some((x) => {
+        if (x === l || x.to !== part.id || userSizeEarned(x) || typeof x.effect_amount !== 'number'
+          || typeof x.effect_per_source_change !== 'number' || x.effect_per_source_change === 0) return false;
+        const from = nodeOf.get(x.from);
+        const sourceFrame = from === undefined ? undefined : resolveMagnitudeFrame(magnitudeNodeFor(from));
+        return sourceFrame !== undefined && Math.abs(x.effect_amount / x.effect_per_source_change) * sourceFrame / totalFrame > 1;
+      });
+      if (pushedPastOne) continue;
+      part.scale_frame = totalFrame;
+      moved = true;
+    }
+  }
   const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map(n => [n.id, magnitudeNodeFor(n)]));
   const sizing = new Map<string, LinkSizing>();
   for (const l of resolvable) {
