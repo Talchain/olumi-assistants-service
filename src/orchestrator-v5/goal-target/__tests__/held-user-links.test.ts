@@ -189,7 +189,7 @@ describe('the model reasons with the existence the Run USES (d5: every reader th
  * either copy REDs that repo's CI until both are re-pinned to the same digest. Check name: "held-link parity fixture digest".
  */
 describe('held-link parity fixture (shared with DGAI)', () => {
-  const FIXTURE_SHA256 = 'f4ee9da4bf7eba64eedbf8f16cdde5b8cccc89cb0f8b2efb02970c8a3c1c1cfc';
+  const FIXTURE_SHA256 = 'dd32c259b407929952f709596158cd5142e53870b339c083b053bb688ac581dd';
   const load = async (): Promise<{ bytes: Buffer; rows: Array<{ name: string; edge: Rec; held: boolean }> }> => {
     const { readFileSync } = await import('node:fs');
     const bytes = readFileSync(new URL('./fixtures/held-link-parity.json', import.meta.url));
@@ -263,5 +263,46 @@ describe('Codex r2 #2643: history recorded before the hold still validates; fres
   it('a hash that matches NO projection is still refused (the pre-hold door is not a wildcard)', async () => {
     const { matchesHistoricalAnalysisIdentity } = await import('../../context/graph-identity.js');
     expect(matchesHistoricalAnalysisIdentity(graphWith(userLink('price', 'subs', ranged(20, 40))) as never, '0'.repeat(64))).toBe(false);
+  });
+});
+
+/**
+ * ⭐ DEFINITIONAL HOLD (Science d5 #87, 6 Oct; DL follow-up to 6008807178(2)): a link typed definitional (a part → its
+ * total, +1 per 1) that the USER stated or quoted holds at 1.0 with no range, at the structural minimum spread 0.01 — never
+ * the ±50% default. A drafter-only definitional flag is Olumi's, so it stays at 0.8 (disclosed). Point causal links stay.
+ */
+describe('definitional hold: the user\'s own definitional link is not doubted', () => {
+  // A definition as drafted: +1 £/month per £/month, its β carried by the edge (the ONE current-carrier predicate).
+  const DEF_NE = { amount: 1, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: '£/month', strength_mean: 1, strength_mean_frame: 'edge_strength' };
+  const definitional = (provenance: Rec): Rec => ({ from: 'part', to: 'total', strength: { mean: 1, std: 0.5 }, exists_probability: 0.8,
+    provenance: { definitional: true, natural_effect: { ...DEF_NE }, ...provenance } });
+  it('QUOTED definitional (brief, with its quote) → held at 1.0 with std 0.01', () => {
+    const e = definitional({ source: 'brief_extraction', magnitude: 'olumi_estimate', source_quote: '<quote>' });
+    expect(heldLinkOf(e)).toEqual({ std: 0.01 });
+    expect(withHeldUserLinks({ nodes: [], edges: [e] }).edges[0]).toMatchObject({ exists_probability: 1, strength: { mean: 1, std: 0.01 } });
+  });
+  it('USER-STATED definitional → held at 1.0 with std 0.01', () => {
+    expect(heldLinkOf(definitional({ source: 'user_specified', magnitude: 'user_stated' }))).toEqual({ std: 0.01 });
+  });
+  it('CONTRAST: a DRAFTER-ONLY definitional flag (Olumi\'s) → not held, stays 0.8', () => {
+    const e = definitional({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    expect(heldLinkOf(e)).toBeNull();
+    expect(withHeldUserLinks({ nodes: [], edges: [e] }).edges[0].exists_probability).toBe(0.8);
+  });
+  it('⛔ Codex r1 P1: a USER BAND EDIT keeps the flag but moves the size → not a definition, not held', () => {
+    const edited = definitional({ source: 'user_specified', magnitude: 'user_stated' });
+    edited.strength = { mean: -0.3, std: 0.075 };
+    expect(heldLinkOf(edited)).toBeNull();
+    delete edited.provenance.natural_effect;
+    expect(heldLinkOf(edited), 'and with its natural effect dropped').toBeNull();
+    expect(withHeldUserLinks({ nodes: [], edges: [edited] }).edges[0]).toMatchObject({ exists_probability: 0.8, strength: { std: 0.075 } });
+  });
+  it('CONTRAST: a definitional flag on a link that is not ±1 per 1 is not a definition → not held', () => {
+    const e = definitional({ source: 'user_specified', magnitude: 'user_stated' });
+    e.provenance.natural_effect.amount = 2;
+    expect(heldLinkOf(e)).toBeNull();
+  });
+  it('CONTRAST: a POINT causal user link (no range, not definitional) → not held, stays 0.8', () => {
+    expect(heldLinkOf(userLink('price', 'subs', undefined))).toBeNull();
   });
 });
