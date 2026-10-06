@@ -25,6 +25,25 @@ function carriesStatedSize(e: Rec, beta: number): boolean {
   return finite(clampedFrom) && near(clampedFrom, beta) && near(Math.abs(mean), 1) && Math.sign(mean) === Math.sign(beta);
 }
 
+/**
+ * ⭐ THE ONE "CURRENT DEFINITIONAL CARRIER" (DL #87, 6 Oct; Codex r1 #2653 P1): a link typed definitional whose stored size
+ * is still that definition: ±1 per 1 in ONE unit at both ends (the hashed `natural_effect`), and the edge still carries that
+ * β, or a verified stored clamp of it (`carriesStatedSize`). A strength or band write that keeps the flag but moves the size
+ * (adjust-edge-strength keeps `definitional`) is no longer a definition. Returns the definition's unit, else undefined.
+ * Read by the definitional part's unit (`mediatorReadings`, FA1) and, with the user-stated class, by the hold.
+ */
+export function currentDefinitionalCarrier(e: unknown): string | undefined {
+  if (!isRec(e) || !isRec(e.provenance) || e.provenance.definitional !== true) return undefined;
+  const ne = e.provenance.natural_effect;
+  if (!isRec(ne) || !finite(ne.amount) || Math.abs(ne.amount) !== 1 || ne.per_source_change !== 1 || !finite(ne.strength_mean)) return undefined;
+  const u = ne.amount_unit;
+  const per = ne.per_source_change_unit;
+  // The SAME unit string at both ends (a drafted definition copies it): exact, so the UI's mirror (`heldUserLink.ts`) reads
+  // it identically with no unit grammar of its own.
+  if (typeof u !== 'string' || u.trim() === '' || per !== u) return undefined;
+  return carriesStatedSize(e, ne.strength_mean) ? u : undefined;
+}
+
 /** The z-width of a 90% range: 2 × 1.645. */
 const RANGE_90_WIDTH_Z = 3.29;
 

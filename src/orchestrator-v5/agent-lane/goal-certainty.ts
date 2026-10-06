@@ -669,7 +669,10 @@ export function noDeadEndAsks(
   for (const l of links) {
     const r = readings.get(l.from);
     if (r?.via !== 'sized_parents' || r.child !== l.to || covered.has(key(l.from, l.to)) || guessed(l)) continue;
-    const childUnit = unitOfNode(l.to);
+    // FA1 (Science d5): a child with no unit of its own that is a definitional part of its total is asked in that unit,
+    // the same reading the writer takes the answer in.
+    const partOf = readings.get(l.to);
+    const childUnit = unitOfNode(l.to) ?? (partOf?.via === 'definitional_part' ? partOf.unit : undefined);
     if (childUnit === undefined) continue;
     first ??= { kind: 'link', from: l.from, to: l.to };
     sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`

@@ -1138,6 +1138,19 @@ export function linkEffectQuoteContextMiss(quote: string, userText: string): 'qu
     ? 'question' as const : NEGATOR.test(sentence) ? 'denied' as const : null);
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
 }
+/**
+ * RT-19 (the no-direct-link guard, no-direct-link.ts): whether ONE clause of the user's message states an EFFECT between two
+ * labels, by the binder's own readers only: its whole sentence is no question or denial (`linkEffectQuoteContextMiss`), it
+ * names both labels (`names`, the caller's label matcher), and it writes at least TWO figures as changes, by the binder's
+ * own change words ("each 10 point RISE", "BY about 1 point", "A £1 RISE"). A level ("coverage is 60%"), a span ("over 12
+ * months", "a 12 month study") or a sum ("£500 to investigate", "a £500 budget") is no change (Codex r1 + r2 on the guard). Negative evidence only: it can stop that
+ * guard, never make a card.
+ */
+export function clauseStatesTwoChanges(message: string, labelA: string, labelB: string,
+  names: (text: string, label: string) => boolean): boolean {
+  return sentencesOf(message.trim()).some((c) => linkEffectQuoteContextMiss(c, message) === null && names(c, labelA) && names(c, labelB)
+    && findLinkEffectAmounts(c).filter((f) => figureWrittenAsAChange(c, f)).length >= 2);
+}
 export function linkEffectTheUserStated(
   quote: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
@@ -1234,6 +1247,21 @@ const COPULA = /^(?:is|was|are|were|equals?|equalled|totals?|remains)$/i;
 const CHANGE_NOUN_OF = /^(?:rise|increase|cut|drop|fall|jump|change|reduction|decrease|gain|growth|loss|hike|swing)s?$/i;
 /** Anywhere in the sentence: SOMETHING changes (presence only; the Agent's args carry the direction, B2). */
 const CHANGE_STATED = /\b(?:ris(?:e|es|ing)|rose|rais(?:e|es|ed|ing)|increas(?:e|es|ed|ing)|decreas(?:e|es|ed|ing)|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|cut(?:s|ting)?|los(?:e|es|ing|t)|loss|gain(?:s|ed|ing)?|wins?|winning|won|add(?:s|ed|ing)?|cost(?:s|ing)?|bring(?:s|ing)?|brought|knocks?|knocked|push(?:es|ed|ing)?|lift(?:s|ed|ing)?|lower(?:s|ed|ing)?|reduc(?:e|es|ed|ing)|boost(?:s|ed|ing)?|grow(?:s|ing|n)?|grew|shrink(?:s|ing)?|halv(?:e|es|ed|ing)|doubl(?:e|es|ed|ing)|clos(?:e|es|ed|ing)|shut(?:s|ting)?|spend(?:s|ing)?|spent|trim(?:s|med|ming)?|sav(?:e|es|ed|ing)|worth|up|down|off|more|less|fewer|extra|additional|every|each|per|by|jumps?|chang(?:e|es|ed|ing)|mov(?:e|es|ed|ing)|means?|shed(?:s|ding)?|put(?:s|ting)?)\b/i;
+
+/** Before a figure, ALONE enough to make it a change for the RT-19 guard: a distributive word or "by" ("each 10", "by about 1").
+ * The binder's own `CHANGE_BEFORE` also takes "a"/"an"/"one"/"extra", where a link is already named; here "a £500 budget for
+ * a 12 month study" would read as two changes (Codex r2 on the guard), so those need a change word AFTER the figure. */
+const CHANGE_BEFORE_ALONE = /^(?:every|each|per|by)$/i;
+/** A figure written AS a change: a change word straight after it (the binder's `CHANGE_AFTER`), or `CHANGE_BEFORE_ALONE`
+ * before it (hedges skipped). */
+function figureWrittenAsAChange(q: string, figure: StatedAmount): boolean {
+  if (CHANGE_AFTER.test(q.slice(figure.index + figure.matchedText.length))) return true;
+  const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);
+  const words = [...(q.slice(0, start).split(/[,;:.!?]/).pop() ?? '').matchAll(/[\p{L}]+/gu)].map(m => m[0]);
+  while (words.length > 0 && HEDGE.test(words[words.length - 1]!)) words.pop();
+  const last = words[words.length - 1];
+  return last !== undefined && CHANGE_BEFORE_ALONE.test(last);
+}
 
 function figureIsALevel(q: string, figure: StatedAmount, endLabel: string): boolean {
   const start = figure.index + (figure.matchedText.length - figure.matchedText.trimStart().length);

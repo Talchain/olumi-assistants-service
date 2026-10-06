@@ -28,7 +28,7 @@ const labelOf = (n: Rec): string => (typeof n.label === 'string' ? n.label.trim(
 const quoted = (label: string): string => `"${label}"`;
 
 /** Links into or out of these carry no causal size: a decision's options and an option's levers. */
-const STRUCTURAL_KINDS: ReadonlySet<unknown> = new Set(['decision', 'option']);
+export const STRUCTURAL_KINDS: ReadonlySet<unknown> = new Set(['decision', 'option']);
 
 export interface LinkSizeAskContext {
   /** The user's message this turn. */
@@ -42,7 +42,7 @@ export interface LinkSizeAskContext {
 const fold = (s: string): string => s.toLowerCase().replace(/[“”"‘’'`]/g, '').replace(/\s+/g, ' ').trim();
 const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, (c) => `\\${c}`);
 /** The label appears in the message as whole words (quotes and case ignored). */
-const names = (message: string, label: string): boolean =>
+export const messageNamesLabel = (message: string, label: string): boolean =>
   label.length >= 3 && new RegExp(`(?:^|[^a-z0-9])${escape(fold(label))}(?:$|[^a-z0-9])`).test(fold(message));
 
 /** The ONE causal link whose two ends the message names, or null (none, or more than one). */
@@ -51,7 +51,7 @@ function namedLink(graph: unknown, message: string): { edge: Rec; source: Rec; t
   const nodes = Array.isArray(g?.nodes) ? g.nodes.map(recordOf).filter((n): n is Rec => n !== undefined) : [];
   const edges = Array.isArray(g?.edges) ? g.edges.map(recordOf).filter((e): e is Rec => e !== undefined) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
-  const named = new Set(nodes.filter((n) => names(message, labelOf(n))).map((n) => n.id));
+  const named = new Set(nodes.filter((n) => messageNamesLabel(message, labelOf(n))).map((n) => n.id));
   const hits = edges.filter((e) => {
     const s = byId.get(e.from); const t = byId.get(e.to);
     return s !== undefined && t !== undefined && named.has(e.from) && named.has(e.to)
