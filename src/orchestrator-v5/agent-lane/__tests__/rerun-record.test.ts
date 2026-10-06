@@ -85,23 +85,35 @@ describe('the typed loop\'s rerun record: Olumi\'s own line, leader-free', () =>
   });
 });
 
-describe('leader-free is CHECKED against the pair\'s own leader and shares (Codex buddy r1 on d70025a9, P1)', () => {
-  const withRow = (row: Record<string, unknown>) => ({ ...SERVED_PAIR, input_changes: [row] });
-  it('RED: a change row whose label IS a leading option\'s id → the neutral line, never the id', () => {
-    const record = rerunRecordForModel(withRow({ entity_kind: 'option_setting', entity_id: 'f', option_id: 'opt_starter', field: 'value',
-      label_before: 'opt_starter', label_after: 'opt_starter', before: { raw: 1 }, after: { raw: 2 }, change: 'changed' }), false, NODES)!;
-    expect(record.code_line).toBe(RERUN_NO_CHANGE_LINES.unknown);
-    expect(record.code_line).not.toContain('opt_starter');
+describe('leader-free is CHECKED against the pair\'s own leader and shares (Codex buddy r1 P1 on d70025a9; r2 P1/P2 on b521a584)', () => {
+  // Each case carries EXACTLY ONE forbidden interpolation, so each collector path is pinned on its own (buddy r2 P2).
+  // The pair below separates the paths: a leader-block-only id, a win-row-only id, and one share (0.795).
+  const PAIR = { ...SERVED_PAIR,
+    leader: { changed: true, prior_leading_option_id: 'opt_leader_only', current_leading_option_id: 'opt_leader_only', noise_verdict: 'signal' },
+    win_probabilities: [{ option_id: 'opt_row_only', prior: 0.2, current: 0.795 }] };
+  const factor = (before: unknown, after: unknown, label = 'Conversion') => ({ entity_kind: 'factor_value', entity_id: 'conv', field: 'value',
+    label_before: label, label_after: label, before, after, change: 'changed' });
+  const link = (fromLabel: string) => [{ id: 'from_node', kind: 'factor', label: fromLabel }, { id: 'to_node', kind: 'factor', label: 'Revenue' }];
+  const linkRow = { entity_kind: 'link', entity_id: 'from_node->to_node', link: { from: 'from_node', to: 'to_node' }, field: 'strength',
+    before: { raw: 'slight' }, after: { raw: 'moderate' }, change: 'changed' };
+  const lineOf = (row: Record<string, unknown>, nodes = NODES) => rerunRecordForModel({ ...PAIR, input_changes: [row] }, false, nodes)!.code_line;
+  it.each<[string, Record<string, unknown>, typeof NODES | undefined]>([
+    ['a leader-block-only id as a factor label', factor({ raw: 1 }, { raw: 2 }, 'opt_leader_only'), undefined],
+    ['a win-row-only id as a factor label', factor({ raw: 1 }, { raw: 2 }, 'opt_row_only'), undefined],
+    ['a leader id as a LINK ENDPOINT label', linkRow, link('opt_leader_only')],
+    ['the share as "79.5 %"', factor({ raw: 3, unit: '%' }, { raw: 79.5, unit: '%' }), undefined],
+    ['the share rounded, "80 %"', factor({ raw: 3, unit: '%' }, { raw: 80, unit: '%' }), undefined],
+    ['the share as "79.5 per cent"', factor({ raw: 3, unit: 'per cent' }, { raw: 79.5, unit: 'per cent' }), undefined],
+    ['the share as "79.5 percent"', factor({ raw: 3, unit: 'percent' }, { raw: 79.5, unit: 'percent' }), undefined],
+    ['the share as a bare fraction "0.795"', factor({ raw: 3 }, { raw: 0.795 }), undefined],
+    ['the share in a UNIT', factor({ raw: 3, unit: 'x (0.795)' }, { raw: 5, unit: 'x (0.795)' }), undefined],
+  ])('RED: %s → the neutral line', (_n, row, nodes) => {
+    expect(lineOf(row, nodes ?? NODES)).toBe(RERUN_NO_CHANGE_LINES.unknown);
   });
-  it('RED: an input written as one of this pair\'s win shares (79 %) → the neutral line, never the share', () => {
-    const record = rerunRecordForModel(withRow({ entity_kind: 'factor_value', entity_id: 'conversion', field: 'value',
-      label_before: 'Conversion', label_after: 'Conversion', before: { raw: 41, unit: '%' }, after: { raw: 79, unit: '%' }, change: 'changed' }), false, NODES)!;
-    expect(record.code_line).toBe(RERUN_NO_CHANGE_LINES.unknown);
-  });
-  it('CONTROL: an input percentage that is NOT one of the pair\'s shares is still named (the check is not blanket)', () => {
-    const record = rerunRecordForModel(withRow({ entity_kind: 'factor_value', entity_id: 'churn', field: 'value',
-      label_before: 'Monthly churn', label_after: 'Monthly churn', before: { raw: 3, unit: '%' }, after: { raw: 5, unit: '%' }, change: 'changed' }), false, NODES)!;
-    expect(record.code_line).toContain('You changed Monthly churn: 3 % → 5 %.');
+  it('CONTROL: the same shapes with NO forbidden content are named (the check is not blanket)', () => {
+    expect(lineOf(factor({ raw: 3, unit: '%' }, { raw: 5, unit: '%' }, 'Monthly churn'))).toContain('You changed Monthly churn: 3 % → 5 %.');
+    expect(lineOf(factor({ raw: 0 }, { raw: 1 }, 'Headcount'))).toContain('You changed Headcount: 0 → 1.');
+    expect(lineOf(linkRow, link('Price'))).toContain('You changed how much Price changes Revenue: slight → moderate.');
   });
 });
 
