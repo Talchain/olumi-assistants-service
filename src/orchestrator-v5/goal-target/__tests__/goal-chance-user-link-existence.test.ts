@@ -69,7 +69,7 @@ describe('the licence says when the chances count Olumi\'s doubt about the USER\
   it('Science d5 6008444863, SERVED G1 draft 1 (CEE 231affb): every counted brief edge carries its quote; an unquoted one never counts', () => {
     const G1 = JSON.parse(readFileSync(new URL('./fixtures/g1-draft1-graph.json', import.meta.url), 'utf8')).graph as Rec;
     const options = G1.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => n.id as string);
-    const counted = userStatedLinksBelowOne(G1, G1.goal_node_id ?? 'monthly_recurring_revenue', options);
+    const counted = userStatedLinksBelowOne(G1, G1.goal_node_id ?? 'monthly_recurring_revenue', options) as Rec[];
     // A brief edge counts by its QUOTE unless the user stated its size (magnitude 'user_stated' is the user's own figure).
     const viaBrief = counted.filter((e) => e.provenance?.source === 'brief_extraction' && e.provenance?.magnitude !== 'user_stated');
     for (const e of viaBrief) expect(e.provenance.source_quote, `${e.from}->${e.to}`).toBe('<quote>');
