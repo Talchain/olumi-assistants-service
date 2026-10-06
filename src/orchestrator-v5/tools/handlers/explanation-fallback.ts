@@ -106,7 +106,7 @@ const CANONICAL_FRAGILE_BAND = 'fragile';
  * would be the hand-maintained-mirror class (CLAUDE.md trap 12).
  */
 export const ATTESTED_NO_FLIP_SENTENCE =
-  'Within the tested range, no single factor on its own reached a tipping point that would change which option leads.';
+  'Within the tested range, no single factor on its own reached a tipping point that would change the most-supported option.';
 
 /**
  * SINGLE near-tie derivation shared by BOTH deterministic post-analysis
@@ -422,11 +422,11 @@ export function composeRobustnessVerdict(
     // finite (clear) margin.
     if (stabilityCat === 'fragile') {
       stability_clause =
-        'The picture appears fragile, so even small adjustments to the strongest drivers could shift which option leads.';
+        'The picture appears fragile, so even small adjustments to the strongest drivers could change the most-supported option.';
       stability_implies_flippability = true;
     } else if (marginCat === 'near_tie') {
       stability_clause =
-        'The result is sensitive to small movements in the strongest drivers, so the leading option could change without much shifting.';
+        'The result is sensitive to small movements in the strongest drivers, so the most-supported option could change without much shifting.';
       stability_implies_flippability = true;
     } else if (
       marginCat === 'clear'
@@ -536,7 +536,7 @@ export function composeExplainResultsFallback(
     // projection because the precondition bypass already guards the
     // no-analysis case. If the assembler produced no leading option even
     // with an analysis fact present, fall through to a generic line.
-    return 'The analysis has finished, but the leading option could not be summarised from the available data. Would you like to explore what would change this result?';
+    return 'The analysis has finished, but the most-supported option could not be summarised from the available data. Would you like to explore what would change this result?';
   }
 
   const leading = projection.leading_option;
@@ -745,11 +745,13 @@ export function composeWhatWouldFlipFallback(
     const concrete = namedEntries.map((e) => e.factor_label);
     if (concrete.length === 1) {
       sentences.push(
-        `${concrete[0]} is the most likely single factor to change which option leads, so it is the clearest one to test.`,
+        // Science d5 (#87 6008424994): the order is the producer's, not a ranking this path measured, so it says only
+        // what the finite-threshold filter guarantees. No "most likely", no "closest".
+        `Of the factors we tested, ${concrete[0]} has a tipping point on its own that would change the most-supported option, so it is a clear one to test.`,
       );
     } else if (concrete.length >= 2) {
       sentences.push(
-        `${concrete[0]} and ${concrete[1]} are the most likely single factors to change which option leads, so they are the clearest ones to test.`,
+        `Of the factors we tested, ${concrete[0]} and ${concrete[1]} each have a tipping point on their own that would change the most-supported option, so they are clear ones to test.`,
       );
     }
 
@@ -770,7 +772,7 @@ export function composeWhatWouldFlipFallback(
     }
   } else if (flipVerdict === 'insufficient_data') {
     sentences.push(
-      'The analysis did not isolate a single-factor tipping point here, so it is not clear that any one change on its own would change which option leads.',
+      'The analysis did not isolate a single-factor tipping point here, so it is not clear that any one change on its own would change the most-supported option.',
     );
   } else if (
     verdict.stability_clause !== null
@@ -813,7 +815,7 @@ export function composeWhatWouldFlipFallback(
  * find, assert it is there, transform — so a copy edit fails LOUD at module
  * load instead of silently producing a sentence nobody reviewed.
  */
-const ATTESTED_NO_FLIP_LEADER_CLAUSE = ' that would change which option leads.';
+const ATTESTED_NO_FLIP_LEADER_CLAUSE = ' that would change the most-supported option.';
 
 /**
  * {@link ATTESTED_NO_FLIP_SENTENCE} with its leader clause removed.

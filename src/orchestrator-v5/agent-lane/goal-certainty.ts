@@ -488,6 +488,12 @@ export function placeholderGoalPaths(
   return out;
 }
 
+/** What a placeholder withhold asks FIRST (D3, 6 Oct): the goal's level, one gauge question, or one link. */
+export type PlaceholderFirstAsk =
+  | { readonly kind: 'goal_level'; readonly node_id: string }
+  | { readonly kind: 'gauge'; readonly from: string; readonly through: string; readonly to: string }
+  | { readonly kind: 'link'; readonly from: string; readonly to: string };
+
 /**
  * The ONE typed warning for (S) (`GOAL_FIGURES_PLACEHOLDER_PATH`): which options, which links, and the words, in the
  * UI's "Not shown." register (≤ 400 characters). The ask names the links to size: the writer is `propose_link_effect`
@@ -499,7 +505,9 @@ export function placeholderGoalWarning(
   paths: readonly PlaceholderGoalPath[],
   code: string,
   productBlocks = false,
-): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }> } {
+  /** RT-18: the (B) gauge ask is gated off in production (cut 5); only its own rows opt in, so cut 6 can lift it tested. */
+  opts: { readonly gaugeAsk?: true } = {},
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; links: Array<{ from: string; to: string }>; acceptable_links?: Array<{ from: string; to: string }>; first_ask?: PlaceholderFirstAsk } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const cardSized = (l: { from: string; to: string }): boolean => {
@@ -525,12 +533,15 @@ export function placeholderGoalWarning(
   // ⭐ NO DEAD END (MC 21's chain; Science #87 6006425419, 6006548763, 6006685510): every withheld path gets an ask the
   // user can answer in one sentence. A level-less mediator is asked END TO END (the gauge) or in the unit its sized parent
   // fixes; a goal with no frame is asked its level first. Pure wording + offer: the links and the withhold are unchanged.
-  const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered);
+  const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered, opts);
   const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
   const said = productBlocks ? unsizedLinkStatement : unsizedLinkSentence;
   const message = noDeadEnd?.message ?? said(ordered.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+  const firstLink = ordered.find((l) => asked.some((a) => a.from === l.from && a.to === l.to));
+  const firstAsk: PlaceholderFirstAsk | undefined = productBlocks ? undefined
+    : noDeadEnd?.first ?? (firstLink !== undefined ? { kind: 'link', from: firstLink.from, to: firstLink.to } : undefined);
   return {
     code, message,
     links: ordered,
@@ -541,6 +552,12 @@ export function placeholderGoalWarning(
     // approval that sizes a placeholder (#2446 `approvalSizes`). Only the ones whose size can make the figure right — the
     // SAME set the sentence asks about (a levelled source, not a guessed mechanism): the offer gate (V4).
     ...(asked.length > 0 && !productBlocks ? { acceptable_links: asked.map((l) => ({ from: l.from, to: l.to })) } : {}),
+    // ⭐ D3 (DL 0df0e1, 6 Oct; Integrator 37): what `message` asks FIRST, typed, so every surface names the SAME next step
+    // (the panel reads it by identity; it never picks a link of its own): the goal's level (A), the gauge's one end-to-end
+    // question (B), a link in its parent's unit (C), else the first link the sentence names that the user CAN size, nearest
+    // the goal: one of `acceptable_links` (AIQ: a guessed or level-less link is named, never asked — the words' "Set them"
+    // is MC's ruled sentence, pinned by mc-p0-round6/round8). Nothing while a product blocks, or when the offer is empty.
+    ...(firstAsk !== undefined ? { first_ask: firstAsk } : {}),
   };
 }
 
@@ -548,13 +565,13 @@ export function placeholderGoalWarning(
  * The ONE source of a withhold's no-dead-end words, for the warning AND the Agent's withheld reply (R8: one grammar for the
  * warning, summary, reply and P5; Codex/R8-6: the reply re-said the generic sentence). The AIQ guessed-link rule applies.
  */
-export function placeholderAskWords(graph: unknown, links: ReadonlyArray<{ from: string; to: string }>): { message: string; gaugeLinks: Set<string> } | undefined {
+export function placeholderAskWords(graph: unknown, links: ReadonlyArray<{ from: string; to: string }>, opts: { readonly gaugeAsk?: true } = {}): { message?: string; gaugeLinks: Set<string>; first?: PlaceholderFirstAsk } | undefined {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const limitIds = new Set((isRec(graph) && Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
     .filter(isRec).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'));
   const guessed = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
-  return noDeadEndAsks(graph, links, (id) => text(byId.get(id)?.label) ?? id, guessed);
+  return noDeadEndAsks(graph, links, (id) => text(byId.get(id)?.label) ?? id, guessed, opts);
 }
 
 /**
@@ -573,7 +590,9 @@ export function noDeadEndAsks(
   labelOf: (id: string) => string,
   /** AIQ 5903604206 / 5903627210: a guessed link out of a node the user's limit watches is said, never asked. */
   guessed: (l: { from: string; to: string }) => boolean = () => false,
-): { message: string; gaugeLinks: Set<string> } | undefined {
+  opts: { readonly gaugeAsk?: true } = {},
+  // `first` is absent on RT-18's gated early return (`{ gaugeLinks }`): the words ask nothing, so nothing is asked first.
+): { message?: string; gaugeLinks: Set<string>; first?: PlaceholderFirstAsk } | undefined {
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || links.length === 0) return undefined;
   const nodes = graph.nodes.filter(isRec);
   const edges = graph.edges.filter(isRec);
@@ -596,11 +615,14 @@ export function noDeadEndAsks(
   const goalView = typeof goal?.id === 'string' ? view.get(goal.id) : undefined;
   if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {
     const unit = unitOf(goalView);
-    const statement = unsizedLinkStatement(links.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })));
+    const statementOf = (): string => unsizedLinkStatement(links.map((l) => ({ ...l, from_label: compact(labelOf(l.from)), to_label: compact(labelOf(l.to)) })));
     // Science d5 #87 6007354826: the bridge says WHY the level comes first (the link question needs the goal's unit).
-    const ask = fitted(() => `To size ${links.length > 1 ? 'them' : 'it'}, I first need today\u2019s level of ${q(String(goal.id))}.`
-      + ` What is it${unit !== undefined ? `, in ${unit}` : ''}?`);
-    return { message: fit([statement, ask]) || ask, gaugeLinks: new Set() };
+    const askOf = (): string => `To size ${links.length > 1 ? 'them' : 'it'}, I first need today\u2019s level of ${q(String(goal.id))}.`
+      + ` What is it${unit !== undefined ? `, in ${unit}` : ''}?`;
+    // ⛔ THE ASK ALWAYS SURVIVES (Codex r1 #2635 P1): `first` names it, so the statement compacts WITH it and is dropped
+    // only when even compacted it leaves no room. Long labels used to keep the statement and drop the question.
+    const both = fitted(() => `${statementOf()} ${askOf()}`);
+    return { message: both.length <= 400 ? both : fitted(askOf), gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id) } };
   }
   const readings = mediatorReadings(graph);
   const unitOfNode = (id: unknown): string | undefined => { const v = view.get(id as string); return v === undefined ? undefined : unitOf(v); };
@@ -608,10 +630,20 @@ export function noDeadEndAsks(
   const covered = new Set<string>();
   const gaugeLinks = new Set<string>();
   const key = (from: unknown, to: unknown): string => `${String(from)}->${String(to)}`;
+  // ⭐ D3 (DL 0df0e1, 6 Oct; Integrator 37): the FIRST thing the words ask, typed, so the panel names the same step.
+  let first: PlaceholderFirstAsk | undefined;
   for (const [m, r] of readings) {
     if (r.via !== 'gauge' || r.stored === true || !links.some((l) => l.from === m || l.to === m)) continue;
     const lever = gaugeLever(edges, m, r, unitOfNode);
     if (lever === undefined || guessed({ from: lever, to: m }) || guessed({ from: m, to: r.child })) continue;
+    // The gauge path's links are never offered one at a time (a lever → M size alone cannot lift the withhold): kept
+    // whether or not the question below is asked (Codex r1 on #2641, P2).
+    for (const k of [key(lever, m), key(m, r.child)]) gaugeLinks.add(k);
+    // ⛔ RT-18 GATE (DL 0df0e1, 6 Oct, cut 5): the (B) end-to-end QUESTION stays OFF until its answer has a working path. On
+    // a served dental draft every answer was refused (the Agent sizes lever → goal, which the model does not hold; the
+    // through-M answer reads "% of appointments" as another quantity). A dead end with a cause beats a false instruction:
+    // the path is said in the unsized-link sentence. Cut 6 lifts this with the end-to-end retarget.
+    if (opts.gaugeAsk !== true) continue;
     const leverUnit = unitOfNode(lever)!;
     // ⛔ NEVER DOUBLE-COUNTED, AND NEVER ANOTHER QUANTITY (Science 6006425419; Codex r1 P2): only the lever's OTHER
     // user-sized links that lie on a goal path are "already given". One stated in the asked unit is quoted; otherwise the
@@ -624,25 +656,27 @@ export function noDeadEndAsks(
     const onTop = (): string => sameQuantity !== undefined
       ? `, on top of the ${sayFigure(sameQuantity.amount as number, sameQuantity.amount_unit as string)} per ${sayFigure(sameQuantity.per_source_change as number, sameQuantity.per_source_change_unit as string)} you already gave`
       : given.length > 0 ? `, on top of its effect through ${q(String(given[0]!.to))} that you already gave` : '';
+    first ??= { kind: 'gauge', from: lever, through: String(m), to: String(r.child) };
     sentences.push(fitted(() => `This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which nobody has set yet.`
       + ` Roughly how much would a ${oneOf(leverUnit)} rise in ${q(lever)} change ${q(r.child)} that way${onTop()}, in ${r.unit}?`
       + ' A best guess and a range is fine.'));
-    for (const k of [key(lever, m), key(m, r.child)]) { covered.add(k); gaugeLinks.add(k); }
+    for (const k of [key(lever, m), key(m, r.child)]) covered.add(k);
   }
   for (const l of links) {
     const r = readings.get(l.from);
     if (r?.via !== 'sized_parents' || r.child !== l.to || covered.has(key(l.from, l.to)) || guessed(l)) continue;
     const childUnit = unitOfNode(l.to);
     if (childUnit === undefined) continue;
+    first ??= { kind: 'link', from: l.from, to: l.to };
     sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
       + ` Olumi measures ${q(l.from)} in ${r.unit}, from its own estimate of the link from ${q(r.parents[0]!)}; correct that if it\u2019s wrong.`
       + ` Roughly how much does each ${oneOf(r.unit)} of ${q(l.from)} change ${q(l.to)}, in ${childUnit}?`));
     covered.add(key(l.from, l.to));
   }
-  if (sentences.length === 0) return undefined;
+  if (sentences.length === 0) return gaugeLinks.size > 0 ? { gaugeLinks } : undefined;
   const rest = links.filter((l) => !covered.has(key(l.from, l.to)));
   if (rest.length > 0) sentences.push(unsizedLinkSentence(rest.map((l) => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) }))));
-  return { message: fit(sentences) || sentences[0]!, gaugeLinks };
+  return { message: fit(sentences) || sentences[0]!, gaugeLinks, first: first! };
 }
 
 /** One of a unit, said singular ("1 week", never "1 weeks"; "£1" as `sayFigure` says it). */
