@@ -29,7 +29,9 @@ import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
-import { GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
+import {
+  GOAL_CHANCE_COMPANION_KEYS, GOAL_CHANCE_DRIVER_RECORD_KEYS, GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures,
+} from '../../orchestrator/context/option-result-source.js';
 
 /**
  * WHOSE RANGE (AIQ ruling #72 5867782904, words ACK 5870069785; Core Stabilisation Plan §7). ISL echoes each
@@ -151,6 +153,7 @@ export function analysisResultForAgent(result: unknown): unknown {
   const enrichment = recordOf(block.enrichment);
   const out: Record<string, unknown> = { ...block };
   if (typeof block.summary === 'string') out.summary = withoutStrongestDriverClause(block.summary);
+  if ('inference_warnings' in block) out.inference_warnings = warningsForAgent(block.inference_warnings);
   if (enrichment !== undefined) {
     const { factor_sensitivity: _structural, ...rest } = enrichment;
     const withheld = runWithheldGoalFigures(enrichment);
@@ -193,6 +196,7 @@ export function analysisResultForAgent(result: unknown): unknown {
       }
       rest.results = results;
     }
+    if ('inference_warnings' in rest) rest.inference_warnings = warningsForAgent(rest.inference_warnings);
     out.enrichment = rest;
     if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
@@ -245,6 +249,21 @@ function optionRowsForAgent(value: unknown, withheld: boolean, outcomeHidden: Re
     return next;
   });
   return { rows, renamed };
+}
+
+/**
+ * ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal-chance licence's main-driver claims never reach the Agent, in either carrier
+ * (`enrichment.inference_warnings`, or a kept Run's `inference_warnings`). The rest of every record is untouched.
+ */
+function warningsForAgent(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((w) => {
+    const r = recordOf(w);
+    if (r === undefined || !GOAL_CHANCE_DRIVER_RECORD_KEYS.some((k) => k in r)) return w;
+    const kept: Record<string, unknown> = { ...r };
+    for (const k of GOAL_CHANCE_DRIVER_RECORD_KEYS) delete kept[k];
+    return kept;
+  });
 }
 
 /** What the Agent is told about the limits-only figure (AIQ 5887531086: its own fact, in the UI's register). */
