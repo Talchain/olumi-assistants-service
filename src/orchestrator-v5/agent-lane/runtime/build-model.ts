@@ -1567,7 +1567,7 @@ export async function buildModelFromBrief(
       });
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
-        const retryHeld = holdAcrossRetry(retryApart.model, { renamed: keptApart, setAside: linksSetAside }, retryApart);
+        const retryHeld = holdAcrossRetry(retryApart.model, { model: firstCandidate, renamed: keptApart, setAside: linksSetAside }, retryApart);
         const retryRaw = keepLimitedQuantityAuthor(
           neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryHeld.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
@@ -1734,7 +1734,7 @@ export async function buildModelFromBrief(
       }) as AdmittedModel['loss'][number])],
     };
   }
-  if (keptApart.length > 0) {
+  if (keptApart.length > 0 || linksSetAside.length > 0) {
     admitted = {
       ...admitted,
       loss: [...admitted.loss, ...keptApart.map((k) => ({

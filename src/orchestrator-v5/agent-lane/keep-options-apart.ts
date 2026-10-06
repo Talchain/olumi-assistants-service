@@ -90,7 +90,10 @@ export function keepOptionsAndQuantitiesApart(candidate: CandidateModel): {
   ]);
   // ⛔ Codex r1 #2655 P1: an outcome a stated limit names is admitted as an observable FACTOR (`limitedOutcomeFrame`), which
   // an option can act on directly, so only the outcomes admission keeps as outcomes are held by the quantity alone.
-  const keptAnOutcome = (label: string): boolean => !candidate.constraints.some((c) => metricNamesLabel(c.metric, label) && limitedOutcomeFrame(c) !== undefined);
+  // Codex r2: by admission's MERGED key, so a spelling the limit does not name ("Monthly  churn") is re-kinded with the one it does.
+  const rekinded = new Set(candidate.outcomes.filter((o) => candidate.constraints.some((c) => metricNamesLabel(c.metric, o.label) && limitedOutcomeFrame(c) !== undefined))
+    .map((o) => canon(o.label)));
+  const keptAnOutcome = (label: string): boolean => !rekinded.has(canon(label));
   const onlyAQuantityHolds = new Set([canon(candidate.goal.metric), ...candidate.outcomes.filter((o) => keptAnOutcome(o.label)).map((o) => canon(o.label))]);
   // What the links drawn FROM the shared name say. `none`: nothing but (at most) a self-link, the served journey-C shape
   // the loop handling owns (it withholds the self-link, says it and asks). `quantity`: every link ends at the goal or an
@@ -196,26 +199,60 @@ export function setAsideLinkQuestion(a: SetAsideLink): string | null {
  * candidate, the set-aside link already gone, so its own pass finds nothing to rename or set aside; and a retry that draws
  * a link between those ends, from the option or from the renamed quantity, is Olumi's guess at the very mechanism asked
  * about. Each rename and set-aside whose names the retry still carries is kept (said, and asked, again), and every retry
- * link between set-aside ends is removed. One whose names the retry no longer carries is left to the retry's own pass.
+ * link between set-aside ends is removed. One whose option or other end the retry no longer carries is left to its own pass.
+ * ⛔ Codex r2 #2655, the same guess by other means:
+ *   · the retry makes the option ACT on the held end (a change or an intervention the first draft did not have, or the link
+ *     would not have been set aside): that action is removed, so admission never draws the link the words say is absent;
+ *   · the retry RENAMES the quantity (only a compaction can: a repair that sheds an action is never adopted,
+ *     `keepsEveryAction`): the hold follows it when the option sets exactly ONE quantity the first draft did not name (said
+ *     and asked under the new name); otherwise no question can be put in the retry's names, and the option's own link to
+ *     that end is still never drawn.
  */
 export function holdAcrossRetry(
   model: CandidateModel,
-  first: { readonly renamed: readonly KeptApart[]; readonly setAside: readonly SetAsideLink[] },
+  first: { readonly model: CandidateModel; readonly renamed: readonly KeptApart[]; readonly setAside: readonly SetAsideLink[] },
   own: { readonly renamed: readonly KeptApart[]; readonly setAside: readonly SetAsideLink[] },
 ): { readonly model: CandidateModel; readonly renamed: readonly KeptApart[]; readonly setAside: readonly SetAsideLink[] } {
-  const names = new Set([canon(model.goal.metric), ...model.options.map((o) => canon(o.label)), ...model.factors.map((f) => canon(f.label)),
-    ...model.risks.map((r) => canon(r.label)), ...model.outcomes.map((o) => canon(o.label))]);
-  const held = first.setAside.filter((a) => names.has(canon(a.option)) && names.has(canon(a.renamed)) && names.has(canon(a.to)));
+  const namesOf = (m: CandidateModel): Set<string> => new Set([canon(m.goal.metric), ...m.options.map((o) => canon(o.label)),
+    ...m.factors.map((f) => canon(f.label)), ...m.risks.map((r) => canon(r.label)), ...m.outcomes.map((o) => canon(o.label))]);
+  const names = namesOf(model);
+  const before = namesOf(first.model);
+  const setBy = (option: string): string[] => model.options.filter((o) => canon(o.label) === canon(option))
+    .flatMap((o) => [...(o.interventions ?? []).map((i) => i.factor_label), ...(o.changes ?? [])]);
+  const held: SetAsideLink[] = [];
+  const optionOnly: SetAsideLink[] = [];
+  for (const a of first.setAside) {
+    if (!names.has(canon(a.option)) || !names.has(canon(a.to))) continue;
+    if (names.has(canon(a.renamed))) { held.push(a); continue; }
+    if (a.self) continue;
+    const fresh = [...new Set(setBy(a.option).filter((f) => !before.has(canon(f)) && names.has(canon(f))).map(canon))];
+    const next = fresh.length === 1 ? [...model.factors, ...model.risks, ...model.outcomes].find((q) => canon(q.label) === fresh[0]) : undefined;
+    if (next === undefined) { optionOnly.push(a); continue; }
+    held.push({ ...a, renamed: next.label });
+  }
   const ends = (a: SetAsideLink): Set<string> => new Set([canon(a.option), canon(a.renamed)]);
   const between = (l: { from: string; to: string }): boolean => held.some((a) => ends(a).has(canon(l.from))
-    && (a.self ? canon(l.to) === canon(l.from) : canon(l.to) === canon(a.to)));
+    && (a.self ? canon(l.to) === canon(l.from) : canon(l.to) === canon(a.to)))
+    || optionOnly.some((a) => canon(l.from) === canon(a.option) && canon(l.to) === canon(a.to));
+  const heldEnd = (option: string, f: string): boolean => held.some((a) => !a.self && canon(a.option) === canon(option) && canon(a.to) === canon(f));
   const setAside = [...held];
   for (const a of own.setAside) if (!setAside.some((b) => canon(b.option) === canon(a.option) && canon(b.to) === canon(a.to))) setAside.push(a);
   const renamed = [...own.renamed];
   for (const k of first.renamed) {
     if (names.has(canon(k.option)) && names.has(canon(k.to)) && !renamed.some((r) => canon(r.to) === canon(k.to))) renamed.push(k);
   }
-  return { model: { ...model, links: model.links.filter((l) => !between(l)) }, renamed, setAside };
+  return {
+    model: {
+      ...model,
+      links: model.links.filter((l) => !between(l)),
+      options: model.options.map((o) => ({
+        ...o,
+        ...(o.interventions !== undefined ? { interventions: o.interventions.filter((i) => !heldEnd(o.label, i.factor_label)) } : {}),
+        ...(o.changes !== undefined ? { changes: o.changes.filter((f) => !heldEnd(o.label, f)) } : {}),
+      })),
+    },
+    renamed, setAside,
+  };
 }
 
 /** The line said for each rename (`not_represented`, suffix `.label_kept_apart`). */

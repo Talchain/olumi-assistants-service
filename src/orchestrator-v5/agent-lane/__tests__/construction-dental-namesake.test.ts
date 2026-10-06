@@ -150,6 +150,7 @@ describe('Codex r1 #2655: what is set aside stays true to the registered model',
       x.options[0].interventions = [{ factor_label: 'Reserved-instance coverage', value: 70, value_kind: 'absolute', unit: '% of cloud spend', provenance: 'ai_proposed' }];
     });
     expect(trace).toMatchObject({ retried: true, outcome: 'adopted' });
+    expect(said).toContain('"Enterprise discount" names both an option and the factor it acts on, so the factor is called "Enterprise discount level" to keep the two apart.');
     expect(said).toContain(LOCK_IN_LINE);
     expect(asked).toContain(LOCK_IN_ASK);
     expect(toLockIn(edges)).toEqual([]);
@@ -190,6 +191,73 @@ describe('Codex r1 #2655: what is set aside stays true to the registered model',
     expect(edges.filter(([from, to]) => to === 'monthly_churn' && from.startsWith('enterprise_discount'))).toEqual([]);
     expect(said).toContain('The link from "Enterprise discount" to "Monthly churn" could be the option\'s own or "Enterprise discount level"\'s, so it is set aside and not in the model yet.');
     expect(asked).toContain('Does "Enterprise discount" change "Monthly churn" directly, or through "Enterprise discount level"? Until you say, that link is not in the model.');
+  });
+
+  // ── Codex r2 #2655 (cap reached; each reproduced through `buildModelFromBrief`) ──
+  it('r2 P1 (retry acts on the held end): the retry\'s new action by the option on "Reserved-instance coverage" is removed; the link stays out and asked', async () => {
+    const c = structuredClone(FX.candidate) as Rec;
+    c.links.push(L('Enterprise discount', 'Reserved-instance coverage'));
+    c.options[0].interventions = []; c.options[0].changes = ['Reserved-instance coverage'];
+    const { said, asked, edges } = await run(c, FX.brief, (x) => {
+      x.options[0].interventions = [{ factor_label: 'Reserved-instance coverage', value: 70, value_kind: 'absolute', unit: '% of cloud spend', provenance: 'ai_proposed' }];
+      const opt = x.options.find((o: Rec) => o.label === 'Enterprise discount');
+      opt.changes = ['Reserved-instance coverage'];
+      opt.interventions.push({ factor_label: 'Reserved-instance coverage', value: 75, value_kind: 'absolute', unit: '% of cloud spend', provenance: 'ai_proposed' });
+      x.links.push(L('Enterprise discount level', 'Reserved-instance coverage'));
+    });
+    expect(edges.filter(([from, to]) => to === 'reserved_instance_coverage' && from.startsWith('enterprise_discount'))).toEqual([]);
+    expect(said).toContain('The link from "Enterprise discount" to "Reserved-instance coverage" could be the option\'s own or "Enterprise discount level"\'s, so it is set aside and not in the model yet.');
+    expect(asked).toContain('Does "Enterprise discount" change "Reserved-instance coverage" directly, or through "Enterprise discount level"? Until you say, that link is not in the model.');
+  });
+
+  it('r2 P1 (retry renames the quantity): a compaction retry calling it "Negotiated discount rate" never draws it into the risk; the hold follows the name', async () => {
+    const c = withLockIn();
+    c.options.find((o: Rec) => o.label === 'Enterprise discount').interventions.push({ factor_label: 'Reserved-instance coverage', value: 75, value_kind: 'absolute', unit: '% of cloud spend', provenance: 'ai_proposed' });
+    // Twelve extra outcomes force the size retry (a compaction).
+    for (let i = 1; i <= 12; i += 1) { c.outcomes.push({ label: `Extra outcome ${i}`, provenance: 'inferred' }); c.links.push(L(`Extra outcome ${i}`, c.goal.metric)); }
+    const { said, asked, edges, trace } = await run(c, FX.brief, (x) => {
+      x.outcomes = x.outcomes.filter((o: Rec) => !String(o.label).startsWith('Extra outcome'));
+      x.links = x.links.filter((l: Rec) => !String(l.from).startsWith('Extra outcome'));
+      const rename = (v: string): string => (v === 'Enterprise discount level' ? 'Negotiated discount rate' : v);
+      x.factors = x.factors.map((f: Rec) => ({ ...f, label: rename(f.label) }));
+      x.options = x.options.map((o: Rec) => ({ ...o, interventions: (o.interventions ?? []).map((i: Rec) => ({ ...i, factor_label: rename(i.factor_label) })) }));
+      x.links = x.links.map((l: Rec) => ({ ...l, from: rename(l.from), to: rename(l.to) }));
+      x.links.push(L('Negotiated discount rate', 'Provider lock-in'));
+    });
+    expect(trace).toMatchObject({ retried: true, outcome: 'adopted' });
+    expect(edges.filter(([, to]) => to === 'provider_lock_in').map(([from]) => from)).toEqual([]);
+    // The hold follows the quantity's new name.
+    expect(said).toContain('The link from "Enterprise discount" to "Provider lock-in" could be the option\'s own or "Negotiated discount rate"\'s, so it is set aside and not in the model yet.');
+    expect(asked).toContain('Does "Enterprise discount" change "Provider lock-in" directly, or through "Negotiated discount rate"? Until you say, that link is not in the model.');
+  });
+
+  it('r2 P1 (rename, no single new name): a compaction retry whose option sets two new quantities never draws its own link to the held end', async () => {
+    const c = withLockIn();
+    for (let i = 1; i <= 12; i += 1) { c.outcomes.push({ label: `Extra outcome ${i}`, provenance: 'inferred' }); c.links.push(L(`Extra outcome ${i}`, c.goal.metric)); }
+    const { edges, trace } = await run(c, FX.brief, (x) => {
+      x.outcomes = x.outcomes.filter((o: Rec) => !String(o.label).startsWith('Extra outcome'));
+      x.links = x.links.filter((l: Rec) => !String(l.from).startsWith('Extra outcome'));
+      const rename = (v: string): string => (v === 'Enterprise discount level' ? 'Negotiated discount rate' : v);
+      x.factors = x.factors.map((f: Rec) => ({ ...f, label: rename(f.label) }));
+      x.factors.push({ ...x.factors.find((f: Rec) => f.label === 'Negotiated discount rate'), label: 'Discount tier' });
+      x.options = x.options.map((o: Rec) => ({ ...o, interventions: (o.interventions ?? []).map((i: Rec) => ({ ...i, factor_label: rename(i.factor_label) })) }));
+      x.options.find((o: Rec) => o.label === 'Enterprise discount').interventions.push({ factor_label: 'Discount tier', value: 2, value_kind: 'absolute', unit: '%', provenance: 'ai_proposed' });
+      x.links = x.links.map((l: Rec) => ({ ...l, from: rename(l.from), to: rename(l.to) }));
+      x.links.push(L('Discount tier', c.goal.metric), L('Enterprise discount', 'Provider lock-in'));
+    });
+    expect(trace).toMatchObject({ retried: true, outcome: 'adopted' });
+    expect(edges).not.toContainEqual(['enterprise_discount', 'provider_lock_in']);
+  });
+
+  it('r2 P1 (a spelling admission merges): "Monthly  churn" beside the limited "Monthly churn" is re-kinded with it — its link is set aside, never re-sourced', async () => {
+    const c = withLockIn();
+    c.outcomes = [{ label: 'Monthly  churn', provenance: 'inferred' }, { label: 'Monthly churn', provenance: 'inferred' }];
+    c.links = c.links.map((l: Rec) => ({ ...l, to: l.to === 'Service reliability change' ? 'Monthly  churn' : l.to }));
+    c.constraints = [{ metric: 'Monthly churn', operator: '<=', value: 10, unit: '%', provenance: 'explicit', frame: 'level' }];
+    c.links.push(L('Enterprise discount', 'Monthly  churn'));
+    const { edges, said } = await run(c, `${FX.brief} Keep monthly churn under 10%.`);
+    expect(edges.filter(([from, to]) => to === 'monthly_churn' && from.startsWith('enterprise_discount'))).toEqual([]);
+    expect(said.some((x) => x.includes('to "Monthly  churn"') && x.includes('set aside and not in the model yet'))).toBe(true);
   });
 
   it('CONTROL: an outcome with no limit stays the quantity\'s alone — its link is re-sourced, nothing set aside', async () => {
