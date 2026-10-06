@@ -253,16 +253,16 @@ export function withLabelCountUnits(graph: unknown, from: string, to: string, ef
   if (ends === null || !isRec(graph) || !Array.isArray(graph.nodes)) return { effect, label_readings: [] };
   const nodes = graph.nodes.filter(isRec);
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
-  const readEnd = (id: string, stated: string, end: LinkEndUnits, figure: number): LinkEffectLabelReading | undefined => {
+  const readEnd = (id: string, stated: string, end: LinkEndUnits, figure: number, otherEndFigure: number): LinkEffectLabelReading | undefined => {
     if (statedInOneOf(stated, [...end.own, end.adopted])) return undefined;
     const label = nodes.find((n) => n.id === id)?.label;
     const magnitude = view.get(id);
     const unit = magnitude === undefined ? undefined : unitOf(magnitude);
-    return typeof unit === 'string' && labelStandsForCountUnit(stated, label, unit) && sentenceCountsLabel(said, figure, label)
+    return typeof unit === 'string' && labelStandsForCountUnit(stated, label, unit) && sentenceCountsLabel(said, figure, label, otherEndFigure)
       ? { node_id: id, said: stated, unit } : undefined;
   };
-  const source = readEnd(from, effect.per_source_change_unit, ends.source, effect.per_source_change);
-  const target = readEnd(to, effect.amount_unit, ends.target, effect.amount);
+  const source = readEnd(from, effect.per_source_change_unit, ends.source, effect.per_source_change, effect.amount);
+  const target = readEnd(to, effect.amount_unit, ends.target, effect.amount, effect.per_source_change);
   return {
     effect: { ...effect, ...(source !== undefined ? { per_source_change_unit: source.unit } : {}),
       ...(target !== undefined ? { amount_unit: target.unit } : {}) },

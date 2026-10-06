@@ -574,6 +574,18 @@ describe('RT-6 row 1b (Science #87 6005615422): only the node\'s own LABEL stand
     expect(cardsFor(w, result)).toEqual([]);
     noWrite(w, rt1b, before);
   });
+  // Codex r2: the label after an UNRELATED figure of the same size, or continued by a possessive, is not this end's counted
+  // phrase: no card.
+  it.each([
+    ['a borrowed figure', 'Every 10 more subscribers adds about 1 percentage point of wholesale subscription revenue, alongside 10 café subscribers.'],
+    ['a possessive continuation', 'Every 10 more café subscribers\u2019 customers adds about 1 percentage point of wholesale subscription revenue.'],
+  ])('CONTRAST (Codex r2, %s): no card', async (_why, quote) => {
+    const w = world(rt1b); const before = w.graph();
+    const result = await propose(w, { ...rt1b, quote, effect: effect(1, 'percentage points', 10, 'café subscribers') });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false });
+    expect(cardsFor(w, result)).toEqual([]);
+    noWrite(w, rt1b, before);
+  });
   // Rule (b) refused: the label's head noun alone is not the label. Refused at the writer's comparator, never carded.
   it('CONTRAST: the head noun alone ("subscribers") gets no card', async () => {
     const quote = 'Every 10 more subscribers adds about 1 percentage point of wholesale subscription revenue.';
