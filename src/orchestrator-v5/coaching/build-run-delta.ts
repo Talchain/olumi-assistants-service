@@ -61,6 +61,8 @@ import {
   identityBoundWinProbabilities,
   runWithheldWinShares,
 } from '../../orchestrator/context/option-result-source.js';
+import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
+import { unsizedPathLeaderWithheld } from '../agent-lane/unsized-path-cause.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
 import { mayPresentComparedRunLeader, mayPresentComparedRunVerdicts } from './compared-run-leader.js';
 
@@ -671,9 +673,16 @@ export function buildRunDelta(input: {
       && (verdict as { may_name_leading_option?: unknown }).may_name_leading_option === false;
   })();
   const priorFiguresWithheld = priorWins.size === 0 && runWithheldWinShares(priorEchoes.enrichment);
+  // A path withhold removes leader permission, but an older marked envelope can still hold its shares.
+  // Their disjoint identities explain an empty comparison without lending either run a leader licence.
+  const priorMarkedSharesRetained = pair.prior.fact_type === 'run_analysis'
+    && readMayNameLeadingOptionFromResult(pair.prior.result) && unsizedPathLeaderWithheld(pair.prior.result)
+    && runWithheldWinShares(priorEchoes.enrichment);
+  const retainedSharesDoNotMatch = priorMarkedSharesRetained && priorWins.size > 0 && currentWins.size > 0
+    && ![...priorWins.keys()].some((id) => currentWins.has(id));
   const winProbabilitiesUnavailable: RunDeltaWinProbabilitiesUnavailableLiteral | undefined = winProbabilities.length > 0 ? undefined
     : currentEntitled && currentWins.size > 0 && ((!priorEntitled && priorVerdictWithheld) || priorFiguresWithheld) ? 'prior_withheld'
-      : priorEntitled && currentEntitled && priorWins.size > 0 && currentWins.size > 0 ? 'no_matched_option'
+      : currentEntitled && ((priorEntitled && priorWins.size > 0 && currentWins.size > 0) || retainedSharesDoNotMatch) ? 'no_matched_option'
         : undefined;
 
   const candidate = {

@@ -1,3 +1,5 @@
+import { wasAnalysisRequestedByUser } from '../compose/unrequested-analysis-confinement.js';
+import { readUnsizedPathLeaderCause, unsizedPathLeaderWithheld, type UnsizedPathLeaderCause } from '../agent-lane/unsized-path-cause.js';
 /**
  * T1 claim safety — THE fact-array read. ROADMAP 1.233 (the hoist).
  *
@@ -228,6 +230,9 @@ export interface MayNameLeadingOptionVerdict {
    * default the way the boolean's `false` does.
    */
   readonly constraint_verdict_state: ConstraintVerdictState | null;
+  /** Caller-stated licence cause on the same selected claim fact. */
+  readonly unsized_path_cause?: UnsizedPathLeaderCause;
+  readonly unsized_path_unrequested?: boolean;
   /**
    * ⭐⭐ THE SEPARATION HALF, OFF THE SAME SELECTED FACT — added for the same
    * reason `constraint_verdict_state` is here, and the docstring above is its
@@ -444,7 +449,7 @@ export function readMayNameLeadingOptionVerdictForFact(
   return {
     // ONE fact, ALL THREE answers, one narrow. Two `fact_type` checks would be
     // two chances to narrow differently on a single fact.
-    may_name_leading_option: readMayNameLeadingOptionFromResult(fact.result),
+    may_name_leading_option: readMayNameLeadingOptionFromResult(fact.result) && !unsizedPathLeaderWithheld(fact.result),
     constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
     // Same fact, same narrow, the producer's own discrimination.
     separation_withhold: separationWithholdFromRobustness(
@@ -453,6 +458,10 @@ export function readMayNameLeadingOptionVerdictForFact(
       ),
     ),
     provenance: 'scenario_fact',
+    ...(() => {
+      const cause = readUnsizedPathLeaderCause(fact.result);
+      return cause === undefined ? {} : { unsized_path_cause: cause, unsized_path_unrequested: !wasAnalysisRequestedByUser(fact) };
+    })(),
   };
 }
 
@@ -714,6 +723,9 @@ function narrowToProjectedAnalysis(
     // fact; F1 only changes which one.
     separation_withhold: displayed.separation_withhold,
     provenance: 'fail_closed_projected_analysis',
+    ...(displayed.unsized_path_cause === undefined ? {} : {
+      unsized_path_cause: displayed.unsized_path_cause, unsized_path_unrequested: displayed.unsized_path_unrequested,
+    }),
   };
 }
 

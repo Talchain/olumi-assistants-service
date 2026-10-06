@@ -133,6 +133,7 @@ export function statedEffectSpansInText(
 export function statedEffectQuoteMatches(
   quote: string,
   detail: StatedEffectDetail,
+  onMatch?: (spans: { amount: { start: number; end: number }; per: { start: number; end: number } }) => void,
 ): boolean {
   if (quote.trim().length === 0) return false;
   if (![detail.amount, detail.per_source_change].every((value) => Number.isFinite(value) && value !== 0)) return false;
@@ -140,5 +141,9 @@ export function statedEffectQuoteMatches(
   const amounts = locatedAmounts(quote);
   const target = oneMatchingAmount(amounts, detail.amount, detail.amount_unit, false, quote, detail.per_source_change_unit);
   const source = oneMatchingAmount(amounts, detail.per_source_change, detail.per_source_change_unit, true);
+  if (target !== undefined && source !== undefined && target.index !== source.index) onMatch?.({
+    amount: { start: target.index, end: target.index + target.matchedText.length },
+    per: { start: source.index, end: source.index + source.matchedText.length },
+  });
   return target !== undefined && source !== undefined && target.index !== source.index;
 }

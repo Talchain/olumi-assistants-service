@@ -12,7 +12,8 @@ import { leaderLicenceFromState, type LeaderLicence } from '../compose/leader-li
 import { leaderWithheldOnlyBecauseUnrequested, mayPresentLeaderClaimForFact,
   wasAnalysisRequestedByUser } from '../compose/unrequested-analysis-confinement.js';
 import { pickLatestRawRobustness } from '../coaching/pick-raw-robustness.js';
-import { nonlinearIdentityLeaderClaimCause, nodesUnderANonlinearIdentity } from '../agent-lane/admit-model.js';
+import { nonlinearIdentityLeaderClaimCause, nodesUnderANonlinearIdentity,
+  readUnsizedPathLeaderCause, unsizedPathLeaderWithheldWithoutConstraintCause } from '../agent-lane/admit-model.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { deriveEveryOptionLimitVerdict, leaderWithheldWithoutConstraintCause,
   readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
@@ -123,10 +124,13 @@ export function boundRunLeaderClaim(
     readiness,
     runFactBinding: { scenarioId: version.scenario_id, selectedResult: fact.result },
     mayNameLeadingOption: mayPresentLeaderClaimForFact(fact),
-    withheldBecauseUnrequested: leaderWithheldOnlyBecauseUnrequested(fact)
+    withheldBecauseUnrequested: (readUnsizedPathLeaderCause(fact.result) !== undefined && !wasAnalysisRequestedByUser(fact))
+      || leaderWithheldOnlyBecauseUnrequested(fact)
       || identityCause?.withheldBecauseUnrequested === true,
     withheldBecauseNonlinearIdentity: identityCause?.withheldBecauseNonlinearIdentity === true,
-    withheldWithoutConstraintCause: leaderWithheldWithoutConstraintCause(fact.result),
+    withheldBecauseUnsizedPath: readUnsizedPathLeaderCause(fact.result),
+    withheldWithoutConstraintCause: leaderWithheldWithoutConstraintCause(fact.result)
+      || unsizedPathLeaderWithheldWithoutConstraintCause(fact.result),
     ...(limit === null ? {} : { everyOptionLimit: limit.kind }),
     rawRobustness: pickLatestRawRobustness(facts),
   });

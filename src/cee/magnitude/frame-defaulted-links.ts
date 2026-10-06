@@ -152,7 +152,7 @@ export function frameDefaultedLinks<G>(graph: G, factorId: string): FramedLinks<
     if (provenance.magnitude !== 'olumi_placeholder') return edge;
     sized.push(`${String(edge.from)}::${String(edge.to)}`);
     const { magnitude: _m, natural_effect: _n, ...rest } = provenance;
-    return { ...edge, strength: { ...strength, mean: sizing.mean, std: sizing.std }, provenance: rest, defaulted: true };
+    return { ...edge, strength: { ...strength, mean: sizing.mean, std: sizing.std }, provenance: { ...rest, mean_projected: true }, defaulted: true };
   });
   return sized.length > 0 ? { graph: { ...graph, edges } as G, sized } : { graph, sized };
 }

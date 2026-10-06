@@ -62,3 +62,44 @@ export function asServedBeforeOneForm<G>(graph: G, served: unknown): G {
   }
   return out;
 }
+
+/**
+ * MC P0 R13 / DL 0df0e1 (#2613): registration now marks a projected mean separately from a sized link.
+ * The served captures predate that carrier. Their only edge delta is `mean_projected: true` on the exact
+ * default strength; source, direction, spread, existence, authored sizes and every other field remain pinned.
+ */
+function capturedProjectedMean(edge: unknown): edge is Dict {
+  if (!isDict(edge) || !isDict(edge.strength) || !isDict(edge.provenance)) return false;
+  return edge.defaulted === true && typeof edge.strength.mean === 'number' && Math.abs(edge.strength.mean) === 0.5 && edge.strength.std === 0.125
+    && edge.provenance.source === 'cee_hypothesis' && edge.provenance.magnitude === undefined;
+}
+
+/**
+ * Add the one authorised carrier to a served expectation. Capture eligibility BEFORE the magnitude-delta
+ * normaliser removes a converted link's magnitude and restores its old ±0.5; that restored value is not a
+ * newly projected mean. Eligibility never reads the live carrier, so an absent or incorrect carrier still fails.
+ */
+export function asProjectedMeanCapture<G>(graph: G, beforeMagnitudeSubtraction: unknown = graph): G {
+  const out = structuredClone(graph);
+  if (!isDict(out) || !Array.isArray(out.edges)) return out;
+  const rawEdges = isDict(beforeMagnitudeSubtraction) && Array.isArray(beforeMagnitudeSubtraction.edges)
+    ? beforeMagnitudeSubtraction.edges : [];
+  const projectedPairs = new Set(rawEdges.filter(capturedProjectedMean).map((edge) => `${String(edge.from)}::${String(edge.to)}`));
+  const capture: Dict = out;
+  capture.edges = out.edges.map((edge: unknown) => capturedProjectedMean(edge) && isDict(edge.provenance)
+    && projectedPairs.has(`${String(edge.from)}::${String(edge.to)}`)
+    ? { ...edge, provenance: { ...edge.provenance, mean_projected: true } } : edge);
+  return out;
+}
+
+/** Digest-only capture: subtract exactly that carrier before comparing with the unchanged recorded digest. */
+export function asServedBeforeProjectedMeans<G>(graph: G): G {
+  const out = structuredClone(graph);
+  if (!isDict(out) || !Array.isArray(out.edges)) return out;
+  for (const edge of out.edges) {
+    if (capturedProjectedMean(edge) && isDict(edge.provenance) && edge.provenance.mean_projected === true) {
+      delete edge.provenance.mean_projected;
+    }
+  }
+  return out;
+}

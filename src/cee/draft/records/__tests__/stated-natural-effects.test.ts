@@ -158,7 +158,9 @@ describe("draft stated figures at the records seam", () => {
     expect(verdict).toEqual({
       kind: "not_testable", goal_id: goal.id,
       failures: [{ precondition: "P5", case: "c", code: "goal_path_unsized", lever: "Price rise", link_to: goal.label,
-        link: { from: priceRise[0]!.id, to: goal.id } }],
+        link: { from: priceRise[0]!.id, to: goal.id },
+        links: [{ from: priceRise[0]!.id, to: goal.id },
+          { from: result.projection.graph.nodes.find((node) => node.label === "Monthly recurring revenue")!.id, to: goal.id }] }],
     });
   });
 

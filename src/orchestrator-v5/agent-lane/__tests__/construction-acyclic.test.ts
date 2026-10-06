@@ -38,7 +38,7 @@ import { join } from 'node:path';
 import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildModelFromBrief, prepareProvisionalCandidate, type CallStructuredModel, type ConstructionTrace } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import { asServedBeforeOneForm } from './fixtures/one-form-levels.js';
+import { asProjectedMeanCapture, asServedBeforeOneForm } from './fixtures/one-form-levels.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { resolveRunAdmission } from '../../tools/handlers/analysis-ready-core.js';
@@ -246,7 +246,7 @@ describe('the fixture IS the served model (fidelity, not a self-authored stand-i
     // PR1b sizes the served links into bounded targets; subtract that known delta and count it (magnitude-delta.ts).
     const { edges: unsized, sized } = subtractMagnitudeDelta(body.edges);
     expect(sized, 'PR1b sized at least one served link into a bounded target').toBeGreaterThan(0);
-    expect(unsized.map(canon)).toEqual(servedLessWithheld.map(canon));
+    expect(unsized.map(canon)).toEqual(asProjectedMeanCapture({ edges: servedLessWithheld }, body).edges.map(canon));
   });
 });
 
@@ -416,7 +416,7 @@ describe('CONTROL: an acyclic model is unchanged', () => {
     expect(body.edges).toHaveLength(served.length);
     const { edges: unsized, sized } = subtractMagnitudeDelta(body.edges);
     expect(sized).toBeGreaterThan(0);
-    expect(unsized.map(canon)).toEqual(served.map(canon));
+    expect(unsized.map(canon)).toEqual(asProjectedMeanCapture({ edges: served }, body).edges.map(canon));
   });
 });
 

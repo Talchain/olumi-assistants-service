@@ -97,6 +97,30 @@ describe('the run’s own withheld goal explanation at the Agent wire', () => {
     expect(inline.response.assistant_text.match(/Give a figure for that link/g)).toHaveLength(1);
   });
 
+  it('#2613 buddy r5 P1: drops only the repeated typed reason, never a co-holding admission cause', () => {
+    const placeholder = { type: 'analysis_result', enrichment: { inference_warnings: [{
+      code: GOAL_FIGURES_PLACEHOLDER_PATH,
+      message: 'Not shown. This run can’t say how likely Raise to £59 and Keep £49 are to reach the goal, or which option does best. Give a figure for that link and Olumi will use it.',
+      option_ids: ['raise', 'keep'], node_ids: ['mrr'],
+    }] } };
+    const typed = goalChanceWithheldForAgent(placeholder)!.say;
+    const provisional = { analysis_admission: { permitted_analysis_mode: 'quantified_provisional',
+      reasons: [{ field: 'permitted_analysis_mode', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }] } };
+    const wire = (ready: unknown) => enforceAgentLaneLeaderClaimsAtWire(
+      { ...response(`${typed}\n\nRaise to £59 does best.`), blocks: [placeholder] } as unknown as OlumiResponse,
+      { ...opts, analysisReady: ready, protectedGoalChanceSay: typed } as unknown as WireOpts);
+    const out = wire(provisional);
+    expect(out.response.assistant_text.split(typed)).toHaveLength(2);
+    expect(out.response.assistant_text).toContain('every estimate this comparison rests on is still Olumi’s');
+    expect(out.response.assistant_text).not.toContain('Raise to £59 does best');
+    const again = enforceAgentLaneLeaderClaimsAtWire(out.response, { ...opts, analysisReady: provisional, protectedGoalChanceSay: typed } as unknown as WireOpts);
+    expect(again.response.assistant_text).toBe(out.response.assistant_text);
+    // Contrast: with no co-holding admission cause, the typed reason is the whole why and is said once, with no closing.
+    const alone = wire(analysisReady);
+    expect(alone.response.assistant_text.split(typed)).toHaveLength(2);
+    expect(alone.response.assistant_text).not.toContain('every estimate this comparison rests on');
+  });
+
   it('does not replay a prior Run’s sentence on a cold follow-up or after a later Run without that warning', () => {
     expect(goalChanceSayFromThisTurn([])).toBeNull();
     expect(goalChanceSayFromThisTurn([runWithheld, { ran: true }])).toBeNull();

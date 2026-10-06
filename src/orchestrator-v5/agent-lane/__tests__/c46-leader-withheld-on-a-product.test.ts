@@ -61,6 +61,8 @@ import { buildLimitUncheckedCard, leaderWithheldForALimit } from '../../coaching
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { ALLOWED_NODE_FIELD_ROOTS } from '../../graph-management/field-safety.js';
 import { transformNodeToV3 } from '../../../cee/transforms/schema-v3.js';
+import { readMayNameLeadingOptionVerdictForFact } from '../../context/claim-safety-read.js';
+import { enforceAgentLaneLeaderClaimsAtWire } from '../withheld-leader-fail-closed.js';
 
 const SCENARIO = '46464646-4646-4646-8646-464646464646';
 const REQUEST_ID = 'req-mg-c46-stage1';
@@ -184,7 +186,7 @@ function withoutTarget<G>(graph: G): G {
   return c as unknown as G;
 }
 
-async function build(wire: Record<string, unknown>, { validate = true } = {}): Promise<{ registered: Graph; out: ToolResult }> {
+async function build(wire: Record<string, unknown>, { validate = true, linksSized = true } = {}): Promise<{ registered: Graph; out: ToolResult }> {
   if (validate) expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let registered: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -197,7 +199,7 @@ async function build(wire: Record<string, unknown>, { validate = true } = {}): P
   };
   const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, call);
   expect(out.ok, JSON.stringify(out)).toBe(true);
-  return { registered: withoutTarget(sizedForC46(registered as Graph)), out };
+  return { registered: withoutTarget(linksSized ? sizedForC46(registered as Graph) : registered as Graph), out };
 }
 
 /**
@@ -206,8 +208,11 @@ async function build(wire: Record<string, unknown>, { validate = true } = {}): P
  * (S) itself is pinned in `run-analysis-goal-figures-placeholder-path.test.ts`.
  */
 function sizedForC46<G>(g: G): G {
-  const copy = JSON.parse(JSON.stringify(g)) as { edges?: { provenance?: { magnitude?: unknown } }[] };
-  for (const e of copy.edges ?? []) if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.magnitude = 'olumi_estimate';
+  const copy = JSON.parse(JSON.stringify(g)) as { edges?: { provenance?: { magnitude?: unknown; mean_projected?: unknown } }[] };
+  for (const e of copy.edges ?? []) {
+    if (e.provenance?.magnitude === 'olumi_placeholder') e.provenance.magnitude = 'olumi_estimate';
+    if (e.provenance !== undefined) delete e.provenance.mean_projected;
+  }
   return copy as G;
 }
 
@@ -352,6 +357,29 @@ describe('(a) the checked declaration is carried on the product node, from regis
 
 // ── (b) THE STAMP, END TO END ──────────────────────────────────────────────────────────────────────
 describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its sign is not proven', () => {
+  it('CONTRAST: the same fresh draft without the links-sized precondition withholds for the unsized goal path and tells the user', async () => {
+    const { registered } = await build(paul(), { linksSized: false });
+    const fact = await runOn(registered, [RAISE, KEEP]);
+    expect(fact.result.leading_option_id).toBeNull();
+    const verdict = readMayNameLeadingOptionVerdictForFact(fact);
+    const state = composeAnalysisStateV1({
+      canonical: CANONICAL_FRESH,
+      mayNameLeadingOption: verdict.may_name_leading_option,
+      withheldBecauseUnsizedPath: verdict.unsized_path_cause,
+      rawRobustness: readRawRobustnessFromResponseBody({ blocks: [buildAnalysisResultBlock(fact)] }),
+    })!;
+    expect(state.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'goal_path_unsized' });
+    const wire = enforceAgentLaneLeaderClaimsAtWire({
+      assistant_text: 'Raise Pro to £59 is the best option.',
+      blocks: [buildAnalysisResultBlock(fact)],
+      analysis_state: state,
+    } as never, {
+      requestId: REQUEST_ID, exitPath: 'agent_lane_v1', mayNameLeadingOption: false,
+      leaderClaimWithheldReason: 'goal_path_unsized', graph: registered,
+    } as never);
+    expect(wire.response.assistant_text).toMatch(/whose strengths? nobody has set yet\. Set (?:it|them) to see how much (?:it matters|they matter)\./);
+  });
+
   it('RED: Paul\'s shape, £59 ranked first at 0.94 → no leader may be named, with the C46 reason, by option id', async () => {
     const { registered } = await build(paul());
     const fact = await runOn(registered, [RAISE, KEEP]);

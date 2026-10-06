@@ -165,7 +165,7 @@ describe('A2 L1 through run_analysis (real handler; only PLoT doubled)', () => {
     const r = await runOnce(FA027, fa027Graph, plotDouble('served'));
     expect(r.fact.result.leading_option_id).toBe(LEADER);
     expect(r.fact.result.constraint_verdict.may_name_leading_option).toBe(true);
-    expect(warningCodes(r.fact)).toEqual([]);
+    expect(warningCodes(r.fact)).toEqual(['GOAL_FIGURES_OLUMI_SUPPLIED_LINK']);
   });
 
   it('L1-b (SYNTHETIC envelope): a separated comparative_leader Run is `permitted`, names the stored leader, and every live site agrees', async () => {

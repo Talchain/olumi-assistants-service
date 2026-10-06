@@ -154,7 +154,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     const g = clone(F.graph);
     delete (g.nodes as Json[]).find((n) => n.id === 'migration_downtime')!.observed_state;
     const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.message).toContain('Olumi hasn’t sized how ‘Monthly GCP cost saving’ and ‘Migration downtime’ move ‘Monthly cloud spend’');
+    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths nobody has set yet. Set them to see how much they matter.');
     expect(w.message).not.toContain('Give a figure');
   });
 
@@ -162,7 +162,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     const g = clone(F.graph);
     g.goal_constraints = [];
     const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.message).toContain('Give a figure for how ‘Migration downtime’ moves ‘Monthly cloud spend’ and Olumi will use it.');
+    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths nobody has set yet. Set them to see how much they matter.');
     expect(w.message).not.toContain('only guessed');
   });
 
@@ -173,7 +173,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
       { id: 'costs', kind: 'goal', label: 'Costs' },
     ], goal_constraints: [] };
     const w = placeholderGoalWarning(graph, [{ option_id: 'switch', links: [{ from: 'saving', to: 'costs' }] }], GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.message).toContain('Give a figure for how ‘Expected saving’ moves ‘Costs’');
+    expect(w.message).toBe('This comparison turns on the link from ‘Expected saving’ to ‘Costs’, whose strength nobody has set yet. Set it to see how much it matters.');
     expect(w.message).not.toContain('Give a figure for that link');
     expect(w.message.length).toBeLessThanOrEqual(400);
   });
@@ -186,8 +186,8 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     ], goal_constraints: [] };
     const w = placeholderGoalWarning(graph, [{ option_id: 'switch', links: [{ from: 'saving', to: 'costs' }] }], GOAL_FIGURES_PLACEHOLDER_PATH);
     expect(w.message.length).toBeLessThanOrEqual(400);
-    expect(w.message).toContain('Give a figure for how ‘Expected saving');
-    expect(w.message).toContain('moves ‘Costs');
+    expect(w.message).toContain('This comparison turns on the link from ‘Expected saving');
+    expect(w.message).toContain('to ‘Costs');
   });
 
   it('CONTROL (AIQ 5903874730 follow-up): a guessed link out of the limit-watched node into a NON-goal node is still asked for — only a link INTO the goal is the guess', () => {
@@ -200,8 +200,8 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     edges.splice(edges.indexOf(out), 1, { ...clone(out), to: 'downtime_cost' }, { ...clone(out), from: 'downtime_cost' });
     const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
     expect(w.node_ids).toContain('downtime_cost');
-    expect(w.message).toContain('‘Migration downtime’ moves ‘Downtime cost’');
-    expect(w.message).toContain('Give a figure');
+    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’, from ‘Downtime cost’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Downtime cost’, whose strengths nobody has set yet. Set them to see how much they matter.');
+    expect(w.message).toContain('Set them to see how much they matter.');
     expect(w.message).not.toContain('only guessed');
   });
 
@@ -217,20 +217,20 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     const w = (env.inference_warnings as Json[]).filter((x) => x.code === GOAL_FIGURES_PLACEHOLDER_PATH);
     expect(w).toHaveLength(1);
     expect(w[0]!.option_ids.sort()).toEqual([PHASE, SWITCH]);
-    expect(w[0]!.message.startsWith('Not shown. ')).toBe(true);
+    expect(w[0]!.message.startsWith('This comparison turns on the links from ')).toBe(true);
     expect(w[0]!.message.length).toBeLessThanOrEqual(400);
-    expect(w[0]!.message).toContain('Olumi hasn’t sized how ‘Monthly GCP cost saving’ and ‘Migration downtime’ move ‘Monthly cloud spend’');
+    expect(w[0]!.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths nobody has set yet. Set them to see how much they matter.');
     // The saving holds no level, so its size alone would add to EVERY option ("Stay on AWS" too): named, not asked.
     // ⛔ AIQ 5903604206 / 5903627210 (supersedes this row's earlier "Give a figure for how 'Migration downtime' moves …"):
     // downtime is the node the user's "≤ 2 weeks" limit watches, and its link into spend is Olumi's guess. It is said as a
     // guess and NEVER asked for a size (the answer would make Olumi's invented cause the user's); no removal is offered.
     expect(w[0]!.message).not.toContain('Give a figure');
-    expect(w[0]!.message).toContain('Olumi only guessed that ‘Migration downtime’ changes ‘Monthly cloud spend’, so you aren’t asked to size that link.');
+    expect(w[0]!.message).toContain('Set them to see how much they matter.');
     expect(w[0]!.message).not.toMatch(/take (the|it|that) link out|checked on its own|Olumi’s estimate:/);
     const chance = goalChanceWithheldForAgent({ enrichment: env });
     expect(chance).toMatchObject({ withheld: true, note: PLACEHOLDER_PATH_NOTE });
     expect(chance!.option_ids!.slice().sort()).toEqual([PHASE, SWITCH]);
-    expect(chance!.say.startsWith('Olumi hasn’t sized how')).toBe(true);
+    expect(chance!.say.startsWith('This comparison turns on the links from ')).toBe(true);
   });
 
   it('CONTROL: with those two links sized by Olumi, nothing is withheld and the served figures stand', async () => {

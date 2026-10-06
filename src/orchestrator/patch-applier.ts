@@ -1,3 +1,4 @@
+import { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
 /**
  * Pure Patch Applier
  *
@@ -203,6 +204,7 @@ function applyUpdateEdge(graph: GraphV3T, op: PatchOperation): void {
     throw new PatchApplyError('EDGE_NOT_FOUND', `Edge "${from}" → "${to}" not found`);
   }
 
+  const before = structuredClone(edge);
   const updates = op.value as Record<string, unknown>;
   // Guard: prevent overwriting edge identity fields. Required NESTED OBJECT
   // fields are pulled out separately because a shallow Object.assign would
@@ -252,6 +254,8 @@ function applyUpdateEdge(graph: GraphV3T, op: PatchOperation): void {
       [field]: mergeRequiredNestedWrite(readNestedField(edge, field), incoming),
     });
   }
+  // R8: generic patches cannot clear the un-hashed carrier while retaining the size.
+  Object.assign(edge, keepMeanProjectionWhenSizeUnchanged(before, edge));
 }
 
 // ============================================================================

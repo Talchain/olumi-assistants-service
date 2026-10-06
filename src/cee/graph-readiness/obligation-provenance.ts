@@ -56,6 +56,7 @@ import {
   type KnownObservedStateSourceLiteral,
 } from '@talchain/schemas';
 
+import { linkSizing } from '../magnitude/link-sizing.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../graph/repair-authored-edge.js';
 import type { CanonicalReadinessIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
 
@@ -436,20 +437,21 @@ export function classifyValueSource(stamp: unknown): StructureProvenance {
 }
 
 /**
- * ⭐ R11 — WHO AUTHORED A CAUSAL LINK'S STRENGTH (AI Quality #72 5872082179, adopted by the Delivery Lead).
- *
- * `provenance.source` says who put the LINK in the model; `defaulted: true` says Olumi supplied its NUMBERS. A
- * defaulted strength never earns authorship credit, whatever the link's source: a `brief_extraction` link the brief
- * named, carrying Olumi's default strength, is a link the user stated and a size nobody did. It classifies as
- * `ai_drafted` here — the size is Olumi's — so the census cannot license a leader on it.
- *
- * A confirmation keeps `source` and `defaulted` exactly (`adjust-edge-strength.ts`; it only ADDS
- * `provenance.reviewed_by_user`), so it reads through this function unchanged: review, not authorship. Only a `set`
- * that changed the value stamps `user_specified` and removes `defaulted`.
+ * Strength authorship follows the MEAN (Science FD, 5 Oct 2026). A marked user
+ * natural effect earns credit even when spread or existence was projected.
+ * An Olumi magnitude never earns credit from the link's structural source.
+ * Unmarked links retain R11's source/defaulted rule exactly.
  */
 export function edgeStrengthProvenance(edge: unknown): StructureProvenance {
   const record = asRecord(edge);
-  const provenance = classifyValueSource(asRecord(record?.provenance)?.source);
+  const stamp = asRecord(record?.provenance);
+  const sizing = linkSizing(edge);
+  if (sizing === 'user' && (stamp?.source === 'user_specified'
+    || stamp?.reading === 'agent_proposed_user_confirmed'
+    || asRecord(stamp?.natural_effect) !== null)) return 'user_stated';
+  if (stamp?.magnitude === 'user_stated' || sizing === 'placeholder'
+    || sizing === 'olumi_estimate' || sizing === 'olumi_accepted') return 'ai_drafted';
+  const provenance = classifyValueSource(stamp?.source);
   if (record?.defaulted === true && earnsAuthorshipCredit(provenance)) return 'ai_drafted';
   return provenance;
 }

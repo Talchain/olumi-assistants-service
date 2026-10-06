@@ -381,8 +381,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance } };
   // Olumi's why, its old size, its clamp marker and its "holds by definition" claim describe OLUMI's figure, never the
   // user's (Review Desk; Codex buddy r1): `reasoning` would be read as the stated reason for a user-set link, a stale
-  // `clamped_from` keeps "cut short" asked, and `definitional` would call the user's size a definition.
-  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, definitional: _olumisDefinition, ...keptProvenance } = provenance;
+  // `clamped_from` keeps "cut short" asked, and `definitional` would call the user's size a definition. MC P0: a user size
+  // clears `mean_projected` (Olumi's projected-mean record) together with the mean/magnitude change, so the hash moves.
+  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, definitional: _olumisDefinition, mean_projected: _projectedMean, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
   // RT-6: an end taking this link's stored unit, or a newly disclosed sentence unit, keeps its change in the words
