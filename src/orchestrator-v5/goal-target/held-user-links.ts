@@ -44,6 +44,65 @@ export function currentDefinitionalCarrier(e: unknown): string | undefined {
   return carriesStatedSize(e, ne.strength_mean) ? u : undefined;
 }
 
+/**
+ * The two ends of a link as the validated-definition test reads them: the labels, and the TARGET's own unit when it has one.
+ * Built once per graph (`endsOfGraph`) and passed to every reader, so no reader holds a link another does not.
+ */
+export interface LinkEnds { readonly fromLabel: string | undefined; readonly toLabel: string | undefined; readonly toUnit: string | undefined }
+
+export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  return (e) => (isRec(e)
+    ? { fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label),
+      toUnit: text(isRec(byId.get(e.to)?.observed_state) ? byId.get(e.to)!.observed_state.unit : undefined) }
+    : { fromLabel: undefined, toLabel: undefined, toUnit: undefined });
+}
+
+const QUANTITY_STOP = new Set(['a', 'an', 'the', 'of', 'to', 'from', 'for', 'in', 'on', 'per', 'by', 'and', 'or', 'with', 'at', 'into', 'its', 'their']);
+const singularWord = (w: string): string => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w);
+const quantityWords = (label: string): string[] =>
+  label.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w !== '' && !QUANTITY_STOP.has(w)).map(singularWord);
+
+/**
+ * Science d5 (#87 6011224941): the SOURCE label holds every content word of the TARGET's quantity ("Starter-tier monthly
+ * recurring revenue" → "monthly recurring revenue"), or the target's acronym ("Starter MRR" → "monthly recurring revenue").
+ * Plurals fold to the singular. Exact words only: a word the source does not hold is never inferred, so a near miss stays
+ * Olumi's disclosed estimate (fails safe). "Starter churn" → "MRR" and "Support cost" → "MRR" hold no such word.
+ */
+export function labelHoldsQuantity(sourceLabel: string, targetLabel: string): boolean {
+  const source = new Set(quantityWords(sourceLabel));
+  const target = quantityWords(targetLabel);
+  if (source.size === 0 || target.length === 0) return false;
+  if (target.every((w) => source.has(w))) return true;
+  return target.length >= 2 && source.has(target.map((w) => w[0]).join(''));
+}
+
+/**
+ * ⭐ A VALIDATED DEFINITION (Science d5 #87 6011224941, correcting 6009797390's drafter-only clause; DL ruling): a CURRENT
+ * definitional carrier (±1 per 1, one exact unit, its β still carried), whose unit is the target's own when the target has
+ * one, and whose source label holds the target's quantity words. Whoever flagged it: an invalid flag is an ordinary Olumi
+ * estimate. Returns the definition's unit, else undefined. The hold, the part's unit and the caution all read this.
+ */
+export function validatedDefinition(e: unknown, ends: LinkEnds): string | undefined {
+  const u = currentDefinitionalCarrier(e);
+  if (u === undefined || (ends.toUnit !== undefined && ends.toUnit !== u)) return undefined;
+  return ends.fromLabel !== undefined && ends.toLabel !== undefined && labelHoldsQuantity(ends.fromLabel, ends.toLabel) ? u : undefined;
+}
+
+/**
+ * The `from->to` keys of every VALIDATED definition in a graph (`validatedDefinition`, the ONE predicate). Science d5
+ * (#87 6011224941 (a)): such a link is never the caution's pointer (`analysis-result-headline.ts`); the caution steps to
+ * the next candidate. Read off the graph PLoT received, so it is the same set the hold sent at 1.0.
+ */
+export function validatedDefinitionKeys(graph: unknown): ReadonlySet<string> {
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const endsOf = endsOfGraph(graph);
+  return new Set(edges.filter((e) => typeof e.from === 'string' && typeof e.to === 'string' && validatedDefinition(e, endsOf(e)) !== undefined)
+    .map((e) => `${e.from as string}->${e.to as string}`));
+}
+
 /** A definitional link's spread on the Run input: the structural minimum (d5). */
 const DEFINITIONAL_STD = 0.01;
 
@@ -66,13 +125,13 @@ export function isUserStatedLink(e: unknown): boolean {
  * link carries: β(x) = x · strength_mean / amount. `natural_effect` is the user's size while it is current: every write of
  * the strength or the size drops or replaces it (refit-frames, CODEX 5925312387), and reframing rescales it with the edge.
  */
-export function heldLinkOf(e: unknown): { readonly std: number } | null {
+export function heldLinkOf(e: unknown, ends: LinkEnds): { readonly std: number } | null {
+  // ⭐ DEFINITIONAL (Science d5 #87 6011224941, correcting the drafter-only clause): a VALIDATED definition (a part → its
+  // total, ±1 per 1) is exact WHOEVER flagged it, so it holds with no range, at the structural minimum spread (as on
+  // option → factor edges), never the ±50% default. The mechanism's doubt stays on the upstream causal link. An invalid
+  // flag (labels that don't carry the total's quantity, another unit, a band-edited size) is an ordinary estimate.
+  if (validatedDefinition(e, ends) !== undefined) return { std: DEFINITIONAL_STD };
   if (!isUserStatedLink(e)) return null;
-  // ⭐ DEFINITIONAL (Science d5 #87, 6 Oct): the user's own definitional link (a part → its total, +1 per 1) is exact, so it
-  // holds with no range, at the structural minimum spread (as on option → factor edges), never the ±50% default. A
-  // drafter-only definitional flag never reaches here (not user-stated): it stays Olumi's 0.8, disclosed.
-  // ⛔ Codex r1 #2653 P1: only while the link still carries its definition (the ONE predicate): a band edit keeps the flag.
-  if (currentDefinitionalCarrier(e) !== undefined) return { std: DEFINITIONAL_STD };
   const ne = (e as Rec).provenance?.natural_effect;
   if (!isRec(ne) || !isRec(ne.stated_range)) return null;
   const { low, high } = ne.stated_range;
@@ -94,10 +153,11 @@ export function heldLinkOf(e: unknown): { readonly std: number } | null {
  */
 export function withHeldUserLinks<G>(graph: G): G {
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges : [];
-  if (!edges.some((e: unknown) => heldLinkOf(e) !== null)) return graph;
+  const endsOf = endsOfGraph(graph);
+  if (!edges.some((e: unknown) => heldLinkOf(e, endsOf(e)) !== null)) return graph;
   const g = structuredClone(graph) as Rec;
   for (const e of g.edges as unknown[]) {
-    const held = heldLinkOf(e);
+    const held = heldLinkOf(e, endsOf(e));
     if (held === null) continue;
     const edge = e as Rec;
     edge.exists_probability = 1;

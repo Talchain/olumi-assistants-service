@@ -207,7 +207,7 @@ import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
-import { withHeldUserLinks } from '../../goal-target/held-user-links.js';
+import { validatedDefinitionKeys, withHeldUserLinks } from '../../goal-target/held-user-links.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -2479,6 +2479,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       interventionControlledFactorIds: collectInterventionControlledFactorIds(
         snapshot.rawPersistedGraph ?? { options: snapshot.options },
       ),
+      // ⭐ Science d5 (#87 6011224941 (a)): a validated definitional link is never the caution's pointer. Read off the very
+      // graph PLoT received (the hold's own predicate), so the skip and the hold name the same links.
+      definitionalLinkKeys: validatedDefinitionKeys(plotPayload.graph),
       // P2: the INTERSECTION (factors EVERY option sets). Lets the headline
       // tell a vacuous "no single factor would change the order" (nothing
       // could, by construction) from a real finding.

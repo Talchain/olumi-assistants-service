@@ -35,7 +35,7 @@ import { resolveMagnitudeFrame, unitOf, type MagnitudeNode } from '../../cee/mag
 import { POINTS_SPELLINGS, periodAdverb, periodNoun, type UnitPeriod } from '../../utils/unit-alphabet.js';
 import { carrierCompatible, readUnitParts, sameUnit, singular, words, type UnitParts } from './same-unit.js';
 import { licenceUnsizedLink } from './goal-certainty.js';
-import { currentDefinitionalCarrier } from '../goal-target/held-user-links.js';
+import { validatedDefinition } from '../goal-target/held-user-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
@@ -264,7 +264,7 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const kids = edges.filter(e => e.from === id && reaches.has(e.to));
     if (kids.length !== 1 || typeof kids[0]!.to !== 'string') continue;
     const childId = kids[0]!.to as string;
-    const unit = definitionalPartUnit(kids[0]!, view.get(childId));
+    const unit = definitionalPartUnit(kids[0]!, view.get(childId), m.label, byId.get(childId)?.label);
     const parts = unit === undefined ? null : readUnitParts(unit);
     if (unit === undefined || parts === null) continue;
     const label = labelUnitParts(m.label);
@@ -317,11 +317,13 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
 }
 
 /**
- * The unit of a CURRENT definitional link (`currentDefinitionalCarrier`: ±1 per 1, one unit, its size still the
- * definition's), when its total carries that unit too; else undefined.
+ * The unit of a VALIDATED definitional link (`validatedDefinition`, Science d5 6011224941: ±1 per 1, one unit, its size
+ * still the definition's, and the part's label holds the total's quantity words), when its total carries that unit too;
+ * else undefined. An invalid flag gives no part reading: it is an ordinary estimate.
  */
-function definitionalPartUnit(e: Rec, total: MagnitudeNode | undefined): string | undefined {
-  const u = currentDefinitionalCarrier(e);
+function definitionalPartUnit(e: Rec, total: MagnitudeNode | undefined, partLabel: unknown, totalLabel: unknown): string | undefined {
+  const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  const u = validatedDefinition(e, { fromLabel: text(partLabel), toLabel: text(totalLabel), toUnit: undefined });
   const totalUnit = total === undefined ? undefined : unitOf(total);
   return u !== undefined && totalUnit !== undefined && (totalUnit === u || sameUnit(totalUnit, u)) ? u : undefined;
 }

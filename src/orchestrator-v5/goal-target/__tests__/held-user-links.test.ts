@@ -5,7 +5,7 @@
  * persisted graph is untouched. No range → no hold (never mean ± k·std: circular).
  */
 import { describe, expect, it } from 'vitest';
-import { heldLinkOf, withHeldUserLinks } from '../held-user-links.js';
+import { endsOfGraph, heldLinkOf, labelHoldsQuantity, validatedDefinition, validatedDefinitionKeys, withHeldUserLinks, type LinkEnds } from '../held-user-links.js';
 import { goalChanceLicenceOf, userStatedLinksBelowOne } from '../goal-chance-licence.js';
 
 type Rec = Record<string, any>;
@@ -18,12 +18,14 @@ const userLink = (from: string, to: string, ne: Rec | undefined, exists = 0.8): 
   from, to, strength: { mean: ne?.strength_mean ?? 0.6, std: 0.15 }, exists_probability: exists,
   provenance: { source: 'user_specified', magnitude: 'user_stated', ...(ne !== undefined ? { natural_effect: ne } : {}) },
 });
+/** A causal link's rows need no ends: only a definition reads the labels and the target's unit. */
+const NO_ENDS: LinkEnds = { fromLabel: undefined, toLabel: undefined, toUnit: undefined };
 const sdOf = (low: number, high: number): number => Math.abs(0.3 * (high / 20) - 0.3 * (low / 20)) / 3.29;
 
 describe('hold-at-1.0: a user link whose own range excludes zero holds on the Run input', () => {
   it('HELD: user-sized, range 20 to 40 → exists 1.0, sd_β = |β(40) − β(20)| / 3.29, the mean stays the stated β', () => {
     const e = userLink('price', 'subs', ranged(20, 40));
-    expect(heldLinkOf(e)).toEqual({ std: sdOf(20, 40) });
+    expect(heldLinkOf(e, NO_ENDS)).toEqual({ std: sdOf(20, 40) });
     const g = withHeldUserLinks({ nodes: [], edges: [e] });
     expect(g.edges[0].exists_probability).toBe(1);
     expect(g.edges[0].strength.std).toBeCloseTo(sdOf(20, 40), 12);
@@ -31,29 +33,29 @@ describe('hold-at-1.0: a user link whose own range excludes zero holds on the Ru
     expect(g.edges[0].strength.mean).toBe(0.3);
   });
   it('a NEGATIVE range (−40 to −20) excludes zero too → held', () => {
-    expect(heldLinkOf(userLink('price', 'churn', ranged(-40, -20, -40)))).toEqual({ std: sdOf(-40, -20) });
+    expect(heldLinkOf(userLink('price', 'churn', ranged(-40, -20, -40)), NO_ENDS)).toEqual({ std: sdOf(-40, -20) });
   });
   it('CONTRAST: a range that STRADDLES zero (−5 to 10) → not held, the edge is byte-identical', () => {
     const e = userLink('price', 'subs', ranged(-5, 10, 10));
-    expect(heldLinkOf(e)).toBeNull();
+    expect(heldLinkOf(e, NO_ENDS)).toBeNull();
     const g = { nodes: [], edges: [e] };
     expect(withHeldUserLinks(g)).toBe(g);
   });
   it('a range touching zero (0 to 10) does not exclude it → not held', () => {
-    expect(heldLinkOf(userLink('price', 'subs', ranged(0, 10, 10)))).toBeNull();
+    expect(heldLinkOf(userLink('price', 'subs', ranged(0, 10, 10)), NO_ENDS)).toBeNull();
   });
   it('NO RANGE → no hold, whatever the size or spread (never mean ± k·std)', () => {
     const ne = ranged(20, 40);
     delete ne.stated_range;
-    expect(heldLinkOf(userLink('price', 'subs', ne))).toBeNull();
-    expect(heldLinkOf(userLink('price', 'subs', undefined))).toBeNull();
+    expect(heldLinkOf(userLink('price', 'subs', ne), NO_ENDS)).toBeNull();
+    expect(heldLinkOf(userLink('price', 'subs', undefined), NO_ENDS)).toBeNull();
   });
   it('CLASS: an Olumi estimate carrying a range → not held; a brief-quoted link → held; brief WITHOUT its quote → not', () => {
     const olumi = { ...userLink('price', 'subs', ranged(20, 40)), provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: ranged(20, 40) } };
-    expect(heldLinkOf(olumi)).toBeNull();
+    expect(heldLinkOf(olumi, NO_ENDS)).toBeNull();
     const brief = { ...userLink('price', 'subs', ranged(20, 40)), provenance: { source: 'brief_extraction', source_quote: 'each £1 brings 20 to 40 subscribers', natural_effect: ranged(20, 40) } };
-    expect(heldLinkOf(brief)).toEqual({ std: sdOf(20, 40) });
-    expect(heldLinkOf({ ...brief, provenance: { ...brief.provenance, source_quote: '  ' } })).toBeNull();
+    expect(heldLinkOf(brief, NO_ENDS)).toEqual({ std: sdOf(20, 40) });
+    expect(heldLinkOf({ ...brief, provenance: { ...brief.provenance, source_quote: '  ' } }, NO_ENDS)).toBeNull();
   });
   it('the PERSISTED graph is never written: the input is not mutated and a held graph is a new object', () => {
     const e = userLink('price', 'subs', ranged(20, 40));
@@ -70,7 +72,7 @@ describe('hold-at-1.0: a user link whose own range excludes zero holds on the Ru
       strength_mean_frame: 'edge_strength', stated_range: { low: 80, high: 250, text: 'about 150, between 80 and 250', end: 'centre' } };
     const e = userLink('switch', 'subs', ne);
     const sd = Math.abs(beta150 * 250 / 150 - beta150 * 80 / 150) / 3.29;
-    expect(heldLinkOf(e)?.std).toBeCloseTo(sd, 12);
+    expect(heldLinkOf(e, NO_ENDS)?.std).toBeCloseTo(sd, 12);
     const out = withHeldUserLinks({ nodes: [], edges: [e] });
     expect(out.edges[0]).toMatchObject({ exists_probability: 1, strength: { mean: beta150 } });
   });
@@ -190,10 +192,10 @@ describe('the model reasons with the existence the Run USES (d5: every reader th
  */
 describe('held-link parity fixture (shared with DGAI)', () => {
   const FIXTURE_SHA256 = 'dd32c259b407929952f709596158cd5142e53870b339c083b053bb688ac581dd';
-  const load = async (): Promise<{ bytes: Buffer; rows: Array<{ name: string; edge: Rec; held: boolean }> }> => {
+  const load = async (): Promise<{ bytes: Buffer; rows: Array<{ name: string; edge: Rec; ends?: LinkEnds; held: boolean }> }> => {
     const { readFileSync } = await import('node:fs');
     const bytes = readFileSync(new URL('./fixtures/held-link-parity.json', import.meta.url));
-    return { bytes, rows: (JSON.parse(bytes.toString('utf8')) as { rows: Array<{ name: string; edge: Rec; held: boolean }> }).rows };
+    return { bytes, rows: (JSON.parse(bytes.toString('utf8')) as { rows: Array<{ name: string; edge: Rec; ends?: LinkEnds; held: boolean }> }).rows };
   };
   it('held-link parity fixture digest: the bytes are the ones DGAI pins', async () => {
     const { createHash } = await import('node:crypto');
@@ -203,7 +205,7 @@ describe('held-link parity fixture (shared with DGAI)', () => {
     const { rows } = await load();
     expect(rows.filter((r) => r.held).length).toBeGreaterThan(0);
     expect(rows.filter((r) => !r.held).length).toBeGreaterThan(0);
-    for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge) !== null }).toEqual({ name: r.name, held: r.held });
+    for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge, r.ends ?? NO_ENDS) !== null }).toEqual({ name: r.name, held: r.held });
   });
 });
 
@@ -224,7 +226,7 @@ describe('Codex r1 #2643: identity, currency and the decision reviewer read the 
   });
   it('P1 currency: a writer that moved the strength and kept natural_effect leaves it STALE → not held', () => {
     const e = { ...userLink('price', 'subs', ranged(20, 40)), strength: { mean: 0.6, std: 0.15 } };
-    expect(heldLinkOf(e)).toBeNull();
+    expect(heldLinkOf(e, NO_ENDS)).toBeNull();
   });
   it('P2 decision review: both branches read the existence the Run uses (fallback projection and enrichment graph)', async () => {
     const { projectRunGraphForDecisionReview } = await import('../../coaching/decision-review-graph-projection.js');

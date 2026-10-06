@@ -713,6 +713,12 @@ export interface AnalysisResultHeadlineInput {
    */
   readonly unvaluedFactorIds?: ReadonlySet<string>;
   /**
+   * ⭐ Science d5 (#87 6011224941 (a)): the `from->to` keys of the VALIDATED definitional links on the graph PLoT received
+   * (`validatedDefinitionKeys`, the hold's own predicate). A part → its total holds at 1.0, so it is never the caution's
+   * pointer: the caution steps to the next candidate. Keyed on the fragile row's structural ids. Omitted / empty ⇒ no skip.
+   */
+  readonly definitionalLinkKeys?: ReadonlySet<string>;
+  /**
    * P2 (Paul's manual test, 23 Sep 2026): factor ids that EVERY option sets —
    * `intervention-controlled-drivers.ts::collectFactorIdsSetByEveryOption`, the
    * INTERSECTION, not the union in {@link interventionControlledFactorIds}.
@@ -1024,6 +1030,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     interventionControlledFactorIds,
     unsetOptionEffectFactorIds,
     unvaluedFactorIds,
+    definitionalLinkKeys,
   } = input;
 
   // Same-source resolution: the winner label, winner probability, and
@@ -1185,7 +1192,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // option-pinned (sensitivity_score === 0 / zero_reason ===
   // 'intervention_override' / structurally controlled) is never named as
   // "the result is sensitive to X".
-  const caution = resolveCautionCandidate(enrichment, interventionControlledFactorIds);
+  const caution = resolveCautionCandidate(enrichment, interventionControlledFactorIds, definitionalLinkKeys);
   // Mission B (provisional_doctrine_v0): narration-completeness tail —
   // robustness honesty + eliminated options — appended to EVERY emitted
   // case shape, before the status suffix. The base headline stays within
@@ -2382,10 +2389,16 @@ interface FragileEdgeCandidate {
  * Returns null (no caution clause at all) only on the legacy thin-data
  * paths: robustness high/absent, no fragile edges, or no edge with any
  * resolvable label (unchanged from resolveFragileLabel).
+ *
+ * ⭐ Science d5 (#87 6011224941 (a)): a VALIDATED definitional link (a part →
+ * its total) is never a candidate, whatever its switch probability; the
+ * selection steps to the next one. When only such links were fragile, the
+ * caution is generic (fragility is real, nothing changeable to name).
  */
 function resolveCautionCandidate(
   enrichment: Record<string, unknown>,
   controlledFactorIds?: ReadonlySet<string>,
+  definitionalLinkKeys?: ReadonlySet<string>,
 ): CautionCandidate | null {
   // Robust scenarios skip the fragility clause entirely.
   const level = readRobustnessLevel(enrichment);
@@ -2400,9 +2413,11 @@ function resolveCautionCandidate(
   const pinned = collectPinnedFactors(enrichment, controlledFactorIds);
 
   const unresolvedCandidates: FragileEdgeCandidate[] = [];
+  let definitionalSkipped = false;
   for (const raw of fragile) {
     const entry = readRecord(raw);
     if (!entry) continue;
+    if (isDefinitionalFragileRow(entry, definitionalLinkKeys)) { definitionalSkipped = true; continue; }
     const switchProbability = readNumber(entry.switch_probability);
     unresolvedCandidates.push({
       ...(switchProbability !== null ? { switch_probability: switchProbability } : {}),
@@ -2412,7 +2427,8 @@ function resolveCautionCandidate(
   const candidates = orderFragilityPriorityRows(unresolvedCandidates);
 
   const best = candidates.find((c) => c.namedLabel !== null);
-  if (!best) return null; // legacy thin-data path: nothing resolvable at all
+  // Legacy thin-data path: nothing resolvable at all. Fragility only on definitional links is real but not changeable.
+  if (!best) return definitionalSkipped && candidates.length === 0 ? { kind: 'generic' } : null;
 
   // 1. Non-pinned best label → unchanged factor wording.
   if (!isPinnedFactor(best.namedId, best.namedLabel, pinned)) {
@@ -2438,6 +2454,19 @@ function resolveCautionCandidate(
   }
   // 5. Fragility is real but no safe named candidate survived suppression.
   return { kind: 'generic' };
+}
+
+/**
+ * Is this fragile row a VALIDATED definitional link? By structural ids only (the producer's `from_id`/`to_id`, or the
+ * legacy `from_node_id`/`to_node_id`), never by label: two links can share labels, never ids.
+ */
+function isDefinitionalFragileRow(entry: Record<string, unknown>, keys: ReadonlySet<string> | undefined): boolean {
+  if (keys === undefined || keys.size === 0) return false;
+  const id = (a: unknown, b: unknown): string | null =>
+    typeof a === 'string' && a.length > 0 ? a : typeof b === 'string' && b.length > 0 ? b : null;
+  const from = id(entry.from_id, entry.from_node_id);
+  const to = id(entry.to_id, entry.to_node_id);
+  return from !== null && to !== null && keys.has(`${from}->${to}`);
 }
 
 // ============================================================================
