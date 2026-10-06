@@ -134,6 +134,54 @@ function factorAuthorshipExplained(
   return current.source !== undefined && valueWriteAuthorshipDigests(current.source).includes(current.authorship_digest);
 }
 
+/**
+ * ⭐ SD-1 INTERIM (DL 0df0e1 ruling, 6 Oct, cut 5): a link whose size moved INSIDE one band between two Runs. No row can
+ * state it (the contract's `strength` row is a band literal; `effect` lands with schemas 0.78 in cut 6), so the pair is
+ * `partial` (`diffRunInputs` below). This list lets S7 NAME the link while coverage stays partial; it never rides the wire.
+ * Read from the two Runs' OWN persisted input snapshots (each Run's `mean` and `band`), never the current graph.
+ * - Counted: the link is in both Runs, both record a band and it is the same band, the sign is the same, the mean differs.
+ *   (A band move is a `strength` row; a sign flip is a direction change this sentence must not call a size change.)
+ * - `author` picks S7's words (c6's three lines):
+ *   - `user`: the pair's persisted record shows the USER wrote this link between the two Runs: user-sized now
+ *     (`sizing: 'user'`), its authorship (`authorship_digest`) differs between the Runs, AND `userWroteLink` finds the
+ *     write's own persisted receipt for exactly this move (buddy r1: a moved digest proves metadata changed, not who wrote
+ *     it). Without a receipt it is never `user` (DL: "you changed" only on a user write);
+ *   - `olumi`: Olumi-sized now (`olumi_estimate`, `olumi_accepted`, `placeholder`), so the figure is said to be Olumi's;
+ *   - `unknown`: anything else (no user write recorded, `unmarked`, sizing not recorded): no author is claimed.
+ */
+export interface WithinBandLinkMove {
+  readonly from: string;
+  readonly to: string;
+  readonly band: NonNullable<RunInputSnapshot['links'][number]['band']>;
+  readonly author: 'user' | 'olumi' | 'unknown';
+}
+
+const OLUMI_SIZED: ReadonlySet<string> = new Set(['olumi_estimate', 'olumi_accepted', 'placeholder']);
+
+export function linksMovedWithinBand(
+  prior: RunInputSnapshot,
+  current: RunInputSnapshot,
+  /** The persisted receipt of a user write that moved `from → to` from `priorMean` to `currentMean`; absent = none. */
+  userWroteLink: (from: string, to: string, priorMean: number, currentMean: number) => boolean = () => false,
+): WithinBandLinkMove[] {
+  const key = (l: { from: string; to: string }) => `${l.from}->${l.to}`;
+  const pL = byId(prior.links, key);
+  const cL = byId(current.links, key);
+  const out: WithinBandLinkMove[] = [];
+  for (const id of [...cL.keys()].sort()) {
+    const pl = pL.get(id);
+    const cl = cL.get(id)!;
+    if (pl === undefined || pl.band === undefined || cl.band === undefined || pl.band !== cl.band) continue;
+    if (pl.mean === cl.mean || Math.sign(pl.mean) !== Math.sign(cl.mean)) continue;
+    const userWrite = cl.sizing === 'user'
+      && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined && pl.authorship_digest !== cl.authorship_digest
+      && userWroteLink(cl.from, cl.to, pl.mean, cl.mean);
+    const author = userWrite ? 'user' : cl.sizing !== undefined && OLUMI_SIZED.has(cl.sizing) ? 'olumi' : 'unknown';
+    out.push({ from: cl.from, to: cl.to, band: cl.band, author });
+  }
+  return out;
+}
+
 /** The rows, and `complete: false` when a sent input changed that no row states. */
 export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot): { rows: Row[]; complete: boolean } {
   const rows: Row[] = [];

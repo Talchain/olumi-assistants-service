@@ -21,6 +21,8 @@
  */
 import { checkMethodTurn, type MethodInputs } from './guidance/index.js';
 import { POLICY } from './guidance/policy.js';
+import { CANVAS_BAND_WORD, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
+import type { WithinBandLinkMove } from '../coaching/run-input-changes.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -43,6 +45,16 @@ const ownEstimateMoved = (from: string, to: string, before: string, after: strin
   `You gave your own estimate for how much ${from} changes ${to}: ${before} → ${after}.`;
 const strengthMoved = (from: string, to: string, before: string, after: string) =>
   `You changed how much ${from} changes ${to}: ${before} → ${after}.`;
+/**
+ * ⭐ SD-1 INTERIM (DL 0df0e1, 6 Oct, cut 5; words c6 6 Oct, verbatim): a link whose size moved INSIDE its band, which no
+ * row can state until schemas 0.78's `effect` (cut 6). The author is the pair's persisted record (`linksMovedWithinBand`):
+ * "You" only on a recorded user write; Olumi's figure is said to be Olumi's; otherwise no author. No figures, no cause.
+ */
+export const WITHIN_BAND_LINES = {
+  user: (from: string, to: string, band: string) => `You changed how much ${from} changes ${to}; it is still ${band}.`,
+  olumi: (from: string, to: string, band: string) => `Olumi’s estimate for how much ${from} changes ${to} changed; it is still ${band}.`,
+  unknown: (from: string, to: string, band: string) => `How much ${from} changes ${to} changed; it is still ${band}.`,
+} as const;
 
 /** RC's fallback case lines (policy `fallback`); C3–C5 never say "a new draw" (it may be the engine that differed). */
 export const RERUN_FALLBACK_LINES = {
@@ -134,6 +146,8 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
 
 /** Recorded changes past the cap are disclosed, never dropped from the record (CODEX CEE BUDDY CR 5940970957). */
 const moreChangesLine = (n: number) => `You also made ${n} other change${n === 1 ? '' : 's'}.`;
+/** SD-1 interim (buddy r1; words c6, verbatim): the overflow line when an overflowed item has no recorded user write. */
+const moreRecordedLine = (n: number) => (n === 1 ? 'One other input also differs between the two Runs.' : `${n} other inputs also differ between the two Runs.`);
 
 type CheckCase = 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
 /** The wire case → the check's three (C3–C5 are not attributable: judged as C2, said with their own fallback line). */
@@ -151,11 +165,27 @@ export function rerunExplanationPlan(
   optionLabels: readonly string[],
   leaderLicensed: boolean,
   modelLabels: readonly string[] = [],
+  /** SD-1 interim: the pair's within-band link moves (`withinBandLinkMovesForRunPair`), named after the typed rows. */
+  withinBand: readonly WithinBandLinkMove[] = [],
 ): RerunExplanationPlan | null {
   const d = rec(runDelta);
   if (d === undefined) return null;
   const rows = Array.isArray(d.input_changes) ? d.input_changes.map(rec).filter((r): r is Rec => r !== undefined) : [];
-  const { sentences, skipped } = changeSentences(rows, labelOf);
+  const typed = changeSentences(rows, labelOf);
+  const skipped = typed.skipped;
+  // c6: one sentence per link, after the typed rows and inside the cap; a link that already has a sizing or strength row
+  // is said by that row's sentence, never twice. A link whose ends have no label goes unsaid (coverage is partial anyway).
+  const linkWithRow = new Set(rows.filter((r) => r.entity_kind === 'link' && (r.field === 'sizing' || r.field === 'strength'))
+    .map((r) => rec(r.link)).filter((l): l is Rec => l !== undefined).map((l) => `${String(l.from)}->${String(l.to)}`));
+  const withinBandSentences = withinBand.flatMap((m) => {
+    if (linkWithRow.has(`${m.from}->${m.to}`)) return [];
+    const from = labelOf(m.from); const to = labelOf(m.to);
+    if (from === undefined || to === undefined) return [];
+    return [{ text: WITHIN_BAND_LINES[m.author](from, to, CANVAS_BAND_WORD[edgeBandFromStrengthBand(m.band)]), yours: m.author === 'user' }];
+  });
+  const sentences = [...typed.sentences, ...withinBandSentences.map((w) => w.text)];
+  // "You also made N other changes" only when every change past the cap is a typed row or a recorded user write.
+  const overflowNotYours = withinBandSentences.slice(Math.max(0, MAX_NAMED_CHANGES - typed.sentences.length)).some((w) => !w.yours);
   const changes = sentences.slice(0, MAX_NAMED_CHANGES);
   const more = sentences.length - changes.length;
   // ⛔ Partial or unrecorded coverage never licenses "same inputs" or a cause (CODEX CEE BUDDY preflight 5939219187): other
@@ -200,7 +230,7 @@ export function rerunExplanationPlan(
       : wireCase === 'C2_unpaired' ? RERUN_FALLBACK_LINES.C2
         : differenceUnknown ? RERUN_FALLBACK_LINES.unverified : RERUN_FALLBACK_LINES.other;
   const codeLine = changes.length > 0
-    ? `${changes.join(' ')}${more > 0 ? ` ${moreChangesLine(more)}` : ''} ${!priorWithheld ? caseLine
+    ? `${changes.join(' ')}${more > 0 ? ` ${overflowNotYours ? moreRecordedLine(more) : moreChangesLine(more)}` : ''} ${!priorWithheld ? caseLine
       : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.unwithheld
         : `${RERUN_NO_CHANGE_LINES.unwithheld} ${caseLine}`}`
     : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;
@@ -307,13 +337,14 @@ export function rerunRecordForModel(
   modelDeltaShown: boolean,
   nodes: readonly NodeLike[],
   optionDisplayLabels: readonly string[] = [],
+  withinBand: readonly WithinBandLinkMove[] = [],
 ): RerunRecordForModel | undefined {
   if (modelDeltaShown) return undefined;
   const labelled = nodes.filter((n): n is NodeLike & { id: string; label: string } =>
     typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '');
   const labelOf = (id: string): string | undefined => labelled.find((n) => n.id === id)?.label;
   const optionLabels = [...new Set([...labelled.filter((n) => n.kind === 'option').map((n) => n.label), ...optionDisplayLabels])];
-  const plan = rerunExplanationPlan(wireDelta, labelOf, optionLabels, false, labelled.map((n) => n.label));
+  const plan = rerunExplanationPlan(wireDelta, labelOf, optionLabels, false, labelled.map((n) => n.label), withinBand);
   if (plan === null) return undefined;
   return {
     code_line: leaksPairLeaderOrShare(plan.codeLine, wireDelta) ? RERUN_NO_CHANGE_LINES.unknown : plan.codeLine,
