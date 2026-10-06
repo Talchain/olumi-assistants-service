@@ -98,6 +98,9 @@ describe('fast path 2: a typed approval chip applies its exact proposal with zer
     expect(commits, 'the exact proposal was applied once').toHaveLength(1);
     expect(edges).toEqual([{ from: 'f1', to: 'o1' }]);
     expect(b2.assistant_text.length, 'Olumi states what was saved').toBeGreaterThan(0);
+    // CONTROL (DL on #2661 S5t-W): an approval whose receipt claims no completion is byte-unchanged by the approve path no
+    // longer running the model-claim stripper (measured "Saved." with the old narration and with the new).
+    expect(b2.assistant_text).toBe('Saved.');
   });
 
   it('CONTRAST: the same words WITHOUT the typed chip still go to the Agent (no inference from text)', async () => {

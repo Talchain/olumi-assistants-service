@@ -631,7 +631,10 @@ function recordedRunPair(
         if (!sameMean(refit!.before, mean)) return false;
         mean = refit!.after;
       }
-      return sameMean(mean, persistedMean(currentMean));
+      // ⛔ The chain ends at the current Run's OWN mean, never its clamp (Codex buddy r1 on #2661): a refit never writes a
+      // clamped link (`refitKeepsOtherLinks` refuses one), so a current β beyond ±1 restored from `clamped_from` is a later
+      // re-estimate that only collides with the refit's endpoint at the clamp. It is a change, and it is said.
+      return Math.abs(currentMean) <= 1 && sameMean(mean, currentMean);
     },
   };
 }
