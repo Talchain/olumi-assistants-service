@@ -1489,7 +1489,12 @@ function linkEffectNoSuchLinkWords(raw: unknown, from: { id: string; label: stri
     }
     return false;
   };
-  const first = walk.find((e) => e.from === from.id && e.to !== to.id && reaches(e.to));
+  // Codex r2 on #2641: the named first link must be one the canvas edit can take: ONE edge of any type on that pair, and
+  // both ends one entity each that is not an option or the decision (else the strength edit refuses it as ambiguous).
+  const one = (id: unknown): boolean => nodes.filter((n) => n.id === id).length === 1;
+  const editable = (a: unknown, b: unknown): boolean => one(a) && one(b) && edges.filter((e) => e.from === a && e.to === b).length === 1
+    && !['option', 'decision'].includes(String(nodes.find((n) => n.id === b)?.kind));
+  const first = walk.find((e) => e.from === from.id && e.to !== to.id && editable(e.from, e.to) && reaches(e.to));
   const via = first === undefined ? undefined : nodes.find((n) => n.id === first.to);
   if (via !== undefined) {
     const v = typeof via.label === 'string' && via.label.trim() !== '' ? via.label : String(via.id);
@@ -1497,6 +1502,13 @@ function linkEffectNoSuchLinkWords(raw: unknown, from: { id: string; label: stri
       + `"The model has no direct link from \u201c${from.label}\u201d to \u201c${to.label}\u201d: \u201c${from.label}\u201d moves \u201c${to.label}\u201d through \u201c${v}\u201d. `
       + `You can set how strong that first link is now: on the canvas, click the link from \u201c${from.label}\u201d to \u201c${v}\u201d, and under `
       + '\u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. That records how strong you judge the link, not your figure."';
+  }
+  // Codex r2 on #2641: a pair the model already holds as a SHARED CAUSE (bidirected) cannot take an added link
+  // (`propose_model_change` refuses already_present), so that offer is never made for it.
+  if (edges.some((e) => e.from === from.id && e.to === to.id)) {
+    return 'Nothing was prepared. Tell the user exactly this: '
+      + `"The model holds \u201c${from.label}\u201d and \u201c${to.label}\u201d as moved by a shared cause, not one moving the other, so there is `
+      + 'no effect to record. If you meant two other factors, name them and I\u2019ll check."';
   }
   return 'Nothing was prepared. Tell the user exactly this: '
     + `"The model has no link from \u201c${from.label}\u201d to \u201c${to.label}\u201d, so there is no effect to record yet. `

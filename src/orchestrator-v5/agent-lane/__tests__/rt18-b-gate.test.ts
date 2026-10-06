@@ -175,5 +175,32 @@ describe('RT-18 (cut 5): no (B) ask without a working answer, and never a click 
     expect(twin('£')).toBeUndefined();
     expect(twin('percentage points', '% of appointments')).toBeUndefined();
   });
+  // Codex r2 on #2641: the named route is one the canvas edit can take; a shared-cause pair is never offered an added link.
+  const RAW = (): Rec => JSON.parse(readFileSync(new URL('./fixtures/rt18-dental-74cc7aea-graph.json', import.meta.url), 'utf8')) as Rec;
+  it('ROUTE EDITABLE: an ambiguous first link (a bidirected twin on fee → deterrence) is skipped for the next editable route', async () => {
+    const g = RAW();
+    g.edges.push({ from: 'missed_appointment_fee', to: 'financial_deterrence_of_no_shows', edge_type: 'bidirected', strength: { mean: 0.1, std: 0.05 },
+      exists_probability: 0.5, effect_direction: 'positive' });
+    const r = await propose(world(g), 'no-shows', A1, 'percentage points');
+    expect(r).toMatchObject({ ok: false, refusal: 'no_such_link' });
+    expect(String(r.detail)).not.toMatch(/click the link from “Missed-appointment fee” to “Financial deterrence of no-shows”/);
+    expect(String(r.detail)).toMatch(/through “Fee-related patient dissatisfaction”\. You can set how strong that first link is now: on the canvas, click the link from “Missed-appointment fee” to “Fee-related patient dissatisfaction”/);
+  });
+  it('ROUTE EDITABLE: a duplicated id on the way is skipped too (never a label from the wrong entity)', async () => {
+    const g = RAW();
+    g.nodes.push({ id: 'financial_deterrence_of_no_shows', kind: 'option', label: 'Option D' });
+    const r = await propose(world(g), 'no-shows', A1, 'percentage points');
+    expect(String(r.detail)).not.toMatch(/Option D|Financial deterrence of no-shows/);
+    expect(String(r.detail)).toMatch(/through “Fee-related patient dissatisfaction”/);
+  });
+  it('SHARED CAUSE: a pair held only as bidirected is never offered an added link (propose_model_change would refuse it)', async () => {
+    const g = RAW();
+    g.edges.push({ from: 'missed_appointment_fee', to: 'patient_appointment_awareness', edge_type: 'bidirected', strength: { mean: 0.1, std: 0.05 },
+      exists_probability: 0.5, effect_direction: 'positive' });
+    const r = await propose(world(g), 'Patient appointment awareness', A2, '%');
+    expect(r).toMatchObject({ ok: false, refusal: 'no_such_link' });
+    expect(String(r.detail)).not.toMatch(/I can add that link/);
+    expect(String(r.detail)).toContain('as moved by a shared cause, not one moving the other');
+  });
 });
 
