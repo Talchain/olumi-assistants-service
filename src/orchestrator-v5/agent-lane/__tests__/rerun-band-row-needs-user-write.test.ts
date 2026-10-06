@@ -111,6 +111,11 @@ describe('the receipt binding (`userWrittenLinksForRunPair`), on the j3rw pair',
     expect(userWrittenLinksForRunPair(facts, delta(), [first, second])).toEqual([edited]);
     expect(userWrittenLinksForRunPair(facts, delta(), [second, first])).toEqual([edited]);
   });
+  it('a chain whose receipts share one timestamp has no provable order → none (buddy r2 P2)', () => {
+    const m1 = meanOf(J3RW.s1, edited); const m2 = meanOf(J3RW.s2, edited); const mid = (m1 + m2) / 2;
+    const at = '2026-10-06T03:05:00.000Z';
+    expect(userWrittenLinksForRunPair(facts, delta(), [{ fact: receipt(edited, m1, mid), created_at: at }, { fact: receipt(edited, mid, m2), created_at: at }])).toEqual([]);
+  });
   it('a chain with a gap (something else moved the link between two edits) → none', () => {
     const m1 = meanOf(J3RW.s1, edited); const m2 = meanOf(J3RW.s2, edited); const mid = (m1 + m2) / 2;
     const first = { fact: receipt(edited, m1, mid), created_at: '2026-10-06T03:03:00.000Z' };

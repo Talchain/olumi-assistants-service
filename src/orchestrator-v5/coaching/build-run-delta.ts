@@ -585,6 +585,9 @@ function recordedRunPair(
         .filter((r): r is { at: number; move: { before: number; after: number } } => r.move !== null)
         .sort((a, b) => a.at - b.at);
       if (chain.length === 0) return false;
+      // Two receipts at the same instant (or the same millisecond) have no provable order, and an order is what a chain
+      // claims (buddy r2 P2 on #2647): no author is claimed.
+      if (chain.some((r, i) => i > 0 && r.at === chain[i - 1]!.at)) return false;
       // Receipts record the PERSISTED strength (clamped to ±1); a Run restores the full β from `clamped_from` before it
       // sends (run-analysis.ts). So the chain is walked in persisted terms (buddy r1 P2-2 on #2647).
       let mean = persistedMean(priorMean);
