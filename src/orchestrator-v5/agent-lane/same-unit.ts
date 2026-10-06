@@ -241,6 +241,15 @@ export function readUnitParts(unit: unknown): UnitParts | null {
   return { kind: 'count', code: null, scale: 1, noun: nouns.map(singular), per, base: null, qualifiers: null, period };
 }
 
+/**
+ * The percent unit shared by change-goal readers. The one grammar owns every spelling and qualifier, and keeps
+ * points distinct. Callers can inspect the base/qualifiers before treating a percent as only a change's size.
+ */
+export function readPercentUnit(unit: unknown): UnitParts | null {
+  const parts = readUnitParts(unit);
+  return parts?.kind === 'percent' ? parts : null;
+}
+
 const sameWords = (a: readonly string[], b: readonly string[]): boolean => a.join(' ') === b.join(' ');
 /** `outer` contains `inner` as a contiguous run (a stated "new subscriber" contains the declared "subscriber"). */
 const containsWords = (outer: readonly string[], inner: readonly string[]): boolean =>

@@ -43,6 +43,7 @@ import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
+import { readPercentUnit } from './same-unit.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { bindStatedLinkSizes, type PassThroughBinding } from './stated-size-binding.js';
 import type { LabelHeadReading } from './label-head-unit.js';
@@ -2748,7 +2749,8 @@ function goalLevelIsEstimated(goal: CandidateModel['goal']): boolean {
  * points") names a measure, never only a change's size.
  */
 export function isBarePercent(unit: unknown): boolean {
-  return typeof unit === 'string' && /^(?:%|percent|per\s+cent|percentage)$/i.test(unit.trim());
+  const parts = readPercentUnit(unit);
+  return parts !== null && parts.base === null && parts.qualifiers === null;
 }
 
 /**
@@ -2759,13 +2761,17 @@ const PERCENTAGE_QUANTITY = /%|\b(?:rates?|ratios?|shares?|margins?|churn|retent
 
 /**
  * ⛔ THE "%" OF A RELATIVE CHANGE, NEVER THE QUANTITY'S OWN UNIT (DL 0df0e1 founder trace Q1; AIE review on #87 6016108422 (1)).
- * True ONLY when the "%" is solely the size of a relative change on a quantity that is not a percentage: "increase
- * productivity by at least 10%". A quantity measured in % keeps it as its unit: "cut churn rate by 10%" is a relative
+ * True ONLY when the percent unit (bare or explicitly "change from today") is solely the size of a relative change
+ * on a quantity that is not a percentage: "increase productivity by at least 10%". A quantity measured in % keeps it
+ * as its unit: "cut churn rate by 10%" is a relative
  * change of a % metric, and "win rate" or "conversion rate" are read in %. A level frame is never a change: its "%" is the
  * level's own. Fail-closed toward the stored unit: any percentage-quantity word in the name keeps the "%".
  */
 export function isChangeOwnPercent(goal: { readonly metric?: unknown; readonly unit?: unknown; readonly frame?: unknown }): boolean {
-  return goal.frame === 'change_rel' && isBarePercent(goal.unit)
+  const parts = readPercentUnit(goal.unit);
+  const qualifier = parts?.qualifiers?.join(' ');
+  return goal.frame === 'change_rel' && parts !== null && parts.base === null
+    && (qualifier === undefined || qualifier === 'change' || qualifier === 'change from today')
     && !(typeof goal.metric === 'string' && PERCENTAGE_QUANTITY.test(goal.metric));
 }
 
