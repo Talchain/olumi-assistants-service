@@ -135,8 +135,9 @@ describe('S1-D same saved state, live/cold full readiness', () => {
         wireGraph: savedGraph, plotPayload: { goal_node_id: GRAPH.goal_node_id },
       }) : null;
       if (kind === 'goal_unit_changed') expect(inputSnapshot).not.toBeNull();
+      // turn_id belongs to save()'s SessionTurnWrite, not the strict Run fact.
       await save(undefined, [RunAnalysisHandlerFactSchema.parse({
-        fact_type: 'run_analysis', fact_version: 1, noop: false, turn_id: 'run-turn',
+        fact_type: 'run_analysis', fact_version: 1, noop: false,
         result: { scenario_id: SCENARIO, leading_option_id: 'opt_hire', summary: 'A saved comparison.',
           graph_hash_at_run: hash, computed_at: COMPUTED_AT, win_probabilities: { opt_hire: 0.68, opt_hold: 0.32 },
           constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'unevaluated' },

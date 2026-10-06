@@ -143,7 +143,7 @@ import {
   type LeaderLimitRisk,
   type StoredLimitVerdicts,
 } from '../orchestrator/context/constraint-feasibility.js';
-import { deriveAnalysisFreshness, isGoalSnapshotStaleReason, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
+import { compareRunGoalUnitSnapshot, deriveAnalysisFreshness, isGoalSnapshotStaleReason, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional-links.js';
 import { isScenarioAnalysisReasoningAuthority, readScenarioAnalysisClaimSafetyFact, type ScenarioAnalysisClaimSafetyRead } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -612,9 +612,16 @@ export async function readScenarioAnalysis(
     // existing stale-goal explanation; ordinary reads use the live freshness
     // decorators, including its raw edit-token domain (not the selector's hash).
     const graphHash = computeAnalysisAffectingGraphHash(params.graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]) ?? undefined;
+    // An observed-state unit edit also diverges the hash, before freshness can
+    // name the goal-unit change. Use the selected Run's existing snapshot
+    // comparison for readiness copy only; selection and result gates stay put.
+    const readinessDerivation = derivation.reason === 'graph_hash_diverged' && historical !== null
+      && compareRunGoalUnitSnapshot(historical.fact, params.graph) === 'unit_changed'
+      ? { ...derivation, reason: 'goal_unit_changed' as const }
+      : derivation;
     const readinessForRead = analysisReady === undefined ? undefined : withCurrentGraphHash(
       withRunStateFreshness(
-        isGoalSnapshotStaleReason(derivation.reason) ? attachComputedAt(analysisReady, derivation) : analysisReady,
+        isGoalSnapshotStaleReason(readinessDerivation.reason) ? attachComputedAt(analysisReady, readinessDerivation) : analysisReady,
         analysisState,
         { graphHash, analysisResult: boundResult },
       ),
