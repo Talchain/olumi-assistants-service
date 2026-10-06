@@ -40,6 +40,8 @@ export interface EnrichFactorsOptions {
   maxRank?: number;
   /** Timeout in milliseconds (default: 30000) */
   timeoutMs?: number;
+  /** Outer turn deadline/cancellation; omission retains the legacy timeout. */
+  signal?: AbortSignal;
 }
 
 export interface EnrichFactorsResult {
@@ -438,6 +440,7 @@ export async function enrichFactors(
       maxTokens: 4000,
       temperature: 0,
       ...(options.modelOverride !== undefined ? { modelOverride: options.modelOverride } : {}),
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
     });
 
     if (!llmResult.success || !llmResult.response) {

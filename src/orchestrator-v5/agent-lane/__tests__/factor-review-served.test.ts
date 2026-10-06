@@ -45,7 +45,7 @@ import { agentV1TurnRoute, persistedFactorReviewFor } from '../../../routes/agen
 import legacyReviewRoute from '../../../routes/assist.v1.review.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { decisionReviewFor, factorReviewPressLine, DECISION_REVIEW_PRESS_ID } from '../decision-review-press.js';
-import { AGENT_LANE_ENRICH_MODEL } from '../factor-review.js';
+import { AGENT_LANE_ENRICH_MODEL, agentFactorEnrichments, factorReviewSensitivity } from '../factor-review.js';
 import { guidanceHistoryOf } from '../turn-context/guidance-history.js';
 
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -64,7 +64,7 @@ const graph = {
 };
 const enrichment = (question = QUESTION) => ({ factor_id: 'price', sensitivity_rank: 1,
   observations: ['This factor affects the model result.'], perspectives: ['Evidence could test the assumption.'], confidence_question: question });
-const sensitivity = [{ factor_id: 'price', elasticity: 0.62, importance_rank: 1 }];
+const sensitivity = [{ factor_id: 'price', elasticity: 0.62, importance_rank: 1, influence_score: 0.62 }];
 const plotResponse = (withSensitivity = true) => ({ analysis_status: 'computed',
   meta: { seed_used: 42, n_samples: 1000, response_hash: 'h' }, response_hash: 'h',
   results: [],
@@ -80,14 +80,18 @@ const invocation = (): HandlerInvocation => ({
   requestId: 'mc-factor-review', signal: new AbortController().signal, orientationText: '',
 });
 
-async function runAndPersist(withSensitivity = true, agent = true) {
+async function runAndPersist(withSensitivity = true, agent = true, timing: { signal?: AbortSignal; plotDelayMs?: number } = {}) {
   const policy = OPENAI_ONLY('agent_v1_turn');
-  const plot = vi.fn(async (_payload: Record<string, unknown>) => JSON.parse(JSON.stringify(plotResponse(withSensitivity))));
+  const plot = vi.fn(async (_payload: Record<string, unknown>) => {
+    if (timing.plotDelayMs) await new Promise((resolve) => setTimeout(resolve, timing.plotDelayMs));
+    return JSON.parse(JSON.stringify(plotResponse(withSensitivity)));
+  });
   const handler = createRunAnalysisHandler({ plotClient: { run: plot, validatePatch: vi.fn() } as never,
     scenarioReader: async () => ({ graph, rawPersistedGraph: graph, goal_node_id: 'goal',
       options: graph.nodes.filter((n) => n.kind === 'option').map((n) => ({ ...n, option_id: n.id })) }) as never });
   const execute = async () => {
-    const result = await handler(invocation());
+    const call = invocation();
+    const result = await handler({ ...call, signal: timing.signal ?? call.signal });
     await commitDirectAnswer({ response_version: 2, assistant_text: result.assistant_text, blocks: [], insights: [],
       suggested_actions: [], stage_indicator: 'analyse' } as OlumiResponse,
     { scenario_id: SCENARIO, turn_id: randomUUID(), turn_class: 'decide', handler_id: 'run_analysis',
@@ -141,6 +145,87 @@ describe('MC factor review served from the persisted Agent Run', () => {
   const press = () => agentApp.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     scenario_id: SCENARIO, turn_id: randomUUID(), message: 'Review this decision', source: 'chip_click', chip: { id: DECISION_REVIEW_PRESS_ID },
   } });
+
+  it('finding 1: authoritative influence ranks a above b despite intervention-zeroed elasticity', () => {
+    const rows = [
+      { factor_id: 'a', elasticity: 0, influence_rank: 1, influence_score: 0.9 },
+      { factor_id: 'b', elasticity: 0.2, influence_rank: 2, influence_score: 0.1 },
+    ];
+    expect(factorReviewSensitivity(rows)).toEqual([
+      { factor_id: 'a', elasticity: 0, rank: 1 }, { factor_id: 'b', elasticity: 0.2, rank: 2 },
+    ]);
+    const question = 'What evidence would test this assumption in this model?';
+    expect(factorReviewPressLine({
+      graph: { nodes: [{ id: 'a', kind: 'factor', label: 'Demand' }, { id: 'b', kind: 'factor', label: 'Cost' }] },
+      analysisResult: { enrichment: { factor_sensitivity: rows } },
+      factorEnrichments: ['a', 'b'].map((factor_id) => ({ ...enrichment(question), factor_id, sensitivity_rank: 1 })),
+    })).toBe(`The result moves most with ‘Demand’. A question to test it: ${question}`);
+    expect(factorReviewSensitivity([{ factor_id: 'b', elasticity: 0.2 }])).toEqual([]);
+  });
+
+  it('finding 2: PLoT returns with 100 ms remaining; hung extraction stops at the outer cap and cancels the SDK call', async () => {
+    vi.useFakeTimers();
+    const outer = new AbortController();
+    const cap = setTimeout(() => outer.abort(), 1_000);
+    try {
+      sdk.openai.mockImplementationOnce(() => new Promise(() => {}));
+      let settled = false;
+      const pending = runAndPersist(true, true, { signal: outer.signal, plotDelayMs: 900 })
+        .then((result) => { settled = true; return result; });
+      await vi.advanceTimersByTimeAsync(900);
+      expect(extractionSpy).toHaveBeenCalledTimes(1);
+      expect(extractionSpy.mock.calls[0]![2]!.signal).toBe(outer.signal);
+      const sdkSignal = sdk.openai.mock.calls[0]![1]?.signal as AbortSignal | undefined;
+      expect(sdkSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(99);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      expect(sdkSignal?.aborted).toBe(true);
+      const { result } = await pending;
+      const fact = result.handler_facts.find((f) => f.fact_type === 'run_analysis')!;
+      expect(fact.result.enrichment).not.toHaveProperty('factor_enrichments');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      clearTimeout(cap);
+      vi.useRealTimers();
+    }
+  });
+
+  it('finding 2 CONTROL: an expired outer budget skips enrichment without an extraction call', async () => {
+    const outer = new AbortController();
+    outer.abort();
+    const result = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'),
+      () => agentFactorEnrichments(graph, sensitivity, 'expired-factor-review', outer.signal));
+    expect(result).toBeUndefined();
+    expect(extractionSpy).not.toHaveBeenCalled();
+    expect(sdk.openai).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'Would exploring a tech lead first help in this model?',
+    'Could we prioritise a tech lead in this model?',
+    'Would choosing the tech lead help in this model?',
+    'Would hiring a tech lead help in this model?',
+  ])('finding 3: stored option-action/priority paraphrase is withheld: %s', async (question) => {
+    sdk.openai.mockImplementationOnce(async () => ({ choices: [{ message: { content: JSON.stringify({ enrichments: [enrichment(question)] }) } }] }));
+    await runAndPersist();
+    const read = { ...await readStored(), graph: { ...graph,
+      nodes: [...graph.nodes, { id: 'hire-lead', kind: 'option', label: 'Hire a Tech Lead' }] } };
+    expect(read.factorEnrichments).toEqual([enrichment(question)]);
+    expect(factorReviewPressLine(read)).toBeNull();
+    expect(decisionReviewFor(SCENARIO, read).reply).not.toContain(question);
+  });
+
+  it('finding 3 CONTROL: evidence questions and testing the factor first remain available', () => {
+    const read = { graph: { ...graph, nodes: [...graph.nodes, { id: 'hire-lead', kind: 'option', label: 'Hire a Tech Lead' }] },
+      analysisResult: { enrichment: { factor_sensitivity: sensitivity } } };
+    for (const question of [QUESTION, 'What evidence would test whether a tech lead affects this model?',
+      'Would testing the price assumption first help in this model?']) {
+      expect(factorReviewPressLine({ ...read, factorEnrichments: [enrichment(question)] }))
+        .toBe(`The result moves most with ‘Price per seat’. A question to test it: ${question}`);
+    }
+  });
 
   it('(a) RED at base: an Agent Run stores the enrichment and the route serves exactly one rank-1 item', async () => {
     const { plot } = await runAndPersist();
@@ -228,6 +313,7 @@ describe('MC factor review served from the persisted Agent Run', () => {
       const { result } = await pending;
       const fact = result.handler_facts.find((f) => f.fact_type === 'run_analysis')!;
       expect(fact.result.enrichment).not.toHaveProperty('factor_enrichments');
+      expect(sdk.openai.mock.calls[0]![1]?.signal.aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }

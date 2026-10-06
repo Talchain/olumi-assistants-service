@@ -72,6 +72,20 @@ type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v : null);
 
+/** A stored challenge must not propose acting on, or prioritising, a shortened option reference. */
+function questionSuggestsOptionAction(question: string, graph: unknown): boolean {
+  if (!/\b(?:explor(?:e|ing)|choos(?:e|ing)|hir(?:e|ing)|recruit\w*|add(?:ing)?|rais(?:e|ing)|lower\w*|hold\w*|keep\w*|maintain\w*|use|using|switch\w*|select\w*|pursu(?:e|ing)|adopt\w*|prioriti[sz]\w*|prefer\w*|go\s+with|start\s+with|focus\s+on|first|before|ahead\s+of|instead\s+of|priority)\b/i.test(question)) return false;
+  const words = (s: string): string[] => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const questionWords = ` ${words(question).join(' ')} `;
+  return [...graphNodes(graph).values()].some((node) => {
+    if (node.kind !== 'option' || node.label === null) return false;
+    // The option's noun phrase survives a dropped action/article: "Hire a Tech Lead" → "tech lead".
+    const reference = words(node.label);
+    while (reference.length > 1 && /^(?:a|an|the|hire|hiring|recruit|add|adding|raise|lower|hold|keep|maintain|use|using|choose|adopt|switch|to)$/.test(reference[0]!)) reference.shift();
+    return reference.length > 0 && questionWords.includes(` ${reference.join(' ')} `);
+  });
+}
+
 /** One rank-1 challenge, rank only. Every composed byte must survive the existing #2660 egress ladder. */
 export function factorReviewPressLine(read: DecisionReviewRead): string | null {
   const enrichment = recordOf(recordOf(read.analysisResult)?.enrichment);
@@ -81,6 +95,7 @@ export function factorReviewPressLine(read: DecisionReviewRead): string | null {
   const question = str(stored?.find((e) => e.factor_id === driver.factor_id && e.sensitivity_rank === 1)?.confidence_question)?.trim();
   const label = graphNodes(read.graph).get(driver.factor_id)?.label;
   if (!label || !question) return null;
+  if (questionSuggestsOptionAction(question, read.graph)) return null;
   if (!survivesReplyEditors(question, read.graph, read.analysisReady)) return null;
   // Only an open test question: no numeric/value assertion, recommendation or generated observations.
   if (!/^(?:what|which|how could|how would|could|would)\b/i.test(question) || !question.endsWith('?')

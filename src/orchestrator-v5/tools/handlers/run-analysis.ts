@@ -2905,7 +2905,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
     // Option C: compute in-process before the existing fact commit; no callback and no brief carry.
     const factorEnrichments = await agentFactorEnrichments(snapshot.rawPersistedGraph ?? snapshot.graph,
-      (response as Record<string, unknown>).factor_sensitivity, invocation.requestId);
+      (response as Record<string, unknown>).factor_sensitivity, invocation.requestId, invocation.signal);
     // Attached to the PLoT response before the one owned projection stamp (handler-ownership guard pins that line).
     if (factorEnrichments !== undefined) (response as Record<string, unknown>).factor_enrichments = factorEnrichments;
     const factCandidate: RunAnalysisHandlerFact = {
