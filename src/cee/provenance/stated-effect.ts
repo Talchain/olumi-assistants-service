@@ -125,6 +125,26 @@ export function statedEffectSpansInText(
 }
 
 /**
+ * ⭐ A SWITCH'S STATED EFFECT (Science d5 #87 6008844683). "The AI release cuts monthly churn by 6 points" and "the
+ * starter tier would win about 150 new subscribers": one switch turned on, so no per-source figure is ever written. This
+ * validates the TARGET figure only: exactly one located amount, in the target's unit, for a typed effect per ONE switch.
+ * The caller binds it only for a source typed binary that the sentence names (`stated-size-binding.ts`).
+ */
+export function statedSwitchEffectQuoteMatches(
+  quote: string,
+  detail: StatedEffectDetail,
+  onMatch?: (spans: { amount: { start: number; end: number }; per: { start: number; end: number } }) => void,
+): boolean {
+  if (quote.trim().length === 0 || detail.per_source_change !== 1 || detail.per_source_change_unit !== "switch") return false;
+  if (!Number.isFinite(detail.amount) || detail.amount === 0 || detail.amount_unit.trim().length === 0) return false;
+  const target = oneMatchingAmount(locatedAmounts(quote).filter((a) => a.implicitSource !== true), detail.amount, detail.amount_unit, false, quote);
+  if (target === undefined) return false;
+  const span = { start: target.index, end: target.index + target.matchedText.length };
+  onMatch?.({ amount: span, per: span });
+  return true;
+}
+
+/**
  * Validate, rather than extract, a typed natural effect against its quoted span.
  * The quote supplies no endpoints, signs or target values to the model. It
  * validates the four typed fields using located numerals and units; a counting

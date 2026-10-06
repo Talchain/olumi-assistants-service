@@ -214,7 +214,7 @@ function writtenWithALetter(a: { readonly magnitude: number; readonly matchedTex
 }
 
 /** A money unit's own magnitude letter ("£k/month" → 1000, "£m" → 1e6); 1 for a unit with none, or one not money. */
-function moneyUnitScale(unit: unknown): number {
+export function moneyUnitScale(unit: unknown): number {
   if (typeof unit !== 'string') return 1;
   const reading = readCurrencyUnitWithQualifiers(unit);
   return reading.kind === 'currency' && Number.isFinite(reading.multiplier) && reading.multiplier > 0 ? reading.multiplier : 1;
@@ -1269,10 +1269,24 @@ function wordFigureCountsAnotherUnit(q: string, figure: StatedAmount, ends: { re
 }
 
 /** The words after a unit's "of" ("% of appointments" → appointments), determiners dropped; [] when it has none. */
+/**
+ * The words dropped before a denominator is compared, on BOTH sides (the stored unit's and the user's "of …"): U3 (Science
+ * d5 #87 6008156781 (1)) adds "all" ("0.05% of all appointments" is the level's own denominator).
+ */
+export const DENOMINATOR_DETERMINER = /^(?:all|our|the|their|its|your|my|a|an)$/;
+/**
+ * The ONE tokeniser for a denominator's words: letters only, lower-cased, a determiner dropped only when it stands
+ * alone (Codex r1 on #2651: "all-hands meetings" keeps "all", so it never reads as "hands meetings").
+ */
+export function denominatorWords(text: string): string[] {
+  return [...text.matchAll(/[\p{L}]+/gu)].filter((w) => {
+    const joined = text[w.index! - 1] === '-' || text[w.index! + w[0].length] === '-';
+    return joined || !DENOMINATOR_DETERMINER.test(w[0].toLowerCase());
+  }).map((w) => w[0].toLowerCase());
+}
 export function unitDenominatorWords(unit: string): string[] {
   const tail = /\bof\s+(.+)$/iu.exec(unit)?.[1];
-  return tail === undefined ? [] : [...tail.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase())
-    .filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
+  return tail === undefined ? [] : denominatorWords(tail);
 }
 
 /**
@@ -1318,7 +1332,7 @@ function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: 
   // makes the end's name the OWNER of another quantity, never that quantity (Codex step-4 buddy r1/r2 HIGH).
   const owned = /^(['’])(s?)((?:\s+(?!(?:while|and|but|which|that|when|if|as|so|for|than|to)\b)[\p{L}-]+){1,6})/iu.exec(after.slice(m[0].length));
   if (owned !== null) return `${run}${owned[1]}${owned[2]}${owned[3]}`;
-  const content = [...run.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase()).filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
+  const content = denominatorWords(run);
   if (content.length === 0 || content.every(w => wordsOf(target).some(t => sameWord(t, w)))) return undefined;
   // The TARGET's own unit's denominator ("0.05% of appointments" on a target kept in "% of appointments"; red-team F2,
   // #87 6007779166): that run is the target's unit, not another quantity, but ONLY when its words ARE the denominator of

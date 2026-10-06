@@ -19,8 +19,9 @@ import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRe
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
+import { reframedNodeIds } from '../refit-frames.js';
 import { acceptedOlumiEstimateSentence, rerunRecordForModel } from '../rerun-explanation.js';
-import { withinBandMovesForRunDelta } from '../rerun-within-band.js';
+import { rerunPairReadForRunDelta } from '../rerun-within-band.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapApprovalWords, applyOptionGapDeclarations } from '../unmodelled-mechanisms.js';
@@ -1469,6 +1470,16 @@ function stillReadUnitReadings(graph: unknown, item: { readonly from: string; re
 }
 
 /**
+ * ⭐ S5t: the receipt's one sentence for a refit (Science d5 #87 6009444385, verbatim; DL adopted; c6 checks the guards).
+ * A frame is a choice of units, so every other link means the same; a band word read off β may not (cut-7 follow-up).
+ */
+export function frameRefitReceipt(nodes: readonly string[]): string {
+  const named = nodes.map((n) => `‘${n}’`);
+  const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return `Olumi rescaled ${list} so your figure fits. Your other links mean the same as before, though some strength words may read differently.`;
+}
+
+/**
  * ⭐ RT-18 (DL 0df0e1, cut 5): the words for a link the model does NOT hold. Never a click route to that link (the canvas
  * does not show it); always a next step the user can take. If the source reaches the target through other links, the
  * FIRST of them is named with its own canvas route (a link the canvas shows). Otherwise Olumi offers to add the link for
@@ -1586,7 +1597,10 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
       return `Nothing was prepared: the user's figure is more than the analysis can represent on the range the model uses for "${from.label}"`
         + `${rangeOf(from.id)} and "${to.label}"${rangeOf(to.id)}, so it would be cut short. Repeat their figure in their own words, and say `
         + 'plainly that it is that range, not their figure, that stops it being used here. Never ask them to change their figure first, '
-        + 'and never shrink it yourself. That range cannot be changed from this conversation yet, so do not offer to change it.';
+        + 'and never shrink it yourself. Nothing was recorded. Then give them the one route that works today (S5t: never a refusal '
+        + 'with no way forward), in exactly these words: "You can set how strong this link is now: on the canvas, click the link from '
+        + `\u201c${from.label}\u201d to \u201c${to.label}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. `
+        + 'That records how strong you judge the link, not your figure."';
     }
     case 'out_of_domain':
       return `Nothing was prepared: across the options, the user's figure would take "${to.label}" outside the range it can hold. Repeat `
@@ -2809,6 +2823,8 @@ export function createAgentCapabilities(
         expected: { graph_hash: expectedHash, edge_token: item.edge_token }, quote: item.quote, reading_token: item.reading_token,
         ...(item.unit_readings !== undefined ? { unit_readings: item.unit_readings } : {}),
         ...(item.reversal !== undefined ? { reversal: item.reversal } : {}), ...(item.link_selected ? { link_selected: true } : {}),
+        // S5t: a frame refit only where the door admits one — ONE approved link goes to the `link_effect` door (below).
+        ...(approvedEffects.length === 1 ? { frameRefit: true as const } : {}),
         lastRunIdentityUse: approvedRead.identity_run_use ?? null });
       if (dry.kind === 'refused') {
         const from = { id: item.from, label: approvedRead.nodes.find((n) => n.id === item.from)?.label ?? item.from };
@@ -2878,11 +2894,14 @@ export function createAgentCapabilities(
         detail: 'These link sizes were sent, but reading the model back did not show all of them as recorded. Say exactly that; never say they were recorded or not recorded.' };
     }
     proposals.markApplied(parent.proposal_id, receipts);
+    // ⭐ S5t (Science d5 #87 6009444385, DL adopted): a frame the refit widened is said ONCE, in Science's words — read off
+    // the model before approval and the read-back above, never the writer's own account. Only the one-link door refits.
+    const reframed = approvedEffects.length === 1 ? reframedNodeIds(approvedRead.raw, check?.raw) : [];
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       follow_up: approvedEffects.length === 1
-        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'} Any earlier result is now out of date.`
+        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'}${reframed.length > 0 ? ` ${frameRefitReceipt(reframed.map(labelOf))}` : ''} Any earlier result is now out of date.`
         : `Recorded your figures for ${approvedEffects.length} links, from your words, as you confirmed. Any earlier result is now out of date.`,
     };
   };
@@ -3224,10 +3243,12 @@ export function createAgentCapabilities(
       // gets Olumi's record too, so the model can say every change and that nothing proves one caused it.
       const modelCaseCheckedDown = delta !== undefined && (g.run_delta as { attribution_case?: unknown } | undefined)?.attribution_case === 'C1_attributable'
         && (delta as { attribution_case?: unknown }).attribution_case !== 'C1_attributable';
+      // SD-1 interim: a link restated inside its band, and (cut 6) the links the user wrote between the two Runs, both read
+      // from the pair's own persisted Run facts (never on the wire). No read for a model delta shown as licensed.
+      const pairRead = delta !== undefined && !modelCaseCheckedDown ? undefined
+        : await rerunPairReadForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta);
       const rerunRecord = rerunRecordForModel(g.run_delta, delta !== undefined && !modelCaseCheckedDown, g.nodes,
-        [...optionNames.values()].map((a) => a.display),
-        // SD-1 interim: a link restated inside its band, named from the pair's own persisted Run facts (never on the wire).
-        delta !== undefined && !modelCaseCheckedDown ? [] : await withinBandMovesForRunDelta(ctx.scenario_id, ctx.request_id, g.run_delta));
+        [...optionNames.values()].map((a) => a.display), pairRead?.withinBand ?? [], pairRead?.userWrittenLinks);
       return {
         ok: true,
         mutated: false,
@@ -3548,7 +3569,9 @@ export function createAgentCapabilities(
           const dry = applyLinkEffectEdit({ persistedGraph: working, from: from.id, to: to.id, effect,
             expected: { graph_hash: expectedHash, edge_token: edgeToken }, quote: said,
             ...unitReadings, ...consent,
-            reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null });
+            reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null,
+            // S5t: a group of ONE is approved through the one-link door, the only door that admits a frame refit.
+            ...(grouped.length === 1 ? { frameRefit: true as const } : {}) });
           if (dry.kind === 'refused') {
             const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(working, from.id, to.id, g.identity_run_use ?? null) : null;
             fail(dry.reason, definition !== null ? `${definitionalLinkRefusalText(working, definition)} Tell the user exactly this.`
@@ -3672,7 +3695,8 @@ export function createAgentCapabilities(
         expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said,
         ...unitReadings, ...consent,
         // A dry run of the reading the card will show: its own token, so every refusal it returns is about the write.
-        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null });
+        reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: said, ...unitReadings, ...consent }), lastRunIdentityUse: g.identity_run_use ?? null,
+        frameRefit: true });
       if (dry.kind === 'refused') {
         const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
         return { ok: false, mutated: false, refusal: dry.reason,

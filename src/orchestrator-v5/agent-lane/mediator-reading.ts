@@ -28,6 +28,9 @@ import { resolveMagnitudeFrame, unitOf, type MagnitudeNode } from '../../cee/mag
 import { POINTS_SPELLINGS, periodAdverb, periodNoun, type UnitPeriod } from '../../utils/unit-alphabet.js';
 import { carrierCompatible, readUnitParts, sameUnit, singular, words, type UnitParts } from './same-unit.js';
 import { licenceUnsizedLink } from './goal-certainty.js';
+import { linkSizing } from '../../cee/magnitude/link-sizing.js';
+import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -89,7 +92,64 @@ function labelPeriods(label: unknown): Set<UnitPeriod> {
 const hasLevel = (n: Rec): boolean => isRec(n.observed_state)
   && ['value', 'raw_value', 'baseline'].some(k => { const v = (n.observed_state as Rec)[k]; return v !== undefined && v !== null; });
 
+/**
+ * ⭐ T1b (Science d5, 6 Oct, RT-18 class Q1): the user's own sizes on BOTH sides of a level-less mediator size the path,
+ * because M's arbitrary scale cancels in β_in · β_out. Every link (keyed `from→to`: each in-link and the out-link) of each
+ * level-less, single-child M whose links the user sized, read by `linkSizing` 'user' (their figure, a band they set, or
+ * the magnitude they drew the link with): `source` and `magnitude`, which the analysis hash covers, never a display field.
+ * Never (Codex r1 on #2648): an M an option sets (its level is then set directly), a %-level M, an M with its own
+ * identity, or an M its child multiplies (an operand: M's scale does not cancel through a product). P5 and goal certainty
+ * read these as sized, so no question is asked that M's missing unit makes unanswerable. A gauge never overwrites a user
+ * band (`kidUnsized` below).
+ */
+export function userSizedLevelLessLinks(graph: unknown): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return out;
+  const nodes = graph.nodes.filter(isRec);
+  const edges = graph.edges.filter(isRec).filter(e => e.edge_type !== 'bidirected');
+  const byId = new Map(nodes.map(n => [n.id, n] as const));
+  const setByOption = new Set(nodes.filter(n => n.kind === 'option').flatMap(o => Object.keys(mergeInterventionSourceObjects(o))));
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints));
+  const figureOn = (e: Rec): boolean => isRec(e.provenance) && (isRec(e.provenance.natural_effect) || e.provenance.magnitude === 'user_stated');
+  for (const m of nodes) {
+    if (typeof m.id !== 'string' || !['factor', 'risk', 'outcome'].includes(String(m.kind))) continue;
+    const mv = view.get(m.id);
+    if (mv === undefined || unitOf(mv) !== undefined || hasLevel(m) || mv.percent_level === true) continue;
+    if (isRec(m.nonlinear_identity) || setByOption.has(m.id)) continue;
+    const kids = edges.filter(e => e.from === m.id);
+    const into = edges.filter(e => e.to === m.id);
+    if (kids.length !== 1 || into.length === 0) continue;
+    if (into.some(e => { const k = byId.get(e.from)?.kind; return k === 'option' || k === 'decision'; })) continue;
+    const child = byId.get(kids[0]!.to);
+    const operands = isRec(child?.nonlinear_identity) ? (child!.nonlinear_identity as Rec).factor_ids : undefined;
+    if (Array.isArray(operands) && operands.includes(m.id)) continue;
+    const chain = [...into, kids[0]!];
+    // Codex r2 on #2648: a FIGURE counts only while it is a valid, current size (`sizedLinkTest`: its mean and unit), the
+    // same test every sized reader applies; a stale or wrong-unit figure is not the user's size of this link. A band
+    // (no natural effect) is the user's judgement of the strength itself.
+    if (!chain.every(e => linkSizing(e) === 'user' && (!figureOn(e) || sized(e)))) continue;
+    for (const e of chain) out.add(`${String(e.from)}→${String(e.to)}`);
+  }
+  return out;
+}
+
 /** Every mediator reading of a graph, by node id. Pure; one pass. */
+/**
+ * ⭐ S5t (Codex r2 on #2631, P1): every gauge `before` holds as STORED is still the stored gauge, on the same child, in
+ * `after`. A frame refit rescales a link framed at both ends, so a gauge whose mediator and child frames differ leaves ±1
+ * and the reading is lost (a repeated answer would then be read on the mediator's own frame). Such a refit is refused.
+ */
+export function storedGaugesKept(before: unknown, after: unknown): boolean {
+  const now = mediatorReadings(after);
+  for (const [id, was] of mediatorReadings(before)) {
+    if (was.via !== 'gauge' || was.stored !== true) continue;
+    const kept = now.get(id);
+    if (kept?.via !== 'gauge' || kept.stored !== true || kept.child !== was.child) return false;
+  }
+  return true;
+}
+
 export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
   const out = new Map<string, MediatorReading>();
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return out;

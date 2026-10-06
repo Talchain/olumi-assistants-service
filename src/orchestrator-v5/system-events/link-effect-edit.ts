@@ -39,7 +39,8 @@ import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-v
 import { prepareLinkEffectUnitReadings, sentenceCountsLabel, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 import { POINTS_SPELLINGS, POINTS_UNIT } from '../../utils/unit-alphabet.js';
 import { labelStandsForCountUnit } from '../agent-lane/same-unit.js';
-import { GAUGE_OP, mediatorReadings, withMediatorReading } from '../agent-lane/mediator-reading.js';
+import { GAUGE_OP, mediatorReadings, storedGaugesKept, withMediatorReading } from '../agent-lane/mediator-reading.js';
+import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -92,6 +93,12 @@ export interface ApplyLinkEffectEditParams {
   readonly reading_token: string;
   /** What the last Run did with declared identities (`identityRunUseFromFacts`); absent = no Run yet. */
   readonly lastRunIdentityUse?: IdentityRunUse | null;
+  /**
+   * ⭐ S5t: a user's size the frames cannot hold is written and the frames refit by construction's own rule. Opt-in: only the
+   * ONE-link door passes it (its proposer and approval dry runs, and `executeOptionInterventionBatch`'s `linkEffect`), because
+   * only that door admits a refit postimage (`linkEffectRefitPostimageIsScoped`). Absent ⇒ `not_representable`, as before.
+   */
+  readonly frameRefit?: true;
 }
 
 export type LinkEffectRefusal =
@@ -116,6 +123,11 @@ export type LinkEffectEditResult =
       readonly handlerFacts: readonly HandlerFact[];
       /** The size said back in the user's units (`sizeLink`'s own words), for the one-line acknowledgement. */
       readonly statement?: string;
+      /**
+       * ⭐ S5t: present only when the frames were refit — the write BEFORE the refit (the user's link at its full β). The door
+       * scope-checks THIS against the stored graph and recomputes construction's refit from it; never the writer's word.
+       */
+      readonly refitFrom?: unknown;
     }
   | { readonly kind: 'refused'; readonly reason: LinkEffectRefusal };
 
@@ -510,7 +522,11 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     sourceNode,
     targetNode,
   );
-  if (sizing.problem !== undefined) return refuse(sizing.problem);
+  // ⭐ S5t (Science d5 #87 6007669630; DL): a USER's size the frames cannot hold (|β| > 1) is written at its full β and the
+  // frames are refit below by CONSTRUCTION's own rule, exactly as the same sentence in a brief would be. Every other
+  // sizing problem is still a refusal.
+  const fitsByRefit = params.frameRefit === true && sizing.problem === 'not_representable' && sizing.outcome === 'user_stated';
+  if (sizing.problem !== undefined && !fitsByRefit) return refuse(sizing.problem);
   if (sizing.outcome !== 'user_stated' || sizing.natural_effect === undefined) return refuse('unconvertible');
 
   const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance } };
@@ -559,7 +575,30 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
     gaugeEdge.std_defaulted = true;
   }
 
-  const parsed = GraphV3.safeParse(graph);
+  // ⭐ S5t: ONE refit rule for the brief and the chat (no chat-only path): construction's `refitFramesForStatedEffects`, called
+  // as construction calls it, then its clamp-at-persist. A frame is a choice of UNITS: every link touching a re-framed node
+  // keeps its natural size, and raw levels and the raw target stay. If the refit does not fit THIS link (v1 refuses a factor
+  // target, a target an option sets or a limit names, a bounded scale, a moving spread, or a new cut), nothing is written.
+  let written: Rec & { nodes: unknown[]; edges: unknown[] } = graph;
+  let refitFrom: unknown;
+  if (fitsByRefit) {
+    // Only THIS link moves the frames: a stored graph construction would already refit (another user link it now fits) is
+    // refused, so no other link's size changes because of this sentence.
+    if (refitFramesForStatedEffects(params.persistedGraph as Rec).refits.length > 0) return refuse('not_representable');
+    refitFrom = structuredClone(graph);
+    const fitted = refitFramesForStatedEffects(graph);
+    const mine = (fitted.graph.edges as Rec[]).find(e => e.from === from && e.to === to && isDirectedEdge(e as never));
+    if (mine === undefined || !finite((mine.strength as Rec | undefined)?.mean) || Math.abs((mine.strength as Rec).mean as number) > 1) {
+      return refuse('not_representable');
+    }
+    written = clampForPersist(fitted.graph) as typeof graph;
+    // r2 (Codex r1 on #2631): no OTHER link's analysed size may move (a clamped sibling, or one from an implicit frame).
+    if (!refitKeepsOtherLinks(refitFrom as Rec, written, new Set([`${from}→${to}`]))) return refuse('not_representable');
+    // r2b (Codex r2 on #2631): a refit never breaks a gauge (the one written with this answer, or one already stored).
+    if (!storedGaugesKept(refitFrom, written)) return refuse('not_representable');
+  }
+  const writtenEdge = (written.edges as Rec[]).find(e => e.from === from && e.to === to && isDirectedEdge(e as never)) ?? edge;
+  const parsed = GraphV3.safeParse(written);
   if (!parsed.success) return refuse('invalid_graph');
   // `.catch(undefined)` can make the graph parse succeed after dropping a malformed reading. Never report the card's
   // disclosed unit as saved unless each named node still carries precisely that reading after the real reload parse.
@@ -573,9 +612,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
       target_id: `${from}→${to}`,
       status: 'applied',
       before,
-      after: { from, to, strength: { ...(edge.strength as Rec) }, effect_direction: direction, provenance: edge.provenance, stated_quote: params.quote },
+      after: { from, to, strength: { ...(writtenEdge.strength as Rec) }, effect_direction: direction, provenance: writtenEdge.provenance, stated_quote: params.quote },
     },
   });
-  return { kind: 'mutated', mutatedGraph: graph, graph: parsed.data, handlerFacts: [fact as HandlerFact],
-    ...(sizing.statement !== undefined ? { statement: sizing.statement } : {}) };
+  return { kind: 'mutated', mutatedGraph: written, graph: parsed.data, handlerFacts: [fact as HandlerFact],
+    ...(sizing.statement !== undefined ? { statement: sizing.statement } : {}), ...(refitFrom !== undefined ? { refitFrom } : {}) };
 }
