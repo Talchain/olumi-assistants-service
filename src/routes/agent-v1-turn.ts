@@ -119,6 +119,7 @@ import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js'
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
 import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
+import { GUIDANCE_WRAPPER_REFUSAL, runDeliveryFactFor, turnRunReceipts, type RunDeliveryOutcome } from '../orchestrator-v5/agent-lane/run-delivery-fact.js';
 import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
@@ -167,6 +168,7 @@ import {
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { ANSWER_SHAPE_MAX_BULLETS, AnswerShapeSchema, deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure, withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 /**
  * C6-1b: the revision a turn-state packet is bound to when the read found NO graph. Never a hash (a real revision
@@ -1169,7 +1171,28 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
   } };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+/**
+ * 0.79 SD-1 Slice R (DL #87 option A): the scenario read's selected Run, ONLY when `current_read` says it is
+ * `complete_current` and names it (CEE #2654): its `run_id`, the graph it ran against and when it was computed. The
+ * run_delivery writer records the turn's delivery against this Run only when it IS the Run this turn made.
+ */
+export interface ReadbackCurrentRun {
+  readonly runId: string;
+  readonly graphHashAtRun: string;
+  readonly computedAt: string;
+}
+
+export function readbackCurrentRun(raw: unknown): ReadbackCurrentRun | undefined {
+  const read = raw as { run_state?: { kind?: unknown; computed_at?: unknown } | null; run_id?: unknown; computed_against_hash?: unknown } | null | undefined;
+  if (read?.run_state?.kind !== 'complete_current') return undefined;
+  const { run_id: runId, computed_against_hash: graphHashAtRun } = read;
+  const computedAt = read.run_state.computed_at;
+  if (typeof runId !== 'string' || runId === '' || typeof graphHashAtRun !== 'string' || graphHashAtRun === ''
+    || typeof computedAt !== 'string' || computedAt === '') return undefined;
+  return { runId, graphHashAtRun, computedAt };
+}
+
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean; currentRun?: ReadbackCurrentRun }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1229,12 +1252,15 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
    * where nothing errors and everything looks broken.
    */
   let draftGraph: unknown;
+  /** 0.79 SD-1 Slice R: the read's selected Run, when it is current and identified (the run_delivery writer binds to it). */
+  let currentRun: ReadbackCurrentRun | undefined;
   /** The persisted graph as read — the leader wire gate reads its option ROSTER, never a verdict. */
   let graph: unknown;
   try {
     const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (after.status === 200) {
       graph = after.json.graph;
+      currentRun = readbackCurrentRun(after.json.current_read);
       scopeOpen = Array.isArray(after.json.goal_scope_reconciliation) && after.json.goal_scope_reconciliation.length > 0;
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
@@ -1390,7 +1416,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, scopeOpen };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, scopeOpen, currentRun };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -3977,12 +4003,40 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * no claim, no replay, no fence, exactly as before for everything else about an unnamed turn.
      */
     const answerGuidance = guidanceOnAnswer(wireBody.guidance as GuidanceWire | undefined, guidanceHistory, handledGuidancePress);
-    const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
+    /**
+     * ⭐ 0.79 SD-1 Slice R — THE WRITER (DL #87 option A; label `writer-after-prod-0.79`): what this Run's turn
+     * DELIVERED, recorded on this answer row as an append-only `run_delivery` fact, so a reload or a second device shows
+     * the same "Olumi model review" cards (CEE #2654 serves it; DGAI adopts it). `wireBody` here IS the body sent (every
+     * reassignment precedes this line). Bound to the Run THIS turn made (its run_identity = the readback's current Run),
+     * and only within the readback's licence; any doubt omits, and the row is written exactly as before.
+     */
+    // A guidance answer records it too (28% of Run answers carry guidance, DL 6 Oct): `appendThroughRpc` and the SQL
+    // wrapper `append_agent_answer_with_guidance` (migration 20261006070522) admit ONE run_delivery beside guidance.
+    const runDelivery: RunDeliveryOutcome = runDeliveryFactFor({
+      sentBody: wireBody,
+      // The automatic first analysis is this turn's Run too (Codex r1 P2); a later Run in the turn wins.
+      toolResults: turnRunReceipts(fa, result.tool_results),
+      currentRun: finalRead.currentRun,
+      licence: leaderLicenceFromState(analysisState, analysisReady),
+      graph: readbackGraph ?? null,
+      analysisReady,
+    });
+    if (runDelivery.kind === 'recorded' || runDelivery.reason !== 'no_run_this_turn') {
+      log.info({
+        event: 'v5.run_delivery', request_id: String(req.id), scenario_id: scenarioId,
+        ...(runDelivery.kind === 'recorded'
+          ? { outcome: 'recorded', block_count: runDelivery.record.phase3_blocks.length }
+          : { outcome: 'omitted', reason: runDelivery.reason }),
+      }, 'agent-lane: run_delivery');
+    }
+    // A recorded Run delivery is durable too (Desk 6b on #2657): the same minted id as an offer, so an unnamed turn never
+    // drops the record the reload and the second device read.
+    const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined || runDelivery.kind === 'recorded' ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
         // `store.append` stays inside it (C8). No graph rides on this row.
-        const outcome = await appendCheckedGraphWrite({
+        const appendAnswer = (handlerFacts: readonly HandlerFact[]) => appendCheckedGraphWrite({
           store,
           writesGraph: false,
           source: 'agent_turn',
@@ -4004,7 +4058,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           llm_calls_used: providerCallsMade()
             ?? (fastPath === 'approve' || fastPath === 'strengthen' ? 0 : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? 1 : 0) : result.hops + 1),
           duration_ms: Date.now() - startedAt,
-          handler_facts: [],
+          handler_facts: handlerFacts,
           userMessage: message,
           assistantMessage: String(wireBody.assistant_text ?? text),
           ...(answerGuidance !== undefined ? { agent_guidance: answerGuidance } : {}),
@@ -4013,6 +4067,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
           },
         });
+        let outcome: Awaited<ReturnType<typeof appendAnswer>>;
+        try {
+          outcome = await appendAnswer(runDelivery.kind === 'recorded' ? [runDelivery.fact] : []);
+        } catch (err) {
+          // ⛔ The DELIVERY never costs the ANSWER: a DB whose guidance wrapper predates 20261006070522 (not yet applied,
+          // or rolled back) refuses the whole row, and the RPC rolled it back. So that one refusal retries once without
+          // the fact: the answer and its offers stay durable, and only the delivery record is lost (and logged).
+          if (runDelivery.kind !== 'recorded' || !String(err).includes(GUIDANCE_WRAPPER_REFUSAL)) throw err;
+          log.warn({ event: 'v5.run_delivery', request_id: String(req.id), scenario_id: scenarioId, outcome: 'omitted', reason: 'guidance_wrapper_refused' },
+            'agent-lane: run_delivery refused by the guidance wrapper (migration 20261006070522 not applied?) — answer written without it');
+          outcome = await appendAnswer([]);
+        }
         if (outcome.priorTurnConflict === true) {
           // A concurrent request with the SAME id and a DIFFERENT message won the
           // row. This answer is not the recorded one; say so rather than return it.
