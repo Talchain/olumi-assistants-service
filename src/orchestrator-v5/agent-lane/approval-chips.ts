@@ -67,6 +67,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
   // PJ-E-FIG: new factors carrying the user's figures, held on the same seam as the add-risk (`gmh_`).
   propose_new_factor: { label: 'Add these factors', message: 'Yes, add them.' },
+  propose_new_outcome: { label: 'Add this outcome', message: 'Yes, add that outcome.' },
   // SLICE C2: a new figure for a limit the model already holds, written through the product's limit door.
   propose_limit_change: { label: 'Change this limit', message: 'Yes, change that limit.' },
   // The user confirms Olumi's reading of their goal as a product of two of their figures (`identity-card.ts`).
@@ -74,7 +75,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
 };
 
 /** The proposers whose change is HELD on the product's own seam (`gmh_`): the button carries the product's own words. */
-const HELD_ON_THE_PRODUCT_SEAM: ReadonlySet<string> = new Set(['propose_new_option', 'propose_new_risk', 'propose_new_factor']);
+const HELD_ON_THE_PRODUCT_SEAM: ReadonlySet<string> = new Set(['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_new_outcome']);
 
 /**
  * ⛔ ONE APPROVAL CARRIES ONE CHANGE, SO A TURN LEAVES AT MOST ONE PROPOSAL OPEN (AI Conversation #70 5847130065 (a);
@@ -179,7 +180,10 @@ export function approvalChipsFor(
   const source = labelSourceFor?.(proposalId);
   const held = source?.result;
   if (HELD_ON_THE_PRODUCT_SEAM.has(tool) && /^gmh_/.test(proposalId) && held !== undefined) {
-    const label = typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
+    const factorCount = Array.isArray(held.factors) ? held.factors.length : undefined;
+    const label = tool === 'propose_new_outcome' ? 'Add this outcome'
+      : tool === 'propose_new_factor' && factorCount === 1 ? 'Add this factor'
+      : typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
     const message = typeof held.held_message === 'string' && held.held_message.trim() !== '' ? held.held_message : approve.message;
     /**
      * ⛔ THE BUTTON NEVER CUTS THE OPTION'S NAME (Paul's test, 27 Sep, B3): the product's label is clamped to 57
@@ -590,6 +594,7 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
   const result = source?.result;
   if (proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return fallback;
   const ops = proposal.operations;
+  if (tool === 'propose_new_factor' && ops.filter((o) => o.op === 'add_node' && (o.value as { kind?: unknown } | undefined)?.kind === 'factor').length === 1) return 'Add this factor';
   /**
    * ⛔ LEVELS THE USER GAVE ARE RECORDED, NOT "STARTING" ONES (AI Conversation #70 5848452740): beside "the levels are
    * your stated figures" the chip read "Use as starting option levels" — the per-tool fallback, since the links the

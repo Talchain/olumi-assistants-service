@@ -75,7 +75,7 @@ import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-cur
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
-import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddOutcomeInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
 import { declinedProposalOf, heldChangeName, isProductHold, productHoldRecord, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
@@ -138,7 +138,9 @@ import {
   CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
   settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
   widenPassingArgs, widenTargetOf, widenTurnForReadback, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
-  type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
+  factorsTurnForReadback, outcomesTurnForReadback, settleFactorsTurn, settleOutcomesTurn,
+  SUGGEST_FACTORS_CHIP, SUGGEST_OUTCOMES_CHIP, widenAddTargetOf, widenHeldReply, WIDEN_ADD_REFUSED_REPLY,
+  type RunFactorsWidenTurn, type RunOutcomesWidenTurn, type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
@@ -734,7 +736,7 @@ function decisionReviewChips(turn: DecisionReviewTurn): OfferedAction[] {
 }
 /** Every press that runs a reasoning method (the selector withholds its rows on one): the next steps and Widen. */
 const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID, DECISION_REVIEW_PRESS_ID, SUGGEST_RISKS_CHIP.id,
-  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID]);
+  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, SUGGEST_FACTORS_CHIP.id, SUGGEST_OUTCOMES_CHIP.id]);
 export { METHOD_PRESS_IDS };
 
 /**
@@ -2402,6 +2404,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           writesDispatched += 1;
           return readCache.around(() => holdAddFactorInProcess(input, String(req.id)));
         },
+        // P14: an outcome is held on the same consent seam, with no edge into the goal.
+        holdAddOutcome: async (input) => {
+          writesDispatched += 1;
+          return readCache.around(() => holdAddOutcomeInProcess(input, String(req.id)));
+        },
         commitLimitEdit: async (input) => {
           writesDispatched += 1;
           return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitEditInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
@@ -3020,13 +3027,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * by RC's structured checks BEFORE the door stores anything (`widenGate`), so it ends in ONE consent card or in RC's
      * deterministic fallback with no card. Unavailable (no goal, unread model) answers with no model call.
      */
-    let widenTurn: WidenTurn | RunRisksWidenTurn | null = null;
+    let widenTurn: WidenTurn | RunRisksWidenTurn | RunFactorsWidenTurn | RunOutcomesWidenTurn | null = null;
     let widenGateResult: WidenGateResult | undefined;
-    // ⭐ S-C: ONE door, a target per press (`widenTargetOf`, by identity): options (its one-card door) or risks.
+    // One explicit readback arm per target: a factor/outcome press never enters the options writer.
     const widenTarget = widenTargetOf(pressedChipId, message);
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTarget !== null) {
       const rb = await readBackState(readingDispatch, scenarioId);
-      widenTurn = widenTarget === 'risks' ? risksTurnForReadback(rb, toolCtx.user_text ?? '') : widenTurnForReadback(pressedChipId, rb);
+      switch (widenTarget) {
+        case 'risks': widenTurn = risksTurnForReadback(rb, toolCtx.user_text ?? ''); break;
+        case 'factors': widenTurn = factorsTurnForReadback(rb); break;
+        case 'outcomes': widenTurn = outcomesTurnForReadback(rb); break;
+        case 'options': widenTurn = widenTurnForReadback(pressedChipId, rb); break;
+      }
       if (widenTurn !== null) fastPath = 'method';
       if (widenTurn !== null && widenTurn.kind === 'unavailable') {
         result = {
@@ -3044,6 +3056,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const widenRun = widenTurn?.kind === 'run' ? widenTurn : undefined;
     const risksRun = widenTurn?.kind === 'run_risks' ? widenTurn : undefined;
+    const factorsRun = widenTurn?.kind === 'run_factors' ? widenTurn : undefined;
+    const outcomesRun = widenTurn?.kind === 'run_outcomes' ? widenTurn : undefined;
+    const toolLessWidenRun = risksRun ?? factorsRun ?? outcomesRun;
     /**
      * ⭐ S-C ADD: the per-item press a widening turn offered. NO model call: the exact message the press was minted with
      * names the risk and its refs (`widenAddCallOf`), and the EXISTING door holds ONE card for the existing approve chip.
@@ -3054,12 +3069,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWidenAddPressId(pressedChipId)) {
       const rb = await readBackState(readingDispatch, scenarioId);
       const call = widenAddCallOf(pressedChipId, message, rb);
-      const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode);
+      const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args), { ...toolCtx, widen_add: true }, capabilities, mode);
       const held = issued?.ok === true && typeof issued.proposal_id === 'string';
       // A held card is NEVER worded as a refusal: the door's own reply, else what is held (served sc-plus-1 defect).
-      const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? riskHeldReply(call!) : RISK_ADD_REFUSED_REPLY;
+      const addTarget = call?.tool === 'propose_new_factor' ? 'factors' : call?.tool === 'propose_new_outcome' ? 'outcomes' : widenAddTargetOf(message);
+      const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? widenHeldReply(call!)
+        : addTarget === 'risks' ? RISK_ADD_REFUSED_REPLY : WIDEN_ADD_REFUSED_REPLY;
+      const retryPress = addTarget === 'factors' ? SUGGEST_FACTORS_CHIP : addTarget === 'outcomes' ? SUGGEST_OUTCOMES_CHIP : RISKS_PRESS;
       fastPath = 'method';
-      widenAdd = { actions: held ? [] : [RISKS_PRESS] };
+      widenAdd = { actions: held ? [] : [retryPress] };
       result = {
         assistant_text: text, items: [],
         tool_calls: call === null || issued === undefined ? [] : [{ name: call.tool, ok: held, mutated: false,
@@ -3234,7 +3252,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⏱ M3 latency (RC T1 map item 5; SCIENCE/DSK #85 5942859063): a method turn is tool-less and checked BEFORE it is
       // sent, so it is an interpret-shaped call — the banked interpret budget (Sol, effort low; `model-budgets.ts`), not
       // the coach's conversation budget (Sol, effort high: 716 reasoning tokens, 25.5 s for ONE served call, R3 j7 @ecce374d).
-      if (methodTurn?.kind === 'run' || risksRun !== undefined) budget = interpretBudget();
+      if (methodTurn?.kind === 'run' || toolLessWidenRun !== undefined) budget = interpretBudget();
       result = await runAgentTurn(
         {
           ctx: { ...toolCtx,
@@ -3247,14 +3265,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           message,
           instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
             : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
-            : risksRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${risksRun.directive}` : AGENT_INSTRUCTIONS,
+            : toolLessWidenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${toolLessWidenRun.directive}` : AGENT_INSTRUCTIONS,
           maxOutputTokens: budget.max_output_tokens,
           mode,
           // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
-          withheldTools: methodTurn?.kind === 'run' || risksRun !== undefined ? toolsFor(mode).map((t) => t.name)
+          withheldTools: methodTurn?.kind === 'run' || toolLessWidenRun !== undefined ? toolsFor(mode).map((t) => t.name)
             // Widen: ONE call, and its ONLY tool is the add-option door (forced below), so the turn ends in one card or none.
             : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
-          ...(methodTurn?.kind === 'run' || widenRun !== undefined || risksRun !== undefined ? { maxHops: 1 } : {}),
+          ...(methodTurn?.kind === 'run' || widenRun !== undefined || toolLessWidenRun !== undefined ? { maxHops: 1 } : {}),
           // Before the widen and chip forcings below, which win if both were ever set.
           ...(linkSentenceTool !== undefined ? { firstCallTool: linkSentenceTool } : {}),
           ...(levelAnswerTool !== undefined ? { firstCallTool: levelAnswerTool } : {}),
@@ -3359,6 +3377,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         scenario_id: scenarioId, widen_target: 'risks', offered: settled.offered, gap: risksRun.gap?.kind ?? null,
         gate_dropped: settled.gate.dropped,
       }, 'agent-lane: widen turn settled');
+    }
+    if (factorsRun !== undefined || outcomesRun !== undefined) {
+      const draft = result.stopped_reason === 'answered' ? text : '';
+      const settled = factorsRun !== undefined ? settleFactorsTurn(factorsRun, draft) : settleOutcomesTurn(outcomesRun!, draft);
+      text = settled.reply;
+      widenActions = settled.actions;
+      result = { ...result, assistant_text: text, items: [], tool_calls: [], tool_results: [] };
+      log.info({ scenario_id: scenarioId, widen_target: factorsRun !== undefined ? 'factors' : 'outcomes',
+        offered: settled.offered, gate_dropped: settled.gate.dropped }, 'agent-lane: widen turn settled');
     }
     if (widenRun !== undefined) {
       const settled = settleWidenTurn(widenRun, { assistant_text: result.stopped_reason === 'answered' ? text : '', tool_calls: result.tool_calls, tool_results: result.tool_results });
