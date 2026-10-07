@@ -99,6 +99,7 @@ import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct
 import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-sentence-route.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -118,7 +119,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
+import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -659,7 +660,8 @@ export const MODEL_RELATIVE_NAMING_INSTRUCTION =
   + 'If the result gives no such share, make no claim about how runs fell: say what the result rests on instead. Keep any provisional or limit condition the rules above require in that same sentence. '
   + 'Never name an option as leading, ahead, favoured, on top or winning in other words, and never without \u201cin this model\u201d. '
   + 'Never call a result, finding, option or link \u201cfragile\u201d: say what the result rests on instead, in the result\u2019s own terms, '
-  + 'such as the assumption its decision_sensitivity names when measured, and whose figure it is.';
+  + 'such as the assumption its decision_sensitivity names when measured, and whose figure it is. '
+  + "When the result gives options' chances of meeting the goal, lead with those chances as the rules below allow, and give any run share after them as supporting detail; never open with the share.";
 
 /**
  * ⭐ D3 step 2, DL 0df0e1 ruling C (6 Oct): step 2 puts each option's licensed chance of meeting the goal in front of the
@@ -2071,6 +2073,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const unavailableExplanation = new Set([interpretationUnavailableText({ ok: true, ran: true }), RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT]);
       let replayText = prior.assistant_message ?? 'That request was already completed.';
       let replayNarration: { status: 'pending' | 'ready' | 'unavailable' | 'stale'; run_key: string } | undefined;
+      // ⭐ 2b-0 (DL: reload = same): the replayed Run reply passes the SAME pure composer with the SAME typed roles as the
+      // live uninterpreted Run (the ready text and break-even as host parts, the withheld goal chance's sentence as its
+      // reason, asks as asks, the root line and basis as evidence), so the bytes and `_answer_shape` come out equal.
+      let replayObligations: FaceObligation[] | undefined;
       const boundControl: OfferedAction[] = [];
       const whatChangesReplay = approvedProposal === undefined && (explanationId === TIPPING_POINT_PRESS_ID
         || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, WHAT_CHANGES_CHIP_OPERATION)));
@@ -2128,14 +2134,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         } else {
           replayNarration = { status: 'ready', run_key: runKey };
         }
-      } else if (approvedProposal === undefined && typedRunOf(body) && replayText.startsWith(RUN_RESULT_READY_TEXT)) {
+      } else if (approvedProposal === undefined && typedRunOf(body) && replayText.includes(RUN_RESULT_READY_TEXT)) {
+        // B15: the atomic ready part may follow the typed chance headline in the stored derivation.
         if (replayChip !== null) {
           // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
           const say = goalChanceWithheldForAgent(state.analysisResult, state.graph)?.say;
-          const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
+          // The live Run turn's methods note (`disclosuresFor`, a Run on this turn) comes first in its owed lines.
+          const indexNow = indexGoalWeightsMessages(state.analysisResult);
+          const owedNow = [...indexNow, ...(typeof say === 'string' && say.trim() !== '' ? [say] : [])];
           // MC D1 (c): the same #416 ask the live Run turn said, from the same readback.
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           if (askNow !== null) owedNow.push(askNow);
@@ -2157,7 +2166,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const breakEvenNow = (state.analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
             ? (state.scopeOpen ? null : breakEvenFor(state.graph, state.identityEvaluated)) : null;
           if (breakEvenNow !== null) rebuilt = withBreakEvenAnswer(rebuilt, breakEvenNow, { afterIdentityAsk: false });
+          // B15: the live Run turn's screen chance lines, at the live turn's stage (after break-even, before A7), by its
+          // helpers on the same readback: without them the replay loses the typed chance headline the user first saw.
+          const screenNow = goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
+            (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
+          rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
           replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
+          replayObligations = [
+            { role: 'host', text: RUN_RESULT_READY_TEXT },
+            ...(typeof say === 'string' && say.trim() !== '' ? [say, ...sentencesOf(say)].map((text): FaceObligation => ({ role: 'withheld_reason', text })) : []),
+            ...[askNow, ...lines].filter((l): l is string => typeof l === 'string' && l.includes('?')).map((text): FaceObligation => ({ role: 'ask', text })),
+            ...indexNow.map((text): FaceObligation => ({ role: 'host', text })),
+            ...[rootNow, owedNow.find((l) => l !== say && l !== askNow && l !== rootNow && !indexNow.includes(l) && !l.includes('?'))]
+              .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text): FaceObligation => ({ role: 'evidence', text })),
+            // The live turn types its decision lines and break-even arithmetic as host parts (a line that asks is the ask).
+            ...lines.filter((l) => !l.includes('?')).map((text): FaceObligation => ({ role: 'host', text })),
+            ...(breakEvenNow !== null ? [{ role: 'host' as const, text: breakEvenLine(breakEvenNow, { afterIdentityAsk: false }) }] : []),
+            // The live turn's typing of the same lines (one finding = chance + depends; lead: true).
+            ...screenNow.flatMap((l): FaceObligation[] => [
+              ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: `${l.chance} ${l.depends}`, lead: true as const }]),
+              { role: 'evidence', text: l.chance, lead: true },
+              ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: l.depends }]),
+            ]),
+          ];
           replayNarration = { status: 'pending', run_key: replayChip.id.slice(RUN_EXPLANATION_PREFIX.length) };
           boundControl.push(replayChip);
         } else {
@@ -2199,6 +2230,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // `draft_graph` is read back only when the graph has content.
           modelExists: state.draftGraph !== undefined,
         });
+      // ⛔ RELOAD = SAME, PROVED AT RUNTIME (Codex r1 on #2783): the rebuild re-derives the live turn's lines, and every
+      // live branch it does not mirror (leader gate, a proposal card's profile, a link ask, a held lapse…) would compose a
+      // different shape. So the shape rides only when the composed replay IS the stored words the user first saw; any
+      // other replay ships the rebuilt text whole, as before 2b-0 (the structural-challenge replay's rule).
+      const composedCandidate = replayObligations === undefined ? null
+        : composeReplyShape({ text: withoutProposalIds(replayText), obligations: replayObligations, graph: state.graph ?? null, profile: 'coaching' });
+      const replayComposed = composedCandidate !== null && composedCandidate.shape !== null
+        && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       const replayCard = replayRecords[0];
       const replayActions = firstOfEachId([...stillValid, ...boundControl]);
       const methodTerminalReplay = approvedProposal === undefined && (whatChangesReplay || isMethodPress(explanationId)
@@ -2209,7 +2248,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
       for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
       const composedReplay = composeDirectAnswerResponse({
-        assistant_text: withoutProposalIds(replayText),
+        assistant_text: replayComposed !== null ? replayComposed.text : withoutProposalIds(replayText),
         stage: 'frame',
         answerKind: 'substantive',
         // The bound Explain control is re-derived from the canonical readback above, so it is valid by construction.
@@ -2219,6 +2258,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...finaliseV5Response(composedReplay, { scenarioId, runDeltaBoundByCaller: true }),
         ...(replayFields !== undefined ? { _proposal_fields: replayFields } : {}),
         ...(replayNarration !== undefined ? { narration: replayNarration } : {}),
+        ...(replayComposed?.shape != null ? { _answer_shape: replayComposed.shape } : {}),
         // The CURRENT result as the live turn carries it: the readback's bound block and its sidecars, same fact.
         ...(resultFirstReplay && state.analysisResult !== undefined ? { blocks: [state.analysisResult] } : {}),
         ...(resultFirstReplay && state.limitVerdicts !== undefined ? { limit_verdicts: state.limitVerdicts } : {}),
@@ -2236,7 +2276,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
       const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       // ⭐ PR-S2 r5: a replayed reply never denies the driver the screen shows (`goal-chance-driver-egress.ts`).
-      return withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
+      const gatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_replay',
         scopeAuthorityUnavailable: state.scopeAuthorityUnavailable,
@@ -2250,6 +2290,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
       });
+      // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
+      // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
+      return withShapeOnlyIfItDerives(gatedReplay);
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
@@ -4380,10 +4423,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * turn's asks, the leader gate's closing and every no-leader sentence, the Explain caveat, and required evidence (screen
      * chance lines, basis, a root treated as zero) and the withheld goal chance's reason (S-E GOALS #2742). Every other host
      * line (owed disclosures, the status/receipt, CEE's run words, the arithmetic) is ONE typed part, never split, that may
-     * go to detail (R1). The leader-free envelope, and a turn no model wrote words for (`host_composed`), ship whole.
+     * go to detail (R1). The leader-free envelope and other `host_composed` turns ship whole; an uninterpreted Run
+     * uses coaching, with its first host part whole as the headline.
      * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
      */
     {
+      // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
+      const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
       const reply = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
@@ -4411,8 +4457,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Required evidence, never hidden (AIE line review): the screen's chance lines, the comparison's basis, a root
         // the Run treated as zero. A chance and what it depends on are ONE finding: the joined line (as
         // `withScreenLinesOwed` writes it) binds as one unit when present, else each sentence binds where it stands.
-        ...[...screenLines.flatMap((l) => [l.depends === '' ? null : `${l.chance} ${l.depends}`, l.chance, l.depends]), basis, rootLine]
-          .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text) => ({ role: 'evidence' as const, text })),
+        ...screenLines.flatMap((l): FaceObligation[] => [
+          ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: `${l.chance} ${l.depends}`, lead: true as const }]),
+          { role: 'evidence', text: l.chance, lead: true },
+          ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: l.depends }]),
+        ]),
+        ...[basis, rootLine].filter((l): l is string => typeof l === 'string' && l.trim() !== '')
+          .map((text) => ({ role: 'evidence' as const, text })),
         // The withheld goal chance's reason (S-E GOALS #2742: the chance-goal sentence speaks alone) is a withheld reason:
         // the whole owed line when it stands, else each of its sentences where it stands (a re-ask may have dropped one).
         ...(goalChanceOwed !== null ? [goalChanceOwed, ...sentencesOf(goalChanceOwed)] : [])
@@ -4422,7 +4473,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // the ask; the rest may sit under More detail (R1).
         // A host line that carries the open-questions segment is typed up to it: the segment has its own place (detail,
         // DGAI's questions toggle), and a part spanning it could not be located as one unit.
-        ...[...owed.filter((l) => l !== goalChanceOwed), narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
+        ...[...(uninterpretedRun ? [RUN_RESULT_READY_TEXT, ...decisionLines] : []), ...owed.filter((l) => l !== goalChanceOwed), narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
           .map((l) => (typeof l === 'string' ? (openQuestionsSegment(l)?.lead ?? l).trim() : l))
           .filter((l): l is string => typeof l === 'string' && l !== '')
           .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),
@@ -4435,7 +4486,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // profile (by identity: `widenAdd` and a made proposal), so the door's words ship whole, never reshaped.
       const profile: ReplyProfile = widenAdd !== null && madeProposal ? 'proposal'
         : fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
-      // No model wrote words this turn (a card press, an uninterpreted Run, the action bar's typed reply: S-B #2751's
+      // No model wrote words this turn (a card press, an uninterpreted Explain, the action bar's typed reply: S-B #2751's
       // can't-yet / already-waiting words): every line is the host's, shipped as composed. The bar's sidecars (`_action`)
       // are attached after this block and never pass the composer.
       const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
@@ -4447,7 +4498,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
-          : narratorModel === null ? { keepWhole: 'host_composed' as const } : {}),
+          : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const } : {}),
       });
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
       // Written only when the composer shaped the reply or placed owed detail lines: an unshaped, unchanged reply (or a

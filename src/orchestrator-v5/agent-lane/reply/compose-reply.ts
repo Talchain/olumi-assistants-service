@@ -39,6 +39,7 @@
  * Regexes: bounded runs only; every unbounded `.*` is a single class over one line (linear). Timing rows:
  * `__tests__/compose-reply.test.ts`.
  */
+import { z } from 'zod';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
@@ -75,19 +76,25 @@ export const REPLY_SHAPE_INSTRUCTION =
 /**
  * A host line by its exact text. `ask`, `withheld_reason`, `caveat` and `evidence` must be seen without opening "More
  * detail"; `host` (a receipt, a status, CEE's own run words, the arithmetic) is one atomic part that may sit in detail (R1)
- * but is never split. A reply with no model sentence outside host parts ships as the host composed it.
+ * but is never split. In coaching with only typed host parts, the first part is the whole headline.
  */
 export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence' | 'host' | 'detail';
 /** Overlapping obligations are one unit carrying the strongest role among them. */
 const ROLE_RANK: Record<FaceObligationRole, number> = { ask: 5, withheld_reason: 4, caveat: 3, evidence: 2, host: 1, detail: 0 };
-export interface FaceObligation { readonly role: FaceObligationRole; readonly text: string; readonly subjects?: readonly string[] }
+export interface FaceObligation {
+  readonly role: FaceObligationRole;
+  readonly text: string;
+  readonly subjects?: readonly string[];
+  /** B15: a typed screen goal-chance finding leads when present; its evidence rank is unchanged. */
+  readonly lead?: true;
+}
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
 /** The typed response profile, chosen by the turn kind (never by reading the words). */
 export type ReplyProfile = 'coaching' | 'method_step' | 'proposal';
 /**
  * Why a reply ships whole by the turn's identity: its profile is not `coaching`, the egress replaced the body, or no model
- * wrote words this turn (a card press, an uninterpreted Run: the host composed every line, `host_composed`).
+ * wrote words this turn (a card press, an uninterpreted Explain: `host_composed`). Uninterpreted Run uses coaching.
  */
 export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed';
 
@@ -323,11 +330,21 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const leadIn = beforeRun !== undefined && beforeRun.obligation === undefined && eligible(beforeRun) && beforeRun !== ask
     && (beforeRun.kind === 'heading' || /:["'”’)\]*]{0,4}$/.test(beforeRun.text)) ? beforeRun : undefined;
 
-  const headline = leadIn
+  // ⭐ 2b-0, P05 W-1, DL GO: no narrator units → the first typed host part is the atomic headline.
+  // Evidence/withheld/ask ranks below remain unchanged. No recognition by wording.
+  const hostHeadline = units.every((u) => u.obligation !== undefined) && units[0]!.obligation === 'host'
+    ? units[0] : undefined;
+  // B15 (DL, 7 Oct): the first PRESENT screen goal-chance finding in text order leads, by identity alone.
+  // `present` retains the marker even when overlapping obligations bind as one larger atomic unit. The unit must BE that
+  // finding (exact text): a bullet that carries it beside other sentences (a run share) never leads (Codex r1 P1 #2783).
+  const goalChanceHeadline = units.find((u) => present.some((o) => o.lead === true && u.text === o.text));
+  // A unit that carries a lead finding beside other words never leads by ANY selector (Codex r2 P2 #2783).
+  const mixedLead = (u: Unit): boolean => present.some((o) => o.lead === true && u.text !== o.text && u.text.includes(o.text));
+  const headline = goalChanceHeadline ?? hostHeadline ?? leadIn
     ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u))
     ?? units.find((u) => u.kind === 'heading' && eligible(u))
-    ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host') : undefined)
-    ?? (units.length === 1 && eligible(units[0]!) ? units[0] : undefined);
+    ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host' && !mixedLead(u)) : undefined)
+    ?? (units.length === 1 && eligible(units[0]!) && !mixedLead(units[0]!) ? units[0] : undefined);
   if (headline === undefined) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline' };
 
   const mustFace = [...otherObligations.filter((u) => u !== headline), ...(ask !== undefined && ask !== headline ? [ask] : [])];
@@ -370,8 +387,8 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   };
   // Already in shape, shipped exactly as written: the whole reply fits the face budget with at most one question, or
   // too little would go behind "More detail" to be worth a click.
-  if (detailLines.length === 0 && restatements.size === 0 && measure.words_in <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
-  if (detailLines.length === 0 && restatements.size === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS) return { text, shape: null, outcome: 'already_in_shape', measure };
+  if (goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && measure.words_in <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
+  if (goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS) return { text, shape: null, outcome: 'already_in_shape', measure };
   // More obligations than the face holds: hiding one would break its rule, so the reply ships whole (counted).
   if (measure.face_over_cap) return { text, shape: null, outcome: 'kept_whole', reason: 'face_over_cap', measure };
   // ⛔ A lead-in stays with what it introduces ("…, on current information:" before the screen's chance lines): a face
@@ -382,7 +399,10 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   }
 
   const detail = [renderDetail(detailUnits), split?.segment ?? ''].filter((p) => p.length > 0).join('\n\n');
-  const parsed = AnswerShapeSchema.safeParse({ headline: headline.text, bullets: faceBullets.map((u) => u.text), detail });
+  // A typed host or goal-chance part can contain several sentences; narrator headlines keep the single-sentence contract.
+  const schema = goalChanceHeadline === undefined && hostHeadline === undefined ? AnswerShapeSchema
+    : AnswerShapeSchema.extend({ headline: z.string().trim().min(1) });
+  const parsed = schema.safeParse({ headline: headline.text, bullets: faceBullets.map((u) => u.text), detail });
   if (!parsed.success) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline', measure };
   const shaped = deriveAnswerTextFromShape(parsed.data);
   // ⛔ THE INVARIANT: every sentence of the input, and nothing else, is in the derived text.
@@ -407,4 +427,15 @@ function renderDetail(units: readonly Unit[]): string {
     prev = u;
   }
   return paras.map((p) => p.join('\n')).join('\n\n');
+}
+
+/**
+ * A body's `_answer_shape` rides only while it derives the words that ship (checked AFTER every final gate: an egress may
+ * edit the shape alone, Codex r2 on #2783). Otherwise the body ships its text whole, without the shape.
+ */
+export function withShapeOnlyIfItDerives<B extends { assistant_text?: unknown; _answer_shape?: unknown }>(body: B): B {
+  const shape = body._answer_shape as AnswerShape | undefined;
+  if (shape === undefined || deriveAnswerTextFromShape(shape) === body.assistant_text) return body;
+  const { _answer_shape: _unproven, ...whole } = body;
+  return whole as B;
 }

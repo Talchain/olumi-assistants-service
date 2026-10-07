@@ -179,7 +179,9 @@ describe('wiring: both Agent exits apply the edit after the leader egress', () =
     const live = route.indexOf("exitPath: 'agent_lane_v1_final',\n        ...(turnId");
     expect(live).toBeGreaterThan(route.indexOf("exitPath: 'agent_lane_v1_final',\n        scopeAuthorityUnavailable"));
     expect(route.slice(live - 200, live)).toContain('withoutDriverAbsenceClaimsAtEgress(wireBody, {');
-    expect(route).toContain("return withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {");
+    // #2783 r4: the replay exit keeps this order, then proves its shape after both gates (withShapeOnlyIfItDerives).
+    expect(route).toContain("const gatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {");
+    expect(route).toContain("return withShapeOnlyIfItDerives(gatedReplay);");
     expect(route).toContain("analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',");
   });
 });

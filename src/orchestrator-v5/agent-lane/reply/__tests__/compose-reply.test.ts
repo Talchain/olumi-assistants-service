@@ -14,13 +14,15 @@
  * Quality's 17 real gpt-5.6-terra replies (`compose/__tests__/fixtures/leader-gate-real-replies.json`). Text from outside
  * this author's head.
  */
+import { RUN_RESULT_READY_TEXT } from '../../run-explanation.js';
 import { chanceGoalDeadlineAsk, chanceGoalSentence } from '../../../goal-target/goal-kind.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
+import { scalingRatio } from '../../../../../tests/helpers/scaling-ratio.js';
 import {
-  composeReplyShape, sentencesOf, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
-  type ReplyComposition,
+  composeReplyShape, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
+  type ReplyComposition, type FaceObligation,
 } from '../compose-reply.js';
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
 import { textAtRest } from '../../decision-input-ask.js';
@@ -241,6 +243,28 @@ describe('obligations on a coaching reply (DL R1 + AIE): the headline, the ONE a
       .toMatchObject({ outcome: 'kept_whole', reason: 'no_headline', text });
     expect(composeReplyShape({ text }).text, 'the control: untyped, the same words are reshaped').not.toBe(text);
   });
+  it('B15 / 2b-0: all typed host parts → first screen chance headline; no-marker control retains host headline', () => {
+    const evidence = ['‘Keep Pro at £49’: about 34% chance of meeting your goal, in this model.',
+      '‘Raise Pro to £59 at release’: about 47% chance of meeting your goal, in this model.'];
+    const text = [RUN_RESULT_READY_TEXT, ...evidence, RECEIPT, ARITHMETIC].join('\n\n');
+    const obligations = [{ role: 'host' as const, text: RUN_RESULT_READY_TEXT },
+      ...evidence.map(text => ({ role: 'evidence' as const, text, lead: true as const })),
+      ...[RECEIPT, ARITHMETIC].map(text => ({ role: 'host' as const, text }))];
+    const c = composeReplyShape({ text, obligations, profile: 'coaching' });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.headline).toBe(evidence[0]);
+    expect(c.shape!.bullets).toEqual(evidence.slice(1));
+    expect(c.shape!.detail).toBe(`${RUN_RESULT_READY_TEXT}\n\n${RECEIPT}\n\n${ARITHMETIC}`);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    expect(c.text.startsWith(evidence[0]!)).toBe(true);
+    const control = composeReplyShape({ text, obligations: obligations.map(({ role, text }) => ({ role, text })) });
+    expect(control.shape!.headline, 'positive control: no typed lead retains 2b-0').toBe(RUN_RESULT_READY_TEXT);
+    expect(control.shape!.bullets).toEqual(evidence);
+    expect(control.shape!.detail).toBe(`${RECEIPT}\n\n${ARITHMETIC}`);
+    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset(text));
+    expect(composeReplyShape({ text, obligations, keepWhole: 'host_composed' }))
+      .toMatchObject({ text, shape: null, reason: 'host_composed' });
+  });
   it('a host part is ONE unit, never split: right after the headline it still sits whole (under More detail, R1)', () => {
     const text = `The figure is recorded in the model now. ${RECEIPT} ${NARRATOR}\n\n${ASK}`;
     const c = composeReplyShape({ text, obligations: [{ role: 'host', text: RECEIPT }, { role: 'ask', text: ASK }] });
@@ -379,19 +403,8 @@ describe('the producer half: one shape rule for every model', () => {
 });
 
 describe('timing: every regex on the path scales linearly (20k -> 80k, min of 7 batches, ratio < 8x)', () => {
-  // The batch size is calibrated so the LARGE sample runs >= ~60 ms: a 6.6 ms sample read 8.84x on a CI runner
-  // (7 Oct, #2761). Linear ~ 4x, quadratic ~ 16x; the bar stays < 8x. Measured 20k -> 80k -> 320k: ~4x each step.
-  const batchMs = (f: () => void, calls: number): number => {
-    const t0 = performance.now();
-    for (let j = 0; j < calls; j += 1) f();
-    return performance.now() - t0;
-  };
-  const minBatchMs = (f: () => void, calls: number): number => {
-    batchMs(f, calls); // warm-up
-    let best = Infinity;
-    for (let i = 0; i < 7; i += 1) best = Math.min(best, batchMs(f, calls));
-    return best;
-  };
+  // P51's calibrated helper (min of 7 batches, LARGE sample >= ~60 ms). Linear ~ 4x, quadratic ~ 16x; the bar stays < 8x.
+  // Measured locally 8 Oct: terminators 20k 0.19 ms -> 80k 0.69 ms -> 320k 2.74 ms per call (linear); CI read 8.32x once.
   const shapes: [string, (n: number) => string][] = [
     ['whitespace', (n) => `Lead.${' '.repeat(n)}Next. ${'\t'.repeat(n)}`],
     ['terminators', (n) => `${'.'.repeat(n)} A${'?'.repeat(n)}`],
@@ -403,11 +416,8 @@ describe('timing: every regex on the path scales linearly (20k -> 80k, min of 7 
     expect(large.length).toBeGreaterThanOrEqual(small.length * 3);
     const runLarge = (): void => { composeReplyShape({ text: large }); };
     const runSmall = (): void => { composeReplyShape({ text: small }); };
-    const oneCall = Math.max(Math.min(batchMs(runLarge, 1), batchMs(runLarge, 1), batchMs(runLarge, 1)), 0.001);
-    const calls = Math.min(Math.max(Math.ceil(60 / oneCall), 1), 50_000);
-    const tLarge = minBatchMs(runLarge, calls);
-    const tSmall = Math.max(minBatchMs(runSmall, calls), 0.05);
-    expect(tLarge / tSmall, `20k ${tSmall.toFixed(2)} ms -> 80k ${tLarge.toFixed(2)} ms (x${calls})`).toBeLessThan(8);
+    const growth = scalingRatio(runSmall, runLarge);
+    expect(growth.ratio, growth.detail).toBeLessThan(8);
   });
 });
 
@@ -418,5 +428,100 @@ describe('the ONE label rule (`reply/labels.ts`, D-04): never cut mid-word', () 
     expect(compactWordLabel('meet our next feature-launch deadline', 22)).toBe('meet our next…');
     expect(compactWordLabel('Revenue', 22)).toBe('Revenue');
     expect(compactWordLabel('Supercalifragilistic', 8)).toBe('…');
+  });
+});
+
+describe('B15: a present typed goal-chance finding is the headline, by identity', () => {
+  // Served R-3.chat.txt lines 28–32, verbatim; the first option is not the largest chance.
+  const servedLines = [
+    "In this model, 73% of runs supported ‘Launch starter tier’, provisionally on Olumi’s starting estimates. That share is not its chance of meeting your target.",
+    "For your goal of at least £126,000/month, chances of meeting it, in this model, are:",
+    "Raise prices 10%: about 16%.",
+    "Launch starter tier: about 52%.",
+    "Keep pricing as it is: less than 1%.",
+  ];
+  const text = servedLines.join('\n');
+  const share = sentencesOf(servedLines[0]!)[0]!;
+  const chances = servedLines.slice(2);
+  // Deliberately reverse the obligation order: text order alone determines the headline.
+  const obligations: FaceObligation[] = [...chances].reverse().map(text => ({ role: 'evidence', text, lead: true }));
+  const assertDerivation = (original: string, c: ReplyComposition) => {
+    expect(c.outcome).toBe('shaped');
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset(original));
+  };
+
+  it('R4: served share-first reply → first typed chance exactly; share in bullets/detail; invariant', () => {
+    const c = composeReplyShape({ text, obligations });
+    expect(c.shape, 'typed goal chance produces a headline even below the face budget').not.toBeNull();
+    expect(c.shape!.headline).toBe(chances[0]);
+    expect([...c.shape!.bullets, c.shape!.detail].join('\n')).toContain(share);
+    expect(c.shape!.bullets).toEqual(chances.slice(1));
+    assertDerivation(text, c);
+  });
+
+  it('R5 control: identical words without chance obligations → today’s byte-identical passthrough', () => {
+    const c = composeReplyShape({ text });
+    expect(c).toMatchObject({ outcome: 'already_in_shape', shape: null, text });
+    expect(sentencesOf(c.text.split('\n')[0]!)[0]).toBe(share);
+  });
+
+  it('R5 evidence control: no lead marker retains today’s byte-identical behaviour', () => {
+    const c = composeReplyShape({ text, obligations: chances.map(text => ({ role: 'evidence', text })) });
+    expect(c).toMatchObject({ outcome: 'already_in_shape', shape: null, text });
+  });
+
+  it('R6: chance first, share later → chance headline; existing bullet order is unchanged', () => {
+    const points = ['Check the assumptions.', 'Keep the evidence visible.', share];
+    const reordered = [chances[0]!, ...points.map(p => `- ${p}`)].join('\n');
+    const c = composeReplyShape({ text: reordered, obligations });
+    expect(c.shape!.headline).toBe(chances[0]);
+    expect(c.shape!.bullets).toEqual(points);
+    assertDerivation(reordered, c);
+  });
+
+  it('R8 (Codex r1 P1 #2783): a bullet carrying the share AND a chance never leads; its own-unit control does', () => {
+    const mixed = [`- ${share} ${chances[1]}`, '- Check the assumptions.', '- Keep the evidence visible.', chances[0]].join('\n');
+    const c = composeReplyShape({ text: mixed, obligations });
+    expect(c.shape?.headline ?? '', 'the share-led bullet is not the headline').not.toContain(share);
+    expect(c.shape?.headline, 'the chance standing as its own unit leads').toBe(chances[0]);
+    const alone = [`- ${chances[1]}`, '- Check the assumptions.', '- Keep the evidence visible.'].join('\n');
+    expect(composeReplyShape({ text: alone, obligations }).shape?.headline, 'control: a bullet that IS the chance leads').toBe(chances[1]);
+  });
+
+  it('R7: all-host Run → chance outranks the atomic ready headline; ready goes to detail', () => {
+    const hostText = [RUN_RESULT_READY_TEXT, ...chances.slice(0, 2)].join('\n\n');
+    const c = composeReplyShape({ text: hostText, obligations: [
+      { role: 'host', text: RUN_RESULT_READY_TEXT }, ...obligations,
+    ] });
+    expect(c.shape!.headline).toBe(chances[0]);
+    expect(c.shape!.bullets).toEqual([chances[1]]);
+    expect(c.shape!.detail).toBe(RUN_RESULT_READY_TEXT);
+    assertDerivation(hostText, c);
+  });
+
+  it('atomic two-sentence chance+depends outranks lead-in; other evidence, withheld reason and ask stay on face', () => {
+    const chance = '‘Launch starter tier’: about 52% chance of meeting your goal, in this model.';
+    const depends = 'It depends most on whether starter subscribers affect revenue at all, which Olumi assumed.';
+    const joined = `${chance} ${depends}`;
+    const reason = 'No single option can be put forward on this result yet.';
+    const ask = 'Which assumption should we test first?';
+    const second = '‘Raise prices 10%’: about 16% chance of meeting your goal, in this model.';
+    const atomicText = [share, 'For your goal, on current information:', joined, second, reason, ask].join('\n');
+    const c = composeReplyShape({ text: atomicText, obligations: [
+      { role: 'evidence', text: joined, lead: true },
+      { role: 'evidence', text: chance, lead: true }, { role: 'evidence', text: depends },
+      { role: 'evidence', text: second, lead: true },
+      { role: 'withheld_reason', text: reason }, { role: 'ask', text: ask },
+    ] });
+    expect(c.shape!.headline).toBe(joined);
+    expect(c.shape!.bullets).toEqual([second, reason, ask]);
+    expect(c.shape!.detail).toContain(share);
+    assertDerivation(atomicText, c);
+  });
+
+  it('a typed chance absent from final text does not change the no-chance path', () => {
+    const noChance = `${share} Check the assumptions before relying on these runs.`;
+    expect(composeReplyShape({ text: noChance, obligations })).toEqual(composeReplyShape({ text: noChance }));
   });
 });
