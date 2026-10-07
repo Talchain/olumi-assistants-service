@@ -1,0 +1,7 @@
+I’ve prepared this change: add option 'Raise prices and launch starter tier', with 'Price rise' at 10% (Olumi’s estimate) and 'Starter tier launched' on, link 'Decision: Monthly recurring revenue' to 'Raise prices and launch starter tier', link 'Raise prices and launch starter tier' to 'Price rise' and link 'Raise prices and launch starter tier' to 'Starter tier launched'.
+
+‘Price rise’ is set to 10%, Olumi’s estimate (Olumi’s suggested combined option reuses the 10% increase you are already considering, rather than introducing an unsupported price change.), for you to correct.
+
+‘Starter tier launched’ is set to 1 0 / 1, Olumi’s estimate (Olumi’s suggested combined option switches on the starter tier you described, at its existing £49 monthly price.), for you to correct.
+
+Approve these 4 changes?
