@@ -4394,6 +4394,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
         // `store.append` stays inside it (C8). No graph rides on this row.
+        // S-D x S-D.1b: the floor may reconcile more than once (it re-reads when the latest row moved). Every attempt starts
+        // from the reply as composed BEFORE the floor, and a proposal that did not fit is set aside only after the append.
+        const wireBeforeFloor = wireBody;
+        let overCapAtAppend: readonly PendingAction[] = [];
         const outcome = await appendCheckedGraphWrite({
           store,
           writesGraph: false,
@@ -4408,9 +4412,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               heldRecords = (write.pending_actions ?? []).flatMap(p => {
                 const r = proposalRecord(p, readbackGraph); return r && r.base_graph_hash === graphHash ? [r] : [];
               });
-              for (const h of overCap) if (agentProposalOf(h) !== undefined) proposals.discard(heldProposalId(h));
+              overCapAtAppend = overCap;
               const said = overCap.map(h => heldLapseSentence(heldChangeName(h), 'over_cap'));
-              const actions = (wireBody.suggested_actions as OfferedAction[] | undefined ?? []).filter(a => {
+              const actions = (wireBeforeFloor.suggested_actions as OfferedAction[] | undefined ?? []).filter(a => {
                 const approved = typedApprovalOf({ chip: { id: a.id } }); const declined = declinedProposalOf(a.id);
                 return approved !== undefined ? heldRecords.some(r => r.proposal_id === approved)
                   : declined !== undefined ? heldRecords.some(r => r.proposal_id === declined)
@@ -4421,8 +4425,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                 && !offeredNow.some(a => a.id === oldest.approve_action.id)
                 && fastPath !== 'method' && !decisionReviewRequested
                 && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated)))) actions.unshift(oldest.approve_action as OfferedAction, AMEND_CHIP, oldest.decline_action as OfferedAction);
-              const currentText = String(wireBody.assistant_text ?? text);
-              wireBody = { ...wireBody, assistant_text: said.length > 0 ? `${currentText}\n\n${said.join('\n')}` : currentText,
+              const currentText = String(wireBeforeFloor.assistant_text ?? text);
+              wireBody = { ...wireBeforeFloor, assistant_text: said.length > 0 ? `${currentText}\n\n${said.join('\n')}` : currentText,
                 suggested_actions: firstOfEachId(actions) };
               return { ...write, assistantMessage: String(wireBody.assistant_text),
                 pending_actions: (write.pending_actions ?? []).map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
@@ -4457,6 +4461,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
           },
         });
+        for (const h of overCapAtAppend) if (agentProposalOf(h) !== undefined) proposals.discard(heldProposalId(h));
         if (outcome.priorTurnConflict === true) {
           // A concurrent request with the SAME id and a DIFFERENT message won the
           // row. This answer is not the recorded one; say so rather than return it.
