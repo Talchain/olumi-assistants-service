@@ -98,6 +98,24 @@ const pending = (scenarioId = SID): PendingAction => ({ ...reconciliationPending
   question: 'Which revenue scope should this model represent?', /* #2613-successor (Science d5 6006584860): an UNTYPED question no longer blocks; this fixture's open issue is a typed one. */ scope: { modelled: 'all revenue', alternative: 'one stream', extent: 'total', stated_in_brief: true, source: { quote: 'all revenue' } }, expected: 'billing_basis', operands: [], derivations: [],
 }, Date.parse(AT)), id: PENDING_ID });
 
+/**
+ * S-B (lane ACTION-BAR-CEE): every live agent-lane turn carries the `action_bar` v1 sidecar, and an action press its `_action`
+ * receipt. Both are orthogonal to the leader egress these captures pin, so they are taken out (the bar asserted present and
+ * versioned first) and every OTHER byte must still equal the pristine pre-fix capture: the baselines are not re-recorded.
+ */
+function withoutActionBar(raw: string, live: boolean): string {
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  // A replay re-sends the stored answer: it derives no bar (the reload GET does).
+  if (!live) { expect(parsed['action_bar']).toBeUndefined(); expect(parsed['_action']).toBeUndefined(); return raw; }
+  expect((parsed['action_bar'] as { v?: unknown } | undefined)?.v).toBe(1);
+  const removed = ['action_bar', '_action'].filter((k) => k in parsed);
+  const removedBytes = removed.reduce((n, k) => n + JSON.stringify({ [k]: parsed[k] }).length - 1, 0);
+  for (const k of removed) delete parsed[k];
+  const rest = JSON.stringify(parsed);
+  expect(rest.length, 'only the S-B keys were removed').toBe(raw.length - removedBytes);
+  return rest;
+}
+
 describe('fresh goal scope reaches the canonical leader claim at every route egress', () => {
   let app: FastifyInstance;
   let readState: ReturnType<typeof composeAnalysisStateV1>;
@@ -177,7 +195,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
       expect(body.analysis_state.run_state).toEqual(readState?.run_state);
       expect(body.analysis_state.run_state.computed_at).toBe(RESULT.computed_at);
     }
-    return { body, bytes: response.body };
+    return { body, bytes: withoutActionBar(response.body, body._agent?.replayed !== true) };
   };
   const assertWithheld = (body: Record<string, any>) => {
     expect.soft(body.analysis_state.leader_claim).toEqual({ permitted: false, withheld_reason: 'goal_scope_unresolved' });

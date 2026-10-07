@@ -234,6 +234,10 @@ import type { AnswerOffersRead } from '../orchestrator-v5/session/store.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { answerOffersForReload } from '../orchestrator-v5/agent-lane/answer-offers-reload.js';
 import { executableWaitingProposal } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
+import { actionFactsOf } from '../orchestrator-v5/agent-lane/actions/state.js';
+import { actionBarOf, type ActionBarV1 } from '../orchestrator-v5/agent-lane/actions/rank.js';
+import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
+import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_SCHEMA = "scenario_graph.v1" as const;
@@ -723,6 +727,27 @@ export default async function route(app: FastifyInstance) {
         }) : undefined;
       const conversationTurns = conversationRead === undefined ? undefined : conversationRead?.turns ?? null;
       const heldOffers = conversationRead?.heldOffers;
+      /**
+       * ⭐ S-B: THE ACTION BAR ON RELOAD (github-a2 contract amendment 9: reload by re-derivation). The same pure function the
+       * live turn uses (`actionBarOf(actionFactsOf(…))`), over this read's own fields and the persisted guidance history, so
+       * an unchanged state reloads the bar the last answer carried, byte for byte, and a changed state reloads the bar it
+       * now earns. Only on the reload that restores the conversation (a viewer member's read carries none). A failed
+       * history read ranks with no cooldown; a failed ranking carries no bar and never costs the read.
+       */
+      let actionBar: ActionBarV1 | undefined;
+      if (conversationRequested) {
+        let guidance: GuidanceState | null = null;
+        try { guidance = typeof store.readGuidanceHistory === 'function' ? await store.readGuidanceHistory(scenarioId) : null; } catch { guidance = null; }
+        try {
+          const evaluated = readEvaluatedIdentityNodeIds(analysis.analysis_identity_evaluated_node_ids);
+          actionBar = actionBarOf(actionFactsOf({
+            scenarioId, graph: graphPresent ? graph : null,
+            ...(graphPresent ? { graphHash: computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined } : {}),
+            analysisState: analysis.analysis_state, analysisReady: analysis.current_read.analysis_ready, analysisResult: analysis.analysis_result,
+            optionParticipation: analysis.analysis_option_participation, ...(evaluated !== undefined ? { identityEvaluated: evaluated } : {}), guidance,
+          }));
+        } catch { actionBar = undefined; }
+      }
 
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
@@ -859,6 +884,7 @@ export default async function route(app: FastifyInstance) {
          */
         analysis_admission: projectAnalysisAdmission(graph, graphPresent),
         ...(conversationTurns !== undefined ? { conversation_turns: conversationTurns } : {}),
+        ...(actionBar !== undefined ? { action_bar: actionBar } : {}),
         request_id: requestId,
       });
     },
