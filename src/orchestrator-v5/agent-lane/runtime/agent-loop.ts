@@ -40,6 +40,12 @@ export interface ModelCallRequest {
   readonly deadline_ms?: number;
   /** T1 (b): the ledger's purpose for a cache prewarm (`PREWARM_OUTPUT_TOKENS`); never sent to the provider. */
   readonly purpose?: 'prewarm';
+  /**
+   * P44 S1: this call only states a proposal the previous hop already held (`hopOnlyHeldProposals`), so the route may
+   * send it at the model's banked `narrate` effort (`narrateEffortFor`), with `NARRATE_LABEL_LINE` last in its input. Never sent to
+   * the provider; absent ⇒ as before.
+   */
+  readonly reasoning_role?: 'narrate';
 }
 
 export interface ModelCallResponse {
@@ -223,6 +229,28 @@ export interface AgentTurnResult {
 }
 
 const DEFAULT_MAX_HOPS = 6;
+
+/**
+ * ⭐ P44 S1 — THE CALL AFTER A HELD PROPOSAL ONLY SAYS WHAT THE RESULT HOLDS (DL 58e392 GO, 7 Oct). True when every call of
+ * the hop just made was a proposing tool that held its change (`ok`, not `mutated`, with a `proposal_id`). The next call
+ * then states it and asks for the yes; its decision was the hop before. Measured on the served narration bytes
+ * (prompt 8c743f05, tools ae038f5f), 2 cases × 2 reps per arm: Sol high median 6.7 s vs low 3.1 s, truth rows 8/8 both
+ * (not claimed added, what it threatens, drivers, placeholder, asks, no id; the double-count warning kept 2/2 at low).
+ */
+/**
+ * The one line a narrating call adds at the END of its input (after the cached prefix), never handed on into history.
+ * Without it, low and medium effort named the held risk by paraphrase ("the onboarding-delay risk") 0/2 each; with it, the
+ * exact quoted label 4/4 at low, every other truth row held (DL 58e392 ruling: the user's model labels are quoted exactly).
+ */
+export const NARRATE_LABEL_LINE = 'Name the change you proposed by its exact label, in quotes.';
+const NARRATE_ITEM = { role: 'developer', content: [{ type: 'input_text', text: NARRATE_LABEL_LINE }] } as const;
+
+export function hopOnlyHeldProposals(calls: readonly { name: string }[], results: readonly ToolResult[]): boolean {
+  return calls.length > 0 && calls.length === results.length && calls.every((c, i) => {
+    const r = results[i] as { ok?: unknown; mutated?: unknown; proposal_id?: unknown } | undefined;
+    return isProposingTool(c.name) && r?.ok === true && r.mutated === false && typeof r.proposal_id === 'string' && r.proposal_id !== '';
+  });
+}
 
 // Diagnostic content is deliberately narrower than the tool schema: never
 // copy basis, rationale, quotes, messages, credentials or arbitrary properties.
@@ -429,6 +457,7 @@ export async function runAgentTurn(
     };
   };
 
+  let narrateNext = false;
   for (let hop = 0; hop < maxHops; hop++) {
     const providerStartedAt = now();
     // Eligibility, not the raw catalogue. `eligibleTools` starts from
@@ -442,10 +471,11 @@ export async function runAgentTurn(
       ? input.firstCallTool : undefined;
     const request: ModelCallRequest = {
       instructions: input.instructions,
-      input: items,
+      input: narrateNext ? [...items, NARRATE_ITEM] : items,
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
+      ...(narrateNext ? { reasoning_role: 'narrate' as const } : {}),
     };
     if (hostCall !== undefined) {
       void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
@@ -513,6 +543,7 @@ export async function runAgentTurn(
     // The whole output array first — the reasoning item must accompany the
     // calls — then one output per call, in the order they were made.
     items.push(...out);
+    const hopResultsFrom = toolResults.length;
     for (const call of calls) {
       const toolStartedAt = now();
       toolCallCount += 1;
@@ -600,6 +631,7 @@ export async function runAgentTurn(
         output: JSON.stringify(modelFacingToolResult(String(call.name), result)),
       });
     }
+    narrateNext = hopOnlyHeldProposals(calls.map((c) => ({ name: String(c.name) })), toolResults.slice(hopResultsFrom));
     // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.
     if (input.composeReply !== undefined && calls.length === 1 && toolCalls.length === 1) {
       let args: unknown;
