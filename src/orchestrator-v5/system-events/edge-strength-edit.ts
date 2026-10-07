@@ -8,6 +8,7 @@
  * compare-and-swap remain owned by `dispatch.ts` → `commitDirectAnswer`.
  */
 
+import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
 import { approvalSizes, ESTIMATE_MAGNITUDE } from '../../cee/magnitude/link-sizing.js';
 import type {
   OlumiResponse,
@@ -545,6 +546,7 @@ export async function applyEdgeStrengthEdit(
   // the explicit confirmation intent grants that provenance-only write.
   if (
     !replacesUserFigure &&
+    drawnLinkAdoptionFor(payload.scenario_id, event.from, event.to, event.magnitude, targetEdge) === undefined &&
     event.intent === 'set' &&
     target.mean === targetEdge.strength.mean &&
     target.effectDirection === targetEdge.effect_direction

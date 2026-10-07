@@ -244,6 +244,9 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // (`toolCtx.user_text`: the risks turn's and the wire's gap signal) — never the history.
     expect(route).toContain('await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode)');
     expect(route.match(/toolCtx\.user_text \?\? ''/g)?.length, 'the gap signal reads the typed-words carrier only').toBe(2);
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the nine dispatch sites (the approve site twice), the state read and two typed-words reads').toBe(14);
+    // Item 3 (Canvas, 7 Oct; DL D1): the drawn-link press's ONE forced call is a dispatch site on the SAME typed carrier.
+    expect(route).toContain('result = await drawnLinkPress(');
+    expect(route).toContain('{ ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS,');
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the ten dispatch sites (the approve site twice), the state read and two typed-words reads').toBe(15);
   });
 });
