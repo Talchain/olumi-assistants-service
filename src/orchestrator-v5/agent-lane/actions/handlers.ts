@@ -118,6 +118,10 @@ const BECAUSE: Record<keyof typeof DISABLED, string> = {
 };
 
 function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFacts, bar: ActionBarV1): ActionTypedReply {
+  // An estimate action not offered because no Run is bound still has its points: say what it needs, never "no triggers".
+  if ((action === 'bias_anchoring' || action === 'check_estimates') && !f.runBound && estimatePointsOf(f).length > 0) {
+    return { text: `${CANT_YET[action]}: ${BECAUSE.needs_current_analysis}`, reason: 'needs_current_analysis', exits: runExits(f) };
+  }
   if (action === 'bias_anchoring') return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
   const reasonKey = (Object.keys(DISABLED) as (keyof typeof DISABLED)[]).find((k) => DISABLED[k] === offer?.disabled_reason);
   if (reasonKey !== undefined) {
