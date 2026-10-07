@@ -229,9 +229,9 @@ export function sentGoalThresholdOf(
 ): SentGoalThreshold | undefined {
   const licence = goalChanceLicenceOf(envelope, graph, goalId, earned);
   if (licence === null) return undefined;
-  const goal = isRec(graph) && Array.isArray(graph.nodes)
-    ? graph.nodes.find((n): n is Rec => isRec(n) && n.id === goalId && n.kind === 'goal') : undefined;
-  if (goal === undefined) return undefined;
+  const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
+  const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
+  if (goal === undefined || !isRec(envelope)) return undefined;
   const records = readOptionResultSources(envelope).find(s => s.length > 0) ?? [];
   const candidates: SentGoalThreshold[] = [];
   for (const field of ['goal_threshold_raw', 'goal_threshold'] as const) {
@@ -532,7 +532,13 @@ export function goalChanceLicenceForAgent(result: unknown): {
   return {
     form,
     option_ids: optionIds,
-    ...(validSent ? { sent_threshold: sent as unknown as SentGoalThreshold } : {}),
+    ...(validSent && sent !== undefined ? { sent_threshold: {
+      value: sent.value as number,
+      field: sent.field as SentGoalThreshold['field'],
+      frame: sent.frame as SentGoalThreshold['frame'],
+      ...(typeof sent.baseline === 'number' ? { baseline: sent.baseline } : {}),
+      ...(typeof sent.status_quo_option_id === 'string' ? { status_quo_option_id: sent.status_quo_option_id } : {}),
+    } satisfies SentGoalThreshold } : {}),
     ...(validSpread ? { spread_note_by_option: notes as Record<string, string> } : {}),
     ...(typeof r.leader_option_id === 'string' ? { leader_option_id: r.leader_option_id } : {}),
     ...(similar !== undefined ? { similar_option_ids: similar } : {}),
