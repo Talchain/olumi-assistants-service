@@ -148,6 +148,20 @@ describe('"Test without this link": rows are the reply\'s allowlisted lines, bou
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it('Codex r2: a separator inside an id cannot merge two limit rows (option "a:b" + limit "c" vs option "a" + limit "b:c")', async () => {
+    const turn = await testLinkTurn();
+    const result = turn.result!;
+    const limit = (option_id: string, constraint_id: string) => ({ kind: 'constraint_probability' as const,
+      option_id, constraint_id, baseline: 0.3, alternative: 0.6, target: null, constraint_boundary: null,
+      noise_verdict: 'signal' as const, verdict: 'delta_only' as const, basis: 'no_licensed_boundary' as const, invariant_by_construction: false });
+    const two = StructuralChallengeResultV1Schema.parse({ ...result, claims: [...result.claims, limit('a:b', 'c'), limit('a', 'b:c')] });
+    const reply = composeStructuralChallengeReply({ result: two, labels: turn.labels, certainty: turn.certainty });
+    const limits = testLinkMethodResult({ ...turn, result: two, reply }, CTX)!.rows.filter((r) => r.row_id.startsWith('limit:'));
+    expect(limits.map((r) => r.item_refs[0])).toEqual(expect.arrayContaining([{ kind: 'option', id: 'a:b' }, { kind: 'option', id: 'a' }]));
+    expect(new Set(limits.map((r) => r.row_id)).size).toBe(limits.length);
+    expect(limits.length).toBe(2);
+  });
+
   it('control pair: a stale test is a sidecar with no rows (completed has rows)', async () => {
     const stale = testLinkMethodResult(await testLinkTurn(L1, 'stale'), CTX)!;
     expect(stale).toMatchObject({ outcome: 'stale', rows: [] });

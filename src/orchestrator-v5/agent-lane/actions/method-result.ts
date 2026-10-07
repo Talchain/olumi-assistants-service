@@ -47,6 +47,8 @@ export interface MethodResultContext {
 }
 
 const linkRef = (from_id: string, to_id: string): ItemRef => ({ kind: 'link', from_id, to_id });
+/** One id inside a row id, encoded so a separator inside a canonical id (`a:b`) cannot make two rows one (Codex r2). */
+const idPart = (id: string): string => encodeURIComponent(id);
 
 /**
  * Ruling 4. True when the SCI-CHANGE rows may stand beside the hero: every option's displayed goal chance is a POINT and
@@ -90,7 +92,7 @@ export function whatChangesMethodResult(
   const rows = measured.rows
     .filter((row) => row.kind === 'quoted' || row.kind === 'below_a_tenth')
     .map((row): MethodResultRowV1 => ({
-      row_id: `flip:${row.link.from_id}->${row.link.to_id}`,
+      row_id: `flip:${idPart(row.link.from_id)}->${idPart(row.link.to_id)}`,
       item_refs: [linkRef(row.link.from_id, row.link.to_id), { kind: 'option', id: row.option_id }],
       text: row.text,
       provenance: 'server_built',
@@ -115,7 +117,7 @@ export function testLinkMethodResult(turn: StructuralChallengeTurn, ctx: MethodR
   const link = linkRef(result.alternative.from_id, result.alternative.to_id);
   const rows = structuralChallengeRowsOf(turn).map((row): MethodResultRowV1 => ({
     row_id: row.option_id === undefined ? row.kind
-      : row.constraint_id !== undefined ? `${row.kind}:${row.option_id}:${row.constraint_id}` : `${row.kind}:${row.option_id}`,
+      : row.constraint_id !== undefined ? `${row.kind}:${idPart(row.option_id)}:${idPart(row.constraint_id)}` : `${row.kind}:${idPart(row.option_id)}`,
     item_refs: row.kind === 'provisional' || row.kind === 'not_saved' ? []
       : row.option_id !== undefined ? [{ kind: 'option', id: row.option_id }, link] : [link],
     text: row.text,
