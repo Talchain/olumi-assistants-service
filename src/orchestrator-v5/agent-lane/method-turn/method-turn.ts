@@ -197,7 +197,7 @@ const UNAVAILABLE_REPLY: Readonly<Record<UnavailableReason, (plan: string | null
   no_goal: () => 'I can\u2019t run the pre-mortem yet because your model has no goal to measure failure against. Add the goal first.',
   no_own_option: () => 'I can\u2019t run the pre-mortem yet because your model has no option of yours to stress-test. Add one first.',
   plan_unconfirmed: () => 'I can\u2019t run the pre-mortem because I couldn\u2019t confirm which option to stress-test. Press \u201cRun a pre-mortem\u201d again and pick one.',
-  no_grounded_item: (plan) => `I can\u2019t run the pre-mortem on ${plan === null ? 'this decision' : `\u2018${plan}\u2019`} yet because nothing on ${plan === null ? 'its option paths' : 'its path'} is Olumi\u2019s estimate, a risk or a limit to stress-test.`,
+  no_grounded_item: (plan) => `I can\u2019t run the pre-mortem on ${plan === null ? 'this decision' : `\u2018${plan}\u2019`} yet because I have no supported model item to stress-test for it.`,
 };
 
 export function unavailableTurn(reason: UnavailableReason, plan: string | null = null): UnavailableTurn {
@@ -232,17 +232,22 @@ export function methodTurnFromSignals(chipId: unknown, s: TurnSignals, graph: un
   const planId = methodPlanOf(selector);
   if (!decision && planId === undefined) return unavailableTurn('plan_unconfirmed');
   if (decision && s['model.non_sq_option_ids'].some(id => !s['model.option_labels'][id])) return unavailableTurn('plan_unconfirmed');
+  // A generic press may stress the decision if its licensed leader has no eligible item. An option-naming press
+  // keeps the selector's plan; science uses the same item eligibility and union as the existing decision-level path.
+  const mayUseDecision = decision || (chipId === PREMORTEM_PRESS_ID && press.pick === null && s['model.non_sq_option_ids'].length >= 2);
   const context = methodScienceContext({
     method: 'pre_mortem',
     canonical_stage: canonicalStageOf(s['run.kind'], graph),
     signals: s,
     user_selected_option_id: press.pick,
-    ...(decision ? { decision_level: true } : {}),
+    ...(mayUseDecision ? { decision_level: true } : {}),
     graph,
   });
-  // ONE plan rule, two readers (RC's `methodPlanOf`, SCIENCE/DSK's `choosePlan`): if they ever disagree, nothing runs.
+  // Option plans must agree across RC and science. Decision runs carry no plan and require permission above.
   const plan = context.plan;
-  if (decision ? plan !== null || context.decision_level !== true : plan === null || plan.option_id !== planId) return unavailableTurn('plan_unconfirmed');
+  if (context.decision_level === true) {
+    if (!mayUseDecision || plan !== null || s['model.non_sq_option_ids'].some(id => !s['model.option_labels'][id])) return unavailableTurn('plan_unconfirmed');
+  } else if (decision || plan === null || plan.option_id !== planId) return unavailableTurn('plan_unconfirmed');
   if (context.supplied_items.length === 0) return unavailableTurn('no_grounded_item', plan?.label ?? null);
   return { kind: 'run', context, directive: methodDirective(context), check_inputs: checkInputsOf(context, graph) };
 }
