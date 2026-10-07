@@ -49,10 +49,10 @@ const marked = () => {
 const UNMARKED_HASH_UNDER_V3 = '362137a00c45afb4';
 
 describe('0.64.0 — `proposed_by` enters the analysis revision (projection v4)', () => {
-  it('PRECONDITION: the vendored vocabulary is v5 (v4 + intervention `range`, hashed by CEE via the published list), whose node fields still end with `proposed_by`', () => {
-    expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(5);
+  it('PRECONDITION: the vendored vocabulary is v6 (0.82.0: v5 + node `event_risk` appended), whose node fields still carry `proposed_by` immediately before `event_risk`', () => {
+    expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(6);
     const fields: readonly string[] = CANONICAL_GRAPH_HASH_NESTED_PROJECTION.node.fields;
-    expect(fields[fields.length - 1]).toBe('proposed_by');
+    expect(fields.slice(-2)).toEqual(['proposed_by', 'event_risk']);
   });
 
   it('CONTROL (no mass stale): a graph with NO marker hashes exactly as it did under v3', () => {

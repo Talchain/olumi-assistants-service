@@ -861,6 +861,36 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "Its `factor_id` names what it scales. ISL derives the preventer link's coefficient from it; the link's own " +
       "strength is ignored by contract.",
   },
+  // ── the SAME four on the contract's NodeV3 (schemas 0.82.0, main c7461d7e; reached CEE with the 0.82.0 re-vendor) ──
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.occurrence.p_low",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.occurrence.p_low (settled together, " +
+      "same reason): schemas 0.82.0 `EventRiskV1Schema` is the shape CEE's own `EventRiskV1` mirrors, with the same " +
+      "REQUIRED `occurrence.basis` beside the range and the same strict object, so the warrant travels with the value.",
+  },
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.occurrence.p_high",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.occurrence.p_high; reason given at " +
+      "unwarranted:cee.NodeV3::event_risk.occurrence.p_low.",
+  },
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.horizon.months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.horizon.months; reason given there " +
+      "(unit by name, attested by the block's `occurrence.basis`).",
+  },
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.mitigations[].occurrence_reduction",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.mitigations[].occurrence_reduction; " +
+      "reason given there (a fraction by meaning, attested by the block's `occurrence.basis`).",
+  },
 ];
 
 // ============================================================================

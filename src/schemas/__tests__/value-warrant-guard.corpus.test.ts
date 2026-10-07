@@ -294,7 +294,7 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 51 sites, 36 findings, 20 OPEN, 16 accepted", () => {
+  it("the first cut is an ENUMERATION: 55 sites, 40 findings, 20 OPEN, 20 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
@@ -323,14 +323,16 @@ describe("the live value-bearing contract, adjudicated", () => {
     // +4 sites / +4 findings / +4 ACCEPTED, NONE (7 Oct, event_risk.v1, Science 393023 pilot): `event_risk.occurrence.
     // {p_low,p_high}`, `horizon.months` and `mitigations[].occurrence_reduction`. Their warrant is the block's REQUIRED
     // `occurrence.basis` (Science's name, not a warrant token), written only at the validated door (value-warrant-guard.ts).
-    expect(SITES.length).toBe(51);
-    expect(FINDINGS.length).toBe(36);
+    // +4 sites / +4 findings / +4 ACCEPTED, NONE (7 Oct, schemas 0.82.0 re-vendor): the SAME four on the contract's NodeV3
+    // (`EventRiskV1Schema`), each recorded as the twin of its CEE entry above.
+    expect(SITES.length).toBe(55);
+    expect(FINDINGS.length).toBe(40);
     expect(report.open.length).toBe(20);
-    expect(report.accepted.length).toBe(16);
+    expect(report.accepted.length).toBe(20);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(9);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(6);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(15);
-    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(21);
+    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(25);
   });
 
   it("no decision is a bare exemption — each one argues, or names the one that does", () => {
