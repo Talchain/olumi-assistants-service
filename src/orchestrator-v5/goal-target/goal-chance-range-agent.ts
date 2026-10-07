@@ -19,6 +19,15 @@ function warningsOf(result: unknown): Rec[] {
     .flatMap((v) => Array.isArray(v) ? v : []).map(rec).filter((v): v is Rec => v !== undefined);
 }
 
+/**
+ * A Run served before #2625 carries no GOAL_CHANCE_LICENSED record at all: its chances keep the rules they were built
+ * under (W3 leader rule on the saved-Run door; the run-wide withhold on the run door). ANY record by that code — even a
+ * malformed or duplicated one — makes the Run licensed-era, so a broken licence fails closed instead of falling back.
+ */
+export function runHasGoalChanceLicenceRecord(result: unknown): boolean {
+  return warningsOf(result).some((w) => w.code === 'GOAL_CHANCE_LICENSED');
+}
+
 export interface GoalChanceRangeDisplay {
   readonly range: string;
   readonly depends_on: {

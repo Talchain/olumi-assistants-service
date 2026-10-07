@@ -27,7 +27,7 @@
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 import { goalChanceDriverAvailabilityForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
-import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
+import { goalChanceFactsForAgent, runHasGoalChanceLicenceRecord } from '../goal-target/goal-chance-range-agent.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
@@ -155,6 +155,8 @@ export function analysisResultForAgent(result: unknown, graph?: unknown, current
   const enrichment = recordOf(block.enrichment);
   const goalFacts = goalChanceFactsForAgent(block, graph, current);
   const displays = goalFacts.goal_chance_display ?? {};
+  // A Run with no GOAL_CHANCE_LICENSED record (served before #2625) keeps the run-wide rule it was built under.
+  const legacyRun = !runHasGoalChanceLicenceRecord(block);
   const out: Record<string, unknown> = { ...block };
   if (typeof block.summary === 'string') out.summary = withoutStrongestDriverClause(block.summary);
   if ('inference_warnings' in block) out.inference_warnings = warningsForAgent(block.inference_warnings);
@@ -167,7 +169,7 @@ export function analysisResultForAgent(result: unknown, graph?: unknown, current
     const brief = recordOf(rest.decision_brief);
     let limitsRenamed = false;
     const rows = (value: unknown): unknown => {
-      const projected = optionRowsForAgent(value, outcomeHidden, shown, displays);
+      const projected = optionRowsForAgent(value, outcomeHidden, shown, displays, legacyRun ? withheld : undefined);
       if (projected.renamed) limitsRenamed = true;
       return projected.rows;
     };
@@ -230,6 +232,8 @@ export function analysisResultForAgent(result: unknown, graph?: unknown, current
 function optionRowsForAgent(
   value: unknown, outcomeHidden: ReadonlySet<string> = new Set(), shown: ReadonlyMap<string, number> = new Map(),
   displays: Readonly<Record<string, string>> = {},
+  /** Legacy Run (no licence record): the run-wide withhold alone decides, as before #2625. */
+  legacyWithheld?: boolean,
 ): { rows: unknown; renamed: boolean } {
   if (!Array.isArray(value)) return { rows: value, renamed: false };
   let renamed = false;
@@ -255,13 +259,13 @@ function optionRowsForAgent(
       next = { ...others, all_limits_hold_probability: joint };
       renamed = true;
     }
-    const chancePermitted = id !== undefined && Object.hasOwn(displays, id);
+    const chancePermitted = legacyWithheld !== undefined ? !legacyWithheld : id !== undefined && Object.hasOwn(displays, id);
     if (!chancePermitted && 'probability_of_goal' in next) {
       const { probability_of_goal: _withheld, ...others } = next;
       next = others;
     }
     if (chancePermitted && id !== undefined && typeof next.probability_of_goal === 'number') {
-      const whole = /^about (\d+)%$/.exec(displays[id]!);
+      const whole = Object.hasOwn(displays, id) ? /^about (\d+)%$/.exec(displays[id]!) : null;
       next = { ...next, probability_of_goal: whole !== null ? Number(whole[1]) / 100 : shown.get(id) ?? next.probability_of_goal };
     }
     // ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal chance's precision and drivers NEVER reach the Agent, withheld or not —

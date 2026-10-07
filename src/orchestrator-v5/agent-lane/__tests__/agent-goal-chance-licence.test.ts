@@ -99,10 +99,16 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     noChance(await saved(read));
     noChance(await run(read));
   });
-  it('(4) no licence gives no point chance on either path', async () => {
+  // A Run with NO GOAL_CHANCE_LICENSED record (served before #2625) keeps base behaviour (S2 CI, saved-run-chance 520aab46):
+  // no licence facts on either door; the saved door's W3 leader rule (this fixture's leader is withheld → no chance) and the
+  // run door's run-wide withhold (none here → the recorded chance stays, as on base).
+  it('(4) no licence record: no licence facts; each door keeps its base rule for the raw chance', async () => {
     const read = fixture([horizon]);
     noChance(await saved(read));
-    noChance(await run(read));
+    const view = await run(read);
+    for (const key of ['goal_chance_display', 'goal_chance_licence', 'goal_chance_driver_display', 'goal_chance_range_display', 'goal_horizon_line']) expect(view).not.toHaveProperty(key);
+    expect(view.enrichment.option_comparison.find((r: Json) => r.option_id === A)).toHaveProperty('probability_of_goal');
+    for (const row of view.enrichment.option_comparison) noCompanions(row);
   });
   it('(5) a scoped placeholder withhold keeps the other licensed displays (RED on base: the run-wide gate drops all)', async () => {
     const read = fixture([licence, { code: GOAL_FIGURES_PLACEHOLDER_PATH, severity: 'info', message: 'A link needs sizing.', option_ids: [C] }]);
@@ -161,7 +167,7 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
       expect((await run(read)).goal_horizon_line).toBe(horizonLine);
     }
     noChance(await saved(fixture([horizon])));
-    noChance(await run(fixture([horizon])));
+    expect(await run(fixture([horizon]))).not.toHaveProperty('goal_horizon_line');
     expect(await saved(fixture())).not.toHaveProperty('goal_horizon_line');
     expect(await run(fixture())).not.toHaveProperty('goal_horizon_line');
   });

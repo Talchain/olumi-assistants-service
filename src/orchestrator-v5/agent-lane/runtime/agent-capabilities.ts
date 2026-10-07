@@ -197,7 +197,7 @@ import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEv
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
-import { goalChanceFactsForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
+import { goalChanceFactsForAgent, goalChanceRangeDisplayForAgent, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
@@ -1651,6 +1651,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     ? withNonlinearIdentity(permissions, g.raw, g.identity_evaluated) : permissions;
   const goalFacts = goalChanceFactsForAgent(g.analysis_result, g.raw, current);
   const goalChanceDisplay = goalFacts.goal_chance_display;
+  const legacyRun = !runHasGoalChanceLicenceRecord(g.analysis_result);
   // ⭐ (9) chat and panel quote the same figure: a chance the licence displays at the nearest 5 is handed over as displayed.
   const shownChance = nearestFiveGoalChancesForAgent(g.analysis_result);
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
@@ -1666,8 +1667,13 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     if (typeof id !== 'string') return [];
     const label = row?.option_label ?? row?.label;
     const decision = byId.get(id);
-    const chancePermitted = goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id);
-    const whole = chancePermitted ? /^about (\d+)%$/.exec(goalChanceDisplay[id]!) : null;
+    // A Run with no GOAL_CHANCE_LICENSED record (served before #2625) keeps W3's rule: a leader that may be named carries
+    // each recorded chance (Science 393023, S2 CI: saved-run-chance.shared-data 520aab46). A licensed Run reads its licence.
+    const chancePermitted = legacyRun
+      ? current && goalChance === undefined && permissions.leader_may_be_named === true
+      : goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id);
+    const whole = chancePermitted && goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id)
+      ? /^about (\d+)%$/.exec(goalChanceDisplay[id]!) : null;
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
       ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
