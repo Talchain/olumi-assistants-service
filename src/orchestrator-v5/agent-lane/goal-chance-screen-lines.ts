@@ -71,28 +71,109 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   return [...points, ...ranges];
 }
 
-/** Whether the reply already gives this option's figure: the screen's sentence, or the option named with its figure. */
-function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
+const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
+interface Span { start: number; end: number }
+
+/** Match in the same plain words used for detection, retaining the span of the actual quoted/styled source. */
+function plainSpans(value: string, words: string): Span[] {
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let normalized = '';
+  for (const m of value.matchAll(/['"‘’“”`*_]|\s+|[^]/g)) {
+    for (const c of plain(m[0])) {
+      if (c === ' ' && normalized.endsWith(' ')) {
+        ends[ends.length - 1] = m.index + m[0].length;
+      } else {
+        normalized += c;
+        starts.push(m.index);
+        ends.push(m.index + m[0].length);
+      }
+    }
+  }
+  const needle = plain(words);
+  const spans: Span[] = [];
+  if (needle === '') return spans;
+  for (let at = normalized.indexOf(needle); at >= 0; at = normalized.indexOf(needle, at + needle.length)) {
+    spans.push({ start: starts[at]!, end: ends[at + needle.length - 1]! });
+  }
+  return spans;
+}
+
+function withoutSpans(value: string, spans: readonly Span[]): string {
+  let clean = value;
+  for (const span of [...spans].sort((a, b) => b.start - a.start)) {
+    clean = clean.slice(0, span.start) + clean.slice(span.end);
+  }
+  return clean;
+}
+
+/** A named figure in its own clause; a note's orphaned option label cannot borrow a later option's figure. */
+function chanceSpans(row: string, l: GoalChanceScreenLine): (Span & { figureEnd: number })[] {
+  return plainSpans(row, l.label).flatMap(label => {
+    const figure = plainSpans(row, l.figure).find(span => span.start >= label.end
+      && !/[.;]/.test(row.slice(label.end, span.start)));
+    return figure === undefined ? [] : [{ start: label.start, end: figure.end, figureEnd: figure.end }];
+  });
+}
+
+/** Shared spread words belong to their chance unit, their named shortfall pair, or a standalone spread row. */
+function noteSpans(row: string, l: GoalChanceScreenLine, lines: readonly GoalChanceScreenLine[]): Span[] {
+  const shortfalls = l.shortfall_note === undefined ? [] : plainSpans(row, l.shortfall_note);
+  if (l.spread_note === undefined) return shortfalls;
+  const pairs = l.shortfall_note === undefined ? [] : [
+    ...plainSpans(row, `${l.spread_note} ${l.shortfall_note}`),
+    ...plainSpans(row, `${l.shortfall_note} ${l.spread_note}`),
+  ];
+  const otherPairs = lines.flatMap(other => other.option_id === l.option_id || other.spread_note === undefined
+    || other.shortfall_note === undefined ? [] : [
+      ...plainSpans(row, `${other.spread_note} ${other.shortfall_note}`),
+      ...plainSpans(row, `${other.shortfall_note} ${other.spread_note}`),
+    ]);
+  // Preserve offsets while hiding labels inside shortfall sentences from chance detection.
+  let chanceRow = row;
+  const allShortfalls = lines.flatMap(other => other.shortfall_note === undefined ? [] : plainSpans(row, other.shortfall_note));
+  for (const span of allShortfalls) {
+    chanceRow = chanceRow.slice(0, span.start) + ' '.repeat(span.end - span.start) + chanceRow.slice(span.end);
+  }
+  const chances = lines.flatMap(other => chanceSpans(chanceRow, other).map(span => ({ ...span, option_id: other.option_id })))
+    .sort((a, b) => a.start - b.start);
+  const spreads = plainSpans(row, l.spread_note).filter(span => {
+    if (pairs.some(pair => pair.start <= span.start && span.end <= pair.end)) return true;
+    if (otherPairs.some(pair => pair.start <= span.start && span.end <= pair.end)) return false;
+    if (plain(row).trim() === plain(l.spread_note!).trim()) return true;
+    const preceding = chances.filter(chance => chance.figureEnd <= span.start).at(-1);
+    return preceding?.option_id === l.option_id
+      || (preceding === undefined && chances.length > 0 && chances.every(chance => chance.option_id === l.option_id));
+  });
+  return [...shortfalls, ...spreads];
+}
+
+/** Whether the reply already gives exactly one of this option's complete chance/notes units. */
+function alreadySaid(text: string, l: GoalChanceScreenLine, lines: readonly GoalChanceScreenLine[]): boolean {
   // The Agent's own phrasing ("Raise prices 10%: about 46%") gives the same figure: never said twice in two wordings.
-  const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
-  if (l.shortfall_note !== undefined) {
+  if (l.spread_note !== undefined || l.shortfall_note !== undefined) {
     const notes = [l.spread_note, l.shortfall_note].filter((note): note is string => note !== undefined);
     const suffix = notes.join(' ');
     // A split or orphaned note is moved beside its chance, including when one complete unit already has a duplicate note.
-    return text.split(l.shortfall_note).length === 2 && text.split('\n').some(row => {
+    const rows = text.split('\n');
+    if (rows.flatMap(row => noteSpans(row, l, lines)).length !== notes.length) return false;
+    if (l.shortfall_note === undefined) {
+      // Keep the established spread-only wording/placement when its one owned note is already said.
+      return sameWordsIn(text, l.chance)
+        || rows.some(row => chanceSpans(row, l).length > 0 && noteSpans(row, l, lines).length === 1);
+    }
+    return rows.some(row => {
       const p = plain(row);
-      const labelAt = p.indexOf(plain(l.label));
-      const figureAt = p.indexOf(plain(l.figure), labelAt + plain(l.label).length);
-      const notesAt = p.indexOf(plain(suffix));
-      const figureTail = p.slice(figureAt + plain(l.figure).length, notesAt);
-      const stop = figureTail.indexOf('.');
-      const adjacent = stop < 0 || figureTail.slice(stop + 1).trim() === '';
-      return labelAt >= 0 && labelAt < figureAt && figureAt >= 0 && notesAt > figureAt && adjacent && sameWordsIn(row, suffix);
+      return chanceSpans(p, l).some(chance => {
+        const notesAt = p.indexOf(plain(suffix), chance.figureEnd);
+        if (notesAt < 0) return false;
+        const figureTail = p.slice(chance.figureEnd, notesAt);
+        const stop = figureTail.search(/[.;]/);
+        return stop < 0 || figureTail.slice(stop + 1).trim() === '';
+      });
     });
   }
   if (sameWordsIn(text, l.chance)) return true;
-  if (l.spread_note !== undefined) return text.split('\n').some(row =>
-    plain(row).includes(plain(l.label)) && plain(row).includes(plain(l.figure)) && sameWordsIn(row, l.spread_note!));
   const p = plain(text);
   return p.includes(plain(l.label)) && p.includes(plain(l.figure));
 }
@@ -114,50 +195,32 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
     const notes = [l.spread_note, l.shortfall_note].filter((note): note is string => note !== undefined);
     const suffix = notes.length === 0 ? undefined : notes.join(' ');
     const chanceOnly = suffix === undefined ? l.chance : l.chance.slice(0, l.chance.length - suffix.length).trimEnd();
-    const withoutNotes = (value: string): string => {
-      if (l.shortfall_note === undefined) return notes.reduce((clean, note) => clean.split(note).join(''), value);
-      let clean = value;
-      if (l.spread_note !== undefined) {
-        // A spread sentence can belong to several options. Move this option's pair without stripping another's unit.
-        clean = clean.split(`${l.spread_note} ${l.shortfall_note}`).join('')
-          .split(`${l.shortfall_note} ${l.spread_note}`).join('');
-      }
-      clean = clean.split(l.shortfall_note).join('');
-      if (l.spread_note === undefined) return clean;
-      clean = clean.split(`${chanceOnly} ${l.spread_note}`).join(chanceOnly);
-      return clean.split('\n').map(row => {
-        const ownFigure = row.includes(l.label) && row.includes(l.figure);
-        const otherFigure = lines.some(other => other.option_id !== l.option_id && row.includes(other.label) && row.includes(other.figure));
-        return row.trim() === l.spread_note || (ownFigure && !otherFigure) ? row.split(l.spread_note!).join('') : row;
-      }).join('\n');
-    };
-    if (suffix !== undefined && !alreadySaid(body, l)) {
+    const withoutNotes = (value: string): string => value.split('\n')
+      .map(row => withoutSpans(row, noteSpans(row, l, lines))).join('\n');
+    if (suffix !== undefined && !alreadySaid(body, l, lines)) {
       if (body.includes(chanceOnly)) {
         body = withoutNotes(body);
         body = body.replace(chanceOnly, l.chance);
         added += 1;
       } else {
         // A shortfall itself names the option. Its orphaned label must not borrow another option's figure on that row.
-        const candidate = l.shortfall_note === undefined ? body : withoutNotes(body);
+        const candidate = withoutNotes(body);
         const rows = candidate.split('\n');
-        const rowAt = rows.findIndex(row => l.shortfall_note === undefined
-          ? row.includes(l.label) && row.includes(l.figure)
-          : row.indexOf(l.label) >= 0 && row.indexOf(l.figure, row.indexOf(l.label) + l.label.length) >= 0);
+        const rowAt = rows.findIndex(row => chanceSpans(row, l).length > 0);
         if (rowAt >= 0) {
-          body = l.shortfall_note === undefined ? withoutNotes(body) : candidate;
+          body = candidate;
           const cleanRows = body.split('\n');
           const row = cleanRows[rowAt]!;
-          const figureAt = l.shortfall_note === undefined ? row.indexOf(l.figure) : row.indexOf(l.figure, row.indexOf(l.label) + l.label.length);
-          const figureEnd = figureAt + l.figure.length;
-          const stop = row.indexOf('.', figureEnd);
-          const end = stop < 0 ? row.length : stop + 1;
+          const figureEnd = chanceSpans(row, l)[0]!.figureEnd;
+          const stop = row.slice(figureEnd).search(/[.;]/);
+          const end = stop < 0 ? row.length : figureEnd + stop + 1;
           cleanRows[rowAt] = `${row.slice(0, end)} ${suffix}${row.slice(end)}`;
           body = cleanRows.join('\n');
           added += 1;
         }
       }
     }
-    if (alreadySaid(body, l)) continue;
+    if (alreadySaid(body, l, lines)) continue;
     // Move any existing note behind its own chance, including when the Agent gave only the figure.
     if (suffix !== undefined) {
       body = withoutNotes(body);

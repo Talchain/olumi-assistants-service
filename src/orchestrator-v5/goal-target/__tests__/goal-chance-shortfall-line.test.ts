@@ -200,6 +200,23 @@ describe('B19 rounding — DOWN means a conservative bound, not nearest', () => 
   it.each([0.000059, 0.000599])('formatter-limited X=%s stays silent rather than zero or an increased bound', x => {
     const f = fixture(); option(f).outcome.p10 = 126000; option(f).downside.p05 = (126000 - x) / CAP; absent(f);
   });
+  it('numeric £1 shortfall positive control → binary unit 0/1 suppresses a nonnumeric figure', () => {
+    const f = fixture();
+    goal(f).goal_threshold_cap = 1; goal(f).goal_threshold_raw = 1; goal(f).goal_threshold = 1;
+    f.sent = { ...f.sent, value: 1 };
+    option(f).downside.p05 = 0;
+    option(f).outcome = { p10: 0, p50: 0, mean: 0, p90: 1 };
+    const l = licence(f);
+    expect(l.form).toBe('each');
+    expect(l.pct_by_option[RAISE]).toBe(48);
+    expect(l.shortfall_note_by_option?.[RAISE]).toBe(
+      'In its worst 1 in 20 runs of this model, ‘Raise prices 10%’ falls short of your target by £1 / month or more.',
+    );
+    goal(f).goal_threshold_unit = '0/1';
+    expect(sayFigureAsWritten(1, '0/1')).toBe('on');
+    expect(licence(f).pct_by_option[RAISE]).toBe(48);
+    absent(f);
+  });
 });
 
 describe('B19 stored Agent licence — exact template and licensed option identities', () => {

@@ -377,6 +377,8 @@ function shortfallNotesOf(
     // zero, or round a conservative tail bound UP while saying "or more".
     if (amount < 0.0001 || (pct[id] !== 0 && Math.round(amount * 1e4) / 1e4 > amount)) continue;
     const figure = sayFigureAsWritten(amount, unit);
+    // A two-state unit may format a difference as "on"; a shortfall requires a numeric amount.
+    if (!/\d/.test(figure)) continue;
     const template = pct[id] === 0 ? TYPICAL_SHORTFALL_TEMPLATE : SHORTFALL_TEMPLATE;
     Object.defineProperty(notes, id, { enumerable: true, value: template.replace(/<label>|<figure>/g, part => part === '<label>' ? label : figure) });
   }
