@@ -35,19 +35,16 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import {
-  PENDING_ACTION_ASK_TURN_TTL,
-  PENDING_ACTION_ASK_WALL_TTL_MS,
-  type PendingAction,
-} from '../session/pending-action.js';
+import { type PendingAction } from '../session/pending-action.js';
+import { HELD_PROPOSAL_TURN_BUDGET, PROPOSAL_IDLE_TTL_MS } from './proposal-object/lifecycle.js';
 import { log } from '../../utils/telemetry.js';
 import { approvalChipIdFor, readingOfLinkEffectApproval } from './approval-chips.js';
 import { readingOfIdentityApproval } from './identity-card.js';
 import { computeProposalId, type ProposalStore, type StructuredProposal } from './proposal.js';
 
 /**
- * ⭐ THE CARRIER LIVES FOR 12 TURNS / 30 MINUTES — the recorded-ask bounds, NOT the 2 turns / 10 minutes
- * an ordinary offer gets.
+ * ⭐ S-D (Paul 7 Oct): the carrier uses the held proposal's 24-hour idle backstop and turn budget,
+ * refreshed on every Agent answer row while it remains held.
  *
  * Why the default was wrong here: those bounds exist so a stale OFFER cannot hijack a later bare "yes"
  * (`pending-action.ts`, the two-dial note). This carrier is not resolved by a bare "yes" on its own lane:
@@ -65,8 +62,8 @@ import { computeProposalId, type ProposalStore, type StructuredProposal } from '
  * this carrier by identity; `commit.ts` carry-forward decrements its count by one per conventional commit
  * and keeps its wall expiry. Pinned by `proposal-survives-a-restart.test.ts`.
  */
-export const AGENT_PROPOSAL_CARRIER_TURN_TTL = PENDING_ACTION_ASK_TURN_TTL;
-export const AGENT_PROPOSAL_CARRIER_WALL_TTL_MS = PENDING_ACTION_ASK_WALL_TTL_MS;
+export const AGENT_PROPOSAL_CARRIER_TURN_TTL = HELD_PROPOSAL_TURN_BUDGET;
+export const AGENT_PROPOSAL_CARRIER_WALL_TTL_MS = PROPOSAL_IDLE_TTL_MS;
 
 type ApproveChip = { readonly id: string; readonly label: string; readonly message: string; readonly detail?: string };
 

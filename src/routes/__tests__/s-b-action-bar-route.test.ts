@@ -252,7 +252,8 @@ describe('the same offer pressed twice prepares ONE card (amendment 6)', () => {
     const approve = first.suggested_actions.find((a) => a.id.startsWith('agent-approve-proposal:'))!;
     const second = await press(offer.press_id, { parameters: { offer_key: offer.offer_key } });
     expect(second._agent?.tool_calls ?? []).toEqual([]);
-    expect(second.suggested_actions.map((a) => a.id)).toEqual([approve.id, 'agent-amend-proposal']);
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
+    expect(second.suggested_actions.map((a) => a.id)).toEqual([approve.id, 'agent-amend-proposal', `agent-decline-proposal:${approve.id.slice('agent-approve-proposal:'.length)}`]);
     expect(agentProposals.outstanding(scenario, OWNER).length).toBe(1);
     expect(second._action).toMatchObject({ outcome: 'ran', reason: 'already_waiting' });
   });

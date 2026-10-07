@@ -481,6 +481,11 @@ export function stillValidOffers(
   now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown; modelExists: boolean },
 ): OfferedAction[] {
   const approvals = stillValidApprovalOffers(offered, now.outstandingProposalIds);
+  const declines = offered.filter(a => {
+    const id = declinedProposalOf(a.id);
+    return id !== undefined && now.outstandingProposalIds.has(id)
+      && approvals.some(c => typedApprovalOf({ chip: { id: c.id } }) === id);
+  });
   const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
     && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
@@ -496,7 +501,7 @@ export function stillValidOffers(
   // next step after a blocked Run: after a restart the replay carries the words only).
   const nextSteps = offersNextSteps(now.analysisState) && now.outstandingProposalIds.size === 0
     ? offered.filter((a) => METHOD_PRESS_IDS.has(a.id) || isWidenAddPressId(a.id)) : [];  // Widen sits in a next step's place (DL P2 on #2512)
-  return [...approvals, ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
+  return [...approvals, ...declines, ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
 }
 const sessions = new SessionBindingRegistry();
 
@@ -2222,6 +2227,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const stillValid = decisionReviewReplay ? [] : stillValidOffers(offered, {
           outstandingProposalIds: new Set([
             ...replayRecords.map(r => r.proposal_id),
+            ...executableWaitingProposalIds(scenarioId, userId, state.graphHash),
             ...(await liveHeldRefs(scenarioId)),
           ]),
           analysisReady: state.analysisReady,
@@ -2538,7 +2544,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // A product hold is its own durable card; confirmHeld checks these words against that exact live hold.
     const pressedApproval = approvedProposal !== undefined
       ? { typed_approval_of: approvedProposal,
-        ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') || approvedProposal.startsWith('prop_') ? { typed_approval_words: message } : {}),
+        ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
         ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
     const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
@@ -2668,7 +2674,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const originalCarrier = heldAtStart.find(h => heldProposalId(h) === approvedProposal);
       const original = originalCarrier !== undefined ? agentProposalOf(originalCarrier) : undefined;
       // A settled card has no held carrier; the store still owns its idempotent already-applied result.
-      if (approvedProposal.startsWith('prop_') && original === undefined && !proposals.isApplied(approvedProposal)) editsFailure = 'not_held';
+      if (approvedProposal.startsWith('prop_') && original === undefined && !proposals.isApplied(approvedProposal)
+        && typeof store.readMostRecentPendingActions === 'function') editsFailure = 'not_held';
       if (editsForThisCard !== undefined && approvedProposal.startsWith('prop_')) {
         const current = await readBackState(dispatch, scenarioId);
         const record = originalCarrier !== undefined ? proposalRecord(originalCarrier, current.graph) : undefined;
@@ -3857,6 +3864,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const heldCardOffer: OfferedAction[] = approvals.length === 0 && heldRecords.length > 0
       && fastPath !== 'method' && !decisionReviewRequested
+      && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated)))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
       ? [heldRecords[0]!.approve_action as OfferedAction, AMEND_CHIP, heldRecords[0]!.decline_action as OfferedAction] : [];
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
@@ -3878,7 +3886,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offeredRecord = heldRecords.find(r => r.approve_action.id === offeredApprove?.id);
     // ⭐ S-D (DL 7 Oct, Canvas's served capture #2614): the PROPOSING turn offers "Not now" too, so a held proposal can be
     // declined from the first moment, not only from the next reply (the record's own `decline_action`).
-    if (offeredRecord !== undefined) offeredNow.push(offeredRecord.decline_action as OfferedAction);
+    if (offeredRecord !== undefined && !offeredNow.some(a => a.id === offeredRecord.decline_action.id)) {
+      const amendIndex = offeredNow.findIndex(a => a.id === AMEND_CHIP.id);
+      offeredNow.splice(amendIndex >= 0 ? amendIndex + 1 : offeredNow.length, 0, offeredRecord.decline_action as OfferedAction);
+    }
 
     /**
      * ⛔ THIS ROW MUST CARRY THE PRODUCT'S HELD ADD-OPTION FORWARD (C52). Pending actions are read from the
@@ -4291,6 +4302,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // the final egress and only beside its surviving chip (`previewBesideItsChip`); never on the answer row.
       const offeredId = offeredApprove !== undefined ? typedApprovalOf({ chip: { id: offeredApprove.id } }) : undefined;
       pendingPreview = offeredId !== undefined && waitingIds.includes(offeredId)
+        && !heldCardOffer.some(a => a.id === offeredApprove?.id)
         ? proposalPreviewFor(offeredId, proposals.get(offeredId), readbackGraph) : undefined;
     }
     /**
@@ -4418,7 +4430,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
               });
               const oldest = heldRecords[0];
               if (oldest !== undefined && !actions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
-                && fastPath !== 'method' && !decisionReviewRequested) actions.unshift(oldest.approve_action as OfferedAction, AMEND_CHIP, oldest.decline_action as OfferedAction);
+                && !offeredNow.some(a => a.id === oldest.approve_action.id)
+                && fastPath !== 'method' && !decisionReviewRequested
+                && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated)))) actions.unshift(oldest.approve_action as OfferedAction, AMEND_CHIP, oldest.decline_action as OfferedAction);
               const currentText = String(wireBody.assistant_text ?? text);
               wireBody = { ...wireBody, assistant_text: said.length > 0 ? `${currentText}\n\n${said.join('\n')}` : currentText,
                 suggested_actions: firstOfEachId(actions) };
