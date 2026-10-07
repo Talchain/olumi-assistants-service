@@ -98,7 +98,7 @@ describe('DL condition 3: the full served corpus, not a sample', () => {
   });
   it.each(CORPUS.rows.filter((r) => !r.fire).map((r) => [r.sentence]))('keeps: %s', (sentence) => {
     expect(DRIVER_ABSENCE_CLAIM.test(sentence)).toBe(false);
-    expect(removeDriverAbsenceClaims(sentence)).toEqual({ text: sentence, removed: 0 });
+    expect(removeDriverAbsenceClaims(sentence)).toEqual({ text: sentence, removed: 0, keptUnsafe: 0 });
   });
 });
 
@@ -165,5 +165,73 @@ describe('wiring: both Agent exits apply the edit after the leader egress', () =
     expect(route.slice(live - 200, live)).toContain('withoutDriverAbsenceClaimsAtEgress(wireBody, {');
     expect(route).toContain("return withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {");
     expect(route).toContain("analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',");
+  });
+});
+
+describe('S2 review r1 #2 (DL ruling): never remove a figure, label, deadline or lead-in content; unsafe → kept + logged', () => {
+  it.each([
+    ['dash after a figure', '- Launch starter tier: about 52%—the run does not establish which assumption matters most.', '- Launch starter tier: about 52%.'],
+    ['dash after a chance', 'The chance is about 46%—the run does not establish which assumption matters most.', 'The chance is about 46%.'],
+    ['spaced dashes both sides', 'Robustness is low — the run does not establish which assumption matters most — so treat this as provisional.', 'Robustness is low — so treat this as provisional.'],
+    ['comma-less "and" after the deadline', 'The nine-month deadline was not tested and the run does not establish which assumption matters most.', 'The nine-month deadline was not tested.'],
+    ['comma-less "and" after a disclosure', 'Six values came from Olumi and sensitivity has not established which assumption matters most.', 'Six values came from Olumi.'],
+    ['a bold lead-in left empty drops its line', 'Intro line.\n- **Sensitivity:** the run does not establish which assumption matters most.\n- Keep this line.', 'Intro line.\n- Keep this line.'],
+    ['a plain lead-in left empty drops its line', 'First paragraph.\n\nIn short: the run does not establish which assumption matters most.', 'First paragraph.'],
+  ])('%s', (_name, input, expected) => {
+    const out = removeDriverAbsenceClaims(input);
+    expect(out.text).toBe(expected);
+    expect(out.removed).toBe(1);
+    expect(out.keptUnsafe).toBe(0);
+    expectWellFormed(out.text);
+  });
+
+  it.each([
+    ['comma before the claim with no connector', 'Although robustness is low, it is unclear which assumption matters most.'],
+    ['a comma inside the subject', 'Sensitivity, unfortunately, has not established which assumption matters most.'],
+    ['a figure inside the clause', 'The run does not establish which assumption matters most in 3 of 5 runs.'],
+    ['the deadline inside the clause', 'The run does not establish which assumption matters most within the nine-month deadline.'],
+    ['an option label inside the clause', 'The run does not establish which assumption matters most for Raise prices.'],
+    ['a lead-in with another sentence on its line', '**Sensitivity:** the run does not establish which assumption matters most. Robustness is low.'],
+  ])('KEPT, never cut unsafely: %s', (_name, input) => {
+    const out = removeDriverAbsenceClaims(input, ['Raise prices']);
+    expect(out.text).toBe(input);
+    expect(out.removed).toBe(0);
+    expect(out.keptUnsafe).toBe(1);
+  });
+
+  it('a reply that is ONLY the denial is shipped as written and logged kept_unsafe (code + turn id, no prose)', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined as never);
+    const only = { ...PROD, assistant_text: 'The analysis has not measured which assumption matters most to the comparison.' };
+    expect(withoutDriverAbsenceClaimsAtEgress(only, opts(only))).toBe(only);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [fields] = warn.mock.calls[0]! as [Json];
+    expect(fields).toEqual({ event: 'agent_lane.goal_chance_driver_absence_kept_unsafe', code: 'GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE',
+      turn_id: 'turn-s2', request_id: 'req-s2', exit_path: 'agent_lane_v1_final', kept_count: 1 });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('has not measured');
+  });
+});
+
+describe('S2 review r1 #5: the reviewer’s paraphrase misses fire; its near-misses do not', () => {
+  it.each([
+    'It remains unclear which of the assumptions matters most.',
+    'Which of these assumptions matters most is still unknown.',
+    'The most influential assumption has not been identified.',
+    'No assumption has been identified as the most important.',
+    'We don’t yet know which assumption is the biggest driver.',
+    'The run does not establish the most important assumption.',
+    'This run doesn’t tell us what matters most.',
+    'Nothing in this run shows which assumption matters most.',
+    'None of the assumptions stands out as the main driver.',
+  ])('fires and leaves nothing: %s', (sentence) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(sentence)).toBe(true);
+    expect(removeDriverAbsenceClaims(sentence).text).toBe('');
+  });
+  it.each([
+    'We have not established which supplier matters most.',
+    'I can’t tell which assumption you meant.',
+    'I don’t know which factor the 4% refers to.',
+    'We can’t tell what matters most to you between them.',
+  ])('does not fire: %s', (sentence) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(sentence)).toBe(false);
   });
 });
