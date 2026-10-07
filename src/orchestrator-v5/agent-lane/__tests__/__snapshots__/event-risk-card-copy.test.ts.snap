@@ -1,0 +1,82 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`event-risk approval card > ER-1a-control: no member preserves the entire current record, including detail and digest 1`] = `
+{
+  "approve_action": {
+    "detail": "Add risk 'Key developer might leave'
+Link 'Key developer might leave' to 'weekly bookings'",
+    "id": "agent-approve-proposal:gmh_aaaaaaaaaaaa",
+    "label": "Approve 2 changes",
+    "message": "Yes, add risk 'Key developer might leave' and link 'Key developer might leave' to 'weekly bookings'.",
+  },
+  "base_graph_hash": "fixed-hash",
+  "decline_action": {
+    "id": "agent-decline-proposal:gmh_aaaaaaaaaaaa",
+    "label": "Not now",
+    "message": "Not now.",
+  },
+  "dialect": "product_hold",
+  "digest": "9ec0b33cc1a9e120139b8cd7a2990cb5",
+  "fields": [
+    {
+      "allowed_bands": [
+        "slight",
+        "moderate",
+        "strong",
+        "very_strong",
+      ],
+      "current": {
+        "band": "strong",
+        "source": "placeholder",
+      },
+      "direction": "negative",
+      "editable": true,
+      "field_id": "link_strength:risk_dev::goal",
+      "from_id": "risk_dev",
+      "from_label": "Key developer might leave",
+      "kind": "link_strength",
+      "to_id": "goal",
+      "to_label": "weekly bookings",
+    },
+  ],
+  "missing": [
+    {
+      "kind": "risk",
+      "label": "Key developer might leave",
+      "node_id": "risk_dev",
+      "what": "level_today",
+    },
+  ],
+  "operations": [
+    {
+      "op": "add_node",
+      "path": "risk_dev",
+      "value": {
+        "id": "risk_dev",
+        "kind": "risk",
+        "label": "Key developer might leave",
+      },
+    },
+    {
+      "op": "add_edge",
+      "path": "risk_dev::goal",
+      "value": {
+        "defaulted": true,
+        "effect_direction": "negative",
+        "exists_probability": 0.8,
+        "from": "risk_dev",
+        "provenance": {
+          "source": "cee_hypothesis",
+        },
+        "strength": {
+          "mean": -0.5,
+          "std": 0.125,
+        },
+        "to": "goal",
+      },
+    },
+  ],
+  "proposal_id": "gmh_aaaaaaaaaaaa",
+  "revision": "11111111-1111-4111-8111-111111111111",
+}
+`;
