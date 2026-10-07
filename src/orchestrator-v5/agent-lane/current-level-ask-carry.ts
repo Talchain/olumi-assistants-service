@@ -15,7 +15,7 @@ function stillAsksForSameGoal(ask: Ask, graph: unknown): boolean {
   const goal = nodes.map(record).find(n => n?.id === ask.action.goal_id && n.kind === 'goal' && n.label === ask.action.goal_label);
   if (goal === undefined || typeof record(goal.observed_state)?.raw_value === 'number') return false;
   const held = record(goal.observed_state)?.unit ?? goal.goal_threshold_unit;
-  const unit = isChangeOwnPercent({ frame: goal.goal_threshold_frame, unit: held, metric: goal.label }) ? undefined : held;
+  const unit = isChangeOwnPercent({ frame: goal.goal_threshold_frame, unit: held, metric: goal.label, value: goal.goal_threshold_raw }) ? undefined : held;
   return unit === ask.action.goal_unit;
 }
 

@@ -2765,10 +2765,11 @@ const PERCENTAGE_QUANTITY = /%|\b(?:rates?|ratios?|shares?|margins?|churn|retent
  * on a quantity that is not a percentage: "increase productivity by at least 10%". A quantity measured in % keeps it
  * as its unit: "cut churn rate by 10%" is a relative
  * change of a % metric, and "win rate" or "conversion rate" are read in %. A level frame is never a change: its "%" is the
- * level's own. Fail-closed toward the stored unit: any percentage-quantity word in the name keeps the "%".
+ * level's own. Direction words must agree with the signed `value` (percent or stored fraction).
+ * Fail-closed toward the stored unit: any percentage-quantity word in the name keeps the "%".
  */
-export function isChangeOwnPercent(goal: { readonly metric?: unknown; readonly unit?: unknown; readonly frame?: unknown }): boolean {
-  return goal.frame === 'change_rel' && isRelativeChangePercentUnit(goal.unit)
+export function isChangeOwnPercent(goal: { readonly metric?: unknown; readonly unit?: unknown; readonly frame?: unknown; readonly value?: unknown }): boolean {
+  return goal.frame === 'change_rel' && isRelativeChangePercentUnit(goal.unit, goal.value)
     && !(typeof goal.metric === 'string' && PERCENTAGE_QUANTITY.test(goal.metric));
 }
 
@@ -2820,7 +2821,7 @@ export function admitStatedGoalChange(
    * as the goal's unit: the metric's unit is unknown until a level states it (`isChangeOwnPercent`). A quantity measured
    * in % ("cut churn rate by 10%") keeps "%", and so does a level the user wrote in % (`notTheUsers === null` below).
    */
-  const unit = goal.unit && !isChangeOwnPercent(goal) ? goal.unit : undefined;
+  const unit = goal.unit && !isChangeOwnPercent({ ...goal, value: raw }) ? goal.unit : undefined;
   const stored = frame === 'change_rel' ? raw / 100 : raw;
   const node: Partial<AdmittedNode> = { ...(unit ? { goal_threshold_unit: unit } : {}), goal_threshold_frame: frame, goal_threshold_raw: stored };
   const sign = raw > 0 ? '+' : '';
