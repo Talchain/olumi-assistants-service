@@ -34,7 +34,8 @@ export const rows: readonly { name: string; check: () => void }[] = [
   { name: 'value 0 is switched off', check: () => {
     assert.ok(compose({ ...result, levels: [{ ...result.levels[1], value: 0 }] })!.includes('‘Starter tier launched’ is switched off, Olumi’s estimate'));
   } },
-  ...['binary', 'yes/no', 'on/off', 'true/false', '0/1', '0 / 1', 'boolean'].map((unit) => ({ name: `typed ${unit}: both states and every shared formatter`, check: () => {
+  // B1b (cut 8 manual-test t1b-3: a draft stored "0-1" → "set to 1 0-1"): hyphen, en/em dash and "to" separators too.
+  ...['binary', 'yes/no', 'on/off', 'true/false', '0/1', '0 / 1', 'boolean', '0-1', '0 - 1', '0–1', '0—1', '0 to 1', 'yes-no', 'on-off', 'true-false'].map((unit) => ({ name: `typed ${unit}: both states and every shared formatter`, check: () => {
     for (const value of [0, 1]) {
       const state = value === 1 ? 'on' : 'off';
       assert.ok(compose(optionLevel(value, unit), 'propose_option_interventions')!.includes(`‘Starter tier launched’ under ‘Launch’ is switched ${state},`));
@@ -76,6 +77,11 @@ export const rows: readonly { name: string; check: () => void }[] = [
     assert.deepEqual(formatFactorValue(15000, '£'), { display: '£15,000', value: 15000 });
     assert.deepEqual(formatFactorValueApprox(58.8, '£'), { display: '£58.8', rounded: 58.8, approximate: false });
     assert.equal(twoStateLevelWords(2, 'binary'), null);
+    // B1b controls: a range is not a switch; linear on long whitespace (anchored, bounded separators).
+    for (const unit of ['0-100', '0-10', '1-0', '0 to 10', 'hours']) assert.equal(twoStateLevelWords(1, unit), null, unit);
+    for (const unit of [`0${' '.repeat(20_000)}x`, `${' '.repeat(20_000)}0-`, `yes${' '.repeat(20_000)}`]) {
+      const t0 = performance.now(); twoStateLevelWords(1, unit); assert.ok(performance.now() - t0 < 50, 'two-state unit rule at 20k');
+    }
     assert.equal(twoStateLevelWords(1, 'hires', [{ kind: 'option', interventions: { X: 1 } }], 'X'), null);
   } },
 ];
