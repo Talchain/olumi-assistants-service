@@ -33,7 +33,8 @@ import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import {
-  GOAL_CHANCE_COMPANION_KEYS, GOAL_CHANCE_DRIVER_RECORD_KEYS, GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures,
+  GOAL_CHANCE_COMPANION_KEYS, GOAL_CHANCE_DRIVER_RECORD_KEYS, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES,
+  runWithheldGoalFigures,
 } from '../../orchestrator/context/option-result-source.js';
 
 /**
@@ -314,10 +315,19 @@ function optionRowsForAgent(
  */
 function warningsForAgent(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
+  // ⛔ S2l (Science 393023, served B9 unseen b9-1): beside a range the screen TESTS the target for the ranged options, so the
+  // producer's unscoped not-testable `message` ("can't yet test them against your target", naming a ranged option's links)
+  // is false of this Run. The Agent keeps the scoped fact (`option_ids`, `withheld_claims`, the scoped `say`), never the
+  // unscoped words. With no range record the message is true and stays.
+  const ranged = value.some((w) => recordOf(w)?.code === 'GOAL_CHANCE_RANGE');
   // ⛔ S1 review r1 #4: the GOAL_CHANCE_RANGE record's figures never reach the model raw (ruling 1 §6: no comparison of
   // ranges); the Agent reads only its ruled display (`goalChanceRangeDisplayForAgent`, PR-S2).
   return value.filter((w) => recordOf(w)?.code !== 'GOAL_CHANCE_RANGE').map((w) => {
     const r = recordOf(w);
+    if (ranged && r?.code === GOAL_FIGURES_TARGET_NOT_TESTABLE && 'message' in r) {
+      const { message: _unscoped, ...scoped } = r;
+      return scoped;
+    }
     if (r === undefined || !GOAL_CHANCE_DRIVER_RECORD_KEYS.some((k) => k in r)) return w;
     const kept: Record<string, unknown> = { ...r };
     for (const k of GOAL_CHANCE_DRIVER_RECORD_KEYS) delete kept[k];
