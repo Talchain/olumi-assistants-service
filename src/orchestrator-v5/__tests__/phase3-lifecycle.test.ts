@@ -547,7 +547,9 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     // the verbatim [] equality is the precise no-rehydration proof.)
 
     // Every internal carrier / deferred field is stripped at transport.
-    for (const k of ['_meta', 'meta', 'downstream_calls', 'fact_objects', 'graph', 'm1_coaching', 'dominant_factor']) {
+    // schemas 0.80.0 (#2747): `dominant_factor` is no longer a deferred field (the keep-list carries it; pinned by identity
+    // in the RECOVERED row below), so it leaves this strip list. The captured payload itself is unchanged.
+    for (const k of ['_meta', 'meta', 'downstream_calls', 'fact_objects', 'graph', 'm1_coaching']) {
       expect(k in enr).toBe(false);
     }
     const enrJson = JSON.stringify(enr);
@@ -572,17 +574,21 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     expect(ft[0]!.flip_value).toBeNull();
   });
 
-  it('DEFERRED: m1_coaching (carries isl_engine) and dominant_factor remain unrecovered', () => {
+  it('RECOVERED (schemas 0.80.0): dominant_factor passes through as the stored PLoT value, by identity; m1_coaching (carries isl_engine) stays unrecovered', () => {
+    // PLoT's shape (schemas 0.80.0 `AnalysisEnrichmentSchema.dominant_factor`: {factor_id, factor_label}).
+    const stored = { factor_id: 'fac_a', factor_label: 'Engineering Capacity' };
     const fact = factWithEnrichment({
       option_comparison: [{ option_id: 'opt_a', win_probability: 0.7 }],
       confidence_tier: 'needs_work',
       m1_coaching: { assumptions_ledger: { assumptions: [{ source_service: 'isl_engine' }] } },
-      dominant_factor: 'fac_a',
+      dominant_factor: stored,
     });
     const enr = analysisResultBlockFor(fact, { currentTurn: false })!.enrichment ?? {};
     expect(enr.confidence_tier).toBe('needs_work');
     expect('m1_coaching' in enr).toBe(false);
-    expect('dominant_factor' in enr).toBe(false);
+    // By identity: the same factor id and label the Run stored, not merely a present key.
+    expect(enr.dominant_factor).toEqual(stored);
+    expect((enr.dominant_factor as { factor_id?: unknown }).factor_id).toBe('fac_a');
     expect(JSON.stringify(enr).toLowerCase()).not.toContain('isl_engine');
   });
 
