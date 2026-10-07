@@ -7,6 +7,13 @@
  * new is stored: every value and every provenance is read from the held operations themselves, through the estate's
  * existing predicates (`whoSized` for a link), so this module can never become a second provenance authority (R5v2).
  *
+ * ⭐ ONE LIFECYCLE ENVELOPE OVER TYPE-SPECIFIC PAYLOADS (binding: DL, AIE line review #87 6037446159 item 6; design §2a).
+ * The record is the ENVELOPE every proposal shares: identity (id, revision, digest), pin, card, lifecycle, the field
+ * PROJECTION with provenance, the missing data, and the receipt. The PAYLOAD is the stored carrier, verbatim
+ * (`operations`): every quantity, unit, cap, scale, operator, value frame, condition and provenance it was stored with.
+ * It is never copied into a generic shape. Each field kind has its own domain and writes back only into its own op
+ * (`amend.ts`), and a kind that cannot be projected without loss stays unclassified for editing (`slice_2`/`slice_3`).
+ *
  * SLICE 1 implements the product-hold dialect (`gmh_`, `graph_management_held_v1`: the add-option, add-risk and
  * add-factor doors and the edit referee hold) and the `link_strength` field class. Every other op class is CLASSIFIED
  * here (exhaustively, so a new op is a compile error until it is) and declared for the slice that adds it.

@@ -129,6 +129,12 @@ describe('approve-with-edits (amend.ts)', () => {
     expect((edited['strength'] as { mean: number }).mean).toBeCloseTo(-0.85, 12);
     expect(edited['provenance']).toEqual({ source: 'user_specified' });
     expect(Object.hasOwn(edited, 'defaulted')).toBe(false);
+    // ONE envelope over TYPE-SPECIFIC payloads (DL #87 6037446159 item 6): the edited op keeps every other key it was
+    // stored with, never re-shaped into a generic value.
+    const { strength: _s, provenance: _p, defaulted: _d, ...storedRest } = riskOps()[1]!.value as Record<string, unknown>;
+    const { strength: _s2, provenance: _p2, ...editedRest } = edited;
+    expect(editedRest).toEqual(storedRest);
+    expect({ ...r.operations[1]!, value: undefined }).toEqual({ ...riskOps()[1]!, value: undefined });
     expect(r.operations[2]).toEqual(riskOps()[2]);
     expect(r.operations[0]).toEqual(riskOps()[0]);
     expect(r.userEdits).toEqual([
