@@ -1061,6 +1061,19 @@ describe('Wave B6, keys untouched: "…or tipping point was established" and "no
 const B7_CH1 = JSON.parse(fixture('waveB7-unseen1-7e3f8fb-challenge-turn001.json')) as Json;
 const B7_EX2 = JSON.parse(fixture('waveB7-unseen2-7e3f8fb-explain-turn003.json')) as Json;
 const B7_T1B = JSON.parse(fixture('waveB7-t1b-7e3f8fb-explain-turn003.json')) as Json;
+/** Every egress class on `head` + n spaces + "x": the cost at 20,000 over the cost at 5,000 (min of 5 timings each). */
+const egressCostRatio = (head: string): number => {
+  const run = (text: string): void => {
+    DRIVER_ABSENCE_CLAIM.test(text); SENS_CLAIM.test(text); ALL_WITHHELD_CLAIM.test(text);
+    removeDriverAbsenceClaims(text); removeSensitivityAbsenceClaims(text); removeAllWithheldClaims(text);
+  };
+  const cost = (n: number): number => {
+    const text = `${head}${' '.repeat(n)}x`;
+    run(text);
+    return Math.min(...[0, 1, 2, 3, 4].map(() => { const t0 = performance.now(); run(text); return performance.now() - t0; }));
+  };
+  return cost(20000) / cost(5000);
+};
 
 describe('Wave B7, keys untouched: four new wordings (S2i egress backstop)', () => {
   it.each([
@@ -1118,17 +1131,16 @@ describe('Wave B7, keys untouched: four new wordings (S2i egress backstop)', () 
     expect(removeSensitivityAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
   });
 
+  // 4× the whitespace (5,000 → 20,000), min of 5 timings: linear ≈ 4×, quadratic ≈ 16×. Never an absolute bar: a CI runner
+  // read 81 ms where the Mac read under 50 (#2736).
   it.each([
-    ['"which change" + 20,000 spaces', `hasn't established which change${' '.repeat(20000)}x`],
-    ['"sensitivity and tipping points" + 20,000 spaces', `sensitivity and tipping points${' '.repeat(20000)}x`],
-    ['"which assumption most affects the" + 20,000 spaces', `which assumption most affects the${' '.repeat(20000)}x`],
-    ['"supplies no" + 20,000 spaces', `supplies no${' '.repeat(20000)}x`],
-    ['a consequence + 20,000 spaces', `Values are Olumi's; sensitivity was not measured, so${' '.repeat(20000)}x`],
-  ])('LINEAR TIME: %s', (_name, text) => {
-    const t0 = performance.now();
-    DRIVER_ABSENCE_CLAIM.test(text); SENS_CLAIM.test(text); ALL_WITHHELD_CLAIM.test(text);
-    removeDriverAbsenceClaims(text); removeSensitivityAbsenceClaims(text); removeAllWithheldClaims(text);
-    expect(performance.now() - t0).toBeLessThan(50);
+    ['"which change" + whitespace', "hasn't established which change"],
+    ['"sensitivity and tipping points" + whitespace', 'sensitivity and tipping points'],
+    ['"which assumption most affects the" + whitespace', 'which assumption most affects the'],
+    ['"supplies no" + whitespace', 'supplies no'],
+    ['a consequence + whitespace', "Values are Olumi's; sensitivity was not measured, so"],
+  ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
+    expect(egressCostRatio(head)).toBeLessThan(8);
   });
 });
 
@@ -1188,12 +1200,9 @@ describe('Cut 9 PROD, keys untouched: two wordings that passed prod cut 8 and cu
   });
 
   it.each([
-    ['"which assumption matters most to the" + 20,000 spaces', `which assumption matters most to the${' '.repeat(20000)}x`],
-    ['"does not establish a single most consequential" + 20,000 spaces', `does not establish a single most consequential${' '.repeat(20000)}x`],
-  ])('LINEAR TIME: %s', (_name, text) => {
-    const t0 = performance.now();
-    DRIVER_ABSENCE_CLAIM.test(text); SENS_CLAIM.test(text); ALL_WITHHELD_CLAIM.test(text);
-    removeDriverAbsenceClaims(text); removeSensitivityAbsenceClaims(text); removeAllWithheldClaims(text);
-    expect(performance.now() - t0).toBeLessThan(50);
+    ['"which assumption matters most to the" + whitespace', 'which assumption matters most to the'],
+    ['"does not establish a single most consequential" + whitespace', 'does not establish a single most consequential'],
+  ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
+    expect(egressCostRatio(head)).toBeLessThan(8);
   });
 });
