@@ -30,12 +30,14 @@ const clinicCase = (text: string) => {
     option_start: p.evidence.option_start + delta, option_end: p.evidence.option_end + delta };
   return { model, brief, option: p.option, factor: p.factor };
 };
-/** The credited sentence itself replaced: the model quotes the new sentence (offsets are ignored). */
-const ownSentence = (text: string) => {
+/** The credited sentence S replaced by `text`; the model quotes `quote` (offsets are ignored). */
+const quoted = (text: string, quote: string) => {
   const i = clinicCase(text); const iv = level(i.model, i.option, i.factor);
-  iv.stated_evidence = { ...iv.stated_evidence!, quote: text, option_quote: text }; return i;
+  iv.stated_evidence = { ...iv.stated_evidence!, quote, option_quote: quote }; return i;
 };
-const setting = (sentence: string, option: string, factor: string, value: number, unit: string) => {
+const ownSentence = (text: string) => quoted(text, text);
+const S4 = S.replace('4 Saturday', 'four Saturday');
+const setting = (sentence: string, option: string, factor: string, value: number, unit: string, siblings: string[] = []) => {
   const base = structuredClone(probes[0]!.model);
   const amountAt = findStatedAmounts(sentence).find(n => n.magnitude === value)?.index ?? sentence.indexOf('four');
   const template = structuredClone(base.options[1]!);
@@ -43,7 +45,7 @@ const setting = (sentence: string, option: string, factor: string, value: number
     stated_evidence: { quote: sentence, start: 0, end: sentence.length, amount_start: amountAt,
       option_quote: sentence, option_start: 0, option_end: sentence.length } }];
   const model: CandidateModel = { ...base,
-    options: [template, { ...base.options[0]!, label: 'Continue unchanged' }],
+    options: [template, { ...base.options[0]!, label: 'Continue unchanged' }, ...siblings.map(label => ({ ...base.options[0]!, label }))],
     factors: [{ ...base.factors[0]!, label: factor, unit }],
     links: [], risks: [], outcomes: [], constraints: [],
   };
@@ -58,7 +60,8 @@ export const r2Cases: R2Case[] = [
   { name: 'R8 retraction repeats the 4', expected: false, input: () => clinicCase(S + ' Ignore the 4; we have not decided how many Saturday sessions.') },
   { name: 'R5c directContext source heading', expected: false, input: () => clinicCase('Olumi suggested:\n' + S) },
   { name: 'C source heading without Olumi attribution', expected: false, input: () => clinicCase('Advisor suggested:\n' + S) },
-  { name: 'G1 Our options are to', expected: true, input: () => setting('Our options are to run 4 Saturday clinics a month or provide remote consultations.', 'Saturday clinics', 'Saturday clinics', 4, 'clinics/month') },
+  // A sibling arm must name another option of the model (r2 buddy P1-3), as the drafter's model of this brief would.
+  { name: 'G1 Our options are to', expected: true, input: () => setting('Our options are to run 4 Saturday clinics a month or provide remote consultations.', 'Saturday clinics', 'Saturday clinics', 4, 'clinics/month', ['Remote consultations']) },
   { name: 'G2 One option is to', expected: true, input: () => setting('One option is to run 4 Saturday clinics a month.', 'Saturday clinics', 'Saturday clinics', 4, 'clinics/month') },
   { name: 'G3 10 hours each week', expected: true, input: () => setting('Our options are to staff reception for 10 hours each week.', 'Staff reception', 'Reception hours', 10, 'hours/week') },
   { name: 'G4 engineering domain', expected: true, input: () => setting('One option is to hire 3 engineers.', 'Hire engineers', 'Engineers', 3, 'engineers') },
@@ -108,8 +111,25 @@ export const r2Cases: R2Case[] = [
   { name: 'Q ", like the clinic next door does" is a benchmark', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, like the clinic next door does.') },
   { name: 'Q Olumi named inside the credited clause', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month as Olumi suggested.') },
   { name: 'Q control: ", and extend weekday opening" is a sibling arm', expected: true, input: () => ownSentence('We could open for 4 Saturday sessions each month, and extend weekday opening by 10 hours a week.') },
-  { name: 'Q control: "or provide remote consultations" is a sibling arm', expected: true, input: () => ownSentence('We could open for 4 Saturday sessions each month or provide remote consultations.') },
+  { name: 'Q "or provide remote consultations" names no option of the model', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month or provide remote consultations.') },
   { name: 'Q control: ", between 2 and 6" brackets the figure', expected: true, input: () => ownSentence('We could open for 4 Saturday sessions each month, between 2 and 6.') },
+  // r2 buddy (Codex) reproducers and their twins. V: the credited clause may hold only the option's, the factor's and
+  // the unit's words plus frame grammar; anything else refuses.
+  { name: 'V control: "open for 4 Saturday sessions each month" credits', expected: true, input: () => ownSentence('We could open for 4 Saturday sessions each month.') },
+  { name: 'V control: "open for about 4" credits (an approximate point is still the user\'s)', expected: true, input: () => ownSentence('We could open for about 4 Saturday sessions each month.') },
+  { name: 'V "up to 4" is a ceiling (buddy P1-1)', expected: false, input: () => ownSentence('We could open for up to 4 Saturday sessions each month.') },
+  { name: 'V "as a ceiling" without a comma (buddy P1-1)', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month as a ceiling.') },
+  { name: 'V "under 4" is a bound', expected: false, input: () => ownSentence('We could open for under 4 Saturday sessions each month.') },
+  { name: 'V "another 4" is a delta', expected: false, input: () => ownSentence('We could open for another 4 Saturday sessions each month.') },
+  { name: 'V "according to your estimate" attributes the figure to Olumi (buddy P1-4)', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month according to your estimate.') },
+  { name: 'Q ", or open for 5 sessions" names no other option (buddy P1-3)', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or open for 5 sessions.') },
+  { name: 'Q ", or use that number as a ceiling" names no other option (buddy P1-3)', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or use that number as a ceiling.') },
+  { name: 'Q Olumi named in a sibling arm that names another option', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or keep the present timetable as Olumi suggested.') },
+  { name: 'Q ", as the present timetable allows" names an option but is not an arm', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, as the present timetable allows.') },
+  { name: 'Q control: ", or keep the present timetable" is a sibling arm', expected: true, input: () => ownSentence('We could open for 4 Saturday sessions each month, or keep the present timetable.') },
+  { name: 'N credited "four", neighbour retracts "the 4"', expected: false, input: () => quoted(S4 + ' Ignore the 4; we have not decided.', S4) },
+  { name: 'N credited "4", neighbour retracts "the four"', expected: false, input: () => quoted(S + ' Ignore the four; we have not decided.', S) },
+  { name: 'N control: credited "four" with no figure in a neighbour credits', expected: true, input: () => quoted(S4, S4) },
 ];
 export const r2Rows: Row[] = r2Cases.map(c => ({ name: c.name, run: () => {
   const i = c.input(), o = i.model.options.find(o => o.label === i.option)!;
@@ -130,4 +150,16 @@ export function scalingRow(verify = verifiedOptionSetting): { small: number; lar
   const small = sample(5000), large = sample(20000); return { small, large, ratio: large / small };
 }
 r2Rows.push({ name: 'P0 5k to 20k no-full-stop line scaling <8x (min of 5)', run: () => { assert.ok(scalingRow().ratio < 8); } });
+/** r2 buddy P0: one quoted sentence of n clauses ("open for 4 hours, " × n). Refused at the sentence cap, linearly. */
+export function longSentenceRow(verify = verifiedOptionSetting): { small: number; large: number; ratio: number } {
+  const sample = (n: number): number => {
+    const i = ownSentence('We could ' + 'open for 4 hours, '.repeat(n) + 'open for 4 Saturday sessions each month.');
+    const o = i.model.options.find(o => o.label === i.option)!; const iv = level(i.model, i.option, i.factor); const times: number[] = [];
+    verify(i.model, o, iv, i.brief);
+    for (let k = 0; k < 5; k++) { const t = performance.now(); assert.equal(verify(i.model, o, iv, i.brief), false); times.push(performance.now() - t); }
+    return Math.min(...times);
+  };
+  const small = sample(278), large = sample(1112); return { small, large, ratio: large / small };
+}
+r2Rows.push({ name: 'P0b one 5k to 20k sentence of 278 to 1,112 clauses: refused, scaling <8x (min of 5)', run: () => { assert.ok(longSentenceRow().ratio < 8); } });
 describe('round 2 general, linear and fail-closed', () => { for (const row of r2Rows) it(row.name, row.run); });

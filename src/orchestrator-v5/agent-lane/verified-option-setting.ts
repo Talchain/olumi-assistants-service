@@ -55,6 +55,9 @@ const NOT_POINT = new Set(['not', 'cannot', 'no', 'least', 'most', 'minimum', 'm
 /** Verbs that open a sibling option arm in the same sentence ("…, or provide remote consultations"). */
 const ARMS = new Set([...ACTIONS, 'provide', 'offer', 'raise', 'lower', 'hold', 'stop', 'start', 'continue', 'maintain',
   'close', 'move', 'build', 'buy', 'lease', 'rent', 'delay', 'defer', 'do']);
+const MAX_ASSERTION = 1000;
+/** Words a credited clause may hold besides the option's, the factor's and its unit's own words. */
+const CLAUSE = new Set(['about', 'around', 'roughly', 'approximately', 'exactly', 'with', 'new']);
 const figure = (w: string): number | null => /^[0-9]{1,12}$/u.test(w) ? Number(w) : parseCardinalAmount(w);
 function namedOption(model: CandidateModel, selected: Option, clause: string, value: number): boolean {
   const said = words(clause);
@@ -72,13 +75,12 @@ function namedOption(model: CandidateModel, selected: Option, clause: string, va
   });
   return matches.length === 1 && matches[0] === selected;
 }
-/** Every other clause of the sentence must be a sibling option arm: an arm verb, words of its own, and, if it names
- * the selected option's words, a figure that names a different option. A qualifier ("at most", "as a ceiling"), an
- * elliptical alternative ("or 5", "or open for 5") or an attribution after the setting refuses. Only a range that
- * brackets the figure ("between 80 and 250") may directly follow it.
+/** Every other clause of the sentence must be a sibling option arm: an arm verb that uniquely names ANOTHER option of
+ * the model, with that option's own figure (if any). A qualifier ("at most", "or use that number as a ceiling"), an
+ * elliptical or unbound alternative ("or 5", "or open for 5 sessions") or an attribution after the setting refuses.
+ * Only a range that brackets the figure ("between 80 and 250") may directly follow it.
  */
 function onlySiblingArms(model: CandidateModel, selected: Option, others: readonly { text: string; next: boolean }[], value: number): boolean {
-  const own = words(selected.label).filter(w => !GRAMMAR.has(w) && figure(w) === null);
   return others.every(({ text, next }) => {
     const ws = words(text);
     if (next && ws.length === 4 && ws[0] === 'between' && ws[2] === 'and') {
@@ -87,14 +89,12 @@ function onlySiblingArms(model: CandidateModel, selected: Option, others: readon
     }
     const arm = ws[0] === 'or' || ws[0] === 'and' || ws[0] === 'to' ? ws.slice(1) : ws;
     if (!ARMS.has(arm[0] ?? '')) return false;
-    if (!arm.some(w => !GRAMMAR.has(w) && !ARMS.has(w) && figure(w) === null)) return false;
-    if (!(own.length > 0 && own.every(w => ws.some(x => sameName(x, w))))) return true;
     const figures = ws.flatMap(w => { const n = figure(w); return n === null ? [] : [n]; });
-    return figures.length === 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0]!));
+    return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN));
   });
 }
 /** A positive ownership frame. History, current-state reporting, conditions and third-party claims abstain. */
-function settingClause(a: Assertion, at: number): { text: string; start: number; others: { text: string; next: boolean }[] } | null {
+function settingClause(a: Assertion, at: number): { text: string; start: number; frame: string[]; others: { text: string; next: boolean }[] } | null {
   const lead = /^(?:We (?:could|will) |Our options are to |One option is to |Decision: )/iu.exec(a.text);
   // A labelled prospective assertion is also owned, e.g. "The premium plan would attract ...".
   const prospective = /^The (?:[\p{L}]{1,64} ){1,6}would [\p{L}]{1,64} /iu.exec(a.text);
@@ -103,7 +103,7 @@ function settingClause(a: Assertion, at: number): { text: string; start: number;
   const bodyStart = lead?.[0].length ?? 0;
   const body = a.text.slice(bodyStart);
   let start = bodyStart;
-  let found: { text: string; start: number } | null = null;
+  let found: { text: string; start: number; frame: string[] } | null = null;
   const others: { text: string; next: boolean }[] = [];
   let before = 0;
   // Keep numeric alternatives in the clause so the point gate refuses them, rather than selecting an endpoint.
@@ -117,7 +117,7 @@ function settingClause(a: Assertion, at: number): { text: string; start: number;
       if (ws.some(w => NOT_POINT.has(w)) || /[+/()]|[0-9][ \t]{0,4}(?:or|and|-)[ \t]{0,4}[0-9]/iu.test(part)) return null;
       // The complete local clause supplies the setting; a numeric alternative is never a point.
       if (ws.includes('or') || ws.includes('but') || ws.includes('if')) return null;
-      found = { text: part, start };
+      found = { text: part, start, frame: prospective !== null && start === 0 ? ['would', ...words(prospective[0]).slice(-1)] : [first ?? ''] };
     } else if (part.trim() !== '') {
       // `next` marks only the clause directly after the setting (the one place a bracketing range may stand).
       others.push({ text: part, next: found !== null && others.length === before });
@@ -144,7 +144,7 @@ function sameFrame(text: string, span: { start: number; end: number }, unit: unk
 /** DL 7 Oct: a repeated literal (including "the 4") in a neighbour, or Olumi attribution in the credited sentence
  * or a neighbour, refuses. Third-party attribution without either signal is ACCEPTED RESIDUAL (DL 7 Oct).
  */
-function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], literal: string): boolean {
+function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], literal: string, value: number): boolean {
   const breaks = [...brief.matchAll(/\n[ \t]{0,4}\n/gu)].map(m => m.index!);
   const start = breaks.filter(n => n < a.start).at(-1) ?? -1;
   const end = breaks.find(n => n >= a.end) ?? brief.length;
@@ -152,6 +152,8 @@ function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], lit
   return sentences.filter(s => s.start > start && s.start < end).every(s => {
     if (/\bOlumi\b|\byou suggested\b|\byour (?:suggestion|last reply)\b/iu.test(s.text)) return false;
     if (s === a) return true;
+    // The same figure in another spelling ("the 4" beside "four", "four" beside "4") is the same literal.
+    if (words(s.text).some(w => figure(w) === value)) return false;
     const text = s.text.toLowerCase();
     let at = text.indexOf(token);
     while (at >= 0) {
@@ -169,7 +171,9 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
   const sentences = assertions(brief);
   // Only the unique normalized quote is model evidence. Every offset, including amount_start, is ignored.
   const a = exactEvidence(brief, e.quote, sentences);
-  if (a === null || !directContext(brief, a)) return false;
+  // A stated option setting is one ordinary sentence. Longer runs are refused before any per-amount reader runs, so
+  // the shared binder below never sees an unbounded sentence (r2 buddy P0: 1,112 clauses scaled 10x from 5k to 20k).
+  if (a === null || a.text.length > MAX_ASSERTION || !directContext(brief, a)) return false;
   const factors = model.factors.filter(f => f.label === intervention.factor_label);
   if (factors.length !== 1 || (option.interventions ?? []).filter(i => i.factor_label === intervention.factor_label).length !== 1) return false;
   const factor = factors[0]!;
@@ -186,6 +190,11 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
   const clause = settingClause(a, span.start);
   if (clause === null || !namedOption(model, option, clause.text, intervention.value)
     || !onlySiblingArms(model, option, clause.others, intervention.value)) return false;
+  // Every word of the credited clause names the option, the factor or its unit, or is grammar of the frame: a bound
+  // ("up to", "under"), a delta ("another"), a qualifier ("as a ceiling") or an attribution ("according to your
+  // estimate") is outside that vocabulary and refuses. An allowlist, never a list of bad words.
+  const vocab = [...words(option.label), ...words(factor.label), ...words(typeof factor.unit === 'string' ? factor.unit : ''), ...clause.frame];
+  if (!words(clause.text).every(w => figure(w) !== null || GRAMMAR.has(w) || CLAUSE.has(w) || vocab.some(v => sameName(v, w)))) return false;
   const head = labelHead(factor.label);
   const right = words(a.text.slice(span.end)).slice(0, 2);
   const left = words(a.text.slice(clause.start, span.start))
@@ -193,5 +202,5 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
   if (head === undefined || (!right.some(w => sameName(head, w)) && !sameName(head, left.at(-1) ?? ''))) return false;
   if (model.constraints.some(c => c.value === intervention.value && metricNamesLabel(c.metric, factor.label))) return false;
   if (!sameFrame(a.text, span, factor.unit)) return false;
-  return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end));
+  return safeNeighbours(brief, a, sentences, a.text.slice(span.start, span.end), intervention.value);
 }
