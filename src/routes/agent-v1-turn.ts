@@ -4514,7 +4514,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const answerGuidance = guidanceOnAnswer(wireBody.guidance as GuidanceWire | undefined, guidanceHistory, handledGuidancePress);
     const answerOffers = ((wireBody.suggested_actions ?? []) as readonly SuggestedAction[])
-      .filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id, label, message }));
+      // The migration's cap is 8 offers per row; a ninth would refuse the whole row, so it stays live only.
+      .filter(isDurableAnswerOffer).slice(0, 8).map(({ id, label, message }) => ({ id, label, message }));
     const answerOffersRunKey = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })
       ?.id.slice(RUN_EXPLANATION_PREFIX.length) ?? null;
     const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
