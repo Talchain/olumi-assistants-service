@@ -3,7 +3,7 @@
  *
  * ── MEASURED IN A USER SESSION (deployed staging, 23 Sep, scenario `399c2814`)
  * Readiness held exactly ONE issue for thirty-seven minutes:
- *   `OPTION_NEEDS_MAPPING` — "How does Two Developers change Coordination
+ *   `OPTION_NEEDS_MAPPING` — since 23 Sep: "Two Developers is linked straight to Coordination
  *   Overhead Risk?" — `repairability: human_input_required`.
  * "Hire a Tech Lead" was `status: ready` throughout.
  *

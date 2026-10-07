@@ -8,7 +8,7 @@
  *
  * ── WHAT HAPPENED ──────────────────────────────────────────────────────────
  * Readiness held exactly ONE blocking issue for thirty-seven minutes:
- *   OPTION_NEEDS_MAPPING — "How does Two Developers change Coordination
+ *   OPTION_NEEDS_MAPPING — since 23 Sep: "Two Developers is linked straight to Coordination
  *   Overhead Risk? The proposed relationship is retained, but its mechanism
  *   and value still need clarification." (repairability: human_input_required)
  * "Hire a Tech Lead" was `status: ready` throughout.
