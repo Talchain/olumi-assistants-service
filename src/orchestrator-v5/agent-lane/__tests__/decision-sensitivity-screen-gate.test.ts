@@ -1,7 +1,7 @@
 /**
  * S2i (DL GO, 7 Oct): no absence status is handed to the Agent beside a screen that shows a driver, a range or robustness.
  *
- * Bound to SERVED Runs, keys untouched: Waves B1–B7 and W3 (14 Runs, staging, guest; each fixture names its capture).
+ * Bound to SERVED Runs, keys untouched: Waves B1–B7 and W3 (14 Runs, staging, guest) and cut 9 PRODUCTION (2 Runs, guest).
  * Before S2i the projection handed every one of them `decision_sensitivity: not_measured | none_measurable` and
  * `tipping_point: not_evaluated`, and each wave served a new wording of "nothing established which assumption matters
  * most / sensitivity was not measured" beside a screen that names one. Derivatives written by the author are labelled.
@@ -44,6 +44,8 @@ const SERVED: readonly (readonly [string, 'driver' | 'range', boolean])[] = [
   ['waveB7-unseen2-7e3f8fb-explain-turn003.json', 'range', true],
   ['waveB7-t1b-7e3f8fb-explain-turn003.json', 'driver', true],
   ['served-w3-f440be4a-t1b-7ab6c1af.json', 'driver', true],
+  // Cut 9 PRODUCTION (7 Oct, CEE 7e3f8fb live): the Challenge that said "…does not establish a single most consequential change".
+  ['cut9-prod-p1-1-7e3f8fb-challenge-turn004.json', 'driver', true],
 ];
 
 describe('S2i: served Runs whose screen shows a driver or a range hand the Agent no absence status', () => {
@@ -76,6 +78,17 @@ describe('S2i: served Runs whose screen shows a driver or a range hand the Agent
     expect(absenceHanded(out)).toBe(false);
     // CONTROL (author: its robustness check removed): the screen shows nothing, so both statuses are handed.
     expect(project(noRobustness(block), body.draft_graph)).toMatchObject({ decision_sensitivity: { status: 'not_measured' }, tipping_point: { status: 'not_evaluated' } });
+  });
+});
+
+describe('S2i: the Run behind the cut 9 PRODUCTION Explain ("Which assumption matters most to the comparison has not been measured.")', () => {
+  it('RED at base: its readback, as the Explain caller projects it (screen labels only), hands no absence status', () => {
+    const read = fixture('cut9-prod-p1-2-7e3f8fb-readback-run1.json').j as Json;
+    expect(read.analysis_state.run_state.kind).toBe('complete_current');
+    expect(decisionSensitivityOf(read.analysis_result.enrichment).status).toMatch(/^(not_measured|none_measurable)$/u);
+    expect(tippingPointOf(read.analysis_result.enrichment)).toEqual({ status: 'not_evaluated' });
+    expect(absenceHanded(project(read.analysis_result, undefined, true, read.graph))).toBe(false);
+    expect(absenceHanded(project(read.analysis_result, read.graph))).toBe(false);
   });
 });
 

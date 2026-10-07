@@ -55,7 +55,9 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+matters\s+most(?!\s+to\s+(?:you|your|them|the\s+team))`,
   // fronted: "Which assumption matters most has not been established"
   // ⭐ Wave B7 (T1b Explain): "Which assumption most affects the comparison has not been measured." (an object after MOST)
-  R`\b${WHICH_ITEM}${GAP}${MOST}(?:\s+(?:the|its|your|this)\s+(?:comparison|result|outcome|chances?|figures?|answer|ranking))?\s+(?:has|have|is|was|remains?)${ABSENT}`,
+  // ⭐ Cut 9 PROD (7 Oct, CEE 7e3f8fb, Explain): "Which assumption matters most to the comparison has not been measured."
+  // (a preposition before that object; "to you / your team" is never an object here, so a person's preference stays)
+  R`\b${WHICH_ITEM}${GAP}${MOST}(?:\s+(?:(?:to|for|in|on|across)\s+)?(?:the|its|your|this)\s+(?:comparison|result|outcome|chances?|figures?|answer|ranking))?\s+(?:has|have|is|was|remains?)${ABSENT}`,
   // impersonal: "it is unclear which assumption matters most"
   R`\b(?:it\s+is|it[’']s|it\s+remains|it\s+was)\s+(?:still\s+)?(?:unclear|not\s+(?:yet\s+)?(?:clear|known|established)|unknown|uncertain|undetermined)\s+${WHICH_ITEM}${GAP}${MOST}`,
   // "nothing in this run shows which assumption matters most"
@@ -84,7 +86,9 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // rescanned a long word (base 01a2b27: 380 ms on one 20,000-character word, near-quadratic).
   R`(?=[ \t]{1,3}(?:or|nor)[ \t])(?<=${NEG_B}(?:[ \t]{1,3}[\w’'-]{1,40}){1,6})[ \t]{1,3}(?:or|nor)[ \t]{1,3}(?:yet[ \t]{1,3})?(?:established?|identified|set|determined)[ \t]{1,3}(?:(?:an?|the|any)[ \t]{1,3})?(?:clear[ \t]{1,3})?investigation[ \t]{1,3}priorit(?:y|ies)\b`,
   // ⭐ Wave B4 (7 Oct, CEE 01a2b27, Challenge): "This result doesn’t identify an overall “most influential” assumption."
-  R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:(?:overall|single|clear)\s+)?[“"‘']?${MOST_ADJ}[”"’']?\s+${ITEM}`,
+  // ⭐ Cut 9 PROD (7 Oct, CEE 7e3f8fb, Challenge, beside 2 drivers): "…the supplied analysis does not establish a single most
+  // consequential change across options." (a change or lever, as the what-form's "which change"). Never a question.
+  R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:(?:overall|single|clear)\s+)?[“"‘']?${MOST_ADJ}[”"’']?\s+(?:${ITEM}|changes?|levers?)\b(?![^.!?\n]{0,120}\?)`,
   // Wave B (7 Oct, unseen-2 provisional view): "it has not established an investigation priority"
   R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:clear\s+)?investigation\s+priorit(?:y|ies)\b`,
   // "there is no investigation priority yet"

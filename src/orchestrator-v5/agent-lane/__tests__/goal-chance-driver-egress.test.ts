@@ -1131,3 +1131,69 @@ describe('Wave B7, keys untouched: four new wordings (S2i egress backstop)', () 
     expect(performance.now() - t0).toBeLessThan(50);
   });
 });
+
+/**
+ * Cut 9 PRODUCTION smoke (7 Oct 07:4x–07:5xZ, guest, CEE 7e3f8fb live), keys untouched. DL: both passed the egress on prod
+ * cut 8 (3fce64f) AND cut 9; they are served must-fire rows for S2i.
+ * - p1-1 Challenge (turn 004, beside two screen drivers): `cut9-prod-p1-1-7e3f8fb-challenge-turn004.json`;
+ * - p1-2 Explain (its Run's robustness check ran, 4 fragile links; screen drivers 2): the Explain reply as captured
+ *   (`cut9-prod-p1-2-7e3f8fb-explain-turn.txt`) beside the readback of the Run it explained (`…-readback-run1.json`).
+ */
+const CUT9_CH = JSON.parse(fixture('cut9-prod-p1-1-7e3f8fb-challenge-turn004.json')) as Json;
+const CUT9_READ = (JSON.parse(fixture('cut9-prod-p1-2-7e3f8fb-readback-run1.json')) as { j: Json }).j;
+const CUT9_EX: Json = { assistant_text: fixture('cut9-prod-p1-2-7e3f8fb-explain-turn.txt'), blocks: [CUT9_READ.analysis_result], draft_graph: CUT9_READ.graph };
+const CUT9_CH_CLAIM = 'the supplied analysis does not establish a single most consequential change across options.';
+const CUT9_EX_CLAIM = 'Which assumption matters most to the comparison has not been measured.';
+
+describe('Cut 9 PROD, keys untouched: two wordings that passed prod cut 8 and cut 9 (S2i must-fire)', () => {
+  it('the gates are the screen’s: both Runs name a driver, and both robustness checks ran', () => {
+    for (const b of [CUT9_CH, CUT9_EX]) {
+      expect(screenNamesADriver(blockOf(b), b.draft_graph)).toBe(true);
+      expect(robustnessComputed(blockOf(b))).toBe(true);
+    }
+  });
+
+  it('RED at base: the Challenge loses only its claim; the clause before the semicolon stays a sentence', () => {
+    const before = `Check those revenue mechanics and timing before trusting the percentages; ${CUT9_CH_CLAIM}`;
+    expect(CUT9_CH.assistant_text).toContain(before);
+    const out = withoutDriverAbsenceClaimsAtEgress(CUT9_CH, opts(CUT9_CH)) as Json;
+    expect(out.assistant_text).toBe(CUT9_CH.assistant_text.replace(before, 'Check those revenue mechanics and timing before trusting the percentages.'));
+  });
+
+  it('RED at base: the Explain reply loses only its claim; the three chance lines stay', () => {
+    expect(CUT9_EX.assistant_text).toContain(CUT9_EX_CLAIM);
+    const out = withoutDriverAbsenceClaimsAtEgress(CUT9_EX, opts(CUT9_EX)) as Json;
+    expect(out.assistant_text.trimEnd()).toBe(CUT9_EX.assistant_text.replace(` ${CUT9_EX_CLAIM}`, '').trimEnd());
+    for (const line of ['- Raise prices 10%: about 47%.', '- Launch £49 starter tier: about 52%.', '- Keep pricing as it is: less than 1%.']) {
+      expect(out.assistant_text).toContain(line);
+    }
+  });
+
+  it.each([
+    'The analysis doesn’t identify a single most decisive change.',
+    'This run has not established the most important lever across options.',
+    'Which factor matters most for the result has not been established.',
+    'Which assumption mattered most to the outcome is still unclear.',
+  ])('MUST FIRE (paraphrase): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+  });
+
+  it.each([
+    'Raising prices is the most consequential change in this model.',
+    'Which assumption matters most to you has not been measured.',
+    'Which assumption matters most to your team has not been decided.',
+    'The analysis does not establish a single most consequential change? Check the starter link first.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text) || SENS_CLAIM.test(text) || ALL_WITHHELD_CLAIM.test(text)).toBe(false);
+  });
+
+  it.each([
+    ['"which assumption matters most to the" + 20,000 spaces', `which assumption matters most to the${' '.repeat(20000)}x`],
+    ['"does not establish a single most consequential" + 20,000 spaces', `does not establish a single most consequential${' '.repeat(20000)}x`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text); SENS_CLAIM.test(text); ALL_WITHHELD_CLAIM.test(text);
+    removeDriverAbsenceClaims(text); removeSensitivityAbsenceClaims(text); removeAllWithheldClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
