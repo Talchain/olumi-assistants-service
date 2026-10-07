@@ -17,6 +17,8 @@ import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../../system-events/dispatch.js';
 import { linkEffectEndUnits, statedInOneOf, type LinkEffectStatement } from '../../system-events/link-effect-edit.js';
 import { ProposalStore } from '../proposal.js';
+import { isPlaceholderLink } from '../../../cee/magnitude/link-sizing.js';
+import { mediatorReadings } from '../mediator-reading.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 import { agentSelectionContext } from '../selection-context.js';
@@ -610,9 +612,35 @@ describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never 
     const w = world(row as CorpusRow); const before = w.graph(); const result = await propose(w, row as CorpusRow);
     oneQuestion(result, question); expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
   });
+  // Science 393023 LICENCE ruling 3 (7 Oct 20:48Z), re-derived from the predicate, not re-recorded. On served d39c05ba
+  // the kid link "Onboarding drag" → "Feature points per developer-week" is the untagged "+" door constant (0.5/0.125,
+  // `defaulted`), now a placeholder (ruling (b)). Mediator-reading then gauges "Onboarding drag" in its child's unit, so
+  // "1 percentage point of onboarding drag" is a unit mismatch: the user is asked again, no card, nothing stored. Base
+  // does the same today for any TAGGED placeholder kid (a pre-existing gauge rule; follow-up: the gauge should yield to a
+  // unit the user writes). The CONTROL's own claim (the end itself is never a possessive) is kept on a SYNTHETIC
+  // variant whose kid link is sized (std 0.1, not a door constant).
+  const cPoss = { ...headcount, id: 'C-poss', quote: 'Every 2 extra developers add about 1 percentage point of onboarding drag.',
+    effect: effect(1, 'percentage points', 2, 'developers') } as const;
+  const kidLink = (g: Json) => (g.edges as Json[]).filter(e => e.from === 'onboarding_drag' && e.to === 'feature_points_per_developer_week');
+  it('AS SERVED (ruling 3): the end itself on d39c05ba → the gauge reads the placeholder kid link → unit_mismatch, no card, nothing stored', async () => {
+    const served = fixture(cPoss as CorpusRow);
+    expect(kidLink(served)).toHaveLength(1);
+    expect(isPlaceholderLink(kidLink(served)[0])).toBe(true);
+    expect(mediatorReadings(served).get('onboarding_drag')).toMatchObject({ via: 'gauge', child: 'feature_points_per_developer_week' });
+    const w = world(cPoss as CorpusRow); const before = w.graph(); const result = await propose(w, cPoss as CorpusRow);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false, refusal: 'unit_mismatch' });
+    expect(cardsFor(w, result)).toEqual([]); noWrite(w, cPoss as CorpusRow, before);
+  });
+  it('CONTROL (SYNTHETIC, kid link sized at std 0.1): the end itself ("…of onboarding drag") still cards', async () => {
+    const g = fixture(cPoss as CorpusRow);
+    for (const e of kidLink(g)) (e.strength as Json).std = 0.1;
+    expect(isPlaceholderLink(kidLink(g)[0])).toBe(false);
+    expect(mediatorReadings(g).get('onboarding_drag')).toBeUndefined();
+    const w = world(cPoss as CorpusRow, g); const result = await propose(w, cPoss as CorpusRow);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)[0]?.detail).toContain(`From your words: "${cPoss.quote}"`);
+  });
   it.each([
-    ['the end itself ("…of onboarding drag")', { ...headcount, id: 'C-poss', quote: 'Every 2 extra developers add about 1 percentage point of onboarding drag.',
-      effect: effect(1, 'percentage points', 2, 'developers') }],
     ['no modifier ("increase revenue by £100")', { ...resort, id: 'C-lift', quote: 'Every 2 additional customers increase revenue by £100 per month.',
       effect: effect(100, 'GBP/month', 2, 'customers') }],
     ['a particle is not a modifier ("push up revenue by £100")', { ...resort, id: 'C-up', quote: 'Every 2 additional customers push up revenue by £100 per month.',
