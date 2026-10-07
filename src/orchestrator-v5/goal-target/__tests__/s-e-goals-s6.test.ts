@@ -13,6 +13,7 @@ import { GOAL_CHANCE_LICENSED } from '../goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from '../goal-chance-range.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { scopeTargetNotTestableWithRanges } from '../scope-target-not-testable.js';
+import { analysisResultForAgent } from '../../agent-lane/decision-sensitivity.js';
 import {
   BASELINE_WAITS_FOR_OTHERS,
   OWN_REASON_FALLBACK,
@@ -233,5 +234,20 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     expect(Object.keys(reasons)).toEqual(['option_a']);
     expect(OWN_REASON_FALLBACK).toBe("It can't yet be tested against your target.");
     expect(reasons.option_a!.message).toBe("Not shown. It can't yet be tested against your target.");
+  });
+
+  it('R8 Agent view (Codex r1 P2): the panel prose never reaches the model; the projection is exactly the pre-S6 one', () => {
+    const served = read('s-e-goals/b9-unseen1-df15c8c-readback').j;
+    const scoped = scopeTargetNotTestableWithRanges(served.analysis_result.enrichment, served.graph) as Rec;
+    expect(warning(scoped).per_option.carry_on_as_now.message).toBe(BASELINE);
+    const block = { ...served.analysis_result, enrichment: scoped };
+    const withoutPanel = structuredClone(block);
+    delete warning(withoutPanel.enrichment).per_option;
+    const agent = analysisResultForAgent(block, served.graph) as Rec;
+    expect(JSON.stringify(agent)).not.toContain('per_option');
+    expect(JSON.stringify(agent)).not.toContain('It needs nothing more of its own');
+    // CONTROL: the Run-wide reason the model already read is still there, and nothing else in its view moved.
+    expect(warning(agent.enrichment).message).toBe(warning(scoped).message);
+    expect(agent).toEqual(analysisResultForAgent(withoutPanel, served.graph));
   });
 });
