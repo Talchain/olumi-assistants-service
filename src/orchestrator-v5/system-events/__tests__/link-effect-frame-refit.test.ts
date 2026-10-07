@@ -12,7 +12,7 @@ import { prepareLinkEffectUnitReadings } from '../link-effect-unit-reading.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken } from '../link-effect-edit.js';
 import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { clampForPersist, refitFramesForStatedEffects } from '../../agent-lane/refit-frames.js';
-import { heldLinkOf } from '../../goal-target/held-user-links.js';
+import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { linkEffectRefusalWords } from '../../agent-lane/runtime/agent-capabilities.js';
 import { executeOptionInterventionBatch, linkEffectRefitPostimageIsScoped } from '../option-intervention-edit.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
@@ -454,12 +454,13 @@ describe('S5t × hold-at-1.0: a refit keeps a held user sibling held, its spread
     sib.provenance = { source: 'brief_extraction', magnitude: 'user_stated',
       source_quote: 'Each 1% more integration-step abandonment costs about £10,000 a quarter, somewhere between £5,000 and £15,000.',
       natural_effect: { ...sib.provenance.natural_effect, stated_range: { low: -15000, high: -5000 } } };
-    const before = heldLinkOf(sib);
+    const before = heldLinkOf(sib, endsOfGraph(g)(sib));
     expect(before, 'precondition: the sibling is held before the refit').not.toBeNull();
     const r = write(g);
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     if (r.kind !== 'mutated') return;
-    const after = heldLinkOf(edge2(r.mutatedGraph as Rec, 'integration_step_abandonment_rate', 'quarterly_revenue'));
+    const sibAfter = edge2(r.mutatedGraph as Rec, 'integration_step_abandonment_rate', 'quarterly_revenue');
+    const after = heldLinkOf(sibAfter, endsOfGraph(r.mutatedGraph)(sibAfter));
     expect(after).not.toBeNull();
     expect(after!.std).toBeCloseTo(before!.std * (3500000 / 5000000), 12);
   });
