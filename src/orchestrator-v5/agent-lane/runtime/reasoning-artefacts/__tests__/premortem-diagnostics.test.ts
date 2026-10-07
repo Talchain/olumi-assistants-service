@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { authoredBanAfterMasking, PremortemWorksheetV1Schema, premortemProducerDirective, premortemWorksheetDiagnosticsFor, premortemWorksheetFor } from '../premortem.js';
-import { boldCases, diagnosticsCases, maskingCases, riskCases, riskStories } from './premortem-diagnostics-cases.js';
+import { b9ScopedTurns, b9Served, boldCases, diagnosticsCases, eligibilityCases, exitCases, maskingCases, riskCases, riskStories } from './premortem-diagnostics-cases.js';
 import { performance } from 'node:perf_hooks';
 
 describe('pre-mortem story completeness and coded diagnostics', () => {
-  it.each([...diagnosticsCases, ...maskingCases, ...riskCases, ...boldCases])('$name', row => {
+  it.each([...diagnosticsCases, ...maskingCases, ...riskCases, ...boldCases, ...eligibilityCases, ...exitCases])('$name', row => {
     const result = premortemWorksheetDiagnosticsFor(row.make());
     expect(result.worksheet !== undefined).toBe(row.emitted);
+    // A typed exit names a boundary failure; a story-level withhold carries its drops instead.
+    expect(result.exit).toBe(row.exit);
+    // Every withhold is explainable (A2-ELIG): a typed exit, or the stories' own coded drops; never neither.
+    if (result.worksheet === undefined) expect(result.exit !== undefined || result.dropped.length > 0).toBe(true);
     expect(result.rows).toBe(row.rows);
     expect(result.stories).toBe(row.name.startsWith('two ') ? 2 : 1);
     if (row.reason) expect(result.dropped).toContainEqual(expect.objectContaining({ story_index: row.storyIndex, reason: row.reason }));
@@ -61,10 +65,46 @@ describe('pre-mortem story completeness and coded diagnostics', () => {
     expect(elapsed).toBeLessThan(50);
   });
 
-  it('keeps missing-appendix and failed-egress diagnostics available without rows', () => {
-    for (const override of [{ candidates: undefined }, { passed: false }, { initial: undefined }, { turnId: undefined }]) {
+  it('keeps missing-appendix and failed-egress diagnostics available without rows, each with its typed exit', () => {
+    for (const [override, exit] of [[{ candidates: undefined }, 'candidates_invalid'], [{ passed: false }, 'not_passed'],
+      [{ initial: undefined }, 'no_initial'], [{ turnId: undefined }, 'no_turn_id']] as const) {
       const result = premortemWorksheetDiagnosticsFor({ ...diagnosticsCases[1].make(), ...override });
-      expect(result).toEqual({ worksheet: undefined, dropped: [], stories: 2, rows: 0 });
+      expect(result).toEqual({ worksheet: undefined, dropped: [], stories: 2, rows: 0, exit });
+    }
+  });
+
+  it('A2-ELIG served B9: the scoped press refuses the user-sized option, the decision turn supplies its lever', () => {
+    // The diagnosis, pinned: a SCOPED press on 'Raise prices by 10%' has no item (its links are user-sized, its factors
+    // of unknown authorship); the decision turn the producer ran under supplies that option's own lever for stories.
+    const { price, starter } = b9ScopedTurns();
+    expect(price).toMatchObject({ kind: 'unavailable', reason: 'no_grounded_item' });
+    expect(starter?.kind).toBe('run');
+    const decision = b9Served().turn!;
+    expect(decision.context.supplied_items.find(i => i.id === 'price_rise_from_current_price'))
+      .toMatchObject({ kind: 'factor', labels: ['Price rise from current price'], card: null, lever_option_labels: ['Raise prices by 10%'] });
+  });
+
+  it('A2-ELIG served B9: the worksheet carries every story the chat told, word for word', () => {
+    const input = b9Served();
+    const result = premortemWorksheetDiagnosticsFor(input);
+    expect(result).toMatchObject({ stories: 2, rows: 2, dropped: [] });
+    expect(result.exit).toBeUndefined();
+    expect(result.worksheet?.turn_id).toBe(input.turnId);
+    expect(result.worksheet?.rows.map(r => [r.option_id, r.option_label, r.grounding])).toEqual([
+      ['raise_prices_by_10', 'Raise prices by 10%', { kind: 'factor', ids: ['price_rise_from_current_price'], labels: ['Price rise from current price'] }],
+      ['launch_starter_tier', 'Launch starter tier', { kind: 'factor', ids: ['starter_monthly_price', 'starter_subscribers'], labels: ['Starter monthly price', 'Starter subscribers'] }],
+    ]);
+    for (const row of result.worksheet!.rows) {
+      for (const part of [row.failure_way, row.early_warning, row.mitigation!]) expect(input.reply).toContain(part);
+    }
+    expect(result.worksheet?.coverage.find(c => c.option_id === 'keep_pricing_as_it_is')?.status).toBe('not_stress_tested');
+  });
+
+  it('typed exits and drops never carry reply or candidate prose', () => {
+    for (const row of [...exitCases, ...eligibilityCases]) {
+      const result = premortemWorksheetDiagnosticsFor(row.make());
+      const { worksheet: _worksheet, ...diagnostics } = result;
+      expect(JSON.stringify(diagnostics)).not.toMatch(/year later|Watch for|Mitigate|Outside the model|private prose/u);
     }
   });
 
