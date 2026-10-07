@@ -118,7 +118,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
+import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -2212,7 +2212,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
       const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       // ⭐ PR-S2 r5: a replayed reply never denies the driver the screen shows (`goal-chance-driver-egress.ts`).
-      return withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
+      const gatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_replay',
         scopeAuthorityUnavailable: state.scopeAuthorityUnavailable,
@@ -2226,6 +2226,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
       });
+      // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
+      // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
+      return withShapeOnlyIfItDerives(gatedReplay);
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside

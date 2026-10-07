@@ -338,11 +338,13 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // `present` retains the marker even when overlapping obligations bind as one larger atomic unit. The unit must BE that
   // finding (exact text): a bullet that carries it beside other sentences (a run share) never leads (Codex r1 P1 #2783).
   const goalChanceHeadline = units.find((u) => present.some((o) => o.lead === true && u.text === o.text));
+  // A unit that carries a lead finding beside other words never leads by ANY selector (Codex r2 P2 #2783).
+  const mixedLead = (u: Unit): boolean => present.some((o) => o.lead === true && u.text !== o.text && u.text.includes(o.text));
   const headline = goalChanceHeadline ?? hostHeadline ?? leadIn
     ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u))
     ?? units.find((u) => u.kind === 'heading' && eligible(u))
-    ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host') : undefined)
-    ?? (units.length === 1 && eligible(units[0]!) ? units[0] : undefined);
+    ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host' && !mixedLead(u)) : undefined)
+    ?? (units.length === 1 && eligible(units[0]!) && !mixedLead(units[0]!) ? units[0] : undefined);
   if (headline === undefined) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline' };
 
   const mustFace = [...otherObligations.filter((u) => u !== headline), ...(ask !== undefined && ask !== headline ? [ask] : [])];
@@ -425,4 +427,15 @@ function renderDetail(units: readonly Unit[]): string {
     prev = u;
   }
   return paras.map((p) => p.join('\n')).join('\n\n');
+}
+
+/**
+ * A body's `_answer_shape` rides only while it derives the words that ship (checked AFTER every final gate: an egress may
+ * edit the shape alone, Codex r2 on #2783). Otherwise the body ships its text whole, without the shape.
+ */
+export function withShapeOnlyIfItDerives<B extends { assistant_text?: unknown; _answer_shape?: unknown }>(body: B): B {
+  const shape = body._answer_shape as AnswerShape | undefined;
+  if (shape === undefined || deriveAnswerTextFromShape(shape) === body.assistant_text) return body;
+  const { _answer_shape: _unproven, ...whole } = body;
+  return whole as B;
 }
