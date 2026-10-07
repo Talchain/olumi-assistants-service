@@ -306,7 +306,7 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(t1.assistant_text).not.toContain('What other way could you reach');
   }, 120_000);
 
-  it('W-R6: a SAME-LEVEL twin never reaches the door — its level reads as today\u2019s (unchanged), not the declared cut (WD-S-DIRECTION)', async () => {
+  it('W-R6: a SAME-LEVEL twin is dropped (WD-S-DIRECTION); the passing option gets ONE card', async () => {
     seeded();
     const before = optionLabels();
     script = [() => fnCall('propose_new_option', { options: [
@@ -314,10 +314,13 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
       { label: 'Hold at £49', acts_on: [{ factor_label: 'Price', direction: 'negative', level: { value: 49, unit: 'GBP', estimate: true, basis: 'today\u2019s price' } }] },
     ], rationale: 'r' })];
     const t1 = await press();
-    expect(t1._agent.tool_calls.map((c) => [c.name, c.ok, c.refusal])).toEqual([['propose_new_option', false, 'widen_gate']]);
-    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'route-v2 never reached').toEqual([]);
-    expect(await heldOnLatestRow()).toEqual([]);
-    expect(approveChipOf(t1)).toBeUndefined();
+    expect(t1._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_option', true]]);
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option')).toHaveLength(1);
+    expect(await heldOnLatestRow()).toHaveLength(1);
+    expect(t1.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:'))).toHaveLength(1);
+    expect(t1.assistant_text).toContain('Retention offer');
+    expect(t1.assistant_text).toContain('Not in this change: ‘Hold at £49’');
+    expect(t1.assistant_text).not.toContain('What other way could you reach');
     expect(optionLabels()).toEqual(before);
   }, 120_000);
 
