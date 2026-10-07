@@ -383,3 +383,21 @@ describe('timing (preamble rule): every new regex at 5k → 20k characters, 3 sh
     }
   });
 });
+
+describe('P17 (Codex r1 #2780): a RATE goal in a chance-named unit takes its own figures through the real doors', () => {
+  const rateGoal = (unit: string): Rec => { const g = servedGraph(unit); g.nodes[1].label = 'Monthly churn'; return stored(g); };
+  it('today’s "5%" is the level of a rate written in % ("% monthly churn probability"); a 0–1 unit refuses it, never re-scaled', async () => {
+    const ok = await world(rateGoal('% monthly churn probability')).caps.proposeGoalCurrentLevel!(ctxSaying('Our monthly churn is 5% today.'),
+      { goal_label: 'Monthly churn', value: 5, unit: '%', user_stated: true }) as Rec;
+    expect(ok.refusal).toBeUndefined();
+    expect(ok.ok).toBe(true);
+    const no = await world(rateGoal('monthly churn probability (0–1)')).caps.proposeGoalCurrentLevel!(ctxSaying('Our monthly churn is 5% today.'),
+      { goal_label: 'Monthly churn', value: 5, unit: '%', user_stated: true }) as Rec;
+    expect(no).toEqual(expect.objectContaining({ ok: false }));
+  });
+  it('a £ target is never a rate’s target ("conversion probability per visitor"); a % target is', async () => {
+    const pounds = await world(rateGoal('conversion probability per visitor')).caps.proposeGoalTarget!(ctxSaying('We want at least £50 per visitor.'),
+      { constraint_type: 'at_least', value: 50, unit: '£', rationale: 'x' }) as Rec;
+    expect(pounds).toEqual(expect.objectContaining({ ok: false, refusal: 'target_unit_mismatch' }));
+  });
+});

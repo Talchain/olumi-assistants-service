@@ -15,7 +15,7 @@ describe('Science (b) rows: a rate is a quantity, a one-off event stays a chance
   it.each([
     ['churn probability', 2],
     ['monthly churn probability', 1],
-    ['probability a customer churns each month', 2],
+    ['probability a customer churns each month', 1], // "each month": rule 1 comes first (buddy r1 P2)
     ['conversion probability per visitor', 1],
     ['the chance a trial user converts', 2],
   ] as const)('QUANTITY: %s (rule %i)', (text, rule) => {
@@ -66,6 +66,29 @@ describe('the goal’s label is read with its unit (the drafter often writes the
     ['New platform shipped by Q3', 'probability (0–1)'], // 1
   ])('SERVED CHANCE stays a chance: %s measured in %s', (label, unit) => {
     expect(goalKindOf({ kind: 'goal', label, goal_threshold_unit: unit })).toBe('chance_of_event');
+  });
+});
+
+describe('Codex buddy r1 (#2780 @ 7ddad08b): event timing and everyday words never make a one-off event a rate', () => {
+  it.each([
+    ['Launch a month from now', 'probability (%)'],
+    ['Probability we win the open tender', 'probability (%)'],
+    ['Return the deposit by Friday', 'probability (%)'],
+    ['Default supplier delivers on time', 'probability (%)'],
+  ])('CHANCE: %s measured in %s', (label, unit) => {
+    expect(goalKindOf({ kind: 'goal', label, goal_threshold_unit: unit })).toBe('chance_of_event');
+  });
+  it.each([
+    ['probability of purchase each month', 1],
+    ['default probability', 2],
+    ['probability of default', 2],
+    ['probability a customer returns', 2],
+    ['the chance a visitor clicks through', 2],
+  ] as const)('QUANTITY: %s (rule %i)', (text, rule) => {
+    expect(readRateAsQuantity(text)).toEqual({ kind: 'quantity', rule });
+  });
+  it('a million-character label is cut before it is joined, and falls to rule 4', () => {
+    expect(goalKindOf({ kind: 'goal', label: `churn ${'x'.repeat(1_000_000)}`, goal_threshold_unit: 'probability (%)' })).toBe('chance_of_event');
   });
 });
 

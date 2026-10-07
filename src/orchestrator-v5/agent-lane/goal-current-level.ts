@@ -53,7 +53,7 @@
  *     on a `scale_frame`; the apply below retires it exactly as the target writer does, so the user's own sizes into the
  *     goal are re-derived onto the level's frame, never left on a frame the goal no longer has.
  */
-import { goalKindOf } from '../goal-target/goal-kind.js';
+import { goalKindOf, rateUnitInPercent } from '../goal-target/goal-kind.js';
 import { USER_EDIT_SOURCE } from '../../orchestrator/canonicalise-value-ops.js';
 import { sameUnit } from '../../utils/currency-alphabet.js';
 import { admitStatedGoalLevel, admitStatedGoalLevelOnScale, isChangeOwnPercent } from './admit-model.js';
@@ -317,8 +317,10 @@ function sameUnitPhrase(stated: string, goalUnit: string): boolean {
  *     "customers/month"; `ratePeriodOf`, the closed table `unitComparisonKey` folds with), the goal's unit must be per the
  *     SAME period. A unit with no period ("£") is not a period claim and is read by the rungs above as before.
  */
-export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { readonly label: string; readonly unit: string | undefined }): StatedLevel {
+export function readStatedGoalLevel(value: number, statedUnit: unknown, heldGoal: { readonly label: string; readonly unit: string | undefined }): StatedLevel {
   const stated = typeof statedUnit === 'string' ? statedUnit.trim() : '';
+  // P17: a rate written in % ("Monthly churn" in "probability (%)") takes today's "5%" as its own unit.
+  const goal = { label: heldGoal.label, unit: rateUnitInPercent(heldGoal.unit) ?? heldGoal.unit };
   if (goal.unit === undefined) return { ok: true, raw: value };
   const goalFamily = unitPhraseFamily(goal.unit) ?? (moneyInAlphabet(goal.unit) ? 'currency' : null);
   const goalHead = unitPhraseHead(goal.unit) ?? '';

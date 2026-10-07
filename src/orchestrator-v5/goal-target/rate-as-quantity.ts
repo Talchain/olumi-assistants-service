@@ -21,9 +21,19 @@ const MEMBERS = new Set(['customer', 'customers', 'user', 'users', 'visitor', 'v
 /** Rule 2's population nouns, with the inflections that name the same act ("a customer churns", "a trial user converts"). */
 const POPULATION = new Set([
   'churn', 'churns', 'churned', 'churning', 'conversion', 'conversions', 'convert', 'converts', 'converted', 'converting',
-  'retention', 'retained', 'default', 'defaults', 'defaulted', 'defaulting', 'clickthrough', 'open', 'opens',
-  'response', 'responses', 'return', 'returns', 'attrition',
+  'retention', 'retained', 'clickthrough', 'clickthroughs', 'attrition',
 ]);
+/**
+ * Rule 2's nouns that are also everyday words ("the OPEN tender", "a RETURN on investment", "by DEFAULT"): a population
+ * noun only beside the chance word ("default probability", "probability of default") or with a member named
+ * ("probability a customer returns").
+ */
+const POPULATION_IF_SUBJECT = new Set([
+  'default', 'defaults', 'defaulted', 'defaulting', 'open', 'opens', 'opened', 'response', 'responses', 'respond',
+  'responds', 'responded', 'return', 'returns', 'returned', 'returning',
+]);
+const CHANCE = new Set(['probability', 'probabilities', 'chance', 'chances', 'likelihood', 'likelihoods', 'odds']);
+const MEMBER_WORDS = new Set([...MEMBERS, 'subscriber', 'subscribers', 'borrower', 'borrowers', 'recipient', 'recipients', 'buyer', 'buyers']);
 /** Rule 3's one-off events and decisions. */
 const EVENT = new Set([
   'win', 'wins', 'winning', 'won', 'launch', 'launches', 'launching', 'launched', 'deal', 'approval', 'approved', 'hire',
@@ -31,17 +41,21 @@ const EVENT = new Set([
 ]);
 /** Words that make "a <period>" a time window ("within a month"), never a per-period rate ("3% a month"). */
 const WINDOW = new Set(['within', 'in', 'by', 'before', 'after', 'for']);
+/** …and "a month FROM NOW" / "a year AWAY" is a date. */
+const DATE_AFTER = new Set(['from', 'away', 'later', 'ago', 'out', 'time']);
 
 function wordsOf(text: string): string[] {
   const words: string[] = []; let word = '';
   for (const c of text.toLowerCase()) {
     if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) word += c;
-    else if (c === '%') { if (word !== '') words.push(word); words.push('%'); word = ''; }
+    // "%" is a word; "|" is the boundary between a goal's unit and its label, so no word is read as "beside" one across it.
+    else if (c === '%' || c === '|') { if (word !== '') words.push(word); words.push(c); word = ''; }
     else if (word !== '') { words.push(word); word = ''; }
   }
   if (word !== '') words.push(word);
   // "click-through" / "click through" are one noun.
-  return words.flatMap((w, i) => (w === 'click' && words[i + 1] === 'through' ? ['clickthrough'] : w === 'through' && words[i - 1] === 'click' ? [] : [w]));
+  const click = (w: string | undefined): boolean => w === 'click' || w === 'clicks';
+  return words.flatMap((w, i) => (click(w) && words[i + 1] === 'through' ? ['clickthrough'] : w === 'through' && click(words[i - 1]) ? [] : [w]));
 }
 
 const isPeriod = (w: string | undefined): boolean => w !== undefined && periodNoun(w) !== null;
@@ -51,7 +65,7 @@ function perMarker(ws: readonly string[]): boolean {
   return ws.some((w, i) => w === 'rate' || w === 'rates'
     || periodAdverb(w) !== null
     || (w === 'per' && (isPeriod(ws[i + 1]) || MEMBERS.has(ws[i + 1] ?? '')))
-    || (w === 'a' && isPeriod(ws[i + 1]) && !WINDOW.has(ws[i - 1] ?? ''))
+    || ((w === 'a' || w === 'each' || w === 'every') && isPeriod(ws[i + 1]) && !WINDOW.has(ws[i - 1] ?? '') && !DATE_AFTER.has(ws[i + 2] ?? ''))
     || (w === '%' && ws[i + 1] === 'of' && MEMBERS.has(ws[i + 2] ?? '')));
 }
 
@@ -66,7 +80,11 @@ export function readRateAsQuantity(text: string): RateReading {
   if (text.length > 400) return { kind: 'chance', rule: 4 };
   const ws = wordsOf(text);
   if (perMarker(ws)) return { kind: 'quantity', rule: 1 };
-  if (ws.some((w) => POPULATION.has(w))) return { kind: 'quantity', rule: 2 };
+  const member = ws.some((w) => MEMBER_WORDS.has(w));
+  if (ws.some((w, i) => POPULATION.has(w) || (POPULATION_IF_SUBJECT.has(w)
+    && (member || [ws[i - 1], ws[i + 1], ws[i - 2], ws[i + 2]].some((n) => n !== undefined && CHANCE.has(n)))))) {
+    return { kind: 'quantity', rule: 2 };
+  }
   if (oneOffEvent(ws)) return { kind: 'chance', rule: 3 };
   return { kind: 'chance', rule: 4 };
 }

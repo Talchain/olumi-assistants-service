@@ -51,6 +51,21 @@ export function unitNamesAChance(unit: unknown): boolean {
   return words.some((w, i) => CHANCE_WORD.test(w) && CLAUSE_OPENERS.has((words[i + 1] ?? '').toLowerCase()));
 }
 
+/**
+ * P17: a RATE goal measured in a chance-named unit ("probability (%)", "conversion probability per visitor") is a share.
+ * For the unit-family check a figure in pounds, people or months is never it, so the unit reads as "%". Only for a unit
+ * written in % ("probability (%)", "% churn probability") is a stated "%" figure the rate's own; a 0–1 or bare
+ * "probability" unit keeps its own words (a "5%" is then refused, never silently re-scaled).
+ */
+export function rateUnitForFamily(unit: unknown): string | undefined {
+  return unitNamesAChance(unit) ? '%' : undefined;
+}
+export function rateUnitInPercent(unit: unknown): string | undefined {
+  if (!unitNamesAChance(unit) || typeof unit !== 'string') return undefined;
+  const lower = unit.toLowerCase();
+  return lower.includes('%') || lower.includes('percent') ? '%' : undefined;
+}
+
 /** The unit the goal is measured in: its target's unit, else its level's. */
 export function goalUnitOf(goal: Rec): string | undefined {
   const own = goal.goal_threshold_unit;
@@ -70,7 +85,8 @@ export function goalKindOf(goal: unknown): GoalKind {
   // P17, Science ruling (b): a population RATE written as a probability ("churn probability", "conversion probability per
   // visitor") is a quantity. Its unit, then its label, are read by the ruling's four rules; a one-off event stays a chance.
   if (chanceUnits.length > 0
-    && readRateAsQuantity([...chanceUnits, typeof goal.label === 'string' ? goal.label : ''].join(' | ')).kind === 'chance') {
+    // Each part is cut to 401 characters first, so an over-long one falls to rule 4 without building a long string.
+    && readRateAsQuantity([...chanceUnits, typeof goal.label === 'string' ? goal.label : ''].map((t) => t.slice(0, 401)).join(' | ')).kind === 'chance') {
     return 'chance_of_event';
   }
   const frame = goal.goal_threshold_frame;
