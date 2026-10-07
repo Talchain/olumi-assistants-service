@@ -3866,8 +3866,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * option's figure. AFTER the leader gate on purpose (as break-even): a per-option chance line is not a ranking, and the
      * gate's classifier codes it as one (B5 T1b: it deleted all three). From the final readback, only while its Run is
      * complete and current. Logged by code, never the prose.
+     * S4d (Wave B6): ALSO on the Explain turn that narrates that current Run — B5's X1 ("…on current information:" with
+     * nothing under it) was the Explain turn, which "ran an analysis" never covered. Never on a stale explanation.
      */
-    if (ranAnalysisThisTurn && typeof wireBody.assistant_text === 'string') {
+    const explainsCurrentRun = fastPath === 'explain' && narrationStatus !== 'stale';
+    if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       const rangeCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
       const ranged = withScreenLinesOwed(wireBody.assistant_text, goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, rangeCurrent));
       if (ranged.added > 0) {

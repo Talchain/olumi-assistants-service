@@ -60,7 +60,10 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // "nothing in this run shows which assumption matters most"
   R`\bnothing\b(?:\s+[\w’'-]+){0,4}?\s+(?:shows?|establish(?:es)?|identifies|indicates|tells?\s+us)\s+${WHICH_ITEM}${GAP}${MOST}`,
   // "no most-sensitive assumption was measurable / has been established"
-  R`\bno\s+(?:single\s+)?${MOST_ADJ}\s+${ITEM}\s+(?:was|is|has\s+been|could\s+be|were|are)\s+(?:established|measurable|measured|identified|found|determined)`,
+  // ⭐ Wave B6 (7 Oct, CEE 4ce3583, Explain): "No most-sensitive assumption or tipping point was established." (a coordinated noun)
+  R`\bno\s+(?:single\s+)?${MOST_ADJ}\s+${ITEM}(?:[ \t]{1,3}or[ \t]{1,3}[\w’'-]{1,40}(?:[ \t]{1,3}[\w’'-]{1,40}){0,2})?\s+(?:was|is|has\s+been|could\s+be|were|are)\s+(?:established|measurable|measured|identified|found|determined)`,
+  // ⭐ Wave B6 (Challenge): "No recorded sensitivity result establishes which matters most across options."
+  R`\bno\s+(?:(?:recorded|measured|computed)\s+)?(?:(?:sensitivity|robustness)\s+)?(?:results?|analys[ie]s|findings?|evidence|checks?|tests?)\s+(?:yet\s+)?(?:establish|show|identif|determin|indicat|tell|reveal)\w*\s+(?:us\s+)?(?:which|what)(?:\s+(?:of\s+(?:the|these|those)\s+)?${ITEM})?\s+(?:matters?|counts?)\s+(?:the\s+)?most\b(?![ \t]{1,3}to[ \t]{1,3}(?:you|your|them|the[ \t]{1,3}team))`,
   // "no assumption has been identified as the most important"
   R`\bno\s+(?:single\s+)?${ITEM}\s+(?:has\s+been|was|is|could\s+be)\s+(?:identified|established|shown|found|singled\s+out)\s+as\s+(?:the\s+)?(?:most\s+(?:important|influential|sensitive)|(?:main|key|biggest)\s+driver)`,
   // ⭐ Wave B2 (7 Oct 03:3xZ, CEE 044faef): paraphrases keep coming ("…has not established which assumption deserves
@@ -71,7 +74,8 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   R`${NEG}${VERB}\s+${WHICH_ITEM}${GEN_GAP}\s+(?:the\s+)?(?:most(?:\s+(?:sensitive\s+to|weight))?|priority)${CLAUSE_END}`,
   // ⭐ Wave B3 (7 Oct, CEE 7addf05, Challenge): "This result does not establish what changes chances most." /
   // "It hasn't established what changes the chances most: …" (a "what" with no assumption noun).
-  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
+  // ⭐ Wave B5 (7 Oct, CEE 5a260e3, Challenge): "This run doesn’t establish what would change the chances most: …" (a modal).
+  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+(?:(?:would|could|might|will|can|does|do)\s+)?(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
   // ⭐ Wave B3 (T1b provisional view): "…the analysis has not tested the deadline or established investigation priority."
   // Only the "or …" tail is the claim (bounded lookbehind to its negation); `cutOnce` cuts from the "or".
   // ⛔ S2f: the "or" is checked FIRST (lookahead), and each word is bounded: tried at every position, the lookbehind
