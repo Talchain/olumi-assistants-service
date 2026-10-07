@@ -48,6 +48,19 @@ export const MORE_LIKELY_TO_MISS_PCT = 40;
 export type GoalChanceForm = 'highest' | 'highest_all_likely_to_miss' | 'all_likely_to_miss' | 'similar' | 'each';
 export type GoalChanceComparator = 'at_least' | 'above' | 'at_most' | 'below';
 
+/** Recorded by the Run-input owner only after the scoring frame has been confirmed. */
+export interface SentGoalThreshold {
+  readonly value: number;
+  readonly field: 'goal_threshold' | 'goal_threshold_raw';
+  readonly frame: 'level' | 'delta';
+  readonly baseline?: number;
+  readonly status_quo_option_id?: string;
+}
+
+export const SPREAD_NOTE_WITH_DOWNSIDE = 'Its typical result falls short of your target: this chance comes from its wider spread, which also widens how far short it could fall (see its downside).';
+export const SPREAD_NOTE_WITHOUT_DOWNSIDE = 'Its typical result falls short of your target: this chance comes from its wider spread, which also means it could fall further short.';
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
 export interface GoalChanceLicence {
   readonly code: typeof GOAL_CHANCE_LICENSED;
   readonly severity: 'info';
@@ -63,6 +76,9 @@ export interface GoalChanceLicence {
   readonly similar_option_ids?: readonly string[];
   readonly leader_option_id?: string;
   readonly next_option_id?: string;
+  /** The Run's unambiguous scoring threshold, retained even when there is no spread reversal. */
+  readonly sent_threshold?: SentGoalThreshold;
+  readonly spread_note_by_option?: Readonly<Record<string, string>>;
   /** The target as the user stated it: the UI says it in these words, never re-derives the comparator. */
   readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string };
   /**
@@ -109,6 +125,7 @@ export function displayedGoalPct(p: number): number {
  */
 export function goalChanceLicenceOf(
   envelope: unknown, graph: unknown, goalId: unknown, earned: (optionId: string, p: 0 | 1) => boolean = () => false,
+  sentThreshold?: SentGoalThreshold,
 ): GoalChanceLicence | null {
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
@@ -131,6 +148,7 @@ export function goalChanceLicenceOf(
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
+    recordOf.set(id, r);
     const p = r.probability_of_goal;
     option_ids.push(id);
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
@@ -138,7 +156,6 @@ export function goalChanceLicenceOf(
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
     if (!Number.isFinite(p) || p < 0 || p > 1) return null;
     licensed.push(id);
-    recordOf.set(id, r);
     // ⭐ Ruling 5: the displayed step follows the figure's own precision; no precision block → whole, as before.
     const precision = goalChancePrecisionOf(r);
     if (precision !== null) {
@@ -184,6 +201,7 @@ export function goalChanceLicenceOf(
       else noDrivers[id] = claim.no_driver;
     }
   }
+  const spread = spreadNotesOf(sentThreshold, goal, nodes, licensed, pct, recordOf, comparator, form);
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
@@ -191,6 +209,8 @@ export function goalChanceLicenceOf(
     form,
     option_ids,
     pct_by_option: pct,
+    ...(spread === undefined ? {} : { sent_threshold: sentThreshold }),
+    ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
@@ -201,6 +221,87 @@ export function goalChanceLicenceOf(
     ...(Object.keys(drivers).length > 0 ? { driver_by_option: drivers } : {}),
     ...(Object.keys(noDrivers).length > 0 ? { no_driver_by_option: noDrivers } : {}),
   };
+}
+
+/** One Run-input candidate must agree with every licensed option; ambiguity records nothing. */
+export function sentGoalThresholdOf(
+  envelope: unknown, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
+): SentGoalThreshold | undefined {
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned);
+  if (licence === null) return undefined;
+  const graphNodes: unknown[] = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes : [];
+  const goal = graphNodes.filter(isRec).find((n) => n.id === goalId && n.kind === 'goal');
+  if (goal === undefined || !isRec(envelope)) return undefined;
+  const records = readOptionResultSources(envelope).find(s => s.length > 0) ?? [];
+  const candidates: SentGoalThreshold[] = [];
+  for (const field of ['goal_threshold_raw', 'goal_threshold'] as const) {
+    const value = goal[field];
+    if (!finite(value)) continue;
+    const agrees = Object.keys(licence.pct_by_option).every(id => {
+      const record = records.find(r => (r.option_id ?? r.id) === id);
+      const outcome = isRec(record?.outcome) ? record.outcome : undefined;
+      return thresholdScaleAgrees(value, outcome?.p10, outcome?.p90, record?.probability_of_goal, licence.target.comparator);
+    });
+    if (agrees) candidates.push({ value, field, frame: 'delta' });
+  }
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+/** The same percentile/chance agreement rules apply to candidate selection and the recorded scoring frame. */
+function thresholdScaleAgrees(t: number, low: unknown, high: unknown, p: unknown, comparator: GoalChanceComparator): boolean {
+  if (!finite(low) || !finite(high) || !finite(p) || low > high || p < 0 || p > 1) return false;
+  const upwards = comparator === 'at_least' || comparator === 'above';
+  return (t > low || (upwards ? p >= 0.85 : p <= 0.15))
+    && (t < high || (upwards ? p <= 0.15 : p >= 0.85))
+    && (t <= low || t >= high || (p >= 0.05 && p <= 0.95));
+}
+
+/** No frame is inferred from a target, a unit, or a sample magnitude. Missing Run inputs keep the note silent. */
+function spreadNotesOf(
+  sent: SentGoalThreshold | undefined, goal: Rec | undefined, nodes: Rec[], licensed: string[],
+  pct: Record<string, number>, records: Map<string, Rec>, comparator: GoalChanceComparator, form: GoalChanceForm,
+): Record<string, string> | undefined {
+  if (sent === undefined || !finite(sent.value) || goal === undefined
+    || !['goal_threshold', 'goal_threshold_raw'].includes(sent.field) || goal[sent.field] !== sent.value
+    || (sent.frame !== 'level' && sent.frame !== 'delta')) return undefined;
+  let offset = 0;
+  if (sent.frame === 'level') {
+    const statusQuo = nodes.find(n => n.id === sent.status_quo_option_id && n.kind === 'option' && n.is_baseline === true);
+    const reference = records.get(sent.status_quo_option_id ?? '');
+    const mean = isRec(reference?.outcome) ? reference.outcome.mean : undefined;
+    if (!finite(sent.baseline) || goal.goal_baseline !== sent.baseline || statusQuo === undefined || !finite(mean)) return undefined;
+    offset = sent.baseline - mean;
+  }
+  const upwards = comparator === 'at_least' || comparator === 'above';
+  const means = new Map<string, number>();
+  for (const id of licensed) {
+    const r = records.get(id)!;
+    const outcome = isRec(r.outcome) ? r.outcome : undefined;
+    if (!finite(outcome?.mean) || !finite(outcome?.p10) || !finite(outcome?.p90) || !finite(r.probability_of_goal)) return undefined;
+    const mean = outcome.mean + offset;
+    const low = outcome.p10 + offset;
+    const high = outcome.p90 + offset;
+    if (![mean, low, high].every(Number.isFinite) || low > high) return undefined;
+    const p = r.probability_of_goal;
+    // One failing option silences the whole Run; a normalised threshold against currency samples fails here.
+    if (!thresholdScaleAgrees(sent.value, low, high, p, comparator)) return undefined;
+    means.set(id, mean);
+  }
+  const notes: Record<string, string> = {};
+  // This is the same visibility condition as goalChanceScreenLinesForAgent's point lines.
+  if (form !== 'each') return notes;
+  for (const b of licensed) {
+    const meanB = means.get(b)!;
+    const beyond = upwards ? sent.value > meanB : sent.value < meanB;
+    if (!beyond) continue;
+    const reversal = licensed.some(a => a !== b && pct[a]! < pct[b]!
+      && (upwards ? means.get(a)! > meanB : means.get(a)! < meanB));
+    if (!reversal) continue;
+    const downside = records.get(b)!.downside;
+    Object.defineProperty(notes, b, { enumerable: true, value: isRec(downside) && finite(downside.p05)
+      ? SPREAD_NOTE_WITH_DOWNSIDE : SPREAD_NOTE_WITHOUT_DOWNSIDE });
+  }
+  return notes;
 }
 
 /**
@@ -283,8 +384,9 @@ function goalPathEdges(graph: unknown, goalId: unknown, optionIds: readonly stri
 /** Appends the licence to the Run's `inference_warnings` when there is one; otherwise the envelope itself. Pure. */
 export function withGoalChanceLicence<E>(
   envelope: E, graph: unknown, goalId: unknown, earned?: (optionId: string, p: 0 | 1) => boolean,
+  sentThreshold?: SentGoalThreshold,
 ): E {
-  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned);
+  const licence = goalChanceLicenceOf(envelope, graph, goalId, earned, sentThreshold);
   if (licence === null || !isRec(envelope)) return envelope;
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
   return { ...envelope, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;
@@ -392,6 +494,7 @@ export function agentLicenceRecordOf(result: unknown): Rec | undefined {
  */
 export function goalChanceLicenceForAgent(result: unknown): {
   form: GoalChanceForm; option_ids: string[]; leader_option_id?: string; similar_option_ids?: string[]; withheld_option_ids?: string[];
+  sent_threshold?: SentGoalThreshold; spread_note_by_option?: Readonly<Record<string, string>>;
 } | undefined {
   if (!isRec(result)) return undefined;
   const records = [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
@@ -415,9 +518,28 @@ export function goalChanceLicenceForAgent(result: unknown): {
     : r.similar_option_ids !== undefined) return undefined;
   if (r.withheld_option_ids !== undefined
     && (form !== 'each' || withheld === undefined || withheld.length === 0 || !withheld.every((id) => optionIds.includes(id)))) return undefined;
+  const sent = isRec(r.sent_threshold) ? r.sent_threshold : undefined;
+  const notes = isRec(r.spread_note_by_option) ? r.spread_note_by_option : undefined;
+  const validSent = sent !== undefined && finite(sent.value)
+    && (sent.field === 'goal_threshold' || sent.field === 'goal_threshold_raw')
+    && (sent.frame === 'delta' || (sent.frame === 'level' && finite(sent.baseline)
+      && typeof sent.status_quo_option_id === 'string' && optionIds.includes(sent.status_quo_option_id)));
+  const validSpread = form === 'each' && validSent
+    && notes !== undefined && Object.keys(notes).length > 0
+    && Object.entries(notes).every(([id, note]) => optionIds.includes(id) && !withheld?.includes(id)
+      && isRec(r.pct_by_option) && finite(r.pct_by_option[id])
+      && (note === SPREAD_NOTE_WITH_DOWNSIDE || note === SPREAD_NOTE_WITHOUT_DOWNSIDE));
   return {
     form,
     option_ids: optionIds,
+    ...(validSent && sent !== undefined ? { sent_threshold: {
+      value: sent.value as number,
+      field: sent.field as SentGoalThreshold['field'],
+      frame: sent.frame as SentGoalThreshold['frame'],
+      ...(typeof sent.baseline === 'number' ? { baseline: sent.baseline } : {}),
+      ...(typeof sent.status_quo_option_id === 'string' ? { status_quo_option_id: sent.status_quo_option_id } : {}),
+    } satisfies SentGoalThreshold } : {}),
+    ...(validSpread ? { spread_note_by_option: notes as Record<string, string> } : {}),
     ...(typeof r.leader_option_id === 'string' ? { leader_option_id: r.leader_option_id } : {}),
     ...(similar !== undefined ? { similar_option_ids: similar } : {}),
     ...(withheld !== undefined ? { withheld_option_ids: withheld } : {}),
