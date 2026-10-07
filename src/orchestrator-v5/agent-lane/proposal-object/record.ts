@@ -29,7 +29,7 @@ import { GM_HELD_GRADED_TODAY_KEY, GM_HELD_SWITCH_FACTORS_KEY, readGradedTodayMe
 import { GM_HELD_USER_TODAY_KEY, readUserTodayMember } from '../../routing/add-factor-transaction.js';
 import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
 import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember } from '../../routing/stated-event-risk.js';
-import { eventRiskLikelihoodWords } from '../stated-event-risk-draft.js';
+import { eventRiskCardLine } from '../stated-event-risk-draft.js';
 import { whoSized } from '../strength-authorship-words.js';
 import type { ProposalOperation } from '../proposal.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -232,7 +232,7 @@ function approveActionOf(pa: PendingAction, ops: readonly HeldOp[], graph: unkno
   // The member reader validates the occurrence with EventRiskV1 before any copy is added.
   const eventRisk = readUserEventRiskMember(patch[GM_HELD_USER_EVENT_RISK_KEY]);
   if (eventRisk !== undefined) {
-    const line = `It may happen: ${eventRiskLikelihoodWords(eventRisk.event_risk)}, as you said.`;
+    const line = eventRiskCardLine(eventRisk.event_risk);
     detail = detail !== undefined ? `${detail}\n${line}` : line;
   }
   return { id: `${APPROVE_PREFIX}${pa.chip_id}`, label, message, ...(detail !== undefined ? { detail } : {}) };

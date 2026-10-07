@@ -1,7 +1,7 @@
 import { describe, it, vi } from 'vitest';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 import { censusRows, probeRows, integrityRows, seamRows, rawRows, registrationRows, probes, level, assertCell, type Row } from './fixtures/r5-verified-cases.js';
 import assert from 'node:assert/strict';
-import { performance } from 'node:perf_hooks';
 import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 import type { CandidateModel } from '../admit-model.js';
 import { verifiedOptionSetting } from '../verified-option-setting.js';
@@ -176,30 +176,27 @@ export const r2Rows: Row[] = r2Cases.map(c => ({ name: c.name, run: () => {
   assert.equal(level(prepareProvisionalCandidate(i.model, i.brief).candidate, i.option, i.factor).provenance, c.expected ? 'explicit' : 'ai_proposed');
   if (c.name.startsWith('R')) assertCell(i.model, i.brief, i.option, i.factor, c.expected ? 'explicit' : 'ai_proposed');
 } }));
-/** Scaling uses minima of five, never an absolute millisecond acceptance bar. */
+/** Scaling uses minima of seven calibrated batches (scalingRatio), never an absolute millisecond acceptance bar. */
 export function scalingRow(verify = verifiedOptionSetting): { small: number; large: number; ratio: number } {
-  const sample = (size: number): number => {
+  const call = (size: number): (() => void) => {
     const i = clinicCase('a'.repeat(size) + '\n' + S), o = i.model.options.find(o => o.label === i.option)!;
-    const iv = level(i.model, i.option, i.factor); const times: number[] = [];
-    verify(i.model, o, iv, i.brief); // warm up both sizes
-    for (let k = 0; k < 5; k++) { const t = performance.now(); assert.equal(verify(i.model, o, iv, i.brief), true); times.push(performance.now() - t); }
-    return Math.min(...times);
+    const iv = level(i.model, i.option, i.factor);
+    return () => assert.equal(verify(i.model, o, iv, i.brief), true);
   };
-  const small = sample(5000), large = sample(20000); return { small, large, ratio: large / small };
+  const m = scalingRatio(call(5000), call(20000)); return { small: m.smallMs, large: m.largeMs, ratio: m.ratio };
 }
-r2Rows.push({ name: 'P0 5k to 20k no-full-stop line scaling <8x (min of 5)', run: () => { assert.ok(scalingRow().ratio < 8); } });
+r2Rows.push({ name: 'P0 5k to 20k no-full-stop line scaling <8x (min of 7 calibrated batches)', run: () => { assert.ok(scalingRow().ratio < 8); } });
 /** r2 buddy P0: one quoted sentence of n clauses ("open for 4 hours, " × n). Refused at the sentence cap, linearly. */
+// Calibrated batches: the single-call min-of-5 version failed on a staging push run (7 Oct).
 export function longSentenceRow(verify = verifiedOptionSetting): { small: number; large: number; ratio: number } {
-  const sample = (n: number): number => {
+  const call = (n: number): (() => void) => {
     const i = ownSentence('We could ' + 'open for 4 hours, '.repeat(n) + 'open for 4 Saturday sessions each month.');
-    const o = i.model.options.find(o => o.label === i.option)!; const iv = level(i.model, i.option, i.factor); const times: number[] = [];
-    verify(i.model, o, iv, i.brief);
-    for (let k = 0; k < 5; k++) { const t = performance.now(); assert.equal(verify(i.model, o, iv, i.brief), false); times.push(performance.now() - t); }
-    return Math.min(...times);
+    const o = i.model.options.find(o => o.label === i.option)!; const iv = level(i.model, i.option, i.factor);
+    return () => assert.equal(verify(i.model, o, iv, i.brief), false);
   };
-  const small = sample(278), large = sample(1112); return { small, large, ratio: large / small };
+  const m = scalingRatio(call(278), call(1112)); return { small: m.smallMs, large: m.largeMs, ratio: m.ratio };
 }
-r2Rows.push({ name: 'P0b one 5k to 20k sentence of 278 to 1,112 clauses: refused, scaling <8x (min of 5)', run: () => { assert.ok(longSentenceRow().ratio < 8); } });
+r2Rows.push({ name: 'P0b one 5k to 20k sentence of 278 to 1,112 clauses: refused, scaling <8x (min of 7 calibrated batches)', run: () => { assert.ok(longSentenceRow().ratio < 8); } });
 describe('round 2 general, linear and fail-closed', () => { for (const row of r2Rows) it(row.name, row.run); });
 describe('DL 7 Oct (v): a malformed draft refuses and logs; a well-formed refusal does not log', () => {
   const run = (i: ReturnType<typeof clinicCase>): { verified: boolean; logged: boolean } => {

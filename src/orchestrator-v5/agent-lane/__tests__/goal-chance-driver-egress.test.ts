@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../../../utils/telemetry.js';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import {
   DRIVER_ABSENCE_CLAIM, GOAL_CHANCE_DRIVER_ABSENCE_REMOVED, removeDriverAbsenceClaims, withoutDriverAbsenceClaimsAtEgress,
@@ -627,19 +628,12 @@ describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
     removeDriverAbsenceClaims(text);
     expect(performance.now() - t0).toBeLessThan(50);
   });
-  // 4× the input, min of 5 timings: linear ≈ 4×, quadratic ≈ 16×. (A 2× step at 4–8 ms read 3.5× on a CI runner, #2727.)
+  // 4× the input, calibrated batches (scalingRatio): linear ≈ 4×, quadratic ≈ 16×. (A 2× step at 4–8 ms read 3.5× on CI, #2727.)
   it('LINEAR TIME: 4× the repeated limb costs under 8× (quadratic would be 16×)', () => {
-    const cost = (n: number): number => {
-      const text = 'does not establish which assumption deserves '.repeat(n);
-      removeDriverAbsenceClaims(text);
-      return Math.min(...[0, 1, 2, 3, 4].map(() => {
-        const t0 = performance.now();
-        DRIVER_ABSENCE_CLAIM.test(text);
-        removeDriverAbsenceClaims(text);
-        return performance.now() - t0;
-      }));
-    };
-    expect(cost(4000) / cost(1000)).toBeLessThan(8);
+    const [small, large] = [1000, 4000].map((n) => 'does not establish which assumption deserves '.repeat(n));
+    const run = (text: string): void => { DRIVER_ABSENCE_CLAIM.test(text); removeDriverAbsenceClaims(text); };
+    const m = scalingRatio(() => run(small), () => run(large));
+    expect(m.ratio, m.detail).toBeLessThan(8);
   });
 });
 
@@ -912,20 +906,12 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
   it.each([
     ['the verb-object limb', (n: number) => 'prevents goal chances for '.repeat(n)],
     ['the passive limb', (n: number) => 'chances are withheld for '.repeat(n)],
-  // 4× the input, min of 5 timings: linear ≈ 4×, quadratic ≈ 16× (the #2728 pattern; a 2× step flaked at 3.5× on CI).
+  // 4× the input, calibrated batches (scalingRatio): linear ≈ 4×, quadratic ≈ 16× (a 2× step flaked at 3.5× on CI).
   ])('LINEAR TIME: 4× %s costs under 8× (quadratic would be 16×)', (_name, make) => {
-    const cost = (n: number): number => {
-      const text = make(n);
-      removeAllWithheldClaims(text);
-      return Math.min(...[0, 1, 2, 3, 4].map(() => {
-        const t0 = performance.now();
-        ALL_WITHHELD_CLAIM.test(text);
-        removeAllWithheldClaims(text);
-        DRIVER_ABSENCE_CLAIM.test(text);
-        return performance.now() - t0;
-      }));
-    };
-    expect(cost(4000) / cost(1000)).toBeLessThan(8);
+    const [small, large] = [make(1000), make(4000)];
+    const run = (text: string): void => { ALL_WITHHELD_CLAIM.test(text); removeAllWithheldClaims(text); DRIVER_ABSENCE_CLAIM.test(text); };
+    const m = scalingRatio(() => run(small), () => run(large));
+    expect(m.ratio, m.detail).toBeLessThan(8);
   });
 });
 
@@ -1061,18 +1047,17 @@ describe('Wave B6, keys untouched: "…or tipping point was established" and "no
 const B7_CH1 = JSON.parse(fixture('waveB7-unseen1-7e3f8fb-challenge-turn001.json')) as Json;
 const B7_EX2 = JSON.parse(fixture('waveB7-unseen2-7e3f8fb-explain-turn003.json')) as Json;
 const B7_T1B = JSON.parse(fixture('waveB7-t1b-7e3f8fb-explain-turn003.json')) as Json;
-/** Every egress class on `head` + n spaces + "x": the cost at 20,000 over the cost at 5,000 (min of 5 timings each). */
-const egressCostRatio = (head: string): number => {
+/**
+ * Every egress class on `head` + n spaces + "x": the cost at 80,000 over the cost at 20,000 (scalingRatio, calibrated
+ * batches). Single-call 5k -> 20k samples read 8.18–10.24× on CI runners (7 Oct, #2765 and five other runs).
+ */
+const egressCostRatio = (head: string): ReturnType<typeof scalingRatio> => {
   const run = (text: string): void => {
     DRIVER_ABSENCE_CLAIM.test(text); SENS_CLAIM.test(text); ALL_WITHHELD_CLAIM.test(text);
     removeDriverAbsenceClaims(text); removeSensitivityAbsenceClaims(text); removeAllWithheldClaims(text);
   };
-  const cost = (n: number): number => {
-    const text = `${head}${' '.repeat(n)}x`;
-    run(text);
-    return Math.min(...[0, 1, 2, 3, 4].map(() => { const t0 = performance.now(); run(text); return performance.now() - t0; }));
-  };
-  return cost(20000) / cost(5000);
+  const [small, large] = [20000, 80000].map((n) => `${head}${' '.repeat(n)}x`);
+  return scalingRatio(() => run(small), () => run(large));
 };
 
 describe('Wave B7, keys untouched: four new wordings (S2i egress backstop)', () => {
@@ -1140,7 +1125,8 @@ describe('Wave B7, keys untouched: four new wordings (S2i egress backstop)', () 
     ['"supplies no" + whitespace', 'supplies no'],
     ['a consequence + whitespace', "Values are Olumi's; sensitivity was not measured, so"],
   ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
-    expect(egressCostRatio(head)).toBeLessThan(8);
+    const m = egressCostRatio(head);
+    expect(m.ratio, m.detail).toBeLessThan(8);
   });
 });
 
@@ -1203,7 +1189,8 @@ describe('Cut 9 PROD, keys untouched: two wordings that passed prod cut 8 and cu
     ['"which assumption matters most to the" + whitespace', 'which assumption matters most to the'],
     ['"does not establish a single most consequential" + whitespace', 'does not establish a single most consequential'],
   ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
-    expect(egressCostRatio(head)).toBeLessThan(8);
+    const m = egressCostRatio(head);
+    expect(m.ratio, m.detail).toBeLessThan(8);
   });
 });
 
@@ -1252,6 +1239,7 @@ describe('Wave B8, keys untouched: "the biggest driver" (S2j, a superlative noun
     ['"the biggest driver" + whitespace (predicative)', 'the biggest driver'],
     ['"does not establish the main driver of" + whitespace (another-quantity guard)', 'does not establish the main driver of'],
   ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
-    expect(egressCostRatio(head)).toBeLessThan(8);
+    const m = egressCostRatio(head);
+    expect(m.ratio, m.detail).toBeLessThan(8);
   });
 });

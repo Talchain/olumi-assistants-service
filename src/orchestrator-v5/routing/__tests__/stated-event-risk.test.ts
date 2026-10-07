@@ -1,5 +1,6 @@
 /** event_risk.v1 slice 2a. */
 import { describe, it, expect } from 'vitest';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 import { readStatedEventRisk } from '../stated-event-risk.js';
 
 describe('event_risk.v1 slice 2a — stated occurrence', () => {
@@ -41,16 +42,10 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
     ['digits', (n: number) => '9'.repeat(n)],
     ['spaces', (n: number) => `between ${' '.repeat(n)}10% within 6 months`],
     ['near-matches', (n: number) => '10- within '.repeat(Math.ceil(n / 10)).slice(0, n)],
-  ])('2a-LINEAR TIME-%s: 5k to 20k, min of 5 runs, ratio < 8', (_id, make) => {
-    const cost = (n: number) => {
-      const text = make(n);
-      readStatedEventRisk(text);
-      return Math.min(...Array.from({ length: 5 }, () => {
-        const start = performance.now();
-        readStatedEventRisk(text);
-        return performance.now() - start;
-      }));
-    };
-    expect(cost(20000) / cost(5000)).toBeLessThan(8);
+  // Calibrated batches (scalingRatio): single-call min-of-5 read 8.18× on CI for near-matches (7 Oct). Linear ≈ 4×, quadratic ≈ 16×.
+  ])('2a-LINEAR TIME-%s: 5k to 20k, min of 7 calibrated batches, ratio < 8', (_id, make) => {
+    const [small, large] = [make(5000), make(20000)];
+    const m = scalingRatio(() => readStatedEventRisk(small), () => readStatedEventRisk(large));
+    expect(m.ratio, m.detail).toBeLessThan(8);
   });
 });

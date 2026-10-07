@@ -63,6 +63,7 @@ import { log } from '../utils/telemetry.js';
 import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
@@ -2557,6 +2558,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** CEE's own words for a Run that did not run (the Run button), a typed host part for the composer. */
     let runOutcomeText: string | undefined;
     let result: AgentTurnResult | undefined;
+    if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
+      result = await drawnLinkPress(
+        (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode },
+        (await readBackState(readingDispatch, scenarioId)).graph, capabilities, callModelFor(budget));
+      fastPath = 'method';
+    }
     /** S-D: this turn's approve-with-edits applied nothing (its own sentence says so; no generic "Not saved" line). */
     let editsRefusedThisTurn = false;
     const keptProposal = keptProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
