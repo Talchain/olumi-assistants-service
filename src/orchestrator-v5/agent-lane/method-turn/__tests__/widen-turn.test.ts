@@ -12,8 +12,14 @@ import { POLICY } from '../../guidance/policy.js';
 import type { GuidanceSignals } from '../../turn-context/guidance-signals.js';
 import {
   actsWithout, doorFactorOf, existingLevers, keptProposalOf, nextStepsWithWiden, openAssumptionOf, sameLevers, settleWidenTurn, SOMETHING_ELSE_CHIP, WIDEN_CARD_LINE, WIDEN_CHIP,
-  WIDEN_FALLBACK_TEMPLATE, WIDEN_REPLACES_CHIP_ID, widenDoorReply, widenGate, widenTurnFromSignals, type RunWidenTurn,
+  WIDEN_FALLBACK_TEMPLATE, WIDEN_REPLACES_CHIP_ID, widenDoorReply, widenGate as gateWithChecks, widenTurnFromSignals, type RunWidenTurn,
 } from '../widen-turn.js';
+
+// Preserve the existing exact verdict pins; W10 separately verifies the new per-option diagnostics.
+const widenGate = (...args: Parameters<typeof gateWithChecks>) => {
+  const result = gateWithChecks(...args);
+  return result.ok ? { ok: true } : { ok: false, failed: result.failed };
+};
 
 const STRUCTURAL = { strength: { mean: 1.0 }, effect_direction: 'positive' };
 /** A goal, two factors, a status quo at today's price, an option that CUTS the price and one that RAISES it. */
@@ -193,9 +199,9 @@ describe('RC-WIDEN method turn', () => {
       one('Cut price, cut churn', ['Price', 'negative'], ['customer churn', 'negative']),
     ], rationale: 'r' })).toEqual({ ok: true });
     expect(widenGate(run(), one('Retention offer', ['Customer churn', 'negative']))).toEqual({ ok: true });
-    // Two proposals with one lever set: the second copies the first.
+    // W10 DL ruling: the second copy is dropped, while the first is admitted.
     expect(widenGate(run(), { options: [one('Retention offer', ['Customer churn', 'negative']), one('Loyalty scheme', ['Customer churn', 'negative'])], rationale: 'r' }))
-      .toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+      .toEqual({ ok: true });
   });
 
   it('WD-NO-DUP: a current option’s label (case and spacing folded) is refused, the status quo included', () => {

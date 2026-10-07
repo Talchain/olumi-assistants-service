@@ -29,6 +29,7 @@ import { doorLevelOf, estimateLevelPersists } from '../runtime/agent-capabilitie
 import { assembleGuidanceSignals, type GuidanceSignals as TurnSignals } from '../turn-context/guidance-signals.js';
 import { selectorSignalsOf, TALK_IT_THROUGH_CHIP, type MethodReadback } from './method-turn.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
+import type { AgentCapabilities, ToolResult } from '../runtime/agent-tools.js';
 
 const METHOD = 'RC-WIDEN' as const;
 const CONTRACT = POLICY.method_turns[METHOD];
@@ -100,7 +101,8 @@ const numeric = (v: unknown): number | undefined => {
  * An existing option's levers by the CANONICAL rule (`model.same_lever`, guidance-signals.ts): the sign of its set level
  * against the baseline (the status-quo option's level, else the factor's observed value, else 0). A level that is not a
  * number is `unknown`. An option with no interventions falls back to its option → factor edges, each `unknown`: the
- * direction is not stored there, so a proposal on the same factors fails closed.
+ * direction is not stored there, so a proposal on the same factors fails closed. The status quo's repair edges are
+ * never moves; its stored baseline levels, if any, imply only `unchanged`.
  */
 export function existingLevers(g: Graph, optionId: string, sqId: string | null): Levers {
   const byId = new Map(g.nodes.map((n) => [String(n.id), n] as const));
@@ -112,7 +114,7 @@ export function existingLevers(g: Graph, optionId: string, sqId: string | null):
     const base = baselineOf(g, t, sqId);
     out.set(t, moveOf(numeric(ivs[t]), base));
   }
-  if (out.size === 0) {
+  if (out.size === 0 && optionId !== sqId) {
     for (const e of g.edges) if (e.from === optionId && factorIds.has(String(e.to))) out.set(String(e.to), 'unknown');
   }
   return out;
@@ -203,9 +205,9 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown, question?: 
     ...g.nodes.filter((n) => n.kind === 'option' && !compared.has(String(n.id))).map((n) => String(n.id))];
   const graphLabel = new Map(g.nodes.map((n) => [String(n.id), labelOf(n)] as const));
   const labelFor = (id: string): string => labels[id] ?? graphLabel.get(id) ?? id;
-  const current = optionIds.map((id) => ({ label: norm(labelFor(id)), levers: existingLevers(g, id, sq) }));
+  const current = optionIds.map((id) => ({ label: norm(labelFor(id)), levers: id === sq ? new Map<string, Move>() : existingLevers(g, id, sq) }));
   const describe = (id: string): string => {
-    const changes = g.edges.filter((e) => e.from === id && factorLabel.has(e.to)).map((e) => quote(factorLabel.get(e.to)!));
+    const changes = id === sq ? [] : g.edges.filter((e) => e.from === id && factorLabel.has(e.to)).map((e) => quote(factorLabel.get(e.to)!));
     return `- ${quote(labelFor(id))}${compared.has(id) ? '' : ' (left out of the comparison)'}${changes.length > 0 ? `: changes ${changes.join(', ')}` : ''}`;
   };
   const directive = question !== undefined ? questionDirective(question, optionIds.map(describe), factors.map((n) => quote(labelOf(n)!))) : [
@@ -255,7 +257,17 @@ export function widenTurnForReadback(chipId: unknown, rb: MethodReadback): Widen
   return widenTurnFromSignals(signals, rb.graph, question);
 }
 
-export type WidenGateResult = { readonly ok: true } | { readonly ok: false; readonly failed: readonly string[] };
+/** Safe to log verbatim: no option/factor labels, basis text, levels or user words. */
+export interface WidenOptionCheck {
+  readonly index: number;
+  readonly factors: readonly { readonly factor_id: string | null; readonly stated_direction: 'positive' | 'negative' | null;
+    readonly stored_direction: Move }[];
+  readonly failed: readonly string[];
+}
+export type WidenGateResult = ({ readonly ok: true } | { readonly ok: false; readonly failed: readonly string[] }) & {
+  readonly passing_indices: readonly number[];
+  readonly per_option: readonly WidenOptionCheck[];
+};
 
 /** The door's own normaliser (`propose-new-option.ts` `norm`): trim + lower-case, nothing else. */
 const doorNorm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
@@ -282,24 +294,32 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
   const failed = new Set<string>();
   if (raw.length < 1 || raw.length > WIDEN_MAX_OPTIONS) failed.add('WD-COUNT');
   if (Array.isArray(a.new_factors) && a.new_factors.length > 0) failed.add('WD-S-NEW-FACTORS');
+  if (turn.question !== undefined && raw.length !== 1) failed.add('CH-COUNT');
+  const wholeCallFailed = [...failed];
+  const perOption: WidenOptionCheck[] = [];
+  const passingIndices: number[] = [];
   const seen: Levers[] = turn.current.map((c) => c.levers);
   const currentLabels = new Set(turn.current.map((c) => c.label));
   const proposedLabels = new Set<string>();
-  for (const item of raw) {
+  for (const [index, item] of raw.entries()) {
+    const optionFailed = new Set<string>(wholeCallFailed);
+    const diagnostics: WidenOptionCheck['factors'][number][] = [];
     const factorsSeen = new Set<string>();
     const o = rec(item);
     const label = typeof o?.label === 'string' ? norm(o.label) : '';
     const actsOn = Array.isArray(o?.acts_on) ? o.acts_on.map(rec) : [];
-    if (label === '' || currentLabels.has(label) || proposedLabels.has(label)) failed.add('WD-NO-DUP');
-    proposedLabels.add(label);
+    if (label === '' || currentLabels.has(label) || proposedLabels.has(label)) optionFailed.add('WD-NO-DUP');
     const levers = new Map<string, Move>();
-    if (actsOn.length === 0) failed.add('WD-S-GROUNDED');
+    if (actsOn.length === 0) optionFailed.add('WD-S-GROUNDED');
     for (const e of actsOn) {
       const id = doorFactorOf(turn, e?.factor_label);
-      const direction = e?.direction === 'negative' ? 'negative' : e?.direction === 'positive' ? 'positive' : undefined;
-      if (id === undefined || direction === undefined) { failed.add('WD-S-GROUNDED'); continue; }
+      const direction: 'positive' | 'negative' | undefined = e?.direction === 'negative' ? 'negative' : e?.direction === 'positive' ? 'positive' : undefined;
+      const diagnostic = { factor_id: id ?? null, stated_direction: direction ?? null, stored_direction: 'unknown' as Move };
+      diagnostics.push(diagnostic);
+      if (id !== undefined && turn.question !== undefined && !actsWithout(turn.graph, id, turn.question)) optionFailed.add('CH-OTHER-MECHANISM');
+      if (id === undefined || direction === undefined) { optionFailed.add('WD-S-GROUNDED'); continue; }
       // The door keeps the FIRST entry's direction but the LAST entry's level for a repeated factor: refuse the repeat.
-      if (factorsSeen.has(id)) { failed.add('WD-S-LEVEL'); continue; }
+      if (factorsSeen.has(id)) { optionFailed.add('WD-S-LEVEL'); continue; }
       factorsSeen.add(id);
       /**
        * ⛔ THE GATE JUDGES WHAT THE WRITER WILL PERSIST, NEVER WHAT THE MODEL DECLARED (DL round 3, P1-F; the scope cut
@@ -308,41 +328,73 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
        * door does, and `estimateLevelPersists` runs its unit check, name rule (`unit ?? factorUnit`) and range, in its
        * order. The door's other unset paths: no estimate + basis (WD-NO-NEW-FIGURES here) and the user's split in
        * another period (unreachable: the press message is our fixed chip text, no ratio). Plus a finite baseline for
-       * the move. Anything else refuses the WHOLE proposal: a lever that never persists can never make it "distinct".
+       * the move. Anything else refuses this option: a lever that never persists can never make it "distinct".
        */
       const level = rec(e?.level);
       const lvl = doorLevelOf(level);
-      if (level === undefined || lvl === undefined) { failed.add('WD-S-LEVEL'); continue; }
-      if (level.estimate !== true || typeof level.basis !== 'string' || level.basis.trim() === '') { failed.add('WD-NO-NEW-FIGURES'); continue; }
+      if (level === undefined || lvl === undefined) { optionFailed.add('WD-S-LEVEL'); continue; }
+      if (level.estimate !== true || typeof level.basis !== 'string' || level.basis.trim() === '') { optionFailed.add('WD-NO-NEW-FIGURES'); continue; }
       const node = turn.graph.nodes.find((n) => String(n.id) === id);
       const persists = estimateLevelPersists(lvl, node as never, turn.raw, typeof o?.label === 'string' ? o.label : '');
-      if (!persists.ok) { failed.add('WD-S-LEVEL'); continue; }
+      if (!persists.ok) { optionFailed.add('WD-S-LEVEL'); continue; }
       const encoded = persists.value;
       // DL P1-E: the persisted level decides the move, on the door's own frame against the same baseline as the existing
       // options. No finite baseline = no move (refused); today's level, or a move against the declared word, is refused.
       const derived = moveOf(encoded, baselineOf(turn.graph, id, turn.sq));
-      if (derived === 'unknown') { failed.add('WD-S-LEVEL'); continue; }
-      if (derived !== direction) { failed.add('WD-S-DIRECTION'); continue; }
+      diagnostic.stored_direction = derived;
+      if (derived === 'unknown') { optionFailed.add('WD-S-LEVEL'); continue; }
+      if (derived !== direction) { optionFailed.add('WD-S-DIRECTION'); continue; }
       levers.set(id, derived);
     }
-    if (levers.size > 0 && seen.some((existing) => sameLevers(levers, existing))) failed.add('WD-S-DISTINCT');
-    seen.push(levers);
-  }
-  if (turn.question !== undefined) {
-    if (raw.length !== 1) failed.add('CH-COUNT');
-    for (const item of raw) {
-      const actsOn = Array.isArray(rec(item)?.acts_on) ? (rec(item)!.acts_on as unknown[]).map(rec) : [];
-      for (const e of actsOn) {
-        const id = doorFactorOf(turn, e?.factor_label);
-        if (id !== undefined && !actsWithout(turn.graph, id, turn.question)) failed.add('CH-OTHER-MECHANISM');
-      }
+    if (levers.size > 0 && seen.some((existing) => sameLevers(levers, existing))) optionFailed.add('WD-S-DISTINCT');
+    const clauses = [...optionFailed];
+    perOption.push({ index, factors: diagnostics, failed: clauses });
+    for (const clause of clauses) failed.add(clause);
+    if (clauses.length === 0) {
+      passingIndices.push(index);
+      proposedLabels.add(label);
+      seen.push(levers);
     }
   }
-  return failed.size === 0 ? { ok: true } : { ok: false, failed: [...failed] };
+  const checks = { passing_indices: passingIndices, per_option: perOption };
+  return passingIndices.length > 0 ? { ok: true, ...checks } : { ok: false, failed: [...failed], ...checks };
 }
 
 export function widenFallbackReply(turn: RunWidenTurn): string {
   return WIDEN_FALLBACK_TEMPLATE.replace('{goal}', quote(turn.goal_label));
+}
+
+/** Preserve the door's call shape and metadata; a partial batch contains only admitted options. */
+export function widenPassingArgs(gate: WidenGateResult, args: Parameters<AgentCapabilities['proposeNewOption']>[1]): typeof args {
+  return Array.isArray(args.options)
+    ? { ...args, options: args.options.filter((_, index) => gate.passing_indices.includes(index)) } : args;
+}
+
+const WIDEN_FAILURE_WORDS: Readonly<Record<string, string>> = {
+  'WD-NO-DUP': 'its name repeats another option',
+  'WD-S-DISTINCT': 'it changes the same factors in the same direction as another option',
+  'WD-S-GROUNDED': 'its changes could not be matched to factors in your model',
+  'WD-S-LEVEL': 'a level could not be stored and compared against today',
+  'WD-S-DIRECTION': 'a level does not move in the direction it describes',
+  'WD-NO-NEW-FIGURES': 'a level needs to be offered as Olumi’s estimate with a basis',
+  'CH-OTHER-MECHANISM': 'it still depends on the assumption being questioned',
+};
+
+/** Extend the door's existing not_added disclosure, without inventing same-level twins for other failures. */
+export function widenNotAdded(result: ToolResult, gate: WidenGateResult, args: unknown): ToolResult {
+  if (!result.ok || !gate.ok) return result;
+  const raw = rec(args);
+  const options = Array.isArray(raw?.options) ? raw.options : [raw];
+  const dropped = gate.per_option.filter((o) => o.failed.length > 0).map((o) => ({
+    option: String(rec(options[o.index])?.label ?? 'Unnamed option'),
+    reason: o.failed.map((clause) => WIDEN_FAILURE_WORDS[clause] ?? 'it did not pass the checks for this suggestion').join('; '),
+  }));
+  if (dropped.length === 0) return result;
+  return { ...result, not_added: [...(Array.isArray(result.not_added) ? result.not_added : []), ...dropped],
+    not_added_note: [result.not_added_note,
+      ...dropped.map((o) => `${quote(o.option)} is NOT in this change: ${o.reason}.`),
+      'A distinct option requires a new proposal and approval. Never promise to add it later.',
+    ].filter((line) => typeof line === 'string' && line !== '').join(' ') };
 }
 
 export interface SettledWidenTurn {
@@ -378,8 +430,9 @@ export function widenDoorReply(result: unknown): string | null {
     return `- ${String(o!.label)}${parts.length > 0 ? `: sets ${parts.join(', ')}` : ''}`;
   });
   const left = (Array.isArray(r.not_added) ? r.not_added.map(rec) : []).flatMap((n) =>
-    typeof n?.option === 'string' && typeof n.same_levels_as === 'string'
-      ? [`Not in this change: ${quote(n.option)} would set the same levels as ${quote(n.same_levels_as)}.`] : []);
+    typeof n?.option !== 'string' ? [] : typeof n.same_levels_as === 'string'
+      ? [`Not in this change: ${quote(n.option)} would set the same levels as ${quote(n.same_levels_as)}.`]
+      : typeof n.reason === 'string' ? [`Not in this change: ${quote(n.option)}: ${n.reason}.`] : []);
   return [
     `${held.length === 1 ? 'An option' : 'Options'} you haven\u2019t compared yet:`,
     ...lines,
@@ -403,7 +456,9 @@ export function settleWidenTurn(
 ): SettledWidenTurn {
   const cards = run.tool_calls.flatMap((c, i) => (c.name === WIDEN_TOOL && c.ok && typeof c.proposal_id === 'string' ? [i] : []));
   if (cards.length === 1) {
-    const reply = run.assistant_text.trim() !== '' ? run.assistant_text
+    const result = rec(run.tool_results?.[cards[0]!]);
+    const gateDropped = Array.isArray(result?.not_added) && result.not_added.some((n) => typeof rec(n)?.reason === 'string');
+    const reply = gateDropped ? widenDoorReply(result) ?? WIDEN_CARD_LINE : run.assistant_text.trim() !== '' ? run.assistant_text
       : widenDoorReply(run.tool_results?.[cards[0]!]) ?? WIDEN_CARD_LINE;
     if (turn.question !== undefined) {
       return { reply: `${questionHeadline(turn.question)}\n${reply}`, carded: true,

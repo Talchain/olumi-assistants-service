@@ -127,7 +127,7 @@ import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim
 import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import {
-  isWidenPress, keptProposalOf, nextStepsWithWiden, settleWidenTurn, widenGate, widenOffered, widenTurnForReadback,
+  isWidenPress, keptProposalOf, nextStepsWithWiden, settleWidenTurn, widenGate, widenNotAdded, widenOffered, widenPassingArgs, widenTurnForReadback,
   WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
@@ -3145,7 +3145,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             // ⛔ SERVER-OWNED ORIGIN (DL P1 on #2512): a Widen press carries no user-written figure, so every level it
             // proposes is Olumi's ESTIMATE. The session's earlier words ("Price was £45") must never make it "yours".
             return widenGateResult.ok
-              ? capabilities.proposeNewOption({ ...gateCtx, user_text: '' }, gateArgs)
+              ? widenNotAdded(await capabilities.proposeNewOption({ ...gateCtx, user_text: '' }, widenPassingArgs(widenGateResult, gateArgs)), widenGateResult, gateArgs)
               : { ok: false, mutated: false, refusal: WIDEN_GATE_REFUSAL,
                   detail: `These suggestions did not pass Olumi’s checks (${widenGateResult.failed.join(', ')}). Nothing was changed.` };
           },
@@ -3211,6 +3211,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       log.info({
         scenario_id: scenarioId, widen_variant: widenRun.variant, carded: settled.carded,
         gate_failed: widenGateResult !== undefined && !widenGateResult.ok ? widenGateResult.failed : [],
+        gate_options: widenGateResult?.per_option ?? [],
         tool_calls: result.tool_calls.map((c) => `${c.name}:${c.ok ? 'ok' : (c.refusal ?? 'refused')}`),
       }, 'agent-lane: widen turn settled');
     }

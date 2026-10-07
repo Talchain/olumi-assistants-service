@@ -94,7 +94,7 @@ export interface MethodScienceInput {
    * quo, never an option taken out of the comparison (RC 5937065922 / 5937114487). It never licenses a leader.
    */
   readonly user_selected_option_id?: string | null;
-  /** Generic multi-option pre-mortem: ground the decision in the union of its own option paths. */
+  /** Generic multi-option pre-mortem: use the own-path union when no plan has eligible grounding. */
   readonly decision_level?: boolean;
   /** The current graph, read ONLY for the limits on the plan's path. */
   readonly graph?: unknown;
@@ -358,12 +358,15 @@ function adjudicate(
 
 export function methodScienceContext(input: MethodScienceInput): MethodScienceContext {
   const s = input.signals;
-  const plan = input.method === 'pre_mortem' ? choosePlan(s, input.user_selected_option_id) : null;
-  const decision = input.method === 'pre_mortem' && input.decision_level === true && plan === null
-    && s['run.leader_licensed'] === false && input.user_selected_option_id == null
+  const selectedPlan = input.method === 'pre_mortem' ? choosePlan(s, input.user_selected_option_id) : null;
+  const planItems = selectedPlan === null ? [] : premortemItems(s, [selectedPlan.option_id], input.graph);
+  // Keep grounded leaders and explicit picks. A generic press with an empty leader path can still stress the
+  // decision, without changing the Run's licence, reclassifying provenance, or claiming a winning-plan DSK badge.
+  const decision = input.method === 'pre_mortem' && input.decision_level === true && planItems.length === 0
+    && (selectedPlan !== null || s['run.leader_licensed'] === false) && input.user_selected_option_id == null
     && s['model.non_sq_option_ids'].length >= 2;
-  const items = decision ? premortemItems(s, s['model.non_sq_option_ids'], input.graph)
-    : plan === null ? [] : premortemItems(s, [plan.option_id], input.graph);
+  const plan = decision ? null : selectedPlan;
+  const items = decision ? premortemItems(s, s['model.non_sq_option_ids'], input.graph) : planItems;
   const { citation, reason } = adjudicate(input, plan, items);
   return {
     method: input.method,
