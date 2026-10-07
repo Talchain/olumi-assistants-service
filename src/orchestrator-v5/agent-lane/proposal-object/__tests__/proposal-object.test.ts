@@ -237,7 +237,7 @@ describe('the words (reply.ts) and the conventional bare-confirm window', () => 
       + 'You set how strongly "Price" affects "Demand": slight; Olumi\'s estimate was moderate. '
       + 'Left as Olumi\'s placeholder: "Price" → "Competitive response".');
     for (const t of [text, heldDeclineSentence("the risk 'X'"), editsRefusedSentence('stale'), editsRefusedSentence('refused'),
-      ...(['model_changed', 'idle', 'over_cap', 'gone'] as const).map((r) => heldLapseSentence("The held change to add the risk 'X'", r))]) {
+      ...(['model_changed', 'idle', 'over_cap', 'gone', 'superseded'] as const).map((r) => heldLapseSentence("The held change to add the risk 'X'", r))]) {
       expect(findForbiddenPhraseHit(t), t).toBeNull();
       expect(t, t).not.toMatch(/—|\b(best|winner|recommend|leader|ahead|beats)\b/i);
     }

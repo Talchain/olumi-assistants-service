@@ -33,7 +33,7 @@ export function userEditsReceipt(edits: readonly UserEdit[]): string {
   return lines.join(' ');
 }
 
-export type HeldLapseReason = 'model_changed' | 'idle' | 'over_cap' | 'gone';
+export type HeldLapseReason = 'model_changed' | 'idle' | 'over_cap' | 'gone' | 'superseded';
 
 /** A held change that could not be kept is SAID, once, on the turn it goes (never a silent drop, D-08). */
 export function heldLapseSentence(name: string | undefined, reason: HeldLapseReason): string {
@@ -47,6 +47,9 @@ export function heldLapseSentence(name: string | undefined, reason: HeldLapseRea
       return `${what} was set aside because only three changes can wait at once; say the word if you still want it.`;
     case 'gone':
       return `${what} is no longer waiting; say the word if you still want it.`;
+    case 'superseded':
+      // DL 7 Oct (f48e3e67): a newer card for the same targets replaces an older held one; recorded and said, never silent.
+      return `${what} was replaced by the newer card for the same change; nothing in the model changed.`;
   }
 }
 

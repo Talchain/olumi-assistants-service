@@ -3854,10 +3854,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           && h.emitted_at_iso < approvalCarrier.emitted_at_iso && older.operations.every((o) => targets.has(o.path));
       });
       for (const h of replaced) proposals.discard(heldProposalId(h));
+      // DL 7 Oct: recorded as superseded (log + the saved answer's words), never silently dropped.
+      if (replaced.length > 0) {
+        log.info({ event: 'agent_lane.held_superseded', scenario_id: scenarioId, superseded: replaced.map((h) => heldProposalId(h)), by: approvalCarrier.chip_id },
+          'agent-lane: a newer offer for the same targets replaced older held proposals');
+        heldLapseLines = [...heldLapseLines, ...replaced.map((h) => heldLapseSentence(heldChangeName(h), 'superseded'))];
+      }
       liveHolds = liveHolds.filter((h) => !replaced.includes(h));
       heldRecords = heldRecords.filter((r) => !replaced.some((h) => heldProposalId(h) === r.proposal_id));
     }
-    const offeredRecord =heldRecords.find(r => r.approve_action.id === offeredApprove?.id);
+    const offeredRecord = heldRecords.find(r => r.approve_action.id === offeredApprove?.id);
     // ⭐ S-D (DL 7 Oct, Canvas's served capture #2614): the PROPOSING turn offers "Not now" too, so a held proposal can be
     // declined from the first moment, not only from the next reply (the record's own `decline_action`).
     if (offeredRecord !== undefined && !offeredNow.some(a => a.id === offeredRecord.decline_action.id)) {
