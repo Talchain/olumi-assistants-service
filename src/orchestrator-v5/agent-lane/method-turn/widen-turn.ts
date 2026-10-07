@@ -285,12 +285,23 @@ export function doorFactorOf(turn: RunWidenTurn, wanted: unknown): string | unde
 }
 
 /**
+ * The options a Widen call proposes, read EXACTLY as the door reads them (`agent-capabilities.ts` proposeNewOption:
+ * `options` only when it is a NON-EMPTY array, otherwise the single `label`/`acts_on`). A strict provider fills every
+ * key, so a one-option call arrives as `{ label, acts_on, options: [] }`; reading `[]` as "no options" refused both
+ * pressed staging draws as WD-COUNT with nothing checked (Wave A2, CEE 86ccaf3, 7 Oct 02:41Z: `gate_options: []`).
+ */
+export function widenOptionsOf(a: Record<string, unknown>): unknown[] {
+  if (Array.isArray(a.options) && a.options.length > 0) return a.options;
+  return a.label !== undefined || a.acts_on !== undefined ? [{ label: a.label, acts_on: a.acts_on }] : [];
+}
+
+/**
  * RC-WIDEN's structured checks on the door's own arguments, BEFORE the door stores anything (by identity, never wording).
  * Failed ids: WD-COUNT · WD-S-NEW-FACTORS · WD-S-GROUNDED · WD-NO-DUP · WD-S-DISTINCT · WD-NO-NEW-FIGURES.
  */
 export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
   const a = rec(args) ?? {};
-  const raw: unknown[] = Array.isArray(a.options) ? a.options : a.label !== undefined || a.acts_on !== undefined ? [{ label: a.label, acts_on: a.acts_on }] : [];
+  const raw = widenOptionsOf(a);
   const failed = new Set<string>();
   if (raw.length < 1 || raw.length > WIDEN_MAX_OPTIONS) failed.add('WD-COUNT');
   if (Array.isArray(a.new_factors) && a.new_factors.length > 0) failed.add('WD-S-NEW-FACTORS');
@@ -366,7 +377,7 @@ export function widenFallbackReply(turn: RunWidenTurn): string {
 
 /** Preserve the door's call shape and metadata; a partial batch contains only admitted options. */
 export function widenPassingArgs(gate: WidenGateResult, args: Parameters<AgentCapabilities['proposeNewOption']>[1]): typeof args {
-  return Array.isArray(args.options)
+  return Array.isArray(args.options) && args.options.length > 0
     ? { ...args, options: args.options.filter((_, index) => gate.passing_indices.includes(index)) } : args;
 }
 
@@ -384,7 +395,7 @@ const WIDEN_FAILURE_WORDS: Readonly<Record<string, string>> = {
 export function widenNotAdded(result: ToolResult, gate: WidenGateResult, args: unknown): ToolResult {
   if (!result.ok || !gate.ok) return result;
   const raw = rec(args);
-  const options = Array.isArray(raw?.options) ? raw.options : [raw];
+  const options = Array.isArray(raw?.options) && raw.options.length > 0 ? raw.options : [raw];
   const dropped = gate.per_option.filter((o) => o.failed.length > 0).map((o) => ({
     option: String(rec(options[o.index])?.label ?? 'Unnamed option'),
     reason: o.failed.map((clause) => WIDEN_FAILURE_WORDS[clause] ?? 'it did not pass the checks for this suggestion').join('; '),
