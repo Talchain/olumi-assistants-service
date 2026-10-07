@@ -343,7 +343,7 @@ describe('THE WORDS: the card and the withhold ask', () => {
     placeholderGoalWarning(graph, [{ option_id: option, links }], 'GOAL_FIGURES_PLACEHOLDER_PATH', false, { gaugeAsk: true });
   it('(B) withhold: ONE end-to-end question, never the two links apart; neither is offered as a one-click', () => {
     const w = W(gaugeGraph(), [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise');
-    expect(w.message).toBe('This comparison turns on how much ‘Pro plan price’ changes ‘MRR’ through ‘Support capacity strain’, which nobody has set yet.'
+    expect(w.message).toBe('This comparison turns on how much ‘Pro plan price’ changes ‘MRR’ through ‘Support capacity strain’, which isn\'t sized in the model yet.'
       + ' Roughly how much would a £1 rise in ‘Pro plan price’ change ‘MRR’ that way, in £/month? A best guess and a range is fine.');
     expect(w.acceptable_links).toBeUndefined();
     expect(w.links).toHaveLength(2);
@@ -370,7 +370,7 @@ describe('THE WORDS: the card and the withhold ask', () => {
         per_source_change_unit: '£', strength_mean: 0.2, strength_mean_frame: 'edge_strength' } } });
     expect(W(offPath, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).not.toContain('on top of');
   });
-  it('(B) long labels compact; the question is never dropped (Codex r1 P2: the message came back empty)', () => {
+  it('(B) long labels compact at WORD BOUNDARIES (S-A label rule, D-04); the question is never dropped (Codex r1 P2: the message came back empty)', () => {
     const g = gaugeGraph();
     g.nodes.find((n: Rec) => n.id === 'price').label = 'Enterprise onboarding and implementation consulting fee for new accounts';
     g.nodes.find((n: Rec) => n.id === 'strain').label = 'Annual security audit gross profit from enterprise contracts and renewals';
@@ -378,6 +378,12 @@ describe('THE WORDS: the card and the withhold ask', () => {
     const m = W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message;
     expect(m.length).toBeGreaterThan(0);
     expect(m.length).toBeLessThanOrEqual(400);
+    // Never mid-word: every shortened label is a whole-word prefix of its full label.
+    const full = ['price', 'strain', 'mrr'].map((id) => g.nodes.find((n: Rec) => n.id === id).label as string);
+    for (const [, shown] of m.matchAll(/‘([^’]*)…’/g)) {
+      const prefix = shown!.trimEnd();
+      expect(full.some((l) => l.startsWith(prefix) && (l.length === prefix.length || /\s/.test(l.charAt(prefix.length)))), prefix).toBe(true);
+    }
     expect(m).toContain(' through ');
     expect(m).toContain('A best guess and a range is fine.');
   });
@@ -402,7 +408,7 @@ describe('THE WORDS: the card and the withhold ask', () => {
     const goal = g.nodes.find((n: Rec) => n.id === 'mrr');
     delete goal.observed_state;
     goal.goal_threshold_unit = '£/month';
-    expect(W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).toMatch(/whose strengths nobody has set yet\. To size them, I first need today’s level of ‘MRR’\. What is it, in £\/month\?$/);
+    expect(W(g, [{ from: 'price', to: 'strain' }, { from: 'strain', to: 'mrr' }], 'o-raise').message).toMatch(/whose strengths aren't sized in the model yet\. To size them, I first need today’s level of ‘MRR’\. What is it, in £\/month\?$/);
   });
   it('CONTROL: a withhold with no mediator and a framed goal keeps its words byte for byte', () => {
     const g = gaugeGraph();

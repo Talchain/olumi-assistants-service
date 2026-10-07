@@ -80,7 +80,9 @@ export function matchesHistoricalAnalysisIdentity(graph: GraphStateIngress, stor
     // Codex r2 #2643: a version recorded before hold-at-1.0 hashed its held links unheld; it is still that version.
     || computeAnalysisAffectingGraphHashSha256(graph, 'pre_hold') === storedHash
     // d5 #87 6011224941: a version recorded under the user-only hold (before a validated definition held) is still that version.
-    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_definition') === storedHash;
+    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_definition') === storedHash
+    // Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6: history only.
+    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_route_once') === storedHash;
 }
 
 /** Compare's recorded Run and admission identity use the existing sanctioned seam.
@@ -100,7 +102,8 @@ export function matchesHistoricalRunAnalysisIdentity(
   const preHoldHash = computeAnalysisAffectingGraphHash(graph, 'pre_hold');
   // d5 #87 6011224941: and a Run computed under the user-only hold, before a validated definition held (history only).
   const preDefinitionHash = computeAnalysisAffectingGraphHash(graph, 'pre_definition');
-  if (currentHash !== storedHash && preHoldHash !== storedHash && preDefinitionHash !== storedHash
+  const preRouteOnceHash = computeAnalysisAffectingGraphHash(graph, 'pre_route_once');
+  if (currentHash !== storedHash && preHoldHash !== storedHash && preDefinitionHash !== storedHash && preRouteOnceHash !== storedHash
     && (projection !== undefined || carriesGaps
       || computeAnalysisAffectingGraphHash(graph, 'legacy') !== storedHash)) return false;
   const snapshot = RunInputSnapshotSchema.safeParse(inputSnapshot);

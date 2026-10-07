@@ -28,15 +28,19 @@ function graph(edges: Rec[]): Rec {
 const existence = (edges: Rec[]) => goalChanceLicenceOf(env(['a', 0.5], ['b', 0.35]), graph(edges), 'mrr')?.user_link_existence;
 
 describe('the licence says when the chances count Olumi\'s doubt about the USER\'s links', () => {
-  it('R17 shape: user-stated links on the path at 0.8 → 2 links, 1-in-5', () => {
-    expect(existence([userLink('price', 'customers', 0.8), userLink('customers', 'mrr', 0.8)])).toEqual({ links: 2, one_in: 5 });
+  it('R17 shape: user-stated links on the path at 0.8 → 2 links, 1-in-5 (two routes, each its own first link)', () => {
+    expect(existence([userLink('price', 'customers', 0.8), olumiLink('customers', 'mrr', 1), userLink('price', 'mrr', 0.8)])).toEqual({ links: 2, one_in: 5 });
+  });
+  it('RULE R (Science 393023): a user-stated CHAIN at 0.8 → only its first link carries Olumi\'s doubt; the Run holds the next at 1 → 1 link', () => {
+    expect(existence([userLink('price', 'customers', 0.8), userLink('customers', 'mrr', 0.8)])).toEqual({ links: 1, one_in: 5 });
   });
   it('TWIN: the same links held at 1.0 → nothing', () => {
     expect(existence([userLink('price', 'customers', 1), userLink('customers', 'mrr', 1)])).toBeUndefined();
   });
   it('0.9 → 1-in-10 (never 1-in-5); mixed values → the count only (the words say Olumi\'s estimate for each)', () => {
-    expect(existence([userLink('price', 'customers', 0.9), userLink('customers', 'mrr', 0.9)])).toEqual({ links: 2, one_in: 10 });
-    expect(existence([userLink('price', 'customers', 0.8), userLink('customers', 'mrr', 0.9)])).toEqual({ links: 2 });
+    // Two routes from the option's factor, each link the FIRST on its route (a chain's next link is counted once, rule R).
+    expect(existence([userLink('price', 'customers', 0.9), olumiLink('customers', 'mrr', 1), userLink('price', 'mrr', 0.9)])).toEqual({ links: 2, one_in: 10 });
+    expect(existence([userLink('price', 'customers', 0.8), olumiLink('customers', 'mrr', 1), userLink('price', 'mrr', 0.9)])).toEqual({ links: 2 });
   });
   it('only USER-stated links count: an Olumi estimate at 0.8 → nothing', () => {
     expect(existence([olumiLink('price', 'customers', 0.8), olumiLink('customers', 'mrr', 0.8)])).toBeUndefined();

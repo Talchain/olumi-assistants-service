@@ -296,7 +296,8 @@ describe('A7 is folded on the reply the user SEES — after the leader gate (R3 
     const call = src.indexOf('withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText)');
     expect(call).toBeGreaterThan(src.indexOf('enforceAgentLaneLeaderClaimsAtWire(wireBody'));
     expect(call).toBeGreaterThan(src.indexOf('withBreakEvenAnswer(wireBody.assistant_text'));
-    expect(call).toBeLessThan(src.indexOf('wireBody = withAnalysisAnswerShape(wireBody'));
+    // S-A (7 Oct): the ONE composer replaced `withAnalysisAnswerShape`; A7 still lands before it.
+    expect(call).toBeLessThan(src.indexOf('const composedReply = composeReplyShape('));
     expect(call).toBeLessThan(src.indexOf('assistantMessage: String(wireBody.assistant_text'));
     // The ONLY assistant_text rewrites after it are the shape (built from this prose) — none appends prose.
     const after = src.slice(call, src.indexOf('assistantMessage: String(wireBody.assistant_text'));

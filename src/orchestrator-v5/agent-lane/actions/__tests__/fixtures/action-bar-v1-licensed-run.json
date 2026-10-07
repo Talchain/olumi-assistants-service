@@ -1,9 +1,9 @@
 {
   "v": 1,
-  "state_key": "7678dfcef6415a46",
+  "state_key": "5dd4622a3025bf9f",
   "revision": {
-    "graph_hash": "a5e35f971332db00",
-    "run_key": "bdcd26db0aa8768a"
+    "graph_hash": "e1427c397debd7cf",
+    "run_key": "938a1ff7df011d6f"
   },
   "priority": [
     {
@@ -15,7 +15,7 @@
       "user_line": "Suggest options I haven’t considered.",
       "enabled": true,
       "why_now": "Your options all work through the same lever.",
-      "offer_key": "b68fe0ea70096963"
+      "offer_key": "238eb45e85c31ecf"
     },
     {
       "action_id": "test_link",
@@ -31,7 +31,7 @@
         "from_id": "gcp_workload_share",
         "to_id": "monthly_cloud_savings"
       },
-      "offer_key": "83f693a5875ed6ef"
+      "offer_key": "555028f2881b8dfa"
     }
   ],
   "standard": [
@@ -44,7 +44,7 @@
       "user_line": "Review this decision: what should I check before relying on it?",
       "enabled": true,
       "why_now": "Lists what this result rests on before you rely on it.",
-      "offer_key": "18200a8ef6662648"
+      "offer_key": "a34992fb64208d0d"
     },
     {
       "action_id": "what_changes",
@@ -55,7 +55,7 @@
       "user_line": "What would most likely change this result?",
       "enabled": true,
       "why_now": "Shows what would have to change for this result to change.",
-      "offer_key": "c9e9c1a76061b94c"
+      "offer_key": "66479fb40c2a3815"
     },
     {
       "action_id": "pre_mortem",
@@ -66,7 +66,7 @@
       "user_line": "Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?",
       "enabled": true,
       "why_now": "Imagine this went badly and find the most likely causes.",
-      "offer_key": "da59a4ce5dc627c7"
+      "offer_key": "ac8f78024406c132"
     }
   ],
   "more": []

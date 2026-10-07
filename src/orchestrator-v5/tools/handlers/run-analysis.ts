@@ -1113,11 +1113,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ HOLD-AT-1.0 (Science d5 #87 6008807178 / 6008817484; D3 cut 6): a user-stated link whose own range excludes zero is
     // sent at exists_probability 1.0 with its range's spread, on this wire copy only. AFTER the clamp restore, which
     // rescales a restored std. The licence's existence flag reads the SAME function (`heldLinkOf`).
+    // ⭐ RULE R (Science 393023): the same seam also sends a link whose route already carries Olumi's default doubt at
+    // existence 1.0, its strength untouched (`held-user-links.ts`, reason `route_once`).
     const heldWireGraph = withHeldUserLinks(statedWireGraph);
     if (heldWireGraph !== statedWireGraph) {
       log.info(
         { event: 'run_analysis.user_links_held_at_one', request_id: invocation.requestId, scenario_id: args.scenario_id },
-        'run_analysis held user-stated links whose range excludes zero at existence 1.0 (wire copy only; ids only)',
+        'run_analysis held links at existence 1.0: a user range, a validated definition or route-once (wire copy only; ids only)',
       );
     }
     const plotPayload: Record<string, unknown> = {
