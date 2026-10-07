@@ -26,10 +26,11 @@
  * placeholder. Otherwise the normal fold applies. Pure.
  */
 
-import { isSizedOnlyByOlumi, isAcceptedOlumiSize } from '../../cee/magnitude/link-sizing.js';
+import { isSizedOnlyByOlumi, isAcceptedOlumiSize, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { isAcceptedOlumiEstimate } from '../../cee/transforms/provenance-display.js';
+import { exactIdentityOperandLinks } from '../../orchestrator-v5/admission/identity-evaluations.js';
 import { sameUnit } from '../../orchestrator-v5/agent-lane/same-unit.js';
 
 type Rec = Record<string, unknown>;
@@ -179,16 +180,62 @@ export function limitUnitsOf(limits: unknown): ReadonlyMap<unknown, string> {
   return out;
 }
 
+/**
+ * L1 r2 (Science 393023, 7 Oct): an ABSENT node unit is established at read time only by the user's current figures
+ * on both sides. EVERY user-stated touching link must agree (incoming amount, outgoing per-source change). Estimates,
+ * hypotheses and projected means never establish authority, even with a user stamp. No node or provenance is written.
+ */
+export function userStatedLinkUnitsOf(nodes: readonly Rec[], edges: readonly Rec[]): ReadonlyMap<unknown, string> {
+  const own = nodeUnitOf(nodes);
+  const natural = naturalAmountUnitsOf(nodes);
+  const touching = new Map<unknown, Array<{ edge: Rec; incoming: boolean }>>();
+  for (const edge of edges) {
+    if (linkSizing(edge) !== 'user') continue;
+    for (const [id, incoming] of [[edge.to, true], [edge.from, false]] as const) {
+      const links = touching.get(id) ?? [];
+      links.push({ edge, incoming });
+      touching.set(id, links);
+    }
+  }
+  const out = new Map<unknown, string>();
+  for (const node of nodes) {
+    if (typeof node.id !== 'string' || own(node.id) !== undefined || norm(natural.get(node.id)) !== undefined) continue;
+    const links = touching.get(node.id) ?? [];
+    let unit: string | undefined;
+    let incoming = false;
+    let outgoing = false;
+    const agrees = links.every(({ edge, incoming: into }) => {
+      const p = isRec(edge.provenance) ? edge.provenance : undefined;
+      const effect = p !== undefined && isRec(p.natural_effect) ? p.natural_effect : undefined;
+      // An estimate is not the user's figure; all touching user stamps still take part in the fail-closed check.
+      if (p === undefined || p.source === 'cee_hypothesis' || p.mean_projected === true
+        || (typeof p.magnitude === 'string' && p.magnitude.startsWith('olumi_'))) return false;
+      const mean = isRec(edge.strength) ? edge.strength.mean : undefined;
+      if (effect === undefined || !finite(mean) || mean !== effect.strength_mean || !finite(effect.amount)
+        || !finite(effect.per_source_change) || effect.per_source_change === 0) return false;
+      const u = into ? effect.amount_unit : effect.per_source_change_unit;
+      if (typeof u !== 'string' || u.trim() === '' || (unit !== undefined && !sameUnit(unit, u))) return false;
+      unit ??= u;
+      incoming ||= into;
+      outgoing ||= !into;
+      return true;
+    });
+    if (agrees && incoming && outgoing && unit !== undefined) out.set(node.id, unit);
+  }
+  return out;
+}
+
 const NO_LIMIT_UNITS: ReadonlyMap<unknown, string> = new Map();
 
 /**
  * Per node, the unit the sizer says a link's size in ("percentage points" only for a percentage LEVEL on 100) — or, for a
  * node with no unit of its own, its level limit's unit ({@link limitUnitsOf}).
  */
-const sizerUnitsOf = (nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS): Map<unknown, string | undefined> => {
+const sizerUnitsOf = (nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS, edges: readonly Rec[] = []): Map<unknown, string | undefined> => {
   const ownUnit = nodeUnitOf(nodes);
+  const stated = userStatedLinkUnitsOf(nodes, edges);
   return new Map([...naturalAmountUnitsOf(nodes)].map(([id, u]) => [id,
-    ownUnit(id) === undefined && limitUnits.has(id) ? norm(limitUnits.get(id)) : norm(u)] as const));
+    ownUnit(id) === undefined && limitUnits.has(id) ? norm(limitUnits.get(id)) : norm(u) ?? norm(stated.get(id))] as const));
 };
 
 /**
@@ -214,7 +261,8 @@ function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefine
  */
 function userStatedStrength(edge: Rec): boolean {
   const p = isRec(edge.provenance) ? edge.provenance : undefined;
-  return p?.source === 'user_specified';
+  // This exemption is the user's BAND, not a natural figure in a conflicting or absent unit.
+  return p?.source === 'user_specified' && !isRec(p.natural_effect);
 }
 
 /**
@@ -222,8 +270,8 @@ function userStatedStrength(edge: Rec): boolean {
  * points at, written for the mean it now holds. Shared with the goal-certainty rule (`goal-certainty.ts`), so the two
  * rulings (AI Quality 5882087383, 5882366427) read one definition of "unsized".
  */
-export function sizedLinkTest(nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS): (edge: Rec) => boolean {
-  const unitById = sizerUnitsOf(nodes, limitUnits);
+export function sizedLinkTest(nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS, edges: readonly Rec[] = []): (edge: Rec) => boolean {
+  const unitById = sizerUnitsOf(nodes, limitUnits, edges);
   const unitOf = nodeUnitOf(nodes);
   // A link that holds by definition is sized by it (never asked about: `link-size-ask.ts`; MG sweep C3).
   return (edge) => holdsByDefinition(edge, unitOf) || linkIsSized(edge, unitById);
@@ -298,6 +346,7 @@ export function placeholderPartsFinding(
   options: ReadonlyArray<Record<string, unknown>>,
   /** Per node, its level limit's unit ({@link limitUnitsOf}): read for a node with no unit of its own. */
   limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS,
+  identityEvaluations?: readonly unknown[],
 ): PlaceholderPartsFinding | null {
   const { nodes, edges } = asAnalysed({ nodes: allNodes, edges: allEdges }, targetId);
   const kindById = new Map(nodes.map((n) => [n.id, n.kind] as const));
@@ -332,7 +381,8 @@ export function placeholderPartsFinding(
     if (target !== undefined && isRec(target.nonlinear_identity) && !definitionalSum(target, edges, nodeUnitOf(nodes))) {
       return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
     }
-    const unitById = sizerUnitsOf(nodes, limitUnits);
+    const unitById = sizerUnitsOf(nodes, limitUnits, edges);
+    const exactOperands = exactIdentityOperandLinks(nodes, edges, identityEvaluations);
     const unitOf = nodeUnitOf(nodes);
     const onPath = new Set<unknown>([...parts, targetId]);
     for (const iv of movers) {
@@ -346,8 +396,8 @@ export function placeholderPartsFinding(
             if (e.from !== at || !onPath.has(e.to)) continue;
             // A link that holds by definition is sized by that definition, whatever unit token the sizer would pick
             // ("%" vs "percentage points"): checked first (MG sweep C2, a percent-level total).
-            if (!holdsByDefinition(e, unitOf) && !linkIsSized(e, unitById) && !userStatedStrength(e)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
-            if (guessed === undefined && olumiGuessedLink(e, unitOf)) guessed = { partId, from: String(e.from), to: String(e.to) };
+            if (!exactOperands.has(e) && !holdsByDefinition(e, unitOf) && !linkIsSized(e, unitById) && !userStatedStrength(e)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
+            if (!exactOperands.has(e) && guessed === undefined && olumiGuessedLink(e, unitOf)) guessed = { partId, from: String(e.from), to: String(e.to) };
             if (e.to !== targetId && !reached.has(e.to)) {
               reached.add(e.to);
               walk.push(e.to);

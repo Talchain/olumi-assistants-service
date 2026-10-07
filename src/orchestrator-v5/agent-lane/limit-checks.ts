@@ -105,6 +105,7 @@ const andList = (xs: readonly string[]): string =>
 function withheldOptionsFor(
   graph: unknown,
   targetId: string | null,
+  identityEvaluated?: ReadonlySet<string>,
 ): WithheldOptions {
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const edges = (graph as { edges?: unknown } | null | undefined)?.edges;
@@ -118,7 +119,8 @@ function withheldOptionsFor(
   const target = labelOf(targetId);
   const out = NONE_WITHHELD();
   for (const o of recs.filter((n) => n.kind === 'option')) {
-    const finding = placeholderPartsFinding(targetId, recs, links, [o], limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints));
+    const finding = placeholderPartsFinding(targetId, recs, links, [o], limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints),
+      identityEvaluated === undefined ? undefined : [...identityEvaluated].map(node_id => ({ node_id, evaluated: true })));
     const label = labelOf(optionIdOf(o));
     if (finding === null || label === null) continue;
     out.labels.push(label);
@@ -149,9 +151,9 @@ interface WithheldOptions {
 const NONE_WITHHELD = (): WithheldOptions => ({ labels: [], byReason: new Map(), asks: [], guesses: new Map() });
 
 /** {@link withheldOptionsFor} that never throws: a failure costs only the per-option words and asks, never the rows. */
-function withheldOptionsOrNone(graph: unknown, targetId: string | null): ReturnType<typeof withheldOptionsFor> {
+function withheldOptionsOrNone(graph: unknown, targetId: string | null, identityEvaluated?: ReadonlySet<string>): ReturnType<typeof withheldOptionsFor> {
   try {
-    return withheldOptionsFor(graph, targetId);
+    return withheldOptionsFor(graph, targetId, identityEvaluated);
   } catch (err) {
     log.warn({ event: 'agent_lane.limit_withheld_options_failed', err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the options withheld on a limit could not be read; the row goes without them');
     return NONE_WITHHELD();
@@ -206,7 +208,7 @@ export function limitAskIdsOf(graph: unknown): ReadonlySet<string> {
 }
 
 /** `undefined` when the run carries no per-limit rows, or none can be named. */
-export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined): LimitCheck[] | undefined {
+export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined, identityEvaluated?: ReadonlySet<string>): LimitCheck[] | undefined {
   if (verdicts === null || verdicts === undefined) return undefined;
   const limits = readRatifiedConstraints(graph);
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
@@ -229,7 +231,7 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     // unscored row checked no option, so it names none (its own sentence already says it could not be checked)...
     const perOptionRow = row.state !== 'unscored' || row.reason === PLACEHOLDER_PARTS_REASON
       || row.reason === PARTS_IDENTITY_UNMODELLED_REASON || row.reason === OLUMI_GUESS_LIMIT_REASON;
-    const perOption = perOptionRow ? withheldOptionsOrNone(graph, limit?.node_id ?? null) : NONE_WITHHELD();
+    const perOption = perOptionRow ? withheldOptionsOrNone(graph, limit?.node_id ?? null, identityEvaluated) : NONE_WITHHELD();
     // ...unless B6 withheld one of its options (AIQ 5916187873): then every option was withheld PER OPTION, for its own
     // reason, and the row says each one — never one option's reason as if it were every option's.
     if (row.state === 'unscored' && perOption.guesses.size === 0) {
