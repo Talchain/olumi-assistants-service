@@ -31,7 +31,7 @@ import { teamShareMoments, extraShareMoments } from '../event-by-date-share.js';
 import { withShareByDateFrame } from '../share-by-date-run.js';
 import { decisionInputLines, decisionInputAsk } from '../../agent-lane/decision-input-ask.js';
 import { noDeadEndAsks } from '../../agent-lane/goal-certainty.js';
-import { readTeamTime, TEAM_TIME, applyTeamShareEdit, teamObservedState, type ApprovedTeamTime } from '../team-share-write.js';
+import { readTeamTime, TEAM_TIME, applyTeamShareEdit, type ApprovedTeamTime } from '../team-share-write.js';
 import { goalChanceRangeRecordOf } from '../goal-chance-range-record.js';
 import { validatedDefinition, endsOfGraph } from '../held-user-links.js';
 import { applyAndValidateMutation, mergeMutatedGraphForPersistence } from '../../tools/handlers/d1-shared/apply-graph-mutation.js';
