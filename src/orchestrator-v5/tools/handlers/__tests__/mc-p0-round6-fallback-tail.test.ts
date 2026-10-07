@@ -14,8 +14,8 @@ const otherLinks = [
   { from: 'migration_downtime', to: 'monthly_cloud_spend' },
 ];
 const oldTail = 'Olumi only guessed another link; you aren’t asked to size it.';
-const pluralTail = 'and 2 more, whose strengths nobody has set yet.';
-const singularTail = 'and 1 other link on the way, whose strengths nobody has set yet.';
+const pluralTail = 'and 2 more, whose strengths aren\'t sized in the model yet.';
+const singularTail = 'and 1 other link on the way, whose strengths aren\'t sized in the model yet.';
 
 it('R6 original :219 setup: exactly two other nobody-sized links, deduplicated by endpoint identity', async () => {
   const paths = unsizedLeaderGoalPaths(F.graph, ids);
@@ -27,7 +27,7 @@ it('R6 original :219 setup: exactly two other nobody-sized links, deduplicated b
   const r = await runP0Graph(F.graph, F._provenance.brief_text, F.plot_body);
   expect(r.leading_option_id).toBeNull();
   const warning = r.enrichment.inference_warnings.find((w: any) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH);
-  expect(warning.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths nobody has set yet. Set them to see how much they matter.');
+  expect(warning.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
   expect(warning.links).toEqual(otherLinks);
   expect(warning.message).not.toContain(oldTail);
   expect(warning.message.length).toBeLessThanOrEqual(400);
@@ -58,7 +58,7 @@ it('R6 estimated-only twin keeps the old tail and estimates do not block', () =>
 it('R6 singular nobody-sized link comes before the estimated-link tail', () => {
   const { g, paths } = twin(['olumi_placeholder', 'olumi_estimate']);
   const w = placeholderGoalWarning(g, paths, GOAL_FIGURES_PLACEHOLDER_PATH);
-  expect(w.message).toBe('This comparison turns on the link from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’, whose strength nobody has set yet. Set it to see how much it matters.');
+  expect(w.message).toBe('This comparison turns on the link from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’, whose strength isn\'t sized in the model yet. Set it to see how much it matters.');
   expect(w.message).not.toContain(oldTail);
   expect(w.message.length).toBeLessThanOrEqual(400);
 });
@@ -68,7 +68,7 @@ it('R6 singular nobody-sized link without an estimate has no old tail', () => {
   paths[0]!.links.pop();
   g.nodes.find((n: any) => n.id === ids[1]).label += ' across many teams'.repeat(9);
   const w = placeholderGoalWarning(g, paths, GOAL_FIGURES_PLACEHOLDER_PATH);
-  expect(w.message).toContain('whose strength nobody has set yet. Set it to see how much it matters.');
+  expect(w.message).toContain('whose strength isn\'t sized in the model yet. Set it to see how much it matters.');
   expect(w.message).not.toContain(oldTail);
   expect(w.message).not.toContain(pluralTail);
   expect(w.message).not.toContain(singularTail);
@@ -79,7 +79,7 @@ it('R6 both tails still fit the warning budget with long endpoint labels', () =>
   const { g, paths } = twin(['olumi_placeholder', 'olumi_estimate']);
   for (const n of g.nodes) if (n.id === otherLinks[0]!.from || n.id === otherLinks[0]!.to) n.label += ' across many teams'.repeat(9);
   const w = placeholderGoalWarning(g, paths, GOAL_FIGURES_PLACEHOLDER_PATH);
-  expect(w.message).toContain('whose strength nobody has set yet. Set it to see how much it matters.');
+  expect(w.message).toContain('whose strength isn\'t sized in the model yet. Set it to see how much it matters.');
   expect(w.message).not.toContain(oldTail);
   expect(w.message.length).toBeLessThanOrEqual(400);
 });

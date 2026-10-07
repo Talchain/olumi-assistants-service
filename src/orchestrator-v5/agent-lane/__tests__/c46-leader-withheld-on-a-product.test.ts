@@ -377,7 +377,7 @@ describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its si
       requestId: REQUEST_ID, exitPath: 'agent_lane_v1', mayNameLeadingOption: false,
       leaderClaimWithheldReason: 'goal_path_unsized', graph: registered,
     } as never);
-    expect(wire.response.assistant_text).toMatch(/whose strengths? nobody has set yet\. Set (?:it|them) to see how much (?:it matters|they matter)\./);
+    expect(wire.response.assistant_text).toMatch(/whose (?:strength isn't|strengths aren't) sized in the model yet\. Set (?:it|them) to see how much (?:it matters|they matter)\./);
   });
 
   it('RED: Paul\'s shape, £59 ranked first at 0.94 → no leader may be named, with the C46 reason, by option id', async () => {

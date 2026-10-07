@@ -1,0 +1,1369 @@
+[
+  {
+    "name": "R4",
+    "graph": {
+      "nodes": [
+        {
+          "id": "base",
+          "kind": "factor",
+          "label": "base",
+          "observed_state": {
+            "value": 1
+          }
+        },
+        {
+          "id": "hire",
+          "kind": "factor",
+          "label": "hire",
+          "observed_state": {
+            "value": 1
+          }
+        },
+        {
+          "id": "capacity",
+          "kind": "chance",
+          "label": "capacity"
+        },
+        {
+          "id": "goal",
+          "kind": "outcome",
+          "label": "goal"
+        }
+      ],
+      "edges": [
+        {
+          "to": "goal",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "from": "base"
+        },
+        {
+          "to": "capacity",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "hire"
+        },
+        {
+          "to": "goal",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "capacity"
+        }
+      ]
+    },
+    "held": [
+      "capacity->goal"
+    ]
+  },
+  {
+    "name": "R5",
+    "graph": {
+      "nodes": [
+        {
+          "id": "base",
+          "kind": "factor",
+          "label": "base",
+          "observed_state": {
+            "value": 1
+          }
+        },
+        {
+          "id": "hire",
+          "kind": "factor",
+          "label": "hire",
+          "observed_state": {
+            "value": 1
+          }
+        },
+        {
+          "id": "freelance",
+          "kind": "factor",
+          "label": "freelance",
+          "observed_state": {
+            "value": 1
+          }
+        },
+        {
+          "id": "bridge",
+          "kind": "chance",
+          "label": "bridge"
+        },
+        {
+          "id": "goal",
+          "kind": "outcome",
+          "label": "goal"
+        }
+      ],
+      "edges": [
+        {
+          "to": "goal",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "from": "base"
+        },
+        {
+          "to": "goal",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "hire"
+        },
+        {
+          "to": "bridge",
+          "strength": {
+            "mean": 0.4,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "freelance"
+        },
+        {
+          "to": "goal",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "bridge"
+        }
+      ]
+    },
+    "held": [
+      "bridge->goal"
+    ]
+  },
+  {
+    "name": "Served shape",
+    "graph": {
+      "nodes": [
+        {
+          "id": "decision",
+          "kind": "decision",
+          "label": "decision"
+        },
+        {
+          "id": "option",
+          "kind": "option",
+          "label": "option"
+        },
+        {
+          "id": "factorA",
+          "kind": "factor",
+          "label": "factorA"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "chance",
+          "label": "Y"
+        },
+        {
+          "id": "goal",
+          "kind": "goal",
+          "label": "goal"
+        }
+      ],
+      "edges": [
+        {
+          "to": "option",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "from": "decision"
+        },
+        {
+          "to": "factorA",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 1,
+          "from": "option"
+        },
+        {
+          "to": "M",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "factorA"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        },
+        {
+          "to": "goal",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "Y"
+        }
+      ]
+    },
+    "held": [
+      "M->Y",
+      "Y->goal"
+    ]
+  },
+  {
+    "name": "I4 user range",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.0911854103343465
+          },
+          "exists_probability": 0.8,
+          "provenance": {
+            "source": "user_specified",
+            "magnitude": "user_stated",
+            "natural_effect": {
+              "amount": 20,
+              "amount_unit": "subscribers",
+              "per_source_change": 1,
+              "per_source_change_unit": "£",
+              "strength_mean": 0.3,
+              "strength_mean_frame": "edge_strength",
+              "stated_range": {
+                "low": 20,
+                "high": 40,
+                "text": "20 to 40",
+                "end": "low"
+              }
+            }
+          },
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": [
+      "A->M"
+    ]
+  },
+  {
+    "name": "I4 certain",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.05
+          },
+          "exists_probability": 1,
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "I4 zero",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.05
+          },
+          "exists_probability": 0,
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "Bidirected",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "edge_type": "bidirected",
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "I4 absent probability",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.05
+          },
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "I4 validated definition",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "Starter-tier revenue",
+          "unit": "£/month"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "Revenue",
+          "unit": "£/month"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 1,
+            "std": 0.01
+          },
+          "exists_probability": 0.8,
+          "provenance": {
+            "definitional": true,
+            "source": "cee_hypothesis",
+            "natural_effect": {
+              "amount": 1,
+              "amount_unit": "£/month",
+              "per_source_change": 1,
+              "per_source_change_unit": "£/month",
+              "strength_mean": 1
+            }
+          },
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": [
+      "A->M"
+    ]
+  },
+  {
+    "name": "Identity operand",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M",
+          "nonlinear_identity": {
+            "factor_ids": [
+              "A"
+            ]
+          }
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "Identity operand covered source",
+    "graph": {
+      "nodes": [
+        {
+          "id": "R",
+          "kind": "factor",
+          "label": "R"
+        },
+        {
+          "id": "A",
+          "kind": "chance",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M",
+          "nonlinear_identity": {
+            "factor_ids": [
+              "A"
+            ]
+          }
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "A",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "R"
+        },
+        {
+          "to": "M",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": [
+      "M->Y"
+    ]
+  },
+  {
+    "name": "Bidirected covered source",
+    "graph": {
+      "nodes": [
+        {
+          "id": "R",
+          "kind": "factor",
+          "label": "R"
+        },
+        {
+          "id": "A",
+          "kind": "chance",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "A",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "R"
+        },
+        {
+          "to": "M",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "edge_type": "bidirected",
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "I6 before",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.0911854103343465
+          },
+          "exists_probability": 0.8,
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": [
+      "M->Y"
+    ]
+  },
+  {
+    "name": "I6 after",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.0911854103343465
+          },
+          "exists_probability": 0.8,
+          "provenance": {
+            "source": "user_specified",
+            "magnitude": "user_stated",
+            "natural_effect": {
+              "amount": 20,
+              "amount_unit": "subscribers",
+              "per_source_change": 1,
+              "per_source_change_unit": "£",
+              "strength_mean": 0.3,
+              "strength_mean_frame": "edge_strength",
+              "stated_range": {
+                "low": 20,
+                "high": 40,
+                "text": "20 to 40",
+                "end": "low"
+              }
+            }
+          },
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": [
+      "A->M"
+    ]
+  },
+  {
+    "name": "Shared node doubted",
+    "graph": {
+      "nodes": [
+        {
+          "id": "price",
+          "kind": "factor",
+          "label": "price"
+        },
+        {
+          "id": "service",
+          "kind": "factor",
+          "label": "service"
+        },
+        {
+          "id": "customers_lost",
+          "kind": "chance",
+          "label": "customers_lost"
+        },
+        {
+          "id": "goal",
+          "kind": "goal",
+          "label": "goal"
+        }
+      ],
+      "edges": [
+        {
+          "to": "customers_lost",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "price"
+        },
+        {
+          "to": "customers_lost",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "service"
+        },
+        {
+          "to": "goal",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "customers_lost"
+        }
+      ]
+    },
+    "held": [
+      "customers_lost->goal"
+    ]
+  },
+  {
+    "name": "Shared node undoubted",
+    "graph": {
+      "nodes": [
+        {
+          "id": "price",
+          "kind": "factor",
+          "label": "price"
+        },
+        {
+          "id": "service",
+          "kind": "factor",
+          "label": "service"
+        },
+        {
+          "id": "customers_lost",
+          "kind": "chance",
+          "label": "customers_lost"
+        },
+        {
+          "id": "goal",
+          "kind": "goal",
+          "label": "goal"
+        },
+        {
+          "id": "known",
+          "kind": "factor",
+          "label": "known"
+        }
+      ],
+      "edges": [
+        {
+          "to": "customers_lost",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "price"
+        },
+        {
+          "to": "customers_lost",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "service"
+        },
+        {
+          "to": "customers_lost",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 1,
+          "from": "known"
+        },
+        {
+          "to": "goal",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "customers_lost"
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "Cycle",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "chance",
+          "label": "Y"
+        },
+        {
+          "id": "X",
+          "kind": "chance",
+          "label": "X"
+        },
+        {
+          "id": "Z",
+          "kind": "chance",
+          "label": "Z"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 0.3,
+            "std": 0.0911854103343465
+          },
+          "exists_probability": 0.8,
+          "provenance": {
+            "source": "user_specified",
+            "magnitude": "user_stated",
+            "natural_effect": {
+              "amount": 20,
+              "amount_unit": "subscribers",
+              "per_source_change": 1,
+              "per_source_change_unit": "£",
+              "strength_mean": 0.3,
+              "strength_mean_frame": "edge_strength",
+              "stated_range": {
+                "low": 20,
+                "high": 40,
+                "text": "20 to 40",
+                "end": "low"
+              }
+            }
+          },
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        },
+        {
+          "to": "Z",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "X"
+        },
+        {
+          "to": "X",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "Z"
+        }
+      ]
+    },
+    "held": [
+      "A->M"
+    ]
+  },
+  {
+    "name": "Dangling edge",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "M",
+          "kind": "chance",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "to": "M",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "A"
+        },
+        {
+          "to": "Y",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        },
+        {
+          "to": "M",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "ghost"
+        },
+        {
+          "to": "missing",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "M"
+        }
+      ]
+    },
+    "held": [
+      "M->Y"
+    ]
+  },
+  {
+    "name": "No covered default",
+    "graph": {
+      "nodes": [
+        {
+          "id": "A",
+          "kind": "factor",
+          "label": "A"
+        },
+        {
+          "id": "goal",
+          "kind": "goal",
+          "label": "goal"
+        }
+      ],
+      "edges": [
+        {
+          "to": "goal",
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          },
+          "exists_probability": 0.8,
+          "from": "A"
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "Retained excluded upstream",
+    "graph": {
+      "nodes": [
+        {
+          "id": "X",
+          "kind": "factor",
+          "label": "X",
+          "analysis_participation": "retained_excluded"
+        },
+        {
+          "id": "M",
+          "kind": "factor",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "from": "X",
+          "to": "M",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "M",
+          "to": "Y",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "Retained excluded upstream control",
+    "graph": {
+      "nodes": [
+        {
+          "id": "X",
+          "kind": "factor",
+          "label": "X"
+        },
+        {
+          "id": "M",
+          "kind": "factor",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "from": "X",
+          "to": "M",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "M",
+          "to": "Y",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": [
+      "M->Y"
+    ]
+  },
+  {
+    "name": "Event-risk mitigation",
+    "graph": {
+      "nodes": [
+        {
+          "id": "preventer",
+          "kind": "factor",
+          "label": "preventer"
+        },
+        {
+          "id": "risk",
+          "kind": "risk",
+          "label": "risk",
+          "event_risk": {
+            "version": 1,
+            "occurrence": {
+              "p_low": 0.05,
+              "p_high": 0.15,
+              "basis": "olumi"
+            },
+            "horizon": {
+              "months": 12
+            },
+            "mitigations": [
+              {
+                "factor_id": "preventer",
+                "occurrence_reduction": 0.5
+              }
+            ]
+          }
+        },
+        {
+          "id": "child",
+          "kind": "goal",
+          "label": "child"
+        }
+      ],
+      "edges": [
+        {
+          "from": "preventer",
+          "to": "risk",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": -1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "risk",
+          "to": "child",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "Event-risk mitigation control",
+    "graph": {
+      "nodes": [
+        {
+          "id": "preventer",
+          "kind": "factor",
+          "label": "preventer"
+        },
+        {
+          "id": "risk",
+          "kind": "risk",
+          "label": "risk"
+        },
+        {
+          "id": "child",
+          "kind": "goal",
+          "label": "child"
+        }
+      ],
+      "edges": [
+        {
+          "from": "preventer",
+          "to": "risk",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": -1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "risk",
+          "to": "child",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": [
+      "risk->child"
+    ]
+  },
+  {
+    "name": "Event-risk occurrence is not cover",
+    "graph": {
+      "nodes": [
+        {
+          "id": "risk",
+          "kind": "risk",
+          "label": "risk",
+          "event_risk": {
+            "version": 1,
+            "occurrence": {
+              "p_low": 0.05,
+              "p_high": 0.15,
+              "basis": "olumi"
+            },
+            "horizon": {
+              "months": 12
+            }
+          }
+        },
+        {
+          "id": "child",
+          "kind": "outcome",
+          "label": "child"
+        },
+        {
+          "id": "goal",
+          "kind": "goal",
+          "label": "goal"
+        }
+      ],
+      "edges": [
+        {
+          "from": "risk",
+          "to": "child",
+          "exists_probability": 1,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "child",
+          "to": "goal",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": []
+  }
+]

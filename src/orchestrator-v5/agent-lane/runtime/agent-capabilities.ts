@@ -15,6 +15,7 @@
  */
 
 import { readStatedEventRisk, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
+import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
@@ -1359,7 +1360,10 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
    */
   const structuralFrom = new Set(g.nodes.filter((n) => n.kind === 'decision' || n.kind === 'option').map((n) => n.id));
   const unitOfNode = nodeUnitOf(g.nodes);
+  // Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
+  const endsOf = endsOfGraph(g.raw);
   const links = g.edges.map((e) => {
+    const countedOnce = heldLinkOf(e, endsOf(e))?.reason === 'route_once';
     const source = (e.provenance !== null && typeof e.provenance === 'object') ? (e.provenance as { source?: unknown }).source : e.provenance;
     const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;
     const fixed = (st === undefined || (st.mean === 1 && (st.std === undefined || st.std === 0.01)))
@@ -1380,7 +1384,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
       ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
-      ...(num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
+      ...(countedOnce ? { exists_probability: 1, counted_once: true }
+        : num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       /**
        * ⭐ WHO SIZED IT, by F1b's ONE rule (`linkSizing`; AI HARNESS, DL 5936996041 on R3 DEFECT 2 5936673643). `defaulted`
        * is NOT a sizing mark: construction sets it on Olumi's estimates too (a projected spread or existence), and the
