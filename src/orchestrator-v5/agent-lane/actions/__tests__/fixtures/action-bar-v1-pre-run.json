@@ -98,18 +98,5 @@
       "why_now": "See what your brief has and what it is missing.",
       "offer_key": "524f6501fd806533"
     }
-  ],
-  "bias_risk": {
-    "v": 1,
-    "items": [
-      {
-        "claim_id": "DSK-B-001",
-        "name": "Anchoring",
-        "why": "Olumi’s starting figure for ‘Enterprise prospect signing likelihood’ could pull later estimates towards it.",
-        "action_id": "bias_anchoring",
-        "press_id": "act:bias_anchoring",
-        "offer_key": "665d59f6b8824852"
-      }
-    ]
-  }
+  ]
 }
