@@ -156,7 +156,8 @@ afterEach(async () => {
 });
 
 type Offer = { action_id: string; press_id: string; enabled: boolean; offer_key: string; label: string; disabled_reason?: string; why_now?: string };
-type Bar = { v: number; state_key: string; revision: { graph_hash: string | null; run_key: string | null }; priority: Offer[]; standard: Offer[]; more: Offer[] };
+type Bar = { v: number; state_key: string; revision: { graph_hash: string | null; run_key: string | null }; priority: Offer[]; standard: Offer[]; more: Offer[];
+  bias_risk?: { v: 1; items: { claim_id: string; press_id: string; offer_key: string }[] } };
 type Body = { assistant_text: string; suggested_actions: { id: string; label: string; message: string }[]; action_bar?: Bar;
   _action?: Record<string, unknown>; _agent?: { tool_calls?: { name: string; proposal_id?: string }[] }; _diagnostic_trace?: { fast_path?: string } };
 let turnSerial = 0;
@@ -451,7 +452,9 @@ describe('S-B slice 2b through the real turn, composer and reload routes', () =>
     expect(b.assistant_text).toBe(expected);
     expect(b.assistant_text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
     expect(b.suggested_actions).toEqual([]);
-    expect(b._action?.science).toBeUndefined(); // two options + current Run: canonicalStageOf reads decide
+    // Two options + current Run: canonicalStageOf reads decide, a compared Run; DSK-B-001 applies there (Science 393023 decide→evaluate).
+    expect(b._action?.science).toEqual(id === 'bias_anchoring' ? resolveDskClaimProvenance('DSK-B-001') : undefined);
+    expect(JSON.stringify(b._action).match(/DSK-B-001/g)?.length ?? 0).toBe(id === 'bias_anchoring' ? 1 : 0);
     for (const action_id of ['bias_anchoring', 'check_estimates']) expect(b.action_bar!.more.find(o => o.action_id === action_id)).toMatchObject({ enabled: true });
     coldStore();
     expect((await reload()).action_bar).toEqual(b.action_bar);

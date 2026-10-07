@@ -45,6 +45,10 @@ const STAGES: Readonly<Record<BiasClaimId, readonly ReturnType<typeof mapStageTo
   'DSK-B-007': ['frame', 'ideate'],
 };
 
+/** The one stage rule for a bias claim's science badge (the row here and the press reply in handlers.ts). */
+export const biasBadgeApplies = (claim_id: BiasClaimId, stage: ReturnType<typeof mapStageToDecisionStage> | null): boolean =>
+  stage !== null && STAGES[claim_id].includes(stage);
+
 export function biasRiskOf(f: ActionFacts, offers: readonly ActionOffer[], frame: OptionFrame): BiasRiskV1 | undefined {
   if (!f.readable) return undefined;
 
@@ -52,7 +56,7 @@ export function biasRiskOf(f: ActionFacts, offers: readonly ActionOffer[], frame
   const stage = f.canonicalStage === null ? null : mapStageToDecisionStage(f.canonicalStage);
   const items: BiasRiskItem[] = [];
   const add = (claim_id: BiasClaimId, name: string, why: string, offer: ActionOffer): void => {
-    const science = stage !== null && STAGES[claim_id].includes(stage) ? resolveDskClaimProvenance(claim_id) : null;
+    const science = biasBadgeApplies(claim_id, stage) ? resolveDskClaimProvenance(claim_id) : null;
     items.push({
       claim_id,
       name,
