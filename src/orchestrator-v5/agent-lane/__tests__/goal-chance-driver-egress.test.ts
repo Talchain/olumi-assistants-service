@@ -13,6 +13,7 @@ import { goalChanceDriverDisplayForAgent } from '../../goal-target/goal-chance-r
 import {
   DRIVER_ABSENCE_CLAIM, GOAL_CHANCE_DRIVER_ABSENCE_REMOVED, removeDriverAbsenceClaims, withoutDriverAbsenceClaimsAtEgress,
   SENSITIVITY_ABSENCE_CLAIM, SENSITIVITY_ABSENCE_REMOVED, SENSITIVITY_ABSENCE_KEPT_UNSAFE, removeSensitivityAbsenceClaims, robustnessComputed,
+  screenNamesADriver,
 } from '../goal-chance-driver-egress.js';
 
 type Json = Record<string, any>;
@@ -435,5 +436,107 @@ describe('Wave B pilot, keys untouched: a Run whose robustness check ran never s
       else expect(final).toBe(base);
     }
     expect(n).toBe(16);
+  });
+});
+
+/**
+ * Wave B, unseen brief (7 Oct 03:0xZ, guest, CEE b568cc9, UI e3f2fc82), keys untouched. The screen showed RANGE lines
+ * ("It depends most on how strongly 'Fourth-shop net-profit contribution' affects 'monthly profit' …") and NO licensed
+ * driver, so S2's gate (licensed drivers only) never opened: the Run narration said "… so investigation priority is not
+ * established" and the Challenge reply "The run hasn't established which assumption changes the chances most." DL ruling:
+ * a range line's driver is a screen driver (the same unbarred options the screen draws).
+ */
+const UNSEEN_RUN1 = JSON.parse(fixture('waveB-unseen1-b568cc9-run1-turn003.json')) as Json;
+const UNSEEN_CHALLENGE = JSON.parse(fixture('waveB-unseen1-b568cc9-challenge-turn001.json')) as Json;
+const RUN1_CLAUSE = ', so investigation priority is not established.';
+const CHALLENGE_LINE = 'The run hasn’t established which assumption changes the chances most.\n\n';
+const withoutRange = (body: Json): Json => {
+  const out = clone(body);
+  blockOf(out).enrichment.inference_warnings = blockOf(out).enrichment.inference_warnings.filter((w: Json) => w.code !== 'GOAL_CHANCE_RANGE');
+  return out;
+};
+
+describe('Wave B unseen brief, keys untouched: a range line is a screen driver, so the reply never denies one', () => {
+  it('the gate opens on the range display alone (no licensed driver on this Run; robustness not computed)', () => {
+    for (const body of [UNSEEN_RUN1, UNSEEN_CHALLENGE]) {
+      expect(goalChanceDriverDisplayForAgent(blockOf(body), body.draft_graph)).toEqual({});
+      expect(robustnessComputed(blockOf(body))).toBe(false);
+      expect(screenNamesADriver(blockOf(body), body.draft_graph)).toBe(true);
+    }
+  });
+
+  it('RED at base: the Run narration loses only "so investigation priority is not established"', () => {
+    expect(UNSEEN_RUN1.assistant_text.endsWith(`Sensitivity was not measured${RUN1_CLAUSE}`)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(UNSEEN_RUN1, opts(UNSEEN_RUN1)) as Json;
+    expect(out.assistant_text).toBe(UNSEEN_RUN1.assistant_text.replace(RUN1_CLAUSE, '.'));
+    expect(out.assistant_text).toContain('Sensitivity was not measured.');
+    expectWellFormed(out.assistant_text);
+    expect({ ...out, assistant_text: UNSEEN_RUN1.assistant_text }).toEqual(UNSEEN_RUN1);
+  });
+
+  it('RED at base: the Challenge reply loses only its denial line', () => {
+    expect(UNSEEN_CHALLENGE.assistant_text.startsWith(CHALLENGE_LINE)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(UNSEEN_CHALLENGE, opts(UNSEEN_CHALLENGE)) as Json;
+    expect(out.assistant_text).toBe(UNSEEN_CHALLENGE.assistant_text.slice(CHALLENGE_LINE.length));
+    expectWellFormed(out.assistant_text);
+    expect({ ...out, assistant_text: UNSEEN_CHALLENGE.assistant_text }).toEqual(UNSEEN_CHALLENGE);
+  });
+
+  it('CONTROL no range record: the same replies are kept, by reference', () => {
+    for (const body of [withoutRange(UNSEEN_RUN1), withoutRange(UNSEEN_CHALLENGE)]) {
+      expect(screenNamesADriver(blockOf(body), body.draft_graph)).toBe(false);
+      expect(withoutDriverAbsenceClaimsAtEgress(body, opts(body))).toBe(body);
+    }
+  });
+
+  it('CONTROL every ranged option barred (product not read): the screen draws no range, so nothing is removed', () => {
+    const barred = clone(UNSEEN_CHALLENGE);
+    const range = blockOf(barred).enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_RANGE');
+    blockOf(barred).enrichment.inference_warnings.push({ code: 'GOAL_FIGURES_PRODUCT_NOT_READ', severity: 'warning', message: 'x', option_ids: range.option_ids });
+    expect(screenNamesADriver(blockOf(barred), barred.draft_graph)).toBe(false);
+    expect(withoutDriverAbsenceClaimsAtEgress(barred, opts(barred))).toBe(barred);
+  });
+
+  // The two missing forms (author-written paraphrases, labelled as such), each with its edited text.
+  it.each([
+    ['Six values are Olumi’s. The run hasn’t established which assumption changes the chances most.', 'Six values are Olumi’s.'],
+    ['This run does not show which factor moves the result most, and the deadline was not tested.', 'The deadline was not tested.'],
+    ['It cannot tell which input shifts your chances the most; check the churn figure.', 'Check the churn figure.'],
+    ['Figures are provisional; it has not established an investigation priority.', 'Figures are provisional.'],
+    ['There is no investigation priority yet; the deadline was not tested.', 'The deadline was not tested.'],
+    ['Olumi has not identified an investigation priority, so check the biggest figures first.', 'Check the biggest figures first.'],
+    ['Sensitivity was not measured, so investigation priority is not established.', 'Sensitivity was not measured.'],
+  ])('MUST FIRE (paraphrase): %s', (text, edited) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+    const out = removeDriverAbsenceClaims(text);
+    expect(out).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+    expectWellFormed(out.text);
+  });
+
+  it.each([
+    'Your investigation priority is the churn link.',
+    'Set an investigation priority with your team.',
+    'Investigation priorities are set by your team.',
+    'The price rise changes the chances most in this model.',
+    'We have not established which supplier changes the result most.',
+    'Which option changes the chances most is not something Olumi ranks.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  // DL: every new pattern at 20,000 whitespace stays linear (< 50 ms).
+  it.each([
+    ['"changes" + 20,000 spaces', `changes${' '.repeat(20000)}x`],
+    ['"changes the" + 20,000 spaces', `changes the${' '.repeat(20000)}x`],
+    ['"investigation" + 20,000 spaces', `investigation${' '.repeat(20000)}x`],
+    ['"no" + 20,000 spaces + "investigation"', `no${' '.repeat(20000)}investigation`],
+    ['"has not established" + 20,000 spaces', `has not established${' '.repeat(20000)}x`],
+    ['"which assumption" + 20,000 spaces', `which assumption${' '.repeat(20000)}x`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text);
+    removeDriverAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
   });
 });
