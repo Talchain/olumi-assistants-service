@@ -100,14 +100,15 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     assert.equal(JSON.stringify(turn(captured('B'))), JSON.stringify(base.B));
   });
 
-  it('C: W9c replaces the decision-union first-link fallback/card with own-lever stories', () => {
+  it('C: whole decision turn and exact fallback are pinned with the grounding union intact', () => {
     const c = captured('C');
     const out = run(turn(c));
-    // W9c deliberately replaces this historical nonempty-union link/card behaviour; B stays byte-pinned.
-    assert.deepEqual(out.context.supplied_items.map(i => i.id), ['price_rise', 'starter_tier_subscribers']);
+    const expected = JSON.parse(readFileSync(new URL('./fixtures/w9c/r2-controls.json', import.meta.url), 'utf8')).C;
+    assert.equal(JSON.stringify(out), JSON.stringify(expected.turn));
     const fallback = settleMethodTurn(out, '');
+    assert.equal(fallback.reply, expected.fallback);
+    assert.equal(JSON.stringify(fallback), JSON.stringify(expected.settled));
     assert.equal(settleMethodTurn(out, fallback.reply).passed, true);
-    assert.equal(fallback.reply.split('Watch for:').length - 1, 2);
     assert.equal(cardCallFor(fallback.target, c.graph), null);
   });
 

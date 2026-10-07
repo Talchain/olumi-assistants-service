@@ -1,3 +1,4 @@
+import { textAssertsLeadingOption } from '../../compose/leading-option-egress-guard.js';
 import { POLICY } from './policy.js';
 import type { MethodInputs, MethodTurnCheck, MethodTurnId, SuppliedItem } from './types.js';
 
@@ -87,9 +88,15 @@ function blindspotOk(reply: string): boolean {
   return blind.length === 1 && lines[blind[0]].trimEnd().endsWith('?') && numbered.every(i => i < blind[0]);
 }
 function numberTokens(reply: string): string[] {
-  const body = reply.replace(/^\s*[1-9]\.\s/gmu, '');
+  const body = reply.replace(/^[ \t]*[1-9]\.\s/gmu, '');
   return [...body.matchAll(/(?<![A-Za-z])[£$€]?\d[\d,]*(?:\.\d+)?\s*(?:%|k|m|bn)?/giu)].map(m => m[0].trim());
 }
+// These are claim predicates, never bare ranking words ("team leader", "ranked price above features").
+const LEADER_WORDS = /\b(?:leaders?|leading|rank(?:ed|s|ing|ings)?|top|stronger|strongest|beats?|outperformed|front[- ]runner|favou?rite|preferred|wins?|winners?|best|ahead|leads?|recommend\w*)\b/iu;
+const DECISION_CLAIM = /\b(?:(?:is|are|was|were|as)\s+(?:the\s+)?leader|(?:is|was)\s+leading(?!\s+(?:to|indicators?)\b)|rank(?:ed|s)\s+(?:first|top|highest)|top[- ]ranked|(?:the\s+)?ranking\s+favou?rs|(?:stronger|strongest|preferred)\s+option|beats?\s+\S+|outperformed\s+\S+|(?:the\s+)?front[- ]runner|(?:the\s+)?favou?rite|edged\s+ahead)\b/iu;
+const DURATION = /\b\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b/giu;
+const NUMBER_WORD = '(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)';
+const WORD_FIGURE = new RegExp(`\\b(?:about\\s+half|one\\s+in\\stwo|${NUMBER_WORD}(?:[- ]${NUMBER_WORD}){0,8}\\s+(?:percent|per\\s+cent))\\b`, 'iu');
 const digits = (text: string) => text.replace(/\D/gu, '');
 function supplied(token: string, figures: readonly string[]): boolean {
   const value = digits(token);
@@ -97,7 +104,7 @@ function supplied(token: string, figures: readonly string[]): boolean {
 }
 
 /** Exactly the text post-checks; no mechanism judgement and no fallback generation. */
-export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: MethodInputs): MethodTurnCheck {
+export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: MethodInputs, decisionStories = true): MethodTurnCheck {
   const failed: string[] = [];
   let targets: (string | null)[] = [];
   // shared.label_masking: every node label of the current model is the user's word, never a claim.
@@ -117,13 +124,17 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('PM-PLAN-ONLY', inputs.decision_level === true
       ? items.every(item => new Set((inputs.current_option_labels ?? []).filter(label => labelMatches(item, [label])).map(normalise)).size <= 1)
       : !labelMatches(reply, otherOptions));
-    const unlicensedClaim = inputs.decision_level === true && normalise(masked(reply, labels)).split(' ')
-      .some(word => ['leader', 'leaders', 'leading', 'ranking', 'rankings', 'ranked'].includes(word));
+    // Use the shared assertion classifier; per-ban masking cannot let a label called 'Leader' hide a claim.
+    // Collapse whitespace before the shared scanner: its multiline top-claim pattern otherwise rescans newline runs.
+    const claimText = maskedFor(reply, LEADER_WORDS, labels).replace(/\s+/gu, ' ');
+    const unlicensedClaim = decisionStories && inputs.decision_level === true
+      && (textAssertsLeadingOption(claimText) || DECISION_CLAIM.test(claimText));
     check('PM-NO-WINNER', inputs.decision_level !== true
       || !banned(reply, /\b(?:(?<!\b(?:quick|small|early|easy)\s)wins?(?![\s-]+(?:back|over)\b)(?!\s+(?:(?:new|more)\s+)?(?:customers?|clients?|deals?|business|subscribers?|users?)\b)|winners?|winning|recommend\w*|(?<!\b(?:at|our|your|their|its)\s)best(?![\s-]+(?:case|practice|effort)\b)|(?:comes?|came|is|are|was|pulls?|stays?|moves?)(?:\s+out)?\s+ahead(?!\s+of\b)|leads?(?!\s+(?:to|time)\b))\b/iu, labels) && !unlicensedClaim);
-    // Decision stories are qualitative. Numbered story markers and digits in the user's own labels are exempt;
-    // no Run figures (withheld or otherwise) are licensed here. Reuse the existing parser, with no new regex.
-    check('PM-NO-FIGURES', inputs.decision_level !== true || numberTokens(masked(reply, labels)).length === 0);
+    // Story markers and own-label digits are exempt; durations are not Run figures.
+    const figureText = masked(reply, labels).replace(DURATION, ' ');
+    check('PM-NO-FIGURES', !decisionStories || inputs.decision_level !== true
+      || numberTokens(figureText).length === 0 && !banned(reply, WORD_FIGURE, labels));
     check('PM-BLINDSPOT', blindspotOk(reply));
   } else if (policy_id === 'RERUN-EXPLANATION') {
     check('RX-NAMES-CHANGES', (inputs.change_labels ?? []).slice(0, 3).every(label => labelMatches(reply, [label])));

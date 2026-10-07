@@ -163,6 +163,8 @@ export interface MethodScienceContext {
    */
   readonly plan: { readonly option_id: string; readonly label: string; readonly basis: PlanBasis } | null;
   readonly decision_level?: boolean;
+  /** Unlicensed decision stories; absent on the original W9 licensed-leader control. */
+  readonly decision_story_only?: true;
   readonly goal_label: string | null;
   readonly current_option_labels: readonly string[];
   readonly supplied_items: readonly SuppliedItem[];
@@ -411,7 +413,7 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
   // A nonempty union licenses the exercise, not authorship of its lever values. Ground a current decision in
   // the own options' intervention targets on real goal paths, including user-stated levers. The empty-union
   // eligibility above stays conservative: an entirely user-sized model still refuses as before.
-  if (decision && items.length > 0 && s['run.kind'] === 'complete_current') {
+  if (decision && !s['run.leader_licensed'] && items.length > 0 && s['run.kind'] === 'complete_current') {
     const pathNodes = new Set(s['model.goal_path_links']
       .filter(l => l.option_ids.some(id => s['model.non_sq_option_ids'].includes(id)))
       .flatMap(l => l.link_id.split('->')));
@@ -431,10 +433,11 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
       .sort((a, b) => a.goal_distance - b.goal_distance || byCodepoint(a.factor_id, b.factor_id))
       .map((f): SuppliedItem => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: null,
         lever_option_labels: ownLevers.get(f.factor_id)! }));
-    if (levers.length > 0) items = levers;
+    const leverIds = new Set(levers.map(item => item.id));
+    items = [...levers, ...items.filter(item => !leverIds.has(item.id))];
   }
-  // A decision exercise never offers an estimate/keep approval, including on rejection of the model's draft.
-  if (decision) items = items.map(item => ({ ...item, card: null }));
+  // Unlicensed decision stories never offer an approval. Preserve the original W9 licensed-leader control.
+  if (decision && !s['run.leader_licensed']) items = items.map(item => ({ ...item, card: null }));
   const { citation, reason } = adjudicate(input, plan, items);
   return {
     method: input.method,
@@ -442,6 +445,7 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
     not_cited: reason,
     plan,
     ...(decision ? { decision_level: true } : {}),
+    ...(decision && !s['run.leader_licensed'] ? { decision_story_only: true as const } : {}),
     goal_label: typeof s['model.goal_label'] === 'string' ? s['model.goal_label'] : null,
     current_option_labels: Object.values(s['model.option_labels']),
     supplied_items: items,

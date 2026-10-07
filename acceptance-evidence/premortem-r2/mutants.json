@@ -1,0 +1,265 @@
+{
+  "backup": "/private/tmp/w9c-r2-mutants-yd21ff24",
+  "restored_sha256": {
+    "src/orchestrator-v5/agent-lane/guidance/method-turn-check.ts": "48c6585a28e71cc386cb5ea8f783f602b6b61504f1afc6d37a8e76d3f4c54506",
+    "src/orchestrator-v5/agent-lane/guidance/reasoning-interventions.json": "87a29cb488501604302cb522f55304755cd9313aed58f0321ae5607c7661b1d5",
+    "src/orchestrator-v5/agent-lane/method-turn/method-turn.ts": "66b7aee3d922661cc330d433af59004418b61f7c3b22fcc3b613564374b5e7ca",
+    "src/orchestrator-v5/agent-lane/science/method-science-context.ts": "4a4855f8c5e0efa01d46c6ba3ed104f5d26fad0b792246f20b26adc54022c007"
+  },
+  "mutants": [
+    {
+      "mutant": "marker regex regresses to cross-line whitespace",
+      "row_filter": "P1-1 timing: 20k newlines",
+      "exit": 1,
+      "failed_rows": [
+        "P1-1 timing: 20k newlines <50ms",
+        "P1-1 timing: 20k newlines + failing tail <50ms"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "shared classifier receives raw newline runs",
+      "row_filter": "P1-1 timing: 20k newlines",
+      "exit": 1,
+      "failed_rows": [
+        "P1-1 timing: 20k newlines <50ms",
+        "P1-1 timing: 20k newlines + marker <50ms",
+        "P1-1 timing: 20k newlines + failing tail <50ms"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "bare leader tokens reject ordinary prose",
+      "row_filter": "P1-2 PASS exact",
+      "exit": 1,
+      "failed_rows": [
+        "P1-2 PASS exact: leading to lower renewals",
+        "P1-2 PASS exact: a leading indicator",
+        "P1-2 PASS exact: market-leading",
+        "P1-2 PASS exact: team leader",
+        "P1-2 PASS exact: ranked price above features"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "shared leader classifier removed",
+      "row_filter": "REJECT exact: came out on top",
+      "exit": 1,
+      "failed_rows": [
+        "P1-2 REJECT exact: came out on top"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "comparative claim predicates removed",
+      "row_filter": "REJECT exact: the stronger option",
+      "exit": 1,
+      "failed_rows": [
+        "P1-2 REJECT exact: the stronger option"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "duration exemption removed",
+      "row_filter": "PASS exact: 2 weeks",
+      "exit": 1,
+      "failed_rows": [
+        "P1-2 PASS exact: 2 weeks"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "worded figure guard removed",
+      "row_filter": "REJECT exact: forty-seven percent",
+      "exit": 1,
+      "failed_rows": [
+        "P1-2 REJECT exact: forty-seven percent"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "numeric figure guard removed",
+      "row_filter": "REJECT exact: 47%",
+      "exit": 1,
+      "failed_rows": [
+        "P1-2 REJECT exact: 47%"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "per-ban leader masking replaced with plain masking",
+      "row_filter": "P2-6",
+      "exit": 1,
+      "failed_rows": [
+        "P2-6: the whole-ban label Leader cannot mask a leader assertion"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "lever template replaced by non-lever template",
+      "row_filter": "P1-3 exact fallback: lever",
+      "exit": 1,
+      "failed_rows": [
+        "P1-3 exact fallback: lever"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "link fallback regresses to effect of how",
+      "row_filter": "P1-3 exact fallback: link",
+      "exit": 1,
+      "failed_rows": [
+        "P1-3 exact fallback: link"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "risk fallback inverts meaning",
+      "row_filter": "P1-3 exact fallback: risk",
+      "exit": 1,
+      "failed_rows": [
+        "P1-3 exact fallback: risk"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "limit fallback loses breach meaning",
+      "row_filter": "P1-3 exact fallback: limit",
+      "exit": 1,
+      "failed_rows": [
+        "P1-3 exact fallback: limit"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "non-lever factor is called a lever",
+      "row_filter": "P1-3 exact fallback: factor",
+      "exit": 1,
+      "failed_rows": [
+        "P1-3 exact fallback: factor"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "own levers replace grounding union",
+      "row_filter": "P1-4",
+      "exit": 1,
+      "failed_rows": [
+        "P1-4 union + A2 option-grounding intersection: w9b-2",
+        "P1-4 union + A2 option-grounding intersection: w9b-3",
+        "P1-4 union + A2 option-grounding intersection: C",
+        "P1-4 union + A2 option-grounding intersection: A-Q-D1-BUILD",
+        "P1-4 union + A2 option-grounding intersection: draw2",
+        "P1-4 R1: the ORIGINAL served D1 GOOD draft passes verbatim with no card"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "own levers follow union",
+      "row_filter": "P1-4",
+      "exit": 1,
+      "failed_rows": [
+        "P1-4 union + A2 option-grounding intersection: w9b-2",
+        "P1-4 union + A2 option-grounding intersection: w9b-3",
+        "P1-4 union + A2 option-grounding intersection: C",
+        "P1-4 union + A2 option-grounding intersection: A-Q-D1-BUILD",
+        "P1-4 union + A2 option-grounding intersection: draw2"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "decision card-null projection removed",
+      "row_filter": "P1-3 served A-STALE-SILENT",
+      "exit": 1,
+      "failed_rows": [
+        "P1-3 served A-STALE-SILENT: exact kind-correct link fallback without levers or cards"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "licensed-leader lever control widened",
+      "row_filter": "P2 scope: licensed",
+      "exit": 1,
+      "failed_rows": [
+        "P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "licensed-leader card control widened",
+      "row_filter": "P2 scope: licensed",
+      "exit": 1,
+      "failed_rows": [
+        "P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "licensed fallback changed",
+      "row_filter": "P2 scope: licensed",
+      "exit": 1,
+      "failed_rows": [
+        "P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "licensed directive changed",
+      "row_filter": "P2 scope: licensed",
+      "exit": 1,
+      "failed_rows": [
+        "P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "licensed settlement applies new decision guard",
+      "row_filter": "P2 scope: licensed",
+      "exit": 1,
+      "failed_rows": [
+        "P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "typed story-only decision mode removed",
+      "row_filter": "P1-3 exact fallback",
+      "exit": 1,
+      "failed_rows": [
+        "P1-3 exact fallback: lever",
+        "P1-3 exact fallback: link",
+        "P1-3 exact fallback: risk",
+        "P1-3 exact fallback: limit",
+        "P1-3 exact fallback: factor"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "C whole-object directive pin discriminates",
+      "row_filter": "P2: near-tie C WHOLE",
+      "exit": 1,
+      "failed_rows": [
+        "P2: near-tie C WHOLE turn, check_inputs, directive and exact fallback/settlement pin"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "C whole-object check_inputs pin discriminates",
+      "row_filter": "P2: near-tie C WHOLE",
+      "exit": 1,
+      "failed_rows": [
+        "P2: near-tie C WHOLE turn, check_inputs, directive and exact fallback/settlement pin"
+      ],
+      "red": true
+    },
+    {
+      "mutant": "policy duration exemption drifts",
+      "row_filter": "P1-1: all 29",
+      "exit": 1,
+      "failed_rows": [
+        "P1-1: all 29 historical checker fixtures keep exact matches, failures and targets"
+      ],
+      "red": true
+    }
+  ]
+}

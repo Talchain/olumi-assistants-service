@@ -55,13 +55,13 @@ for (const name of ['w9b-2', 'w9b-3']) {
     assert.equal(out.context.decision_level, true);
     assert.equal(out.context.dsk, null);
     assert.deepEqual(out.context.supplied_figures, []);
-    assert.ok(out.directive.includes('give no figures, leader or ranking claims'));
+    assert.ok(out.directive.includes('give no Run figures, leader or ranking claims'));
     assert.ok(out.directive.includes('no model change or approval card'));
     const ownIds = new Set(c.graph.nodes.filter(n => n.kind === 'option' && n.id !== 'keep_pricing_as_it_is')
       .flatMap(n => Object.keys(n.interventions ?? {})));
     assert.ok(out.context.supplied_items.length >= 2);
     for (const item of out.context.supplied_items) {
-      assert.ok(ownIds.has(item.id));
+      if (item.lever_option_labels !== undefined) assert.ok(ownIds.has(item.id));
       assert.equal(item.card, null);
       assert.equal(cardCallFor(item, c.graph), null);
     }

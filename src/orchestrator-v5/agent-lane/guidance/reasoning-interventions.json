@@ -1274,18 +1274,18 @@
         },
         {
           "id": "PM-NO-WINNER",
-          "rule": "decision_plan only: no winner, winning, recommend (including inflections), 'best option/choice/bet/path/plan', 'comes out ahead' or bare 'lead(s)' (not 'leads to') claim, nor leader/leading/ranking/ranked in Olumi's own text; ordinary prose such as quick wins, in the best case or the months ahead is allowed (shared.label_masking)"
+          "rule": "decision_plan only: no winner, winning, recommend (including inflections), 'best option/choice/bet/path/plan', 'comes out ahead' or bare 'lead(s)' (not 'leads to') claim, nor leader or ranking assertions in Olumi's own text (shared leader classifier plus comparative claim predicates); ordinary prose such as quick wins, in the best case or the months ahead is allowed (shared.label_masking)"
         },
         {
           "id": "PM-NO-FIGURES",
-          "rule": "decision_plan only: no figures outside supplied model labels; numbered story markers are exempt"
+          "rule": "decision_plan only: no Run figures outside supplied model labels, including worded percentages and proportions; numbered story markers and durations such as 2 weeks or first 30 days are exempt"
         },
         {
           "id": "PM-BLINDSPOT",
           "rule": "exactly one blindspot_line; it ends with '?'; every numbered line comes before it"
         }
       ],
-      "fallback": "Deterministic, no LLM: 'Imagine ‘{plan}’ has gone badly. Start with {first supplied item}: how would you notice it early, and what would you do?' with that item's card, plus 'Talk it through'. In decision_plan mode, give two qualitative failure stories on supplied own levers, each with Watch for / Mitigate, followed by the outside-model question; no change card.",
+      "fallback": "Deterministic, no LLM: 'Imagine ‘{plan}’ has gone badly. Start with {first supplied item}: how would you notice it early, and what would you do?' with that item's card, plus 'Talk it through'. In unlicensed decision_plan mode, give two qualitative, kind-correct failure stories on supplied own levers and the retained grounding union, each with Watch for / Mitigate, followed by the outside-model question; no change card. Preserve the original W9 card-bearing licensed-leader decision control byte for byte.",
       "science": "Prospective hindsight (Mitchell, Russo & Pennington 1989; Klein 2007). DSK-P-001 provenance only through MethodScienceContext (shared.dsk_provenance).",
       "format": "Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.",
       "targets": "checkMethodTurn returns targets[]: one per numbered item (parsing.target). The harness picks action_target from them.",
