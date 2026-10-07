@@ -139,6 +139,9 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
         noCompanions(row);
       }
     }
+    // S1 review r1 #4 × S2: the ruled display reaches the model while the raw record it is read from does not.
+    expect(JSON.stringify(read)).toContain('"code":"GOAL_CHANCE_RANGE"');
+    expect(JSON.stringify(views[1])).not.toContain('"code":"GOAL_CHANCE_RANGE"');
     expect(read).toEqual(before);
   });
   it.each([
@@ -189,7 +192,11 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     const read = fixture([{ ...licence, withheld_option_ids: undefined, form: 'similar', similar_option_ids: [A, B], pct_by_option: { [A]: 44, [B]: 48, [C]: 25 }, display_rounding_by_option: undefined }]);
     const view = await saved(read);
     expect(view.goal_chance_display).toEqual({ [A]: 'about 44%', [B]: 'about 48%', [C]: 'about 25%' });
-    expect(view.saved_run_options.find((r: Json) => r.option_id === A).probability_of_goal).toBe(0.44);
+    // The number handed over is the Run's recorded figure (base W3 rule, served row (a) in same-run-…); the WORDS come
+    // only from goal_chance_display. Present here = the similar form permits the chance without a leader.
+    const recorded = read.analysis_result.enrichment.option_comparison.find((r: Json) => r.option_id === A).probability_of_goal;
+    expect(recorded).toBe(0.441);
+    expect(view.saved_run_options.find((r: Json) => r.option_id === A).probability_of_goal).toBe(recorded);
   });
   it('CONTROL: a conflicting licence and a missing displayed percentage permit no point figure', async () => {
     noChance(await saved(fixture([licence, licence])));
