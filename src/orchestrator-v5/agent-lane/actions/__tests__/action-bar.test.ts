@@ -60,7 +60,9 @@ describe('the registry: ONE dispatch table, total', () => {
   it('an act: id the registry does not hold is an action press (never a free turn); ask:*, approvals and plain ids are not', () => {
     expect(isUnknownActionPress('act:frame_brief')).toBe(true);
     expect(actionOfPress('act:frame_brief')).toBeUndefined();
-    for (const other of ['ask:method-reframe', 'agent-approve-proposal:prop_1', 'agent-run-analysis', 'agent-next-suggest-risks', undefined, 7]) {
+    // S-C WIDEN #2744's own presses (risks door, canvas asks, per-item Add) never collide with a registry press id.
+    for (const other of ['ask:method-reframe', 'agent-approve-proposal:prop_1', 'agent-run-analysis', 'agent-next-suggest-risks', 'ask:risks', 'ask:widen',
+      'agent-widen-add:0123456789abcdef', 'agent-widen-something-else', undefined, 7]) {
       expect(actionOfPress(other), String(other)).toBeUndefined();
       expect(isUnknownActionPress(other), String(other)).toBe(false);
     }
