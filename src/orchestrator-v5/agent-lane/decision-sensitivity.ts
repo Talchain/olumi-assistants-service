@@ -181,7 +181,10 @@ export function analysisResultForAgent(result: unknown, graph?: unknown, current
   const legacyRun = !runHasGoalChanceLicenceRecord(block);
   const out: Record<string, unknown> = { ...block };
   if (typeof block.summary === 'string') out.summary = withoutStrongestDriverClause(block.summary);
-  if ('inference_warnings' in block) out.inference_warnings = warningsForAgent(block.inference_warnings);
+  // S2l (Codex r1 P1): "beside a range" is the range the Agent is SHOWN, by the predicate the withheld reader uses for its
+  // range opening (a validated record with a resolved line for an option it does not bar); a malformed record shows nothing.
+  const rangeShown = Object.keys(goalChanceFactsForAgent(block, graph ?? screenGraph, true).goal_chance_range_display ?? {}).length > 0;
+  if ('inference_warnings' in block) out.inference_warnings = warningsForAgent(block.inference_warnings, rangeShown);
   if (enrichment !== undefined) {
     const { factor_sensitivity: _structural, ...rest } = enrichment;
     const withheld = runWithheldGoalFigures(enrichment);
@@ -226,7 +229,7 @@ export function analysisResultForAgent(result: unknown, graph?: unknown, current
       }
       rest.results = results;
     }
-    if ('inference_warnings' in rest) rest.inference_warnings = warningsForAgent(rest.inference_warnings);
+    if ('inference_warnings' in rest) rest.inference_warnings = warningsForAgent(rest.inference_warnings, rangeShown);
     out.enrichment = rest;
     if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
@@ -313,13 +316,13 @@ function optionRowsForAgent(
  * ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal-chance licence's main-driver claims never reach the Agent, in either carrier
  * (`enrichment.inference_warnings`, or a kept Run's `inference_warnings`). The rest of every record is untouched.
  */
-function warningsForAgent(value: unknown): unknown {
+function warningsForAgent(value: unknown, rangeShown: boolean): unknown {
   if (!Array.isArray(value)) return value;
   // ⛔ S2l (Science 393023, served B9 unseen b9-1): beside a range the screen TESTS the target for the ranged options, so the
   // producer's unscoped not-testable `message` ("can't yet test them against your target", naming a ranged option's links)
   // is false of this Run. The Agent keeps the scoped fact (`option_ids`, `withheld_claims`, the scoped `say`), never the
-  // unscoped words. With no range record the message is true and stays.
-  const ranged = value.some((w) => recordOf(w)?.code === 'GOAL_CHANCE_RANGE');
+  // unscoped words. With no range shown (none, or a malformed record: Codex r1 P1) the message is true and stays.
+  const ranged = rangeShown && value.some((w) => recordOf(w)?.code === 'GOAL_CHANCE_RANGE');
   // ⛔ S1 review r1 #4: the GOAL_CHANCE_RANGE record's figures never reach the model raw (ruling 1 §6: no comparison of
   // ranges); the Agent reads only its ruled display (`goalChanceRangeDisplayForAgent`, PR-S2).
   return value.filter((w) => recordOf(w)?.code !== 'GOAL_CHANCE_RANGE').map((w) => {

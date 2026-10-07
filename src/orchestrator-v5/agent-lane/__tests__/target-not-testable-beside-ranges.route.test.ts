@@ -108,4 +108,18 @@ describe('S2l: the model is not sent the unscoped not-testable message beside a 
     const explain = await runThenExplain();
     expect(explain.some((b) => UNSCOPED.test(b)), 'Explain turn').toBe(true);
   });
+
+  it('Codex r1 P0 (author twin): no scoped say + a placeholder withhold beside the range; no Explain body carries the unscoped words', async () => {
+    const r = structuredClone(READ.analysis_result) as Json;
+    r.enrichment.inference_warnings = [...(r.enrichment.inference_warnings as Json[]).map((w) => {
+      if (w.code !== 'GOAL_FIGURES_TARGET_NOT_TESTABLE') return w;
+      const { say: _say, ...rest } = w;
+      return rest;
+    }), { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', severity: 'warning', option_ids: ['open_clifton_shop'], node_ids: ['monthly_profit'],
+      withheld_claims: ['goal_probability'], message: 'This comparison turns on the link from ‘Clifton shop opening’ to ‘Clifton monthly operating profit’, whose strength nobody has set yet.' }];
+    result = r;
+    const explain = await runThenExplain();
+    expect(explain.length).toBeGreaterThan(0);
+    for (const body of explain) expect(body).not.toMatch(UNSCOPED);
+  });
 });
