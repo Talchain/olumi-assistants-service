@@ -361,7 +361,7 @@ export function goalChanceDriverAvailabilityForAgent(result: unknown): GoalChanc
   };
 }
 
-function isLicensedDriver(d: Rec): boolean {
+export function isLicensedDriver(d: Rec): boolean {
   if (typeof d.quantity_id !== 'string' || d.quantity_id === '' || !['user', 'olumi', 'unattributed'].includes(String(d.authored_by))) return false;
   if (d.kind === 'factor_value') return typeof d.factor_id === 'string' && d.factor_id !== ''
     && (d.side === 'low' || d.side === 'high') && typeof d.cut_value === 'number' && Number.isFinite(d.cut_value)
@@ -372,7 +372,7 @@ function isLicensedDriver(d: Rec): boolean {
     && typeof d.pct_if_side === 'number' && Number.isInteger(d.pct_if_side) && d.pct_if_side >= 0 && d.pct_if_side <= 100;
 }
 
-function agentLicenceRecordOf(result: unknown): Rec | undefined {
+export function agentLicenceRecordOf(result: unknown): Rec | undefined {
   if (!isRec(result) || goalChanceLicenceForAgent(result) === undefined) return undefined;
   return [isRec(result.enrichment) ? result.enrichment.inference_warnings : undefined, result.inference_warnings]
     .flatMap((w) => Array.isArray(w) ? w : []).find((w): w is Rec => isRec(w) && w.code === GOAL_CHANCE_LICENSED);

@@ -3,7 +3,7 @@ import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
 import {
   GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
 } from '../../orchestrator/context/option-result-source.js';
-import { goalChanceDisplayForAgent, goalChanceLicenceForAgent } from './goal-chance-licence.js';
+import { agentLicenceRecordOf, goalChanceDisplayForAgent, goalChanceLicenceForAgent, isLicensedDriver } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
 
 type Rec = Record<string, unknown>;
@@ -68,10 +68,80 @@ export function goalChanceOptionWithheldForAgent(result: unknown, optionId: stri
       || !ids(w.option_ids) || w.option_ids.includes(optionId)));
 }
 
+/** The licensed point chances actually shown; ranges and scoped withholds keep their existing entitlement. */
+function pointDisplayForAgent(result: unknown, ranges: Record<string, GoalChanceRangeDisplay> | undefined): Record<string, string> {
+  const licence = goalChanceLicenceForAgent(result);
+  const withheld = new Set(licence?.withheld_option_ids ?? []);
+  return Object.fromEntries(Object.entries(goalChanceDisplayForAgent(result) ?? {})
+    .filter(([optionId]) => licence?.option_ids.includes(optionId) && !withheld.has(optionId)
+      && !goalChanceOptionWithheldForAgent(result, optionId) && !Object.hasOwn(ranges ?? {}, optionId)));
+}
+
+/** Screen's ruled driver sentences, from the selected Run's stored licence only; never from raw driver rows. */
+export function goalChanceDriverDisplayForAgent(result: unknown, graph: unknown): Record<string, string> {
+  const licence = agentLicenceRecordOf(result);
+  if (licence === undefined) return {};
+  const display = pointDisplayForAgent(result, goalChanceRangeDisplayForAgent(result, graph));
+  const drivers = rec(licence.driver_by_option) ?? {};
+  const absent = rec(licence.no_driver_by_option) ?? {};
+  const nodes = rec(graph)?.nodes;
+  const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
+    .filter((n): n is Rec => n !== undefined && id(n.id) && id(n.label)).map((n) => [n.id as string, n.label as string]));
+  const about = (v: unknown): string => v === 0 ? 'less than 1%' : v === 100 ? 'more than 99%' : `about ${v}%`;
+  const asked = new Set<string>();
+  const out: Record<string, string> = {};
+  for (const optionId of licence.option_ids as string[]) {
+    if (!Object.hasOwn(display, optionId) || !Object.hasOwn(drivers, optionId) || absent[optionId] !== undefined) continue;
+    const d = rec(drivers[optionId]);
+    if (d === undefined || !isLicensedDriver(d)) continue;
+    let line: string;
+    let question: string | undefined;
+    let key: string | undefined;
+    if (d.kind === 'factor_value') {
+      const label = labels.get(d.factor_id as string);
+      if (label === undefined) continue;
+      const cut = `${(d.cut_value as number).toLocaleString('en-GB')} ${typeof d.cut_unit === 'string' ? d.cut_unit : ''}`.trim();
+      const falls = `if it is ${d.side === 'low' ? 'below' : 'above'} ${cut}, the chance falls to ${about(d.pct_if_side)}.`;
+      line = d.authored_by === 'olumi'
+        ? `It rests most on ‘${label}’, using a range Olumi assumed: ${falls}`
+        : `It rests most on ‘${label}’: ${falls}`;
+      if (d.authored_by === 'olumi') { key = `factor:${d.factor_id}`; question = ' Do you know it more precisely?'; }
+    } else {
+      const from = labels.get(d.from as string);
+      const to = labels.get(d.to as string);
+      if (from === undefined || to === undefined) continue;
+      if (d.kind === 'link_strength') {
+        if (d.authored_by === 'olumi') {
+          line = `It rests most on Olumi’s own estimate of how strongly ‘${from}’ affects ‘${to}’: if that effect is ${d.strength} than Olumi assumed, the chance falls.`;
+          question = ' Is that estimate right?';
+        } else if (d.authored_by === 'user') {
+          line = `It rests most on how strongly ‘${from}’ affects ‘${to}’, at the size you set: if that effect is ${d.strength} than that, the chance falls.`;
+          question = ' How sure are you of that size?';
+        } else {
+          line = `It rests most on how strongly ‘${from}’ affects ‘${to}’: if that effect is ${d.strength} than this model assumes, the chance falls.`;
+        }
+        if (question !== undefined) key = `strength:${d.from}->${d.to}`;
+      } else {
+        if (d.authored_by !== 'olumi' || d.side !== 'absent') continue;
+        if (d.user_stated_link === true) {
+          line = `It rests most on your link from ‘${from}’ to ‘${to}’: Olumi’s model also allows that it does not hold, and in those runs the chance is ${about(d.pct_if_side)}.`;
+        } else {
+          line = `It rests most on Olumi’s own assumption that ‘${from}’ affects ‘${to}’: in the model runs without that link, the chance is ${about(d.pct_if_side)}.`;
+          key = `existence:${d.from}->${d.to}`; question = ' Is that right?';
+        }
+      }
+    }
+    if (key !== undefined && !asked.has(key)) { line += question; asked.add(key); }
+    Object.defineProperty(out, optionId, { enumerable: true, configurable: true, value: line });
+  }
+  return out;
+}
+
 /** The two Agent doors read the same per-option entitlement, independently of permission to name a leader. */
 export function goalChanceFactsForAgent(result: unknown, graph: unknown, current: boolean): {
   goal_chance_licence?: ReturnType<typeof goalChanceLicenceForAgent>;
   goal_chance_display?: Record<string, string>;
+  goal_chance_driver_display?: Record<string, string>;
   goal_chance_range_display?: Record<string, GoalChanceRangeDisplay>;
   goal_horizon_line?: string;
 } {
@@ -80,16 +150,15 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   const ranges = goalChanceRangeDisplayForAgent(result, graph);
   const rangeDisplay = Object.fromEntries(Object.entries(ranges ?? {})
     .filter(([optionId]) => !goalChanceOptionWithheldForAgent(result, optionId)));
-  const withheld = new Set(licence?.withheld_option_ids ?? []);
-  const display = Object.fromEntries(Object.entries(goalChanceDisplayForAgent(result) ?? {})
-    .filter(([optionId]) => licence?.option_ids.includes(optionId) && !withheld.has(optionId)
-      && !goalChanceOptionWithheldForAgent(result, optionId) && !Object.hasOwn(ranges ?? {}, optionId)));
+  const display = pointDisplayForAgent(result, ranges);
   const hasChance = Object.keys(display).length > 0;
+  const drivers = hasChance ? goalChanceDriverDisplayForAgent(result, graph) : {};
   const hasRange = Object.keys(rangeDisplay).length > 0;
   const horizon = warningsOf(result).filter((w) => w.code === GOAL_HORIZON_NOT_TESTED);
   const line = horizon.length === 1 && horizon[0]!.severity === 'info' && id(horizon[0]!.message) ? horizon[0]!.message : undefined;
   return {
     ...(hasChance ? { goal_chance_licence: licence, goal_chance_display: display } : {}),
+    ...(Object.keys(drivers).length > 0 ? { goal_chance_driver_display: drivers } : {}),
     ...(hasRange ? { goal_chance_range_display: rangeDisplay } : {}),
     ...((hasChance || hasRange) && line !== undefined ? { goal_horizon_line: line } : {}),
   };

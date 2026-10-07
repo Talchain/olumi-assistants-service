@@ -4,7 +4,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
-import { goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
+import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import {
   GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
@@ -67,7 +67,7 @@ function noCompanions(row: Json) {
   for (const key of GOAL_CHANCE_COMPANION_KEYS) expect(row).not.toHaveProperty(key);
 }
 function noChance(view: Json) {
-  for (const key of ['goal_chance_display', 'goal_chance_licence', 'goal_chance_range_display', 'goal_horizon_line']) expect(view).not.toHaveProperty(key);
+  for (const key of ['goal_chance_display', 'goal_chance_licence', 'goal_chance_driver_display', 'goal_chance_range_display', 'goal_horizon_line']) expect(view).not.toHaveProperty(key);
   for (const row of view.saved_run_options ?? view.enrichment?.option_comparison ?? []) {
     expect(row).not.toHaveProperty('probability_of_goal');
     noCompanions(row);
@@ -198,5 +198,156 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     const view = analysisResultForAgent(read.analysis_result, read.graph) as Json;
     expect(view.enrichment.results).not.toHaveProperty('options');
     expect(view.goal_chance_display).toEqual({ [A]: 'about 45%', [B]: 'about 50%' });
+  });
+});
+
+const factorDriver = { kind: 'factor_value', quantity_id: 'factor:pro_plan_price', factor_id: 'pro_plan_price',
+  authored_by: 'olumi', side: 'low', cut_value: 1200, cut_unit: 'GBP/month', pct_if_side: 20 };
+const strengthDriver = { kind: 'link_strength', quantity_id: 'strength:pro_plan_price->mrr',
+  from: 'pro_plan_price', to: 'mrr', authored_by: 'olumi', side: 'low', strength: 'weaker' };
+const existenceDriver = { kind: 'link_existence', quantity_id: 'existence:pro_plan_price->mrr',
+  from: 'pro_plan_price', to: 'mrr', authored_by: 'olumi', side: 'absent', pct_if_side: 20 };
+function driven(driver: Json, extra: Json = {}): Json {
+  return fixture([{ ...licence, driver_by_option: { [A]: driver }, ...extra }]);
+}
+
+describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
+  it.each([
+    ['A: factor, user', { ...factorDriver, authored_by: 'user' },
+      'It rests most on ‘Pro plan price’: if it is below 1,200 GBP/month, the chance falls to about 20%.'],
+    ['A: factor, unattributed', { ...factorDriver, authored_by: 'unattributed', side: 'high' },
+      'It rests most on ‘Pro plan price’: if it is above 1,200 GBP/month, the chance falls to about 20%.'],
+    ['B: factor, Olumi', factorDriver,
+      'It rests most on ‘Pro plan price’, using a range Olumi assumed: if it is below 1,200 GBP/month, the chance falls to about 20%. Do you know it more precisely?'],
+    ['C: strength, Olumi (RED on round-1 HEAD: both doors omit the sentence)', strengthDriver,
+      'It rests most on Olumi’s own estimate of how strongly ‘Pro plan price’ affects ‘Monthly recurring revenue’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?'],
+    ['C: strength, user', { ...strengthDriver, authored_by: 'user', side: 'high', strength: 'stronger' },
+      'It rests most on how strongly ‘Pro plan price’ affects ‘Monthly recurring revenue’, at the size you set: if that effect is stronger than that, the chance falls. How sure are you of that size?'],
+    ['C: strength, unattributed', { ...strengthDriver, authored_by: 'unattributed' },
+      'It rests most on how strongly ‘Pro plan price’ affects ‘Monthly recurring revenue’: if that effect is weaker than this model assumes, the chance falls.'],
+    ['D: existence, Olumi', existenceDriver,
+      'It rests most on Olumi’s own assumption that ‘Pro plan price’ affects ‘Monthly recurring revenue’: in the model runs without that link, the chance is about 20%. Is that right?'],
+    ['E: existence, user-stated link', { ...existenceDriver, user_stated_link: true },
+      'It rests most on your link from ‘Pro plan price’ to ‘Monthly recurring revenue’: Olumi’s model also allows that it does not hold, and in those runs the chance is about 20%.'],
+  ])('%s: exact words on both doors, availability unchanged and raw rows still stripped', async (_case, driver, sentence) => {
+    const read = driven(driver as Json);
+    const before = clone(read);
+    expect(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph)).toEqual({ [A]: sentence });
+    for (const view of [await saved(read), await run(read)]) {
+      expect(view.goal_chance_driver_display).toEqual({ [A]: sentence });
+      expect(view.goal_chance_display).toEqual({ [A]: 'about 45%', [B]: 'about 50%' });
+      expect(view.goal_chance_driver_availability).toMatchObject({ status: 'available',
+        options: [{ option_id: A, status: 'available' }, { option_id: B, status: 'not_recorded' }] });
+      for (const row of view.saved_run_options ?? view.enrichment.option_comparison) noCompanions(row);
+      const warning = view.enrichment?.inference_warnings?.find((w: Json) => w.code === licence.code);
+      if (warning !== undefined) {
+        expect(warning).not.toHaveProperty('driver_by_option');
+        expect(warning).not.toHaveProperty('no_driver_by_option');
+      }
+    }
+    expect(read).toEqual(before);
+  });
+
+  it.each([factorDriver, strengthDriver, existenceDriver])('asks once per shared $kind driver in licence order, independently of side', async (driver) => {
+    const otherSide = driver.kind === 'factor_value' ? { side: 'high' }
+      : driver.kind === 'link_strength' ? { side: 'high', strength: 'stronger' } : {};
+    const read = driven(driver, { option_ids: [B, A, C], driver_by_option: { [A]: { ...driver, ...otherSide }, [B]: driver, [C]: driver } });
+    for (const view of [await saved(read), await run(read)]) {
+      expect(Object.keys(view.goal_chance_driver_display)).toEqual([B, A]);
+      expect(view.goal_chance_driver_display[B]).toMatch(/\?$/);
+      expect(view.goal_chance_driver_display[A]).toMatch(/\.$/);
+    }
+  });
+
+  it('a withheld first option does not consume the shared question; a scoped withhold affects only its own id', async () => {
+    const read = driven(strengthDriver, { option_ids: [C, B, A], driver_by_option: { [C]: strengthDriver, [B]: strengthDriver, [A]: strengthDriver } });
+    read.analysis_result.enrichment.inference_warnings.push({ code: GOAL_FIGURES_PLACEHOLDER_PATH, option_ids: [B] });
+    for (const view of [await saved(read), await run(read)]) {
+      expect(Object.keys(view.goal_chance_driver_display)).toEqual([A]);
+      expect(view.goal_chance_driver_display[A]).toMatch(/ Is that estimate right\?$/);
+    }
+  });
+
+  it.each([0, 100])('factor and existence edge %s use the screen’s non-certainty words', (pct) => {
+    for (const driver of [factorDriver, existenceDriver]) {
+      const read = driven({ ...driver, pct_if_side: pct });
+      expect(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph)[A])
+        .toContain(pct === 0 ? 'less than 1%' : 'more than 99%');
+    }
+  });
+
+  it.each([
+    { ...existenceDriver, authored_by: 'user' }, { ...existenceDriver, authored_by: 'unattributed' },
+    { ...existenceDriver, side: 'present' }, { ...strengthDriver, strength: 'stronger' },
+    { ...strengthDriver, quantity_id: '' }, { ...factorDriver, cut_value: NaN },
+    { ...factorDriver, pct_if_side: 20.5 }, { ...existenceDriver, pct_if_side: 101 },
+    { ...factorDriver, authored_by: 'someone' },
+  ])('no sentence for an unruled or invalid licensed entry %j', async (driver) => {
+    const read = driven(driver);
+    expect(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph)).toEqual({});
+    for (const view of [await saved(read), await run(read)]) expect(view).not.toHaveProperty('goal_chance_driver_display');
+  });
+
+  it.each(['factor_id', 'from', 'to'])('an unresolved %s label suppresses the sentence, with no id fallback', async (field) => {
+    const driver = field === 'factor_id' ? factorDriver : strengthDriver;
+    const read = driven({ ...driver, [field]: 'unresolved' });
+    for (const view of [await saved(read), await run(read)]) expect(view).not.toHaveProperty('goal_chance_driver_display');
+  });
+
+  it('blank graph labels and absent graph suppress sentences', () => {
+    const read = driven(strengthDriver);
+    read.graph.nodes.find((n: Json) => n.id === 'mrr').label = '   ';
+    expect(goalChanceDriverDisplayForAgent(read.analysis_result, read.graph)).toEqual({});
+    expect(goalChanceDriverDisplayForAgent(read.analysis_result, undefined)).toEqual({});
+  });
+
+  it('only stored licensed drivers speak; unlicensed ids, withheld ids, conflicting entries and raw rows cannot supply a sentence', async () => {
+    const read = driven(strengthDriver, { driver_by_option: { [A]: strengthDriver, [B]: strengthDriver,
+      [C]: strengthDriver, unknown_option: strengthDriver }, no_driver_by_option: { [A]: 'none' } });
+    for (const view of [await saved(read), await run(read)]) {
+      expect(Object.keys(view.goal_chance_driver_display)).toEqual([B]);
+      expect(view.goal_chance_driver_display[B]).toMatch(/\?$/);
+    }
+    const rawOnly = fixture();
+    rawOnly.analysis_result.enrichment.option_comparison[0].probability_of_goal_drivers = { rows: [strengthDriver] };
+    for (const view of [await saved(rawOnly), await run(rawOnly)]) expect(view).not.toHaveProperty('goal_chance_driver_display');
+  });
+
+  it('driver display stays absent without point display: stale, range, no chance, no licence, duplicate licence or run-wide withhold', async () => {
+    const reads = [driven(strengthDriver), driven(strengthDriver), driven(strengthDriver, { pct_by_option: {} }),
+      fixture(), driven(strengthDriver), driven(strengthDriver), driven(strengthDriver)];
+    reads[0]!.analysis_state.run_state.kind = 'complete_stale';
+    reads[1]!.analysis_result.enrichment.inference_warnings.push(clone(rangeRecord));
+    reads[3]!.analysis_result.enrichment.inference_warnings = [];
+    reads[4]!.analysis_result.enrichment.inference_warnings.push(clone(licence));
+    reads[5]!.analysis_result.enrichment.inference_warnings.push({ code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, option_ids: [C] });
+    reads[6]!.analysis_result.enrichment.inference_warnings.push({ code: GOAL_FIGURES_USER_EFFECT_CLAMPED, option_ids: [C] });
+    for (const read of reads) for (const view of [await saved(read), await run(read)]) {
+      expect(view).not.toHaveProperty('goal_chance_display');
+      expect(view).not.toHaveProperty('goal_chance_driver_display');
+    }
+  });
+
+  it('a top-level stored licence supplies the run-turn sentence, including alongside the unchanged deadline', () => {
+    const read = driven(strengthDriver);
+    const result = { inference_warnings: [...read.analysis_result.enrichment.inference_warnings, horizon] };
+    expect(analysisResultForAgent(result, read.graph)).toMatchObject({
+      goal_chance_display: { [A]: 'about 45%' }, goal_horizon_line: horizonLine,
+      goal_chance_driver_display: goalChanceDriverDisplayForAgent(result, read.graph),
+    });
+  });
+
+  it('both reporting rules contain the exact driver rule, with the old bans retained', () => {
+    const driverRule = "When you state an option's chance and goal_chance_driver_display has a sentence for that option, say that sentence exactly, right after the chance (before any deadline sentence). While goal_chance_driver_display has any sentence, never say that no assumption is established, measurable, or most worth investigating, in any wording.";
+    const runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
+    const savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));
+    for (const rule of [runRule, savedRule]) expect(rule).toContain(driverRule);
+    expect(HOST_TOOL_CONTRACT).toContain('Never call an option the winner, the best option or the recommended one.');
+    expect(HOST_TOOL_CONTRACT).toContain('Otherwise do not name, rank or hint at one');
+    expect(HOST_TOOL_CONTRACT).toContain('never express the chance as a percentage of model runs');
+    expect(HOST_TOOL_CONTRACT).toContain('Leader permission still governs ranking and naming a leader; never turn per-option facts into a ranking.');
+    expect(HOST_TOOL_CONTRACT).toContain('Name an assumption the ordering is sensitive to ONLY from the result’s `decision_sensitivity`');
+    expect(HOST_TOOL_CONTRACT).toContain('Never translate either EVPPI status into no measurable assumption or no measurable goal-chance driver');
+    expect(HOST_TOOL_CONTRACT).toContain('This availability grants no permission to name or rank a driver or an option.');
   });
 });

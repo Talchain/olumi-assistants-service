@@ -18,7 +18,7 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // AI HARNESS (2 Oct, RC 5950124321): none_measurable makes no claim; the sentence it was told to say is gone: 913872bf… → cd04fd8c….
 // AI HARNESS W3 (6 Oct evening, Paul's headline ruling): the per-option headline is the chance of meeting the goal, never
 // the share of runs; chat quotes the screen's goal-chance display: 09f7b6ac… → f6cec112….
-const HOST_SHA = '5010c85b4d52c915dea37b6e50b467860fd1a3a5abb8c10cebd0f65e50b18b98';
+const HOST_SHA = '0261b2b15bbe4fe47fd268523d0572479792cff63c6f615b2075db1f5b1eab98';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
@@ -35,8 +35,8 @@ const HOST_SHA = '5010c85b4d52c915dea37b6e50b467860fd1a3a5abb8c10cebd0f65e50b18b
 //   bytes (+1 space +745 = exactly the rule's bytes); Codex r2 widened it to every probability_of_goal and to the result being
 //   reported: 29,212 → 30,154 (+1 +941, exactly the rule). Template and host shas unchanged. Derived from the SENT body.
 // + W3 headline + goal-chance display (6 Oct evening): 30,246 → 31,346 bytes. Derived from the SENT body.
-const RENDERED_SHA = 'ed184dc315b7f832aba0393b7aa72bd5e0ed0b870a025d93c45538688621232d';
-const RENDERED_BYTES = 32_936;
+const RENDERED_SHA = '4ab5608090b36194e57fc571f8152eda2eba03465aa824229264bc4191112f64';
+const RENDERED_BYTES = 33_600;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
