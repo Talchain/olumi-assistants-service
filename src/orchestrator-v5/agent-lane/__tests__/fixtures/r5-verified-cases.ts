@@ -53,9 +53,11 @@ const supportedProbes = new Set(['N0', 'N1a', 'N3', 'N5', 'N10c', 'B-N0']);
 export const censusRows: Row[] = census.map((c, index) => {
   const underCredit = (c.sc === 'ca2cc3ca' && c.factor === 'Starter tier monthly price')
     || (c.sc === 'b7398aad' && c.factor === 'Starter-tier price');
-  const expected = underCredit ? 'ai_proposed' : c.expected;
+  // Source blocks no longer have a fixture-specific exemption: imported rent is conservatively refused.
+  const sourceBlock = c.sc === 'e63bd10a' && c.factor === 'Leeds monthly rent';
+  const expected = underCredit || sourceBlock ? 'ai_proposed' : c.expected;
   return {
-    name: `${underCredit ? 'KNOWN UNDER-CREDIT (strict F: names the tier, not the price) — ' : ''}census ${c.sc}: ${c.option} -> ${c.factor} ${expected}`,
+    name: `${sourceBlock ? 'SOURCE BLOCK REFUSAL (generic directContext) - ' : ''}${underCredit ? 'KNOWN UNDER-CREDIT (strict F: names the tier, not the price) — ' : ''}census ${c.sc}: ${c.option} -> ${c.factor} ${expected}`,
     run: () => { const { model, brief } = censusInput(index); assertCell(model, brief, c.option, c.factor, expected); },
   };
 });
@@ -82,8 +84,10 @@ const corruptions: [string, (e: StatedOptionEvidence) => StatedOptionEvidence | 
   ['noninteger', e => ({ ...e, amount_start: e.amount_start + 0.5 })], ['negative', e => ({ ...e, start: -1 })],
   ['out of bounds', e => ({ ...e, end: Number.MAX_SAFE_INTEGER })],
 ];
-export const integrityRows: Row[] = corruptions.map(([name, corrupt]) => ({ name: `E: ${name} demotes`, run: () => {
-  const input = positive(); Object.assign(level(input.model, census[0]!.option, census[0]!.factor), { stated_evidence: corrupt(input.evidence) }); mustDemote(input);
+const ignoredEvidenceFields = new Set(['forged offsets', 'forged anchor', 'wrong amount_start', 'noninteger', 'negative', 'out of bounds']);
+export const integrityRows: Row[] = corruptions.map(([name, corrupt]) => ({ name: `E: ${name} ${ignoredEvidenceFields.has(name) ? 'ignored; unique quote credits' : 'demotes'}`, run: () => {
+  const input = positive(); Object.assign(level(input.model, census[0]!.option, census[0]!.factor), { stated_evidence: corrupt(input.evidence) });
+  assertCell(input.model, input.brief, census[0]!.option, census[0]!.factor, ignoredEvidenceFields.has(name) ? 'explicit' : 'ai_proposed');
 } }));
 integrityRows.push(
   { name: 'E: duplicate assertion refuses even with correct offsets', run: () => { const i = positive(); i.brief += `\n${i.evidence.quote}`; mustDemote(i); } },
@@ -103,14 +107,14 @@ export const seamRows: Row[] = [
     assert.equal(level(prepare(i.model, i.brief).candidate, census[0]!.option, census[0]!.factor).provenance, 'explicit');
   } },
   { name: 'same-factor constraint equality refuses', run: () => { const i = positive(); Object.assign(i.model, { constraints: [{ metric: census[0]!.factor, value: 4, unit: 'sessions/month', operator: '<=', provenance: 'explicit', frame: 'level' }] }); mustDemote(i); } },
-  { name: 'rename, changed retry value and stale brief reverify; no previous-cell licence', run: () => {
+  { name: 'rename and changed retry value reverify; shifted unique quote still credits', run: () => {
     const i = positive(); const first = prepare(i.model, i.brief);
     const retry = structuredClone(i.model); Object.assign(level(retry, census[0]!.option, census[0]!.factor), { value: 2 });
     const p = carryFindingsAcrossRetry(first, prepare(retry, i.brief));
     assert.equal(level(p.candidate, census[0]!.option, census[0]!.factor).provenance, 'ai_proposed');
     Object.assign(i.model.options.find(o => o.label === census[0]!.option)!, { label: 'Light Saturday opening' });
     assert.equal(level(prepare(i.model, i.brief).candidate, 'Light Saturday opening', census[0]!.factor).provenance, 'ai_proposed');
-    const j = positive(); j.brief = `Changed\n${j.brief}`; mustDemote(j);
+    const j = positive(); j.brief = `Changed\n${j.brief}`; assertCell(j.model, j.brief, census[0]!.option, census[0]!.factor, 'explicit');
   } },
   { name: 'point credit changes source/count but leaves analysis hash; numeric positive control changes hash', run: () => {
     const i = positive(); const credited = admitted(prepare(i.model, i.brief).candidate, i.brief);

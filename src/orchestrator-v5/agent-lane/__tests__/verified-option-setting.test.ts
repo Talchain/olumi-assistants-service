@@ -1,11 +1,113 @@
 import { describe, it } from 'vitest';
-import { censusRows, probeRows, integrityRows, seamRows, rawRows, registrationRows } from './fixtures/r5-verified-cases.js';
+import { censusRows, probeRows, integrityRows, seamRows, rawRows, registrationRows, probes, level, assertCell, type Row } from './fixtures/r5-verified-cases.js';
+import assert from 'node:assert/strict';
+import { performance } from 'node:perf_hooks';
+import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
+import type { CandidateModel } from '../admit-model.js';
+import { verifiedOptionSetting } from '../verified-option-setting.js';
+import { prepareProvisionalCandidate } from '../runtime/build-model.js';
 
 for (const [name, rows] of [
-  ['census: five required credits, two known under-credits, eight refusals', censusRows],
+  ['census: generic credits, known under-credits and source refusals', censusRows],
   ['all 44 probes and 12 witness inputs: including each of the 28 FALSE-CREDIT IDs', probeRows],
   ['E/F evidence integrity', integrityRows], ['construction seam and hash controls', seamRows],
   ['unchanged raw outputs and strict-schema compatibility', rawRows], ['registration witnesses', registrationRows],
 ] as const) {
   describe(name, () => { for (const row of rows) it(row.name, row.run); });
 }
+
+
+
+const S = 'We could keep the present timetable, open for 4 Saturday sessions each month, or extend weekday opening by 10 hours a week.';
+export type R2Case = { name: string; expected: boolean; input: () => { model: CandidateModel; brief: string; option: string; factor: string } };
+const clinicCase = (text: string) => {
+  const p = probes.find(p => p.id === 'N0')!;
+  const model = structuredClone(p.model); const brief = p.brief.replace(S, text);
+  const located = brief.indexOf(S);
+  const delta = located < 0 ? 0 : located - p.evidence.start;
+  level(model, p.option, p.factor).stated_evidence = { ...p.evidence,
+    start: p.evidence.start + delta, end: p.evidence.end + delta, amount_start: p.evidence.amount_start + delta,
+    option_start: p.evidence.option_start + delta, option_end: p.evidence.option_end + delta };
+  return { model, brief, option: p.option, factor: p.factor };
+};
+const setting = (sentence: string, option: string, factor: string, value: number, unit: string) => {
+  const base = structuredClone(probes[0]!.model);
+  const amountAt = findStatedAmounts(sentence).find(n => n.magnitude === value)?.index ?? sentence.indexOf('four');
+  const template = structuredClone(base.options[1]!);
+  template.label = option; template.interventions = [{ ...template.interventions![0]!, factor_label: factor, value, unit,
+    stated_evidence: { quote: sentence, start: 0, end: sentence.length, amount_start: amountAt,
+      option_quote: sentence, option_start: 0, option_end: sentence.length } }];
+  const model: CandidateModel = { ...base,
+    options: [template, { ...base.options[0]!, label: 'Continue unchanged' }],
+    factors: [{ ...base.factors[0]!, label: factor, unit }],
+    links: [], risks: [], outcomes: [], constraints: [],
+  };
+  return { model, brief: sentence, option, factor };
+};
+export const r2Cases: R2Case[] = [
+  { name: 'R0 unchanged served sentence', expected: true, input: () => clinicCase(S) },
+  { name: 'R5 Olumi attribution in previous sentence', expected: false, input: () => clinicCase('Olumi suggested these options in its last reply. ' + S) },
+  // ACCEPTED RESIDUAL (DL 7 Oct): copied-list attribution names neither Olumi nor the credited literal.
+  { name: 'R6 ACCEPTED RESIDUAL (DL 7 Oct)', expected: true, input: () => clinicCase(S + " That list is copied from the clinic down the road's newsletter, not ours.") },
+  { name: 'R7 ceiling repeats literal', expected: false, input: () => clinicCase(S + ' The 4 Saturday sessions are a ceiling, not a target.') },
+  { name: 'R8 retraction repeats the 4', expected: false, input: () => clinicCase(S + ' Ignore the 4; we have not decided how many Saturday sessions.') },
+  { name: 'R5c directContext source heading', expected: false, input: () => clinicCase('Olumi suggested:\n' + S) },
+  { name: 'C source heading without Olumi attribution', expected: false, input: () => clinicCase('Advisor suggested:\n' + S) },
+  { name: 'G1 Our options are to', expected: true, input: () => setting('Our options are to run 4 Saturday clinics a month or provide remote consultations.', 'Saturday clinics', 'Saturday clinics', 4, 'clinics/month') },
+  { name: 'G2 One option is to', expected: true, input: () => setting('One option is to run 4 Saturday clinics a month.', 'Saturday clinics', 'Saturday clinics', 4, 'clinics/month') },
+  { name: 'G3 10 hours each week', expected: true, input: () => setting('Our options are to staff reception for 10 hours each week.', 'Staff reception', 'Reception hours', 10, 'hours/week') },
+  { name: 'G4 engineering domain', expected: true, input: () => setting('One option is to hire 3 engineers.', 'Hire engineers', 'Engineers', 3, 'engineers') },
+  { name: 'G5 price to GBP39', expected: true, input: () => setting('We will cut the retail price to £39.', 'Retail price', 'Retail price', 39, '£') },
+  { name: 'G6 percentage unit', expected: true, input: () => setting('One option is to set the reserve allocation to 15%.', 'Reserve allocation', 'Reserve allocation', 15, '%') },
+  { name: 'G7 figure in words', expected: true, input: () => setting('We will run four mobile clinics each month.', 'Mobile clinics', 'Mobile clinics', 4, 'clinics/month') },
+  { name: 'G8 sibling uses each week', expected: true, input: () => {
+    const i = clinicCase(S.replace('10 hours a week', '10 hours each week'));
+    const e = level(i.model, i.option, i.factor).stated_evidence!;
+    const quote = S.replace('10 hours a week', '10 hours each week');
+    level(i.model, i.option, i.factor).stated_evidence = { ...e, quote, option_quote: quote,
+      end: e.start + quote.length, option_end: e.option_start + quote.length }; return i;
+  } },
+  // The old starter_price branch was deleted. This positive rate is verified by the generic unit reader.
+  { name: 'P2-2 positive starter_price with explicit subscriber denominator', expected: true, input: () => setting('One option is to launch the starter tier with a price of £39 per subscriber each month.', 'Launch starter tier', 'Starter price', 39, '£/subscriber/month') },
+  { name: 'E wrong model offsets are ignored', expected: true, input: () => { const i = clinicCase(S); Object.assign(level(i.model, i.option, i.factor).stated_evidence!, { start: NaN, end: -1, amount_start: 1e300 }); return i; } },
+  { name: 'E quote appears twice', expected: false, input: () => clinicCase(S + '\n\n' + S) },
+  { name: 'E normalized duplicate appears twice', expected: false, input: () => clinicCase(S + '\n\n' + S.replace('4 Saturday', '４\t Saturday')) },
+  { name: 'E NFKC and whitespace quote location', expected: true, input: () => clinicCase(S.replace('4 Saturday', '４\t Saturday')) },
+  { name: 'E paraphrased quote is absent', expected: false, input: () => { const i = clinicCase(S); const iv = level(i.model, i.option, i.factor); iv.stated_evidence = { ...iv.stated_evidence!, quote: S.replace('We could', 'We might') }; return i; } },
+  { name: 'N adjacent paragraph repeats literal (outside neighbour rule)', expected: true, input: () => clinicCase(S + '\n\nIgnore the 4 from a different proposal.') },
+  { name: 'N you suggested', expected: false, input: () => clinicCase('You suggested these options. ' + S) },
+  { name: 'N your suggestion', expected: false, input: () => clinicCase(S + ' This was your suggestion.') },
+  { name: 'N your last reply', expected: false, input: () => clinicCase(S + ' This was your last reply.') },
+  { name: 'N other number 40 is not literal 4', expected: true, input: () => clinicCase(S + ' The annual limit is 40 sessions.') },
+  // An addition is a delta, and a setting cannot borrow an option named only in another clause/sentence.
+  { name: 'F add 4 is a delta', expected: false, input: () => setting('One option is to add 4 mobile clinics each month.', 'Mobile clinics', 'Mobile clinics', 4, 'clinics/month') },
+  { name: 'O option words in another clause', expected: false, input: () => setting('One option is to run mobile clinics; another proposal uses 4 clinics each month.', 'Mobile clinics', 'Mobile clinics', 4, 'clinics/month') },
+  { name: 'O option words in another sentence', expected: false, input: () => { const i = setting('One option is to run 4 clinics each month.', 'Mobile clinics', 'Mobile clinics', 4, 'clinics/month'); i.brief = 'We could run mobile clinics. ' + i.brief; return i; } },
+  { name: 'U missing subscriber denominator', expected: false, input: () => setting('One option is to launch the starter tier with a price of £39 each month.', 'Launch starter tier', 'Starter price', 39, '£/subscriber/month') },
+  { name: 'F count noun with a rival entity', expected: false, input: () => { const i = setting('One option is to hire 3 engineers.', 'Hire engineers', 'Engineers', 3, 'engineers'); i.model.goal.metric = 'Senior engineers'; return i; } },
+  { name: 'O third-party subject inside alternative clause', expected: false, input: () => setting('We could retain our service; their mobile clinics run 4 clinics each month.', 'Mobile clinics', 'Mobile clinics', 4, 'clinics/month') },
+  { name: 'P range cannot supply a point', expected: false, input: () => setting('One option is to run 4 to 5 mobile clinics each month.', 'Mobile clinics', 'Mobile clinics', 4, 'clinics/month') },
+  { name: 'O distinctive word must not merely be a prefix', expected: false, input: () => setting('One option is to run 4 Mondayish clinics each month.', 'Monday clinics', 'Monday clinics', 4, 'clinics/month') },
+  { name: 'U count noun must not merely be a prefix', expected: false, input: () => setting('One option is to hire 3 engineerspecialists.', 'Hire engineers', 'Engineers', 3, 'engineers') },
+  { name: 'U wrong period', expected: false, input: () => setting('We will run four mobile clinics each quarter.', 'Mobile clinics', 'Mobile clinics', 4, 'clinics/month') },
+];
+export const r2Rows: Row[] = r2Cases.map(c => ({ name: c.name, run: () => {
+  const i = c.input(), o = i.model.options.find(o => o.label === i.option)!;
+  const iv = level(i.model, i.option, i.factor);
+  assert.equal(verifiedOptionSetting(i.model, o, iv, i.brief), c.expected);
+  assert.equal(level(prepareProvisionalCandidate(i.model, i.brief).candidate, i.option, i.factor).provenance, c.expected ? 'explicit' : 'ai_proposed');
+  if (c.name.startsWith('R')) assertCell(i.model, i.brief, i.option, i.factor, c.expected ? 'explicit' : 'ai_proposed');
+} }));
+/** Scaling uses minima of five, never an absolute millisecond acceptance bar. */
+export function scalingRow(verify = verifiedOptionSetting): { small: number; large: number; ratio: number } {
+  const sample = (size: number): number => {
+    const i = clinicCase('a'.repeat(size) + '\n' + S), o = i.model.options.find(o => o.label === i.option)!;
+    const iv = level(i.model, i.option, i.factor); const times: number[] = [];
+    verify(i.model, o, iv, i.brief); // warm up both sizes
+    for (let k = 0; k < 5; k++) { const t = performance.now(); assert.equal(verify(i.model, o, iv, i.brief), true); times.push(performance.now() - t); }
+    return Math.min(...times);
+  };
+  const small = sample(5000), large = sample(20000); return { small, large, ratio: large / small };
+}
+r2Rows.push({ name: 'P0 5k to 20k no-full-stop line scaling <8x (min of 5)', run: () => { assert.ok(scalingRow().ratio < 8); } });
+describe('round 2 general, linear and fail-closed', () => { for (const row of r2Rows) it(row.name, row.run); });
