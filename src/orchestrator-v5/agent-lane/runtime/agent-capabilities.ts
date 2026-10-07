@@ -1,3 +1,4 @@
+import { readNewLimit, limitFigure, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 /**
  * Agent lane — the capabilities, each delegating to an existing Olumi path.
  *
@@ -163,7 +164,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import type { CommitLimitAddInput, CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
@@ -2055,6 +2056,7 @@ export function createAgentCapabilities(
      * ⭐ SLICE C2: the product's limit door (`commitLimitEditInProcess`): a new figure for an EXISTING limit row, its unit
      * and frame kept, stamped as the user's, ONE CAS commit with the base-hash gate. Absent ⇒ unavailable.
      */
+    readonly commitLimitAdd?: (input: CommitLimitAddInput) => Promise<CommitLimitEditResult>;
     readonly commitLimitEdit?: (input: CommitLimitEditInput) => Promise<CommitLimitEditResult>;
     /**
      * ⭐ MG F1 T6 (#2471): the option-status door, in-process (`commitOptionStatusInProcess`), fenced like the limit door.
@@ -5764,6 +5766,45 @@ export function createAgentCapabilities(
        * figure is stamped as the user's, ONE CAS commit. Applied ONLY when the door committed AND the model read back holds
        * that very row (same constraint_id) at exactly the approved figure, in its own unit.
        */
+      if (ops.length === 1 && ops[0]!.op === 'add_limit') {
+        const op = ops[0]!;
+        const v = op.value as NewLimitValue;
+        const pid = decision.proposal.proposal_id;
+        const words = ctx.typed_approval_words ?? ctx.user_turn_text;
+        const useReserve = v.reserve !== undefined && words === v.reserve.message;
+        // A forged chip/message cannot substitute another figure for this stored card.
+        if (ctx.typed_approval_of === pid && words !== 'Yes, record that limit.' && !useReserve) {
+          return { ok: false, mutated: false, refusal: 'approval_words_mismatch' };
+        }
+        if (opts.commitLimitAdd === undefined) return { ok: false, mutated: false, refusal: 'unavailable' };
+        const approvedValue = useReserve ? v.reserve!.alternative : v.raw_value;
+        const res = await opts.commitLimitAdd({ scenario_id: ctx.scenario_id, turn_id: authorisationTurnId(pid),
+          base_graph_hash: decision.proposal.base_graph_identity_hash, node_id: op.path, operator: '<=', raw_value: approvedValue,
+          unit: v.unit, source_quote: v.source_quote, ...(v.value_frame !== undefined ? { value_frame: v.value_frame } : {}) });
+        if (res.status === 'stale') return { ok: false, mutated: false, refusal: 'superseded', proposal_id: pid };
+        if (res.status === 'refused') return { ok: false, mutated: false, refusal: 'not_applied', proposal_id: pid,
+          follow_up: 'The limit was not recorded. Nothing on your model changed.' };
+        if (res.status === 'unconfirmed') return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
+          detail: 'The limit was sent, but the saved model could not be confirmed.' };
+        const after = await readGraph(ctx.scenario_id);
+        const rows = (Array.isArray(after?.raw.goal_constraints) ? after!.raw.goal_constraints as Record<string, unknown>[] : [])
+          .filter(c => c.node_id === op.path);
+        const beforeRows = Array.isArray(before.raw.goal_constraints) ? before.raw.goal_constraints : [];
+        const allAfter = Array.isArray(after?.raw.goal_constraints) ? after!.raw.goal_constraints : [];
+        const row = rows[0];
+        if (rows.length !== 1 || allAfter.length !== beforeRows.length + 1 || row?.constraint_id !== res.row.constraint_id
+          || row?.operator !== '<=' || row.value !== approvedValue || row.unit !== v.unit || row.source_quote !== v.source_quote
+          || row.value_frame !== v.value_frame || row.provenance !== 'explicit') {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
+            detail: 'The limit was sent, but the saved model could not be confirmed.' };
+        }
+        const receipt = receiptSummaryOf({ model_version_receipt: res.model_version_receipt });
+        const receipts = receipt.summary !== null ? [receipt.summary] : [];
+        proposals.markApplied(pid, receipts);
+        return { ok: true, mutated: true, applied: true, proposal_id: pid, receipts,
+          follow_up: `The limit on “${before.nodes.find(n => n.id === op.path)?.label}” is recorded as at most ${limitFigure(approvedValue, v.unit)}.` };
+      }
+
       if (ops.length === 1 && ops[0]!.op === 'set_limit') {
         const op = ops[0]!;
         const v = op.value as { operator: '<=' | '>='; raw_value: number; unit: string | null; constraint_id: string; before: number;
@@ -8314,6 +8355,35 @@ export function createAgentCapabilities(
           : 'Nothing has changed yet. Tell the user it will add each factor with the figure they gave, what it affects, and that '
             + 'how strongly is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
       };
+    },
+
+    /** S-E S4: one ceiling from this message, held for approval on an existing quantity. */
+    async proposeNewLimit(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const text = typeof ctx.user_turn_text === 'string' ? ctx.user_turn_text : '';
+      const value = readNewLimit(g.raw, text, Number(args.value), args.quantity_label);
+      if (value === null) return { ok: false, mutated: false, refusal: 'limit_not_bound', reply: NO_LIMIT_QUANTITY,
+        detail: `Say exactly this one line, with no chip: ${NO_LIMIT_QUANTITY}` };
+      const existing = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints as Record<string, unknown>[] : [])
+        .filter(c => c.node_id === value.node_id);
+      if (existing.length > 0) {
+        if (existing.length !== 1 || existing[0]?.operator !== '<=') return { ok: false, mutated: false, refusal: 'limit_ambiguous', reply: NO_LIMIT_QUANTITY };
+        return caps.proposeLimitChange!( { ...ctx, user_text: text }, { limit_label: args.quantity_label, operator: '<=',
+          new_value: value.raw_value, unit: value.unit, rationale: args.rationale });
+      }
+      if (opts.commitLimitAdd === undefined) return { ok: false, mutated: false, refusal: 'unavailable',
+        detail: 'A limit cannot be recorded here yet. Nothing was prepared.' };
+      const label = String(g.nodes.find(n => n.id === value.node_id)!.label).toLowerCase();
+      const card = `Keep ${label} within ${limitFigure(value.raw_value, value.unit)}?`;
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash, operations: [{ op: 'add_limit', path: value.node_id, value }],
+        provenance: { authored_by: 'user_stated', basis: args.rationale }, validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: card });
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: card, base_revision: g.graph_hash,
+        note: `Show exactly: ${card}${value.reserve === undefined ? '' : ` ${value.reserve.detail}`} Nothing has changed yet; call authorise_change only after approval.` };
     },
 
     /**

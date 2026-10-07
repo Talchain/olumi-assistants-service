@@ -1,3 +1,4 @@
+import { applyLimitAdd, type LimitAddRequest } from './limit-add.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
@@ -3755,6 +3756,60 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
         payload: turn,
         request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
           ...(input.stated_operator !== undefined ? { stated_operator: input.stated_operator } : {}) },
+        requestId,
+        persistedGraph,
+        priorFacts,
+      }),
+      reportRefusalReason: true,
+      fenceRefusalReachesCaller: true,
+    },
+    requestId,
+    Date.now(),
+  );
+  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.commitSkippedReason === 'refused_no_write') return { status: 'refused', reason: r.refusal?.reason ?? 'refused' };
+  const graphHash = (r.response as { graph_hash?: unknown }).graph_hash;
+  if (!r.commitPerformed || typeof graphHash !== 'string' || graphHash.length === 0) return { status: 'unconfirmed' };
+  const held = (Array.isArray((r.graph as { goal_constraints?: unknown } | null)?.goal_constraints)
+    ? (r.graph as { goal_constraints: Record<string, unknown>[] }).goal_constraints : [])
+    .filter((c) => c['node_id'] === input.node_id && c['operator'] === input.operator);
+  const row = held.length === 1 ? held[0]! : undefined;
+  if (row === undefined || typeof row['constraint_id'] !== 'string' || typeof row['value'] !== 'number') return { status: 'unconfirmed' };
+  return {
+    status: 'committed',
+    graph_hash: graphHash,
+    model_version_receipt: (r.response as { model_version_receipt?: unknown }).model_version_receipt,
+    row: {
+      constraint_id: row['constraint_id'],
+      value: row['value'],
+      ...(typeof row['unit'] === 'string' ? { unit: row['unit'] } : {}),
+      ...(typeof row['value_frame'] === 'string' ? { value_frame: row['value_frame'] } : {}),
+      ...(typeof row['provenance'] === 'string' ? { provenance: row['provenance'] } : {}),
+    },
+  };
+}
+
+/** S-E S4: the same fenced CAS commit and persisted-row read-back as limit edits. */
+export type CommitLimitAddInput = Omit<CommitLimitEditInput, 'operator' | 'stated_operator'> & Omit<LimitAddRequest, 'node_id' | 'raw_value' | 'base_graph_hash'>;
+export async function commitLimitAddInProcess(input: CommitLimitAddInput, requestId: string): Promise<CommitLimitEditResult> {
+  const turn = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const };
+  const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
+    kind: 'agent_limit_add', node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
+    unit: input.unit, source_quote: input.source_quote, ...(input.value_frame !== undefined ? { value_frame: input.value_frame } : {}) }))
+    .digest('hex').slice(0, 32)}`;
+  const r = await dispatchAddConstraintEdit(
+    {
+      turn,
+      requestHash,
+      eventKind: 'limit_add',
+      logFields: { node_id: input.node_id, operator: input.operator },
+      committedLogFields: { node_id: input.node_id, operator: input.operator },
+      committedMessage: 'V5 limit_add committed — the new limit row appended through add_constraint, hash recomputed',
+      dispatchPath: 'agent_lane.limit_add',
+      apply: (persistedGraph, priorFacts) => applyLimitAdd({
+        payload: turn,
+        request: { node_id: input.node_id, operator: input.operator, raw_value: input.raw_value, base_graph_hash: input.base_graph_hash,
+          unit: input.unit, source_quote: input.source_quote, ...(input.value_frame !== undefined ? { value_frame: input.value_frame } : {}) },
         requestId,
         persistedGraph,
         priorFacts,
