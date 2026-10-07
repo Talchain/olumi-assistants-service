@@ -463,11 +463,16 @@ export function targetWarningSentence(graph: unknown, verdict: TargetTestability
  * "…: Olumi can't yet test a '{op} {X}' target." with no question; beside needs, "…: I need {A}. Olumi also can't yet
  * test a '{op} {X}' target. {question for A}".
  */
-export function untestableTargetTail(graph: unknown, verdict: TargetTestability): string | null {
+export function untestableTargetTail(graph: unknown, verdict: TargetTestability, optionLabels?: readonly string[]): string | null {
   const parts = untestableTargetParts(graph, verdict);
   if (parts === null || parts.tailTarget === null) return null;
+  // Science R3: a scoped spoken sentence must retain a reason and an ask; the panel keeps the original reason.
+  if (optionLabels !== undefined && (parts.needs.length === 0 || parts.question === null)) return null;
   const { needs, untestableComparator } = parts;
-  const opening = `I can't yet say how likely any option is to keep ${parts.name} ${parts.tailTarget}:`;
+  const names = optionLabels?.map(label => `‘${label}’`);
+  const named = names === undefined ? 'any option' : names.length < 3 ? names.join(' or ')
+    : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+  const opening = `I can't yet say how likely ${named} is to keep ${parts.name} ${parts.tailTarget}:`;
   const question = parts.question !== null ? ` ${parts.question}` : '';
   if (needs.length === 0) {
     return untestableComparator === null ? null : `${opening} Olumi can't yet test a ${untestableComparator} target.`;
