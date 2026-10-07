@@ -82,7 +82,7 @@ import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEdits
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import { treatedAsZeroReplyLine } from '../orchestrator-v5/agent-lane/root-line.js';
-import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
+import { strictForTheDrafter, type CallStructuredModel, type ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
 import { agentProposals as proposals, executableWaitingProposal, stillValidApprovalOffers } from '../orchestrator-v5/agent-lane/held-approval-offers.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
@@ -1712,7 +1712,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           type: 'json_schema',
           name: 'whole_candidate',
           strict: true,
-          schema: reqBody.schema,
+          schema: strictForTheDrafter(reqBody.schema),
         },
       },
     };

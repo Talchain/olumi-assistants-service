@@ -1,0 +1,172 @@
+[
+  {
+    "sc": "a4d58afe",
+    "option": "Four Saturday sessions",
+    "factor": "Saturday sessions per month",
+    "evidence": {
+      "quote": "We could keep the present timetable, open for 4 Saturday sessions each month, or extend weekday opening by 10 hours a week.",
+      "start": 487,
+      "end": 610,
+      "amount_start": 533,
+      "option_quote": "We could keep the present timetable, open for 4 Saturday sessions each month, or extend weekday opening by 10 hours a week.",
+      "option_start": 487,
+      "option_end": 610
+    }
+  },
+  {
+    "sc": "a4d58afe",
+    "option": "Extend weekdays",
+    "factor": "Weekday extended opening hours",
+    "evidence": {
+      "quote": "We could keep the present timetable, open for 4 Saturday sessions each month, or extend weekday opening by 10 hours a week.",
+      "start": 487,
+      "end": 610,
+      "amount_start": 594,
+      "option_quote": "We could keep the present timetable, open for 4 Saturday sessions each month, or extend weekday opening by 10 hours a week.",
+      "option_start": 487,
+      "option_end": 610
+    }
+  },
+  {
+    "sc": "fff05472",
+    "option": "Four Saturday sessions",
+    "factor": "Saturday sessions",
+    "evidence": {
+      "quote": "We could keep the present timetable, open for 4 Saturday sessions each month, or extend weekday opening by 10 hours a week.",
+      "start": 487,
+      "end": 610,
+      "amount_start": 533,
+      "option_quote": "We could keep the present timetable, open for 4 Saturday sessions each month, or extend weekday opening by 10 hours a week.",
+      "option_start": 487,
+      "option_end": 610
+    }
+  },
+  {
+    "sc": "ca2cc3ca",
+    "option": "Launch starter tier",
+    "factor": "Starter tier subscribers",
+    "evidence": {
+      "quote": "The starter tier would win about 150 new subscribers, between 80 and 250.",
+      "start": 498,
+      "end": 571,
+      "amount_start": 531,
+      "option_quote": "Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is.",
+      "option_start": 110,
+      "option_end": 204
+    }
+  },
+  {
+    "sc": "ca2cc3ca",
+    "option": "Launch starter tier",
+    "factor": "Starter tier monthly price",
+    "evidence": {
+      "quote": "Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is.",
+      "start": 110,
+      "end": 204,
+      "amount_start": 166,
+      "option_quote": "Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is.",
+      "option_start": 110,
+      "option_end": 204
+    }
+  },
+  {
+    "sc": "b7398aad",
+    "option": "Launch starter tier",
+    "factor": "Starter subscribers",
+    "evidence": {
+      "quote": "The starter tier would win about 150 new subscribers, between 80 and 250.",
+      "start": 498,
+      "end": 571,
+      "amount_start": 531,
+      "option_quote": "Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is.",
+      "option_start": 110,
+      "option_end": 204
+    }
+  },
+  {
+    "sc": "b7398aad",
+    "option": "Launch starter tier",
+    "factor": "Starter-tier price",
+    "evidence": {
+      "quote": "Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is.",
+      "start": 110,
+      "end": 204,
+      "amount_start": 166,
+      "option_quote": "Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is.",
+      "option_start": 110,
+      "option_end": 204
+    }
+  },
+  {
+    "sc": "f440be4a",
+    "option": "Launch starter tier",
+    "factor": "Starter-tier subscribers",
+    "evidence": {
+      "quote": "The starter tier would win about 150 new subscribers, between 80 and 250.",
+      "start": 498,
+      "end": 571,
+      "amount_start": 531,
+      "option_quote": "Decision: raise prices by 10%, launch a starter tier at £49 a month, or keep pricing as it is.",
+      "option_start": 110,
+      "option_end": 204
+    }
+  },
+  {
+    "sc": "689f4bb9",
+    "option": "Hire a Tech lead",
+    "factor": "Tech lead hires",
+    "evidence": null
+  },
+  {
+    "sc": "689f4bb9",
+    "option": "Hire two developers",
+    "factor": "Developer hires",
+    "evidence": null
+  },
+  {
+    "sc": "e63bd10a",
+    "option": "Open Leeds shop",
+    "factor": "Leeds shop presence",
+    "evidence": {
+      "quote": "[Paragraph 1] Should we open a second bakery shop in Leeds or expand home delivery from our current York shop?",
+      "start": 24,
+      "end": 134,
+      "amount_start": 35,
+      "option_quote": "[Paragraph 1] Should we open a second bakery shop in Leeds or expand home delivery from our current York shop?",
+      "option_start": 24,
+      "option_end": 134
+    }
+  },
+  {
+    "sc": "e63bd10a",
+    "option": "Open Leeds shop",
+    "factor": "Expansion budget",
+    "evidence": null
+  },
+  {
+    "sc": "e63bd10a",
+    "option": "Open Leeds shop",
+    "factor": "Leeds monthly rent",
+    "evidence": {
+      "quote": "A Leeds lease costs about £45,000 to fit out plus £3,000 rent a month.",
+      "start": 383,
+      "end": 453,
+      "amount_start": 433,
+      "option_quote": "[Paragraph 1] Should we open a second bakery shop in Leeds or expand home delivery from our current York shop?",
+      "option_start": 24,
+      "option_end": 134
+    }
+  },
+  {
+    "sc": "549f6ab8",
+    "option": "Online Booking System",
+    "factor": "Online booking availability",
+    "evidence": null
+  },
+  {
+    "sc": "779c9319",
+    "option": "Open Leeds location",
+    "factor": "Leeds location open",
+    "evidence": null
+  }
+]

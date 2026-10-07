@@ -488,6 +488,22 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_goal_deadline',
+    description:
+      'Record the DEADLINE the user has stated for their goal ("we have a deadline in 6 months", "by Q2", "by the end of March", '
+      + '"7 April 2027"), as a date on the goal. Call it in the SAME turn the user states it, even beside another change they ask for. '
+      + 'Give deadline_words EXACTLY as the user wrote the deadline phrase (for example "a deadline in 6 months"): Olumi works out the '
+      + 'calendar date itself, from today, and the card asks the user to confirm it ("Is your deadline 7 April 2027 (6 months from '
+      + 'today)?"). Never compute or state a date yourself, and never pass a duration that is not the deadline (for example how long '
+      + 'recruitment takes). This does NOT change anything: it prepares ONE change and returns its id, which you keep for '
+      + 'authorise_change once the user agrees; never show the id.',
+    parameters: obj({
+      deadline_words: { type: 'string', maxLength: 80, description: 'The user\u2019s own words for the deadline, verbatim (for example "a deadline in 6 months" or "end of Q2").' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['deadline_words', 'rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_option_status',
     description:
       'Take ONE option out of the comparison, or put it back, when the user asks (for example "drop carry on as now", '
@@ -789,7 +805,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -866,6 +882,8 @@ export interface AgentCapabilities {
     current_level?: { value: number; unit: string };
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
+  /** S-E GOALS: the user's stated deadline as a date on the goal (`goal_horizon.deadline`), proposed for approval. */
+  proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string }): Promise<ToolResult>;
   proposeOptionStatus?(ctx: AgentToolContext, args: {
     option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
   }): Promise<ToolResult>;
@@ -986,6 +1004,10 @@ export async function dispatchTool(
       return caps.proposeGoalTarget !== undefined
         ? caps.proposeGoalTarget(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
+    case 'propose_goal_deadline':
+      return caps.proposeGoalDeadline !== undefined
+        ? caps.proposeGoalDeadline(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A deadline cannot be recorded here. Nothing was changed.' };
     case 'propose_option_status':
       return caps.proposeOptionStatus !== undefined
         ? caps.proposeOptionStatus(ctx, args as never)
