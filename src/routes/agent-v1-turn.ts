@@ -1073,7 +1073,7 @@ export function typedRunOf(body: Record<string, unknown>): boolean {
   // A "Test without this link" press is terminal SCI-DEEP whatever else the chip carries: never an ordinary Run.
   if (typeof chip?.id === 'string' && chip.id.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) return false;
   // ⭐ S-B (Codex r1 P1-2 on #2751): an action press is dispatched by its id whatever else the chip carries: never a Run.
-  if (actionPressOf(chip) !== null) return false;
+  if (actionPressOf(chip, body['message']) !== null) return false;
   // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
   return (body['kind'] === undefined || body['kind'] === 'message') && (chip?.action_type === 'run_analysis' || chip?.id === RUN_OFFER_CHIP.id);
 }
@@ -2843,12 +2843,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined) {
       const decided = await (async () => {
         const chip = body['chip'];
-        if (actionPressOf(chip) === null) return null;
+        if (actionPressOf(chip, body['message']) === null) return null;
         const rb = await readBackState(readingDispatch, scenarioId);
         const facts = actionFactsOf({ scenarioId, graph: rb.graph, graphHash: rb.graphHash, analysisState: rb.analysisState,
           analysisReady: rb.analysisReady, analysisResult: rb.analysisResult, optionParticipation: rb.optionParticipation,
           identityEvaluated: rb.identityEvaluated });
-        return { facts, decision: decidePress(chip, facts), graphHash: rb.graphHash };
+        return { facts, decision: decidePress(chip, facts, undefined, body['message']), graphHash: rb.graphHash };
       })();
       if (decided !== null && decided.decision.kind !== 'not_an_action') {
         actionPress = decided.decision.press;

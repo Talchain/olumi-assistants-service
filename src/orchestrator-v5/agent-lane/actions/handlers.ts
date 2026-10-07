@@ -68,11 +68,12 @@ const OFFER_KEY = /^[0-9a-f]{16}$/;
 const rec = (v: unknown): Record<string, unknown> | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
 
 /** The action a chip presses, its target (a per-link press names its link) and the offer key it carried. */
-export function actionPressOf(chip: unknown): ActionPress | null {
+export function actionPressOf(chip: unknown, message?: unknown): ActionPress | null {
   const c = rec(chip);
   const id = c?.id;
   if (typeof id !== 'string') return null;
-  const action = actionOfPress(id);
+  // The turn's visible message rides beside the chip: a shared chip id (WIDEN's risks door) is told apart by it.
+  const action = actionOfPress(id, message);
   if (action === undefined && !isUnknownActionPress(id)) return null;
   const key = rec(c?.parameters)?.offer_key;
   const parsed = action === 'test_link' ? parseStructuralChallengePress(id) : null;
@@ -155,8 +156,8 @@ function gapReply(action: ActionId, f: ActionFacts, bar: ActionBarV1): ActionTyp
  * THE DISPATCH DECISION for one press, on the CURRENT state (re-derived, never the bar the press came from). The
  * route runs `route` presses through their existing typed path, and answers `reply` presses with the typed reply.
  */
-export function decidePress(chip: unknown, f: ActionFacts, bar: ActionBarV1 = actionBarOf(f)): PressDecision {
-  const press = actionPressOf(chip);
+export function decidePress(chip: unknown, f: ActionFacts, bar: ActionBarV1 = actionBarOf(f), message?: unknown): PressDecision {
+  const press = actionPressOf(chip, message);
   if (press === null) return { kind: 'not_an_action' };
   if (press.action === null) {
     const exits = otherOffers(bar, null, 2);

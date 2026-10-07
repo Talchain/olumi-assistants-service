@@ -165,7 +165,10 @@ const turn = async (payload: Record<string, unknown>): Promise<Body> => {
   expect(r.statusCode, r.body).toBe(200);
   return r.json() as Body;
 };
-const press = (id: string, extra: Record<string, unknown> = {}) => turn({ message: 'pressed', source: 'chip', chip: { id, ...extra } });
+// A bar press carries its offer's user_line as the visible message (DGAI sends exactly that); WIDEN's shared risks id
+// is told apart by it (SR-5). Ids the registry does not map keep a neutral message.
+const USER_LINE_BY_PRESS = new Map(Object.values(ACTION_REGISTRY).flatMap((e) => (e.press.kind === 'fixed' ? [[e.press.id, e.user_line] as const] : [])));
+const press = (id: string, extra: Record<string, unknown> = {}) => turn({ message: USER_LINE_BY_PRESS.get(id) ?? 'pressed', source: 'chip', chip: { id, ...extra } });
 const reload = async (): Promise<{ action_bar?: Bar }> => {
   const r = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${scenario}/graph`, payload: { include_conversation_turns: true } });
   expect(r.statusCode, r.body).toBe(200);

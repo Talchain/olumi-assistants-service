@@ -19,7 +19,7 @@
  * bias review and the anchoring check stay held (AIE 6036471065 item 2). An id that is not here is never emitted.
  */
 
-import { SUGGEST_RISKS_CHIP } from '../method-turn/widen-turn.js';
+import { SUGGEST_RISKS_CHIP, widenTargetOf } from '../method-turn/widen-turn.js';
 
 export const ACTION_IDS = ['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks'] as const;
 export type ActionId = (typeof ACTION_IDS)[number];
@@ -134,9 +134,13 @@ const BY_PRESS_ID: ReadonlyMap<string, ActionId> = new Map(ACTION_IDS.flatMap((i
 }));
 
 /** The registry action a chip id presses, or undefined for any other chip (approvals, plan picks, `ask:*`, …). */
-export function actionOfPress(chipId: unknown): ActionId | undefined {
+export function actionOfPress(chipId: unknown, message?: unknown): ActionId | undefined {
   if (typeof chipId !== 'string') return undefined;
   const fixed = BY_PRESS_ID.get(chipId);
+  // WIDEN's risks chip id is shared: the pre-mortem worksheet's "Add this as a risk" carries the SAME id with its own
+  // message and must stay an ordinary Agent turn (SR-5). So the press is More risks only when WIDEN's own predicate
+  // reads it as its risks door (`widenTargetOf`, which matches the message), never on the id alone.
+  if (fixed === 'more_risks') return widenTargetOf(chipId, message) === 'risks' ? fixed : undefined;
   if (fixed !== undefined) return fixed;
   if (chipId.startsWith(TEST_LINK_PRESS_PREFIX)) return 'test_link';
   return undefined;

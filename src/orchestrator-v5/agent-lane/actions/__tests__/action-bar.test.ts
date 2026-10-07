@@ -60,7 +60,13 @@ describe('the registry: ONE dispatch table, total', () => {
     expect(fixed).toEqual({ review: 'agent-next-review-decision', what_changes: 'agent-next-what-would-change', strengthen: 'agent-next-strengthen',
       pre_mortem: 'agent-next-pre-mortem', more_options: 'agent-next-widen',
       frame_brief: 'act:frame_brief', set_goal: 'act:set_goal', set_deadline: 'act:set_deadline', more_risks: SUGGEST_RISKS_CHIP.id });
-    for (const [id, press] of Object.entries(fixed)) expect(actionOfPress(press)).toBe(id);
+    for (const [id, press] of Object.entries(fixed)) expect(actionOfPress(press, ACTION_REGISTRY[id as keyof typeof ACTION_REGISTRY].user_line)).toBe(id);
+    // SR-5: WIDEN's risks chip id is shared with the pre-mortem worksheet's "Add this as a risk" (its own message), which
+    // must stay an ordinary Agent turn: the id alone is never More risks.
+    expect(actionOfPress(SUGGEST_RISKS_CHIP.id)).toBeUndefined();
+    expect(actionOfPress(SUGGEST_RISKS_CHIP.id, 'Prepare one risk called "Onboarding drag": Onboarding takes longer.')).toBeUndefined();
+    expect(decidePress({ id: SUGGEST_RISKS_CHIP.id }, actionFactsOf(preRun(gapGraph())), undefined, 'Prepare one risk called "Onboarding drag".')).toEqual({ kind: 'not_an_action' });
+    expect(decidePress({ id: SUGGEST_RISKS_CHIP.id }, actionFactsOf(preRun(gapGraph())), undefined, SUGGEST_RISKS_CHIP.message)).toMatchObject({ kind: 'route', handler: { route: 'widen_turn' } });
     expect(actionOfPress('agent-test-without-link:["a","b"]')).toBe('test_link');
   });
   it('an act: id the registry does not hold is an action press (never a free turn); ask:*, approvals and plain ids are not', () => {
