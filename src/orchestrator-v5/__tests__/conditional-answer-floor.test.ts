@@ -23,11 +23,7 @@ function setup(initial: readonly PendingAction[], moves: readonly (readonly Pend
   let attempt = 0;
   const written: SessionTurnWrite[] = [];
   const calls: { write: SessionTurnWrite; options?: ConditionalAppendOptions }[] = [];
-  function append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
-  // eslint-disable-next-line no-redeclare -- TypeScript overload preserves the ordinary append outcome.
-  function append(write: SessionTurnWrite, options: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome>;
-  // eslint-disable-next-line no-redeclare -- Implementation of the two typed overloads above.
-  async function append(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
+  async function appendAny(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
     calls.push({ write, ...(options ? { options } : {}) });
     if (options) {
       const next = moves[attempt++];
@@ -38,7 +34,8 @@ function setup(initial: readonly PendingAction[], moves: readonly (readonly Pend
     return { id: 'answer-row' };
   }
   const store = createNoopSessionStore();
-  store.append = append;
+  store.append = async (write: SessionTurnWrite): Promise<SessionAppendOutcome> => appendAny(write) as Promise<SessionAppendOutcome>;
+  store.appendIfLatest = (write: SessionTurnWrite, options: ConditionalAppendOptions) => appendAny(write, options);
   store.readMostRecentPendingActions = vi.fn(async (_scenario, options) => {
     options?.onLatestRowId?.(row.id);
     return row.pending;

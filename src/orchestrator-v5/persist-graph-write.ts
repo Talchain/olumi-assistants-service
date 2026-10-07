@@ -405,8 +405,8 @@ export async function appendCheckedGraphWrite(
     // Nothing mutates the graph between the check above and this line. A row written inside one of the Agent's own
     // dispatches is stored without conversation text: the user never saw it (`agent-subturn-context.ts`, #75 5910983526).
     const storedWrite = withoutAgentSubturnText(write);
-    if (expectedLatestRowId === undefined || attempt >= 3) return await store.append(storedWrite);
-    const outcome = await store.append(storedWrite, { expectedLatestRowId });
+    if (expectedLatestRowId === undefined || attempt >= 3 || typeof store.appendIfLatest !== 'function') return await store.append(storedWrite);
+    const outcome = await store.appendIfLatest(storedWrite, { expectedLatestRowId });
     if (!('status' in outcome)) return outcome;
     if (attempt === 2) {
       log.warn({ event: 'v5.agent_answer.latest_moved_exhausted', scenario_id: write.scenario_id, source, attempts: 3 },

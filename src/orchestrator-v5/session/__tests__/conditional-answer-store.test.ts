@@ -34,7 +34,7 @@ describe('S-D.1b conditional Agent answer store', () => {
   it.each(['plain', 'guidance', 'offers'])('passes exactly the existing row args plus expected id: %s', async mode => {
     const s = setup(), w = write(mode);
     s.rpc.mockResolvedValueOnce({ data: mode === 'plain' ? 'answer-row' : receipt, error: null });
-    expect(await s.fresh().append(w, { expectedLatestRowId: 'floor-row' })).toEqual({ id: 'answer-row' });
+    expect(await s.fresh().appendIfLatest(w, { expectedLatestRowId: 'floor-row' })).toEqual({ id: 'answer-row' });
     expect(s.rpc).toHaveBeenCalledExactlyOnceWith(RPC, {
       p_expected_latest_row_id: 'floor-row', p_scenario_id: SCENARIO, p_turn_id: 'answer', p_turn_class: 'direct_answer',
       p_handler_id: null, p_request_hash: w.request_hash, p_response_emitted: true, p_llm_calls_used: 0,
@@ -48,7 +48,7 @@ describe('S-D.1b conditional Agent answer store', () => {
   it('NULL means no scenario row, still a conditional append', async () => {
     const s = setup();
     s.rpc.mockResolvedValueOnce({ data: 'answer-row', error: null });
-    await s.fresh().append(write(), { expectedLatestRowId: null });
+    await s.fresh().appendIfLatest(write(), { expectedLatestRowId: null });
     expect(s.rpc.mock.calls[0]?.[0]).toBe(RPC);
     expect(s.rpc.mock.calls[0]?.[1].p_expected_latest_row_id).toBeNull();
   });
@@ -61,7 +61,7 @@ describe('S-D.1b conditional Agent answer store', () => {
       const expected = await baseline.fresh().append(write(mode));
       s.rpc.mockResolvedValueOnce({ data: null, error: { code, message: 'function missing' } });
       s.rpc.mockResolvedValueOnce({ data: mode === 'plain' ? 'answer-row' : receipt, error: null });
-      expect(await s.fresh().append(write(mode), { expectedLatestRowId: 'floor-row' })).toEqual(expected);
+      expect(await s.fresh().appendIfLatest(write(mode), { expectedLatestRowId: 'floor-row' })).toEqual(expected);
       expect(s.rpc).toHaveBeenCalledTimes(2);
       expect(s.rpc.mock.calls[1]).toEqual(baseline.rpc.mock.calls[0]);
       expect(s.evict).toHaveBeenCalledOnce();
@@ -74,7 +74,7 @@ describe('S-D.1b conditional Agent answer store', () => {
   it('latest_moved returns the typed no-write outcome, no delegate and no cache eviction', async () => {
     const s = setup();
     s.rpc.mockResolvedValueOnce({ data: { status: 'latest_moved' }, error: null });
-    const outcome = await s.fresh().append(write('offers'), { expectedLatestRowId: 'floor-row' });
+    const outcome = await s.fresh().appendIfLatest(write('offers'), { expectedLatestRowId: 'floor-row' });
     expect(outcome).toEqual({ status: 'latest_moved' });
     expect(s.rpc).toHaveBeenCalledExactlyOnceWith(RPC, expect.any(Object));
     expect(s.evict).not.toHaveBeenCalled();
@@ -84,14 +84,14 @@ describe('S-D.1b conditional Agent answer store', () => {
   it.each(['replayed_prior_turn', 'prior_turn_conflict'] as const)('keeps the delegate receipt flag %s', async flag => {
     const s = setup();
     s.rpc.mockResolvedValueOnce({ data: { ...receipt, [flag]: true }, error: null });
-    expect(await s.fresh().append(write('offers'), { expectedLatestRowId: 'floor-row' })).toEqual({ id: 'answer-row',
+    expect(await s.fresh().appendIfLatest(write('offers'), { expectedLatestRowId: 'floor-row' })).toEqual({ id: 'answer-row',
       [flag === 'replayed_prior_turn' ? 'replayedPriorTurn' : 'priorTurnConflict']: true });
   });
 
   it('other RPC errors never fall back', async () => {
     const s = setup();
     s.rpc.mockResolvedValueOnce({ data: null, error: { code: '42501', message: 'denied' } });
-    await expect(s.fresh().append(write(), { expectedLatestRowId: null })).rejects.toBeInstanceOf(StateCommitFailedError);
+    await expect(s.fresh().appendIfLatest(write(), { expectedLatestRowId: null })).rejects.toBeInstanceOf(StateCommitFailedError);
     expect(s.rpc).toHaveBeenCalledOnce();
     expect(s.evict).not.toHaveBeenCalled();
   });
@@ -99,7 +99,7 @@ describe('S-D.1b conditional Agent answer store', () => {
   it.each([{ graph: {} }, { turn_id: 'answer:claim' }, { request_hash: 'internal' }, { handler_id: 'run_analysis' },
     { response_emitted: false }, { briefText: 'brief' }, { coaching_state: {} }, { modelVersion: {} }])('refuses non-final answer shape %j', async patch => {
     const s = setup();
-    await expect(s.fresh().append({ ...write(), ...patch } as SessionTurnWrite, { expectedLatestRowId: null })).rejects.toBeInstanceOf(StateCommitFailedError);
+    await expect(s.fresh().appendIfLatest({ ...write(), ...patch } as SessionTurnWrite, { expectedLatestRowId: null })).rejects.toBeInstanceOf(StateCommitFailedError);
     expect(s.rpc).not.toHaveBeenCalled();
   });
 

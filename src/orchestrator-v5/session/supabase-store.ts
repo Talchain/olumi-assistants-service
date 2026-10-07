@@ -309,15 +309,18 @@ export class SupabaseSessionStore implements SessionStore {
    * mutation ("Updated X from A to B"), and they are the ones a false claim
    * harms. A non-graph turn pays no extra read.
    */
-  async append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
-  async append(write: SessionTurnWrite, options: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome>;
-  async append(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
+  async append(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
     const prior = write.graph == null ? 'new' : await this.classifyPriorTurn(write);
-    const outcome = await this.appendThroughRpc(write, options);
-    if ('status' in outcome) return outcome;
+    const outcome = await this.appendThroughRpc(write);
+    if ('status' in outcome) throw new StateCommitFailedError('an unconditional append returned a conditional outcome');
     if (prior === 'replay') return { ...outcome, replayedPriorTurn: true };
     if (prior === 'conflict') return { ...outcome, priorTurnConflict: true };
     return outcome;
+  }
+
+  /** S-D.1b: see `SessionStore.appendIfLatest`. Only a final non-graph Agent answer (checked in `appendThroughRpc`). */
+  async appendIfLatest(write: SessionTurnWrite, options: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
+    return this.appendThroughRpc(write, options);
   }
 
   /**

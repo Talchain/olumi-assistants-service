@@ -308,7 +308,12 @@ export interface AnswerOffersRead {
 
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
-  append(write: SessionTurnWrite, options: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome>;
+  /**
+   * S-D.1b: the Agent answer row, appended ONLY if the latest row is still `options.expectedLatestRowId`. A SEPARATE,
+   * optional capability (never an overload of `append`), so no other store, test double or caller changes; a store
+   * without it is appended unconditionally by the floor, exactly as before.
+   */
+  appendIfLatest?(write: SessionTurnWrite, options: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome>;
   /** Uncached latest-answer offers only; absent/malformed/unavailable reads are null. */
   readLatestAnswerOffers?(scenarioId: string): Promise<AnswerOffersRead | null>;
   /** Uncached, scenario-scoped bounded answer history. Read failure throws; absent capability is unknown. */
