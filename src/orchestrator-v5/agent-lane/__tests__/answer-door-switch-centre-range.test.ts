@@ -22,7 +22,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { applyLinkEffectEdit } from '../../system-events/link-effect-edit.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
-import { heldLinkOf } from '../../goal-target/held-user-links.js';
+import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 
 type Json = Record<string, any>;
 const FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/g1b-answer-door-banked.json', import.meta.url), 'utf8')) as {
@@ -128,7 +128,7 @@ describe('MUST-FIX (8 banked T1b drafts): the user\'s "about 150, between 80 and
       natural_effect: { amount: 150, per_source_change: 1, per_source_change_unit: 'switch',
         stated_range: { low: 80, high: 250, text: 'between 80 and 250', end: 'centre' } } });
     // Held at existence 1.0 with the range's own spread: what the same sentence in the brief gives this link.
-    expect(heldLinkOf(stored), 'the user\'s range excludes zero: the link is held').not.toBeNull();
+    expect(heldLinkOf(stored, endsOfGraph(graph)(stored)), 'the user\'s range excludes zero: the link is held').not.toBeNull();
   });
 });
 

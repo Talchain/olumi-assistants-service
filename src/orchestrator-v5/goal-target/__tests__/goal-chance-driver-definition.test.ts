@@ -31,7 +31,7 @@ describe('S-DEF: the served Starter chance no longer "rests most on" an identity
     const claim = goalChanceDriverOf(recordOf('launch_starter_tier'), 'launch_starter_tier', GRAPH, BLOCK);
     expect(JSON.stringify(claim)).not.toContain(IDENTITY);
     expect(claim).toEqual({ no_driver: 'below_resolution' });
-    const kept = withoutDefinitionRows(recordOf('launch_starter_tier'), GRAPH).probability_of_goal_drivers.drivers as Rec[];
+    const kept = (withoutDefinitionRows(recordOf('launch_starter_tier'), GRAPH) as Rec).probability_of_goal_drivers.drivers as Rec[];
     expect(kept.some((r) => r.quantity_id === IDENTITY)).toBe(false);
     expect(kept.length).toBe(recordOf('launch_starter_tier').probability_of_goal_drivers.drivers.length - 2);
   });
@@ -71,5 +71,13 @@ describe('S-DEF: an existence driver\'s doubt is the user\'s only when the USER\
     expect(user.driver).toMatchObject({ kind: 'link_existence', authored_by: 'user' });
     const olumi = goalChanceDriverOf(existenceOnly('starter_subscribers', 'starter_tier_monthly_recurring_revenue'), 'launch_starter_tier', GRAPH, BLOCK) as Rec;
     expect(olumi.driver).toMatchObject({ kind: 'link_existence', authored_by: 'olumi' });
+  });
+  it('TWIN (author): the SAME user link with its range removed is not held, so the doubt is Olumi\'s (user_stated_link kept)', () => {
+    const graph = clone(GRAPH);
+    const edge = graph.edges.find((e: Rec) => e.from === 'price_rise_from_current_price' && e.to === 'customers_lost_from_price_rise');
+    expect(edge.provenance.natural_effect.stated_range).toBeDefined();
+    delete edge.provenance.natural_effect.stated_range;
+    const claim = goalChanceDriverOf(existenceOnly(edge.from, edge.to), 'launch_starter_tier', graph, BLOCK) as Rec;
+    expect(claim.driver).toMatchObject({ kind: 'link_existence', authored_by: 'olumi', user_stated_link: true });
   });
 });
