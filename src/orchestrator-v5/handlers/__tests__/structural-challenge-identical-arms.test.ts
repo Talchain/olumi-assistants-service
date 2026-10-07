@@ -173,7 +173,9 @@ function canonicalStore(facts: Rec[]) {
 
 async function harness(link: { from_id: string; to_id: string }, candidate: Shape, baseline: Shape = 'served', asServed = false) {
   currentnessStore.current = undefined;
-  // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+  // ⚠ SYNTHETIC by default (Science 393023 pre-review P0-1): served fa027's licensed leader is false by ruling (its door
+  // constants are placeholders), so the default harness runs a std 0.125 → 0.1 clone that keeps this file's independent
+  // claims; it no longer witnesses the served shape. `asServed` runs the captured bytes unchanged (the withhold row below).
   const graph = asServed ? structuredClone(servedGraph) : legacyDoorGraph(servedGraph);
   const reader = () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: structuredClone(graph) }));
   const plot = plotDouble(link, candidate, baseline);
