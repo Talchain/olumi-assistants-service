@@ -17,7 +17,7 @@
  * (a question in the same message must be answered; served A08). Nothing is said that the tool did not return.
  */
 import { formatFactorValue } from '../compose/format-factor-value.js';
-import { sayFigureExactly } from './say-figure.js';
+import { sayFigureExactly, twoStateLevelWords } from './say-figure.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';
 
@@ -74,6 +74,16 @@ const shown = (value: number, unit: unknown): string => {
   const u = nonEmpty(unit) ? unit.trim() : null;
   return sayFigureExactly(value, u ?? '') ?? formatFactorValue(value, u)?.display ?? (u === null ? String(value) : `${value} ${u}`);
 };
+/** Adapt returned option levels to the existing classifier's option/intervention shape. */
+const levelSources = (levels: readonly unknown[]): unknown[] => levels.flatMap((raw) => {
+  const l = recordOf(raw);
+  return l !== undefined && nonEmpty(l.factor)
+    ? [{ kind: 'option', interventions: { [l.factor]: l.value } }] : [];
+});
+const setting = (value: number, unit: unknown, nodes: readonly unknown[], factor: string): string => {
+  const state = twoStateLevelWords(value, unit, nodes, factor);
+  return state === null ? `set to ${shown(value, unit)}` : `switched ${state}`;
+};
 const question = (publicLabel: unknown): string => {
   const n = typeof publicLabel === 'string' ? /^Approve (\d+) changes$/.exec(publicLabel.trim())?.[1] : undefined;
   return n !== undefined && Number(n) > 1 ? `Approve these ${n} changes?` : 'Approve this change?';
@@ -86,6 +96,7 @@ function newOptionReply(r: Rec): string | null {
   if (subject === undefined || subject.trim() === '') return null;
   const options = Array.isArray(r.options) ? r.options.map(recordOf) : [{ levels: r.levels }];
   if (options.some((o) => o === undefined)) return null;
+  const sources = levelSources(options.flatMap((o) => Array.isArray(o?.levels) ? o.levels : []));
   const lines: string[] = [];
   const notSet: string[] = [];
   const addNotSet = (factor: string): void => {
@@ -104,7 +115,7 @@ function newOptionReply(r: Rec): string | null {
       if (typeof l.value !== 'number' || !Number.isFinite(l.value)) return null;
       if (l.stated_by === 'user') continue; // the consent subject states it
       if (l.stated_by !== 'olumi_estimate' || !nonEmpty(l.basis)) return null;
-      lines.push(`${q(l.factor)} is set to ${shown(l.value, l.unit)}, Olumi’s estimate (${l.basis.trim()}), for you to correct.`);
+      lines.push(`${q(l.factor)} is ${setting(l.value, l.unit, sources, l.factor)}, Olumi’s estimate (${l.basis.trim()}), for you to correct.`);
     }
   }
   // A figure the tool REFUSED to set carries a reason the user needs (a name conflict, no range, another unit) —
@@ -167,7 +178,7 @@ function newFactorReply(r: Rec): string | null {
     if (f === undefined || cv === undefined || !nonEmpty(f.label) || !nonEmpty(f.affects)
       || typeof cv.value !== 'number' || !Number.isFinite(cv.value) || f.how_strongly !== FACTOR_PLACEHOLDER_STRENGTH) return null;
     if (cv.stated_by === 'user') {
-      lines.push(`${q(f.label)} is ${shown(cv.value, cv.unit)}, the figure you gave, and affects ${f.affects.trim()}.`);
+      lines.push(`${q(f.label)} is ${twoStateLevelWords(cv.value, cv.unit) === null ? shown(cv.value, cv.unit) : `switched ${twoStateLevelWords(cv.value, cv.unit)}`}, the figure you gave, and affects ${f.affects.trim()}.`);
     } else if (cv.stated_by === 'user_to_confirm' && nonEmpty(cv.quote)) {
       // ⛔ DL ruling on #2235: the PAIRING is Olumi's until the user approves it, so the card shows it with their own words.
       toConfirm = true;
@@ -194,7 +205,7 @@ function optionLevelsReply(r: Rec): string | null {
     if (iv === undefined || !nonEmpty(iv.option) || !nonEmpty(iv.factor) || typeof iv.value !== 'number' || !Number.isFinite(iv.value)) return null;
     if (iv.stated_by === 'user') continue; // the consent subject states it
     if (iv.stated_by !== 'olumi_estimate' || !nonEmpty(iv.basis)) return null;
-    lines.push(`${q(iv.factor)} under ${q(iv.option)} is set to ${shown(iv.value, iv.unit)}, Olumi’s estimate (${iv.basis.trim().replace(/\.$/, '')}), for you to correct.`);
+    lines.push(`${q(iv.factor)} under ${q(iv.option)} is ${setting(iv.value, iv.unit, levelSources(r.interventions), iv.factor)}, Olumi’s estimate (${iv.basis.trim().replace(/\.$/, '')}), for you to correct.`);
   }
   return reply(r.public_label.trim().replace(/\.$/, ''), lines, question(undefined));
 }

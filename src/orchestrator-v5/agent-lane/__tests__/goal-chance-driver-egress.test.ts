@@ -622,18 +622,19 @@ describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
     removeDriverAbsenceClaims(text);
     expect(performance.now() - t0).toBeLessThan(50);
   });
-  it('LINEAR TIME: doubling the repeated limb costs under 3× (quadratic would be 4×)', () => {
+  // 4× the input, min of 5 timings: linear ≈ 4×, quadratic ≈ 16×. (A 2× step at 4–8 ms read 3.5× on a CI runner, #2727.)
+  it('LINEAR TIME: 4× the repeated limb costs under 8× (quadratic would be 16×)', () => {
     const cost = (n: number): number => {
       const text = 'does not establish which assumption deserves '.repeat(n);
       removeDriverAbsenceClaims(text);
-      return Math.min(...[0, 1, 2].map(() => {
+      return Math.min(...[0, 1, 2, 3, 4].map(() => {
         const t0 = performance.now();
         DRIVER_ABSENCE_CLAIM.test(text);
         removeDriverAbsenceClaims(text);
         return performance.now() - t0;
       }));
     };
-    expect(cost(2000) / cost(1000)).toBeLessThan(3);
+    expect(cost(4000) / cost(1000)).toBeLessThan(8);
   });
 });
 

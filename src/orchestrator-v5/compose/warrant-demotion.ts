@@ -1,3 +1,5 @@
+import { twoStateLevelWords } from '../agent-lane/say-figure.js';
+
 /**
  * ⭐⭐ WARRANT DEMOTION (INV-1, ROADMAP 2.652) — turn a warrantless mutating
  * proposal into an OFFER.
@@ -457,6 +459,8 @@ function groupThousands(value: number): string {
  */
 function formatBound(value: unknown, unit: unknown): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'that level';
+  const state = twoStateLevelWords(value, unit);
+  if (state !== null) return state;
   const suffix = typeof unit === 'string' && unit.trim().length > 0 ? unit.trim() : '';
   const symbol = CURRENCY_SYMBOL_BY_UNIT[suffix] ?? CURRENCY_SYMBOL_BY_UNIT[suffix.toUpperCase()];
   if (symbol !== undefined) {
