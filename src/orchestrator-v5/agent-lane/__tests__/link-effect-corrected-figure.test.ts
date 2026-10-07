@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
-import { withoutCorrectedFigureTail } from '../stated-by-user.js';
+import { withoutCorrectedFigureTail, linkEffectQuoteContextMiss } from '../stated-by-user.js';
 
 type Json = Record<string, any>;
 const SERVED = (JSON.parse(readFileSync(new URL('./fixtures/served-t1b-user-figure-13149d8.json', import.meta.url), 'utf8')) as { graph: Json }).graph;
@@ -126,5 +126,25 @@ describe('the tail itself', () => {
   it('CONTROL: a sentence with no correction is untouched', () => {
     const plain = 'Each 1% price rise adds £600 a month to monthly recurring revenue.';
     expect(withoutCorrectedFigureTail(plain)).toBe(plain);
+  });
+});
+
+describe('the tail reader is linear: it runs on every turn (DL review 7 Oct: 9.5 s on 3,200 spaces at 9add5bbd)', () => {
+  const PLAIN = 'Each 1% price rise adds £600 a month to monthly recurring revenue';
+  const spaced = (n: number, end = '') => `${PLAIN}, not £1,200${' '.repeat(n)}${end}`;
+  // The slow case is a whitespace run the tail cannot finish (here ":)"): the old pattern tried every split of the run
+  // between its three adjacent whitespace quantifiers (≈2 s at 1,600 spaces, measured 7 Oct). 2,000 keeps the RED bounded.
+  it('", not £1,200" + 2,000 spaces + ":)" reads in well under a second, through the every-turn guard', () => {
+    const said = spaced(2_000, ':)');
+    const t0 = performance.now();
+    expect(withoutCorrectedFigureTail(said)).toBe(said);
+    linkEffectQuoteContextMiss('Each 1% price rise adds £600 a month', said);
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
+  it('PRECONDITION: a short whitespace run still has its tail read (the timing row is about the same tail)', () => {
+    expect(withoutCorrectedFigureTail(spaced(3))).toBe(PLAIN);
+  });
+  it('a space before the end mark still ends the tail ("not £1,200 .")', () => {
+    expect(withoutCorrectedFigureTail(`${PLAIN}, not £1,200 .`)).toBe(`${PLAIN}.`);
   });
 });

@@ -1146,7 +1146,10 @@ function enclosingSentences(userText: string, quote: string): string[] {
  * guess") or two, a tail with another negator, and a sentence whose remaining words still negate ("We don't think it's
  * £600, not £1,200.", "Not £600 a month, not £1,200 either.") all read exactly as before.
  */
-const CORRECTED_FIGURE_TAIL = /,\s*(?:not|rather\s+than|instead\s+of)\s+(?:about\s+|around\s+|roughly\s+)?[£$€]?\d[\d,]*(?:\.\d+)?\s*%?(?:\s+[\p{L}/]+){0,3}\s*[.!]?\s*$/u;
+// No two unbounded whitespace runs may sit side by side: this runs on EVERY turn (no-direct-link guard), and the old
+// `\s*%?(…){0,3}\s*[.!]?\s*$` took 9.5 s on ", not 1" + 3,200 spaces (DL review, 7 Oct). One optional space before % and
+// before the end mark; a single trailing whitespace run.
+const CORRECTED_FIGURE_TAIL = /,\s*(?:not|rather\s+than|instead\s+of)\s+(?:about\s+|around\s+|roughly\s+)?[£$€]?\d[\d,]*(?:\.\d+)?(?:\s?%)?(?:\s+[\p{L}/]+){0,3}(?:\s?[.!])?\s*$/u;
 const CORRECTION_HEAD = /^,\s*(?:not|rather\s+than|instead\s+of)/i;
 export function withoutCorrectedFigureTail(sentence: string): string {
   const m = CORRECTED_FIGURE_TAIL.exec(sentence);
