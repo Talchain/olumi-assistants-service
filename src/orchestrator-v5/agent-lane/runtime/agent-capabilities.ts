@@ -197,7 +197,7 @@ import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEv
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
-import { goalChanceFactsForAgent, goalChanceRangeDisplayForAgent, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
+import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
 import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
@@ -8354,7 +8354,7 @@ export function createAgentCapabilities(
       let limitChecks: ReturnType<typeof limitChecksForAgent>;
       // The post-run graph read, when one was made (the goal-certainty rule reuses it).
       let postRunRead: GraphRead | null | undefined;
-      if (result !== undefined && (permissions.leader_may_be_named !== true || goalChanceRangeDisplayForAgent(result, undefined) !== undefined)) {
+      if (result !== undefined && (permissions.leader_may_be_named !== true || goalChanceNeedsGraphLabels(result))) {
         try {
           const read = await readGraph(ctx.scenario_id);
           postRunRead = read;

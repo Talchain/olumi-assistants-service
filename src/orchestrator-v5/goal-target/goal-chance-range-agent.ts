@@ -78,6 +78,17 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
   return out;
 }
 
+/**
+ * S2 review r1 #4: the run-turn door must read the graph's labels whenever the chat could say a ruled sentence that names
+ * nodes: a range record, or a licence that carries `driver_by_option` (else a Run whose leader may be named lost "It rests
+ * most on …" while the screen said it).
+ */
+export function goalChanceNeedsGraphLabels(result: unknown): boolean {
+  if (warningsOf(result).some((w) => w.code === GOAL_CHANCE_RANGE)) return true;
+  const drivers = rec(agentLicenceRecordOf(result)?.driver_by_option);
+  return drivers !== undefined && Object.keys(drivers).length > 0;
+}
+
 /** Scoped withholds remove only their own options; PLoT #416/#422 always withhold the whole Run. */
 export function goalChanceOptionWithheldForAgent(result: unknown, optionId: string): boolean {
   return warningsOf(result).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)

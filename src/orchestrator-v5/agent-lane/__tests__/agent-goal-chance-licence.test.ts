@@ -301,6 +301,16 @@ describe('PR-S2 Round 2: screen-exact licensed driver sentences', () => {
     }
     expect(read).toEqual(before);
   });
+  // S2 review r1 #4: a Run whose leader MAY be named skipped the run door's graph read, so the chat lost the screen's
+  // "It rests most on …" (RED at e6327125: the run door's driver display was absent).
+  it('(F4) a leader-nameable Run still hands the run door its driver sentence', async () => {
+    const read = driven(strengthDriver as Json);
+    read.analysis_state.leader_claim = { permitted: true, separation: 'separated' };
+    read.analysis_ready = { ...read.analysis_ready, analysis_admission: { ...(read.analysis_ready?.analysis_admission ?? {}), admitted: true, permitted_analysis_mode: 'comparative_leader' } };
+    const out = await capabilities(read).runAnalysis(ctx, { reason: 'Run the analysis' }) as Json;
+    expect(out.claim_permissions?.leader_may_be_named, 'precondition: a leader may be named on this Run').toBe(true);
+    expect(out.result.goal_chance_driver_display).toEqual({ [A]: 'It rests most on Olumi’s own estimate of how strongly ‘Pro plan price’ affects ‘Monthly recurring revenue’: if that effect is weaker than Olumi assumed, the chance falls. Is that estimate right?' });
+  });
 
   it.each([factorDriver, strengthDriver, existenceDriver])('asks once per shared $kind driver in licence order, independently of side', async (driver) => {
     const otherSide = driver.kind === 'factor_value' ? { side: 'high' }
