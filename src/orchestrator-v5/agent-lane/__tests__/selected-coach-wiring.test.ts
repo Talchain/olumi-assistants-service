@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
+import { NARRATE_LABEL_LINE } from '../runtime/agent-loop.js';
 import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { asSent } from './helpers/as-sent.js';
 
@@ -53,7 +54,7 @@ const runFixture = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fix
 };
 const runBlock = runFixture.turns.t2.analysis_result;
 
-type Sent = { model: string; instructions: string; reasoning?: { effort?: string }; max_output_tokens: number;
+type Sent = { model: string; instructions: string; reasoning?: { effort?: string }; max_output_tokens: number; input?: unknown;
   tools?: { name?: string }[]; tool_choice?: unknown; text?: { format?: { name?: string } } };
 const sent: Sent[] = [];
 const registeredAtCall: boolean[] = [];
@@ -187,14 +188,21 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(sent[0]!.instructions).toContain(NAMING_RULE_FORM);
   });
 
-  it('keeps the same selected prompt and budget on a tool-followup conversation', async () => {
+  it('keeps the same selected prompt on a tool-followup conversation; the narrating hop is low effort (P44 S1)', async () => {
     await sendTurn('Timing strongly shapes how the price lands, so add that link.',
       [proposeLink, say('The proposed link is ready for approval.')]);
     expect(sent).toHaveLength(2);
     for (const body of sent) {
-      selected(body);
+      expect(body.model).toBe('gpt-6.1-sol');
+      expect(body.max_output_tokens).toBe(3400);
       expect(sha256(body.instructions)).toBe(RENDERED_SHA);
     }
+    // The deciding call stays high; the call after a held proposal only states it and asks for the yes.
+    expect(sent[0]!.reasoning?.effort).toBe('high');
+    expect(JSON.stringify(sent[0]!.input)).not.toContain(NARRATE_LABEL_LINE);
+    expect(sent[1]!.reasoning?.effort).toBe('low');
+    const narrateInput = sent[1]!.input as { content?: { text?: string }[] }[];
+    expect(narrateInput.at(-1)?.content?.[0]?.text).toBe(NARRATE_LABEL_LINE);
   });
 
   it('uses selected coach bytes as the prefix of the typed Run interpretation', async () => {

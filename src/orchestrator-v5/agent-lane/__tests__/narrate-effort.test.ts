@@ -107,6 +107,20 @@ describe('the narrating call may withdraw, never approve (Codex r1 P1 / r2 P2; D
     expect(r.tool_calls.map((c) => c.name)).toEqual(['propose_new_risk', 'withdraw_proposal']);
   });
 
+  it('CONTROL: on the narrating call, approving an EARLIER turn\'s proposal (not one this turn held) is dispatched', async () => {
+    // approval-chip-order.test.ts: B is proposed and held, then the next hop approves A, which the user said yes to.
+    const authoriseChange = vi.fn(async () => ({ ok: true, mutated: true, proposal_id: 'gmh_earlier' }));
+    const caps = { proposeNewRisk: vi.fn(async () => HELD), authoriseChange } as unknown as AgentCapabilities;
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ output: [call] })
+      .mockResolvedValueOnce({ output: [fc('authorise_change', { proposal_id: 'gmh_earlier' }, 'c2')] })
+      .mockResolvedValueOnce(answer);
+    const r = await runAgentTurn({ ...base, composeReply: () => null } as never, caps, callModel as never);
+    expect((callModel.mock.calls[1]![0] as ModelCallRequest).reasoning_role).toBe('narrate');
+    expect(authoriseChange).toHaveBeenCalledTimes(1);
+    expect(r.tool_calls.map((c) => [c.name, c.ok, c.refusal ?? null])).toEqual([['propose_new_risk', true, null], ['authorise_change', true, null]]);
+  });
+
   it('CONTROL: authorise_change on an ordinary (non-narrating) call is still dispatched', async () => {
     const authoriseChange = vi.fn(async () => ({ ok: true, mutated: true }));
     const caps = { authoriseChange } as unknown as AgentCapabilities;

@@ -558,15 +558,18 @@ export async function runAgentTurn(
       const toolStartedAt = now();
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
-      const result: ToolResult = narrateHop && String(call.name) === AUTHORISE_TOOL
-        ? {
-            ok: false, mutated: false, refusal: NOT_ON_NARRATION,
-            detail: 'The change you just prepared is waiting for the user’s yes. Show it and ask; nothing was approved or changed.',
-          }
-        : withheld.has(String(call.name))
+      const result: ToolResult = withheld.has(String(call.name))
         ? {
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
             detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',
+          }
+        // ⛔ The narrating call may not approve the change THIS turn just held for the user's yes (Codex #2781 r1 P1; DL
+        // ruling B). One an earlier turn showed and the user approved stays approvable on any hop.
+        : narrateHop && String(call.name) === AUTHORISE_TOOL
+          && proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
+        ? {
+            ok: false, mutated: false, refusal: NOT_ON_NARRATION,
+            detail: 'The change you just prepared is waiting for the user’s yes. Show it and ask; nothing was approved or changed.',
           }
         // ⛔ One approval carries one change: a second proposal while this turn's first awaits the user's yes is
         // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`).
