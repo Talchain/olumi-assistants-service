@@ -25,7 +25,7 @@ const A = 'raise', B = 'keep', FROM = 'price', TO = 'revenue';
 const line = 'The original deadline sentence, kept verbatim.';
 const horizon = { code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: line, node_ids: [TO] };
 const row = (patch: Json = {}): Json => ({
-  kind: 'link_strength', quantity_id: `${FROM}->${TO}`, from: FROM, to: TO, status: 'resolved', correlated: false,
+  kind: 'link_strength', quantity_id: `${FROM}->${TO}`, from: FROM, to: TO, status: 'resolved',
   spread: 0.4, p_goal_if_low: 0.234, p_goal_if_high: 0.876, n_low: 4000, n_high: 40, ...patch,
 });
 const graph = (): Json => ({
@@ -42,7 +42,7 @@ const graph = (): Json => ({
 });
 const inputs = (rows: Json[] = [row()], patch: Json = {}): GoalChanceRangeInputs => ({
   driversByOption: new Map([[A, { drivers: rows, ...patch }]]),
-  goalPaths: [{ option_id: A, links: [{ from: FROM, to: TO }] }], plotWithheld: false,
+  goalPaths: [{ option_id: A, links: [{ from: FROM, to: TO }] }], plotWithheld: false, goalId: TO,
 });
 const warning = (code = GOAL_FIGURES_PLACEHOLDER_PATH, option_ids = [A]): Json => ({ code, severity: 'warning', message: 'Withheld.', option_ids });
 const envelope = (): Json => ({ option_comparison: [{ option_id: A }, { option_id: B, probability_of_goal: 0.63 }], inference_warnings: [warning()] });
@@ -109,9 +109,61 @@ describe('ruling 1: a range belongs to one option and one unsized path link', ()
     absent(envelope(), graph(), { ...inputs(), plotWithheld: true });
   });
 
-  it.each([{ status: 'below_resolution' }, { status: 'unknown' }, { correlated: true }, { correlated: undefined }])(
-    'excludes unresolved or not explicitly uncorrelated rows: %j', patch => absent(envelope(), graph(), inputs([row(patch)])),
+  it.each([{ status: 'below_resolution' }, { status: 'unknown' }, { correlated: true }, { correlated: null }])(
+    'excludes unresolved or correlated rows: %j', patch => absent(envelope(), graph(), inputs([row(patch)])),
   );
+
+  // ⛔ S1 review r1 #1 (MUST SHOW): ISL omits `correlated` unless true and PLoT forwards only `true`, so the wire never
+  // carries `false`. The row below is the FIRST link_strength row of the in-repo served capture (served-w3-f440be4a, T1b),
+  // keys and figures untouched, rebound only to this graph's ends. A self-authored `correlated:false` is not the wire.
+  it('a SERVED driver row (no correlated key) shows its range; an explicit false is the same', () => {
+    const served = JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/served-w3-f440be4a-t1b-7ab6c1af.json', import.meta.url), 'utf8'));
+    const block = served.blocks[0].enrichment.option_comparison[0].probability_of_goal_drivers;
+    const servedRow = block.drivers.find((r: Json) => r.kind === 'link_strength');
+    expect(servedRow).not.toHaveProperty('correlated');
+    const asServed = { ...servedRow, from: FROM, to: TO, quantity_id: `${FROM}->${TO}` };
+    const shown = goalChanceRangeOf(envelope(), graph(), A, inputs([asServed]));
+    expect(shown).not.toBeNull();
+    expect(shown).toMatchObject({ kind: 'link_strength', from: FROM, to: TO, among: 'all' });
+    expect(goalChanceRangeOf(envelope(), graph(), A, inputs([{ ...asServed, correlated: false }]))).toEqual(shown);
+  });
+
+  // ⛔ S1 review r1 #2: a chance unusable for the whole Run (here: no stated direction) bars every range, even though the
+  // gate never names an option the placeholder arm already withheld.
+  it('Run-wide unusable chance (no stated direction): no range', () => {
+    const g = graph(); delete g.nodes.find((n: Json) => n.id === TO).goal_direction;
+    absent(envelope(), g, inputs());
+    // CONTROL: the same graph with its direction stated shows the range.
+    expect(goalChanceRangeOf(envelope(), graph(), A, inputs())).toEqual(expected);
+  });
+
+  // Every non-P5 testability failure bars a range; each row first proves the verdict really carries that failure.
+  // (P3: since the 6 Oct relaxation a `<` held on the goal node is scorable — probe at 0f2c3b23 — so no P3 row is built
+  // that way; a P3 arises only from a `<` the row alone states, which the same `every` check rejects.)
+  it.each([
+    ['P1 (no today\'s level)', (g: Json) => { const goal = g.nodes.find((n: Json) => n.id === TO); delete goal.observed_state; }, 'P1'],
+    ['P4 (target unit differs from the goal\'s)', (g: Json) => { g.nodes.find((n: Json) => n.id === TO).goal_threshold_unit = 'orders'; }, 'P4'],
+  ])('%s never grants a range', (_name, mutate, precondition) => {
+    const g = graph(); (mutate as (g: Json) => void)(g);
+    const v = targetTestabilityOf(g);
+    expect(v.kind === 'not_testable' && v.failures.some((f) => f.precondition === precondition)).toBe(true);
+    const e = envelope(); e.inference_warnings = [warning(GOAL_FIGURES_TARGET_NOT_TESTABLE)];
+    absent(e, g, inputs());
+  });
+
+  // ⛔ S1 review r1 #3: the first row on an unsized link decides; a lower unsized row never stands in for it.
+  it('an unsized link below resolution that outranks a resolved unsized link: no range', () => {
+    const g = graph();
+    g.nodes.push({ id: 'cost', kind: 'factor', label: 'Cost', observed_state: { value: 0.5, baseline: 0.5, raw_value: 50, unit: '£', cap: 100 } });
+    g.edges.push({ from: A, to: 'cost', strength: { mean: 1, std: 0.01 } },
+      { from: 'cost', to: TO, strength: { mean: -0.5, std: 0.1 }, provenance: { magnitude: 'olumi_placeholder' }, defaulted: true });
+    const L1 = row({ kind: 'link_existence', status: 'below_resolution', spread: 0.30, p_goal_if_absent: 0.3, p_goal_if_present: 0.6, n_absent: 400, n_present: 1600 });
+    const L2 = row({ quantity_id: `cost->${TO}`, from: 'cost', to: TO, spread: 0.10, p_goal_if_low: 0.40, p_goal_if_high: 0.50 });
+    const i: GoalChanceRangeInputs = { ...inputs([L1, L2]), goalPaths: [{ option_id: A, links: [{ from: FROM, to: TO }, { from: 'cost', to: TO }] }] };
+    absent(envelope(), g, i);
+    // CONTROL: without the outranking unresolved row, L2 shows.
+    expect(goalChanceRangeOf(envelope(), g, A, { ...i, driversByOption: new Map([[A, { drivers: [L2] }]]) })).toMatchObject({ from: 'cost', to: TO });
+  });
 
   it('STOP: different raw group chances display equally, so there is no range', () => {
     absent(envelope(), graph(), inputs([row({ p_goal_if_low: 0.431, p_goal_if_high: 0.439, n_low: 40, n_high: 40 })]));
@@ -257,5 +309,20 @@ describe('real loader and run-analysis handler', () => {
     expect(record(e, GOAL_CHANCE_LICENSED)).toMatchObject({ code: GOAL_CHANCE_LICENSED,
       option_ids: ['59_price', 'current_price'], horizon_untested: true, horizon_line: record(e, GOAL_HORIZON_NOT_TESTED)?.message });
     expect(record(e)).toBeUndefined();
+  });
+});
+
+// ⛔ S1 review r1 #4: until the Agent has a ruled sentence for a range (PR-S2), the record never reaches its view raw.
+describe('the Agent view carries no GOAL_CHANCE_RANGE record', () => {
+  it('analysisResultForAgent drops the record at both levels; other warnings stay', async () => {
+    const { analysisResultForAgent } = await import('../../agent-lane/decision-sensitivity.js');
+    const rangeRecord = { code: GOAL_CHANCE_RANGE, severity: 'info', message: 'm', option_ids: [A], range_by_option: { [A]: expected } };
+    const block = { inference_warnings: [rangeRecord, horizon], enrichment: { inference_warnings: [rangeRecord, horizon], option_comparison: [{ option_id: A }] } };
+    const view = analysisResultForAgent(block) as Json;
+    for (const ws of [view.inference_warnings, view.enrichment.inference_warnings]) {
+      expect(ws.some((w: Json) => w.code === GOAL_CHANCE_RANGE)).toBe(false);
+      expect(ws.some((w: Json) => w.code === GOAL_HORIZON_NOT_TESTED)).toBe(true); // CONTROL
+    }
+    expect(JSON.stringify(view)).not.toContain('range_by_option');
   });
 });

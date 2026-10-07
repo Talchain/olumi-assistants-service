@@ -1983,7 +1983,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       const id = typeof r.option_id === 'string' ? r.option_id : r.id;
       if (typeof id === 'string' && id !== '' && !rangeDrivers.has(id)) rangeDrivers.set(id, r.probability_of_goal_drivers);
     }
-    let rangeInputs: GoalChanceRangeInputs = { driversByOption: rangeDrivers, goalPaths: [], plotWithheld: runWithheldGoalFigures(envelope) };
+    let rangeInputs: GoalChanceRangeInputs = { driversByOption: rangeDrivers, goalPaths: [], plotWithheld: runWithheldGoalFigures(envelope), goalId: snapshot.goal_node_id };
     let withheldBecauseUnsizedPath: UnsizedPathLeaderCause | undefined;
     let legacyFiguresDisclosure = '';
     let legacyFiguresLinks: Array<{ from: string; to: string }> = [];

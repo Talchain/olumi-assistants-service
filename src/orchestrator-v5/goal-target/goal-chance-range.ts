@@ -7,6 +7,7 @@ import {
   GOAL_FIGURES_WITHHELD_CODES,
 } from '../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
+import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
 import type { PlaceholderGoalPath } from '../agent-lane/goal-certainty.js';
 import { byIslRank, groupPct, linkEnds, runEdge, topDriverRow, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
@@ -35,6 +36,8 @@ export interface GoalChanceRangeInputs {
   readonly goalPaths: readonly PlaceholderGoalPath[];
   /** `runWithheldGoalFigures` BEFORE CEE's arms: PLoT's withhold always bars a range. */
   readonly plotWithheld: boolean;
+  /** The Run's goal node: a chance that is unusable for the whole Run (`goalChanceTargetCause`) bars every range. */
+  readonly goalId: unknown;
 }
 
 /** Ruling 2: copy the A7 info record's own sentence verbatim; absence stays absent. */
@@ -48,6 +51,9 @@ export function goalChanceHorizonOf(envelope: unknown): { horizon_untested: true
 /** Ruling 1: one withheld option, one resolved unsized link row, each endpoint at its own group step. */
 export function goalChanceRangeOf(envelope: unknown, graph: unknown, optionId: string, inputs: GoalChanceRangeInputs): GoalChanceRange | null {
   if (!isRec(envelope) || !isRec(graph) || !Array.isArray(graph.nodes) || inputs.plotWithheld) return null;
+  // ⛔ S1 review r1 #2: no stated target / direction / unit, a ceiling not minimised, a floor minimised — the chance itself
+  // is unusable for every option, so no range of it is shown either (the gate never names an option already withheld).
+  if (goalChanceTargetCause(graph, inputs.goalId) !== null) return null;
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings.filter(isRec) : [];
   const applies = (w: Rec): boolean => !Array.isArray(w.option_ids) || w.option_ids.length === 0 || w.option_ids.includes(optionId);
   const allowed = (w: Rec): boolean => w.code === GOAL_FIGURES_PLACEHOLDER_PATH || w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE;
@@ -70,12 +76,20 @@ export function goalChanceRangeOf(envelope: unknown, graph: unknown, optionId: s
   if (!isRec(block) || ('invalid_rows_dropped' in block && block.invalid_rows_dropped !== 0)) return null;
   const top = topDriverRow({ probability_of_goal_drivers: block });
   if (top === null) return null; // Includes any unrankable row, not just an unrankable candidate.
-  const row = (block.drivers as Rec[]).slice().sort(byIslRank).find(r => {
-    if (r.status !== 'resolved' || r.correlated !== false || (r.kind !== 'link_strength' && r.kind !== 'link_existence')) return false;
+  // ⛔ S1 review r1 #3: the FIRST row (ISL's order) on one of this option's unsized links decides. If it cannot be shown
+  // (below resolution, correlated, not a link kind, off the Run graph), there is no range: a lower row would make
+  // "depends most on" false. A sized quantity may outrank it (`among: 'unsized_links'`).
+  const onUnsizedLink = (r: Rec): boolean => {
     const ends = linkEnds(r);
-    return ends !== null && links.some(l => l.from === ends.from && l.to === ends.to) && runEdge(graph, ends.from, ends.to) !== undefined;
-  });
+    return ends !== null && links.some(l => l.from === ends.from && l.to === ends.to);
+  };
+  const row = (block.drivers as Rec[]).slice().sort(byIslRank).find(onUnsizedLink);
   if (row === undefined) return null;
+  // ⛔ S1 review r1 #1: ISL omits `correlated` unless true (PLoT forwards only `true`); a missing key is uncorrelated,
+  // exactly as `goalChanceDriverOf` reads it. Anything but absent/false is correlated.
+  if (row.status !== 'resolved' || (row.correlated !== undefined && row.correlated !== false)
+    || (row.kind !== 'link_strength' && row.kind !== 'link_existence')) return null;
+  { const ends = linkEnds(row)!; if (runEdge(graph, ends.from, ends.to) === undefined) return null; }
   const existence = row.kind === 'link_existence';
   const a = row[existence ? 'p_goal_if_absent' : 'p_goal_if_low'];
   const b = row[existence ? 'p_goal_if_present' : 'p_goal_if_high'];
