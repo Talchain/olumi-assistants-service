@@ -442,6 +442,9 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(os('fac_cost')).toMatchObject({ raw_value: 200 });
     expect(graphWrites.get(SCENARIO)).toBe(1);
     expect(r.assistant_text).toContain('You set "Hours" to 12 hours; Olumi\'s estimate was 10 hours.');
+    // ACTION-BAR's rule: a figure the user did not edit is never recorded or said as theirs.
+    expect(os('fac_cost')['source']).not.toBe('user_override');
+    expect(r.assistant_text).toContain('Left as Olumi\'s estimate: "Cost" (£200).');
   }, 120_000);
   it('CHECK ESTIMATES confirm: pressing the card unchanged records acceptance of the same figures', async () => {
     seed(true);
@@ -451,6 +454,7 @@ describe('S-D slice 2 Agent proposals', () => {
     // The same figure, now Olumi's estimate ACCEPTED by the user (`isAcceptedOlumiEstimate`), never the user's own.
     expect(os('fac_hours')).toMatchObject({ raw_value: 10, source: 'user_assumption', reviewed_by_user: expect.objectContaining({ intent: 'confirm' }) });
     expect(os('fac_cost')).toMatchObject({ raw_value: 200, source: 'cee_inference' });
+    expect(r.assistant_text).toContain('Recorded that you accept Olumi\u2019s estimate');
   }, 120_000);
 
 });
