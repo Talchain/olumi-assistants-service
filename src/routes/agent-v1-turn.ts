@@ -2968,7 +2968,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // no model call — it never falls through to ordinary generation with every door open.
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWidenAddPressId(pressedChipId)) {
       const rb = await readBackState(readingDispatch, scenarioId);
-      const call = widenAddCallOf(pressedChipId, message, rb.graph);
+      const call = widenAddCallOf(pressedChipId, message, rb);
       const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode);
       const held = issued?.ok === true && typeof issued.proposal_id === 'string';
       const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? RISK_ADD_REFUSED_REPLY : RISK_ADD_REFUSED_REPLY;

@@ -10,8 +10,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { assembleGuidanceSignals } from '../../turn-context/guidance-signals.js';
 import {
-  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, modelGapOf, riskGate, risksTurnFromSignals,
-  settleRisksTurn, STATED_BUDGET, SUGGEST_RISKS_CHIP, widenAddCallOf, WIDEN_ADD_MESSAGE, widenTargetOf, WIDEN_PRESS_ID, type RunRisksWidenTurn,
+  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, modelGapOf, riskGate, risksTurnForReadback, risksTurnFromSignals,
+  settleRisksTurn, STATED_BUDGET, SUGGEST_RISKS_CHIP, widenAddCallOf, widenTargetOf, WIDEN_PRESS_ID, type RunRisksWidenTurn,
 } from '../widen-turn.js';
 
 const fixture = (v: 'v1' | 'v2'): Record<string, unknown> =>
@@ -124,7 +124,7 @@ describe('S-C risks gate: grounded, attached, distinct — by identity', () => {
   it('RG-11 (Science: never inert): every kept risk has a parent factor the door will link, and the hit option really changes it', () => {
     const t = turnOn(fixture('v1'));
     for (const r of riskGate(t, TURN2).kept) {
-      const call = widenAddCallOf(r.press.id, r.press.message, fixture('v1'));
+      const call = widenAddCallOf(r.press.id, r.press.message, { graph: fixture('v1') });
       expect(call?.args.caused_by, r.label).toEqual([{ factor_label: r.through.label, direction: r.through.direction }]);
       expect(t.options.find((o) => o.id === r.hits.id)?.changes, r.label).toContain(r.through.id);
     }
@@ -160,7 +160,7 @@ describe('S-C Add press: bound to its message AND the node ids; re-checked on th
   it('AP-1: the press round-trips to ONE propose_new_risk call naming the risk, its driver and what it hurts', () => {
     const r = first();
     expect(r.press.message).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: driven by more ‘Developer Hires’, it would lower ‘Feature Delivery Capacity’.');
-    expect(widenAddCallOf(r.press.id, r.press.message, v1)).toEqual({ tool: 'propose_new_risk', args: {
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: v1 })).toEqual({ tool: 'propose_new_risk', args: {
       label: 'Recruitment delay', rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
       affects: [{ target_label: 'Feature Delivery Capacity', direction: 'negative' }],
       caused_by: [{ factor_label: 'Developer Hires', direction: 'positive' }],
@@ -168,35 +168,59 @@ describe('S-C Add press: bound to its message AND the node ids; re-checked on th
   });
   it('AP-2: an edited message, another press\'s id, or an unbounded message is not this press', () => {
     const r = first();
-    expect(widenAddCallOf(r.press.id, r.press.message.replace('Recruitment delay', 'Something else'), v1)).toBeNull();
-    expect(widenAddCallOf('agent-widen-add:0000000000000000', r.press.message, v1)).toBeNull();
-    expect(widenAddCallOf(r.press.id, `${r.press.message}${' '.repeat(700)}`, v1)).toBeNull();
+    expect(widenAddCallOf(r.press.id, r.press.message.replace('Recruitment delay', 'Something else'), { graph: v1 })).toBeNull();
+    expect(widenAddCallOf('agent-widen-add:0000000000000000', r.press.message, { graph: v1 })).toBeNull();
+    expect(widenAddCallOf(r.press.id, `${r.press.message}${' '.repeat(700)}`, { graph: v1 })).toBeNull();
   });
   it('AP-3 (Codex r1 P1): a stale press is refused — its factor renamed and a NEW node given the old name; or the option no longer changes it', () => {
     const r = first();
     const nodes = v1.nodes as Record<string, unknown>[];
     const renamed = { ...v1, nodes: [...nodes.map((n) => (n.id === 'developer_hires' ? { ...n, label: 'Renamed developer count' } : n)),
       { id: 'fac_other', kind: 'factor', label: 'Developer Hires' }] };
-    expect(widenAddCallOf(r.press.id, r.press.message, renamed)).toBeNull();
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: renamed })).toBeNull();
     const unchanged = { ...v1, nodes: nodes.map((n) => (n.id === 'hire_two_developers'
       ? { ...n, interventions: { ...(n.interventions as Record<string, unknown>), developer_hires: { value: 0, raw_value: 0, unit: 'hires' } } } : n)) };
-    expect(widenAddCallOf(r.press.id, r.press.message, unchanged)).toBeNull();
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: unchanged })).toBeNull();
     // Only the id binding catches this one: what it HURTS was renamed and a new outcome took the old name.
     const outcome = { ...v1, nodes: [...nodes.map((n) => (n.id === 'feature_delivery_capacity' ? { ...n, label: 'Renamed capacity' } : n)),
       { id: 'oc_other', kind: 'outcome', label: 'Feature Delivery Capacity' }],
       edges: [...(v1.edges as Record<string, unknown>[]), { from: 'oc_other', to: 'meet_our_next_feature_launch_deadline', strength: { mean: 0.5, std: 0.1 } }] };
-    expect(widenAddCallOf(r.press.id, r.press.message, outcome)).toBeNull();
-    expect(widenAddCallOf(r.press.id, r.press.message, v1), 'CONTROL: the model as offered').not.toBeNull();
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: outcome })).toBeNull();
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: v1 }), 'CONTROL: the model as offered').not.toBeNull();
   });
   it('AP-4: a shared risk\'s press names no option and is refused once an option starts changing its factor', () => {
     const shared = { label: 'Team attrition', category: 'external', hits_id: 'existing_engineering_team_size', through_id: 'existing_engineering_team_size',
       through_direction: 'negative', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'the current team staying intact', watch_for: 'a resignation before launch' };
     const r = riskGate(turnOn(v1), [shared]).kept[0]!;
     expect(r.press.message).toBe('Add the risk ‘Team attrition’ for every option: driven by less ‘Existing Engineering Team Size’, it would lower ‘Feature Delivery Capacity’.');
-    expect(widenAddCallOf(r.press.id, r.press.message, v1)?.args.caused_by).toEqual([{ factor_label: 'Existing Engineering Team Size', direction: 'negative' }]);
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: v1 })?.args.caused_by).toEqual([{ factor_label: 'Existing Engineering Team Size', direction: 'negative' }]);
     const moved = { ...v1, nodes: (v1.nodes as Record<string, unknown>[]).map((n) => (n.id === 'hire_two_developers'
       ? { ...n, interventions: { ...(n.interventions as Record<string, unknown>), existing_engineering_team_size: { value: 0.3, raw_value: 9, unit: 'engineers' } } } : n)) };
-    expect(widenAddCallOf(r.press.id, r.press.message, moved)).toBeNull();
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: moved })).toBeNull();
+  });
+  it('AP-5 (Codex r2 P1): an option name with its own ’ still round-trips — the press is reconstructed, never parsed', () => {
+    const g = { ...v1, nodes: (v1.nodes as Record<string, unknown>[]).map((n) => (n.id === 'hire_two_developers' ? { ...n, label: 'Don’t outsource hiring' } : n)) };
+    const r = riskGate(turnOn(g), [TURN2[0]]).kept[0]!;
+    expect(r.press.message).toBe('Add the risk ‘Recruitment delay’ to ‘Don’t outsource hiring’: driven by more ‘Developer Hires’, it would lower ‘Feature Delivery Capacity’.');
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: g })?.args.label).toBe('Recruitment delay');
+  });
+  it('AP-6 (Codex r2 P2): Suggest and Add read ONE option scope — a risk shared because the only mover is out of the comparison still adds', () => {
+    const rb = { graph: v1, optionParticipation: [{ option_id: 'hire_two_developers', state: 'excluded_olumi_proposed' }] };
+    const turn = risksTurnForReadback(rb);
+    if (turn.kind !== 'run_risks') throw new Error(turn.kind);
+    const freeze = { label: 'Hiring freeze', category: 'external', hits_id: 'developer_hires', through_id: 'developer_hires', through_direction: 'negative',
+      affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'hiring staying open', watch_for: 'a freeze announced' };
+    const r = riskGate(turn, [freeze]).kept[0]!;
+    expect(r.shared).toBe(true);
+    expect(widenAddCallOf(r.press.id, r.press.message, rb)?.args.caused_by).toEqual([{ factor_label: 'Developer Hires', direction: 'negative' }]);
+    expect(widenAddCallOf(r.press.id, r.press.message, { graph: v1 }), 'CONTROL: with the option back in scope it is no longer shared').toBeNull();
+  });
+  it('AP-7: EVERY offered Add round-trips on the model it was offered on (served turns #2 and #12, the shared twin)', () => {
+    const shared = { label: 'Team attrition', category: 'external', hits_id: 'existing_engineering_team_size', through_id: 'existing_engineering_team_size',
+      through_direction: 'negative', affects_id: 'feature_delivery_capacity', direction: 'negative', relies_on: 'the current team staying intact', watch_for: 'a resignation before launch' };
+    const kept = riskGate(turnOn(v1), [...TURN2.slice(0, 2), shared]).kept;
+    expect(kept).toHaveLength(3);
+    for (const r of kept) expect(widenAddCallOf(r.press.id, r.press.message, { graph: v1 }), r.label).not.toBeNull();
   });
 });
 
@@ -220,6 +244,10 @@ describe('S-C standing gap signal: typed, from model state, ONE question', () =>
     expect(modelGapOf({ ...withTarget, goal_constraints: [{ node_id: 'developer_hires', operator: '<=', value: 200000, unit: '£' }] }, paul), 'a money limit answers it').toBeNull();
     // Codex r1 P2: a hiring-count cap is not the budget.
     expect(modelGapOf({ ...withTarget, goal_constraints: [{ node_id: 'developer_hires', operator: '<=', value: 2 }] }, 'Our budget is £200,000.')?.kind).toBe('budget_without_limit');
+    // Codex r2 P2: an explicit non-money unit decides, whatever the label says.
+    const reviewers = { ...withTarget, nodes: (withTarget.nodes as Record<string, unknown>[]).map((n) => (n.id === 'developer_hires' ? { ...n, label: 'Budget reviewers' } : n)),
+      goal_constraints: [{ node_id: 'developer_hires', operator: '<=', value: 2, unit: 'people' }] };
+    expect(modelGapOf(reviewers, 'Our budget is £200,000.')?.kind).toBe('budget_without_limit');
     expect(modelGapOf(withTarget, 'We need to decide whether to hire a Tech lead or two developers.')).toBeNull();
     expect(modelGapOf(withTarget, 'The budget is tight.')).toBeNull();
   });
@@ -237,15 +265,12 @@ describe('S-C regex scaling (preamble: 5k→20k, 3 shapes, < 8×, min of 5)', ()
     moneyNoBudget: (n) => '£1 '.repeat(Math.ceil(n / 3)).slice(0, n),
   };
   for (const [name, shape] of Object.entries(shapes)) {
-    it(`RX-${name}: STATED_BUDGET and the Add-message parse scale linearly`, () => {
+    it(`RX-${name}: STATED_BUDGET scales linearly; an unbounded Add message is refused before any work`, () => {
       const small = shape(5_000); const big = shape(20_000);
       const r = (time(() => STATED_BUDGET.test(big)) + 0.05) / (time(() => STATED_BUDGET.test(small)) + 0.05);
       expect(r, `budget ${name}`).toBeLessThan(8);
-      // The press never reaches the parse above 600 chars (`widenAddCallOf`); the regex itself is timed unguarded.
-      const msg = (s: string) => `Add the risk ‘x’ to ‘o’: driven by more ‘${s}’, it would lower ‘y’.`;
-      expect(widenAddCallOf('agent-widen-add:0000000000000000', msg(big), fixture('v1'))).toBeNull();
-      const a = (time(() => WIDEN_ADD_MESSAGE.test(msg(big))) + 0.05) / (time(() => WIDEN_ADD_MESSAGE.test(msg(small))) + 0.05);
-      expect(a, `add ${name}`).toBeLessThan(8);
+      // The Add press has no regex: it is reconstructed, and refused above 600 chars before any work.
+      expect(widenAddCallOf('agent-widen-add:0000000000000000', `Add the risk ‘x’ to ‘o’: driven by more ‘${big}’, it would lower ‘y’.`, { graph: fixture('v1') })).toBeNull();
     });
   }
 });

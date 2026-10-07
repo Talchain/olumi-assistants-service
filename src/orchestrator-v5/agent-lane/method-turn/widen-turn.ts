@@ -35,7 +35,6 @@ import { z } from 'zod';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { sameLabel } from '../../routing/add-option-transaction.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
-import { statusQuoOptionId } from '../structural-facts.js';
 
 const METHOD = 'RC-WIDEN' as const;
 const CONTRACT = POLICY.method_turns[METHOD];
@@ -757,8 +756,9 @@ export function modelGapOf(graph: unknown, userWords: string = ''): ModelGap | n
     };
   }
   // Only a MONEY limit answers a stated budget (Codex r1 P2: a hiring-count cap is not the budget).
+  // An explicit unit decides (Codex r2 P2: "Budget reviewers" in people is not money); a label only when no unit is stored.
   const unitOf = (r: Rec): string => [r.unit, rec(rec(g.nodes.find((n) => n.id === r.node_id))?.observed_state)?.unit, labelOf(g.nodes.find((n) => n.id === r.node_id))]
-    .filter((u): u is string => typeof u === 'string').join(' ');
+    .find((u): u is string => typeof u === 'string' && u.trim() !== '') ?? '';
   const moneyLimits = raw !== undefined && Array.isArray(raw.goal_constraints)
     ? raw.goal_constraints.map(rec).filter((r): r is Rec => r !== undefined && (goal === undefined || r.node_id !== goal.id) && MONEY_UNIT.test(unitOf(r))) : [];
   if (moneyLimits.length === 0 && userWords.length <= 20_000 && STATED_BUDGET.test(userWords)) {
@@ -976,49 +976,67 @@ export function isWidenAddPressId(id: unknown): boolean {
   return typeof id === 'string' && /^agent-widen-add:[0-9a-f]{16}$/u.test(id);
 }
 
-export const WIDEN_ADD_MESSAGE = /^Add the risk ‘([^‘’\n]{1,60})’ (?:to ‘([^‘’\n]{1,200})’|for every option): driven by (more|less) ‘([^‘’\n]{1,200})’, it would (lower|raise) ‘([^‘’\n]{1,200})’\.$/u;
-
 export type WidenAddCall = { readonly tool: 'propose_new_risk'; readonly args: {
   label: string; rationale: string;
   affects: { target_label: string; direction: 'positive' | 'negative' }[];
   caused_by: { factor_label: string; direction: 'positive' | 'negative' }[];
 } };
 
+const ADD_PREFIX_WORDS = 'Add the risk ‘';
+const DIRECTIONS = ['positive', 'negative'] as const;
+
 /**
  * The door call an Add press asks for, re-checked against the model AS IT IS NOW, or null (the route then refuses it
- * deterministically: an Add press never falls through to ordinary generation, Codex r1 P1). Null unless: the message is
- * the press's own template; every label names exactly ONE node of the right kind; the id recomputes from the message and
- * THOSE node ids; and the attachment still holds (the option still changes the factor, or no option does for a shared one).
+ * deterministically: an Add press never falls through to ordinary generation, Codex r1 P1).
+ *
+ * NO PARSING of the user-visible words (Codex r2 P1: a label's own ’ broke a capture): the press is RECONSTRUCTED. Every
+ * (option or "every option", factor, goal/outcome, direction pair) the Suggest turn could offer on THIS readback — the
+ * same scope, `risksTurnForReadback` (Codex r2 P2) — is minted again with `riskAddPressFor`; the press stands only when
+ * one of them is byte-identical in message AND id (the id binds the node ids, Codex r1 P1). Then the attachment is
+ * re-checked: the option still changes the factor, or (shared) no option in scope does.
  */
-export function widenAddCallOf(chipId: unknown, message: unknown, graph: unknown): WidenAddCall | null {
+export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodReadback): WidenAddCall | null {
   if (!isWidenAddPressId(chipId) || typeof message !== 'string' || message.length > 600) return null;
   const m = message.trim();
-  const x = WIDEN_ADD_MESSAGE.exec(m);
-  if (x === null) return null;
-  const g = graphOf(graph);
-  const one = (label: string, kinds: readonly string[]): Rec | undefined => {
-    const hits = g.nodes.filter((n) => doorNorm(n.label) === doorNorm(label));
-    return hits.length === 1 && kinds.includes(String(hits[0]!.kind)) ? hits[0] : undefined;
-  };
-  const through = one(x[4]!, ['factor']);
-  const affects = one(x[6]!, ['goal', 'outcome']);
-  const option = x[2] !== undefined ? one(x[2], ['option']) : undefined;
-  if (through === undefined || affects === undefined || (x[2] !== undefined && option === undefined)) return null;
-  const hitsId = option !== undefined ? String(option.id) : String(through.id);
-  if (addPressId(m, [hitsId, String(through.id), String(affects.id)]) !== chipId) return null;
-  const sq = statusQuoOptionId(g.nodes as never, g.edges as never);
-  const changes = (optionId: string): boolean => {
-    const move = existingLevers(g, optionId, sq).get(String(through.id));
-    return move !== undefined && move !== 'unchanged';
-  };
-  const ownOptions = g.nodes.filter((n) => n.kind === 'option' && String(n.id) !== sq).map((n) => String(n.id));
-  if (option !== undefined ? String(option.id) === sq || !changes(String(option.id)) : ownOptions.some(changes)) return null;
-  return { tool: 'propose_new_risk', args: {
-    label: x[1]!.trim(),
-    affects: [{ target_label: String(affects.label), direction: x[5] === 'lower' ? 'negative' : 'positive' }],
-    caused_by: [{ factor_label: String(through.label), direction: x[3] === 'more' ? 'positive' : 'negative' }],
-    rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
-  } };
+  if (!m.startsWith(ADD_PREFIX_WORDS)) return null;
+  const end = m.indexOf('’', ADD_PREFIX_WORDS.length);
+  const label = end < 0 ? '' : m.slice(ADD_PREFIX_WORDS.length, end);
+  if (label === '' || label.length > 60) return null;
+  const turn = risksTurnForReadback(rb);
+  if (turn.kind !== 'run_risks') return null;
+  const g = turn.graph;
+  const uniquelyNamed = (n: Rec): boolean => labelOf(n) !== null && g.nodes.filter((x) => doorNorm(x.label) === doorNorm(n.label)).length === 1;
+  const factors = g.nodes.filter((n) => n.kind === 'factor' && uniquelyNamed(n));
+  const destinations = g.nodes.filter((n) => (n.kind === 'goal' || n.kind === 'outcome') && uniquelyNamed(n));
+  const hits: (RunRisksWidenTurn['options'][number] | null)[] = [...turn.options, null];
+  for (const option of hits) {
+    for (const f of factors) {
+      const fid = String(f.id);
+      // The attachment, re-checked now: the option still changes the factor; a shared factor is changed by no option in scope.
+      if (option !== null ? !option.changes.includes(fid) : turn.options.some((o) => o.changes.includes(fid))) continue;
+      for (const a of destinations) {
+        for (const td of DIRECTIONS) {
+          for (const ad of DIRECTIONS) {
+            const minted = {
+              label,
+              hits: option !== null ? { id: option.id, label: option.label, kind: 'option' as const } : { id: fid, label: labelOf(f)!, kind: 'factor' as const },
+              through: { id: fid, label: labelOf(f)!, direction: td },
+              affects: { id: String(a.id), label: labelOf(a)!, direction: ad },
+            };
+            // Words first (cheap), then the id over the node ids.
+            if (riskAddMessage(minted) !== m || riskAddPressFor(minted).id !== chipId) continue;
+            return { tool: 'propose_new_risk', args: {
+              label,
+              affects: [{ target_label: labelOf(a)!, direction: ad }],
+              caused_by: [{ factor_label: labelOf(f)!, direction: td }],
+              rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
+            } };
+          }
+        }
+      }
+    }
+  }
+  return null;
 }
 
 /** The Add press refused at the door: said plainly, nothing held, and the way back. */
