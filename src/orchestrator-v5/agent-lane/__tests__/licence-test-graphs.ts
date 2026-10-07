@@ -53,7 +53,7 @@ export function reclassifiedCTurn<T>(turn: T): T {
   const checks = out.check_inputs.supplied_items as Rec[];
   checks.splice(index, 0, ...added.map(({ id, labels }) => ({ id, labels })));
   const anchor = '- how ‘Support capacity strain’ affects ‘monthly recurring revenue’ (nobody has sized this yet)';
-  out.directive = out.directive.replace(anchor, anchor + '\n- how ‘Price rise’ affects ‘Price-rise churn’ (nobody has sized this yet)\n- how ‘Starter tier support cost’ affects ‘Support capacity strain’ (nobody has sized this yet)');
+  (out as Rec).directive = String((out as Rec).directive).replace(anchor, anchor + '\n- how ‘Price rise’ affects ‘Price-rise churn’ (nobody has sized this yet)\n- how ‘Starter tier support cost’ affects ‘Support capacity strain’ (nobody has sized this yet)');
   return out;
 }
 
@@ -72,6 +72,6 @@ export function reclassifiedCPlan<T>(turn: T, option: string): T {
   const bullet = `- how ‘${added.labels[0]}’ affects ‘${added.labels[1]}’ (nobody has sized this yet)`;
   const anchor = option === 'raise_prices_10' ? '- ‘Price-rise churn’ (a risk on this plan’s path)'
     : '- how ‘Starter tier subscribers’ affects ‘Starter tier support cost’ (nobody has sized this yet)';
-  out.directive = out.directive.replace(anchor, bullet + '\n' + anchor);
+  (out as Rec).directive = String((out as Rec).directive).replace(anchor, bullet + '\n' + anchor);
   return out;
 }
