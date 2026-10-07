@@ -91,6 +91,18 @@ describe('the ONE proposal object (record.ts)', () => {
     expect(Object.values(FIELD_CLASS_BY_OP).filter((v) => v === 'link_strength')).toHaveLength(1);
   });
 
+  it('RED (Codex r1 P1 on #2743): the digest binds what the panel SHOWS: a rename under the same analysis hash changes it; the same model and hold keep it', () => {
+    const r = productHoldRecord(hold(), graph)!;
+    expect(r.digest).toMatch(/^[0-9a-f]{32}$/);
+    expect(productHoldRecord(hold(), graph)!.digest, 'stable for the same hold on the same model').toBe(r.digest);
+    const renamed = { ...graph, nodes: graph.nodes.map((n) => (n.id === 'fac_price' ? { ...n, label: 'Advertising spend' } : n)) };
+    expect(computeAnalysisAffectingGraphHash(renamed as never), 'precondition: the hash cannot see a rename').toBe(HASH);
+    const after = productHoldRecord(hold(), renamed)!;
+    expect(after.fields.find((f) => f.field_id === FROM_PRICE)!.from_label).toBe('Advertising spend');
+    expect(after.digest).not.toBe(r.digest);
+    expect(productHoldRecord(hold({ id: '22222222-2222-4222-8222-222222222222' }), graph)!.digest, 'another revision').not.toBe(r.digest);
+  });
+
   it('the wire carries only proposals pinned to the model the user sees', () => {
     const r = productHoldRecord(hold(), graph)!;
     expect(proposalFieldsWire([r], HASH)!.proposals.map((p) => p.proposal_id)).toEqual(['gmh_aaaaaaaaaaaa']);
@@ -144,11 +156,16 @@ describe('approve-with-edits (amend.ts)', () => {
   });
 
   it('parse is by shape; the digest binds the values (same press, other values → another request)', () => {
+    const SHOWN = 'd'.repeat(32);
     expect(parseProposalEdits(undefined)).toBeUndefined();
-    expect(parseProposalEdits({ proposal_id: 'gmh_aaaaaaaaaaaa', graph_hash: HASH, fields: [] })).toBeNull(); // no revision
-    const a = parseProposalEdits({ proposal_id: 'gmh_aaaaaaaaaaaa', revision: 'r1', graph_hash: HASH, fields: [{ field_id: TO_GOAL, band: 'slight' }] })!;
-    const b = parseProposalEdits({ proposal_id: 'gmh_aaaaaaaaaaaa', revision: 'r1', graph_hash: HASH, fields: [{ field_id: TO_GOAL, band: 'strong' }] })!;
+    expect(parseProposalEdits({ proposal_id: 'gmh_aaaaaaaaaaaa', digest: SHOWN, graph_hash: HASH, fields: [] })).toBeNull(); // no revision
+    // no digest of what the panel showed (Codex r1 P1 on #2743): the hash and revision alone do not bind the words on screen
+    expect(parseProposalEdits({ proposal_id: 'gmh_aaaaaaaaaaaa', revision: 'r1', graph_hash: HASH, fields: [] })).toBeNull();
+    const a = parseProposalEdits({ proposal_id: 'gmh_aaaaaaaaaaaa', revision: 'r1', digest: SHOWN, graph_hash: HASH, fields: [{ field_id: TO_GOAL, band: 'slight' }] })!;
+    const b = parseProposalEdits({ proposal_id: 'gmh_aaaaaaaaaaaa', revision: 'r1', digest: SHOWN, graph_hash: HASH, fields: [{ field_id: TO_GOAL, band: 'strong' }] })!;
+    expect(a).not.toBeNull();
     expect(proposalEditsDigest(a)).not.toBe(proposalEditsDigest(b));
+    expect(proposalEditsDigest(a), 'what was shown is part of the request').not.toBe(proposalEditsDigest({ ...a, digest: 'e'.repeat(32) }));
     expect(proposalEditsDigest(a)).toBe(proposalEditsDigest({ ...a, fields: [...a.fields] }));
   });
 });
@@ -219,20 +236,18 @@ describe('the words (reply.ts) and the conventional bare-confirm window', () => 
     }
   });
 
-  it('an EXTENDED hold past its original window never binds a bare "yes"; inside that window it still does', () => {
+  it('a hold KEPT by the Agent lane (marked) never binds a bare "yes" on the conventional route — retention is not consent; an unmarked hold is untouched', async () => {
     const now = Date.parse('2026-10-07T10:00:00.000Z');
-    // Kept by the Agent lane's lifecycle (marked), offered 60 minutes ago.
-    const extended = refreshedHold(hold({ emitted_at_iso: '2026-10-07T09:00:00.000Z' }), now);
-    const bare = tryShortConfirmResume({ message: 'yes', pendingActions: [extended], currentTurnIndex: 3, nowMs: now });
-    expect(bare.matched && bare.dispatch === 'pending_action').toBe(false);
+    // Kept by the Agent lane's lifecycle (marked): offered a minute ago, or an hour ago, a bare "yes" binds neither.
+    for (const emitted of ['2026-10-07T09:59:00.000Z', '2026-10-07T09:00:00.000Z']) {
+      const kept = refreshedHold(hold({ emitted_at_iso: emitted }), now);
+      const bare = tryShortConfirmResume({ message: 'yes', pendingActions: [kept], currentTurnIndex: 3, nowMs: now });
+      expect(bare.matched && bare.dispatch === 'pending_action', emitted).toBe(false);
+    }
     // (Its exact card words resolve it by the label pick, `turn-executor.ts` `tryProposalOrdinalSelect`, as before —
-    // the route-level seam test approves held proposals across turns through that path.)
-    // CONTROL: inside the original window a bare "yes" still binds, exactly as before.
-    const fresh = refreshedHold(hold({ emitted_at_iso: '2026-10-07T09:55:00.000Z' }), now);
-    const yes = tryShortConfirmResume({ message: 'yes', pendingActions: [fresh], currentTurnIndex: 3, nowMs: now });
-    expect(yes.matched && yes.dispatch === 'pending_action' ? yes.pending.chip_id : undefined).toBe('gmh_aaaaaaaaaaaa');
-    // CONTROL: an UNMARKED hold (every conventional hold, every existing fixture) is untouched by this rule.
-    const unmarked = hold({ emitted_at_iso: '2026-10-07T09:00:00.000Z', expires_at_iso: '2099-01-01T00:00:00.000Z' });
+    // the route-level seam test approves kept proposals across turns through that path.)
+    // CONTROL: an UNMARKED hold (every conventional hold, every existing fixture) still binds a bare "yes" exactly as before.
+    const unmarked = hold({ emitted_at_iso: '2026-10-07T09:59:00.000Z', expires_at_iso: '2099-01-01T00:00:00.000Z' });
     const legacy = tryShortConfirmResume({ message: 'yes', pendingActions: [unmarked], currentTurnIndex: 3, nowMs: now });
     expect(legacy.matched && legacy.dispatch === 'pending_action' ? legacy.pending.chip_id : undefined).toBe('gmh_aaaaaaaaaaaa');
   });

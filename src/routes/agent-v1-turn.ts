@@ -2561,6 +2561,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** Which typed outcome this turn's Run was said as (`run-outcome.ts`), on either path; `undefined` when none. */
     let runOutcomeKind: RunOutcome['kind'] | undefined;
     let result: AgentTurnResult | undefined;
+    /** S-D: this turn's approve-with-edits applied nothing (its own sentence says so; no generic "Not saved" line). */
+    let editsRefusedThisTurn = false;
     const keptProposal = keptProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
     if (keptProposal !== undefined) {
       const started = Date.now();
@@ -2601,7 +2603,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /**
      * ⭐ S-D APPROVE-WITH-EDITS (design §6): edits that cannot bind to THIS card (malformed, another proposal, or a
      * proposal that takes none in slice 1) apply nothing: the proposal stays held, and the reply says why. Valid edits
-     * ride the SAME approval below (`toolCtx.proposal_edits`) to the existing door, which applies them in one commit.
+     * ride the SAME approval below (the tool context's `proposal_edits`) to the existing door, which applies them in one commit.
      */
     if (approvedProposal !== undefined && result === undefined && proposalEdits !== undefined && editsForThisCard === undefined
       && !(proposalEdits !== null && proposalEdits.proposal_id === approvedProposal && proposalEdits.fields.length === 0)) {
@@ -2652,11 +2654,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
         // ⭐ S-D: what the user set vs what Olumi held, server-authored from the hold's own record, only once it landed.
         const editsApplied = applied.ok === true && applied.mutated === true ? readUserEdits(applied.user_edits) : undefined;
-        const editsRefused = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true;
+        editsRefusedThisTurn = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true;
         const followUp = [guarded.text.trim(), editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
-          editsRefused ? editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
+          editsRefusedThisTurn ? editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
-        const said = [narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
+        // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
+        const said = [editsRefusedThisTurn ? '' : narrateWriteOutcome('', [call], [applied], { versioned: userId !== null }).status ?? '', followUp].filter((x) => x !== '').join(' ');
         const ms = Date.now() - fastStartedAt;
         result = {
           // The reply the user reads is composed from this text plus Olumi's status line.
@@ -3431,16 +3434,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const scopeWithdrawals = new Set(result.tool_results.filter(r => r.withdrawn === true).map(r => r.proposal_id));
     const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
-    // ⭐ S-D: the row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK) and scope issues go first: a held proposal
-    // that does not fit is SAID as set aside, never dropped in silence (the oldest are kept).
-    {
-      const holdRoom = Math.max(0, PENDING_ACTIONS_PER_TURN_CAP - retainedScopeIssues.length);
-      if (liveHolds.length > holdRoom) {
-        heldLapseLines = [...heldLapseLines, ...liveHolds.slice(holdRoom).map((h) => heldLapseSentence(heldChangeName(h), 'over_cap'))];
-        liveHolds = liveHolds.slice(0, holdRoom);
-        heldRecords = heldRecords.filter((r) => liveHolds.some((h) => h.chip_id === r.proposal_id));
-      }
-    }
     const composedRead = await withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues, String(req.id));
     const { analysisState, analysisResult } = composedRead;
     if (whatChangesRead !== undefined) {
@@ -3668,16 +3661,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }), offeredSpecific);
     /**
      * ⭐ S-D CARD CONTINUITY: a held proposal is approvable only by its card, so while one is held and this turn offers no
-     * other approval, the oldest one's card is offered again — its own words, exactly what the door checks — BESIDE the
+     * other approval, the oldest one's card (approve, change, not now) is offered again — its own words, exactly what the door checks — BESIDE the
      * turn's own next steps (a proposal held until decided must not take the user's other actions away while it waits).
      * Never on a method's terminal turn, whose controls are the method's own.
      */
     const heldCardOffer: OfferedAction[] = approvals.length === 0 && carriedApproval.length === 0 && heldRecords.length > 0
-      && fastPath !== 'method' && !decisionReviewRequested ? [heldRecords[0]!.approve_action as OfferedAction, AMEND_CHIP] : [];
+      && fastPath !== 'method' && !decisionReviewRequested
+      // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
+      ? [heldRecords[0]!.approve_action as OfferedAction, AMEND_CHIP, heldRecords[0]!.decline_action as OfferedAction] : [];
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
-    if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
-    rememberApprove(approveKey, offeredNow);
-    rememberResearchOffers(approveKey, offeredNow);
     // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
     // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
     // must not drop what a restart needs to find it).
@@ -3700,13 +3692,37 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * inner write: a hold this turn confirmed is already consumed and is not carried. Holds go first; the row
      * holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). A failed read carries none, loudly.
      */
+    /*
+     * ⭐ S-D: the row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). Scope issues go first, then the approval
+     * this answer offers or carries (the card the user is looking at; Codex r1 P1 on #2743), then the held proposals,
+     * oldest first. A held proposal that does not fit is SAID as set aside, never dropped in silence, and its card and
+     * fields are withdrawn from this answer with it.
+     */
+    {
+      const holdRoom = Math.max(0, PENDING_ACTIONS_PER_TURN_CAP - retainedScopeIssues.length - (approvalCarrier !== undefined ? 1 : 0));
+      if (liveHolds.length > holdRoom) {
+        heldLapseLines = [...heldLapseLines, ...liveHolds.slice(holdRoom).map((h) => heldLapseSentence(heldChangeName(h), 'over_cap'))];
+        liveHolds = liveHolds.slice(0, holdRoom);
+        heldRecords = heldRecords.filter((r) => liveHolds.some((h) => h.chip_id === r.proposal_id));
+        // The re-offered card belongs to the OLDEST hold; if even that one did not fit, its card goes with it.
+        if (heldCardOffer.length > 0 && !heldRecords.some((r) => r.approve_action.id === heldCardOffer[0]!.id)) {
+          const cardIds = new Set(heldCardOffer.map((c) => c.id));
+          for (let i = offeredNow.length - 1; i >= 0; i -= 1) if (cardIds.has(offeredNow[i]!.id)) offeredNow.splice(i, 1);
+        }
+      }
+    }
+    // Remembered only once the row's capacity is settled, so a card withdrawn above is never remembered as offered.
+    if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
+    rememberApprove(approveKey, offeredNow);
+    rememberResearchOffers(approveKey, offeredNow);
     const pendingCandidates = [
       ...retainedScopeIssues,
-      ...liveHolds,
       ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
+      ...liveHolds,
       ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
     ];
-    // The row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). Holds go first; what does not fit is said, never silent.
+    // The row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK): scope issues, the offered approval, the held proposals
+    // (sized above so none is cut here), then the Run offer. What still does not fit is logged.
     if (pendingCandidates.length > PENDING_ACTIONS_PER_TURN_CAP) {
       log.warn({ scenario_id: scenarioId, dropped: pendingCandidates.slice(PENDING_ACTIONS_PER_TURN_CAP).map((pa) => pa.action.kind) },
         'agent-lane: pending actions over the per-row cap — the lowest-priority items are not carried');
@@ -3753,7 +3769,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen' || fastPath === 'method'
       ? { text, status: null as string | null, stripped: [] as string[] }
       : fastPath === 'approve'
-        ? { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }), text }
+        ? (editsRefusedThisTurn ? { text, status: null as string | null, stripped: [] as string[] }
+          : { ...narrateWriteOutcome('', result.tool_calls, result.tool_results, { versioned: userId !== null }), text })
         : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
     const narration = goalLine === null ? narrated : { ...narrated, status: [goalLine, narrated.status].filter((x): x is string => typeof x === 'string' && x !== '').join(' ') };
@@ -4173,6 +4190,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           source: 'agent_turn',
           baseGraphForInvariants: readbackGraph,
           withdrawnGoalScopeChipIds: [...scopeWithdrawals].filter((id): id is string => typeof id === 'string'),
+          // ⭐ S-D: a held proposal this answer carries is kept only while the latest row still holds it (never resurrected).
+          keepSuppliedOnlyIfStillLatest: isProductHold,
           write: {
           scenario_id: scenarioId,
           // The ANSWER row, under the client's own turn_id (the claim `<turn_id>:claim` was taken before

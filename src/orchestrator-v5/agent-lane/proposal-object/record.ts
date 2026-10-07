@@ -11,6 +11,8 @@
  * add-factor doors and the edit referee hold) and the `link_strength` field class. Every other op class is CLASSIFIED
  * here (exhaustively, so a new op is a compile error until it is) and declared for the slice that adds it.
  */
+import { createHash } from 'node:crypto';
+
 import type { StrengthBand } from '@talchain/schemas/boundary';
 
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
@@ -97,6 +99,13 @@ export interface ProposalRecord {
    * that revision, so two panels can never approve each other's values (Codex P0 on the design).
    */
   readonly revision: string;
+  /**
+   * What the panel SHOWED, bound: the card's words, every field (its ends, their labels, direction, value and whose it
+   * is) and the missing data, hashed. Edits name it and the door re-derives it from the stored hold on the stored model,
+   * so a rename or any other change to what was shown applies nothing — the analysis hash alone ignores labels
+   * (Codex r1 P1 on #2743: a renamed factor took the user's value under a name they never saw).
+   */
+  readonly digest: string;
   readonly dialect: 'product_hold';
   readonly base_graph_hash: string;
   readonly approve_action: CardAction;
@@ -234,16 +243,23 @@ export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: numb
     const f = linkField(o, labelOf);
     if (f !== undefined) fields.push(f);
   }
+  const missing = missingOf(pa, ops);
+  const digest = createHash('sha256').update(JSON.stringify({
+    p: pa.chip_id, r: pa.id, g: pin, m: approve.message,
+    f: fields.map((f) => [f.field_id, f.from_id, f.to_id, f.from_label, f.to_label, f.direction, f.current.band, f.current.source, f.editable]),
+    x: missing.map((m) => [m.node_id, m.label, m.kind, m.what]),
+  })).digest('hex').slice(0, 32);
   return {
     proposal_id: pa.chip_id,
     revision: pa.id,
+    digest,
     dialect: 'product_hold',
     base_graph_hash: pin,
     approve_action: approve,
     decline_action: { id: declineChipIdFor(pa.chip_id), label: 'Not now', message: 'Not now.' },
     operations: ops,
     fields,
-    missing: missingOf(pa, ops),
+    missing,
   };
 }
 
@@ -267,6 +283,7 @@ export interface ProposalFieldsWire {
   readonly proposals: readonly {
     readonly proposal_id: string;
     readonly revision: string;
+    readonly digest: string;
     readonly approve_action: CardAction;
     readonly decline_action: CardAction;
     readonly fields: readonly ProposalField[];
@@ -283,7 +300,7 @@ export function proposalFieldsWire(records: readonly ProposalRecord[], graphHash
     version: 1,
     graph_hash: graphHash,
     proposals: pinned.map((r) => ({
-      proposal_id: r.proposal_id, revision: r.revision, approve_action: r.approve_action, decline_action: r.decline_action,
+      proposal_id: r.proposal_id, revision: r.revision, digest: r.digest, approve_action: r.approve_action, decline_action: r.decline_action,
       fields: r.fields, missing: r.missing,
     })),
   };

@@ -25,6 +25,8 @@ export interface ProposalEditsRequest {
   readonly proposal_id: string;
   /** The stored revision the panel showed (`ProposalRecord.revision`): the door applies the edits to that one only. */
   readonly revision: string;
+  /** What the panel showed (`ProposalRecord.digest`): the door applies the edits only while it is still exactly that. */
+  readonly digest: string;
   readonly graph_hash: string;
   readonly fields: readonly { readonly field_id: string; readonly band: StrengthBand }[];
 }
@@ -51,15 +53,16 @@ const MAX_EDITED_FIELDS = 32;
 export function parseProposalEdits(raw: unknown): ProposalEditsRequest | null | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!isRec(raw)) return null;
-  const { proposal_id: id, revision, graph_hash: hash, fields } = raw;
-  if (typeof id !== 'string' || id === '' || typeof revision !== 'string' || revision === '' || typeof hash !== 'string' || hash === ''
+  const { proposal_id: id, revision, digest, graph_hash: hash, fields } = raw;
+  if (typeof id !== 'string' || id === '' || typeof revision !== 'string' || revision === '' || typeof digest !== 'string' || digest === ''
+    || typeof hash !== 'string' || hash === ''
     || !Array.isArray(fields) || fields.length > MAX_EDITED_FIELDS) return null;
   const out: { field_id: string; band: StrengthBand }[] = [];
   for (const f of fields) {
     if (!isRec(f) || typeof f['field_id'] !== 'string' || f['field_id'] === '' || typeof f['band'] !== 'string') return null;
     out.push({ field_id: f['field_id'], band: f['band'] as StrengthBand });
   }
-  return { proposal_id: id, revision, graph_hash: hash, fields: out };
+  return { proposal_id: id, revision, digest, graph_hash: hash, fields: out };
 }
 
 /**
@@ -67,7 +70,7 @@ export function parseProposalEdits(raw: unknown): ProposalEditsRequest | null | 
  * request, so a retry can never replay one set of values as another. Canonical: fields sorted by id.
  */
 export function proposalEditsDigest(edits: ProposalEditsRequest): string {
-  const canonical = JSON.stringify({ p: edits.proposal_id, r: edits.revision, g: edits.graph_hash,
+  const canonical = JSON.stringify({ p: edits.proposal_id, r: edits.revision, d: edits.digest, g: edits.graph_hash,
     f: [...edits.fields].sort((a, b) => (a.field_id < b.field_id ? -1 : a.field_id > b.field_id ? 1 : 0)).map((f) => [f.field_id, f.band]) });
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }

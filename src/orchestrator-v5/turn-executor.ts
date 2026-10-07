@@ -305,7 +305,6 @@ import {
   type GmHeldResumeRead,
 } from './handlers/gm-held-execute.js';
 import { appendLapseNotice, threadHoldsThroughMutatingCommit } from './handlers/hold-thread-through.js';
-import type { EditPatchOperationLike } from './graph-management/adapters/edit-graph-producer.js';
 import { PatchOperationsArraySchema } from '../orchestrator/patch-validation.js';
 import { productHoldRecord } from './agent-lane/proposal-object/record.js';
 import { amendHeldOperations, parseProposalEdits } from './agent-lane/proposal-object/amend.js';
@@ -4648,6 +4647,10 @@ export async function runTurnExecutor(
             return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded');
           }
           const editRecord = productHoldRecord(heldPending, gmBaseGraph);
+          // What the panel showed (labels included), re-derived from the stored hold on the stored model, must be unchanged.
+          if (editRecord !== undefined && editRecord.digest !== proposalEdits.digest) {
+            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded');
+          }
           const amended = editRecord === undefined ? undefined : amendHeldOperations(editRecord, proposalEdits.fields);
           const reparsed = amended?.ok === true ? PatchOperationsArraySchema.safeParse(amended.operations) : undefined;
           if (reparsed === undefined || !reparsed.success) return commitProposedChangeRecovery('invalid', 'gm_held_edits_refused');
@@ -4735,7 +4738,7 @@ export async function runTurnExecutor(
           priorPendingActions: (context.most_recent_pending_actions ?? []).filter((pa) => pa.chip_id !== heldPending.chip_id),
           graphAfterCommit: outcome.mutatedGraph,
           graphHashAfterCommit: confirmHashAfter,
-          appliedOperations: heldOperations as unknown as EditPatchOperationLike[],
+          appliedOperations: heldOperations,
           nowMs: Date.now(),
           scenarioId: context.session_id,
           turnId: context.request_id,
@@ -4746,9 +4749,11 @@ export async function runTurnExecutor(
           deriveUnconfiguredOptionLabels(gmReadiness),
           deriveBlockedConfiguredOptions(gmReadiness),
         );
+        // S-D: any other held change this commit made unfit is said beside the receipt (HOLD-WIPE's own notice).
+        const gmAppliedText = otherHolds.notice === null ? gmReceipt : appendLapseNotice(gmReceipt, otherHolds.notice);
         const appliedResponse = composeAnswer({
           answerKind: 'functional',
-          assistant_text: otherHolds.notice === null ? gmReceipt : appendLapseNotice(gmReceipt, otherHolds.notice),
+          assistant_text: gmAppliedText,
           stage: context.stage,
           suggested_actions: buildGmHeldAppliedChips(gmReadiness),
         });

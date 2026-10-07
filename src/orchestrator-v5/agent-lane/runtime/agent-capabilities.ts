@@ -2249,6 +2249,10 @@ export function createAgentCapabilities(
           detail: 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
       }
       const record = productHoldRecord(hold, before);
+      if (record !== undefined && record.digest !== edits.digest) {
+        return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
+          detail: 'Nothing changed. What this change shows has changed since these values were set.' };
+      }
       const amended = record === undefined ? undefined : amendHeldOperations(record, edits.fields);
       if (amended === undefined || !amended.ok) {
         return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,

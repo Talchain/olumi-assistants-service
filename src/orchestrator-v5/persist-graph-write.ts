@@ -108,7 +108,7 @@
  *   narrower claim than one storage generation.
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
-import { PENDING_ACTIONS_PER_TURN_CAP } from './session/pending-action.js';
+import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
 import { log } from '../utils/telemetry.js';
 
 import {
@@ -171,6 +171,12 @@ export interface CheckedGraphAppendParams {
   readonly source?: string | undefined;
   /** Only successful, user-authorised scope withdrawals may retire this durable issue. */
   readonly withdrawnGoalScopeChipIds?: readonly string[];
+  /**
+   * ⭐ S-D (lane EDIT-PANEL; Codex r1 P1 on #2743): pendings of this class that the caller carried FROM the latest row are
+   * kept only while the latest row, read HERE just before the append, still holds them. A request that reconciled its
+   * held proposals and then took seconds to answer must not put back one another request approved or declined meanwhile.
+   */
+  readonly keepSuppliedOnlyIfStillLatest?: (pending: PendingAction) => boolean;
 }
 
 /**
@@ -348,7 +354,12 @@ export async function appendCheckedGraphWrite(
   if (typeof store.readMostRecentPendingActions === 'function') {
     const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict' });
     if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
-    const supplied = write.pending_actions ?? [];
+    let supplied = write.pending_actions ?? [];
+    if (params.keepSuppliedOnlyIfStillLatest !== undefined) {
+      const onLatest = new Set(prior.map((p) => p.chip_id));
+      const kept = supplied.filter((n) => !params.keepSuppliedOnlyIfStillLatest!(n) || onLatest.has(n.chip_id));
+      if (kept.length !== supplied.length) { supplied = kept; write = { ...write, pending_actions: kept }; }
+    }
     const missing = prior.filter(p => p.action.kind === 'reconcile_goal_scope'
       && !params.withdrawnGoalScopeChipIds?.includes(p.chip_id)
       && !supplied.some(n => n.chip_id === p.chip_id))

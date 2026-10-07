@@ -17,7 +17,6 @@
  * `parsePendingAction`), OpenAI only; route-v2's LLM router throws if touched.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import { asSent } from './helpers/as-sent.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 
@@ -31,9 +30,18 @@ const order: string[] = [];
 let graphOf = new Map<string, unknown>();
 /** Every append that carried a graph, per scenario: "ONE graph-bearing row". */
 const graphWrites = new Map<string, number>();
-/** (7c) Refuse every graph read once the scenario has more than this many graph-bearing rows; `undefined` = never. */
-let failReadsAfterWrites: number | undefined;
-let readsRefused = 0;
+/**
+ * Codex r1 P1 on #2743: run ONCE inside the persistence floor's own pending read (the read just before an answer row is
+ * appended), to stage another request's write landing between a turn's reconcile and its append.
+ */
+let atFloorRead: (() => Promise<void>) | undefined;
+const calledFromFloor = (): boolean => {
+  const limit = Error.stackTraceLimit;
+  Error.stackTraceLimit = 60;
+  const stack = new Error().stack ?? '';
+  Error.stackTraceLimit = limit;
+  return stack.includes('appendCheckedGraphWrite');
+};
 const latestRow = (sid: string = SCENARIO): Row | undefined =>
   [...order].reverse().map((k) => rows.get(k)!).find((r) => r.scenario_id === sid && !r.turn_id.endsWith(':claim'));
 const jsonbOrder = (v: unknown): unknown =>
@@ -56,7 +64,10 @@ const store = {
     const row = rows.get(`${sid}:${turnId}`);
     return row === undefined ? null : { ...row, pending_actions: await parsedPending(row, sid) };
   }),
-  readMostRecentPendingActions: vi.fn(async (sid: string) => parsedPending(latestRow(sid), sid)),
+  readMostRecentPendingActions: vi.fn(async (sid: string) => {
+    if (atFloorRead !== undefined && calledFromFloor()) { const staged = atFloorRead; atFloorRead = undefined; await staged(); }
+    return parsedPending(latestRow(sid), sid);
+  }),
   append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; turn_class?: string; handler_id?: string | null; pending_actions?: unknown[]; graph?: unknown; handler_facts?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) {
@@ -142,11 +153,6 @@ let script: ((body: Record<string, unknown>) => unknown)[] = [];
 let openAiCalls = 0;
 const fnCall = (name: string, args: Record<string, unknown>) => ({ output: [{ type: 'function_call', name, call_id: `c${openAiCalls}`, arguments: JSON.stringify(args) }] });
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
-/** The tool output the model was handed on its NEXT call (the first function_call_output in its input). */
-const toolOutputIn = (body: Record<string, unknown>): Record<string, unknown> => {
-  const out = (body['input'] as { type?: string; output?: string }[]).filter((i) => i.type === 'function_call_output').at(-1);
-  return JSON.parse(String(out?.output ?? '{}')) as Record<string, unknown>;
-};
 
 describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and is approved with the user\'s own values', () => {
   let app: FastifyInstance;
@@ -165,12 +171,8 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async (req, reply) => {
+    app.post('/assist/v1/scenarios/:id/graph', async (req) => {
       const id = (req.params as { id: string }).id;
-      if (failReadsAfterWrites !== undefined && (graphWrites.get(id) ?? 0) > failReadsAfterWrites) {
-        readsRefused += 1;
-        return reply.code(500).send({ error: 'read failed' });
-      }
       const g = graphOf.get(id) ?? null;
       return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never) };
     });
@@ -179,7 +181,7 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     await app.ready();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; failReadsAfterWrites = undefined; readsRefused = 0; });
+  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; routerCalls.length = 0; atFloorRead = undefined; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
@@ -196,10 +198,6 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
   const heldOnLatestRow = async () => {
     const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; action: { kind: string; inline_patch?: { handler_id?: string; operations?: { op: string; path: string; value?: Record<string, unknown> }[] } } }[];
     return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
-  };
-  const refOf = async (targetKey: string) => {
-    const { gmHeldProposalRef } = await import('../../handlers/edit-graph-referee-gate.js');
-    return gmHeldProposalRef(SCENARIO, targetKey);
   };
   const newRisk = () => graphNow().nodes.find((x) => x.kind === 'risk' && x.label === 'Competitive response');
   const RISK_MSG = 'Add a competitive response risk: a price rise could provoke competitors, which lowers revenue.';
@@ -219,11 +217,17 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
 
   type Field = { field_id: string; kind: string; from_id: string; to_id: string; from_label: string; to_label: string; direction: string;
     current: { band: string; source: string }; allowed_bands: string[]; editable: boolean };
-  type Proposal = { proposal_id: string; revision: string; approve_action: Chip; decline_action: Chip; fields: Field[]; missing: { node_id: string; label: string; kind: string; what: string }[] };
+  type Proposal = { proposal_id: string; revision: string; digest: string; approve_action: Chip; decline_action: Chip; fields: Field[]; missing: { node_id: string; label: string; kind: string; what: string }[] };
   type Fields = { version: number; graph_hash: string; proposals: Proposal[] };
   /** The carrier's own id: the stored revision a panel names. */
   const revisionOf = (pa: unknown): string => (pa as { id: string }).id;
   const fieldsOf = (b: Body) => (b as unknown as { _proposal_fields?: Fields })._proposal_fields;
+  /** What the panel was shown for this proposal on that turn: the digest a Submit must echo (Codex r1 P1 on #2743). */
+  const shownOf = (b: Body, ref: string): Proposal => {
+    const p = fieldsOf(b)?.proposals.find((x) => x.proposal_id === ref);
+    expect(p, JSON.stringify(fieldsOf(b))).toBeDefined();
+    return p!;
+  };
   const AMEND = { message: 'Before you apply it, I want to change some of it.', source: 'chip', chip: { id: 'agent-amend-proposal' } };
   const edgeOf = (from: string, to: string) => graphNow().edges.find((e) => e.from === from && e.to === to) as
     ({ strength?: { mean?: number; std?: number }; provenance?: { source?: string }; defaulted?: unknown } & Record<string, unknown>) | undefined;
@@ -259,12 +263,14 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     expect((await heldOnLatestRow()).map((p) => p.chip_id), 'still held').toEqual([ref]);
     expect(approveChipOf(t2)?.id, 'its card is offered again: a hold the user cannot press is a dead hold').toBe(approve.id);
     expect(approveChipOf(t2)?.message, 'the exact words the door checks').toBe(approve.message);
+    expect(t2.suggested_actions.map((c) => c.id), 'its "Not now" is on offer: words alone never set it aside').toContain(`agent-decline-proposal:${ref}`);
     const f = fieldsOf(t2);
     expect(f, JSON.stringify(Object.keys(t2))).toBeDefined();
     expect(f!.graph_hash).toBe(await hashNow());
     expect(f!.proposals.map((p) => p.proposal_id)).toEqual([ref]);
     const p = f!.proposals[0]!;
     expect(p.revision, 'the exact stored revision the panel shows').toBe(revisionOf((await heldOnLatestRow())[0]!));
+    expect(p.digest, 'a digest of exactly what the panel shows').toMatch(/^[0-9a-f]{32}$/);
     expect(p.approve_action).toEqual(expect.objectContaining({ id: approve.id, message: approve.message }));
     expect(p.decline_action.id).toBe(`agent-decline-proposal:${ref}`);
     // Bound by identity: one field per held link, keyed by the held op's own path.
@@ -305,10 +311,11 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     const ref = approve.id.slice('agent-approve-proposal:'.length);
     const riskId = (await heldOnLatestRow())[0]!.action.inline_patch!.operations![0]!.path;
     const revision = revisionOf((await heldOnLatestRow())[0]!);
+    const { digest } = shownOf(t1, ref);
     const writesBefore = graphWrites.get(SCENARIO) ?? 0;
     const calls = openAiCalls;
     const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id },
-      proposal_edits: { proposal_id: ref, revision, graph_hash: await hashNow(), fields: [{ field_id: `link_strength:${riskId}::goal_x`, band: 'very_strong' }] } });
+      proposal_edits: { proposal_id: ref, revision, digest, graph_hash: await hashNow(), fields: [{ field_id: `link_strength:${riskId}::goal_x`, band: 'very_strong' }] } });
     expect(openAiCalls - calls, 'no model call').toBe(0);
     expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: ref })]);
     expect((graphWrites.get(SCENARIO) ?? 0) - writesBefore, 'ONE graph-bearing row: the existing door').toBe(1);
@@ -327,10 +334,12 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     expect(routerCalls).toEqual([]);
   }, 120_000);
 
-  it('NEGATIVE: an edit naming a field the proposal does not hold, a stale model, or another proposal → nothing written, still held, and the reply says so', async () => {
+  it('NEGATIVE: an edit naming a field the proposal does not hold, a stale model, another revision or proposal, or what another panel showed → nothing written, still held, and the reply says so (with no em dash)', async () => {
     graphOf.set(SCENARIO, seedGraph());
-    const approve = approveChipOf(await proposeRisk())!;
+    const t1 = await proposeRisk();
+    const approve = approveChipOf(t1)!;
     const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const { digest } = shownOf(t1, ref);
     const before = bytes();
     const hash = await hashNow();
     const held = (await heldOnLatestRow())[0]!;
@@ -338,41 +347,52 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     const link = `link_strength:fac_price::${held.action.inline_patch!.operations![0]!.path}`;
     for (const edits of [
       // a field this proposal does not hold (an existing link of the model) — bound by identity, never by shape
-      { proposal_id: ref, revision, graph_hash: hash, fields: [{ field_id: 'link_strength:fac_price::goal_x', band: 'strong' }] },
+      { proposal_id: ref, revision, digest, graph_hash: hash, fields: [{ field_id: 'link_strength:fac_price::goal_x', band: 'strong' }] },
       // values set on another model
-      { proposal_id: ref, revision, graph_hash: 'f'.repeat(64), fields: [{ field_id: link, band: 'strong' }] },
+      { proposal_id: ref, revision, digest, graph_hash: 'f'.repeat(64), fields: [{ field_id: link, band: 'strong' }] },
       // values set on another revision of this proposal (Codex P0: two panels never approve each other's values)
-      { proposal_id: ref, revision: '00000000-0000-4000-8000-000000000000', graph_hash: hash, fields: [{ field_id: link, band: 'strong' }] },
+      { proposal_id: ref, revision: '00000000-0000-4000-8000-000000000000', digest, graph_hash: hash, fields: [{ field_id: link, band: 'strong' }] },
       // values for another proposal than the card pressed
-      { proposal_id: 'gmh_000000000000', revision, graph_hash: hash, fields: [{ field_id: link, band: 'strong' }] },
+      { proposal_id: 'gmh_000000000000', revision, digest, graph_hash: hash, fields: [{ field_id: link, band: 'strong' }] },
       // a band outside the vocabulary
-      { proposal_id: ref, revision, graph_hash: hash, fields: [{ field_id: link, band: 'enormous' }] },
+      { proposal_id: ref, revision, digest, graph_hash: hash, fields: [{ field_id: link, band: 'enormous' }] },
+      // what another panel showed (Codex r1 P1: the hash and revision alone do not bind the words on screen)
+      { proposal_id: ref, revision, digest: '0'.repeat(32), graph_hash: hash, fields: [{ field_id: link, band: 'strong' }] },
     ]) {
       const t = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id }, proposal_edits: edits });
       expect(t._agent.tool_calls.filter((c) => c.name === 'authorise_change' && c.ok), JSON.stringify(edits)).toEqual([]);
       expect(bytes(), `nothing written for ${JSON.stringify(edits)}`).toBe(before);
       expect((await heldOnLatestRow()).map((p) => p.chip_id), 'still held').toEqual([ref]);
       expect(t.assistant_text, t.assistant_text).toMatch(/Nothing in the model changed/);
+      expect(t.assistant_text, 'no em dash in the refusal (Codex r1 P2)').not.toContain('\u2014');
     }
-  }, 180_000);
+    // CONTROL: the same press with what this panel showed lands (each refusal above is the one difference named).
+    const ok = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id }, proposal_edits: { proposal_id: ref, revision, digest, graph_hash: hash, fields: [{ field_id: link, band: 'strong' }] } });
+    expect(ok._agent.tool_calls[0], JSON.stringify(ok._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+  }, 240_000);
 
   it('RED (Codex P0): THE DOOR ITSELF applies edits only to the stored revision they name — a press naming another revision writes nothing; the same press naming this one lands the user\u2019s value', async () => {
     graphOf.set(SCENARIO, seedGraph());
-    const approve = approveChipOf(await proposeRisk())!;
+    const t1 = await proposeRisk();
+    const approve = approveChipOf(t1)!;
     const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const { digest } = shownOf(t1, ref);
     const held = (await heldOnLatestRow())[0]!;
     const riskId = held.action.inline_patch!.operations![0]!.path;
     const before = bytes();
     // Straight at the product's confirm (route-v2), bypassing the Agent's own pre-check: the door must bind on its own.
-    const press = (revision: string) => app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+    const press = (revision: string, shown: string = digest) => app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), stage: 'frame', turn_class: 'frame', source: 'chip',
-      message: approve.message, chip: { id: ref, parameters: { proposal_edits: { proposal_id: ref, revision, graph_hash: hashBefore,
+      message: approve.message, chip: { id: ref, parameters: { proposal_edits: { proposal_id: ref, revision, digest: shown, graph_hash: hashBefore,
         fields: [{ field_id: `link_strength:${riskId}::goal_x`, band: 'slight' }] } } },
     } });
     const hashBefore = await hashNow();
     const other = await press('00000000-0000-4000-8000-000000000000');
     expect(other.statusCode, other.body.slice(0, 300)).toBe(200);
     expect(bytes(), 'another revision writes nothing').toBe(before);
+    const otherPanel = await press(revisionOf(held), '0'.repeat(32));
+    expect(otherPanel.statusCode, otherPanel.body.slice(0, 300)).toBe(200);
+    expect(bytes(), 'what another panel showed writes nothing, at the door too').toBe(before);
     const own = await press(revisionOf(held));
     expect(own.statusCode, own.body.slice(0, 300)).toBe(200);
     const e = edgeOf(riskId, 'goal_x')!;
@@ -394,4 +414,100 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     expect(late._agent.tool_calls[0]).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false }));
     expect(bytes(), 'a declined proposal writes nothing').toBe(before);
   }, 120_000);
+
+  it('RED (Codex r1 P1): values shown for one model are never applied to a renamed one: same hash, other words → nothing written, still held; the panel shown afresh lands, in the new words', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeRisk();
+    const approve = approveChipOf(t1)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const riskId = (await heldOnLatestRow())[0]!.action.inline_patch!.operations![0]!.path;
+    const shown = shownOf(t1, ref);
+    const hash = await hashNow();
+    const g = graphNow();
+    graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'fac_price' ? { ...x, label: 'Advertising spend' } : x)) });
+    expect(await hashNow(), 'precondition: a rename leaves the analysis hash as it was').toBe(hash);
+    const before = bytes();
+    const edits = (digest: string) => ({ proposal_id: ref, revision: shown.revision, digest, graph_hash: hash,
+      fields: [{ field_id: `link_strength:fac_price::${riskId}`, band: 'very_strong' }] });
+    const stale = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id }, proposal_edits: edits(shown.digest) });
+    expect(stale._agent.tool_calls.filter((c) => c.name === 'authorise_change' && c.ok), JSON.stringify(stale._agent.tool_calls)).toEqual([]);
+    expect(bytes(), 'the user sized a link they saw as "Price"; nothing is written under another name').toBe(before);
+    expect((await heldOnLatestRow()).map((x) => x.chip_id), 'still held').toEqual([ref]);
+    expect(stale.assistant_text, stale.assistant_text).toMatch(/Nothing in the model changed/);
+    script = [() => say('What would you like to change?')];
+    const fresh = shownOf(await turn(AMEND), ref);
+    expect(fresh.fields.find((f) => f.field_id === `link_strength:fac_price::${riskId}`)?.from_label).toBe('Advertising spend');
+    expect(fresh.digest).not.toBe(shown.digest);
+    const ok = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id }, proposal_edits: edits(fresh.digest) });
+    expect(ok._agent.tool_calls[0], JSON.stringify(ok._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(edgeOf('fac_price', riskId)?.provenance?.source).toBe('user_specified');
+    expect(ok.assistant_text, ok.assistant_text).toContain('You set how strongly "Advertising spend" affects "Competitive response": very strong.');
+  }, 180_000);
+
+  it('RED (Codex r1 P1): values submitted after the model moved → nothing written, said plainly with no em dash; the proposal is still there to decide', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeRisk();
+    const approve = approveChipOf(t1)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const riskId = (await heldOnLatestRow())[0]!.action.inline_patch!.operations![0]!.path;
+    const shown = shownOf(t1, ref);
+    const hash = await hashNow();
+    const g = graphNow();
+    graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'fac_price' ? { ...x, observed_state: { value: 0.275, raw_value: 55, unit: 'GBP', cap: 200 } } : x)) });
+    expect(await hashNow(), 'precondition: the model moved').not.toBe(hash);
+    const before = bytes();
+    const t = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id }, proposal_edits: { proposal_id: ref, revision: shown.revision,
+      digest: shown.digest, graph_hash: hash, fields: [{ field_id: `link_strength:fac_price::${riskId}`, band: 'very_strong' }] } });
+    expect(t._agent.tool_calls.filter((c) => c.name === 'authorise_change' && c.ok), JSON.stringify(t._agent.tool_calls)).toEqual([]);
+    expect(bytes(), 'nothing written').toBe(before);
+    expect(t.assistant_text, t.assistant_text).toMatch(/Nothing in the model changed/);
+    expect(t.assistant_text, t.assistant_text).not.toContain('—');
+    expect((await heldOnLatestRow()).map((x) => x.chip_id), 'never dropped in silence').toEqual([ref]);
+  }, 120_000);
+
+  it('RED (Codex r1 P1): a request that reconciled its held proposals and then answered never puts back one another request declined meanwhile', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeRisk())!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    expect((await heldOnLatestRow()).map((x) => x.chip_id)).toEqual([ref]);
+    // Another request's decline lands between this turn's reconcile and its append (its answer row holds nothing).
+    atFloorRead = async () => {
+      await store.append({ scenario_id: SCENARIO, turn_id: randomUUID(), request_hash: 'another-request-declined-it', userMessage: 'Not now.',
+        assistantMessage: "Set aside: the risk 'Competitive response'. Nothing in the model changed.", pending_actions: [] });
+    };
+    script = [() => say('It means competitors may answer a price rise with their own cuts.')];
+    await turn({ message: 'Tell me what this risk means.' });
+    expect(atFloorRead, 'precondition: the race was staged at the floor’s own read').toBeUndefined();
+    expect(await heldOnLatestRow(), 'never resurrected').toEqual([]);
+  }, 120_000);
+
+  it('RED (Codex r1 P1): three held proposals and a new approval this turn offers → the offered approval is on the row; a held one that cannot fit is SAID set aside, never dropped in silence', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const labels = ['Competitive response', 'Supplier delay', 'Staff turnover'];
+    const refs: string[] = [];
+    for (const label of labels) {
+      const a = approveChipOf(await proposeRisk({ label }, `Add a risk: ${label}, which lowers revenue.`));
+      expect(a, label).toBeDefined();
+      refs.push(a!.id.slice('agent-approve-proposal:'.length));
+    }
+    const heldBefore = (await heldOnLatestRow()).map((x) => x.chip_id);
+    expect(heldBefore.length, 'precondition: the row is full of held proposals').toBeGreaterThanOrEqual(2);
+    script = [
+      () => fnCall('propose_link_strength', { from_label: 'Price', to_label: 'Revenue', strength: 'strong', rationale: 'The user said its effect is strong.' }),
+      () => say('I would set how strongly Price affects Revenue to strong. Shall I?'),
+    ];
+    const t = await turn({ message: 'Price has a strong effect on revenue.' });
+    const offered = approveChipOf(t);
+    expect(offered?.id, JSON.stringify(t._agent.tool_calls)).toMatch(/^agent-approve-proposal:(?!gmh_)/);
+    const offeredRef = offered!.id.slice('agent-approve-proposal:'.length);
+    const row = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; action: { inline_patch?: { agent_proposal?: { proposal_id?: string } } } }[];
+    expect(row.some((x) => x.action.inline_patch?.agent_proposal?.proposal_id === offeredRef), JSON.stringify(row.map((x) => x.chip_id))).toBe(true);
+    const heldAfter = (await heldOnLatestRow()).map((x) => x.chip_id);
+    const cut = refs.filter((r) => heldBefore.includes(r) && !heldAfter.includes(r));
+    expect(cut.length, 'precondition: at least one held proposal could not fit').toBeGreaterThanOrEqual(1);
+    for (const r of cut) {
+      const label = labels[refs.indexOf(r)]!;
+      expect(t.assistant_text, t.assistant_text).toContain(`The held change to add the risk '${label}' was set aside because only three changes can wait at once`);
+    }
+  }, 240_000);
 });
