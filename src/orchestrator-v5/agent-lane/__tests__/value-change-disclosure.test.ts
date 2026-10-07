@@ -136,7 +136,8 @@ describe('the route actually carries it to the user', () => {
     // cannot satisfy this and a moved line cannot break it.
     const decl = ROUTE.slice(ROUTE.indexOf('const owed = '));
     const body = decl.slice(0, decl.indexOf('];') + 2);
-    expect(body).toContain('disclosuresFor(result.tool_results)');
+    // The Run's methods note (Science 393023 (2)) is owed only when the reply has not said it, so the call reads the reply.
+    expect(body).toContain('disclosuresFor(result.tool_results, text)');
     expect(body).toContain('valueChangeDisclosures(stateFacts)');
     // The same owed array reaches both ask selection and the final displayed reply.
     expect(ROUTE).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');

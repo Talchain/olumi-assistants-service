@@ -15,10 +15,14 @@
  */
 import { ACTION_PRESS_PREFIX, ACTION_REGISTRY, actionOfPress, isUnknownActionPress, type ActionId } from './registry.js';
 import { actionBarOf, currentOfferFor, DISABLED, type ActionBarV1, type ActionOffer, type ItemRef } from './rank.js';
-import type { ActionFacts, ActionRevision } from './state.js';
+import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
+import { mapStageToDecisionStage } from '../../../dsk/stage-edge.js';
+import { resolveDskClaimProvenance, type DskClaimProvenance } from '../../compose/dsk-claim-record.js';
+import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
+import { composeGoalTargetQuestion } from '../../goal-target/decide-goal-target-ask.js';
 import { parseStructuralChallengePress } from '../method-turn/structural-challenge-turn.js';
 
-export type ActionRoute = 'decision_review' | 'what_changes' | 'strengthen_s1' | 'method_turn' | 'widen_turn' | 'structural_challenge';
+export type ActionRoute = 'decision_review' | 'what_changes' | 'strengthen_s1' | 'method_turn' | 'widen_turn' | 'structural_challenge' | 'typed_reply';
 export interface ActionHandler {
   /** The existing typed route path that answers this press. */
   readonly route: ActionRoute;
@@ -32,6 +36,12 @@ export const HANDLERS: Readonly<Record<ActionId, ActionHandler>> = {
   pre_mortem: { route: 'method_turn', gate: 'own' },
   more_options: { route: 'widen_turn', gate: 'own' },
   test_link: { route: 'structural_challenge', gate: 'own' },
+  frame_brief: { route: 'typed_reply', gate: 'offer' },
+  set_goal: { route: 'typed_reply', gate: 'offer' },
+  set_deadline: { route: 'typed_reply', gate: 'offer' },
+  more_risks: { route: 'widen_turn', gate: 'own' },
+  bias_anchoring: { route: 'typed_reply', gate: 'offer' },
+  check_estimates: { route: 'typed_reply', gate: 'offer' },
 };
 
 /** A working way on from a "can't yet": another current offer, the Run, or the existing "what it still needs" turn. */
@@ -39,9 +49,10 @@ export type ActionExit = { readonly kind: 'offer'; readonly offer: ActionOffer }
 export type CantYetReason = 'needs_current_analysis' | 'needs_goal' | 'needs_option' | 'nothing_in_scope' | 'unknown_action' | 'not_taken' | 'already_waiting';
 export interface ActionTypedReply {
   readonly text: string;
-  readonly reason: CantYetReason;
+  readonly science?: DskClaimProvenance;
+  readonly reason?: CantYetReason;
   readonly exits: readonly ActionExit[];
-  /** `ran` only for a re-offered card (the press did its job without a second write); every other typed reply is `cant_yet`. */
+  /** A deterministic gap reply or re-offered card ran without a model call or a second write. */
   readonly outcome?: 'ran';
 }
 
@@ -62,11 +73,12 @@ const OFFER_KEY = /^[0-9a-f]{16}$/;
 const rec = (v: unknown): Record<string, unknown> | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
 
 /** The action a chip presses, its target (a per-link press names its link) and the offer key it carried. */
-export function actionPressOf(chip: unknown): ActionPress | null {
+export function actionPressOf(chip: unknown, message?: unknown): ActionPress | null {
   const c = rec(chip);
   const id = c?.id;
   if (typeof id !== 'string') return null;
-  const action = actionOfPress(id);
+  // The turn's visible message rides beside the chip: a shared chip id (WIDEN's risks door) is told apart by it.
+  const action = actionOfPress(id, message);
   if (action === undefined && !isUnknownActionPress(id)) return null;
   const key = rec(c?.parameters)?.offer_key;
   const parsed = action === 'test_link' ? parseStructuralChallengePress(id) : null;
@@ -92,6 +104,12 @@ const CANT_YET: Record<ActionId, string> = {
   pre_mortem: 'I can’t run a pre-mortem yet',
   more_options: 'I can’t suggest options yet',
   test_link: 'I can’t test that link yet',
+  frame_brief: 'I can’t frame the brief yet',
+  set_goal: 'I can’t ask for a target yet',
+  set_deadline: 'I can’t ask for a deadline yet',
+  more_risks: 'I can’t suggest risks yet',
+  bias_anchoring: 'I can’t check anchoring yet',
+  check_estimates: 'I can’t show the estimates yet',
 };
 const BECAUSE: Record<keyof typeof DISABLED, string> = {
   needs_current_analysis: 'it needs a current analysis first.',
@@ -100,6 +118,7 @@ const BECAUSE: Record<keyof typeof DISABLED, string> = {
 };
 
 function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFacts, bar: ActionBarV1): ActionTypedReply {
+  if (action === 'bias_anchoring') return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
   const reasonKey = (Object.keys(DISABLED) as (keyof typeof DISABLED)[]).find((k) => DISABLED[k] === offer?.disabled_reason);
   if (reasonKey !== undefined) {
     const exits = reasonKey === 'needs_current_analysis' ? runExits(f) : otherOffers(bar, action, 2);
@@ -113,12 +132,57 @@ function cantYet(action: ActionId, offer: ActionOffer | undefined, f: ActionFact
       exits: otherOffers(bar, action, 2).length > 0 ? otherOffers(bar, action, 2) : runExits(f) };
 }
 
+/** Science 393023's exact bytes. Shown-first user figures await Science's wording and never enter these replies. */
+function estimateReply(action: 'bias_anchoring' | 'check_estimates', f: ActionFacts): ActionTypedReply {
+  const points = estimatePointsOf(f).filter(p => p.via !== 'shown_first');
+  if (action === 'check_estimates') {
+    // TODO lane-edit-panel.md: replace this list with the S-D panel fields when EDIT-PANEL ships its builder.
+    return { text: ["Olumi's estimates that this result rests on:",
+      ...points.map(p => `- ‘${p.label}’: ${p.figure}. That's Olumi's estimate, not a measured figure.`),
+      "If you have your own figure for any of these, tell me and I'll propose it for you to approve."].join('\n'), exits: [], outcome: 'ran' };
+  }
+  if (points.length === 0) return { text: "None of these patterns' triggers fire in this model.", reason: 'nothing_in_scope', exits: [] };
+  const stage = f.canonicalStage === null ? null : mapStageToDecisionStage(f.canonicalStage);
+  const science = stage === 'frame' || stage === 'evaluate' ? resolveDskClaimProvenance('DSK-B-001') : null;
+  return { text: ["A first number can pull later estimates towards it. Here are Olumi's figures this result leans on, to test against your own evidence.",
+    ...points.map(p => `- Olumi put ‘${p.label}’ at ${p.figure}. That's Olumi's estimate, not a measured figure. What would make the real value much lower than that? And what would make it much higher? From your own evidence, what range would you give, and what is it based on?`),
+    'Which of these would you check first?'].join('\n'), exits: [], outcome: 'ran', ...(science !== null ? { science } : {}) };
+}
+
+/** The gap replies are composed only from this press's current canonical facts. */
+function gapReply(action: ActionId, f: ActionFacts, bar: ActionBarV1): ActionTypedReply {
+  if (action === 'set_deadline') return { text: chanceGoalDeadlineAsk(f.goalLabel), exits: [], outcome: 'ran' };
+  if (action === 'set_goal') return { text: composeGoalTargetQuestion(), exits: [], outcome: 'ran' };
+  const goalWords = f.goalLabel !== '' ? `‘${f.goalLabel}’` : 'your goal';
+  const elements: { name: string; present: boolean; question: string; action?: ActionId }[] = [
+    { name: 'goal', present: f.goalPresent, question: 'What are you trying to achieve with this decision?' },
+    ...(f.goalKind !== null ? [f.goalKind === 'chance_of_event'
+      ? { name: 'deadline', present: f.deadline !== null, question: chanceGoalDeadlineAsk(f.goalLabel), action: 'set_deadline' as const }
+      : { name: 'target', present: f.targetPresent, question: composeGoalTargetQuestion(), action: 'set_goal' as const }] : []),
+    { name: 'options', present: f.ownOptionCount >= 2, question: 'What else could you do instead?', action: 'more_options' },
+    { name: 'factors', present: f.goalPathFactorCount > 0, question: `What most affects whether ${goalWords} is met?` },
+    { name: 'risks', present: f.riskCount > 0, question: `What could go wrong that would stop ${goalWords}?`, action: 'more_risks' },
+    { name: 'outcomes', present: f.outcomeCount > 0, question: 'What else would change as a result, good or bad?' },
+    { name: 'limits', present: f.limitCount > 0, question: 'Is there a budget, time or other limit you must stay within?' },
+  ];
+  const missing = elements.filter(e => !e.present);
+  const present = elements.filter(e => e.present).map(e => e.name);
+  const text = [`Your brief has: ${present.length > 0 ? present.join(', ') : 'none of these elements yet'}.`,
+    ...missing.slice(0, 3).map(e => `- ${e.question}`),
+    ...(missing.length > 3 ? [`Also missing: ${missing.slice(3).map(e => e.name).join(', ')}.`] : [])].join('\n');
+  const exits: ActionExit[] = missing.flatMap(e => {
+    const offer = e.action === undefined ? undefined : currentOfferFor(bar, e.action);
+    return offer?.enabled === true ? [{ kind: 'offer' as const, offer }] : [];
+  }).slice(0, 2);
+  return { text, exits, outcome: 'ran' };
+}
+
 /**
  * THE DISPATCH DECISION for one press, on the CURRENT state (re-derived, never the bar the press came from). The
  * route runs `route` presses through their existing typed path, and answers `reply` presses with the typed reply.
  */
-export function decidePress(chip: unknown, f: ActionFacts, bar: ActionBarV1 = actionBarOf(f)): PressDecision {
-  const press = actionPressOf(chip);
+export function decidePress(chip: unknown, f: ActionFacts, bar: ActionBarV1 = actionBarOf(f), message?: unknown): PressDecision {
+  const press = actionPressOf(chip, message);
   if (press === null) return { kind: 'not_an_action' };
   if (press.action === null) {
     const exits = otherOffers(bar, null, 2);
@@ -127,6 +191,7 @@ export function decidePress(chip: unknown, f: ActionFacts, bar: ActionBarV1 = ac
   }
   const handler = HANDLERS[press.action];
   const offer = currentOfferFor(bar, press.action, press.target);
+  if (handler.route === 'typed_reply' && offer?.enabled === true) return { kind: 'reply', press, reply: press.action === 'bias_anchoring' || press.action === 'check_estimates' ? estimateReply(press.action, f) : gapReply(press.action, f, bar) };
   if (handler.gate === 'own' || offer?.enabled === true) return { kind: 'route', press, handler, offer };
   return { kind: 'reply', press, reply: cantYet(press.action, offer, f, bar) };
 }
@@ -146,6 +211,7 @@ export function declinedReply(press: ActionPress, f: ActionFacts, bar: ActionBar
 
 /** The receipt sidecar every action turn carries (contract v1.1 item 5). */
 export interface ActionReceipt {
+  readonly science?: DskClaimProvenance;
   readonly v: 1;
   readonly action_id: string;
   readonly press_id: string;
@@ -156,9 +222,10 @@ export interface ActionReceipt {
   readonly reason?: CantYetReason;
 }
 
-export function actionReceiptOf(press: ActionPress, revision: ActionRevision, outcome: ActionReceipt['outcome'], reason?: CantYetReason): ActionReceipt {
+export function actionReceiptOf(press: ActionPress, revision: ActionRevision, outcome: ActionReceipt['outcome'], reason?: CantYetReason, science?: DskClaimProvenance): ActionReceipt {
   const suffix = press.press_id.startsWith(ACTION_PRESS_PREFIX) ? press.press_id.slice(ACTION_PRESS_PREFIX.length) : '';
   return {
+    ...(press.action === 'bias_anchoring' && outcome === 'ran' && science !== undefined ? { science } : {}),
     v: 1,
     action_id: press.action ?? (/^[a-z_]{1,40}$/.test(suffix) ? suffix : 'unknown'),
     press_id: press.press_id.length <= 4096 ? press.press_id : press.press_id.slice(0, 4096),
@@ -170,5 +237,5 @@ export function actionReceiptOf(press: ActionPress, revision: ActionRevision, ou
   };
 }
 
-/** The visible user line of an action, for an exit chip's `message` (display only; nothing routes on it). */
+/** The visible user line of an action, for an exit chip’s message (WIDEN risks also matches it by identity). */
 export const userLineOf = (action: ActionId): string => ACTION_REGISTRY[action].user_line;
