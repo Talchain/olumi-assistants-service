@@ -5,7 +5,11 @@
 import {
   appendInferenceWarning, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_WITHHELD_CODES,
+  GOAL_FIGURES_SHARE_APPROXIMATION, readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
+import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
+import { shareByDateGoalOf } from './goal-kind.js';
+import { shareGateForOption } from './share-by-date-run.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -24,7 +28,12 @@ export interface GoalChanceRange {
   readonly high_pct: number;
   readonly low_rounding: GoalChanceDisplayRounding;
   readonly high_rounding: GoalChanceDisplayRounding;
-  readonly kind: 'link_strength' | 'link_existence';
+  readonly kind: 'link_strength' | 'link_existence' | 'stated_time';
+  /** S2a endpoints hold the user's original time/pace at each end, not a link. */
+  readonly basis?: 'stated_time';
+  readonly quantity?: 'months_to_finish' | 'share_per_month';
+  readonly low?: number;
+  readonly high?: number;
   readonly from: string;
   readonly to: string;
   readonly among: 'all' | 'unsized_links';
@@ -126,4 +135,56 @@ export function withGoalChanceRange<E>(envelope: E, graph: unknown, inputs: Goal
     message: "Some options' chances are shown as a range: a link on the way to your goal isn't sized in the model yet.",
     option_ids: entries.map(([id]) => id), range_by_option: Object.fromEntries(entries), ...goalChanceHorizonOf(envelope),
   });
+}
+
+/** S2a after all existing withholds: never resurrect a figure another gate removed.
+ * Same GOAL_CHANCE_RANGE carrier and percentage endpoints; basis distinguishes
+ * the exact stated-time bounds from ISL's unsized-link conditional groups.
+ */
+export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId: unknown): E {
+  const share = shareByDateGoalOf(graph);
+  if (share === null || share.goal.id !== goalId || !isRec(envelope)) return envelope;
+  const records = readOptionResultSources(envelope).find(s => s.length > 0) ?? [];
+  const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings.filter(isRec) : [];
+  const ranges: Record<string, GoalChanceRange> = {};
+  const withheld = new Set<string>();
+  for (const r of records) {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    if (id === undefined || withheld.has(id) || !chance(r.probability_of_goal)) continue;
+    // Existing gates have precedence even if a malformed upstream response kept its point.
+    if (warnings.some(w => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
+      && (!Array.isArray(w.option_ids) || w.option_ids.length === 0 || w.option_ids.includes(id)))) continue;
+    const decision = shareGateForOption(graph, id);
+    if (decision?.form === 'point') continue;
+    withheld.add(id);
+    if (decision === null) continue; // unsupported parts: no manufactured range
+    const lowPct = Math.round(decision.low * 100), highPct = Math.round(decision.high * 100);
+    if (lowPct === highPct) continue; // a displayed point is not a readable range
+    const g = graph as Rec;
+    const nodes = g.nodes as Rec[];
+    const team = nodes.find(n => n.id === share.team_part_id)!;
+    const os = team.observed_state as Rec;
+    const stated = os.stated_time as Rec;
+    ranges[id] = { low_pct: lowPct, high_pct: highPct,
+      low_rounding: 'whole', high_rounding: 'whole', kind: 'stated_time', basis: 'stated_time',
+      quantity: stated.quantity as 'months_to_finish' | 'share_per_month', low: decision.low, high: decision.high,
+      from: share.team_part_id, to: goalId as string, among: 'all' };
+  }
+  if (withheld.size === 0) return envelope;
+  let out = envelope;
+  for (const shownAsRange of [false, true]) {
+    const ids = [...withheld].filter(id => Object.hasOwn(ranges, id) === shownAsRange);
+    if (ids.length === 0) continue;
+    out = withholdOptionGoalFigures(out, new Set(ids), {
+      code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ids,
+      message: 'Not shown as a single figure. How long the work takes with today’s team is too uncertain for one figure here, '
+        + (shownAsRange ? 'so this chance is shown as a range.' : 'so this chance is not shown.'),
+    }, { keepOutcome: true, keepOrdering: true });
+  }
+  if (Object.keys(ranges).length > 0) out = appendInferenceWarning(out, {
+    code: GOAL_CHANCE_RANGE, severity: 'info', option_ids: Object.keys(ranges), range_by_option: ranges,
+    message: 'Each chance runs from the slow end of your time estimate to the fast end.',
+    target: { comparator: 'at_least', value: share.threshold_raw, unit: share.goal.goal_threshold_unit, by_date: share.deadline },
+  });
+  return out;
 }

@@ -170,6 +170,7 @@ const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
  * never disagree. `null` when there is no single goal, no held deadline, or a duration limit scores it.
  */
 export function untestedHorizonLine(graph: unknown): string | null {
+  if (goalKindOf(graph) === 'share_by_date') return null;
   const goal = goalOf(graph);
   if (goal === undefined) return null;
   const within = withinMonths(goal);
