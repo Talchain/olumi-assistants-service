@@ -11,7 +11,13 @@ import { mapStageToDecisionStage } from '../../../dsk/stage-edge.js';
 import { resolveDskClaimProvenance, type DskClaimProvenance } from '../../compose/dsk-claim-record.js';
 import { POLICY } from '../guidance/policy.js';
 
-export type BiasClaimId = 'DSK-B-001' | 'DSK-B-006' | 'DSK-B-007';
+export type BiasClaimId = 'DSK-B-001' | 'DSK-B-007';
+
+export interface OptionFrame {
+  readonly nonSqOptionLabels: readonly string[];
+  readonly statusQuoPresent: boolean;
+  readonly sameLever: boolean;
+}
 
 export interface BiasRiskItem {
   readonly claim_id: BiasClaimId;
@@ -35,16 +41,14 @@ type PolicyRow = (typeof POLICY.rows)[number];
 const BIAS_CUE = POLICY.rows.find((r): r is Extract<PolicyRow, { readonly bias_cue: unknown }> => r.policy_id === 'RC-WIDEN' && 'bias_cue' in r)!.bias_cue;
 
 const STAGES: Readonly<Record<BiasClaimId, readonly ReturnType<typeof mapStageToDecisionStage>[]>> = {
-  'DSK-B-001': ['frame', 'evaluate'],
-  'DSK-B-006': ['frame', 'decide'],
+  'DSK-B-001': ['frame', 'evaluate', 'decide'], // decide→evaluate for the badge (Science 393023 #2771 ruling)
   'DSK-B-007': ['frame', 'ideate'],
 };
 
-export function biasRiskOf(f: ActionFacts, offers: readonly ActionOffer[]): BiasRiskV1 | undefined {
+export function biasRiskOf(f: ActionFacts, offers: readonly ActionOffer[], frame: OptionFrame): BiasRiskV1 | undefined {
   if (!f.readable) return undefined;
 
   const enabledOffer = (id: ActionId) => offers.find(o => o.action_id === id && o.enabled === true && o.target === undefined);
-  const widen = f.rcRows.filter(r => r.policy_id === 'RC-WIDEN' && r.target === 'options');
   const stage = f.canonicalStage === null ? null : mapStageToDecisionStage(f.canonicalStage);
   const items: BiasRiskItem[] = [];
   const add = (claim_id: BiasClaimId, name: string, why: string, offer: ActionOffer): void => {
@@ -61,17 +65,15 @@ export function biasRiskOf(f: ActionFacts, offers: readonly ActionOffer[]): Bias
   };
 
   const moreOptions = enabledOffer('more_options');
-  if (moreOptions !== undefined) {
-    const sameLever = widen.some(r => r.variant === 'W3');
-    if (sameLever || widen.some(r => r.variant === 'W2')) {
-      add('DSK-B-007', 'Narrow framing', sameLever
-        ? BIAS_CUE.narrow_framing
-        : 'There is only one option besides doing nothing, which can hide better routes.', moreOptions);
-    }
-    if (widen.some(r => r.variant === 'W4')) {
-      add('DSK-B-006', 'Status quo', BIAS_CUE.status_quo, moreOptions);
-    }
+  if (moreOptions !== undefined && (frame.sameLever || frame.nonSqOptionLabels.length === 1)) {
+    const o = frame.nonSqOptionLabels[0];
+    add('DSK-B-007', 'Narrow framing', frame.sameLever
+      ? BIAS_CUE.narrow_framing
+      : frame.statusQuoPresent
+        ? `The only choice on the table is ‘${o}’ or carrying on as now, which can hide other routes.`
+        : `‘${o}’ is the only option on the table, which can hide other routes.`, moreOptions);
   }
+  // DSK-B-006 waits for a per-option risk fact (Science 393023, 7 Oct): W4 is a missing baseline, not status quo bias.
 
   if (items.length < BIAS_RISK_MAX) {
     const anchoring = enabledOffer('bias_anchoring');
