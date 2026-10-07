@@ -587,7 +587,7 @@ export function levelUnitForChangeGoal(
   const stated = typeof statedUnitArg === 'string' ? statedUnitArg.trim() : '';
   const label = String(goal.label ?? '');
   const inScope = goal.goal_threshold_frame === 'change_rel'
-    && (stored === undefined || isChangeOwnPercent({ frame: 'change_rel', unit: stored, metric: label }))
+    && (stored === undefined || isChangeOwnPercent({ frame: 'change_rel', unit: stored, metric: label, value: goal.goal_threshold_raw }))
     && (goal.goal_threshold_cap === undefined || goal.goal_threshold_cap === null)
     && stated !== '' && readPercentUnit(stated) === null && unitPhraseFamily(stated) !== 'percent';
   if (!inScope) return { ok: true };

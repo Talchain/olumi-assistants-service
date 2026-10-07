@@ -24,6 +24,7 @@ import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../format/edge-strength
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 import { userSizedLevelLessLinks } from '../agent-lane/mediator-reading.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { sayGoalChange } from '../agent-lane/limit-frame.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -317,9 +318,9 @@ const TAIL_COMPARATOR_WORDS: Readonly<Record<string, string>> = { '<=': 'at or b
  */
 export interface UntestableTargetParts {
   readonly name: string;
-  /** "at most 400 cancellations / month": the readiness sentence's target words. */
+  /** "at most 400 cancellations / month" or "up at least 10% from today": the readiness target words. */
   readonly target: string;
-  /** "at or below 400 cancellations / month" for the tail, or null when no comparator is held. */
+  /** The tail's level or change phrase, or null when no comparator is held. */
   readonly tailTarget: string | null;
   /** One clause per failing case for the readiness sentence ("it needs …", "the model doesn't yet …"). */
   readonly clauses: readonly string[];
@@ -350,8 +351,11 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     : typeof ownLimitRow(graph, goal)?.unit === 'string' ? ownLimitRow(graph, goal)!.unit as string : '';
   const comparator = readHeldGoalComparator(graph, verdict.goal_id) ?? statedGoalTargetOf(graph, goal)?.held;
   const figure = unit !== '' ? sayFigure(raw, unit) : raw.toLocaleString('en-GB');
-  const target = [typeof comparator === 'string' ? COMPARATOR_WORDS[comparator] : undefined, figure].filter(Boolean).join(' ');
+  // W6: the level card's formatter says a change target, never its raw fraction as a level. Level words stay verbatim.
+  const change = sayGoalChange(statedGoalTargetOf(graph, goal)?.frame, raw, unit, (value, u) => sayFigure(value, u ?? ''), comparator);
+  const target = change ?? [typeof comparator === 'string' ? COMPARATOR_WORDS[comparator] : undefined, figure].filter(Boolean).join(' ');
   const tailWords = typeof comparator === 'string' ? TAIL_COMPARATOR_WORDS[comparator] : undefined;
+  const comparatorTarget = change ?? `${typeof comparator === 'string' ? comparator : ''} ${figure}`;
   const failingLink = verdict.failures.find((f) => f.case === 'c');
   const lever = failingLink?.lever;
   const identityCase = verdict.failures.some((f) => f.code === 'identity_unconfirmed');
@@ -395,7 +399,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     return userBand && typeof mean === 'number' && Number.isFinite(mean) ? CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(mean))] : null;
   })();
   const askedAfterTheBand = (question: string): string => bandTheUserSet === null ? question
-    : `You set this link as ${bandTheUserSet}. To test your ${figure} target I need it in ${unit || 'the goal unit'}: `
+    : `You set this link as ${bandTheUserSet}. To test your ${change ?? figure} target I need it in ${unit || 'the goal unit'}: `
       + `${question[0]!.toLowerCase()}${question.slice(1)}`;
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
@@ -403,7 +407,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     : c === 'c' ? [`it needs ${link}`, link,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
       identityCase || lever === undefined ? null : askedAfterTheBand(linkQuestion())]
-    : c === 'b' ? [`it can't yet test a '${typeof comparator === 'string' ? comparator : ''} ${figure}' target on ${name}`, null, null]
+    : c === 'b' ? [`it can't yet test a '${comparatorTarget}' target on ${name}`, null, null]
     : [`your target is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`,
       `${name} measured in ${unit || 'its own units'}`, `What's today's level of ${name}${unit !== '' ? `, in ${unit}` : ''}?`];
   const cases = [...new Set(verdict.failures.map((f) => f.case))];
@@ -411,10 +415,10 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   return {
     name,
     target,
-    tailTarget: tailWords === undefined ? null : `${tailWords} ${figure}`,
+    tailTarget: tailWords === undefined ? null : change ?? `${tailWords} ${figure}`,
     clauses: cases.map((c) => said(c)[0]),
     needs: cases.map((c) => said(c)[1]).filter((n): n is string => n !== null),
-    untestableComparator: cases.includes('b') ? `'${typeof comparator === 'string' ? comparator : ''} ${figure}'` : null,
+    untestableComparator: cases.includes('b') ? `'${comparatorTarget}'` : null,
     question: cases.map((c) => said(c)[2]).find((q): q is string => q !== null) ?? null,
     asked: askingCase === 'c' && failingLink?.link !== undefined ? { from: failingLink.link.from, to: failingLink.link.to } : null,
     askedIn: askingCase !== 'c' ? null : upstream === undefined ? (unit !== '' ? unit : null)
