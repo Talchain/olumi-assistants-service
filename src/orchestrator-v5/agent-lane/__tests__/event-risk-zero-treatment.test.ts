@@ -3,7 +3,8 @@ import { readinessViewOf, treatedAsZeroLine } from '../readiness-view.js';
 import { readStatedEventRisk } from '../../routing/stated-event-risk.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
-function graph(event: boolean) {
+// A fixture graph (a wire-shaped object, not a parsed GraphV3), typed loosely so a row can corrupt one block.
+function graph(event: boolean): { nodes: Array<Record<string, any>>; edges: Array<Record<string, unknown>> } {
   const edge = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
   return {
     nodes: [
