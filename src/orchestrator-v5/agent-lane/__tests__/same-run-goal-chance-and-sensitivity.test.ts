@@ -24,6 +24,9 @@ const BLOCK = WIRE.blocks.find((b: Json) => b.type === 'analysis_result') as Jso
 const copy = (): Json => structuredClone(BLOCK);
 const licence = (b: Json): Json => b.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED') as Json;
 const project = (b = copy()): Json => analysisResultForAgent(b) as Json;
+// S2i (DL GO): this Run's robustness check ran, so the screen shows it and no EVPPI absence status is handed to the Agent.
+// Author's derivative control: the same Run with its robustness check removed.
+const noRobustness = (b: Json): Json => { delete b.enrichment.robustness; delete b.robustness; return b; };
 const DISPLAY = { [RAISE]: 'about 46%', [STARTER]: 'about 52%', [KEEP]: 'less than 1%' };
 const AVAILABILITY = {
   scope: 'per_option_goal_chance', source: 'GOAL_CHANCE_LICENSED', status: 'available', options: [
@@ -48,7 +51,7 @@ const selected = (b = copy(), kind = 'complete_current'): Json => {
 
 // These oracles also reject independent, narrowly targeted mutants without executing an LLM.
 const screenChanceMatches = (out: Json): boolean => JSON.stringify(out.goal_chance_display) === JSON.stringify(DISPLAY);
-const scopesReconciled = (out: Json): boolean => out.decision_sensitivity?.status === 'none_measurable'
+const scopesReconciled = (out: Json): boolean => !('decision_sensitivity' in out)
   && JSON.stringify(out.goal_chance_driver_availability) === JSON.stringify(AVAILABILITY);
 
 describe('W3 witnessed wire contradictions are reconciled by separate typed authorities', () => {
@@ -74,9 +77,10 @@ describe('W3 witnessed wire contradictions are reconciled by separate typed auth
 
   it('RED at base: below-resolution EVPPI cannot erase the two licensed per-option goal-chance drivers', () => {
     const out = project();
-    expect(out.decision_sensitivity).toEqual({ status: 'none_measurable' });
+    expect(out).not.toHaveProperty('decision_sensitivity');
     expect(out.goal_chance_driver_availability).toEqual(AVAILABILITY);
     expect(scopesReconciled(out)).toBe(true);
+    expect(project(noRobustness(copy())).decision_sensitivity).toEqual({ status: 'none_measurable' });
     expect(JSON.stringify(out.goal_chance_driver_availability)).not.toMatch(/quantity_id|authored_by|most_sensitive|price_increase_from_current/);
     expect(licence(out)).not.toHaveProperty('driver_by_option');
     expect(licence(out)).not.toHaveProperty('no_driver_by_option');
@@ -128,7 +132,10 @@ describe('W3 controls: no scope promotion, no withheld/stale fact revival', () =
     delete licence(b).driver_by_option;
     licence(b).no_driver_by_option = { [RAISE]: 'below_resolution', [STARTER]: 'none', [KEEP]: 'none' };
     const out = project(b);
-    expect(out.decision_sensitivity).toEqual({ status: 'none_measurable' });
+    expect(out).not.toHaveProperty('decision_sensitivity');
+    expect(project(noRobustness(structuredClone(b))).decision_sensitivity).toEqual({ status: 'none_measurable' });
+    // The screen names no goal-chance driver here, so the per-option absence is still handed (with the graph too).
+    expect((analysisResultForAgent(b, WIRE.draft_graph) as Json).goal_chance_driver_availability).toMatchObject({ status: 'none_licensed' });
     expect(out.goal_chance_driver_availability).toMatchObject({ status: 'none_licensed', scope: 'per_option_goal_chance' });
     expect(out.goal_chance_driver_availability.options[0]).toEqual({ option_id: RAISE, status: 'none_licensed', reason: 'below_resolution' });
   });
@@ -136,7 +143,8 @@ describe('W3 controls: no scope promotion, no withheld/stale fact revival', () =
   it('no EVPPI: goal drivers stay available; the comparison was not measured', () => {
     const b = copy();
     delete b.enrichment.factor_evppi;
-    expect(project(b).decision_sensitivity).toEqual({ status: 'not_measured' });
+    expect(project(b)).not.toHaveProperty('decision_sensitivity');
+    expect(project(noRobustness(structuredClone(b))).decision_sensitivity).toEqual({ status: 'not_measured' });
     expect(project(b).goal_chance_driver_availability).toEqual(AVAILABILITY);
   });
 
@@ -145,7 +153,8 @@ describe('W3 controls: no scope promotion, no withheld/stale fact revival', () =
     delete b.enrichment.factor_evppi;
     delete licence(b).driver_by_option;
     delete licence(b).no_driver_by_option;
-    expect(project(b).decision_sensitivity).toEqual({ status: 'not_measured' });
+    expect(project(b)).not.toHaveProperty('decision_sensitivity');
+    expect(project(noRobustness(structuredClone(b))).decision_sensitivity).toEqual({ status: 'not_measured' });
     expect(project(b).goal_chance_driver_availability.status).toBe('not_recorded');
   });
 

@@ -15,6 +15,7 @@ import {
   SENSITIVITY_ABSENCE_CLAIM, SENSITIVITY_ABSENCE_REMOVED, SENSITIVITY_ABSENCE_KEPT_UNSAFE, removeSensitivityAbsenceClaims, robustnessComputed,
   screenNamesADriver,
   ALL_WITHHELD_CLAIM, GOAL_CHANCE_ALL_WITHHELD_REMOVED, GOAL_CHANCE_ALL_WITHHELD_KEPT_UNSAFE, removeAllWithheldClaims, screenShowsAChance,
+  SENSITIVITY_ABSENCE_CLAIM as SENS_CLAIM,
 } from '../goal-chance-driver-egress.js';
 
 type Json = Record<string, any>;
@@ -425,8 +426,11 @@ describe('Wave B pilot, keys untouched: a Run whose robustness check ran never s
     ['All three options were analysed, but the nine-month deadline was not tested, and sensitivity was not measured.', 'All three options were analysed, but the nine-month deadline was not tested.'],
     ['Sensitivity and robustness were not assessed, and seven underlying values were supplied by Olumi rather than you.', 'Seven underlying values were supplied by Olumi rather than you.'],
     ['Robustness and sensitivity were not assessed, and seven underlying values are Olumi’s assumptions, not yours.', 'Seven underlying values are Olumi’s assumptions, not yours.'],
+    // S2i (Wave B7): a "sensitivity and tipping points" subject is the same claim (served corpus rows, now edited).
+    ['Olumi supplied 10 unstated values; sensitivity and tipping points were not measured, so this run does not establish which assumption deserves investigation first.', 'Olumi supplied 10 unstated values.'],
+    ['Nine underlying values are Olumi’s assumptions; sensitivity and tipping points were not measured.', 'Nine underlying values are Olumi’s assumptions.'],
   ];
-  it('corpus replay: exactly the 16 listed sentences change, as listed; every other row is byte-identical to base', () => {
+  it('corpus replay: exactly the 18 listed sentences change, as listed; every other row is byte-identical to base', () => {
     const changed = new Map(CHANGED);
     let n = 0;
     for (const row of CORPUS.rows) {
@@ -436,7 +440,7 @@ describe('Wave B pilot, keys untouched: a Run whose robustness check ran never s
       if (changed.has(row.sentence)) { n += 1; expect(final).toBe(changed.get(row.sentence)); expectWellFormed(final); }
       else expect(final).toBe(base);
     }
-    expect(n).toBe(16);
+    expect(n).toBe(18);
   });
 });
 
@@ -1042,6 +1046,88 @@ describe('Wave B6, keys untouched: "…or tipping point was established" and "no
     const t0 = performance.now();
     DRIVER_ABSENCE_CLAIM.test(text);
     removeDriverAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
+
+/**
+ * Wave B7 (7 Oct 07:2x–07:3xZ, guest, CUT 9 CEE 7e3f8fb), keys untouched. Four new wordings beside shown drivers, ranges and
+ * a computed robustness check, each missed by prod cut 8 3fce64f and by cut 9:
+ * - b7-1 Challenge: "The model hasn’t established which change would shift the chances most."
+ * - b7-2 Explain: "Sensitivity and tipping points were not measured." and "This result supplies no confirmed goal chances."
+ * - T1b Explain: "Which assumption most affects the comparison has not been measured."
+ * S2i adds each form, and a consequence (", so …") is now cut WITH its cause, never re-attached to the text before it.
+ */
+const B7_CH1 = JSON.parse(fixture('waveB7-unseen1-7e3f8fb-challenge-turn001.json')) as Json;
+const B7_EX2 = JSON.parse(fixture('waveB7-unseen2-7e3f8fb-explain-turn003.json')) as Json;
+const B7_T1B = JSON.parse(fixture('waveB7-t1b-7e3f8fb-explain-turn003.json')) as Json;
+
+describe('Wave B7, keys untouched: four new wordings (S2i egress backstop)', () => {
+  it.each([
+    ['b7-1 Challenge', () => B7_CH1, ['The model hasn’t established which change would shift the chances most.']],
+    ['b7-2 Explain', () => B7_EX2, ['Sensitivity and tipping points were not measured.', 'This result supplies no confirmed goal chances.']],
+    ['T1b Explain', () => B7_T1B, ['Which assumption most affects the comparison has not been measured.']],
+  ] as const)('RED at base: %s loses only its claim(s)', (_name, body, claims) => {
+    const b = body();
+    for (const c of claims) expect(b.assistant_text).toContain(c);
+    const out = withoutDriverAbsenceClaimsAtEgress(b, opts(b)) as Json;
+    for (const c of claims) expect(out.assistant_text).not.toContain(c);
+    let expected = b.assistant_text as string;
+    for (const c of claims) expected = expected.replace(` ${c}`, '').replace(`${c} `, '').replace(c, '');
+    expect(out.assistant_text.replace(/\s+/g, ' ').trim()).toBe(expected.replace(/\s+/g, ' ').trim());
+  });
+
+  it('the gates are the screen’s: b7-2 shows a range and its robustness ran; T1b names licensed drivers', () => {
+    expect(screenShowsAChance(blockOf(B7_EX2), B7_EX2.draft_graph)).toBe(true);
+    expect(robustnessComputed(blockOf(B7_EX2))).toBe(true);
+    expect(screenNamesADriver(blockOf(B7_T1B), B7_T1B.draft_graph)).toBe(true);
+  });
+
+  it.each([
+    ['It has not established which lever moves the result most.', 'driver'],
+    ['Which factor most drives the result is not yet clear.', 'driver'],
+    ['Tipping points and sensitivity were not assessed.', 'sens'],
+    ['The run gives no goal chances.', 'withheld'],
+  ] as const)('MUST FIRE (paraphrase): %s', (text, cls) => {
+    const re = cls === 'driver' ? DRIVER_ABSENCE_CLAIM : cls === 'sens' ? SENS_CLAIM : ALL_WITHHELD_CLAIM;
+    expect(re.test(text)).toBe(true);
+  });
+
+  it.each([
+    'The model has established which change would shift the chances most: the price rise.',
+    'Which change would shift the chances most?',
+    'The model has not established which change the team wants most.',
+    'This result supplies no point chances; each option shows a range.',
+    'Customer sensitivity and tipping points in demand were not measured by the survey.',
+    'Which assumption most affects the comparison is the churn rate.',
+    'This result supplies no confirmed revenue figure.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text) || SENS_CLAIM.test(text) || ALL_WITHHELD_CLAIM.test(text)).toBe(false);
+  });
+
+  it.each([
+    // served corpus rows: the consequence goes with its cause, never re-attached to the text before it
+    ['Three underlying values are Olumi’s assumptions, not yours; sensitivity was not measured, so investigation priority is not established.', 'Three underlying values are Olumi’s assumptions, not yours.'],
+    ['Olumi supplied 10 unstated values; sensitivity and tipping points were not measured, so this run does not establish which assumption deserves investigation first.', 'Olumi supplied 10 unstated values.'],
+  ])('consequence cut WITH its cause (sensitivity class alone): %s', (text, edited) => {
+    expect(removeSensitivityAbsenceClaims(text)).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+  });
+
+  it('kept-unsafe: a consequence holding the deadline is never removed with its cause', () => {
+    const text = 'Three values are Olumi’s assumptions; sensitivity was not measured, so the 9-month deadline is untested.';
+    expect(removeSensitivityAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
+  });
+
+  it.each([
+    ['"which change" + 20,000 spaces', `hasn't established which change${' '.repeat(20000)}x`],
+    ['"sensitivity and tipping points" + 20,000 spaces', `sensitivity and tipping points${' '.repeat(20000)}x`],
+    ['"which assumption most affects the" + 20,000 spaces', `which assumption most affects the${' '.repeat(20000)}x`],
+    ['"supplies no" + 20,000 spaces', `supplies no${' '.repeat(20000)}x`],
+    ['a consequence + 20,000 spaces', `Values are Olumi's; sensitivity was not measured, so${' '.repeat(20000)}x`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text); SENS_CLAIM.test(text); ALL_WITHHELD_CLAIM.test(text);
+    removeDriverAbsenceClaims(text); removeSensitivityAbsenceClaims(text); removeAllWithheldClaims(text);
     expect(performance.now() - t0).toBeLessThan(50);
   });
 });

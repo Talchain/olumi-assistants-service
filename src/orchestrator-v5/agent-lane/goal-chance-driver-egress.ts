@@ -54,7 +54,8 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // "this run doesn't tell us what matters most" (never "what matters most to you")
   R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+matters\s+most(?!\s+to\s+(?:you|your|them|the\s+team))`,
   // fronted: "Which assumption matters most has not been established"
-  R`\b${WHICH_ITEM}${GAP}${MOST}\s+(?:has|have|is|was|remains?)${ABSENT}`,
+  // ⭐ Wave B7 (T1b Explain): "Which assumption most affects the comparison has not been measured." (an object after MOST)
+  R`\b${WHICH_ITEM}${GAP}${MOST}(?:\s+(?:the|its|your|this)\s+(?:comparison|result|outcome|chances?|figures?|answer|ranking))?\s+(?:has|have|is|was|remains?)${ABSENT}`,
   // impersonal: "it is unclear which assumption matters most"
   R`\b(?:it\s+is|it[’']s|it\s+remains|it\s+was)\s+(?:still\s+)?(?:unclear|not\s+(?:yet\s+)?(?:clear|known|established)|unknown|uncertain|undetermined)\s+${WHICH_ITEM}${GAP}${MOST}`,
   // "nothing in this run shows which assumption matters most"
@@ -75,7 +76,8 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // ⭐ Wave B3 (7 Oct, CEE 7addf05, Challenge): "This result does not establish what changes chances most." /
   // "It hasn't established what changes the chances most: …" (a "what" with no assumption noun).
   // ⭐ Wave B5 (7 Oct, CEE 5a260e3, Challenge): "This run doesn’t establish what would change the chances most: …" (a modal).
-  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+(?:(?:would|could|might|will|can|does|do)\s+)?(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
+  // ⭐ Wave B7 (7 Oct, CEE 7e3f8fb, Challenge): "The model hasn’t established which change would shift the chances most."
+  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+(?:what|which\s+(?:changes?|levers?|links?|${ITEM}))\s+(?:(?:would|could|might|will|can|does|do)\s+)?(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
   // ⭐ Wave B3 (T1b provisional view): "…the analysis has not tested the deadline or established investigation priority."
   // Only the "or …" tail is the claim (bounded lookbehind to its negation); `cutOnce` cuts from the "or".
   // ⛔ S2f: the "or" is checked FIRST (lookahead), and each word is bounded: tried at every position, the lookbehind
@@ -103,7 +105,8 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
 /** Bounded runs only (DL #2712 r1): an unbounded run inside a lookbehind is rescanned at every position (quadratic). */
 const SENS_OPEN = R`(?<=^|\n[ \t]{0,8}(?:(?:[-*•]|\d{1,3}[.)])[ \t]{1,4})?|[.;:!?,—–(*_“"‘][ \t\n]{0,4}|\b(?:and|but|so|yet|while|though|although|because|also|that|as)[ \t\n]{1,4})`;
 const SENS_SUBJECT = R`(?:(?:the|overall|decision|factor|option[-\s]comparison|comparison)\s+)*sensitivity(?:\s+(?:analysis|check|checks|testing|tests?))?(?:\s+of\s+(?:the\s+)?(?:option\s+)?(?:comparison|options|results?|ranking|decision))?`;
-const SENS_ROBUST_SUBJECT = R`(?:the\s+)?(?:robustness(?:\s+and\s+sensitivity)?|sensitivity\s+and\s+robustness)(?:\s+(?:analysis|check|checks))?`;
+/** ⭐ Wave B7 (Explain): "Sensitivity and tipping points were not measured." beside a tipping point and a computed check. */
+const SENS_ROBUST_SUBJECT = R`(?:the\s+)?(?:robustness(?:\s+and\s+sensitivity)?|sensitivity\s+and\s+(?:robustness|tipping\s+points?)|tipping\s+points?\s+and\s+sensitivity)(?:\s+(?:analysis|check|checks))?`;
 const SENS_NOT_DONE = R`\s+(?:has|have|was|were|is|are|had)\s*(?:not|n[’']t)\s+(?:yet\s+)?(?:been\s+)?(?:measured|assessed|tested|run|computed|checked|analysed|analyzed|done|carried\s+out|performed|quantified)`;
 export const SENSITIVITY_ABSENCE_CLAIM = new RegExp([
   // "Sensitivity of the option comparison has not been measured" · "decision sensitivity was not measured"
@@ -149,6 +152,8 @@ export const ALL_WITHHELD_CLAIM = new RegExp([
   R`${NEG}${VERB}\s+how\s+likely\s+${OPT}\b`,
   // "chances for every option are not shown / withheld"
   R`${NP_START}${ADV}\bchances?\s+(?:for|of)\s+${OPT}\s+(?:are|is)\s+(?:not\s+(?:yet\s+)?(?:shown|established|available)|withheld|unavailable)\b`,
+  // ⭐ Wave B7 (Explain, beside 3 ranges): "This result supplies no confirmed goal chances." (never "no point chances")
+  R`\b(?:supplies|gives|provides|offers|carries|contains|yields)\s+no\s+(?:(?:confirmed|usable|reliable|valid)\s+)?(?:(?:goal|target)\s+)?chances?\b`,
   // served (corpus): "its unsized links prevent reporting goal chances for every option" · "this run withholds goal chances
   // for every option" · "prevents this run from reporting target chances for any option" · "prevent goal-chance claims for every option"
   // Never negated ("does not withhold … for every option" is the opposite claim), asked about, or a question.
@@ -221,6 +226,18 @@ function cutOnce(body: string, m: RegExpExecArray, labels: readonly string[]): C
   if (colon && tail.trim() === '' && words(head.replace(/\*+/g, ' ')) <= 3) return PROTECTED.test(head) || MONTH.test(head) || hasLabel(head) ? { kind: 'unsafe' } : { kind: 'lead_in_empty' };
   // S2 review r2 #5: with nothing before the claim, a ", which …" tail would dangle ("Which limits …"): keep it.
   if (head.trim() === '' && /^\s*,\s*which\b/i.test(tail)) return { kind: 'unsafe' };
+  // ⛔ S2i: a consequence of the removed clause (", so …", ", which means …") would become a consequence of the text
+  // before it ("Three values are Olumi's assumptions, so investigation priority is not established"): an invented cause.
+  // The consequence goes WITH its cause, to its own clause stop; the same kept-unsafe rules hold for what that removes.
+  const consequence = head.trim() !== '' ? /^\s*,\s*(?:so|which\s+means|therefore|hence|thus)\b/i.exec(tail) : null;
+  if (consequence !== null) {
+    const rest = tail.slice(consequence[0].length);
+    const stop2 = RIGHT_STOP.exec(rest);
+    const end2 = tailStart + consequence[0].length + (stop2 === null ? rest.length : stop2.index);
+    const removed2 = body.slice(removeStart, end2);
+    if (PROTECTED.test(removed2) || MONTH.test(removed2) || hasLabel(removed2)) return { kind: 'unsafe' };
+    return { kind: 'cut', body: `${head}${body.slice(end2)}` };
+  }
   if (head.trim() === '') return { kind: 'cut', body: capitalised(tail.replace(/^[\s,;:—–-]+/, '').replace(CONNECTOR, '')) };
   return { kind: 'cut', body: `${head}${tail}` };
 }
