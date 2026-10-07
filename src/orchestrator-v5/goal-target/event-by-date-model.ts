@@ -111,8 +111,10 @@ export function admitEventByDate(candidate: CandidateModel): AdmittedModel {
     o.interventions[sw] ??= { value: 0 };
     edges.push({ from: o.id, to: sw, exists_probability: 1, strength: { mean: 1, std: 0.01 }, effect_direction: 'positive' });
   }
-  return { nodes, edges, goal_constraints: [], loss: [], withheld: [],
-    inference_classes: Object.fromEntries(nodes.map(n => [n.id, n.provenance === 'from_brief' ? 'brief_stated' : 'builder_inferred'])) } as unknown as AdmittedModel;
+  const model = { nodes, edges, goal_constraints: [], loss: [], withheld: [],
+    inference_classes: Object.fromEntries(nodes.map(n => [n.id, n.provenance === 'from_brief' ? 'brief_stated' : 'builder_inferred'])) };
+  // forbidden-exempt: deterministic admission builds the canonical share-by-date shape as plain records; every field is pinned by s-e-goals-s2b rows and S2a recognition
+  return model as unknown as AdmittedModel;
 }
 
 /** A held S1 date materialises only this definition's forecast carriers. Pure clone; all other graph fields survive. */
