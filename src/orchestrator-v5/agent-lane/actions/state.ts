@@ -26,6 +26,8 @@ import { canonicalStageOf } from '../method-turn/method-turn.js';
 import { goalChanceDriversForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import { keptFigureFor } from '../kept-figure.js';
 import { proposalFigure } from '../proposal-reply.js';
+import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
+import { computeProposalId } from '../proposal.js';
 import { risksTurnForReadback } from '../method-turn/widen-turn.js';
 
 type Rec = Record<string, unknown>;
@@ -98,6 +100,15 @@ export function stateKeyOf(scenarioId: string, revision: ActionRevision, deadlin
   return hash16(['action_bar', 1, scenarioId, revision.graph_hash, revision.run_key, deadline]);
 }
 
+/** True unless the carrier embeds an Agent proposal whose content no longer hashes to its own id. */
+function agentCarrierIntact(inlinePatch: unknown): boolean {
+  const p = rec(rec(inlinePatch)?.agent_proposal);
+  if (p === undefined) return true;
+  if (typeof p.proposal_id !== 'string') return false;
+  const { proposal_id: id, ...content } = p;
+  try { return computeProposalId(content as Parameters<typeof computeProposalId>[0]) === id; } catch { return false; }
+}
+
 /**
  * Whether an APPROVAL CARD waits for the user's yes in the latest pending carrier (the DL's "consent first": the standing
  * gap yields to it). An approval is a typed approval (`typedApprovalOf`: a `prop_` or `gmh_` proposal, carried either as
@@ -111,6 +122,9 @@ export function approvalWaitingOf(pending: readonly PendingAction[], graphHash: 
   return pending.some((pa) => {
     const typed = typedApprovalOf({ chip: { id: pa.chip_id } }) ?? typedApprovalOf({ chip: { id: approvalChipIdFor(pa.chip_id) } });
     if (typed === undefined || isPendingActionExpired(pa, nowMs)) return false;
+    // An Agent proposal's carrier must still hash to its id, the rule `rehydrateProposals` applies before any card is
+    // served from it (Codex r2 P2 on #2766): a carrier the card reader refuses never displaces the standing gap.
+    if (pa.action.kind === 'apply_proposed_change' && !agentCarrierIntact(pa.action.inline_patch)) return false;
     const offeredOn = pa.preconditions.graph_hash;
     return offeredOn === undefined || graphHash === undefined || offeredOn === graphHash;
   });
@@ -156,7 +170,8 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
         if (node === undefined) return [];
         const unit = rec(node.observed_state)?.unit;
         const value = keptFigureFor(node, typeof unit === 'string' ? unit : '');
-        return value === undefined ? [] : [{ ...f, figure: proposalFigure(value, unit) }];
+        if (value === undefined || !displayScaleEstablished(value, rec(node.observed_state)?.value, unit)) return [];
+        return [{ ...f, figure: proposalFigure(value, unit) }];
       }),
       estimateDriverIds: runKey === null ? [] : goalChanceDriversForAgent(read.analysisResult, read.graph)
         .flatMap(({ driver }) => driver.kind === 'factor_value' && driver.authored_by === 'olumi' ? [driver.factor_id as string] : []),
@@ -180,6 +195,17 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
   } catch {
     return unread;
   }
+}
+
+/**
+ * Whether the figure the keep reader returns is the figure the canvas shows (Codex r2 P1 on #2766). On a percent unit a
+ * stored pair `{ value: 0.25, raw_value: 0.25 }` round-trips the writer as 0.25 but the canvas reads the fraction as
+ * 25%: the display scale is ambiguous, so the point is excluded (fail-closed) rather than said 100× too low. A percent
+ * figure at most 1 is kept only when it IS the normalised value × 100 (a genuine 0.25% is stored as 0.0025).
+ */
+function displayScaleEstablished(figure: number, value: unknown, unit: unknown): boolean {
+  if (typeof unit !== 'string' || !isPercentScaledUnit(unit) || Math.abs(figure) > 1) return true;
+  return typeof value === 'number' && Math.abs(value * 100 - figure) <= 1e-9 * Math.max(1, Math.abs(figure));
 }
 
 export interface EstimatePoint {

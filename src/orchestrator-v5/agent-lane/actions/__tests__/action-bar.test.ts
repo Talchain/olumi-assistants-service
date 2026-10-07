@@ -23,6 +23,7 @@ import { goalChanceDriversForAgent, goalChanceDriverDisplayForAgent } from '../.
 import { resolveDskClaimProvenance } from '../../../compose/dsk-claim-record.js';
 import { reconciliationPending } from '../../goal-scope.js';
 import { approvalChipIdFor } from '../../approval-chips.js';
+import { computeProposalId } from '../../proposal.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
 const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
@@ -344,6 +345,30 @@ describe('S-B slice 2a: standing gaps and typed replies', () => {
     // A product hold (WIDEN / S-D) carries its own gmh_ id as chip_id.
     const hold = approval(g, { chip_id: 'gmh_0123456789ab' });
     expect(ids(bar({ ...preRun(g), pending: [hold] }).priority)).not.toContain('set_deadline');
+  });
+  it('an Agent carrier that no longer hashes to its id is no approval card; the intact carrier yields (Codex r2 P2 on #2766)', () => {
+    const g = gapGraph();
+    const content = { scenario_id: SCENARIO, user_id: null, base_graph_identity_hash: hashOf(g),
+      operations: [{ op: 'set', path: 'nodes/f/observed_state/value', value: 0.4 }],
+      provenance: { authored_by: 'olumi', basis: 'estimate' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: 'Approve the change' };
+    const id = computeProposalId(content as never);
+    const carrier = (agent_proposal: Record<string, unknown>) => approval(g, { chip_id: approvalChipIdFor(id),
+      action: { kind: 'apply_proposed_change', proposal_ref: id, inline_patch: { agent_proposal }, public_label: 'Approve', public_message: 'Approve the held change.' } });
+    expect(ids(bar({ ...preRun(g), pending: [carrier({ ...content, proposal_id: id })] }).priority)).not.toContain('set_deadline');
+    const tampered = { ...content, operations: [{ op: 'set', path: 'nodes/f/observed_state/value', value: 0.9 }], proposal_id: id };
+    expect(ids(bar({ ...preRun(g), pending: [carrier(tampered)] }).priority)).toEqual(['set_deadline']);
+  });
+  it('a percent figure whose display scale is ambiguous is excluded, never said 100x too low (Codex r2 P1 on #2766)', () => {
+    const g = estimateGraph();
+    const near = g.nodes.find(n => n.id === 'near')!;
+    near.observed_state = { value: 0.25, raw_value: 0.25, unit: '%', extractionType: 'inferred' };
+    const points = estimatePointsOf(actionFactsOf(preRun(g)));
+    expect(points.some(p => p.factor_id === 'near')).toBe(false);
+    expect(points.every(p => p.figure !== '0.25%')).toBe(true);
+    // CONTROL: the same estimate stored with its cap reads 25%.
+    near.observed_state = { value: 0.25, raw_value: 25, cap: 100, unit: '%', extractionType: 'inferred' };
+    expect(estimatePointsOf(actionFactsOf(preRun(g))).find(p => p.factor_id === 'near')?.figure).toBe('25%');
   });
   it('expired, exhausted (0 turns), hash-invalid approvals and ordinary asks do not displace the standing gap', () => {
     const g = gapGraph();
