@@ -396,4 +396,61 @@ describe('S-D slice 2 Agent proposals', () => {
     } finally { await cold.close(); }
   }, 120_000);
 
+  // ⭐ "CHECK ESTIMATES" (DL 7 Oct, ACTION-BAR): the host-built call opens the SAME panel on factors' CURRENT figures.
+  const checkEstimates = async (ids: string[]) => {
+    const { checkEstimatesCall } = await import('../proposal-object/check-estimates.js');
+    const call = checkEstimatesCall(graphNow(), ids);
+    expect(call, 'the builder opens a card for these ids').toBeDefined();
+    script = [() => fnCall(call!.name, call!.args as unknown as Record<string, unknown>), () => say('Here are Olumi\'s current estimates to check.')];
+    return turn({ message: 'Check estimates.' });
+  };
+  it('CHECK ESTIMATES builder: at most 3 ids, every id a factor holding a figure, or nothing is opened', async () => {
+    seed(true);
+    const { checkEstimatesCall } = await import('../proposal-object/check-estimates.js');
+    expect(checkEstimatesCall(graphNow(), ['fac_hours', 'fac_cost'])?.args.assumptions).toEqual([
+      expect.objectContaining({ factor_label: 'Hours', value: 10, unit: 'hours', keep: true }),
+      expect.objectContaining({ factor_label: 'Cost', value: 200, unit: 'GBP', keep: true }),
+    ]);
+    expect(checkEstimatesCall(graphNow(), ['fac_hours', 'fac_hours'])?.args.assumptions).toHaveLength(1);
+    expect(checkEstimatesCall(graphNow(), [])).toBeUndefined();
+    // The cap, against ids that would each pass: three open a card (the control), a fourth opens nothing.
+    const four = { nodes: [...graphNow().nodes, ...['fac_c', 'fac_d'].map((id) => ({ id, kind: 'factor', label: id, observed_state: { value: 1, unit: 'units' } }))] };
+    expect(checkEstimatesCall(four, ['fac_hours', 'fac_cost', 'fac_c'])?.args.assumptions).toHaveLength(3);
+    expect(checkEstimatesCall(four, ['fac_hours', 'fac_cost', 'fac_c', 'fac_d'])).toBeUndefined();
+    expect(checkEstimatesCall(graphNow(), ['fac_hours', 'opt_a']), 'an option is not a factor').toBeUndefined();
+    seed();
+    expect(checkEstimatesCall(graphNow(), ['fac_hours']), 'a factor with no figure has no estimate to check').toBeUndefined();
+  }, 120_000);
+  it('CHECK ESTIMATES RED: one held card of the current figures, no change proposed, with Not now', async () => {
+    seed(true); const before = bytes();
+    const b = await checkEstimates(['fac_hours', 'fac_cost']); const p = shown(b);
+    expect(p.proposal_id).toMatch(/^prop_[0-9a-f]{32}$/);
+    expect(b._proposal_fields!.proposals).toHaveLength(1);
+    expect(p.fields).toEqual([
+      expect.objectContaining({ field_id: 'factor_value:fac_cost', kind: 'factor_value', current: { value: 200, unit: 'GBP', source: 'estimate' }, filled_missing: false, editable: true }),
+      expect.objectContaining({ field_id: 'factor_value:fac_hours', kind: 'factor_value', current: { value: 10, unit: 'hours', source: 'estimate' }, filled_missing: false, editable: true }),
+    ]);
+    expect(b.suggested_actions).toContainEqual(p.decline_action);
+    expect(bytes(), 'opening the card changes nothing').toBe(before);
+  }, 120_000);
+  it('CHECK ESTIMATES edit RED: the user\'s figure lands through the existing door; the untouched estimate stays', async () => {
+    seed(true);
+    const b = await checkEstimates(['fac_hours', 'fac_cost']);
+    const r = await submit(b, [{ field_id: 'factor_value:fac_hours', value: 12 }]);
+    expect(r._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    expect(os('fac_hours')).toMatchObject({ raw_value: 12, source: 'user_override' });
+    expect(os('fac_cost')).toMatchObject({ raw_value: 200 });
+    expect(graphWrites.get(SCENARIO)).toBe(1);
+    expect(r.assistant_text).toContain('You set "Hours" to 12 hours; Olumi\'s estimate was 10 hours.');
+  }, 120_000);
+  it('CHECK ESTIMATES confirm: pressing the card unchanged records acceptance of the same figures', async () => {
+    seed(true);
+    const b = await checkEstimates(['fac_hours']); const p = shown(b);
+    const r = await turn(press(p));
+    expect(r._agent.tool_calls).toEqual([expect.objectContaining({ ok: true, mutated: true, proposal_id: p.proposal_id })]);
+    // The same figure, now Olumi's estimate ACCEPTED by the user (`isAcceptedOlumiEstimate`), never the user's own.
+    expect(os('fac_hours')).toMatchObject({ raw_value: 10, source: 'user_assumption', reviewed_by_user: expect.objectContaining({ intent: 'confirm' }) });
+    expect(os('fac_cost')).toMatchObject({ raw_value: 200, source: 'cee_inference' });
+  }, 120_000);
+
 });
