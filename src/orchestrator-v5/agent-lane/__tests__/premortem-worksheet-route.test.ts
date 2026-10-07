@@ -89,6 +89,7 @@ type Body = { assistant_text: string; _premortem_worksheet?: PremortemWorksheetV
 let script: ((body: Record<string, unknown>) => unknown)[] = [];
 let modelCalls = 0;
 let runStamp: 'valid' | 'missing_hash' | 'missing_time' | 'graph_differs' = 'valid';
+let telemetryLog: typeof import('../../../utils/telemetry.js').log;
 const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
 const call = (name: string, args: unknown) => ({ output: [{ type: 'function_call', name, call_id: randomUUID(), arguments: JSON.stringify(args) }] });
 
@@ -108,7 +109,9 @@ describe('A2 final root carrier and existing consent door', () => {
     const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
-    app = Fastify({ logger: false });
+    // A2-ELIG: the request id is the caller's header, so the withhold row binds to the exact request it logged.
+    app = Fastify({ logger: false, requestIdHeader: 'x-request-id' });
+    telemetryLog = (await import('../../../utils/telemetry.js')).log;
     app.post('/assist/v1/scenarios/:id/graph', async req => {
       const sid = (req.params as { id: string }).id;
       const graph = graphOf.get(sid);
@@ -156,6 +159,22 @@ describe('A2 final root carrier and existing consent door', () => {
     expect(body._premortem_worksheet).toBeUndefined();
     expect(body.assistant_text).toBe(REPLY);
     expect(modelCalls).toBe(1);
+  });
+  it('A2-ELIG: a withhold is logged with its request id, turn id and typed exit, ids only', async () => {
+    const info = vi.spyOn(telemetryLog, 'info');
+    try {
+      script = [() => say(`${REPLY}\n<premortem_rows>broken</premortem_rows>`)];
+      const turnId = randomUUID(), requestId = `req-a2elig-${randomUUID()}`;
+      const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', headers: { 'x-request-id': requestId }, payload: {
+        kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: 'Run a pre-mortem.', source: 'chip', chip: { id: planPickChipId(OPTION) },
+      } });
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as Body)._premortem_worksheet).toBeUndefined();
+      const withheld = info.mock.calls.map(([entry]) => entry as unknown as Record<string, unknown>)
+        .filter(entry => entry?.event === 'PREMORTEM_WORKSHEET_WITHHELD');
+      expect(withheld).toEqual([{ event: 'PREMORTEM_WORKSHEET_WITHHELD', request_id: requestId, turn_id: turnId,
+        exit: 'candidates_invalid', stories: 2, rows: 0, dropped: [] }]);
+    } finally { info.mockRestore(); }
   });
   it('refusal and non-method never emit a worksheet', async () => {
     const refused = await turn(planPickChipId('removed'));

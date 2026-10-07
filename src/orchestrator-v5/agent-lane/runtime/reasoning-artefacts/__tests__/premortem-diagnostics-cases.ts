@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { computeAnalysisAffectingGraphHash } from '../../../../context/graph-hash.js';
-import { methodTurnForReadback, PREMORTEM_PRESS_ID } from '../../../method-turn/method-turn.js';
-import type { premortemWorksheetDiagnosticsFor, PremortemDropReason } from '../premortem.js';
+import { readStoredOptionParticipation } from '../../../../tools/handlers/option-participation.js';
+import { readEvaluatedIdentityNodeIds } from '../../../admit-model.js';
+import { methodTurnForReadback, planPickChipId, PREMORTEM_PRESS_ID } from '../../../method-turn/method-turn.js';
+import type { premortemWorksheetDiagnosticsFor, PremortemDropReason, PremortemExit, PremortemRead } from '../premortem.js';
 import { candidate, fixture, LINK, OPTION, outside, ONE_STORY_REPLY as REPLY } from './premortem-fixture.js';
 
 type Input = Parameters<typeof premortemWorksheetDiagnosticsFor>[0];
@@ -55,6 +58,7 @@ export interface DiagnosticsCase {
   reason?: PremortemDropReason;
   storyIndex?: number | null;
   stressTested?: string[];
+  exit?: PremortemExit;
 }
 const singleDrop = (name: PremortemDropReason, change: (out: Input) => void, storyIndex: number | null = 1): DiagnosticsCase => ({
   name, emitted: false, rows: 0, reason: name, storyIndex,
@@ -207,7 +211,8 @@ export function riskStories(): Input {
   const read = {
     graph, graphHash,
     analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-07T06:34:37.724Z' }, leader_claim: { permitted: false, separation: 'near_tie', withheld_reason: 'options_do_not_separate' } },
-    analysisResult: { type: 'analysis_result', computed_against_hash: graphHash, leading_option_id: null },
+    analysisResult: { type: 'analysis_result', computed_against_hash: graphHash, leading_option_id: null,
+      enrichment: { option_comparison: graph.nodes.filter(n => n.kind === 'option').map(n => ({ option_id: n.id })) } },
     optionParticipation: [],
   };
   const turn = methodTurnForReadback(PREMORTEM_PRESS_ID, read);
@@ -291,4 +296,133 @@ export const riskCases: DiagnosticsCase[] = [
       return out;
     },
   },
+];
+// ── A2-ELIG (DL 7 Oct): served B9, staging df15c8c1, req 388cefba, scenario 976078cc. The chat told two stories, the
+// Reasoning tab showed nothing: Render PREMORTEM_WORKSHEET_WITHHELD stories:2 rows:1 dropped:[{1, scoped_not_run}].
+// The decision-level turn supplied 'Raise prices by 10%' sets 'Price rise from current price' for stories, but the
+// worksheet judged that story by a SCOPED press, which refuses an option whose path is user-sized only.
+const B9 = JSON.parse(readFileSync(new URL('./fixtures/premortem-b9-served.json', import.meta.url), 'utf8')) as {
+  scenario_id: string; turn_id: string; assistant_text: string; read: Record<string, unknown> & { graph: Graph; graph_hash: string };
+};
+const B9_PRICE = 'raise_prices_by_10';
+const B9_SQ = 'keep_pricing_as_it_is';
+/** The graph read projected exactly as `readBackState` projects it (same readers, same field names). */
+export function b9Read(): PremortemRead {
+  const r = structuredClone(B9.read);
+  // S-DEF #2739 (d738949c) holds the validated definition Starter-tier MRR → MRR in the analysis-affecting hash, so the
+  // captured df15c8c1 `graph_hash` no longer equals today's derivation of the SAME graph. A Run computed on today's code
+  // carries today's hash on both the read and the result, so the served read is re-derived here, never re-captured.
+  const graphHash = computeAnalysisAffectingGraphHash(r.graph as never)!;
+  return {
+    graph: r.graph, graphHash, analysisState: r.analysis_state,
+    analysisResult: { ...(r.analysis_result as object), computed_against_hash: graphHash },
+    analysisReady: r.analysis_ready, optionParticipation: readStoredOptionParticipation(r.analysis_option_participation),
+    identityEvaluated: readEvaluatedIdentityNodeIds(r.analysis_identity_evaluated_node_ids),
+  };
+}
+/**
+ * The served appendix is stripped before the wire, so each candidate's metadata is reconstructed: every prose field is
+ * copied from the verbatim reply, ids are the decision turn's supplied items, risk labels are phrases of the story.
+ */
+export const b9Candidates = () => [
+  {
+    option_id: B9_PRICE, story_index: 1,
+    failure_way: 'It is a year later and this decision went badly because ‘Raise prices by 10%’ set ‘Price rise from current price’, but customer losses eroded the added revenue.',
+    early_warning: 'Cancellation requests rose after customers received renewal notices.',
+    mitigation: 'Test the change with a small renewal cohort before extending it.',
+    grounding: { kind: 'factor', ids: ['price_rise_from_current_price'] },
+    risk: { label: 'customer losses eroded the added revenue', affected_node_id: 'monthly_recurring_revenue', direction: 'negative' },
+  },
+  {
+    option_id: STARTER, story_index: 2,
+    failure_way: 'It is a year later and this decision went badly because ‘Launch starter tier’ set ‘Starter monthly price’, but ‘Starter subscribers’ grew too slowly to deliver the revenue needed within nine months.',
+    early_warning: 'Paid starter sign-ups fell short of the launch plan.',
+    mitigation: 'Test paid demand before committing to a full launch.',
+    grounding: { kind: 'factor', ids: ['starter_monthly_price', 'starter_subscribers'] },
+    risk: { label: 'grew too slowly to deliver the revenue needed', affected_node_id: 'monthly_recurring_revenue', direction: 'negative' },
+  },
+];
+export function b9Served(): Input {
+  const read = b9Read();
+  // The served chip was the generic press (turn-004 req: chip agent-next-pre-mortem).
+  const turn = methodTurnForReadback(PREMORTEM_PRESS_ID, read);
+  if (turn?.kind !== 'run' || turn.context.decision_level !== true || turn.context.plan !== null) throw new Error('B9 must run at decision level');
+  return { scenarioId: B9.scenario_id, turnId: B9.turn_id, turn, passed: true, reply: B9.assistant_text,
+    candidates: b9Candidates(), initial: read, final: b9Read() };
+}
+/** Rewrites story 1 in the reply and its candidate together, so only the named change differs. */
+const b9Story1 = (out: Input, from: string, to: string, change: Partial<ReturnType<typeof b9Candidates>[number]> = {}) => {
+  const rows = out.candidates as ReturnType<typeof b9Candidates>;
+  if (!out.reply.includes(rows[0].failure_way)) throw new Error('story 1 must be verbatim');
+  const failure = rows[0].failure_way.replace(from, to);
+  out.reply = out.reply.replace(rows[0].failure_way, failure);
+  rows[0] = { ...rows[0], failure_way: failure, ...change };
+};
+const b9Drop = (name: string, change: (out: Input) => void, reason: PremortemDropReason): DiagnosticsCase => ({
+  name: `two stories / B9 ${name}`, emitted: false, rows: 1, reason, storyIndex: 1,
+  make: () => { const out = b9Served(); change(out); return out; },
+});
+export const eligibilityCases: DiagnosticsCase[] = [
+  { name: 'two stories / B9 served near-tie: both stories carried (RED at df15c8c1)', make: b9Served, emitted: true, rows: 2, stressTested: [B9_PRICE, STARTER] },
+  b9Drop('option the Run did not analyse', out => {
+    const result = out.final.analysisResult as { enrichment: { option_comparison: Record<string, unknown>[] } };
+    result.enrichment.option_comparison = result.enrichment.option_comparison.filter(o => o.option_id !== B9_PRICE);
+  }, 'decision_option_ineligible'),
+  b9Drop('status quo option', out => {
+    b9Story1(out, '‘Raise prices by 10%’', '‘Keep pricing as it is’', { option_id: B9_SQ });
+  }, 'decision_option_ineligible'),
+  b9Drop('option the Run took out', out => {
+    out.final.optionParticipation = readStoredOptionParticipation([{ option_id: B9_PRICE, state: 'excluded_olumi_proposed' }]);
+    if (out.final.optionParticipation === undefined) throw new Error('participation fixture must parse');
+  }, 'decision_option_ineligible'),
+  b9Drop('option label not unique', out => {
+    for (const read of [out.initial!, out.final]) {
+      const graph = read.graph as Graph;
+      graph.nodes.push({ id: 'duplicate_label', kind: 'factor', label: 'Raise prices by 10%' });
+      read.graphHash = computeAnalysisAffectingGraphHash(graph as never)!;
+      read.analysisResult = { ...read.analysisResult as object, computed_against_hash: read.graphHash };
+    }
+  }, 'decision_option_ineligible'),
+  // Path membership the scoped gate used to give: 'Starter subscribers' is supplied, but only on 'Launch starter tier'.
+  b9Drop('grounding on another option’s path', out => {
+    b9Story1(out, '‘Price rise from current price’', '‘Starter subscribers’', { grounding: { kind: 'factor', ids: ['starter_subscribers'] } });
+  }, 'supplied_mismatch'),
+  b9Drop('grounding the decision turn never supplied', out => {
+    b9Story1(out, '‘Price rise from current price’', '‘Customers lost from price rise’', { grounding: { kind: 'factor', ids: ['customers_lost_from_price_rise'] } });
+  }, 'supplied_mismatch'),
+];
+
+/** The scoped gate is unchanged for an option-naming press: the user-sized option still refuses there. */
+export function b9ScopedTurns() {
+  const read = b9Read();
+  return { price: methodTurnForReadback(planPickChipId(B9_PRICE), read), starter: methodTurnForReadback(planPickChipId(STARTER), read) };
+}
+
+const exitCase = (exit: PremortemExit, change: (out: Input) => void, rows = 0): DiagnosticsCase => ({
+  name: `two stories / exit ${exit}`, emitted: false, rows, exit,
+  make: () => { const out = b9Served(); change(out); return out; },
+});
+export const exitCases: DiagnosticsCase[] = [
+  exitCase('not_passed', out => { out.passed = false; }),
+  exitCase('no_turn', out => { out.turn = null; }),
+  exitCase('no_initial', out => { out.initial = undefined; }),
+  exitCase('no_turn_id', out => { out.turnId = undefined; }),
+  exitCase('candidates_invalid', out => { out.candidates = undefined; }),
+  exitCase('stamp_missing', out => { out.final = { ...out.final, analysisResult: undefined }; }),
+  exitCase('run_changed', out => {
+    out.final = { ...out.final, analysisState: { ...out.final.analysisState as object,
+      run_state: { kind: 'complete_current', computed_at: '2026-10-07T09:30:00.000Z' } } };
+  }),
+  exitCase('graph_changed', out => {
+    // Layout-only metadata: the analysis hash (so both Run stamps) holds while the whole-graph binding moves.
+    const graph = structuredClone(out.final.graph) as Graph;
+    graph.nodes[0].position = { x: 1, y: 2 };
+    out.final = { ...out.final, graph };
+  }),
+  exitCase('no_blindspot', out => { out.reply = out.reply.split('Outside the model:')[0]; }),
+  exitCase('exception', out => {
+    out.initial = { ...out.initial, get graph(): unknown { throw new Error('private prose must never escape'); } };
+  }),
+  // Every row validates; only the envelope's turn id (max 160) refuses, so the code names the last gate.
+  exitCase('worksheet_invalid', out => { out.turnId = 'x'.repeat(161); }, 2),
 ];

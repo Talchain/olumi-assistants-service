@@ -15,7 +15,7 @@ import type { GraphV3T } from "../../schemas/cee-v3.js";
 import { resolveScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
-import { heldLinkOf } from "../../orchestrator-v5/goal-target/held-user-links.js";
+import { endsOfGraph, heldLinkOf } from "../../orchestrator-v5/goal-target/held-user-links.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
 import {
   observedValueAuthorship,
@@ -771,6 +771,7 @@ function buildOptionReachability(
  * Output is sorted: nodes by id, edges by from then to.
  */
 export function compactGraph(graph: GraphV3T): GraphV3Compact {
+  const endsOf = endsOfGraph(graph);
   // Build lookup maps for resolving factor IDs to labels and node kinds
   const labelMap = new Map<string, string>();
   const framePairs = new Map<string, Record<string, unknown>>();
@@ -1004,7 +1005,7 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         to: edge.to,
         strength: edge.strength?.mean ?? 0,
         // Hold-at-1.0 (d5 #87 6008807178): the model reasons with the existence the Run USES, never a held link's stored doubt.
-        exists: heldLinkOf(edge) !== null ? 1 : edge.exists_probability ?? DEFAULT_EXISTS_PROBABILITY,
+        exists: heldLinkOf(edge, endsOf(edge)) !== null ? 1 : edge.exists_probability ?? DEFAULT_EXISTS_PROBABILITY,
       };
 
       // Non-default only: `directed` is the default and is omitted, so a graph
