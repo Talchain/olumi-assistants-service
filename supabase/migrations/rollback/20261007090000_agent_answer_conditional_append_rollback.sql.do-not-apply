@@ -1,0 +1,6 @@
+-- Order-safe: code feature-detects the missing RPC and uses its existing append.
+-- Drops only S-D.1b's new function. No stored answer or sidecar data is removed.
+DROP FUNCTION IF EXISTS public.append_agent_answer_if_latest(
+  uuid, uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text, jsonb, jsonb, text, text, jsonb, jsonb, text
+);
+NOTIFY pgrst, 'reload schema';

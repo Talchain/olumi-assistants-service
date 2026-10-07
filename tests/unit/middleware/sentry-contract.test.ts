@@ -268,22 +268,34 @@ describe('trace sample rate from env', () => {
 });
 
 describe('query-stripping regex scales linearly (regex budget)', () => {
+  // 4x the input, min of 7 batches, batch size calibrated so the LARGE sample runs >= ~60 ms. A fixed 14 ms
+  // sample read 8.65x on a CI runner (7 Oct, #2748): linear ~ 4x, quadratic ~ 16x, bar stays < 8x.
+  const SMALL = 25_000;
+  const LARGE = 100_000;
   it.each([
     ['no query', (n: number) => 'GET https://plot.invalid/' + 'a'.repeat(n)],
     ['one long query', (n: number) => 'GET https://plot.invalid/x?' + 'b'.repeat(n)],
     ['many short queries', (n: number) => '?a '.repeat(Math.ceil(n / 3)).slice(0, n)],
-  ])('%s: 20k costs < 8x of 5k', async (_shape, make) => {
+  ])('%s: 100k costs < 8x of 25k', async (_shape, make) => {
     const { stripQueriesInText } = await import('../../../src/middleware/sentry.js');
-    const time = (n: number) => {
-      const text = make(n);
-      let best = Infinity;
-      for (let i = 0; i < 5; i += 1) {
-        const t0 = performance.now();
-        for (let j = 0; j < 50; j += 1) stripQueriesInText(text);
-        best = Math.min(best, performance.now() - t0);
-      }
-      return Math.max(best, 0.05);
+    const batchMs = (text: string, calls: number): number => {
+      const t0 = performance.now();
+      for (let j = 0; j < calls; j += 1) stripQueriesInText(text);
+      return performance.now() - t0;
     };
-    expect(time(20_000) / time(5_000)).toBeLessThan(8);
+    const minBatchMs = (text: string, calls: number): number => {
+      batchMs(text, calls); // warm-up
+      let best = Infinity;
+      for (let i = 0; i < 7; i += 1) best = Math.min(best, batchMs(text, calls));
+      return best;
+    };
+    const small = make(SMALL);
+    const large = make(LARGE);
+    expect(large.length).toBeGreaterThanOrEqual(small.length * 3.9);
+    const oneCall = Math.max(Math.min(batchMs(large, 1), batchMs(large, 1), batchMs(large, 1)), 0.001);
+    const calls = Math.min(Math.max(Math.ceil(60 / oneCall), 1), 50_000);
+    const tLarge = minBatchMs(large, calls);
+    const tSmall = Math.max(minBatchMs(small, calls), 0.05);
+    expect(tLarge / tSmall, `25k ${tSmall.toFixed(2)} ms -> 100k ${tLarge.toFixed(2)} ms (x${calls})`).toBeLessThan(8);
   });
 });
