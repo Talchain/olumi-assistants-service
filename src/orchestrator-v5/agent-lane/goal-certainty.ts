@@ -33,6 +33,8 @@ import { mediatorReadings, type MediatorReading } from './mediator-reading.js';
 import { readUnitParts, sameUnit } from './same-unit.js';
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 import { resolveMagnitudeFrame, unitOf } from '../../cee/magnitude/link-effect.js';
+import { chanceGoalSentence, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
+import { sayDate } from '../goal-target/deadline-date.js';
 
 type Rec = Record<string, unknown>;
 
@@ -538,7 +540,9 @@ export function placeholderGoalWarning(
   // user can answer in one sentence. A level-less mediator is asked END TO END (the gauge) or in the unit its sized parent
   // fixes; a goal with no frame is asked its level first. Pure wording + offer: the links and the withhold are unchanged.
   const noDeadEnd = productBlocks ? undefined : placeholderAskWords(graph, ordered, opts);
-  const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
+  // S-E GOALS §2: no link into a chance goal is offered or asked (its sentence above asks nothing).
+  const chanceGoal = nodes.some((n) => n.kind === 'goal' && goalKindOf(n) === 'chance_of_event');
+  const asked = chanceGoal ? [] : named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined
     && !(noDeadEnd?.gaugeLinks.has(`${l.from}->${l.to}`) ?? false));
   // #2613 CR (b): while Gate 5 withholds every option, sizing a link cannot lift it: state the link, invite nothing, offer nothing.
   const said = productBlocks ? unsizedLinkStatement : unsizedLinkSentence;
@@ -615,6 +619,13 @@ export function noDeadEndAsks(
     return build();
   };
   const goal = nodes.find((n) => n.kind === 'goal');
+  // ⛔ S-E GOALS (Science ruling 7 Oct §2, P0; D-06): a goal measured as the CHANCE of an event is never asked its level
+  // ("today's level of … in % likelihood of on-time launch") and no link into it is asked to be sized: Olumi computes that
+  // chance. The one sentence says so; nothing is asked first (the host's one question is the deadline).
+  if (goal !== undefined && goalKindOf(goal) === 'chance_of_event') {
+    const deadline = goalDeadlineOf(goal);
+    return { message: chanceGoalSentence(deadline === undefined ? undefined : sayDate(deadline)), gaugeLinks: new Set() };
+  }
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
   const goalView = typeof goal?.id === 'string' ? view.get(goal.id) : undefined;
   if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {
