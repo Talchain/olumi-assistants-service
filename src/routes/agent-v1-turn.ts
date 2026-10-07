@@ -2402,6 +2402,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           return readCache.around(() => holdAddFactorInProcess(input, String(req.id)));
         },
         commitLimitAdd: async (input) => {
+          writesDispatched += 1;
           const fenceRefused = () => ({ status: 'refused' as const, reason: 'turn_fence_refused' });
           return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitLimitAddInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
         },

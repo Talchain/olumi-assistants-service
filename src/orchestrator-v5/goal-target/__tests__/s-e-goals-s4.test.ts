@@ -101,6 +101,85 @@ describe('D-07: one approved limit on the quantity the user names', () => {
     expect(route).toContain('commitLimitAddInProcess(input, String(req.id))');
     expect(route).toContain('propose_new_limit for a budget ceiling');
   });
+  it.each([
+    ['our budget is £200k', '£/month', 200000, false],
+    ['our budget is £20k a month', '£/month', 20000, true],
+    ['our budget is £20k a year', '£/month', 20000, false],
+    ['our budget is £20k a month', '£', 20000, false],
+  ])('P1-1 period identity: %s → %s', async (text, unit, value, admitted) => {
+    const g = model(); g.nodes[2].observed_state.unit = unit;
+    const w = world(g); const r = await w.propose(text, value);
+    expect(r.ok).toBe(admitted);
+    if (admitted) expect(r.public_label).toBe('Keep total cost within £20,000 a month?');
+    else expect(w.chips(r)).toEqual([]);
+  });
+  it.each(['goal', 'risk', 'factor', 'outcome'])('P1-2 rival money %s owns revenue, never cost', async kind => {
+    const g = model(); g.nodes.push({ id: 'revenue', kind, label: 'Revenue', observed_state: { value: 0.5, raw_value: 200000, cap: 400000, unit: '£' } });
+    const w = world(g);
+    for (const text of ['we only have £200k revenue', 'our budget is £200k revenue', 'our revenue budget is £200k']) {
+      const r = await w.propose(text); expect(r.ok).toBe(false); expect(w.chips(r)).toEqual([]);
+    }
+    expect((await w.propose('our budget is £200k')).ok).toBe(true);
+  });
+  it.each(['Our budget is £200k if funding closes', "Our rival's budget is £200k", 'Our budget is £200k for our rival',
+    'Their budget is £200k', "Acme's budget is £200k", 'Our budget is £200k, if funding closes', 'Our budget was £200k', 'Our budget is £200k last year'])('P1-3 whole-clause ownership: %s', async text => {
+    const w = world(); const r = await w.propose(text);
+    expect(r.ok).toBe(false); expect(w.chips(r)).toEqual([]);
+    expect((await w.propose(SERVED)).ok).toBe(true);
+  });
+  it.each([
+    'Our budget is £200k. Do not keep back £20k',
+    'Our budget is £200k \nKeep back £20k',
+    'Our budget is £200k, do not keep back £20k',
+    "Our budget is £200k, our rival will keep back £20k",
+    "Our budget is £200k, with Acme's £20k held back",
+    'Our budget is £200k, with £20k held back and £250k set aside',
+    'Our budget is £200k, with £250k held back',
+    'Our budget is £200k, with £20k held back and £30k set aside',
+    'Our budget is £200k. Their budget is £100k with £20k held back',
+  ])('P1-4 reserve locality and candidate count: %s', async text => {
+    const w = world(); const r = await w.propose(text); expect(r.ok).toBe(true);
+    expect(w.chips(r).map(c => c.label)).toEqual(['Yes', 'Change']);
+  });
+  it.each([
+    ['chip', 'Use £180,000 instead.', true, 180000],
+    ['typed punctuation', 'Use £180,000 instead.', false, 180000],
+    ['typed', 'Use £180,000 instead', false, 180000],
+    ['typed spacing/case', '  use   £180,000   INSTEAD!  ', false, 180000],
+    ['Yes', 'Yes', false, 200000],
+    ['forged typed', 'Use £190,000', false, null],
+    ['forged chip', 'Use £190,000', true, null],
+  ])('P1-5 %s approval binds stored alternative', async (_, message, chip, value) => {
+    const w = world(); const r = await w.propose();
+    const result = chip ? await w.approve(r, message) : await w.caps.authoriseChange(ctx(message), { proposal_id: r.proposal_id as string });
+    if (value === null) {
+      expect(result).toMatchObject({ ok: false, mutated: false, refusal: 'approval_words_mismatch' });
+      expect(w.writes).toHaveLength(0);
+    } else {
+      expect(result).toMatchObject({ ok: true, applied: true });
+      expect(w.graph().goal_constraints).toEqual([expect.objectContaining({ node_id: COST, value })]);
+    }
+  });
+  it('P2-6 verbatim quote surrounds bound figures after a 200-character preamble', async () => {
+    const text = `${'Context only. '.repeat(20)}Our budget is £200k, with a £20k reserve held back for recruitment fees.`;
+    const w = world(); const r = await w.propose(text);
+    expect(r.ok).toBe(true);
+    const value = w.proposals.get(r.proposal_id as string)!.operations[0]!.value as { source_quote: string };
+    expect(value.source_quote.length).toBeLessThanOrEqual(200);
+    expect(text).toContain(value.source_quote);
+    expect(value.source_quote).toContain('£200k'); expect(value.source_quote).toContain('£20k');
+  });
+  it.each(['our budget is €200k', 'our budget is £200k if funding closes'])('P2-7 existing cost refused statement does not request adding it: %s', async text => {
+    const w = world(); const r = await w.propose(text);
+    expect(r.ok).toBe(false); expect(r.reply).not.toBe(NO_LIMIT_QUANTITY);
+    expect(r.detail ?? '').not.toContain('add “Total cost”'); expect(w.chips(r)).toEqual([]);
+  });
+  it('P2-8 route counts the in-process limit write before dispatch', () => {
+    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    const writer = route.slice(route.indexOf('commitLimitAdd: async (input) => {'), route.indexOf('commitLimitEdit: async (input) => {'));
+    expect(writer).toContain('writesDispatched += 1;');
+    expect(writer.indexOf('writesDispatched += 1;')).toBeLessThan(writer.indexOf('return readCache.around'));
+  });
   it('Paul’s exact served sentence → one add_limit by id, exact card and reserve alternative', async () => {
     const w = world(); const r = await w.propose();
     expect(r).toMatchObject({ ok: true, mutated: false, public_label: 'Keep total cost within £200,000?' });

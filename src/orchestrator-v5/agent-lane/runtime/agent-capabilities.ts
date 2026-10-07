@@ -1,4 +1,4 @@
-import { readNewLimit, limitFigure, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
+import { readNewLimit, limitFigure, hasLimitQuantity, limitApprovalWords, NO_LIMIT_QUANTITY, type NewLimitValue } from '../stated-limit.js';
 /**
  * Agent lane — the capabilities, each delegating to an existing Olumi path.
  *
@@ -5770,10 +5770,10 @@ export function createAgentCapabilities(
         const op = ops[0]!;
         const v = op.value as NewLimitValue;
         const pid = decision.proposal.proposal_id;
-        const words = ctx.typed_approval_words ?? ctx.user_turn_text;
-        const useReserve = v.reserve !== undefined && words === v.reserve.message;
+        const words = limitApprovalWords(ctx.typed_approval_words ?? ctx.user_turn_text ?? '');
+        const useReserve = v.reserve !== undefined && words === limitApprovalWords(v.reserve.message);
         // A forged chip/message cannot substitute another figure for this stored card.
-        if (ctx.typed_approval_of === pid && words !== 'Yes, record that limit.' && !useReserve) {
+        if (!['yes', 'yes, record that limit'].includes(words) && !useReserve) {
           return { ok: false, mutated: false, refusal: 'approval_words_mismatch' };
         }
         if (opts.commitLimitAdd === undefined) return { ok: false, mutated: false, refusal: 'unavailable' };
@@ -8364,12 +8364,13 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const text = typeof ctx.user_turn_text === 'string' ? ctx.user_turn_text : '';
       const value = readNewLimit(g.raw, text, Number(args.value), args.quantity_label);
-      if (value === null) return { ok: false, mutated: false, refusal: 'limit_not_bound', reply: NO_LIMIT_QUANTITY,
-        detail: `Say exactly this one line, with no chip: ${NO_LIMIT_QUANTITY}` };
+      if (value === null) return { ok: false, mutated: false, refusal: 'limit_not_bound',
+        ...(!hasLimitQuantity(g.raw, args.quantity_label) ? { reply: NO_LIMIT_QUANTITY,
+          detail: `Say exactly this one line, with no chip: ${NO_LIMIT_QUANTITY}` } : {}) };
       const existing = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints as Record<string, unknown>[] : [])
         .filter(c => c.node_id === value.node_id);
       if (existing.length > 0) {
-        if (existing.length !== 1 || existing[0]?.operator !== '<=') return { ok: false, mutated: false, refusal: 'limit_ambiguous', reply: NO_LIMIT_QUANTITY };
+        if (existing.length !== 1 || existing[0]?.operator !== '<=') return { ok: false, mutated: false, refusal: 'limit_ambiguous' };
         return caps.proposeLimitChange!( { ...ctx, user_text: text }, { limit_label: args.quantity_label, operator: '<=',
           new_value: value.raw_value, unit: value.unit, rationale: args.rationale });
       }
