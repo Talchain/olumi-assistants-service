@@ -833,8 +833,11 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "(`p_low`, `p_high`), its MEANING (`at_least_once_within_horizon`: a probability, unitless, in [0,1]) and its " +
       "attestation `basis` (`user` | `olumi` | `reference`: whose range it is), which is REQUIRED, so an unattested " +
       "range cannot be written. Science named the field `basis` (science-richness-P0-20261007.md §4), which is not a " +
-      "warrant token, hence the row. Writers: the user's graph registration only, validated at the door " +
-      "(`eventRiskIngressIssues`); never defaulted. It IS an analysis input: ISL draws occurrence from it.",
+      "warrant token, hence the row. Writers: the user's graph registration, validated at the door " +
+      "(`eventRiskIngressIssues`), and the add-risk door's hold stamp (event_risk.v1 slice 2a: `readStatedEventRisk` " +
+      "reads the user's own words, `basis: 'user'`, validated by `EventRiskV1` before holding, stamped after the " +
+      "re-referee); no producer may author it (field-safety pipeline-owned). Never defaulted. It IS an analysis " +
+      "input: ISL draws occurrence from it.",
   },
   {
     id: "unwarranted:cee.NodeV3::event_risk.occurrence.p_high",
