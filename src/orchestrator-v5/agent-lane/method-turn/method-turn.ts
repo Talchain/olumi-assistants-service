@@ -317,7 +317,9 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
     `Format: ${CONTRACT.format}`,
     'Each story rests on at least one of these items from the user’s model, highest priority first. Name the item in '
       + 'its own words; for a link, name both ends:',
-    ...ctx.supplied_items.map((item) => `- ${itemPhrase(item)} (${decision ? ITEM_CLASS[item.kind].replaceAll('this plan', 'an option') : ITEM_CLASS[item.kind]})`),
+    ...ctx.supplied_items.map((item) => item.lever_option_labels !== undefined
+      ? `- ${item.lever_option_labels.map(label => `${quote(label)} sets ${itemPhrase(item)}`).join('; ')}`
+      : `- ${itemPhrase(item)} (${decision ? ITEM_CLASS[item.kind].replaceAll('this plan', 'an option') : ITEM_CLASS[item.kind]})`),
     `${decision ? 'Each story names at most one option. Never name a winner, best option or recommendation.' : `Name no option other than ${plan}.`} Outside an item's own name, use no percentage and none of these words: likely, `
       + 'likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.',
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
@@ -403,9 +405,11 @@ export type CardCall =
  * the writer resolves.
  *
  * Null = no card, and the turn offers 'Talk it through' only: a risk or a limit (its card would need a label drawn from
- * the story, i.e. model text: not in v1), or a target the graph no longer holds as it was read.
+ * the story, i.e. model text: not in v1), a story-only own lever from the empty decision branch, or a target the graph
+ * no longer holds as it was read.
  */
 export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: string = PREMORTEM_CARD_RATIONALE): CardCall | null {
+  if (target.card === null) return null;
   const g = rec(graph);
   const nodes = Array.isArray(g?.nodes) ? g.nodes.map(rec).filter((n): n is Rec => n !== undefined) : [];
   const edges = Array.isArray(g?.edges) ? g.edges.map(rec).filter((e): e is Rec => e !== undefined) : [];
