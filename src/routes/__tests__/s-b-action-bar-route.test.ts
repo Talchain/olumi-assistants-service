@@ -19,7 +19,14 @@ import { SessionLRUCache } from '../../orchestrator-v5/session/cache.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import { agentProposals } from '../../orchestrator-v5/agent-lane/held-approval-offers.js';
 import served from '../../orchestrator-v5/agent-lane/__tests__/fixtures/m1-s1-served-graphs.json';
-import { actionFactsOf } from '../../orchestrator-v5/agent-lane/actions/state.js';
+import { chanceGoalDeadlineAsk } from '../../orchestrator-v5/goal-target/goal-kind.js';
+import { composeGoalTargetQuestion } from '../../orchestrator-v5/goal-target/decide-goal-target-ask.js';
+import { ACTION_REGISTRY } from '../../orchestrator-v5/agent-lane/actions/registry.js';
+import { SUGGEST_RISKS_CHIP } from '../../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
+import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
+import { estimateGraph, estimateLicence } from '../../orchestrator-v5/agent-lane/actions/__tests__/estimate-fixture.js';
+import { resolveDskClaimProvenance } from '../../orchestrator-v5/compose/dsk-claim-record.js';
+import { actionFactsOf, estimatePointsOf } from '../../orchestrator-v5/agent-lane/actions/state.js';
 
 const { port, source, identity, logs } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -126,6 +133,7 @@ const coldStore = () => {
   port.readCommittedTurn.mockImplementation((s: string, t: string) => realStore.readCommittedTurn(s, t));
   port.readLatestAnswerOffers.mockImplementation((s: string) => realStore.readLatestAnswerOffers(s));
   port.readGuidanceHistory.mockImplementation((s: string) => realStore.readGuidanceHistory(s));
+  port.readMostRecentPendingActions.mockImplementation((s: string) => realStore.readMostRecentPendingActions(s, { validation: 'strict' }));
 };
 
 beforeEach(async () => {
@@ -135,7 +143,6 @@ beforeEach(async () => {
   coldStore();
   port.ensureScenarioExists.mockResolvedValue({ user_id: OWNER }); port.getScenarioOwner.mockResolvedValue(OWNER);
   port.scenarioExists.mockResolvedValue(true); port.isScenarioMember.mockResolvedValue(false);
-  port.readMostRecentPendingActions.mockImplementation(async () => []);
   vi.stubGlobal('fetch', vi.fn(async () => {
     modelCalls += 1;
     return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'In the current model, the link matters.' }] }] }), { status: 200 });
@@ -160,7 +167,10 @@ const turn = async (payload: Record<string, unknown>): Promise<Body> => {
   expect(r.statusCode, r.body).toBe(200);
   return r.json() as Body;
 };
-const press = (id: string, extra: Record<string, unknown> = {}) => turn({ message: 'pressed', source: 'chip', chip: { id, ...extra } });
+// A bar press carries its offer's user_line as the visible message (DGAI sends exactly that); WIDEN's shared risks id
+// is told apart by it (SR-5). Ids the registry does not map keep a neutral message.
+const USER_LINE_BY_PRESS = new Map(Object.values(ACTION_REGISTRY).flatMap((e) => (e.press.kind === 'fixed' ? [[e.press.id, e.user_line] as const] : [])));
+const press = (id: string, extra: Record<string, unknown> = {}) => turn({ message: USER_LINE_BY_PRESS.get(id) ?? 'pressed', source: 'chip', chip: { id, ...extra } });
 const reload = async (): Promise<{ action_bar?: Bar }> => {
   const r = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${scenario}/graph`, payload: { include_conversation_turns: true } });
   expect(r.statusCode, r.body).toBe(200);
@@ -168,6 +178,7 @@ const reload = async (): Promise<{ action_bar?: Bar }> => {
 };
 const offersOf = (b: Bar) => [...b.priority, ...b.standard, ...b.more];
 const PRESS_IDS = ['agent-next-review-decision', 'agent-next-what-would-change', 'agent-next-strengthen', 'agent-next-pre-mortem', 'agent-next-widen',
+  'act:frame_brief', 'act:set_goal', 'act:set_deadline', SUGGEST_RISKS_CHIP.id, 'act:bias_anchoring', 'act:check_estimates',
   'agent-test-without-link:["sprint_capacity_for_ai_reporting","ai_reporting_module_availability"]', 'act:no_such_action'];
 
 describe('every press reaches its typed path, never the free Agent turn', () => {
@@ -312,5 +323,152 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
       if (process.env.CAPTURE_ACTION_BAR_FIXTURES === '1') writeFileSync(file, `${JSON.stringify(bar, null, 2)}\n`);
       expect(bar, name).toEqual(JSON.parse(readFileSync(file, 'utf8')));
     }
+  });
+});
+
+
+const paulGraph = (chance = true) => {
+  const g = structuredClone(D1.graph) as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+  const goal = g.nodes.find(n => n.kind === 'goal')!;
+  delete goal.goal_horizon; delete goal.goal_threshold_raw; delete goal.goal_threshold_unit;
+  goal.observed_state = { unit: chance ? '% likelihood of on-time launch' : 'features' };
+  return g;
+};
+
+describe('S-B slice 2a through the real routes', () => {
+  it('Paul: typed turn, pre-mortem press, and reload keep ONLY Set deadline in priority, byte for byte', async () => {
+    setState('pre_run', paulGraph());
+    for (const b of [await turn({ message: 'Where are we?' }), await press('agent-next-pre-mortem')]) {
+      expect(b.action_bar!.priority.map(o => o.action_id)).toEqual(['set_deadline']);
+      expect(b.action_bar!.priority[0]!.label).toBe('Set deadline');
+      coldStore();
+      expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(b.action_bar));
+    }
+  });
+  it('Set target is a standing gap only without a stated target; no goal prioritises Frame brief', async () => {
+    const g = paulGraph(false); setState('pre_run', g);
+    expect((await turn({ message: 'Where are we?' })).action_bar!.priority.map(o => o.action_id)).toEqual(['set_goal']);
+    g.nodes.find(n => n.kind === 'goal')!.goal_threshold_raw = 10; setState('pre_run', g);
+    expect(offersOf((await reload()).action_bar!).map(o => o.action_id)).not.toContain('set_goal');
+    g.nodes = g.nodes.filter(n => n.kind !== 'goal'); setState('pre_run', g);
+    expect((await reload()).action_bar!.priority.map(o => o.action_id)).toEqual(['frame_brief']);
+  });
+  it('a durable pending approval yields on live and reload; a stale Run also yields, a current Run restores priority', async () => {
+    setState('withheld', paulGraph());
+    const card = await press('agent-next-strengthen');
+    const latest = table[0]!.pending_actions as PendingAction[];
+    expect(latest.some(pa => pa.action.kind === 'apply_proposed_change'), 'the answer row carries its approval').toBe(true);
+    expect(card.action_bar!.priority.map(o => o.action_id)).not.toContain('set_deadline');
+    expect(card.action_bar!.more.find(o => o.action_id === 'set_deadline')).toMatchObject({ enabled: true });
+    coldStore();
+    expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(card.action_bar));
+    for (const p of agentProposals.outstanding(scenario, OWNER)) agentProposals.discard(p.proposal_id);
+    table = []; coldStore(); setState('stale', paulGraph());
+    const stale = await press('act:set_deadline');
+    expect(stale.action_bar!.priority.map(o => o.action_id)).not.toContain('set_deadline');
+    expect(stale.action_bar!.more.find(o => o.action_id === 'set_deadline')).toMatchObject({ enabled: true });
+    expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(stale.action_bar));
+    expect((table[0]!.pending_actions as PendingAction[]).some(pa => pa.action.kind === 'apply_proposed_change')).toBe(false);
+    setState('withheld', paulGraph());
+    expect((await reload()).action_bar!.priority.map(o => o.action_id)).toEqual(['set_deadline']);
+  });
+  it('the live bar reads the PERSISTED approval carrier, like the reload (Codex r1 P1-1 on #2766)', async () => {
+    setState('withheld', paulGraph());
+    // The persistence floor (or a concurrent decline) leaves no approval on the row this turn writes.
+    port.append.mockImplementation((w: SessionTurnWrite) => realStore.append({ ...w, pending_actions: [] }));
+    const card = await press('agent-next-strengthen');
+    expect(card.action_bar!.priority.map(o => o.action_id)).toEqual(['set_deadline']);
+    coldStore();
+    expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(card.action_bar));
+  });
+  it.each(['set_deadline', 'set_goal'] as const)('%s press ships the exact canonical question, zero model calls, and a ran receipt', async action => {
+    const g = paulGraph(action === 'set_deadline'); setState('pre_run', g);
+    const b = await press(`act:${action}`);
+    expect(b.assistant_text).toBe(action === 'set_deadline' ? chanceGoalDeadlineAsk(String(g.nodes.find(n => n.kind === 'goal')!.label)) : composeGoalTargetQuestion());
+    expect(modelCalls).toBe(0); expect(b.suggested_actions).toEqual([]);
+    expect(b._diagnostic_trace?.fast_path).toBe('method');
+    expect(b._action).toMatchObject({ action_id: action, outcome: 'ran' });
+  });
+  it('Frame brief ships the exact target + risks reply without a model call or composer rewriting', async () => {
+    const g = { nodes: [
+      { id: 'goal', kind: 'goal', label: 'Grow revenue' }, { id: 'a', kind: 'option', interventions: { f: 1 } }, { id: 'b', kind: 'option', interventions: { f: 2 } },
+      { id: 'f', kind: 'factor' }, { id: 'o', kind: 'outcome' },
+    ], edges: [{ from: 'f', to: 'goal' }], goal_constraints: [{ node_id: 'f', operator: '<=', value: 10 }] };
+    setState('pre_run', g);
+    const b = await press('act:frame_brief');
+    expect(b.assistant_text).toBe('Your brief has: goal, options, factors, outcomes, limits.\n- ' + composeGoalTargetQuestion()
+      + '\n- What could go wrong that would stop ‘Grow revenue’?');
+    expect(modelCalls).toBe(0); expect(b._action).toMatchObject({ action_id: 'frame_brief', outcome: 'ran' });
+    expect(b.suggested_actions.map(a => a.id)).toEqual(['act:set_goal', SUGGEST_RISKS_CHIP.id]);
+  });
+  it('More risks with the registry user line opens WIDEN risks on the method fast path', async () => {
+    setState('pre_run', paulGraph());
+    expect(ACTION_REGISTRY.more_risks.user_line).toBe(SUGGEST_RISKS_CHIP.message);
+    const b = await turn({ source: 'chip', message: ACTION_REGISTRY.more_risks.user_line, chip: { id: SUGGEST_RISKS_CHIP.id } });
+    expect(b._diagnostic_trace?.fast_path).toBe('method');
+    expect(b._action).toMatchObject({ action_id: 'more_risks', outcome: 'ran' });
+    expect(modelCalls).toBeGreaterThan(0);
+  });
+});
+
+
+describe('S-B slice 2b through the real turn, composer and reload routes', () => {
+  const setEstimates = () => {
+    setState('withheld', estimateGraph());
+    const result = { ...(source.analysis.analysis_result as object), enrichment: { inference_warnings: [estimateLicence()] } };
+    source.analysis = { ...source.analysis, analysis_result: result, current_read: { analysis_ready: READY, result } };
+  };
+  it.each(['bias_anchoring', 'check_estimates'] as const)('%s press is an exact typed reply, zero model calls, with live/reload parity and both enabled menu offers', async id => {
+    setEstimates();
+    const b = await press(`act:${id}`, { parameters: { offer_key: '0123456789abcdef' } });
+    expect(b._diagnostic_trace?.fast_path).toBe('method');
+    expect(modelCalls).toBe(0);
+    expect(b._action).toMatchObject({ action_id: id, outcome: 'ran', offer_key: '0123456789abcdef' });
+    const points = estimatePointsOf(actionFactsOf({ scenarioId: scenario, graph: source.graph, graphHash: hashOf(source.graph),
+      analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result, analysisReady: READY }));
+    expect(points.map(p => p.factor_id)).toEqual(['far', 'near', 'znear']);
+    const expected = id === 'bias_anchoring' ? [
+      "A first number can pull later estimates towards it. Here are Olumi's figures this result leans on, to test against your own evidence.",
+      ...[['Far', '25%'], ['Near', '15%'], ['Extra', '10%']].map(([label, figure]) => `- Olumi put ‘${label}’ at ${figure}. That's Olumi's estimate, not a measured figure. What would make the real value much lower than that? And what would make it much higher? From your own evidence, what range would you give, and what is it based on?`),
+      'Which of these would you check first?',
+    ].join('\n') : [
+      "Olumi's estimates that this result rests on:",
+      "- ‘Far’: 25%. That's Olumi's estimate, not a measured figure.",
+      "- ‘Near’: 15%. That's Olumi's estimate, not a measured figure.",
+      "- ‘Extra’: 10%. That's Olumi's estimate, not a measured figure.",
+      "If you have your own figure for any of these, tell me and I'll propose it for you to approve.",
+    ].join('\n');
+    expect(b.assistant_text).toBe(expected);
+    expect(b.assistant_text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
+    expect(b.suggested_actions).toEqual([]);
+    expect(b._action?.science).toBeUndefined(); // two options + current Run: canonicalStageOf reads decide
+    for (const action_id of ['bias_anchoring', 'check_estimates']) expect(b.action_bar!.more.find(o => o.action_id === action_id)).toMatchObject({ enabled: true });
+    coldStore();
+    expect((await reload()).action_bar).toEqual(b.action_bar);
+  });
+  it('anchoring frame badge uses the canonical reader on a stale Run; no readable stage yields no badge', async () => {
+    setState('stale', estimateGraph());
+    const frame = await press('act:bias_anchoring');
+    expect(frame._action?.science).toEqual(resolveDskClaimProvenance('DSK-B-001'));
+    expect(JSON.stringify(frame._action).match(/DSK-B-001/g)).toHaveLength(1);
+    setState('pre_run', estimateGraph());
+    const noStage = await press('act:bias_anchoring');
+    expect(noStage._action).toMatchObject({ outcome: 'ran' });
+    expect(noStage._action?.science).toBeUndefined();
+    expect(modelCalls).toBe(0);
+  });
+  it('stale anchoring offer after all eligible factors became user figures: exact no-trigger reply, cant_yet, no model calls', async () => {
+    setEstimates();
+    const old = (await press('act:check_estimates')).action_bar!.more.find(o => o.action_id === 'bias_anchoring')!;
+    const g = estimateGraph();
+    for (const n of g.nodes) if (n.kind === 'factor' && n.observed_state) n.observed_state = { ...n.observed_state, source: 'user_edited' };
+    setState('withheld', g);
+    const b = await press('act:bias_anchoring', { parameters: { offer_key: old.offer_key } });
+    expect(b.assistant_text).toBe("None of these patterns' triggers fire in this model.");
+    expect(b._action).toMatchObject({ action_id: 'bias_anchoring', outcome: 'cant_yet', reason: 'nothing_in_scope' });
+    expect(b._action?.science).toBeUndefined();
+    expect(b.suggested_actions).toEqual([]);
+    expect(modelCalls).toBe(0);
+    expect(offersOf(b.action_bar!).some(o => o.action_id === 'bias_anchoring' || o.action_id === 'check_estimates')).toBe(false);
   });
 });
