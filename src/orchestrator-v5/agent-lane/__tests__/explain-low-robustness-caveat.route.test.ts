@@ -31,6 +31,14 @@ const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const NARRATOR = 'Raise Pro to £59 at release leads in this model.';
 const NARRATOR_BULLETS = ['The price assumption changes the modelled outcome.', 'The conversion assumption also matters.', 'The timing assumption remains uncertain.'];
 const bulletedNarrator = (n: number) => [NARRATOR, ...NARRATOR_BULLETS.slice(0, n).map(b => `- ${b}`), 'These are model-relative findings.'].join('\n');
+/**
+ * S-A (lane COPY-SHAPE, 7 Oct): the ONE composer ships a reply whole when it fits the 75-word face budget with one
+ * question (AIE #87 6037293086 §5), or when under 15 words would go behind "More detail", so the rows that test the
+ * SHAPED face carry a closing long enough to disclose.
+ */
+const LONG_TAIL = 'They describe what this model implies on current information, not what the market will do, and they change when its assumptions change. '
+  + 'The figures behind them are planning assumptions rather than measured evidence, so the next useful step is to check the inputs this result leans on most.';
+const shapedNarrator = (n: number) => `${bulletedNarrator(n)} ${LONG_TAIL}`;
 const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
 /** Exact public sentences, pinned independently of the selector so base/mutants cannot redefine the oracle. */
 const SENTENCE = 'The result is not yet robust — small changes could flip it.';
@@ -164,7 +172,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   });
   it('W2: licensed + high/true — neither caveat', async () => {
     // Robust contrast: keep a shapeable narrator so absence is checked on the face as well as in text.
-    narrator = bulletedNarrator(2);
+    narrator = shapedNarrator(2);
     readbackResult.enrichment.robustness = { level: 'high', is_robust: true };
     const b = await press(await run());
     expect(b.assistant_text.slice(0, NARRATOR.length)).toBe(NARRATOR);
@@ -209,7 +217,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   });
   // W7: a caveat alone must preserve headline-first rendering and narrator bullet order.
   it('W7: licensed + fragile keeps the shape with the exact caveat as bullet 1', async () => {
-    narrator = bulletedNarrator(2);
+    narrator = shapedNarrator(2);
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.headline).toBe(NARRATOR);
@@ -221,8 +229,8 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   // Exact narrator copies in a shaped answer must move to bullet 1, without surviving elsewhere.
   it.each(['bullet', 'detail'])('W7 contrast: narrator already carries the caveat in %s', async placement => {
     narrator = placement === 'bullet'
-      ? [NARRATOR, `- ${SENTENCE}`, ...NARRATOR_BULLETS.slice(0, 2).map(b => `- ${b}`), 'These are model-relative findings.'].join('\n')
-      : `${bulletedNarrator(2)} ${SENTENCE}`;
+      ? [NARRATOR, `- ${SENTENCE}`, ...NARRATOR_BULLETS.slice(0, 2).map(b => `- ${b}`), `These are model-relative findings. ${LONG_TAIL}`].join('\n')
+      : `${shapedNarrator(2)} ${SENTENCE}`;
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.headline).toBe(NARRATOR);
@@ -233,12 +241,13 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   });
   // W8: adding the face caveat displaces only the last narrator bullet, without losing or doubling words.
   it('W8: three narrator bullets move the last to the start of detail', async () => {
-    narrator = bulletedNarrator(3);
+    narrator = shapedNarrator(3);
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.headline).toBe(NARRATOR);
     expect(b._answer_shape!.bullets).toEqual([SENTENCE, ...NARRATOR_BULLETS.slice(0, 2)]);
-    expect(b._answer_shape!.detail.startsWith(NARRATOR_BULLETS[2]!)).toBe(true);
+    // S-A: a bullet in detail keeps its own list marker (the composer moves lines, it never rewrites them).
+    expect(b._answer_shape!.detail.startsWith(`- ${NARRATOR_BULLETS[2]!}`)).toBe(true);
     const content = [...b._answer_shape!.bullets, b._answer_shape!.detail].join('\n');
     for (const bullet of NARRATOR_BULLETS) expect(count(content, bullet)).toBe(1);
     expect(count(b.assistant_text, SENTENCE)).toBe(1);
@@ -322,7 +331,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   });
   // W14: an exact caveat used as the first sentence must not consume the narrator's real headline.
   it('W14: caveat-first narration retains a shape with the second sentence as headline', async () => {
-    narrator = `${SENTENCE} ${bulletedNarrator(2)}`;
+    narrator = `${SENTENCE} ${shapedNarrator(2)}`;
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.bullets[0]).toBe(SENTENCE);
@@ -351,7 +360,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   });
   it('W16: spaced caveat-first narration retains one caveat and the second sentence as headline', async () => {
     const sentence = NOT_ROBUST_SENTENCE.trim();
-    narrator = `${sentence.replace('robust —', 'robust  —')} ${bulletedNarrator(2)}`;
+    narrator = `${sentence.replace('robust —', 'robust  —')} ${shapedNarrator(2)}`;
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     const shape = b._answer_shape!;
@@ -399,7 +408,7 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
   it('W18: a shapeable narrator with a questions tail keeps the caveat on the face', async () => {
     const sentence = NOT_ROBUST_SENTENCE.trim();
     const question = 'What baseline should we use?';
-    narrator = `${bulletedNarrator(2)}\n\nQuestions this model does not answer yet: ${question}`;
+    narrator = `${shapedNarrator(2)}\n\nQuestions this model does not answer yet: ${question}`;
     const b = await press(await run());
     expect(b._answer_shape).toBeDefined();
     expect(b._answer_shape!.bullets[0]).toBe(sentence);

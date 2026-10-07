@@ -428,10 +428,14 @@ const TARGET_TESTABLE_SENTENCE_CAP = 388;
 export function notTargetTestableSentence(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): string | null {
   const parts = untestableTargetParts(graph, verdict, namedLinkCount);
   if (parts === null) return null;
-  // Consecutive needs share one "it needs" ("it needs today's level of X and a size for the link from L to X").
+  return `Olumi can compare your options, but can't yet test them against your target (${parts.target}), because ${targetBecause(parts)}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+}
+
+/** The "because …" of a target sentence: consecutive needs share one "it needs" ("it needs today's level of X and a size
+ * for the link from L to X"). Shared by the Run-wide sentence and each option's own (S-E GOALS S6). */
+export function targetBecause(parts: Pick<UntestableTargetParts, 'clauses'>): string {
   const clauses = parts.clauses.map((c, i) => (i > 0 && c.startsWith('it needs ') && parts.clauses[i - 1]!.startsWith('it needs ') ? c.slice('it needs '.length) : c));
-  const because = clauses.length === 1 ? clauses[0] : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
-  return `Olumi can compare your options, but can't yet test them against your target (${parts.target}), because ${because}.${parts.question !== null ? ` ${parts.question}` : ''}`;
+  return clauses.length === 1 ? clauses[0]! : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
 }
 
 /**

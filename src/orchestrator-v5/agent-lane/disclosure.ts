@@ -19,10 +19,13 @@
  */
 
 import { resizedLinksSentence, type ResizedLinksGroup } from '../../cee/magnitude/frame-defaulted-links.js';
+import { indexGoalWeightsMessages } from '../goal-target/index-goal-weights-note.js';
 
 export interface DisclosableOutcome {
   /** A write happened. */
   readonly mutated: boolean;
+  readonly ran?: boolean;
+  readonly result?: unknown;
   /** The written strength was a placeholder, not a stated one. */
   readonly placeholder_strength?: boolean;
   /** A goal-target card that left out today's level the user wrote but that could not be bound to the goal (E1). */
@@ -36,17 +39,31 @@ export const PLACEHOLDER_STRENGTH_DISCLOSURE =
   'read as a measurement. Tell me how strong you think the effect is and I will replace it.';
 
 /** The disclosures owed for this turn, in order. Empty when nothing is owed. */
-export function disclosuresFor(outcomes: readonly DisclosableOutcome[]): readonly string[] {
+export function disclosuresFor(outcomes: readonly DisclosableOutcome[], assistantText = ''): readonly string[] {
   const owed: string[] = [];
   if (outcomes.some((o) => o.mutated && o.placeholder_strength === true)) {
     owed.push(PLACEHOLDER_STRENGTH_DISCLOSURE);
   }
   for (const o of outcomes) {
+    // Methods notes are owed only by a Run on this turn, once, without rewriting the model's words.
+    if (o.ran === true) {
+      for (const line of indexGoalWeightsMessages(o.result)) {
+        if (!assistantText.includes(line) && !owed.includes(line)) owed.push(line);
+      }
+    }
     // ⭐ E1 (DL #75 5924370309; AIQ words 5924376899): the user's own level, left out of the target card, is said — once.
     const line = o?.current_level_left_out?.host_line;
     if (typeof line === 'string' && line !== '' && !owed.includes(line)) owed.push(line);
   }
   return owed;
+}
+
+// Only successful construction writes owe these code-authored loss sentences.
+export function eventRiskDisclosuresFor(outcomes: readonly {
+  readonly ok?: boolean; readonly mutated: boolean; readonly event_risk_disclosures?: unknown;
+}[]): readonly string[] {
+  return [...new Set(outcomes.flatMap((o) => o.ok === true && o.mutated === true && Array.isArray(o.event_risk_disclosures)
+    ? o.event_risk_disclosures.filter((line): line is string => typeof line === 'string' && line.trim() !== '') : []))];
 }
 
 /** Append owed disclosures to the Agent's own text, without rewriting it. */

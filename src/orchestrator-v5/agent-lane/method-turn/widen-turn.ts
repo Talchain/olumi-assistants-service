@@ -30,6 +30,12 @@ import { assembleGuidanceSignals, type GuidanceSignals as TurnSignals } from '..
 import { selectorSignalsOf, TALK_IT_THROUGH_CHIP, type MethodReadback } from './method-turn.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import type { AgentCapabilities, ToolResult } from '../runtime/agent-tools.js';
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
+import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
+import { sameLabel } from '../../routing/add-option-transaction.js';
+import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
+import { chanceGoalDeadlineAsk, goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 
 const METHOD = 'RC-WIDEN' as const;
 const CONTRACT = POLICY.method_turns[METHOD];
@@ -52,8 +58,11 @@ export const WIDEN_FALLBACK_TEMPLATE =
 /** The gate's refusal code: the door stores nothing, and the turn falls back. */
 export const WIDEN_GATE_REFUSAL = 'widen_gate';
 
+/** The canvas "+" chooser's Option press (DGAI `WhatElseChooser.tsx` → `askAi.ts` `ask:<intent>`): the same options door. */
+export const CANVAS_OPTIONS_PRESS_ID = 'ask:widen';
+
 export function isWidenPress(chipId: unknown): boolean {
-  return chipId === WIDEN_PRESS_ID || questionedLinkOf(chipId) !== null;
+  return chipId === WIDEN_PRESS_ID || chipId === CANVAS_OPTIONS_PRESS_ID || questionedLinkOf(chipId) !== null;
 }
 
 /** The Widen next-step chip, labelled by RC's primary action for options ("Suggest options"). */
@@ -653,4 +662,462 @@ export function questionHeadline(q: QuestionedLink): string {
 export function questionFallbackReply(q: QuestionedLink): string {
   return `I couldn’t find a way to reach ${quote(q.goal_label)} that does not rely on the link ${linkWords(q)}, so nothing was changed. `
     + 'That link is still an open assumption: you can give your own view of it, or name another lever.';
+}
+
+/**
+ * ⭐⭐ S-C MODEL WIDENING — ONE DOOR, ONE ENTRY PER TARGET (DL 0fd71f 7 Oct; Paul: "I don't want patches"; RC
+ * `method_turns.RC-WIDEN`: "Each Add lands as ONE change card on the item's refs … propose_new_risk for risks").
+ *
+ *   press (by identity: `widenTargetOf`) → the target's readback → ONE model call → typed candidates → the target's
+ *   identity gate → a DETERMINISTIC reply (the named method, ≤3 items, each naming what it hits) + one Add press per
+ *   item + 'Something else'. NOTHING IS STORED. Add → no model call → the target's existing door → ONE held card → the
+ *   existing approve chip. Options keep their one-card door above (target `options`); risks are target `risks`.
+ *
+ * ⛔ WHY A CHOICE FIRST, THEN ONE CARD (approval-chips.ts ONE_CHANGE_PER_APPROVAL): one approval carries one change and
+ * every hold is pinned to the graph it was made on, so three held risks could never all be approved. Add is the choice.
+ * ⛔ NEVER INERT (D-09, Paul's served "Overlapping costs": no parents, valued 0, moved no figure): every risk is linked
+ * FROM a factor that an option the user has actually changes (or a named factor), and INTO the goal or an outcome.
+ * ⛔ ONE SHARED PRESS ID (D-11 diagnosis): DGAI's pre-mortem worksheet "Add this as a risk" sends `agent-next-suggest-risks`
+ * with its OWN "Prepare one risk called …" message (premortem.ts `risk_request`), an ordinary Agent turn. The risks press is
+ * therefore the id AND this exact server-authored message; the canvas "+" sends its own typed id (`ask:risks`).
+ */
+export type WidenTarget = 'options' | 'risks';
+
+/** The W6 press (RC-WIDEN target risks, primary action "Suggest risks"), offered by `nextStepsFromGuidance`. */
+export const SUGGEST_RISKS_CHIP = {
+  id: 'agent-next-suggest-risks',
+  label: 'Suggest risks',
+  message: "Suggest risks I haven't considered.",
+} as const satisfies SuggestedAction;
+/** The canvas "+" chooser's Risk press (DGAI `WhatElseChooser.tsx` → `askAi.ts` `ask:risks`). */
+export const CANVAS_RISKS_PRESS_ID = 'ask:risks';
+
+const foldWords = (s: string): string => s.replace(/[‘’]/gu, "'").replace(/\s+/gu, ' ').trim().toLowerCase();
+
+/** Which target a press opens, by identity; null for every other press (including the pre-mortem's risk request). */
+export function widenTargetOf(chipId: unknown, message?: unknown): WidenTarget | null {
+  if (isWidenPress(chipId)) return 'options';
+  if (chipId === CANVAS_RISKS_PRESS_ID) return 'risks';
+  if (chipId === SUGGEST_RISKS_CHIP.id && typeof message === 'string' && message.length <= 200
+    && foldWords(message) === foldWords(SUGGEST_RISKS_CHIP.message)) return 'risks';
+  return null;
+}
+
+/**
+ * The method that generates risks: ONE registry row (Science 393023 ruling, 7 Oct 10:3xZ, `science-risk-method-ruling-
+ * 20261007.md`). Assumption-Based Planning (Dewar 2002; Dewar et al. 1993, RAND MR-114-A): what each option RELIES ON in
+ * the model, how that could fail, and an early-warning sign ("Watch for", ABP's signpost). Coverage from a risk prompt
+ * list (IEC 31010:2019 checklists; Hillson 2002 RBS). Structured practice, not a validated forecaster: never "the real
+ * risks". The pre-mortem (prospective hindsight) stays a separate method.
+ */
+export const RISK_METHOD = {
+  id: 'assumption_based_planning',
+  categories: ['people', 'timing', 'cost', 'dependency', 'external'] as const,
+  line: 'I checked what each option relies on and how that could fail, across people, timing, cost, dependencies and outside events (assumption-based planning).',
+} as const;
+export type RiskCategory = (typeof RISK_METHOD.categories)[number];
+const CATEGORY_WORDS: Readonly<Record<RiskCategory, string>> = {
+  people: 'people', timing: 'timing', cost: 'cost', dependency: 'dependency', external: 'outside events',
+};
+/** The most risks one press suggests (RC WD-COUNT). */
+export const RISK_MAX_ITEMS = 3;
+/** The Add press: this prefix + a 16-hex hash of its exact message (the research chip's binding, `public-research.ts`). */
+export const WIDEN_ADD_PREFIX = 'agent-widen-add:';
+
+/** ⭐ THE STANDING GAP SIGNAL (S-C / S-E): typed, deterministic, from model state; ONE question at most. */
+export type ModelGap =
+  | { readonly kind: 'goal_target_missing'; readonly goal_id: string; readonly deadline_known: boolean; readonly question: string }
+  /** A chance-of-event goal with no date: S1's ONE question, by its own function (never a target ask, #2742). */
+  | { readonly kind: 'deadline_missing'; readonly goal_id: string; readonly question: string }
+  | { readonly kind: 'budget_without_limit'; readonly question: string };
+
+const finiteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/** A budget the user stated in words: "budget" within one clause of a money figure (bounded runs, no nesting). */
+const MONEY = String.raw`(?:[£$€][ \t]{0,2}\d[\d,.]{0,15}(?:k|m|bn)?|\d[\d,.]{0,15}[ \t]{0,2}(?:k|m|bn)?[ \t]{0,2}(?:pounds|dollars|euros|gbp|usd|eur)\b)`;
+const MONEY_UNIT = /[£$€]|\b(?:gbp|usd|eur|pounds?|dollars?|euros?|budget|cost|spend|salary|salaries)\b/iu;
+export const STATED_BUDGET = new RegExp(String.raw`\bbudget\b[^.?!\n]{0,60}?${MONEY}|${MONEY}[^.?!\n]{0,60}?\bbudget`, 'iu');
+
+/**
+ * The model's most serious gap, or null. Goal first (D-01: no target means no option can have a chance of meeting it),
+ * then a budget the user stated that no limit holds (D-07). Never a question the model already answers.
+ */
+export function modelGapOf(graph: unknown, userWords: string = ''): ModelGap | null {
+  const raw = rec(graph);
+  const g = graphOf(graph);
+  const goal = goalOf(graph, g);
+  // ⛔ THE GOAL-KIND REGISTRY DECIDES WHAT MAY BE ASKED (#2742 S1; PL/Codex 5443200599): a chance goal takes no target
+  // quantity — its one question is S1's deadline ask, byte for byte, and nothing once it holds its date.
+  const chance = goal !== undefined && goalKindOf(goal) === 'chance_of_event';
+  if (chance && typeof goal.id === 'string' && labelOf(goal) !== null && goalDeadlineOf(goal) === undefined) {
+    return { kind: 'deadline_missing', goal_id: goal.id, question: chanceGoalDeadlineAsk(labelOf(goal)!) };
+  }
+  if (!chance && raw !== undefined && goal !== undefined && typeof goal.id === 'string' && labelOf(goal) !== null
+    && statedGoalTargetOf(raw, goal) === null) {
+    const rows = Array.isArray(raw.goal_constraints) ? raw.goal_constraints.map(rec) : [];
+    const horizon = rec(goal.goal_horizon);
+    const deadlineKnown = rows.some((r) => r?.node_id === goal.id && rec(r?.deadline_metadata) !== undefined)
+      || typeof horizon?.deadline === 'string' || finiteNum(horizon?.months);
+    return {
+      kind: 'goal_target_missing', goal_id: goal.id, deadline_known: deadlineKnown,
+      question: deadlineKnown
+        ? `One gap: ${quote(labelOf(goal)!)} has no target yet. What would count as meeting it?`
+        : `One gap: ${quote(labelOf(goal)!)} has no target or deadline yet. What would count as meeting it, and by when?`,
+    };
+  }
+  // Only a MONEY limit answers a stated budget (Codex r1 P2: a hiring-count cap is not the budget).
+  // An explicit unit decides (Codex r2 P2: "Budget reviewers" in people is not money); a label only when no unit is stored.
+  const unitOf = (r: Rec): string => [r.unit, rec(rec(g.nodes.find((n) => n.id === r.node_id))?.observed_state)?.unit, labelOf(g.nodes.find((n) => n.id === r.node_id))]
+    .find((u): u is string => typeof u === 'string' && u.trim() !== '') ?? '';
+  const moneyLimits = raw !== undefined && Array.isArray(raw.goal_constraints)
+    ? raw.goal_constraints.map(rec).filter((r): r is Rec => r !== undefined && (goal === undefined || r.node_id !== goal.id) && MONEY_UNIT.test(unitOf(r))) : [];
+  if (moneyLimits.length === 0 && userWords.length <= 20_000 && STATED_BUDGET.test(userWords)) {
+    return { kind: 'budget_without_limit',
+      question: 'One gap: you mentioned a budget, but the model has no limit for it yet. What is the most you can spend?' };
+  }
+  return null;
+}
+
+/** A risk suggestion that passed the gate: every reference is a stored node, by id, with its exact label. */
+export interface RiskSuggestion {
+  readonly label: string;
+  readonly category: RiskCategory;
+  readonly hits: { readonly id: string; readonly label: string; readonly kind: 'option' | 'factor' };
+  readonly through: { readonly id: string; readonly label: string; readonly direction: 'positive' | 'negative' };
+  readonly affects: { readonly id: string; readonly label: string; readonly direction: 'positive' | 'negative' };
+  /** What the option relies on (ABP's load-bearing assumption), ≤12 words. */
+  readonly relies_on: string;
+  /** ABP's signpost: the early sign, ≤8 words (the pre-mortem's "Watch for" vocabulary). */
+  readonly watch_for: string;
+  /** A factor no option changes: the risk affects every option alike, so it cannot change the comparison (offered last). */
+  readonly shared: boolean;
+  readonly press: SuggestedAction;
+}
+
+/** A risks press that runs: ONE tool-less model call, then the gate. */
+export interface RunRisksWidenTurn {
+  readonly kind: 'run_risks';
+  readonly target: 'risks';
+  readonly goal_label: string;
+  readonly directive: string;
+  readonly graph: Graph;
+  /** The user's own options and the factors each one CHANGES (moves against the status quo; repair edges excluded). */
+  readonly options: readonly { readonly id: string; readonly label: string; readonly changes: readonly string[] }[];
+  readonly gap: ModelGap | null;
+}
+
+const RISK_TAG = 'risk_suggestions';
+const nodeId = z.string().min(1).max(160);
+const riskCandidateSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+  category: z.enum(RISK_METHOD.categories),
+  hits_id: nodeId,
+  through_id: nodeId,
+  through_direction: z.enum(['positive', 'negative']),
+  affects_id: nodeId,
+  direction: z.enum(['positive', 'negative']),
+  relies_on: z.string().trim().min(1).max(120),
+  watch_for: z.string().trim().min(1).max(80),
+}).strict();
+
+/** Olumi-authored words a suggestion may never carry (after the words of the model's own labels are masked out). */
+const AUTHORED_BAN = /%|\b(?:most likely|likely|likelihood|chance|probability|probable|odds|best|winners?|winning|recommend\w*|leads?|leader\w*|ahead|beats?|placeholder|node|edge)\b/iu;
+const WORD = /[\p{L}\p{N}][\p{L}\p{N}'-]*/gu;
+/**
+ * A word the user's own model uses ("Tech Lead", "Q3 revenue") is theirs, not Olumi's ranking word or figure: masked by
+ * WORD before the ban and the figure test. Every other figure or banned word refuses the item.
+ */
+const DURATION = /\b\d{1,3}[ \t]{0,2}(?:days?|weeks?|months?|quarters?|years?)\b|\b(?:day|week|month|quarter)[ \t]{1,2}\d{1,2}\b/giu;
+function bannedAfterMasking(text: string, labels: readonly string[], durations = false): boolean {
+  const theirs = new Set(labels.flatMap((l) => foldWords(l).match(WORD) ?? []));
+  // A signpost may name a time ("no offer by week 4"): durations only, as the pre-mortem's PM-NO-FIGURES exempts them.
+  const timed = durations ? foldWords(text).replace(DURATION, ' ') : foldWords(text);
+  const masked = timed.replace(WORD, (w) => (theirs.has(w) ? ' ' : w));
+  return AUTHORED_BAN.test(masked) || /\d/u.test(masked);
+}
+
+/** The risks turn for a readback: unavailable without a readable model or a goal, else ONE gated model call. Total. */
+export function risksTurnFromSignals(s: TurnSignals, graph: unknown, userWords: string = ''): RunRisksWidenTurn | WidenUnavailableTurn {
+  if (s['model.goal_present'] !== true) return { ...unavailable('no_goal'), reply: RISKS_UNAVAILABLE.no_goal };
+  const g = graphOf(graph);
+  const goal = goalOf(graph, g);
+  if (goal === undefined || labelOf(goal) === null) return { ...unavailable('no_goal'), reply: RISKS_UNAVAILABLE.no_goal };
+  const goalLabel = labelOf(goal)!;
+  const sq = s['model.status_quo_option_id'];
+  const labels = s['model.option_labels'];
+  const options = s['model.non_sq_option_ids'].map((id) => ({
+    id, label: labels[id] ?? labelOf(g.nodes.find((n) => n.id === id)) ?? id,
+    changes: [...existingLevers(g, id, sq)].filter(([, m]) => m !== 'unchanged').map(([f]) => f),
+  }));
+  const pick = (n: Rec): { id: string; label: string } => ({ id: String(n.id), label: labelOf(n) ?? String(n.id) });
+  const factors = g.nodes.filter((n) => n.kind === 'factor' && labelOf(n) !== null).map(pick);
+  const destinations = g.nodes.filter((n) => (n.kind === 'goal' || n.kind === 'outcome') && labelOf(n) !== null).map(pick);
+  const risks = g.nodes.filter((n) => n.kind === 'risk' && labelOf(n) !== null).map((n) => labelOf(n)!);
+  const directive = [
+    'METHOD TURN: the user asked Olumi to suggest risks they have not considered. Do not write prose. Reply with ONLY '
+      + `<${RISK_TAG}>JSON array</${RISK_TAG}>, nothing before or after it. The server writes every word the user sees.`,
+    'METHOD: assumption-based planning. For each option below, find what it RELIES ON in the model (a factor it changes) and '
+      + `how that could fail. Use the prompt list (${RISK_METHOD.categories.join(', ')}) for coverage, and keep up to ${RISK_MAX_ITEMS} `
+      + 'risks, each from a DIFFERENT class. Risks on what the options DIFFER on come first; a risk on a factor no option changes '
+      + 'affects every option alike, so offer it only if there is room. Ground each in the brief, the conversation or the model.',
+    `Each item: {"label": a new risk name, 6 words or fewer, no figures; "category": one of ${RISK_METHOD.categories.join('|')}; `
+      + '"hits_id": the id of the option it hits (or, for an assumption every option shares, the id of a factor NO option '
+      + 'changes); "through_id": the id of a factor which that option CHANGES (listed under it) and which the risk works through, '
+      + 'or the same factor id when hits_id is a factor; "through_direction": "positive" when more of that factor makes the risk '
+      + 'more severe, else "negative"; "affects_id": the id of the goal or an outcome the risk would hurt; "direction": '
+      + '"negative" when the risk lowers it, "positive" when it raises it; "relies_on": what the option relies on, 12 words or '
+      + 'fewer, starting with a verb or noun (e.g. "filling both roles quickly"); "watch_for": the early sign, 8 words or fewer}.',
+    `The goal: ${JSON.stringify({ id: String(goal.id), label: goalLabel })}.`,
+    `Goal and outcomes (affects_id): ${JSON.stringify(destinations)}.`,
+    `The user's options and the factors each one changes: ${JSON.stringify(options.map((o) => ({ id: o.id, label: o.label,
+      changes: o.changes.map((f) => ({ id: f, label: labelOf(g.nodes.find((n) => n.id === f)) ?? f })) })))}.`,
+    `All factors: ${JSON.stringify(factors)}.`,
+    ...(risks.length > 0 ? [`Risks already in the model (never suggest these again): ${JSON.stringify(risks)}.`] : []),
+    'Use only these ids. Never write a probability, percentage, figure, likely, chance, best, recommend, winner, leads or ahead.',
+  ].join('\n');
+  return { kind: 'run_risks', target: 'risks', goal_label: goalLabel, directive, graph: g, options, gap: modelGapOf(graph, userWords) };
+}
+
+const RISKS_UNAVAILABLE: Readonly<Record<'no_goal' | 'model_unread', string>> = {
+  no_goal: 'I can’t suggest risks yet because your model has no goal for them to threaten. Add the goal first.',
+  model_unread: 'I can’t suggest risks right now because I couldn’t read your model. Try again in a moment.',
+};
+
+/** The model call's typed candidates, or undefined when the reply carries none. A malformed appendix is no candidates. */
+export function readRiskCandidates(draft: string): unknown {
+  const open = `<${RISK_TAG}>`;
+  const close = `</${RISK_TAG}>`;
+  const start = draft.indexOf(open);
+  const end = draft.lastIndexOf(close);
+  if (start < 0 || end < start) return undefined;
+  try { return JSON.parse(draft.slice(start + open.length, end)) as unknown; } catch { return undefined; }
+}
+
+/** Safe to log verbatim: indices and clause ids only, never labels or words. */
+export interface RiskGateResult {
+  readonly kept: readonly RiskSuggestion[];
+  readonly dropped: readonly { readonly index: number; readonly failed: readonly string[] }[];
+}
+
+/**
+ * RC-WIDEN's checks for target risks, BY IDENTITY, before anything is offered. Clauses: RK-SCHEMA · RK-NO-DUP (a new
+ * name: no node and no earlier item has it) · RK-HITS (a user option, never the status quo, or a factor) · RK-THROUGH
+ * (a factor that option really changes, uniquely named) · RK-AFFECTS (the goal or an outcome, uniquely named) ·
+ * RK-DISTINCT (one per category) · RK-WORDS (no figure, no banned word, no question, quotable) · RK-DOOR (the door's own
+ * builder accepts it, run purely) · RK-COUNT (at most three kept).
+ */
+export function riskGate(turn: RunRisksWidenTurn, candidates: unknown): RiskGateResult {
+  const g = turn.graph;
+  const byId = new Map(g.nodes.map((n) => [String(n.id), n] as const));
+  const allLabels = g.nodes.map(labelOf).filter((l): l is string => l !== null);
+  const uniqueLabel = (n: Rec | undefined): string | null => {
+    const l = labelOf(n);
+    return l !== null && allLabels.filter((x) => doorNorm(x) === doorNorm(l)).length === 1 && !/[‘’\n]/u.test(l) && l.length <= 200 ? l : null;
+  };
+  const kept: RiskSuggestion[] = [];
+  const dropped: { index: number; failed: string[] }[] = [];
+  const raw = Array.isArray(candidates) ? candidates : [];
+  for (const [index, item] of raw.entries()) {
+    const failed: string[] = [];
+    const parsed = riskCandidateSchema.safeParse(item);
+    if (!parsed.success) { dropped.push({ index, failed: ['RK-SCHEMA'] }); continue; }
+    const c = parsed.data;
+    if (allLabels.some((l) => sameLabel(l, c.label)) || kept.some((k) => sameLabel(k.label, c.label))) failed.push('RK-NO-DUP');
+    const hitNode = byId.get(c.hits_id);
+    const option = turn.options.find((o) => o.id === c.hits_id);
+    // A factor stands in for "every option" ONLY when no option changes it (Science: a shared assumption, offered last).
+    const shared = option === undefined && hitNode?.kind === 'factor' && !turn.options.some((o) => o.changes.includes(c.hits_id));
+    const hitsKind = option !== undefined ? 'option' : shared ? 'factor' : null;
+    if (hitsKind === null) failed.push('RK-HITS');
+    const through = byId.get(c.through_id);
+    const throughLabel = through?.kind === 'factor' ? uniqueLabel(through) : null;
+    if (throughLabel === null || (hitsKind === 'option' && !option!.changes.includes(c.through_id))
+      || (hitsKind === 'factor' && c.through_id !== c.hits_id)) failed.push('RK-THROUGH');
+    const affects = byId.get(c.affects_id);
+    const affectsLabel = affects?.kind === 'goal' || affects?.kind === 'outcome' ? uniqueLabel(affects) : null;
+    if (affectsLabel === null) failed.push('RK-AFFECTS');
+    if (kept.some((k) => k.category === c.category)) failed.push('RK-DISTINCT');
+    const words = (t: string): number => t.split(/\s+/u).filter(Boolean).length;
+    if (words(c.label) > 6 || words(c.relies_on) > 12 || words(c.watch_for) > 8 || /[‘’\n]/u.test(c.label)
+      || [c.label, c.relies_on, c.watch_for].some((t) => /[?\n]/u.test(t))
+      || bannedAfterMasking(c.label, []) || bannedAfterMasking(c.relies_on, allLabels, true)
+      || bannedAfterMasking(c.watch_for, allLabels, true)) failed.push('RK-WORDS');
+    if (failed.length === 0) {
+      const built = buildAddRiskTransaction({ risk: { label: c.label }, links: [
+        { from_id: c.through_id, effect_direction: c.through_direction },
+        { to_id: c.affects_id, effect_direction: c.direction },
+      ] }, { nodes: g.nodes as never, edges: g.edges as never });
+      if (!built.matched) failed.push('RK-DOOR');
+    }
+    if (failed.length === 0 && kept.length >= RISK_MAX_ITEMS) failed.push('RK-COUNT');
+    if (failed.length > 0) { dropped.push({ index, failed }); continue; }
+    const s: Omit<RiskSuggestion, 'press'> = {
+      label: c.label.trim(), category: c.category,
+      hits: { id: c.hits_id, label: hitsKind === 'option' ? option!.label : throughLabel!, kind: hitsKind! },
+      through: { id: c.through_id, label: throughLabel!, direction: c.through_direction },
+      affects: { id: c.affects_id, label: affectsLabel!, direction: c.direction },
+      relies_on: c.relies_on.replace(/[.!]+$/u, ''), watch_for: c.watch_for.replace(/[.!]+$/u, ''), shared: hitsKind === 'factor',
+    };
+    kept.push({ ...s, press: riskAddPressFor(s) });
+  }
+  // Science: what the options DIFFER on first; a shared assumption cannot change the comparison, so it comes last.
+  return { kept: [...kept.filter((k) => !k.shared), ...kept.filter((k) => k.shared)], dropped };
+}
+
+/** The Add press's message: the user's own words in the transcript, naming the risk, what it hits and its refs by label. */
+function riskAddMessage(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects'>): string {
+  const target = s.hits.kind === 'option' ? `to ${quote(s.hits.label)}` : 'for every option';
+  return `Add the risk ${quote(s.label)} ${target}: driven by ${s.through.direction === 'positive' ? 'more' : 'less'} ${quote(s.through.label)}, `
+    + `it would ${s.affects.direction === 'negative' ? 'lower' : 'raise'} ${quote(s.affects.label)}.`;
+}
+/**
+ * The press id binds the message AND the node identities it was minted on (Codex r1 P1 on #2744): a label that later
+ * names another node (a rename plus a new node with the old name) recomputes to a different id and is refused.
+ */
+const addPressId = (message: string, ids: readonly [string, string, string]): string =>
+  `${WIDEN_ADD_PREFIX}${createHash('sha256').update(JSON.stringify([message, ...ids]), 'utf8').digest('hex').slice(0, 16)}`;
+
+export function riskAddPressFor(s: Pick<RiskSuggestion, 'label' | 'hits' | 'through' | 'affects'>): SuggestedAction {
+  const message = riskAddMessage(s);
+  return { id: addPressId(message, [s.hits.id, s.through.id, s.affects.id]), label: `Add ${quote(s.label)}`, message };
+}
+
+export function isWidenAddPressId(id: unknown): boolean {
+  return typeof id === 'string' && /^agent-widen-add:[0-9a-f]{16}$/u.test(id);
+}
+
+export type WidenAddCall = { readonly tool: 'propose_new_risk'; readonly args: {
+  label: string; rationale: string;
+  /** The press IS the whole request (server-owned): the door's own typed reply composes it (`composeProposalReply`). */
+  whole_request: true;
+  affects: { target_label: string; direction: 'positive' | 'negative' }[];
+  caused_by: { factor_label: string; direction: 'positive' | 'negative' }[];
+} };
+
+const ADD_PREFIX_WORDS = 'Add the risk ‘';
+const DIRECTIONS = ['positive', 'negative'] as const;
+
+/**
+ * The door call an Add press asks for, re-checked against the model AS IT IS NOW, or null (the route then refuses it
+ * deterministically: an Add press never falls through to ordinary generation, Codex r1 P1).
+ *
+ * NO PARSING of the user-visible words (Codex r2 P1: a label's own ’ broke a capture): the press is RECONSTRUCTED. Every
+ * (option or "every option", factor, goal/outcome, direction pair) the Suggest turn could offer on THIS readback — the
+ * same scope, `risksTurnForReadback` (Codex r2 P2) — is minted again with `riskAddPressFor`; the press stands only when
+ * one of them is byte-identical in message AND id (the id binds the node ids, Codex r1 P1). Then the attachment is
+ * re-checked: the option still changes the factor, or (shared) no option in scope does.
+ */
+export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodReadback): WidenAddCall | null {
+  if (!isWidenAddPressId(chipId) || typeof message !== 'string' || message.length > 600) return null;
+  const m = message.trim();
+  if (!m.startsWith(ADD_PREFIX_WORDS)) return null;
+  const end = m.indexOf('’', ADD_PREFIX_WORDS.length);
+  const label = end < 0 ? '' : m.slice(ADD_PREFIX_WORDS.length, end);
+  if (label === '' || label.length > 60) return null;
+  const turn = risksTurnForReadback(rb);
+  if (turn.kind !== 'run_risks') return null;
+  const g = turn.graph;
+  const uniquelyNamed = (n: Rec): boolean => labelOf(n) !== null && g.nodes.filter((x) => doorNorm(x.label) === doorNorm(n.label)).length === 1;
+  const factors = g.nodes.filter((n) => n.kind === 'factor' && uniquelyNamed(n));
+  const destinations = g.nodes.filter((n) => (n.kind === 'goal' || n.kind === 'outcome') && uniquelyNamed(n));
+  const hits: (RunRisksWidenTurn['options'][number] | null)[] = [...turn.options, null];
+  for (const option of hits) {
+    for (const f of factors) {
+      const fid = String(f.id);
+      // The attachment, re-checked now: the option still changes the factor; a shared factor is changed by no option in scope.
+      if (option !== null ? !option.changes.includes(fid) : turn.options.some((o) => o.changes.includes(fid))) continue;
+      for (const a of destinations) {
+        for (const td of DIRECTIONS) {
+          for (const ad of DIRECTIONS) {
+            const minted = {
+              label,
+              hits: option !== null ? { id: option.id, label: option.label, kind: 'option' as const } : { id: fid, label: labelOf(f)!, kind: 'factor' as const },
+              through: { id: fid, label: labelOf(f)!, direction: td },
+              affects: { id: String(a.id), label: labelOf(a)!, direction: ad },
+            };
+            // Words first (cheap), then the id over the node ids.
+            if (riskAddMessage(minted) !== m || riskAddPressFor(minted).id !== chipId) continue;
+            return { tool: 'propose_new_risk', args: {
+              label,
+              affects: [{ target_label: labelOf(a)!, direction: ad }],
+              caused_by: [{ factor_label: labelOf(f)!, direction: td }],
+              rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
+              whole_request: true,
+            } };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The Add press HELD its card but the door's typed reply could not be composed: say what is held, never the refusal
+ * (served sc-plus-1, 7 Oct 16:58Z: `held: true`, yet the user read "I couldn't prepare that risk").
+ */
+export function riskHeldReply(call: WidenAddCall): string {
+  const a = call.args;
+  return `I’ve prepared this change: add the risk ${quote(a.label)}, driven by ${a.caused_by[0]!.direction === 'positive' ? 'more' : 'less'} `
+    + `${quote(a.caused_by[0]!.factor_label)}; it would ${a.affects[0]!.direction === 'negative' ? 'lower' : 'raise'} ${quote(a.affects[0]!.target_label)}. `
+    + 'How strongly is not known yet. Nothing is added until you approve it.';
+}
+
+/** The Add press refused at the door: said plainly, nothing held, and the way back. */
+export const RISK_ADD_REFUSED_REPLY =
+  'I couldn’t prepare that risk as a change, so nothing was added. The model may have changed since I suggested it. Press Suggest risks for a fresh set.';
+
+const COUNT_WORDS = ['', 'One risk', 'Two risks', 'Three risks'] as const;
+
+/** RC's deterministic fallback for risks: one question, and 'Talk it through'. */
+export function risksFallbackReply(turn: Pick<RunRisksWidenTurn, 'goal_label'>): string {
+  return `What else could stop ${quote(turn.goal_label)} from working out? For example, something about people, timing, cost, a dependency, or something outside your control.`;
+}
+
+export interface SettledRisksTurn {
+  readonly reply: string;
+  readonly offered: number;
+  readonly actions: readonly SuggestedAction[];
+  readonly gate: RiskGateResult;
+}
+
+/**
+ * The reply, written by the server from the gate's typed items only (Paul 7 Oct: one structure, deterministic): the
+ * named method, then one bullet per item naming what it hits and what it would hurt, then the line that nothing is added,
+ * then AT MOST ONE gap question. Chips: one Add per item, then 'Something else'. None passed → RC's fallback.
+ */
+export function settleRisksTurn(turn: RunRisksWidenTurn, draft: string): SettledRisksTurn {
+  const gate = riskGate(turn, readRiskCandidates(draft));
+  if (gate.kept.length === 0) {
+    return { reply: risksFallbackReply(turn), offered: 0, actions: [TALK_IT_THROUGH_CHIP], gate };
+  }
+  // Science's item shape: who relies on what · the risk, its class and the factor it works through · the signpost.
+  const lines = gate.kept.map((r) => r.shared
+    ? `- Every option relies on ${r.relies_on}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}; it affects every option alike. Watch for: ${r.watch_for}.`
+    : `- ${quote(r.hits.label)} relies on ${r.relies_on}. Risk: ${quote(r.label)} (${CATEGORY_WORDS[r.category]}), through ${quote(r.through.label)}. Watch for: ${r.watch_for}.`);
+  const reply = [
+    `${COUNT_WORDS[gate.kept.length]} you haven’t mapped yet.`,
+    RISK_METHOD.line,
+    ...lines,
+    'Possible risks, not established facts. Nothing is added until you choose one and approve the change.',
+    ...(turn.gap !== null ? [turn.gap.question] : []),
+  ].join('\n');
+  return { reply, offered: gate.kept.length, actions: [...gate.kept.map((r) => r.press), SOMETHING_ELSE_CHIP], gate };
+}
+
+/** The risks turn for a press, from the route's own readback (the same licence and identity projection as the options door). */
+export function risksTurnForReadback(rb: MethodReadback, userWords: string = ''): RunRisksWidenTurn | WidenUnavailableTurn {
+  if (rb.graph === undefined || rb.graph === null) return { ...unavailable('model_unread'), reply: RISKS_UNAVAILABLE.model_unread };
+  const signals = assembleGuidanceSignals({
+    request: 'method',
+    explicitRequest: METHOD,
+    offeredSpecific: [],
+    graph: rb.graph,
+    analysisState: rb.analysisState,
+    analysisResult: rb.analysisResult,
+    optionParticipation: rb.optionParticipation,
+    ...(rb.identityEvaluated !== undefined
+      ? { identityEvaluations: [...rb.identityEvaluated].map((node_id) => ({ node_id, evaluated: true })) } : {}),
+    leaderLicensed: leaderLicenceFromState(rb.analysisState, rb.analysisReady) !== 'withheld',
+  });
+  return risksTurnFromSignals(signals, rb.graph, userWords);
 }

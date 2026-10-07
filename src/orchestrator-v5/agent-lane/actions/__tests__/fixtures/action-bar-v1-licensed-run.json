@@ -1,0 +1,118 @@
+{
+  "v": 1,
+  "state_key": "5dd4622a3025bf9f",
+  "revision": {
+    "graph_hash": "e1427c397debd7cf",
+    "run_key": "938a1ff7df011d6f"
+  },
+  "priority": [
+    {
+      "action_id": "more_options",
+      "label": "More options",
+      "icon": "GitFork",
+      "group": "gap",
+      "press_id": "agent-next-widen",
+      "user_line": "Suggest options I haven’t considered.",
+      "enabled": true,
+      "why_now": "Your options all work through the same lever.",
+      "offer_key": "238eb45e85c31ecf"
+    },
+    {
+      "action_id": "test_link",
+      "label": "Test link",
+      "icon": "Unlink",
+      "group": "method",
+      "press_id": "agent-test-without-link:[\"gcp_workload_share\",\"monthly_cloud_savings\"]",
+      "user_line": "Test without this link",
+      "enabled": true,
+      "why_now": "This result is most sensitive to one link: see what happens without it.",
+      "target": {
+        "kind": "link",
+        "from_id": "gcp_workload_share",
+        "to_id": "monthly_cloud_savings"
+      },
+      "offer_key": "555028f2881b8dfa"
+    }
+  ],
+  "standard": [
+    {
+      "action_id": "review",
+      "label": "Review",
+      "icon": "ListChecks",
+      "group": "review",
+      "press_id": "agent-next-review-decision",
+      "user_line": "Review this decision: what should I check before relying on it?",
+      "enabled": true,
+      "why_now": "Lists what this result rests on before you rely on it.",
+      "offer_key": "a34992fb64208d0d"
+    },
+    {
+      "action_id": "what_changes",
+      "label": "What changes",
+      "icon": "SlidersHorizontal",
+      "group": "method",
+      "press_id": "agent-next-what-would-change",
+      "user_line": "What would most likely change this result?",
+      "enabled": true,
+      "why_now": "Shows what would have to change for this result to change.",
+      "offer_key": "66479fb40c2a3815"
+    },
+    {
+      "action_id": "pre_mortem",
+      "label": "Pre-mortem",
+      "icon": "ClipboardList",
+      "group": "method",
+      "press_id": "agent-next-pre-mortem",
+      "user_line": "Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?",
+      "enabled": true,
+      "why_now": "Imagine this went badly and find the most likely causes.",
+      "offer_key": "ac8f78024406c132"
+    }
+  ],
+  "more": [
+    {
+      "action_id": "frame_brief",
+      "label": "Frame brief",
+      "icon": "FileText",
+      "group": "gap",
+      "press_id": "act:frame_brief",
+      "user_line": "Help me frame my brief: what is missing from it?",
+      "enabled": true,
+      "why_now": "See what your brief has and what it is missing.",
+      "offer_key": "059a58a090450352"
+    },
+    {
+      "action_id": "more_risks",
+      "label": "More risks",
+      "icon": "ShieldAlert",
+      "group": "gap",
+      "press_id": "agent-next-suggest-risks",
+      "user_line": "Suggest risks I haven't considered.",
+      "enabled": true,
+      "why_now": "Find risks you haven’t considered yet.",
+      "offer_key": "124aba71579f3613"
+    },
+    {
+      "action_id": "bias_anchoring",
+      "label": "Anchoring",
+      "icon": "Anchor",
+      "group": "method",
+      "press_id": "act:bias_anchoring",
+      "user_line": "Walk me through where a first number could be pulling my estimates.",
+      "enabled": true,
+      "why_now": "Test Olumi’s figures against your own evidence.",
+      "offer_key": "be2a321235e1a126"
+    },
+    {
+      "action_id": "check_estimates",
+      "label": "Check estimates",
+      "icon": "BadgeCheck",
+      "group": "review",
+      "press_id": "act:check_estimates",
+      "user_line": "Show me Olumi's estimates that this result rests on.",
+      "enabled": true,
+      "why_now": "See the Olumi estimates feeding this result.",
+      "offer_key": "dd3b10d47a3e0c30"
+    }
+  ]
+}

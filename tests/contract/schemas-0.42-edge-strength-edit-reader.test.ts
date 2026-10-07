@@ -299,7 +299,13 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // tarballs (0.80.0 sha1 `d53e6524…`, 0.81.0 sha1 `6ca5c614…`): the FILE SET naming `edge_strength_edit` is identical (5
     // files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0 changed lines naming `edge_strength_edit`
     // (contrast: 66 changed dist lines name `goal_chances`/`GoalChance`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.81.0');
+    // 0.81.0 → 0.82.0 (schemas: event_risk.v1 + graph-hash projection v6; main `c7461d7e`), RE-DERIVED on 7 Oct against the
+    // PUBLISHED tarballs (0.81.0 sha1 `6ca5c614…`, 0.82.0 sha1 `3c18c645…`): the FILE SET naming `edge_strength_edit` is
+    // identical (the same 5 dist files, plus `contracts/adoption-manifest.json`); three are byte-unchanged, and
+    // `dist/boundary/turn-payload.d.ts`, `dist/fixtures/index.js` and the manifest differ with 0 changed lines naming
+    // `edge_strength_edit`. The turn-payload.d.ts change is the inferred NodeV3 expansion (contrast: 1,046 of its 3,998 changed
+    // lines name `event_risk`/`EventRisk` or its fields; 185 changed dist lines across the package name `event_risk`/`EventRisk`).
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.82.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

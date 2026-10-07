@@ -824,6 +824,77 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
       "ACCEPTED — the same warrant as its `low` sibling (settled together): in `natural_effect.amount_unit`, sourced by " +
       "`text`, written only on the user's own size by `writtenRangeFor`, and never an analysis input.",
   },
+  // ── UNWARRANTED, ADJUDICATED: event_risk.v1 (declared 7 Oct 2026, Science 393023 pilot §4; src/schemas/event-risk.ts) ──
+  {
+    id: "unwarranted:cee.NodeV3::event_risk.occurrence.p_low",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — its warrant is the object it sits in, by construction. `occurrence` holds exactly one stated range " +
+      "(`p_low`, `p_high`), its MEANING (`at_least_once_within_horizon`: a probability, unitless, in [0,1]) and its " +
+      "attestation `basis` (`user` | `olumi` | `reference`: whose range it is), which is REQUIRED, so an unattested " +
+      "range cannot be written. Science named the field `basis` (science-richness-P0-20261007.md §4), which is not a " +
+      "warrant token, hence the row. Writers: the user's graph registration, validated at the door " +
+      "(`eventRiskIngressIssues`); the chat add-risk door's hold stamp (event_risk.v1 slice 2a: `readStatedEventRisk` " +
+      "reads the user's own words, `basis: 'user'`, validated by `EventRiskV1` before holding, stamped after the " +
+      "re-referee); and the draft door (slice 2c, `holdStatedEventRisks` in `buildModelFromBrief`: the same reader over " +
+      "one sentence of the BRIEF that names exactly that risk, `basis: 'user'`, never from the drafter). No producer may " +
+      "author it (field-safety pipeline-owned). Never defaulted. It IS an analysis input: ISL draws occurrence from it.",
+  },
+  {
+    id: "unwarranted:cee.NodeV3::event_risk.occurrence.p_high",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the same warrant as its `p_low` sibling (settled together): one stated range, its `meaning` and its " +
+      "required `basis`, on the same object; reason given at unwarranted:cee.NodeV3::event_risk.occurrence.p_low.",
+  },
+  {
+    id: "unwarranted:cee.NodeV3::event_risk.horizon.months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — field-scoped by construction, as `goal_horizon_months` is: its UNIT is its name (months, positive, " +
+      "≤ 600) and its attestation is the enclosing block's `occurrence.basis` (the horizon is the window that range " +
+      "is stated over; the two are written together, never separately). Not rescaled to the goal's own deadline in " +
+      "v1 (Science Q-horizon: that needs a constant-hazard ruling).",
+  },
+  {
+    id: "unwarranted:cee.NodeV3::event_risk.mitigations[].occurrence_reduction",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — a fraction in [0,1] (unit by meaning: the share of occurrence the named preventer removes while it " +
+      "is in place, p × (1 − m)), attested by the block's `occurrence.basis` and written with it at the same door. " +
+      "Its `factor_id` names what it scales. ISL derives the preventer link's coefficient from it; the link's own " +
+      "strength is ignored by contract.",
+  },
+  // ── the SAME four on the contract's NodeV3 (schemas 0.82.0, main c7461d7e; reached CEE with the 0.82.0 re-vendor) ──
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.occurrence.p_low",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.occurrence.p_low (settled together, " +
+      "same reason): schemas 0.82.0 `EventRiskV1Schema` is the shape CEE's own `EventRiskV1` mirrors, with the same " +
+      "REQUIRED `occurrence.basis` beside the range and the same strict object, so the warrant travels with the value.",
+  },
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.occurrence.p_high",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.occurrence.p_high; reason given at " +
+      "unwarranted:cee.NodeV3::event_risk.occurrence.p_low.",
+  },
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.horizon.months",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.horizon.months; reason given there " +
+      "(unit by name, attested by the block's `occurrence.basis`).",
+  },
+  {
+    id: "unwarranted:contract.NodeV3Schema::event_risk.mitigations[].occurrence_reduction",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — the contract-side twin of unwarranted:cee.NodeV3::event_risk.mitigations[].occurrence_reduction; " +
+      "reason given there (a fraction by meaning, attested by the block's `occurrence.basis`).",
+  },
 ];
 
 // ============================================================================

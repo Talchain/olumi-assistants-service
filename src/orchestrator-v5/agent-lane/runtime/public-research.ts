@@ -16,6 +16,7 @@
  * the answer row keeps, so a reload shows the same sources).
  */
 import { createHash } from 'node:crypto';
+import { REPLY_SHAPE_INSTRUCTION } from '../reply/compose-reply.js';
 
 /** Hosted search calls one research request may make (the handoff's `max_tool_calls`). */
 export const RESEARCH_MAX_TOOL_CALLS = 3;
@@ -31,6 +32,8 @@ export const RESEARCH_INSTRUCTIONS = [
   // The chat renders no tables (NE-02, AI Conversation 5849971004: a table arrived as raw pipes in a 319px panel).
   'Never use a table; use short bullet points.',
   'You know nothing about the user or their model beyond the question itself.',
+  // S-A (lane COPY-SHAPE, 7 Oct): the ONE reply shape every chat-writing model is given (`reply/compose-reply.ts`).
+  REPLY_SHAPE_INSTRUCTION,
 ].join(' ');
 
 /** The exact words a query is sent as: one line, trimmed, within the chip's readable length. `null` = not sendable. */

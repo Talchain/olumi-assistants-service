@@ -39,6 +39,7 @@
  * All user-facing wording in this file: provisional_doctrine_v0.
  */
 
+import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember, stampUserEventRisk, type UserEventRisk } from '../routing/stated-event-risk.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import { sizeNewFactorLinks } from './size-new-factor-links.js';
@@ -501,6 +502,8 @@ export type GmHeldResumeRead =
        * confirm writes in the same apply (`stampNewUserTodayLevels`). Absent on every other hold.
        */
       readonly userToday?: readonly UserTodayLevel[];
+      /** event_risk.v1 slice 2a: validated hold member. */
+      readonly userEventRisk?: UserEventRisk;
     };
 
 /**
@@ -539,9 +542,13 @@ export function readGmHeldResume(pending: PendingAction): GmHeldResumeRead {
   const rawUserToday = patch[GM_HELD_USER_TODAY_KEY];
   const userToday = rawUserToday === undefined ? undefined : readUserTodayMember(rawUserToday);
   if (rawUserToday !== undefined && userToday === undefined) return { kind: 'no_payload' };
+  const rawUserEventRisk = patch[GM_HELD_USER_EVENT_RISK_KEY];
+  const userEventRisk = rawUserEventRisk === undefined ? undefined : readUserEventRiskMember(rawUserEventRisk);
+  if (rawUserEventRisk !== undefined && userEventRisk === undefined) return { kind: 'no_payload' };
   return {
     kind: 'ok',
     operations: parsed.data,
+    ...(userEventRisk !== undefined ? { userEventRisk } : {}),
     ...(envelopeCap !== undefined ? { envelopeCap } : {}),
     ...(rawSwitches !== undefined ? { switchFactorIds: [...(rawSwitches as string[])] } : {}),
     ...(userStatedNodeIds !== undefined ? { userStatedNodeIds } : {}),
@@ -569,6 +576,8 @@ export interface GmHeldExecuteInput {
   readonly gradedToday?: readonly GradedTodayLevel[];
   /** ⭐ PJ-E-FIG — the add-factor door's figures, the user's (`readGmHeldResume`); they land in this apply. */
   readonly userToday?: readonly UserTodayLevel[];
+  /** event_risk.v1 slice 2a: validated hold member. */
+  readonly userEventRisk?: UserEventRisk;
   /** The CURRENT graph (persisted authority; hash-verified by the caller). */
   readonly currentGraph: unknown;
   /** Like-for-like hash of `currentGraph` (already matched the pin). */
@@ -792,7 +801,10 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     );
     return { status: 'apply_failed', reason: 'apply_error' };
   }
-  const stampedOperations: PatchOperation[] = userTodayStamp.operations;
+  // event_risk.v1 slice 2a: pipeline-owned occurrence and conditional impact, after the re-referee.
+  const eventRiskStamp = stampUserEventRisk(userTodayStamp.operations, input.userEventRisk, input.currentGraph);
+  if (eventRiskStamp === undefined) return { status: 'apply_failed', reason: 'apply_error' };
+  const stampedOperations: PatchOperation[] = eventRiskStamp;
 
   // ── 2b. Canonicalise value-op field spellings (R1 residual) ────────────
   // The confirm re-applies LOCALLY (no PLoT round-trip), so a tunable value op

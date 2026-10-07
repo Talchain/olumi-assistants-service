@@ -14,6 +14,8 @@
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
+import { readStatedEventRisk, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
+import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
@@ -190,7 +192,6 @@ import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, direction
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
-import { normaliseFactorValue } from '../../tools/handlers/d1-shared/normalise-factor-value.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
@@ -218,6 +219,7 @@ import { isUnadoptedOlumiSuggestion, optionStatusConfirmationText, optionStatusH
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
+import { keptFigureFor } from '../kept-figure.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
@@ -1071,38 +1073,6 @@ function nativeStartingValue(os: { value?: unknown; raw_value?: unknown; cap?: u
 }
 
 /**
- * ⛔ THE FIGURE A KEEP SENDS IS THE ONE THE WRITER STORES AS *EXACTLY* WHAT THE MODEL HOLDS NOW (CODEX CEE BUDDY 5925977983).
- * `nativeStartingValue` reads `observed_state` only: on a factor framed by its node `scale_frame` (value 0.1, frame 40, no
- * raw) it gave 0.1, the card said "0.1 hours/week", and the writer stored 0.0025 — the "unchanged" figure moved fortyfold.
- * So the candidates (raw; value × cap; value × scale_frame; value × 100 on a percent unit; the bare value) are each run
- * through the WRITER'S OWN normaliser with the inputs the writer gives it, and the first that reproduces the stored value
- * (and raw, when one is stored) is the figure. None → `undefined`, and nothing is offered: never an inverse done by hand.
- */
-function keptFigureFor(node: { scale_frame?: unknown; observed_state?: unknown }, unit: string): number | undefined {
-  const os = (node.observed_state ?? undefined) as { value?: unknown; raw_value?: unknown; cap?: unknown; unit?: unknown } | undefined;
-  if (typeof os?.value !== 'number' || !Number.isFinite(os.value)) return undefined;
-  const value = os.value;
-  const raw = typeof os.raw_value === 'number' ? os.raw_value : undefined;
-  const cap = typeof os.cap === 'number' && os.cap > 0 ? os.cap : undefined;
-  const frame = typeof node.scale_frame === 'number' ? node.scale_frame : undefined;
-  const candidates = [raw, cap !== undefined ? value * cap : undefined, frame !== undefined ? value * frame : undefined,
-    isPercentScaledUnit(unit) && Math.abs(value) <= 1 ? value * 100 : undefined, value]
-    .filter((c): c is number => typeof c === 'number' && Number.isFinite(c));
-  for (const c of candidates) {
-    try {
-      const n = normaliseFactorValue({
-        rawInput: c, ...(unit !== '' ? { unit } : {}),
-        ...(cap !== undefined ? { factorCap: cap } : {}), ...(typeof os.unit === 'string' ? { factorUnit: os.unit } : {}),
-        factorObservedValue: value, ...(raw !== undefined ? { factorObservedRawValue: raw } : {}),
-        ...(frame !== undefined ? { factorScaleFrame: frame } : {}), inputHasUnit: unit !== '',
-      });
-      if (n.value === value && (raw === undefined || n.raw_value === raw)) return c;
-    } catch { /* a figure the writer would refuse is no figure to keep */ }
-  }
-  return undefined;
-}
-
-/**
  * The range an option level on this factor is stored against — THE rule the level writer
  * divides by (`proposeOptionInterventions`): `observed_state.cap` when positive, else the
  * factor's stored `scale_frame` when above 1, else none (a level in 0..1 is stored as given).
@@ -1358,7 +1328,10 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
    */
   const structuralFrom = new Set(g.nodes.filter((n) => n.kind === 'decision' || n.kind === 'option').map((n) => n.id));
   const unitOfNode = nodeUnitOf(g.nodes);
+  // Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
+  const endsOf = endsOfGraph(g.raw);
   const links = g.edges.map((e) => {
+    const countedOnce = heldLinkOf(e, endsOf(e))?.reason === 'route_once';
     const source = (e.provenance !== null && typeof e.provenance === 'object') ? (e.provenance as { source?: unknown }).source : e.provenance;
     const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;
     const fixed = (st === undefined || (st.mean === 1 && (st.std === undefined || st.std === 0.01)))
@@ -1379,7 +1352,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
       ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
-      ...(num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
+      ...(countedOnce ? { exists_probability: 1, counted_once: true }
+        : num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       /**
        * ⭐ WHO SIZED IT, by F1b's ONE rule (`linkSizing`; AI HARNESS, DL 5936996041 on R3 DEFECT 2 5936673643). `defaulted`
        * is NOT a sizing mark: construction sets it on Olumi's estimates too (a projected spread or existence), and the
@@ -8058,6 +8032,9 @@ export function createAgentCapabilities(
           detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const riskId = built.proposal.riskId;
+      // event_risk.v1 slice 2a: whole_request is a boolean; only trusted turn words author a figure.
+      const stated = readStatedEventRisk(ctx.user_turn_text ?? ctx.user_text ?? '');
+      const eventRisk = causedBy.length === 0 ? stated : undefined;
       const res = await opts.holdAddRisk({
         scenario_id: ctx.scenario_id,
         // A fresh row per offer (see `HoldAddRiskInput.turn_id`): a lapsed hold never blocks offering the same risk again.
@@ -8065,6 +8042,7 @@ export function createAgentCapabilities(
         base_graph_hash: g.graph_hash,
         risk: { id: riskId, label },
         links,
+        ...(eventRisk !== undefined ? { user_event_risk: eventRisk } : {}),
       });
       if (res.status === 'stale') {
         return { ok: false, mutated: false, refusal: 'model_changed',
@@ -8076,7 +8054,8 @@ export function createAgentCapabilities(
         try {
           const hold = await liveHeldHold(ctx.scenario_id, ref);
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
-          heldOk = ops.some((o) => o.op === 'add_node' && o.path === riskId)
+          heldOk = (eventRisk === undefined || (hold !== undefined && isDeepStrictEqual((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_EVENT_RISK_KEY], { risk_id: riskId, ...eventRisk })))
+            && ops.some((o) => o.op === 'add_node' && o.path === riskId)
             && built.proposal.links.every((l) => ops.some((o) => o.op === 'add_edge' && o.path === `${l.from}::${l.to}`));
         } catch {
           heldOk = false;
@@ -8099,12 +8078,14 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         risk: {
           label,
+          ...(eventRisk !== undefined ? { likelihood: { p_low_pct: eventRisk.event_risk.occurrence.p_low * 100, p_high_pct: eventRisk.event_risk.occurrence.p_high * 100, horizon_months: eventRisk.event_risk.horizon.months, basis: 'user', quote: eventRisk.quote } } : {}),
           threatens: built.proposal.links.filter((l) => l.from === riskId).map((l) => `${labelOfId(l.to)} (${effect(l.effect_direction)})`),
           driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
           how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
         },
         note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
-          + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
+          + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
+          + (stated !== undefined && causedBy.length > 0 ? " I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen." : ''),
       };
     },
 

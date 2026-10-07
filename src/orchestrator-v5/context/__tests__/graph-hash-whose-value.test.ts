@@ -132,8 +132,9 @@ describe('every field the published hash vocabulary names moves the analysis has
   const hashOf = (g: unknown) => computeAnalysisAffectingGraphHash(g as GraphV3T);
   const base = hashOf(baseGraph());
 
-  it('POSITIVE CONTROL: the vendored vocabulary is v5 (v4 + intervention `range`, 0.66.0) — node/edge/intervention lists read from it (TEMPORAL #2382 hashes `range` through it)', () => {
-    expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(5);
+  it('POSITIVE CONTROL: the vendored vocabulary is v6 (0.82.0: v5 + node `event_risk`) — node/edge/intervention lists read from it (TEMPORAL #2382 hashes `range` through it; event_risk.v1 hashes `event_risk` through it)', () => {
+    expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(6);
+    expect(V.node.fields).toContain('event_risk');
     expect(V.node.fields.length).toBeGreaterThan(10);
   });
   it.each(V.node.fields.filter((f) => f !== 'id' && f !== 'kind'))('node.%s', (field) => {
