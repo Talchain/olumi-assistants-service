@@ -295,7 +295,11 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // RE-DERIVED on 7 Oct against the PUBLISHED tarballs (0.79.0 sha1 `fad0e0ad…`, 0.80.0 sha1 `d53e6524…`): the FILE SET naming
     // `edge_strength_edit` is identical (5 files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0 changed
     // lines naming `edge_strength_edit` (contrast: 16 changed dist lines name `dominant_factor`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.80.0');
+    // 0.80.0 → 0.81.0 (schemas #92: `run_delta.goal_chances`; main `581a825b`), RE-DERIVED on 7 Oct against the PUBLISHED
+    // tarballs (0.80.0 sha1 `d53e6524…`, 0.81.0 sha1 `6ca5c614…`): the FILE SET naming `edge_strength_edit` is identical (5
+    // files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0 changed lines naming `edge_strength_edit`
+    // (contrast: 66 changed dist lines name `goal_chances`/`GoalChance`).
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.81.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

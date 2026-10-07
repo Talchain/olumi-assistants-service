@@ -12,6 +12,7 @@
  */
 
 import { statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
+import { chanceGoalDeadlineAsk, DEADLINE_ASK_ENDING, goalDeadlineOf, goalKindOf } from '../goal-target/goal-kind.js';
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch } from '../../graph/inert-risk.js';
@@ -204,6 +205,10 @@ function rawDecisionInputAsk(graph: unknown): string | null {
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return null;
+  // ⭐ S-E GOALS (Science ruling 7 Oct §2/§4): a goal measured as a CHANCE is never given a target figure ("What figure
+  // should '…' reach?" asked for the chance Olumi computes, Paul's turn 7). Its one question is the deadline, while the
+  // goal holds no date; with the date held, nothing more is asked here (the model does not yet say what must be done).
+  if (goalKindOf(goal) === 'chance_of_event') return goalDeadlineOf(goal) === undefined ? chanceGoalDeadlineAsk(label) : null;
   return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
     : !goalHasStatedTarget(goal, graph) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
 }
@@ -246,7 +251,7 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
 
 /** The host's framing or target ask, recognised by every selector and replay reader. */
 export function isDecisionInputAsk(line: string): boolean {
-  return line.endsWith('as your target.') || line.endsWith('What should this model help you explore?');
+  return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith('What should this model help you explore?');
 }
 
 /** The one framing or target ask, or null. */

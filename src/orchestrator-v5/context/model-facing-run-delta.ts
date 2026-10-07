@@ -26,8 +26,10 @@ export function projectModelFacingRunDelta(delta: ContextPackRunDelta & Partial<
     flip_thresholds: _flipThresholdsNotComputed,
     endpoints: _endpoints, input_coverage: _inputCoverage, input_changes: _inputChanges,
     win_probabilities_unavailable: _winProbabilitiesUnavailable,
+    goal_chances: _goalChances,
     ...rest
   } = delta;
   void _flipThresholdsNotComputed; void _endpoints; void _inputCoverage; void _inputChanges; void _winProbabilitiesUnavailable;
+  void _goalChances;
   return attributionCase === rest.attribution_case ? rest : { ...rest, attribution_case: attributionCase };
 }
