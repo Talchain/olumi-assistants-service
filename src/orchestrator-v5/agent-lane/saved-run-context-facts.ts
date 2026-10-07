@@ -12,6 +12,8 @@ export interface SavedRunContextFactsRead {
   readonly analysis_state?: unknown;
   readonly analysis_result?: unknown;
   readonly raw?: unknown;
+  /** The selected Run's existing evaluated-product carrier, bound by the canonical read. */
+  readonly identity_evaluated?: ReadonlySet<string>;
   readonly limit_verdicts?: StoredLimitVerdicts;
   readonly constraint_verdict_state?: unknown;
   readonly leader_limit_risks?: readonly unknown[] | null;
@@ -32,7 +34,7 @@ export function savedRunContextFacts(
   const projected = analysisResultForAgent(read.analysis_result) as Record<string, unknown>;
   const verdict = asVerdictState(read.constraint_verdict_state);
   const checks = !runToolOutputLicensesLeader({ claim_permissions: permissions })
-    ? limitChecksForAgent(read.raw, read.limit_verdicts) : undefined;
+    ? limitChecksForAgent(read.raw, read.limit_verdicts, read.identity_evaluated) : undefined;
   return {
     selected_run_reference: selected.id,
     ...(projected.goal_chance_driver_availability !== undefined

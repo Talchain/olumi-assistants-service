@@ -1,5 +1,5 @@
 import { linkList } from '../agent-lane/unsized-path-cause.js';
-import { evaluatedIdentityCarriers } from './identity-evaluations.js';
+import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from './identity-evaluations.js';
 /**
  * ⭐ IS THE GOAL'S TARGET TESTABLE, BEFORE ANY RUN (DECISION-REPRESENTATION-v1 row 4; PTL A #77 5912737934).
  *
@@ -162,14 +162,8 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
       toGoal.add(e.from); grew = true;
     }
   }
-  const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
-  const exactLinks = new Set(edges.filter(e => {
-    if (isRec(e.provenance) && e.provenance.definitional === true) return true;
-    const to = byId.get(e.to);
-    const identity = isRec(to?.nonlinear_identity) ? to.nonlinear_identity : undefined;
-    return identity !== undefined && (identity.stated_in_brief !== false || evaluated.has(to?.id))
-      && Array.isArray(identity.factor_ids) && identity.factor_ids.includes(e.from);
-  }));
+  const operands = exactIdentityOperandLinks(nodes, edges, identityEvaluations);
+  const exactLinks = new Set(edges.filter(e => (isRec(e.provenance) && e.provenance.definitional === true) || operands.has(e)));
   const reached = new Set<unknown>();
   const paths = ids.map(option_id => {
     const seen = new Set<unknown>(seeds.get(option_id) ?? []);

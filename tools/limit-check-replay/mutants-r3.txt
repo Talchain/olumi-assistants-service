@@ -1,0 +1,100 @@
+BASELINE GREEN
+MUTANT RED: P1 user strength exemption lost
+AssertionError [ERR_ASSERTION]: J3 user-confirmed strength must remain SIZED
++ actual - expected
+
++ [
++   'Raise prices 10%'
++ ]
+- undefined
+RESTORED src/orchestrator/context/placeholder-parts.ts sha256=bb2a484c53f2508f4b82ed6547158aa804f017fc4ea7da8d9ee5e4ffab29a6e7
+RESTORED GREEN
+MUTANT RED: P1 estimate exclusion lost
+AssertionError [ERR_ASSERTION]: user stamp cannot exempt an estimate/projected mean
++ actual - expected
+
++ undefined
+- true
+RESTORED src/orchestrator/context/placeholder-parts.ts sha256=bb2a484c53f2508f4b82ed6547158aa804f017fc4ea7da8d9ee5e4ffab29a6e7
+RESTORED GREEN
+MUTANT RED: P1 projected mean exclusion lost
+AssertionError [ERR_ASSERTION]: user stamp cannot exempt an estimate/projected mean
++ actual - expected
+
++ undefined
+- true
+RESTORED src/orchestrator/context/placeholder-parts.ts sha256=bb2a484c53f2508f4b82ed6547158aa804f017fc4ea7da8d9ee5e4ffab29a6e7
+RESTORED GREEN
+MUTANT RED: P2 limit declaration alone counts
+AssertionError [ERR_ASSERTION]: declaration alone cannot license limit operands
++ actual - expected
+
++ undefined
+- [
+-   'Launch Starter Tier'
+- ]
+RESTORED src/orchestrator/context/placeholder-parts.ts sha256=bb2a484c53f2508f4b82ed6547158aa804f017fc4ea7da8d9ee5e4ffab29a6e7
+RESTORED GREEN
+MUTANT RED: P2 target-testability default changed
+AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+  readRatifiedConstraints(reviewGraph)
+RESTORED src/orchestrator-v5/admission/identity-evaluations.ts sha256=531cb7ac1c00252503288057514536765591c838d12afba4d643c2330fbb797e
+RESTORED GREEN
+MUTANT RED: P2 fold loses evaluation
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+true !== false
+RESTORED src/orchestrator/context/constraint-feasibility.ts sha256=d99a516dac829c82d5ddb282015dd258fff205f2a189bedd9082763e74e6517d
+RESTORED GREEN
+MUTANT RED: P2 option walk loses evaluation
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+true !== false
+RESTORED src/orchestrator/context/placeholder-parts.ts sha256=bb2a484c53f2508f4b82ed6547158aa804f017fc4ea7da8d9ee5e4ffab29a6e7
+RESTORED GREEN
+MUTANT RED: P2 runtime score fold loses evaluation
+AssertionError [ERR_ASSERTION]: Run handler passes evaluations into the score-withhold fold
+
+undefined !== 0.8
+RESTORED src/orchestrator-v5/tools/handlers/run-analysis.ts sha256=c81f8059154543045c29b115be1effcc6ca18a470e833c9cd2e6d0c2d5d808cc
+RESTORED GREEN
+MUTANT RED: P2 runtime verdict fold loses evaluation
+AssertionError [ERR_ASSERTION]: single returned option pins the verdict fold evaluation carrier independently of score withholding
++ actual - expected
+
++ 'unscored'
+- 'scored'
+RESTORED src/orchestrator-v5/tools/handlers/run-analysis.ts sha256=c81f8059154543045c29b115be1effcc6ca18a470e833c9cd2e6d0c2d5d808cc
+RESTORED GREEN
+MUTANT RED: P2 certainty edges lost
+AssertionError [ERR_ASSERTION]: certainty path needs all edges at sizedLinkTest; user-chain alone does not size this mediator
+
+false !== true
+RESTORED src/orchestrator-v5/agent-lane/goal-certainty.ts sha256=bc7cbaeefd20238c2c9e3af8805755c5803a895acc5fe01dba6af533e2c9dfb7
+RESTORED GREEN
+MUTANT RED: P2 saved Explain route carrier lost
+AssertionError [ERR_ASSERTION]: route must pass same-Run evaluation to its limit sentence
+
+true !== false
+RESTORED src/routes/agent-v1-turn.ts sha256=45127255449be653701808dbcfd154aed827a2fa294052af0a7e7c0195f82948
+RESTORED GREEN
+MUTANT RED: P2 runtime chat carrier lost
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ [
++   'Launch Starter Tier'
++ ]
+- undefined
+RESTORED src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts sha256=70a662d5c917cb3f9a54afa95714e7e36e4723b3a3ffb39ca34096fd70e569b5
+RESTORED GREEN
+MUTANT RED: R8-2 direct projected mean read lost
+AssertionError [ERR_ASSERTION]: user stamp cannot exempt an estimate/projected mean
++ actual - expected
+
++ undefined
+- true
+RESTORED src/orchestrator/context/placeholder-parts.ts sha256=bb2a484c53f2508f4b82ed6547158aa804f017fc4ea7da8d9ee5e4ffab29a6e7
+RESTORED GREEN
+ALL 13 PRODUCTION MUTANTS RED; ALL BACKUPS RESTORED BYTE-FOR-BYTE

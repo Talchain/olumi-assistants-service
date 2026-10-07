@@ -1,0 +1,226 @@
+{
+  "limit": [
+    {
+      "unit": "£/month",
+      "label": "monthly recurring revenue",
+      "value": 126000,
+      "node_id": "monthly_recurring_revenue",
+      "operator": ">=",
+      "provenance": "explicit",
+      "value_frame": "level",
+      "constraint_id": "agent-lane:monthly_recurring_revenue:>="
+    }
+  ],
+  "goal": {
+    "id": "monthly_recurring_revenue",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "monthly recurring revenue",
+    "provenance": "from_brief",
+    "unit_reading": {
+      "unit": "GBP",
+      "source": "user_stated",
+      "source_quote": "Goal: reach at least £126,000 monthly recurring revenue within 9 months"
+    },
+    "goal_direction": ">=",
+    "goal_threshold": 0.8,
+    "observed_state": {
+      "cap": 157500,
+      "unit": "£/month",
+      "value": 0.7619047619047619,
+      "source": "brief_extraction",
+      "baseline": 0.7619047619047619,
+      "raw_value": 120000
+    },
+    "threshold_source": "brief_extraction",
+    "goal_threshold_cap": 157500,
+    "goal_threshold_raw": 126000,
+    "goal_horizon_months": 9,
+    "goal_threshold_unit": "£/month",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+  },
+  "checks": [
+    {
+      "constraint_id": "agent-lane:monthly_recurring_revenue:>=",
+      "limit": "monthly recurring revenue",
+      "state": "scored",
+      "say": "‘monthly recurring revenue’ was checked against the figures in your model. For ‘Raise Prices 10%’ and ‘Launch Starter Tier’ it couldn’t be checked: those options move it through a link Olumi hasn’t sized in this limit’s units.",
+      "ask": "How much does ‘Existing-price rise’ change ‘monthly recurring revenue’? How much does ‘Starter-tier availability’ change ‘monthly recurring revenue’?",
+      "withheld_for": [
+        "Raise Prices 10%",
+        "Launch Starter Tier"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "option": "raise_prices_10",
+      "finding": {
+        "reason": "parts_links_placeholder",
+        "partId": "existing_price_rise"
+      }
+    },
+    {
+      "option": "launch_starter_tier",
+      "finding": {
+        "reason": "parts_links_placeholder",
+        "partId": "starter_tier_availability"
+      }
+    },
+    {
+      "option": "keep_pricing_as_it_is",
+      "finding": null
+    }
+  ],
+  "links": [
+    {
+      "option": "raise_prices_10",
+      "links": [
+        {
+          "from": "existing_price_rise",
+          "to": "monthly_recurring_revenue",
+          "effect_unit": "£/month",
+          "sizer_unit": "£/month",
+          "unit_matches": true,
+          "sized": true,
+          "user_chain": false,
+          "exact_on_run": false
+        },
+        {
+          "from": "existing_price_rise",
+          "to": "customers_lost_from_price_rise",
+          "effect_unit": "customers",
+          "sizer_unit": "",
+          "unit_matches": false,
+          "sized": false,
+          "user_chain": false,
+          "exact_on_run": false
+        },
+        {
+          "from": "customers_lost_from_price_rise",
+          "to": "monthly_recurring_revenue",
+          "effect_unit": "£/month",
+          "sizer_unit": "£/month",
+          "unit_matches": true,
+          "sized": true,
+          "user_chain": false,
+          "exact_on_run": false
+        }
+      ]
+    },
+    {
+      "option": "launch_starter_tier",
+      "links": [
+        {
+          "from": "starter_tier_availability",
+          "to": "starter_tier_subscribers",
+          "effect_unit": "subscribers",
+          "sizer_unit": "subscribers",
+          "unit_matches": true,
+          "sized": true,
+          "user_chain": false,
+          "exact_on_run": false
+        },
+        {
+          "from": "starter_tier_subscribers",
+          "to": "starter_tier_mrr",
+          "effect_unit": "£/month",
+          "sizer_unit": "",
+          "unit_matches": false,
+          "sized": false,
+          "user_chain": false,
+          "exact_on_run": true
+        },
+        {
+          "from": "starter_tier_monthly_price",
+          "to": "starter_tier_mrr",
+          "effect_unit": null,
+          "sizer_unit": "",
+          "unit_matches": false,
+          "sized": false,
+          "user_chain": false,
+          "exact_on_run": true
+        },
+        {
+          "from": "starter_tier_mrr",
+          "to": "monthly_recurring_revenue",
+          "effect_unit": "£/month",
+          "sizer_unit": "£/month",
+          "unit_matches": true,
+          "sized": true,
+          "user_chain": false,
+          "exact_on_run": true
+        }
+      ]
+    },
+    {
+      "option": "keep_pricing_as_it_is",
+      "links": []
+    }
+  ],
+  "goal_path_withholds": [],
+  "testability": {
+    "kind": "testable",
+    "goal_id": "monthly_recurring_revenue"
+  },
+  "licence": {
+    "code": "GOAL_CHANCE_LICENSED",
+    "severity": "info",
+    "message": "Each option’s chance of meeting your goal is licensed on this Run.",
+    "form": "each",
+    "option_ids": [
+      "raise_prices_10",
+      "launch_starter_tier",
+      "keep_pricing_as_it_is"
+    ],
+    "pct_by_option": {
+      "raise_prices_10": 47,
+      "launch_starter_tier": 34,
+      "keep_pricing_as_it_is": 0
+    },
+    "target": {
+      "comparator": "at_least",
+      "value": 126000,
+      "unit": "£/month"
+    },
+    "user_link_existence": {
+      "links": 3,
+      "one_in": 5
+    },
+    "summary_withheld": {
+      "cause": "olumi_existence_assumption",
+      "form": "highest"
+    },
+    "display_rounding_by_option": {
+      "raise_prices_10": "whole",
+      "launch_starter_tier": "whole",
+      "keep_pricing_as_it_is": "whole"
+    },
+    "driver_by_option": {
+      "raise_prices_10": {
+        "quantity_id": "existing_price_rise->monthly_recurring_revenue",
+        "kind": "link_strength",
+        "from": "existing_price_rise",
+        "to": "monthly_recurring_revenue",
+        "side": "low",
+        "strength": "weaker",
+        "authored_by": "user",
+        "user_stated_link": true
+      },
+      "launch_starter_tier": {
+        "quantity_id": "starter_tier_availability->starter_tier_subscribers",
+        "kind": "link_strength",
+        "from": "starter_tier_availability",
+        "to": "starter_tier_subscribers",
+        "side": "low",
+        "strength": "weaker",
+        "authored_by": "user",
+        "user_stated_link": true
+      }
+    },
+    "no_driver_by_option": {
+      "keep_pricing_as_it_is": "none"
+    }
+  }
+}

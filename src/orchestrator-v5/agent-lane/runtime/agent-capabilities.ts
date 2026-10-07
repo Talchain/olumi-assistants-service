@@ -8360,7 +8360,7 @@ export function createAgentCapabilities(
           postRunRead = read;
           graphForProduct = read?.raw;
           evaluatedForProduct = read?.identity_evaluated;
-          limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts);
+          limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts, read?.identity_evaluated);
         } catch { postRunRead = null; graphForProduct = undefined; evaluatedForProduct = undefined; limitChecks = undefined; }
       }
       // ⛔ GOAL CERTAINTY (DL 5887593253; MG's producer #2270, stored per Run by #2280): an option at P(goal) exactly 0 or 1 is
