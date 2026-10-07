@@ -51,6 +51,9 @@ export function createMockSessionStore(
 ): SessionStore {
   const complete: Required<SessionStore> = {
     append: async () => ({ id: 'mock-row-id' }),
+    // S-D.1b: the conditional answer append; by default it IS the (possibly overridden) `append` (see below), so a test
+    // capturing writes through `append` still sees the Agent answer row, unconditionally, as before.
+    appendIfLatest: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
     readGuidanceHistory: async () => ({}),
     // X4: the latest Agent answer's stored offers. Benign default = none stored.
@@ -184,7 +187,8 @@ export function createMockSessionStore(
     // above returning `false`: no outstanding loss, so resolving is a no-op.
     resolveScenarioDraftLoss: async () => undefined,
   };
-  return { ...complete, ...overrides };
+  const store: Required<SessionStore> = { ...complete, ...overrides } as Required<SessionStore>;
+  return overrides.appendIfLatest !== undefined ? store : { ...store, appendIfLatest: (write) => store.append(write) };
 }
 
 /**
