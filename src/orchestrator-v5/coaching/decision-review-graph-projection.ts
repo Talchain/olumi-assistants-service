@@ -68,7 +68,7 @@ import {
   type GraphV3Compact,
 } from '../../orchestrator/context/graph-compact.js';
 import { observedValueAuthorship } from '../../cee/transforms/provenance-display.js';
-import { heldLinkOf, withHeldUserLinks } from '../goal-target/held-user-links.js';
+import { endsOfGraph, heldLinkOf, withHeldUserLinks, type LinkEnds } from '../goal-target/held-user-links.js';
 
 /** How the projection was obtained. Reported in telemetry; never user-facing. */
 export type DecisionReviewGraphSource =
@@ -364,7 +364,7 @@ function projectNodePreserving(raw: unknown): Record<string, unknown> | null {
  * no `?? 1` and no `'positive'` default anywhere in this function, and a test
  * pins that a source edge carrying `strength.mean: -0.6` survives as -0.6.
  */
-function projectEdgePreserving(raw: unknown): Record<string, unknown> | null {
+function projectEdgePreserving(raw: unknown, ends: LinkEnds): Record<string, unknown> | null {
   const edge = readRecord(raw);
   if (edge === null) return null;
   const from = nonEmptyString(edge.from);
@@ -380,7 +380,7 @@ function projectEdgePreserving(raw: unknown): Record<string, unknown> | null {
     out.strength = edge.strength;
   }
   // Hold-at-1.0 (Codex r1 #2643): the reviewer reads the existence the Run USES for a held user link.
-  if (heldLinkOf(edge) !== null) {
+  if (heldLinkOf(edge, ends) !== null) {
     out.exists = 1;
   } else if (typeof edge.exists_probability === 'number' && Number.isFinite(edge.exists_probability)) {
     out.exists = edge.exists_probability;
@@ -426,8 +426,9 @@ function projectPreserving(graph: Record<string, unknown>): DecisionReviewGraphP
   const nodes = rawNodes
     .map(projectNodePreserving)
     .filter((n): n is Record<string, unknown> => n !== null);
+  const endsOf = endsOfGraph(graph);
   const edges = rawEdges
-    .map(projectEdgePreserving)
+    .map((e) => projectEdgePreserving(e, endsOf(e)))
     .filter((e): e is Record<string, unknown> => e !== null);
   if (nodes.length === 0 && edges.length === 0) return EMPTY;
   return {
