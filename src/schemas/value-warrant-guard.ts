@@ -841,7 +841,7 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
     status: "ACCEPTED",
     decision:
       "ACCEPTED — the same warrant as its `p_low` sibling (settled together): one stated range, its `meaning` and its " +
-      "required `basis`, on the same object.",
+      "required `basis`, on the same object; reason given at unwarranted:cee.NodeV3::event_risk.occurrence.p_low.",
   },
   {
     id: "unwarranted:cee.NodeV3::event_risk.horizon.months",
