@@ -127,7 +127,7 @@ import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
-import { premortemProducerDirective, readPremortemProduction, premortemWorksheetFor } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
+import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
   isWidenPress, keptProposalOf, settleWidenTurn, widenGate, widenNotAdded, widenOffered, widenPassingArgs, widenTurnForReadback,
   WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
@@ -4123,12 +4123,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // A7: what of the brief the model does not carry — the final readback's own manifest, bound to its graph_hash.
     const notModelledCarrier = notModelledTurnCarrier(notModelled, graphHash);
     // Local carrier, AFTER finalisation and licence egress. If egress changed the prose, the worksheet is withheld.
-    const premortemWorksheet = premortemWorksheetFor({
+    const premortemDiagnostics = premortemWorksheetDiagnosticsFor({
       scenarioId, turnId, turn: methodTurn?.kind === 'run' ? methodTurn : null,
       passed: premortemPassed && premortemReply === wireBody.assistant_text,
       reply: String(wireBody.assistant_text ?? ''), candidates: premortemCandidates,
       initial: premortemInitialRead, final: composedRead,
     });
+    const premortemWorksheet = premortemDiagnostics.worksheet;
+    if (methodTurn?.kind === 'run' && (premortemWorksheet === undefined || premortemDiagnostics.dropped.length > 0)) {
+      log.info({ event: 'PREMORTEM_WORKSHEET_WITHHELD', stories: premortemDiagnostics.stories,
+        rows: premortemDiagnostics.rows, dropped: premortemDiagnostics.dropped.map(({ story_index, reason }) => ({ story_index, reason })) },
+      'PREMORTEM_WORKSHEET_WITHHELD');
+    }
     return reply.code(200).send({
       ...wireBody,
       ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),

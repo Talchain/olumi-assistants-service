@@ -3,7 +3,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../../context/graph-has
 import { PREMORTEM_PRESS_ID, methodTurnForReadback, methodPressOf, planPickChipId, planMethodTurn, settleMethodTurn } from '../../../method-turn/method-turn.js';
 import { methodPlanOf } from '../../../guidance/plan.js';
 import { PremortemWorksheetV1Schema, premortemProducerDirective, readPremortemProduction } from '../premortem.js';
-import { OPTION, LINK, REPLY, FAILURE, WARNING, captures, fixture, candidate, outside, worksheet } from './premortem-fixture.js';
+import { OPTION, LINK, REPLY, ONE_STORY_REPLY, FAILURE, WARNING, captures, fixture, candidate, outside, worksheet } from './premortem-fixture.js';
 
 describe('A2 producer and coverage', () => {
   it('chosen option outranks a different licensed plan in BOTH selectors; only chosen rows survive', () => {
@@ -90,16 +90,16 @@ describe('A2 grounding and words', () => {
     const generic = { ...turn, context: { ...turn.context, plan: null, decision_level: true } };
     expect(worksheet({ turn: generic })).toBeUndefined();
     const row = { ...candidate(), failure_way: `Raise prices: ${FAILURE}` };
-    const reply = REPLY.replace(FAILURE, row.failure_way);
+    const reply = ONE_STORY_REPLY.replace(FAILURE, row.failure_way);
     expect(worksheet({ turn: generic, reply, candidates: [row] })?.rows).toHaveLength(1);
     expect(worksheet({ turn: generic, reply: reply.replace('Raise prices:', 'Launch starter tier:'), candidates: [{ ...row, option_id: 'launch_starter_tier', failure_way: `Launch starter tier: ${FAILURE}` }], initial: read, final: read })).toBeUndefined();
   });
   it.each(['most likely', 'best', 'winner', 'recommend', 'leads', 'ahead', 'beats', 'probability', '20%'])('drops injected %s in grounded AND outside rows', word => {
     const row = { ...candidate(), failure_way: `${FAILURE} ${word}` };
-    expect(worksheet({ candidates: [row], reply: REPLY.replace(FAILURE, row.failure_way) })).toBeUndefined();
+    expect(worksheet({ candidates: [row], reply: ONE_STORY_REPLY.replace(FAILURE, row.failure_way) })).toBeUndefined();
     expect(worksheet({ candidates: [{ ...outside(), early_warning: `${WARNING} ${word}` }] })).toBeUndefined();
   });
-  it('bad row never removes another valid row', () => expect(worksheet({ candidates: [{ ...candidate(), early_warning: '' }, outside()] })?.rows).toHaveLength(1));
+  it('an outside row cannot replace a dropped numbered story', () => expect(worksheet({ candidates: [{ ...candidate(), early_warning: '' }, outside()] })).toBeUndefined());
 });
 
 describe('A2 stamp and carrier validation', () => {
