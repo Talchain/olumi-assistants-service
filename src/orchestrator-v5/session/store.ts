@@ -55,7 +55,21 @@ export type { HandlerFactWithTurn, IdentifiedHandlerFact };
  */
 export interface PendingActionReadOptions {
   readonly validation?: 'tolerant' | 'strict';
+  /** Identity from this same uncached read; null means the scenario has no row. */
+  readonly onLatestRowId?: (id: string | null) => void;
 }
+
+export interface ConditionalAppendOptions {
+  /** Only final, non-graph Agent answers. null asserts that no prior row exists. */
+  readonly expectedLatestRowId: string | null;
+}
+
+/** The conditional RPC inserted nothing; the floor must reread and reconcile. */
+export interface SessionLatestMovedOutcome {
+  readonly status: 'latest_moved';
+}
+
+export type ConditionalSessionAppendOutcome = SessionAppendOutcome | SessionLatestMovedOutcome;
 
 export type VersionAuthoredBy = 'owner' | 'assistant' | string;
 
@@ -294,6 +308,7 @@ export interface AnswerOffersRead {
 
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
+  append(write: SessionTurnWrite, options: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome>;
   /** Uncached latest-answer offers only; absent/malformed/unavailable reads are null. */
   readLatestAnswerOffers?(scenarioId: string): Promise<AnswerOffersRead | null>;
   /** Uncached, scenario-scoped bounded answer history. Read failure throws; absent capability is unknown. */

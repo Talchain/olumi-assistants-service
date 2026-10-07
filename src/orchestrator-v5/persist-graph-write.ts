@@ -178,8 +178,8 @@ export interface CheckedGraphAppendParams {
    * (a supplied held item is kept only while the latest row still holds it) nor erase one another request minted
    * meanwhile (a held item on the latest row that this request never saw is carried). `seenByThisRequest`: every held
    * item this request read, so the ones it settled itself (approved, declined, lapsed: each said) are never re-added.
-   * ⚠ Narrows, does not close, the race: a write landing between this read and the append is still last-writer-wins
-   * (closing it needs a conditional append in the store; follow-up).
+   * S-D.1b compares the identity of this read inside the conditional append RPC,
+   * then rereads and repeats this reconciliation on contention (three attempts).
    */
   readonly heldProposals?: { readonly isHeld: (pending: PendingAction) => boolean; readonly seenByThisRequest: ReadonlySet<string> };
 }
@@ -353,51 +353,64 @@ export async function appendCheckedGraphWrite(
   params: CheckedGraphAppendParams,
 ): Promise<SessionAppendOutcome> {
   const { store, writesGraph, source } = params;
-  let write = params.write;
-  // Pending issue lifetime is a persistence obligation even on a read-only conversational turn.
-  // Only this sidecar is extended here; graph bytes and both hashes remain exactly as prepared.
-  if (typeof store.readMostRecentPendingActions === 'function') {
-    const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict' });
-    if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
-    let supplied = write.pending_actions ?? [];
-    if (params.heldProposals !== undefined) {
-      const { isHeld, seenByThisRequest } = params.heldProposals;
-      const onLatest = new Set(prior.filter(isHeld).map((p) => p.chip_id));
-      const kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id));
-      const arrived = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
-      if (kept.length !== supplied.length || arrived.length > 0) {
-        const merged = [...kept, ...arrived];
-        if (merged.length > PENDING_ACTIONS_PER_TURN_CAP) {
-          log.warn({ scenario_id: write.scenario_id, source, dropped: merged.slice(PENDING_ACTIONS_PER_TURN_CAP).map((p) => p.chip_id) },
-            '[persist] held proposal another request added does not fit the row; the lowest-priority items are not carried');
+  for (let attempt = 0; ; attempt += 1) {
+    // Always reconcile the ORIGINAL request against each fresh row. Reusing the
+    // previous attempt would retain obsolete scope issues or permanently drop holds.
+    let write = params.write;
+    let expectedLatestRowId: string | null | undefined;
+    // Pending issue lifetime is a persistence obligation even on a read-only conversational turn.
+    // Only this sidecar is extended here; graph bytes and both hashes remain exactly as prepared.
+    if (typeof store.readMostRecentPendingActions === 'function') {
+      const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict',
+        ...(params.heldProposals !== undefined ? { onLatestRowId: (id: string | null) => { expectedLatestRowId = id; } } : {}) });
+      if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
+      let supplied = write.pending_actions ?? [];
+      if (params.heldProposals !== undefined) {
+        const { isHeld, seenByThisRequest } = params.heldProposals;
+        const onLatest = new Set(prior.filter(isHeld).map((p) => p.chip_id));
+        const kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id));
+        const arrived = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
+        if (kept.length !== supplied.length || arrived.length > 0) {
+          const merged = [...kept, ...arrived];
+          if (merged.length > PENDING_ACTIONS_PER_TURN_CAP) {
+            log.warn({ scenario_id: write.scenario_id, source, dropped: merged.slice(PENDING_ACTIONS_PER_TURN_CAP).map((p) => p.chip_id) },
+              '[persist] held proposal another request added does not fit the row; the lowest-priority items are not carried');
+          }
+          supplied = merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+          write = { ...write, pending_actions: supplied };
         }
-        supplied = merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP);
-        write = { ...write, pending_actions: supplied };
       }
+      const missing = prior.filter(p => p.action.kind === 'reconcile_goal_scope'
+        && !params.withdrawnGoalScopeChipIds?.includes(p.chip_id)
+        && !supplied.some(n => n.chip_id === p.chip_id))
+        .flatMap(p => { const kept = refreshScopePending(p, writesGraph ? write.graph : params.baseGraphForInvariants); return kept ? [kept] : []; });
+      if (missing.length > 0) write = { ...write, pending_actions: [...missing, ...supplied].slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
     }
-    const missing = prior.filter(p => p.action.kind === 'reconcile_goal_scope'
-      && !params.withdrawnGoalScopeChipIds?.includes(p.chip_id)
-      && !supplied.some(n => n.chip_id === p.chip_id))
-      .flatMap(p => { const kept = refreshScopePending(p, writesGraph ? write.graph : params.baseGraphForInvariants); return kept ? [kept] : []; });
-    if (missing.length > 0) write = { ...write, pending_actions: [...missing, ...supplied].slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
+    if (writesGraph) assertNoScopedIdentityConflict(write.graph);
+
+    // The check runs on `write.graph` — the same object handed to `store.append`
+    // on the last line of this function, with nothing between them.
+    assertNoIntroducedGraphViolations({
+      graph: write.graph,
+      identity: {
+        scenario_id: write.scenario_id,
+        turn_id: write.turn_id,
+        turn_class: write.turn_class,
+      },
+      writesGraph,
+      baseGraphForInvariants: params.baseGraphForInvariants,
+      source,
+    });
+
+    // Nothing mutates the graph between the check above and this line. A row written inside one of the Agent's own
+    // dispatches is stored without conversation text: the user never saw it (`agent-subturn-context.ts`, #75 5910983526).
+    const storedWrite = withoutAgentSubturnText(write);
+    if (expectedLatestRowId === undefined || attempt >= 3) return await store.append(storedWrite);
+    const outcome = await store.append(storedWrite, { expectedLatestRowId });
+    if (!('status' in outcome)) return outcome;
+    if (attempt === 2) {
+      log.warn({ event: 'v5.agent_answer.latest_moved_exhausted', scenario_id: write.scenario_id, source, attempts: 3 },
+        '[persist] latest row moved on all three conditional attempts; rereading once more and appending the answer unconditionally');
+    }
   }
-  if (writesGraph) assertNoScopedIdentityConflict(write.graph);
-
-  // The check runs on `write.graph` — the same object handed to `store.append`
-  // on the last line of this function, with nothing between them.
-  assertNoIntroducedGraphViolations({
-    graph: write.graph,
-    identity: {
-      scenario_id: write.scenario_id,
-      turn_id: write.turn_id,
-      turn_class: write.turn_class,
-    },
-    writesGraph,
-    baseGraphForInvariants: params.baseGraphForInvariants,
-    source,
-  });
-
-  // Nothing mutates the graph between the check above and this line. A row written inside one of the Agent's own
-  // dispatches is stored without conversation text: the user never saw it (`agent-subturn-context.ts`, #75 5910983526).
-  return await store.append(withoutAgentSubturnText(write));
 }
