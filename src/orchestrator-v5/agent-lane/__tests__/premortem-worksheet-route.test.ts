@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { fixture, candidate, REPLY, OPTION } from '../runtime/reasoning-artefacts/__tests__/premortem-fixture.js';
+import { fixture, candidate, secondCandidate, REPLY, OPTION } from '../runtime/reasoning-artefacts/__tests__/premortem-fixture.js';
 import { planPickChipId } from '../method-turn/method-turn.js';
 import type { PremortemWorksheetV1 } from '../runtime/reasoning-artefacts/premortem.js';
 
@@ -138,7 +138,7 @@ describe('A2 final root carrier and existing consent door', () => {
     expect(response.statusCode, response.body.slice(0, 500)).toBe(200);
     return response.json() as Body;
   };
-  const produce = async (appendix = JSON.stringify([candidate()])) => {
+  const produce = async (appendix = JSON.stringify([candidate(), secondCandidate()])) => {
     script = [() => say(`${REPLY}\n<premortem_rows>${appendix}</premortem_rows>`)];
     return turn(planPickChipId(OPTION));
   };
@@ -146,7 +146,7 @@ describe('A2 final root carrier and existing consent door', () => {
     const before = JSON.stringify(graphOf.get(SCENARIO));
     const body = await produce();
     expect(body.assistant_text).toBe(REPLY);
-    expect(body._premortem_worksheet?.rows).toHaveLength(1);
+    expect(body._premortem_worksheet?.rows).toHaveLength(2);
     expect(body._premortem_worksheet?.run.graph_hash_at_run).toBe((fixture().read.analysisResult as Record<string, unknown>).computed_against_hash);
     expect(modelCalls).toBe(1);
     expect(JSON.stringify(graphOf.get(SCENARIO))).toBe(before);

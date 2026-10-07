@@ -34,6 +34,10 @@ const ABSENT = R`(?:\s*(?:not|n[’']t)\s*(?:yet\s+)?(?:been\s+)?(?:established|
 /** "which assumption" · "which of the assumptions" · "what of these factors". */
 const WHICH_ITEM = R`${WHICH}\s+(?:of\s+(?:the|these|those|your)\s+)?${ITEM}`;
 const MOST_ADJ = R`most[-\s](?:sensitive|important|influential|consequential|decisive)`;
+/** ⭐ Wave B8: a superlative noun phrase ("the biggest driver"); "key" was already the predicative form's. */
+const SUPERLATIVE = R`(?:biggest|main|key|largest|strongest|dominant|primary)`;
+/** Never "the biggest driver for you / of churn / behind costs": unless what follows is the chances, the result or the comparison. */
+const NOT_ANOTHER_QUANTITY = R`(?![ \t]{1,3}(?:of|for|behind)[ \t]{1,3}(?!(?:the|these|its|your|each|every)[ \t]{1,3}(?:options?['’]?[ \t]{1,3})?(?:chances?|results?|comparison|outcomes?|goal|options?)\b))`;
 
 /** S2d: 1–6 plain words, none a person who would own a preference (bounded: no `.*`, linear time). */
 const GEN_GAP = R`(?:\s+(?!(?:you|we|they|i|team|users?|people|customers?)\b)[\w’'-]+){1,6}?`;
@@ -54,13 +58,19 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // "this run doesn't tell us what matters most" (never "what matters most to you")
   R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+matters\s+most(?!\s+to\s+(?:you|your|them|the\s+team))`,
   // fronted: "Which assumption matters most has not been established"
-  R`\b${WHICH_ITEM}${GAP}${MOST}\s+(?:has|have|is|was|remains?)${ABSENT}`,
+  // ⭐ Wave B7 (T1b Explain): "Which assumption most affects the comparison has not been measured." (an object after MOST)
+  // ⭐ Cut 9 PROD (7 Oct, CEE 7e3f8fb, Explain): "Which assumption matters most to the comparison has not been measured."
+  // (a preposition before that object; "to you / your team" is never an object here, so a person's preference stays)
+  R`\b${WHICH_ITEM}${GAP}${MOST}(?:\s+(?:(?:to|for|in|on|across)\s+)?(?:the|its|your|this)\s+(?:comparison|result|outcome|chances?|figures?|answer|ranking))?\s+(?:has|have|is|was|remains?)${ABSENT}`,
   // impersonal: "it is unclear which assumption matters most"
   R`\b(?:it\s+is|it[’']s|it\s+remains|it\s+was)\s+(?:still\s+)?(?:unclear|not\s+(?:yet\s+)?(?:clear|known|established)|unknown|uncertain|undetermined)\s+${WHICH_ITEM}${GAP}${MOST}`,
   // "nothing in this run shows which assumption matters most"
   R`\bnothing\b(?:\s+[\w’'-]+){0,4}?\s+(?:shows?|establish(?:es)?|identifies|indicates|tells?\s+us)\s+${WHICH_ITEM}${GAP}${MOST}`,
   // "no most-sensitive assumption was measurable / has been established"
-  R`\bno\s+(?:single\s+)?${MOST_ADJ}\s+${ITEM}\s+(?:was|is|has\s+been|could\s+be|were|are)\s+(?:established|measurable|measured|identified|found|determined)`,
+  // ⭐ Wave B6 (7 Oct, CEE 4ce3583, Explain): "No most-sensitive assumption or tipping point was established." (a coordinated noun)
+  R`\bno\s+(?:single\s+)?${MOST_ADJ}\s+${ITEM}(?:[ \t]{1,3}or[ \t]{1,3}[\w’'-]{1,40}(?:[ \t]{1,3}[\w’'-]{1,40}){0,2})?\s+(?:was|is|has\s+been|could\s+be|were|are)\s+(?:established|measurable|measured|identified|found|determined)`,
+  // ⭐ Wave B6 (Challenge): "No recorded sensitivity result establishes which matters most across options."
+  R`\bno\s+(?:(?:recorded|measured|computed)\s+)?(?:(?:sensitivity|robustness)\s+)?(?:results?|analys[ie]s|findings?|evidence|checks?|tests?)\s+(?:yet\s+)?(?:establish|show|identif|determin|indicat|tell|reveal)\w*\s+(?:us\s+)?(?:which|what)(?:\s+(?:of\s+(?:the|these|those)\s+)?${ITEM})?\s+(?:matters?|counts?)\s+(?:the\s+)?most\b(?![ \t]{1,3}to[ \t]{1,3}(?:you|your|them|the[ \t]{1,3}team))`,
   // "no assumption has been identified as the most important"
   R`\bno\s+(?:single\s+)?${ITEM}\s+(?:has\s+been|was|is|could\s+be)\s+(?:identified|established|shown|found|singled\s+out)\s+as\s+(?:the\s+)?(?:most\s+(?:important|influential|sensitive)|(?:main|key|biggest)\s+driver)`,
   // ⭐ Wave B2 (7 Oct 03:3xZ, CEE 044faef): paraphrases keep coming ("…has not established which assumption deserves
@@ -71,14 +81,22 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   R`${NEG}${VERB}\s+${WHICH_ITEM}${GEN_GAP}\s+(?:the\s+)?(?:most(?:\s+(?:sensitive\s+to|weight))?|priority)${CLAUSE_END}`,
   // ⭐ Wave B3 (7 Oct, CEE 7addf05, Challenge): "This result does not establish what changes chances most." /
   // "It hasn't established what changes the chances most: …" (a "what" with no assumption noun).
-  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
+  // ⭐ Wave B5 (7 Oct, CEE 5a260e3, Challenge): "This run doesn’t establish what would change the chances most: …" (a modal).
+  // ⭐ Wave B7 (7 Oct, CEE 7e3f8fb, Challenge): "The model hasn’t established which change would shift the chances most."
+  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+(?:what|which\s+(?:changes?|levers?|links?|${ITEM}))\s+(?:(?:would|could|might|will|can|does|do)\s+)?(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
   // ⭐ Wave B3 (T1b provisional view): "…the analysis has not tested the deadline or established investigation priority."
   // Only the "or …" tail is the claim (bounded lookbehind to its negation); `cutOnce` cuts from the "or".
   // ⛔ S2f: the "or" is checked FIRST (lookahead), and each word is bounded: tried at every position, the lookbehind
   // rescanned a long word (base 01a2b27: 380 ms on one 20,000-character word, near-quadratic).
   R`(?=[ \t]{1,3}(?:or|nor)[ \t])(?<=${NEG_B}(?:[ \t]{1,3}[\w’'-]{1,40}){1,6})[ \t]{1,3}(?:or|nor)[ \t]{1,3}(?:yet[ \t]{1,3})?(?:established?|identified|set|determined)[ \t]{1,3}(?:(?:an?|the|any)[ \t]{1,3})?(?:clear[ \t]{1,3})?investigation[ \t]{1,3}priorit(?:y|ies)\b`,
   // ⭐ Wave B4 (7 Oct, CEE 01a2b27, Challenge): "This result doesn’t identify an overall “most influential” assumption."
-  R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:(?:overall|single|clear)\s+)?[“"‘']?${MOST_ADJ}[”"’']?\s+${ITEM}`,
+  // ⭐ Cut 9 PROD (7 Oct, CEE 7e3f8fb, Challenge, beside 2 drivers): "…the supplied analysis does not establish a single most
+  // consequential change across options." (a change or lever, as the what-form's "which change"). Never a question.
+  R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:(?:overall|single|clear)\s+)?[“"‘']?${MOST_ADJ}[”"’']?\s+(?:${ITEM}|changes?|levers?)\b(?![^.!?\n]{0,120}\?)`,
+  // ⭐ Wave B8 (7 Oct, CEE f2c8477, Challenge, beside a range driver): "That does not establish the biggest driver across all
+  // options." A superlative NOUN phrase ("the biggest / main / key … driver"). Never a question; never "… for you / of churn"
+  // (a person's preference or another quantity's cause), unless it is the chances, the result or the comparison.
+  R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:(?:overall|single|clear)\s+)?[“"‘']?${SUPERLATIVE}[”"’']?\s+(?:${ITEM}|changes?|levers?)\b${NOT_ANOTHER_QUANTITY}(?![^.!?\n]{0,120}\?)`,
   // Wave B (7 Oct, unseen-2 provisional view): "it has not established an investigation priority"
   R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:clear\s+)?investigation\s+priorit(?:y|ies)\b`,
   // "there is no investigation priority yet"
@@ -86,7 +104,9 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // "no single assumption stands out" · "none of the assumptions stands out"
   R`\b(?:no\s+(?:single\s+)?|none\s+of\s+the\s+)${ITEM}\s+(?:stands?|stood)\s+out`,
   // predicative: "investigation priority is not established" · "the most important assumption is unknown"
-  R`\b(?:investigation\s+priority|(?:the\s+)?${MOST_ADJ}\s+${ITEM}|(?:the\s+)?${ITEM}\s+(?:that|which)\s+matters?\s+most|(?:the\s+)?key\s+${ITEM})\s+(?:is|was|has|remains?)${ABSENT}`,
+  // ⭐ Wave B8: the superlative nouns ("the biggest driver is not established"; fronted "Across all options, the biggest
+  // driver isn't established"), as the B4 "key" form already was.
+  R`\b(?:investigation\s+priority|(?:the\s+)?${MOST_ADJ}\s+${ITEM}|(?:the\s+)?${ITEM}\s+(?:that|which)\s+matters?\s+most|(?:the\s+)?${SUPERLATIVE}\s+(?:${ITEM}|changes?|levers?)${NOT_ANOTHER_QUANTITY})\s+(?:is|was|has|remains?)${ABSENT}`,
 ].join('|'), 'i');
 
 /**
@@ -99,7 +119,8 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
 /** Bounded runs only (DL #2712 r1): an unbounded run inside a lookbehind is rescanned at every position (quadratic). */
 const SENS_OPEN = R`(?<=^|\n[ \t]{0,8}(?:(?:[-*•]|\d{1,3}[.)])[ \t]{1,4})?|[.;:!?,—–(*_“"‘][ \t\n]{0,4}|\b(?:and|but|so|yet|while|though|although|because|also|that|as)[ \t\n]{1,4})`;
 const SENS_SUBJECT = R`(?:(?:the|overall|decision|factor|option[-\s]comparison|comparison)\s+)*sensitivity(?:\s+(?:analysis|check|checks|testing|tests?))?(?:\s+of\s+(?:the\s+)?(?:option\s+)?(?:comparison|options|results?|ranking|decision))?`;
-const SENS_ROBUST_SUBJECT = R`(?:the\s+)?(?:robustness(?:\s+and\s+sensitivity)?|sensitivity\s+and\s+robustness)(?:\s+(?:analysis|check|checks))?`;
+/** ⭐ Wave B7 (Explain): "Sensitivity and tipping points were not measured." beside a tipping point and a computed check. */
+const SENS_ROBUST_SUBJECT = R`(?:the\s+)?(?:robustness(?:\s+and\s+sensitivity)?|sensitivity\s+and\s+(?:robustness|tipping\s+points?)|tipping\s+points?\s+and\s+sensitivity)(?:\s+(?:analysis|check|checks))?`;
 const SENS_NOT_DONE = R`\s+(?:has|have|was|were|is|are|had)\s*(?:not|n[’']t)\s+(?:yet\s+)?(?:been\s+)?(?:measured|assessed|tested|run|computed|checked|analysed|analyzed|done|carried\s+out|performed|quantified)`;
 export const SENSITIVITY_ABSENCE_CLAIM = new RegExp([
   // "Sensitivity of the option comparison has not been measured" · "decision sensitivity was not measured"
@@ -145,6 +166,8 @@ export const ALL_WITHHELD_CLAIM = new RegExp([
   R`${NEG}${VERB}\s+how\s+likely\s+${OPT}\b`,
   // "chances for every option are not shown / withheld"
   R`${NP_START}${ADV}\bchances?\s+(?:for|of)\s+${OPT}\s+(?:are|is)\s+(?:not\s+(?:yet\s+)?(?:shown|established|available)|withheld|unavailable)\b`,
+  // ⭐ Wave B7 (Explain, beside 3 ranges): "This result supplies no confirmed goal chances." (never "no point chances")
+  R`\b(?:supplies|gives|provides|offers|carries|contains|yields)\s+no\s+(?:(?:confirmed|usable|reliable|valid)\s+)?(?:(?:goal|target)\s+)?chances?\b`,
   // served (corpus): "its unsized links prevent reporting goal chances for every option" · "this run withholds goal chances
   // for every option" · "prevents this run from reporting target chances for any option" · "prevent goal-chance claims for every option"
   // Never negated ("does not withhold … for every option" is the opposite claim), asked about, or a question.
@@ -217,6 +240,18 @@ function cutOnce(body: string, m: RegExpExecArray, labels: readonly string[]): C
   if (colon && tail.trim() === '' && words(head.replace(/\*+/g, ' ')) <= 3) return PROTECTED.test(head) || MONTH.test(head) || hasLabel(head) ? { kind: 'unsafe' } : { kind: 'lead_in_empty' };
   // S2 review r2 #5: with nothing before the claim, a ", which …" tail would dangle ("Which limits …"): keep it.
   if (head.trim() === '' && /^\s*,\s*which\b/i.test(tail)) return { kind: 'unsafe' };
+  // ⛔ S2i: a consequence of the removed clause (", so …", ", which means …") would become a consequence of the text
+  // before it ("Three values are Olumi's assumptions, so investigation priority is not established"): an invented cause.
+  // The consequence goes WITH its cause, to its own clause stop; the same kept-unsafe rules hold for what that removes.
+  const consequence = head.trim() !== '' ? /^\s*,\s*(?:so|which\s+means|therefore|hence|thus)\b/i.exec(tail) : null;
+  if (consequence !== null) {
+    const rest = tail.slice(consequence[0].length);
+    const stop2 = RIGHT_STOP.exec(rest);
+    const end2 = tailStart + consequence[0].length + (stop2 === null ? rest.length : stop2.index);
+    const removed2 = body.slice(removeStart, end2);
+    if (PROTECTED.test(removed2) || MONTH.test(removed2) || hasLabel(removed2)) return { kind: 'unsafe' };
+    return { kind: 'cut', body: `${head}${body.slice(end2)}` };
+  }
   if (head.trim() === '') return { kind: 'cut', body: capitalised(tail.replace(/^[\s,;:—–-]+/, '').replace(CONNECTOR, '')) };
   return { kind: 'cut', body: `${head}${tail}` };
 }

@@ -139,7 +139,10 @@ export function sayOneOf(unit: string): string {
  * has no unit of its own and every option that sets it sets 0 or 1. A unit of its own ("hires") keeps it a count, so
  * "0 or 1 hire" still asks per hire.
  */
-const TWO_STATE_UNIT_RE = /^\s*(?:0\s*\/\s*1|binary|bool(?:ean)?|yes\s*\/\s*no|on\s*\/\s*off|true\s*\/\s*false)\s*$/i;
+// B1b (cut 8 manual-test, 7 Oct): a draft stored "0-1" and the reply said "set to 1 0-1"; a slash, hyphen, en/em dash or
+// "to" separates the two states.
+const TWO_STATE_SEP = String.raw`\s{0,3}(?:\/|-|–|—|to)\s{0,3}`;
+const TWO_STATE_UNIT_RE = new RegExp(String.raw`^\s*(?:0${TWO_STATE_SEP}1|binary|bool(?:ean)?|yes${TWO_STATE_SEP}no|on${TWO_STATE_SEP}off|true${TWO_STATE_SEP}false)\s*$`, 'i');
 const isRec = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 export function isTwoStateSource(nodes: readonly unknown[], id: unknown, unit: unknown): boolean {

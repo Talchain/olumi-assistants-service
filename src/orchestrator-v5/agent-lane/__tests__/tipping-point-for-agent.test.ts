@@ -69,7 +69,8 @@ describe('typed tipping-point fact from the served corpus', () => {
     const out = analysisResultForAgent(block) as Rec;
     expect(out.computed_against_hash).toBe('0e19bb826dd6fde4');
     expect(out.tipping_point).toEqual(tippingPointOf(ENRICHMENT));
-    expect(out.decision_sensitivity).toEqual({ status: 'none_measurable' });
+    // S2i (DL GO): robustness ran on this Run, so the screen shows it and no absence status is handed to the Agent.
+    expect(out).not.toHaveProperty('decision_sensitivity');
     expect(JSON.stringify(block)).toBe(before);
   });
   it.each([false, true])('retains the threshold under leader licence %s, with no winner fields', (leader_may_be_named) => {

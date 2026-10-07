@@ -95,6 +95,7 @@ import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-senten
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { GOAL_CHANCE_SCREEN_LINES_OWED, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -126,7 +127,7 @@ import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
-import { premortemProducerDirective, readPremortemProduction, premortemWorksheetFor } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
+import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
   isWidenPress, keptProposalOf, settleWidenTurn, widenGate, widenNotAdded, widenOffered, widenPassingArgs, widenTurnForReadback,
   WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
@@ -990,8 +991,11 @@ function explainRobustnessSentence(analysisResult: unknown, graph: unknown): str
  * ⭐ INTERPRETER v0.2 — THE ARCHITECTURE OWNER'S BANKED TEXT, VERBATIM (RC #63 5803995225:
  * "Interpreter v0.2 is the current prompt candidate"). Source: Talchain/olumi-programme-docs
  * `openai/capability-v01/ANALYSIS_INTERPRETER_PROFILE_v0_2.md` lines 9-33, blob
- * 344896ef92177b7308c1d632699bd98bae10c6b7 (programme-docs main 4961b2d1); sha256 of this
- * string begins 3d979e8406693be4 (pinned by test). APPENDED to the Agent instructions on
+ * 344896ef92177b7308c1d632699bd98bae10c6b7 (programme-docs main 4961b2d1), with ONE clause changed by S2i (DL P6, 7 Oct):
+ * "say investigation priority is not established" → "make no claim about investigation priority beyond the screen's own
+ * driver lines; if the screen shows no driver and no range, say it is not established yet" (served B1: "…so investigation
+ * priority is not established." beside a range line). sha256 of this string begins d13dd401219ddcb7 (pinned by test;
+ * 3d979e8406693be4 with the clause restored). Code only: no prompt store holds this text. APPENDED to the Agent instructions on
  * fast path 3's single interpreting call, as the profile specifies ("appended only for the
  * existing Agent final-response path when explaining canonical analysis. No extra model
  * call."). Prompt text is owned by Paul + ChatGPT; this file only carries it. When CEE #1787
@@ -1008,7 +1012,7 @@ export const INTERPRET_ONLY_CONSTRAINT =
   + 'so never promise one or describe one as made. If the analysis did not run, say in plain words what it still '
   + 'needs; the user can ask you to suggest it.';
 
-export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, say investigation priority is not established.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
+export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relative** analysis. Do not make the user's decision.\n\n**Finding first.** State the most useful conclusion supported by the supplied analysis, then briefly: why it appears, what is not settled, and at most one next reasoning step when justified.\n\n### Hard grounding rules\n\n- Use only supplied canonical analysis, provenance, currentness and claim permissions. Unknown stays unknown.\n- Keep comparison/outcomes, sensitivity, robustness, constraint satisfaction, before/after deltas and evidence provenance as different meanings. Never substitute one for another.\n- Never call an option objectively best, the winner, the right decision or Olumi's recommendation merely because it leads in the model.\n- Never convert a point result into a probability or invert a local switch/perturbation probability into overall stability.\n- Never claim an edit was tested unless the analysed revision/inputs include it.\n- Identical analytical inputs producing the same result show repeatability under those settings, **not** new validation or increased confidence.\n- A changed input may produce no material output change. Report that without inventing an effect.\n- For before/after comparisons, use only **precomputed supplied deltas**. Do not calculate new differences, ratios, annualisations, margins or unit conversions in prose.\n- Attribute a delta to one edit only when the supplied comparison is explicitly compatible and the relevant units, option identities, analysis/projection semantics and engine settings are held constant. Otherwise say the isolated effect is not established.\n- Preserve exact constraint operators and units. Equality does not satisfy a strict `<` or `>` condition.\n- If only a subset of options was analysed, keep conclusions inside that subset and name exclusions.\n- If the result is stale, present it only as historical. If rerun/action eligibility is unknown, do not imply a current control is available; say a current analysis would be needed.\n- If sensitivity or a flip threshold was not computed, do not invent it.\n- **A first-tested assumption that flips an ordering establishes only that this tested change can flip that ordering. It does NOT establish validation priority, importance, largest effect or best next investigation. Never say \"validate X first\" or equivalent on that basis alone.** If comparable effect size, uncertainty and evidence cost/value are absent, make no claim about investigation priority beyond the screen's own driver lines; if the screen shows no driver and no range, say it is not established yet.\n- One edge's perturbation/switch metric is not aggregate stability or factor sensitivity.\n- If a method is declined or applicability is unknown, answer the user's question without starting or completing the method.\n- Do not invent exercise horizons, required counts, missing business dimensions, benchmarks, operating assumptions or retrospective rationales.\n\nKeep the response compact: finding first, then 1–3 grounded points/caveats. Do not force a next step.\n";
 
 /** The UI's Run control: a typed `run_analysis` chip. Words alone never take fast path 3. */
 /**
@@ -2643,7 +2647,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const goalCertaintyNow = goalCertaintyForAgent(st.analysisResult, { scenario_id: scenarioId, analysis_state: st.analysisState },
         { raw: st.graph, analysis_state: st.analysisState, analysis_result: st.analysisResult,
           ...(st.goalCertainty !== undefined ? { goal_certainty: st.goalCertainty } : {}) });
-      const selectedRun = { result: analysisResultForAgent(st.analysisResult), claim_permissions: selectedPermissions, ...factsNow,
+      const selectedRun = { result: analysisResultForAgent(st.analysisResult, undefined, true, st.graph), claim_permissions: selectedPermissions, ...factsNow,
         ...(goalChanceNow !== undefined ? { goal_chance: goalChanceNow } : {}),
         ...(goalCertaintyNow !== undefined ? { goal_certainty: goalCertaintyNow } : {}) };
       const runForInterpreter = runToolOutputLicensesLeader(selectedRun)
@@ -3860,6 +3864,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven, { afterIdentityAsk: runOutcomeKind === 'identity_ask' }) };
     }
     /**
+     * ⭐ S4c (Wave B4/B5, 7 Oct): THE SCREEN'S CHANCE LINES ARE SAID BY OLUMI. On a turn that ran an analysis, each option's
+     * chance line (a range; a point on the `each` licence) in the screen's own words, unless the reply already gives that
+     * option's figure. AFTER the leader gate on purpose (as break-even): a per-option chance line is not a ranking, and the
+     * gate's classifier codes it as one (B5 T1b: it deleted all three). From the final readback, only while its Run is
+     * complete and current. Logged by code, never the prose.
+     * S4d (Wave B6): ALSO on the Explain turn that narrates that current Run — B5's X1 ("…on current information:" with
+     * nothing under it) was the Explain turn, which "ran an analysis" never covered. Never on a stale explanation.
+     */
+    const explainsCurrentRun = fastPath === 'explain' && narrationStatus !== 'stale';
+    if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
+      const rangeCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
+      const ranged = withScreenLinesOwed(wireBody.assistant_text, goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, rangeCurrent));
+      if (ranged.added > 0) {
+        wireBody = { ...wireBody, assistant_text: ranged.text };
+        log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
+          ...(turnId !== undefined ? { turn_id: turnId } : {}), added_count: ranged.added },
+        'agent-lane: the screen\'s chance line was said by Olumi (the reply did not say it)');
+      }
+    }
+    /**
      * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). AFTER the leader gate
      * on purpose: a view ranks an option, and the gate — unchanged, the truth boundary for anything presented as the
      * analysis's result — would strip it. So it never rides in the model's prose: the Agent gives it through the typed
@@ -4105,12 +4129,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // A7: what of the brief the model does not carry — the final readback's own manifest, bound to its graph_hash.
     const notModelledCarrier = notModelledTurnCarrier(notModelled, graphHash);
     // Local carrier, AFTER finalisation and licence egress. If egress changed the prose, the worksheet is withheld.
-    const premortemWorksheet = premortemWorksheetFor({
+    const premortemDiagnostics = premortemWorksheetDiagnosticsFor({
       scenarioId, turnId, turn: methodTurn?.kind === 'run' ? methodTurn : null,
       passed: premortemPassed && premortemReply === wireBody.assistant_text,
       reply: String(wireBody.assistant_text ?? ''), candidates: premortemCandidates,
       initial: premortemInitialRead, final: composedRead,
     });
+    const premortemWorksheet = premortemDiagnostics.worksheet;
+    if (methodTurn?.kind === 'run' && (premortemWorksheet === undefined || premortemDiagnostics.dropped.length > 0)) {
+      log.info({ event: 'PREMORTEM_WORKSHEET_WITHHELD', stories: premortemDiagnostics.stories,
+        rows: premortemDiagnostics.rows, dropped: premortemDiagnostics.dropped.map(({ story_index, reason }) => ({ story_index, reason })) },
+      'PREMORTEM_WORKSHEET_WITHHELD');
+    }
     return reply.code(200).send({
       ...wireBody,
       ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),

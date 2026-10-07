@@ -31,7 +31,7 @@ export function savedRunContextFacts(
     graphHash: read.graph_hash, analysisState: read.analysis_state, analysisResult: read.analysis_result,
   });
   if (selected === null) return {};
-  const projected = analysisResultForAgent(read.analysis_result) as Record<string, unknown>;
+  const projected = analysisResultForAgent(read.analysis_result, undefined, true, read.raw) as Record<string, unknown>;
   const verdict = asVerdictState(read.constraint_verdict_state);
   const checks = !runToolOutputLicensesLeader({ claim_permissions: permissions })
     ? limitChecksForAgent(read.raw, read.limit_verdicts, read.identity_evaluated) : undefined;
