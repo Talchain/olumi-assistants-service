@@ -16,6 +16,7 @@
  * "…on current information:" style lead-in, else as a closing paragraph.
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
+import { sayDate } from '../goal-target/deadline-date.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
@@ -52,6 +53,15 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
       return figure === undefined ? [] : line(id, figure, facts.goal_chance_driver_display?.[id] ?? '');
     }) : [];
   const ranges = Object.entries(facts.goal_chance_range_display ?? {}).flatMap(([id, d]) => {
+    if (d.depends_on.kind === 'stated_time') {
+      const label = labels.get(id), stated = d.stated_time;
+      if (label === undefined || stated === undefined) return [];
+      const goal = stated.launching ? 'launching' : 'meeting your goal';
+      const by = stated.by_date === undefined ? '' : ` by ${sayDate(stated.by_date)}`;
+      return [{ option_id: id, label, figure: d.range,
+        chance: `‘${label}’: ${d.range} chance of ${goal}${by}, in this model, from the slow end of your ${stated.estimate} to the fast end.`,
+        depends: '' }];
+    }
     const lead = d.depends_on.among === 'unsized_links' ? 'Of the links not sized yet, it depends most on' : 'It depends most on';
     const link = d.depends_on.kind === 'link_strength'
       ? `how strongly ‘${d.depends_on.from_label}’ affects ‘${d.depends_on.to_label}’, which isn’t sized in the model yet.`

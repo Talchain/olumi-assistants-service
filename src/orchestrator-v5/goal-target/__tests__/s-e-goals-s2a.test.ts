@@ -26,6 +26,8 @@ import * as shareRun from '../share-by-date-run.js';
 import { GOAL_CHANCE_LICENSED, goalChanceLicenceOf, withGoalChanceLicence } from '../goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE, withShareByDateChanceGate } from '../goal-chance-range.js';
 import { goalChanceRangeDisplayForAgent, goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
+import { goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
+import { goalChanceSideOf } from '../goal-chance-sides.js';
 
 type Rec = Record<string, any>;
 const DEADLINE = '2027-04-07';
@@ -156,6 +158,40 @@ describe('row 6.1: quantity-stated maths (fractions; literal ruled answers)', ()
 });
 
 describe('recognition and persisted carrier survival', () => {
+  it('P1-a: fixed team time rejects a stored spread by team_share identity', () => {
+    const g = graph(), os = team(g).observed_state;
+    os.stated_time.low = 8; os.stated_time.high = 8; os.value = 0.75; os.std = 0.5;
+    goal(g).goal_threshold_raw = 75; goal(g).goal_threshold = 0.75;
+    expect(shareByDateGoalOf(g)).toBeNull();
+  });
+  it.each([undefined, 0, 0.0005])('P1-a control: fixed team time accepts stored sd %s', sd => {
+    const g = graph(), os = team(g).observed_state;
+    os.stated_time.low = 8; os.stated_time.high = 8; os.value = 0.75;
+    if (sd === undefined) delete os.std; else os.std = sd;
+    expect(shareByDateGoalOf(g)?.team_part_id).toBe('team_share');
+  });
+  it('P1-b: extra share attests the final held wire spread by two_devs -> launch_share', () => {
+    const g = graph(), edge = g.edges.find((e: Rec) => e.from === 'two_devs' && e.to === 'launch_share');
+    edge.provenance.magnitude = 'user_stated';
+    edge.provenance.natural_effect.stated_range = { low: 1, high: 100 };
+    const before = structuredClone(g), wire = withHeldUserLinks(g);
+    expect(wire.edges.find((e: Rec) => e.from === 'team_share' && e.to === 'launch_share'))
+      .toMatchObject({ exists_probability: 1, strength: { mean: 1, std: 0.01 } });
+    expect(edge.strength.std).toBeCloseTo(0.0577, 4);
+    expect(wire.edges.find((e: Rec) => e.from === 'two_devs' && e.to === 'launch_share').strength.std).toBeCloseTo(0.3009, 4);
+    expect(g).toEqual(before);
+    expect(shareByDateGoalOf(g)).toBeNull();
+  });
+  it('P1-b control: matching held extra spread and team +1 at 0.01 stay recognised', () => {
+    const g = graph(), edge = g.edges.find((e: Rec) => e.from === 'two_devs' && e.to === 'launch_share');
+    edge.provenance.magnitude = 'user_stated';
+    edge.provenance.natural_effect.stated_range = { low: 10, high: 10 + EXTRA.sd * 3.29 * 20 / EXTRA.mean };
+    const wire = withHeldUserLinks(g);
+    expect(wire.edges.find((e: Rec) => e.from === 'two_devs' && e.to === 'launch_share').strength.std).toBeCloseTo(EXTRA.sd, 12);
+    expect(wire.edges.find((e: Rec) => e.from === 'team_share' && e.to === 'launch_share'))
+      .toMatchObject({ exists_probability: 1, strength: { mean: 1, std: 0.01 } });
+    expect(shareByDateGoalOf(g)?.team_part_id).toBe('team_share');
+  });
   it('Science harness identities, sum-only forecast, recognised with graph context', () => {
     const g = graph();
     expect(shareByDateGoalOf(g)).toEqual({ goal: goal(g), deadline: DEADLINE, threshold_raw: 100, cap: 100,
@@ -242,6 +278,34 @@ describe('recognition and persisted carrier survival', () => {
 });
 
 describe('Run frame and licence by identity', () => {
+  it('P1-d: pace carry-on range keeps its scope and hire licensed at 50%', () => {
+    const g = paceGraph(), raw = result(); raw.option_comparison[1].probability_of_goal = 0.5;
+    const out = withShareByDateChanceGate(raw, g, 'launch_share');
+    const stored = { enrichment: withGoalChanceLicence(out, g, 'launch_share') };
+    const facts = goalChanceFactsForAgent(stored, g, true), withheld = goalChanceWithheldForAgent(stored, g)!;
+    expect(facts.goal_chance_display).toEqual({ hire: 'about 50%' });
+    expect(facts.goal_chance_range_display?.status_quo).toBeDefined();
+    expect(withheld.option_ids).toEqual(['status_quo']);
+    expect(withheld.say).toContain(out.inference_warnings.find((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION).message);
+    expect(withheld.note).toContain('Other options');
+    expect(withheld.note).toContain('licensed points and ranges');
+    expect(withheld.note).not.toContain('EVERY option');
+  });
+  it('P2-e: equal displayed stated-time endpoints withhold status_quo without a range', () => {
+    const g = paceGraph(), original = shareRun.shareGateForOption;
+    const spy = vi.spyOn(shareRun, 'shareGateForOption').mockImplementation((graph, id) => id === 'status_quo'
+      ? { form: 'range', low: 0.249, high: 0.251, error_points: 3 } : original(graph, id));
+    try {
+      const out = withShareByDateChanceGate(result(), g, 'launch_share');
+      const stored = { enrichment: withGoalChanceLicence(out, g, 'launch_share') };
+      expect(out.option_comparison.find((r: Rec) => r.option_id === 'status_quo').probability_of_goal).toBeUndefined();
+      expect(out.inference_warnings.some((w: Rec) => w.code === GOAL_CHANCE_RANGE)).toBe(false);
+      expect(out.inference_warnings.find((w: Rec) => w.code === GOAL_FIGURES_SHARE_APPROXIMATION).message).not.toContain('shown as a range');
+      expect(goalChanceRangeDisplayForAgent(stored, g)).toBeUndefined();
+      expect(goalChanceSideOf(stored, 'status_quo')).toEqual({ kind: 'withheld' });
+      expect(goalChanceWithheldForAgent(stored, g)?.say).not.toContain('shown as a range');
+    } finally { spy.mockRestore(); }
+  });
   it('actual PLoT call carries delta 1.0 and the persisted forecast remains unchanged', async () => {
     const g = graph(), before = structuredClone(g), ran = await runGraph(g);
     expect(goal(ran.payload.graph)).toMatchObject({ goal_threshold_frame: 'delta', goal_threshold: 1.0 });
