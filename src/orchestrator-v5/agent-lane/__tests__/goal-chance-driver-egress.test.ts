@@ -613,12 +613,27 @@ describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
     ['denial + "which assumption" + 20,000 spaces', `has not established which assumption${' '.repeat(20000)}x`],
     ['denial + gap word + 20,000 spaces + "most"', `has not established which assumption deserves${' '.repeat(20000)}most`],
     ['"priority" + 20,000 spaces + "."', `does not establish which factor priority${' '.repeat(20000)}.`],
-    ['the limb repeated 2,000 times', 'does not establish which assumption deserves '.repeat(2000)],
+    // 1,000 repetitions = 45k chars (above the 20k bar). 2,000 (90k) took 26 ms locally and 52 ms on a CI runner (#2714,
+    // 7 Oct): linear (6.5/13/26/53/104 ms for 500…8,000), so the absolute bar was the flake, not the regex. Scaling row below.
+    ['the limb repeated 1,000 times', 'does not establish which assumption deserves '.repeat(1000)],
   ])('LINEAR TIME: %s', (_name, text) => {
     const t0 = performance.now();
     DRIVER_ABSENCE_CLAIM.test(text);
     removeDriverAbsenceClaims(text);
     expect(performance.now() - t0).toBeLessThan(50);
+  });
+  it('LINEAR TIME: doubling the repeated limb costs under 3× (quadratic would be 4×)', () => {
+    const cost = (n: number): number => {
+      const text = 'does not establish which assumption deserves '.repeat(n);
+      removeDriverAbsenceClaims(text);
+      return Math.min(...[0, 1, 2].map(() => {
+        const t0 = performance.now();
+        DRIVER_ABSENCE_CLAIM.test(text);
+        removeDriverAbsenceClaims(text);
+        return performance.now() - t0;
+      }));
+    };
+    expect(cost(2000) / cost(1000)).toBeLessThan(3);
   });
 });
 
