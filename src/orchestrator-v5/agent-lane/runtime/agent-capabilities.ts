@@ -195,6 +195,8 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
+import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
+import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
@@ -209,6 +211,8 @@ import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
 import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
+import { productHoldRecord } from '../proposal-object/record.js';
+import { amendHeldOperations, proposalEditsDigest, type UserEdit } from '../proposal-object/amend.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isUnadoptedOlumiSuggestion, optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -1291,9 +1295,14 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     // Row 5 (#72 5881225605): the comparator the user stated for the target, as construction held it
     // (`goal_direction`). Absent ⇒ unattested, so absent here too — never defaulted, never read off the label.
     const comparator = readHeldGoalComparator(g.raw, n.id);
+    // ⭐ S-E GOALS (C6): the deadline the goal holds, in British words, and a goal measured as a chance said as such, so the
+    // Agent never re-asks a recorded deadline and never treats the chance as a quantity.
+    const deadline = goalDeadlineOf(n);
     return {
       id: n.id,
       label: n.label,
+      ...(goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
+      ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
       ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
         target: {
@@ -2052,6 +2061,8 @@ export function createAgentCapabilities(
      * It returns the WRITER's own typed outcome, the only evidence "applied" may rest on. Absent ⇒ never "applied".
      */
     readonly commitOptionStatus?: (input: CommitOptionStatusInput) => Promise<CommitOptionStatusResult>;
+    /** The clock a deadline is counted from (S-E GOALS; `deadline-date.ts` reads Europe/London's day of it). Absent ⇒ now. */
+    readonly now?: () => Date;
   } = {},
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
@@ -2238,9 +2249,39 @@ export function createAgentCapabilities(
     }
     const before = await readGraph(ctx.scenario_id);
     if (before === null) return { ok: false, mutated: false, refusal: 'not_found', proposal_id: ref };
+    /**
+     * ⭐ S-D APPROVE-WITH-EDITS (lane EDIT-PANEL): the values the user set in the panel, bound by the route to THIS card.
+     * Checked here against the revision and model the panel showed (nothing written on a mismatch), then carried to the
+     * door with the confirm, which applies them to the stored hold in the same execution. What Olumi held for each field
+     * is returned for the reply ("You set … ; Olumi had …"); the door's own amendment is the one that lands.
+     */
+    const edits = ctx.proposal_edits;
+    let userEdits: readonly UserEdit[] | undefined;
+    if (edits !== undefined) {
+      if (edits.proposal_id !== ref || edits.revision !== hold.id || edits.graph_hash !== hold.preconditions.graph_hash
+        || edits.graph_hash !== before.graph_hash) {
+        return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
+          detail: 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
+      }
+      const record = productHoldRecord(hold, before);
+      if (record !== undefined && record.digest !== edits.digest) {
+        return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
+          detail: 'Nothing changed. What this change shows has changed since these values were set.' };
+      }
+      const amended = record === undefined ? undefined : amendHeldOperations(record, edits.fields);
+      if (amended === undefined || !amended.ok) {
+        return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
+          detail: 'Nothing changed. Those values do not belong to this waiting change.' };
+      }
+      userEdits = amended.userEdits;
+    }
     const r = await dispatch('/orchestrate/v2/turn', {
-      kind: 'message', turn_id: authorisationTurnId(`agent_confirm_held:${hold.id}`), scenario_id: ctx.scenario_id,
-      stage: 'frame', turn_class: 'frame', source: 'chip', message: copy.message, chip: { id: ref },
+      kind: 'message',
+      // The edits are part of the confirm's identity: the same card pressed with other values is another request.
+      turn_id: authorisationTurnId(`agent_confirm_held:${hold.id}${edits !== undefined ? `:${proposalEditsDigest(edits)}` : ''}`),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame', turn_class: 'frame', source: 'chip', message: copy.message,
+      chip: { id: ref, ...(edits !== undefined ? { parameters: { proposal_edits: edits } } : {}) },
     });
     const after = await readGraph(ctx.scenario_id);
     let stillHeld = true;
@@ -2376,6 +2417,7 @@ export function createAgentCapabilities(
       ...(unreadable ? { receipt_unreadable: true } : {}),
       follow_up: sentences.join(' '),
       ...(rangesAdded.length > 0 ? { ranges_added_for_analysis: rangesAdded } : {}),
+      ...(userEdits !== undefined ? { user_edits: userEdits } : {}),
     };
   };
 
@@ -2993,6 +3035,72 @@ export function createAgentCapabilities(
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       follow_up: `Recorded, as you confirmed: "${goalLabel}" is calculated as "${rate}" \u00d7 "${count}". Any earlier result is now out of date; `
         + 'run the analysis again to see it calculated that way.',
+    };
+  };
+
+  /**
+   * ⭐ S-E GOALS: the approved deadline card writes ONLY the goal's `goal_horizon.deadline`, through the atomic level door's
+   * `goal_horizon` member (ONE commit, alone). The date is outside the analysis hash, so the stale gate is the date the goal
+   * held when the card was made (`expected_deadline`), plus the analysis revision read at approval (no write in between).
+   * Applied only on the writer's committed outcome AND a read-back holding exactly that date.
+   */
+  const applyGoalDeadline = async (
+    ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
+    parent: StructuredProposal,
+    approvedRead: GraphRead,
+  ): Promise<ToolResult> => {
+    const op = parent.operations[0]!;
+    const v = op.value as { deadline?: unknown; expected_deadline?: unknown; words?: unknown };
+    const notApplied = (reason: string, detail: string): ToolResult => ({
+      ok: false, mutated: false, applied: false, proposal_id: parent.proposal_id, refusal: 'not_applied', reason, detail, receipts: [],
+    });
+    if (typeof v.deadline !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v.deadline) || (v.expected_deadline !== null && typeof v.expected_deadline !== 'string')) {
+      return notApplied('unreadable_proposal', 'This deadline could not be read from the stored proposal, so nothing was recorded. Offer it again only if it still applies.');
+    }
+    const goal = approvedRead.nodes.find((n) => n.id === op.path && n.kind === 'goal');
+    if (goal === undefined) {
+      return notApplied('goal_not_found', 'The goal this deadline was for is no longer in the model, so nothing was recorded. Tell the user plainly.');
+    }
+    // The date the goal holds NOW must still be the one the card was made against: another write moved it otherwise. A goal
+    // that already holds THIS card's date is a retry of a write that landed (Codex buddy r2 on #2742: an "unconfirmed" first
+    // approval): it goes on to the writer, whose verified no-op and the read-back below confirm it.
+    const heldNow = goalDeadlineOf(goal) ?? null;
+    if (heldNow !== v.expected_deadline && heldNow !== v.deadline) {
+      return notApplied('model_changed_since_approval', 'The goal\u2019s deadline changed after this was offered, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
+    }
+    if (opts.commitOptionLevels === undefined) {
+      return notApplied('deadline_writer_unavailable', 'This deadline could not be recorded here, so nothing was recorded.');
+    }
+    const date = sayDate(v.deadline);
+    const res = await opts.commitOptionLevels({
+      scenario_id: ctx.scenario_id,
+      base_graph_hash: approvedRead.graph_hash,
+      turn_id: authorisationTurnId(`${parent.proposal_id}#deadline`),
+      links: [],
+      levels: [],
+      goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null },
+    });
+    if (res.status === 'unconfirmed') {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
+        detail: 'This deadline was sent, but Olumi could not read the model back to confirm it. Say exactly that; never say it was recorded or not recorded.' };
+    }
+    if (res.status === 'stale') {
+      return notApplied('model_changed_since_approval', 'The model changed after this was approved, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
+    }
+    if (res.status === 'refused') {
+      return notApplied(`deadline_${String(res.reason ?? 'refused').replace(/^deadline_/, '')}`, 'The deadline was not recorded, and nothing on the model changed. Tell the user plainly.');
+    }
+    const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
+    const check = await readGraph(ctx.scenario_id);
+    const holds = goalDeadlineOf(check?.nodes.find((n) => n.id === op.path)) === v.deadline;
+    if (!holds) {
+      return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
+        detail: 'This deadline was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
+    }
+    proposals.markApplied(parent.proposal_id, receipts);
+    return {
+      ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
+      follow_up: `Your deadline for "${String(goal.label)}" is now ${date}.`,
     };
   };
 
@@ -4093,6 +4201,13 @@ export function createAgentCapabilities(
             : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this target is for. Ask the user which goal they mean.` };
       }
       const goal = goals[0]!;
+      // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
+      // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).
+      if (goalKindOf(goal) === 'chance_of_event') {
+        return { ok: false, mutated: false, refusal: 'goal_measures_a_chance',
+          detail: `The goal "${goal.label}" is measured as a chance of an event, which Olumi works out, so it takes no target figure. Nothing was prepared. `
+            + 'If the user stated a deadline, call propose_goal_deadline with their words; otherwise tell them plainly, and never ask them for that chance.' };
+      }
       // ⛔ R1 S4-core: a target stated as a CHANGE from today ("cut the bill by 15%": `goal_threshold_frame` `change_rel`,
       // a fraction). This path writes a LEVEL target, so it would silently turn the user's change into a level. Refused by
       // name until a change can be edited as a change; the goal doors refuse it too (`add-constraint.ts`, `goal-target-edit.ts`).
@@ -4212,6 +4327,78 @@ export function createAgentCapabilities(
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
           + (levelLeftOut !== undefined ? ` Today’s level was left out of this card: ${levelLeftOut.reason} Never say it is or will be recorded`
             + (levelLeftOut.host_line !== undefined ? '; Olumi already tells the user it was not included, so do not repeat it.' : '.') : ''),
+      };
+    },
+
+    /**
+     * ⭐ S-E GOALS — THE USER'S DEADLINE, AS A DATE, PROPOSED IN THE TURN THEY STATE IT (Science ruling 7 Oct §3; Paul's prod
+     * test item 6: "the six-month deadline isn't encoded in the goal yet", and nothing was proposed). The Agent quotes the
+     * user's own phrase; CEE places it on the calendar (`readStatedDeadline`, Europe/London's today) — the model never
+     * computes a date. The card asks "Is your deadline 7 April 2027 (6 months from today)?"; the Yes writes ONLY the goal's
+     * `goal_horizon.deadline`, through the atomic level door, stale-gated on the date the goal held when the card was made.
+     */
+    async proposeGoalDeadline(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const words = typeof args?.deadline_words === 'string' ? args.deadline_words.trim() : '';
+      if (words === '' || words.length > 80) {
+        return { ok: false, mutated: false, refusal: 'unreadable_deadline',
+          detail: 'A deadline needs the user\u2019s own words for it (at most 80 characters). Nothing was prepared; ask the user for the date.' };
+      }
+      // ⛔ The words must be the USER'S, typed in THIS turn, as whole words (Codex buddy r1 on #2742: "6 months" matched inside
+      // "16 months", and an earlier message's duration could stand in for today's). Case, spacing and dash/apostrophe forms aside.
+      const plainOf = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
+      const phrase = plainOf(words).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const typed = typeof ctx.user_turn_text === 'string' ? plainOf(ctx.user_turn_text) : '';
+      if (typed === '' || !new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').test(typed)) {
+        return { ok: false, mutated: false, refusal: 'deadline_not_stated',
+          detail: `"${words}" is not something the user wrote in this message, so nothing was prepared: it would be recorded as their deadline. Ask them for the date, in their own words.` };
+      }
+      const today = todayInLondon((opts.now ?? (() => new Date()))());
+      const stated = readStatedDeadline(words, today);
+      if (stated === null) {
+        return { ok: false, mutated: false, refusal: 'deadline_not_placed',
+          detail: `Olumi cannot place "${words}" on the calendar without guessing (for example a fiscal quarter, a sprint, or a date that has passed), so nothing was prepared. `
+            + 'Ask the user which date they mean, and never offer a date of your own.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const goals = g.nodes.filter((n) => n.kind === 'goal');
+      if (goals.length !== 1) {
+        return { ok: false, mutated: false, refusal: 'goal_not_resolved',
+          detail: goals.length === 0
+            ? 'The model has no goal to set a deadline on, so nothing was prepared. Tell the user plainly.'
+            : `The model has more than one goal (${goals.map((x) => `"${x.label}"`).join(', ')}), so nothing was prepared: it is not clear which one this deadline is for. Ask the user which goal they mean.` };
+      }
+      const goal = goals[0]!;
+      const held = goalDeadlineOf(goal);
+      const date = sayDate(stated.date);
+      if (held === stated.date) {
+        return { ok: false, mutated: false, refusal: 'already_held',
+          detail: `The goal "${goal.label}" already holds ${date} as its deadline, so nothing was prepared. Tell the user it is already recorded.` };
+      }
+      const fromToday = sayDeadlineFromToday(stated);
+      const question = `Is your deadline ${date} (${fromToday})?`;
+      const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash,
+        operations: [{ op: 'set_goal_deadline', path: goal.id,
+          value: { deadline: stated.date, expected_deadline: held ?? null, words: stated.words, reference: stated.reference } }],
+        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: `${question}${replaces}`,
+      });
+      proposals.put(proposal);
+      return {
+        ok: true, mutated: false,
+        proposal_id: proposal.proposal_id,
+        public_label: proposal.public_label,
+        base_revision: g.graph_hash,
+        deadline: { goal: goal.label, date, words: stated.words, from_today: fromToday },
+        note: `Nothing has changed yet. Ask the user exactly: "${question}"${replaces === '' ? '' : ` and say it replaces ${sayDate(held!)}`} — never the id, `
+          + 'never a date of your own — and call authorise_change with this proposal_id once they say yes. If they give another date, '
+          + 'call propose_goal_deadline again with their new words.',
       };
     },
 
@@ -5637,6 +5824,7 @@ export function createAgentCapabilities(
       // door is wired here, nothing is written and the Agent says so — never a strength-only or register fallback.
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
+      if (ops.length === 1 && ops[0]!.op === 'set_goal_deadline') return applyGoalDeadline(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
 
       if (ops.some(o => o.op === 'set_option_intervention' && Object.hasOwn((o.value ?? {}) as object, 'unmodelled_mechanisms'))) return applyCompound(ctx, decision.proposal, before);
@@ -7688,9 +7876,12 @@ export function createAgentCapabilities(
         }
       }
       if (!heldBatchOk) {
+        // ⭐ S-D: a hold the product minted that is NOT the change asked for is never kept: held proposals now live until
+        // approved or declined, so one nobody can be shown is declined here, by this door, before anyone sees it.
+        if (heldChip !== undefined) withdrawnHolds.add(ref);
         // A change the product REFUSED with its own sentence (no hold offered) — say that sentence, never a bare "could not".
         const said = heldChip === undefined && r.status === 200 && typeof r.json.assistant_text === 'string' ? r.json.assistant_text.trim() : '';
-        return { ok: false, mutated: false, refusal: 'not_prepared',
+        return { ok: false, mutated: false, refusal: 'not_prepared', ...(heldChip !== undefined ? { withdrawn_hold: ref } : {}),
           detail: said !== ''
             ? `Olumi did not prepare that change, so nothing was added. Olumi said: "${said}" Tell the user plainly; do not retry it in other words.`
             : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };

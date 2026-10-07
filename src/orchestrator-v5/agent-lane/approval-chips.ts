@@ -59,6 +59,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_link_effect: { label: 'Record this reading', message: 'Yes, record that reading.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
+  // S-E GOALS (Science ruling 7 Oct §3): the user's deadline as a date. Two buttons: [Yes] [Change date].
+  propose_goal_deadline: { label: 'Yes', message: 'Yes, that is my deadline.' },
   // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
   propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
@@ -106,6 +108,13 @@ export const NOT_PROPOSED_THIS_TURN = 'not_proposed_this_turn';
 export function withdrawnThisTurn(toolCalls: readonly { name: string; ok: boolean; proposal_id?: string }[]): ReadonlySet<string> {
   return new Set(toolCalls.filter((c) => c.name === WITHDRAW_PROPOSAL && c.ok && typeof c.proposal_id === 'string').map((c) => c.proposal_id as string));
 }
+
+/** S-E GOALS: the deadline card's second button (Science ruling §3: "[Yes] [Change date]"). */
+export const DEADLINE_CHANGE_CHIP: SuggestedAction = {
+  id: 'agent-deadline-change',
+  label: 'Change date',
+  message: 'That is not my deadline. I will give you the date.',
+};
 
 export const AMEND_CHIP: SuggestedAction = {
   id: 'agent-amend-proposal',
@@ -237,6 +246,15 @@ export function approvalChipsFor(
       { id: 'agent-direction-alternative', label: DIRECTION_CHOICE_LABEL_INSTEAD[choice.alternative], message: DIRECTION_CHOICE_MESSAGE[choice.alternative] },
       AMEND_CHIP,
     ];
+  }
+  // ⭐ S-E GOALS: the deadline card asks "Is your deadline 7 April 2027 (6 months from today)?" — the STORED card's words ride
+  // in `detail`, only when the proposer's own result for that id returned the same words; the buttons are [Yes] [Change date].
+  if (tool === 'propose_goal_deadline') {
+    const source = labelSourceFor?.(proposalId);
+    const card = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === source.proposal.proposal_id
+      && source.result.public_label === source.proposal.public_label ? source.proposal.public_label : undefined;
+    return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
+      DEADLINE_CHANGE_CHIP];
   }
   const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);

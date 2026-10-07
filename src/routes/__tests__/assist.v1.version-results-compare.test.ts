@@ -124,6 +124,28 @@ function pairWithAdmission(side: 'prior' | 'current', mode: 'none' | 'explorator
 }
 
 describe('version result comparison uses the real route, service, binder and delta producer', () => {
+  it('Compare goal chances survive a withheld leader at the route’s final licence projection', async () => {
+    const prior = clone(PRIOR); const current = clone(CURRENT);
+    result(current).constraint_verdict = { may_name_leading_option: false, constraint_verdict_state: 'evaluated_feasible' };
+    for (const [run, chances] of [[prior, { 'opt-a': 47, 'opt-b': 70 }], [current, { 'opt-a': 62, 'opt-b': 35 }]] as const) {
+      const enrichment = result(run).enrichment as Record<string, unknown>;
+      enrichment.inference_warnings = [...(Array.isArray(enrichment.inference_warnings) ? enrichment.inference_warnings : []),
+        { code: 'GOAL_CHANCE_LICENSED', form: 'each', option_ids: ['opt-a', 'opt-b'], pct_by_option: chances }];
+    }
+    mocks.facts.mockResolvedValue({ factSet: factSet([current, prior]), hotWindow: { status: 'ok', facts: [] } });
+    mocks.residualLeader = 'current_leading_option_id';
+    const reply = await compare(); expect(reply.statusCode).toBe(200);
+    const value = ModelVersionDiffV2Schema.parse(reply.json()).result_comparison;
+    expect(value).toMatchObject({ status: 'available', kind: 'paired_runs' });
+    if (value.status !== 'available' || value.kind !== 'paired_runs') throw new Error('Expected paired Runs');
+    expect(value.run_delta.win_probabilities).toStrictEqual([]);
+    expect(value.run_delta.leader).not.toHaveProperty('current_leading_option_id');
+    expect(value.run_delta.goal_chances).toStrictEqual([
+      { option_id: 'opt-a', prior: { kind: 'point', pct: 47, rounding: 'whole' }, current: { kind: 'point', pct: 62, rounding: 'whole' } },
+      { option_id: 'opt-b', prior: { kind: 'point', pct: 70, rounding: 'whole' }, current: { kind: 'point', pct: 35, rounding: 'whole' } },
+    ]);
+  });
+
   it.each([
     ['N3', 'prior', 'exploratory'], ['N4', 'current', 'exploratory'],
     ['N3', 'prior', 'none'], ['N4', 'current', 'none'],

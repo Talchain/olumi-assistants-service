@@ -108,7 +108,7 @@
  *   narrower claim than one storage generation.
  */
 import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
-import { PENDING_ACTIONS_PER_TURN_CAP } from './session/pending-action.js';
+import { PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from './session/pending-action.js';
 import { log } from '../utils/telemetry.js';
 
 import {
@@ -171,6 +171,17 @@ export interface CheckedGraphAppendParams {
   readonly source?: string | undefined;
   /** Only successful, user-authorised scope withdrawals may retire this durable issue. */
   readonly withdrawnGoalScopeChipIds?: readonly string[];
+  /**
+   * ⭐ S-D (lane EDIT-PANEL; Codex r1 P1-3 + r2 P1-2 on #2743): held proposals are reconciled against the latest row read
+   * HERE, just before the append, not only against the caller's earlier read. A request that reconciled its held
+   * proposals and then took seconds to answer must neither put back one another request approved or declined meanwhile
+   * (a supplied held item is kept only while the latest row still holds it) nor erase one another request minted
+   * meanwhile (a held item on the latest row that this request never saw is carried). `seenByThisRequest`: every held
+   * item this request read, so the ones it settled itself (approved, declined, lapsed: each said) are never re-added.
+   * ⚠ Narrows, does not close, the race: a write landing between this read and the append is still last-writer-wins
+   * (closing it needs a conditional append in the store; follow-up).
+   */
+  readonly heldProposals?: { readonly isHeld: (pending: PendingAction) => boolean; readonly seenByThisRequest: ReadonlySet<string> };
 }
 
 /**
@@ -348,7 +359,22 @@ export async function appendCheckedGraphWrite(
   if (typeof store.readMostRecentPendingActions === 'function') {
     const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict' });
     if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
-    const supplied = write.pending_actions ?? [];
+    let supplied = write.pending_actions ?? [];
+    if (params.heldProposals !== undefined) {
+      const { isHeld, seenByThisRequest } = params.heldProposals;
+      const onLatest = new Set(prior.filter(isHeld).map((p) => p.chip_id));
+      const kept = supplied.filter((n) => !isHeld(n) || onLatest.has(n.chip_id));
+      const arrived = prior.filter((p) => isHeld(p) && !seenByThisRequest.has(p.chip_id) && !kept.some((n) => n.chip_id === p.chip_id));
+      if (kept.length !== supplied.length || arrived.length > 0) {
+        const merged = [...kept, ...arrived];
+        if (merged.length > PENDING_ACTIONS_PER_TURN_CAP) {
+          log.warn({ scenario_id: write.scenario_id, source, dropped: merged.slice(PENDING_ACTIONS_PER_TURN_CAP).map((p) => p.chip_id) },
+            '[persist] held proposal another request added does not fit the row; the lowest-priority items are not carried');
+        }
+        supplied = merged.slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+        write = { ...write, pending_actions: supplied };
+      }
+    }
     const missing = prior.filter(p => p.action.kind === 'reconcile_goal_scope'
       && !params.withdrawnGoalScopeChipIds?.includes(p.chip_id)
       && !supplied.some(n => n.chip_id === p.chip_id))

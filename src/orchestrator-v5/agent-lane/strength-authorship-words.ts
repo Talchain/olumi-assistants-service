@@ -9,7 +9,7 @@
 type EdgeLike = { readonly provenance?: unknown };
 type Who = 'yours' | 'definition' | 'estimate' | 'placeholder';
 
-function whoSized(edge: EdgeLike): Who {
+export function whoSized(edge: EdgeLike): Who {
   const p = (typeof edge.provenance === 'object' && edge.provenance !== null ? edge.provenance : {}) as { source?: unknown; magnitude?: unknown; definitional?: unknown };
   if (p.magnitude === 'user_stated' || (typeof p.source === 'string' && p.source.startsWith('user'))) return 'yours';
   // ⛔ A link that holds BY DEFINITION (a part of a total, #2445; money lost to a risk, #2386) is arithmetic, never
