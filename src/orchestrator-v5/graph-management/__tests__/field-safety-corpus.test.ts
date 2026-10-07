@@ -81,6 +81,8 @@ function addNode(screened: Record<string, unknown>) {
  * and edge declarations and in the referee's own owned list, read at the bytes.
  */
 const OWNED_NAMES_REACHABLE_IN_THIS_REPO = [
+  // event_risk.v1 slice 2a: pipeline-owned occurrence.
+  'event_risk',
   // src/schemas/cee-v3.ts — NodeV3
   'provenance',
   'extractiontype',
@@ -378,4 +380,14 @@ describe('B3 gap fields stay outside generic mutation permission', () => {
       expect(REFUSALS.has(nodeUpdate(`${field}/0`, 'replacement').blocker?.code ?? '')).toBe(true);
     });
   }
+});
+
+
+describe('event_risk.v1 slice 2a — field safety', () => {
+  it('2a-field-safety: update_node and add_node cannot author event_risk', () => {
+    const block = { version: 1, occurrence: { p_low: 0.1, p_high: 0.3, basis: 'user' }, horizon: { months: 6 } };
+    expect(PIPELINE_OWNED_ROOTS.has('event_risk')).toBe(true);
+    expect(nodeUpdate('event_risk', block).blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+    expect(addNode({ event_risk: block }).blocker?.code).toBe(PIPELINE_OWNED_FIELD);
+  });
 });

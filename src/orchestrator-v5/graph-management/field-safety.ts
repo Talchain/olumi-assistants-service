@@ -251,6 +251,8 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
  * `threshold-source-j2.test.ts`.
  */
 export const PIPELINE_OWNED_ROOTS: ReadonlySet<string> = new Set([
+  // event_risk.v1 slice 2a: only CEE's validated hold stamp may author this block.
+  'event_risk',
   ...CEE_ANALYSIS_OWNED_ROOTS,
   ...provenanceOwnedSegments(),
 ]);
