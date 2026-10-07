@@ -315,26 +315,44 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     expect(routerCalls).toEqual([]);
   }, 120_000);
 
-  it('(3) RED: declined, then left to expire → the stored graph stays BYTE-IDENTICAL, and the old button then writes nothing', async () => {
+  it('(3) RED: a typed "no" never sets the held risk aside on the Agent\u2019s word, and it is NEVER silently expired: still held with its "Not now"; the press sets it aside, SAID; the graph stays BYTE-IDENTICAL, and the old button writes nothing', async () => {
+    // ⭐ S-D (lane EDIT-PANEL, #2743, Paul 7 Oct): a held proposal stays held until it is approved or DECLINED — it no
+    // longer expires by turn count (D-08). Supersedes "declined, then left to expire". Words alone never set it aside
+    // (Codex r1 P1: an allowance for "any typed turn" let the Agent withdraw on "What does the held risk mean?"), so the
+    // Agent's withdraw of an earlier turn's hold stays refused and the card keeps its "Not now", which IS the decline.
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
     const t1 = await proposeRisk();
     const approve = approveChipOf(t1)!;
     expect(approve, JSON.stringify(t1._agent.tool_calls)).toBeDefined();
-    script = [() => say('Understood, I will leave it out.')];
-    await turn({ message: 'No, leave that risk out.' });
-    expect(bytes(), 'a decline writes nothing').toBe(before);
-    for (let i = 0; i < 8 && (await heldOnLatestRow()).length > 0; i += 1) {
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    script = [() => fnCall('withdraw_proposal', { proposal_id: ref }), () => say('Understood, I will leave it out.')];
+    const t2 = await turn({ message: 'No, leave that risk out.' });
+    expect(t2._agent.tool_calls.filter((c) => c.name === 'withdraw_proposal' && c.ok), JSON.stringify(t2._agent.tool_calls)).toEqual([]);
+    expect(bytes(), 'a typed no writes nothing').toBe(before);
+    for (let i = 0; i < 8; i += 1) {
       script = [() => say('Price drives revenue.')];
       await turn({ message: 'What drives revenue?' });
     }
-    expect(await heldOnLatestRow(), 'the hold expired').toEqual([]);
-    expect(bytes()).toBe(before);
+    expect((await heldOnLatestRow()).map((p) => p.chip_id), 'never silently expired (D-08)').toEqual([ref]);
+    const t3 = await turn({ message: 'Not now.', source: 'chip', chip: { id: `agent-decline-proposal:${ref}` } });
+    expect(t3.assistant_text, t3.assistant_text).toContain("Set aside: the risk 'Competitive response'. Nothing in the model changed.");
+    expect(await heldOnLatestRow(), 'no longer held').toEqual([]);
     const late = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(late._agent.tool_calls[0], JSON.stringify(late._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false }));
-    expect(bytes(), 'an expired hold writes nothing').toBe(before);
+    expect(bytes(), 'a declined hold writes nothing').toBe(before);
     expect(newRisk()).toBeUndefined();
   }, 180_000);
+
+  it('(3b) CONTROL (passes at base): a CHIP turn can never withdraw an earlier turn\u2019s held proposal either', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeRisk())!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    script = [() => fnCall('withdraw_proposal', { proposal_id: ref }), () => say('Here are some risks.')];
+    const t2 = await turn({ message: 'Suggest risks I haven\u2019t considered.', source: 'chip', chip: { id: 'agent-suggest-risks' } });
+    expect(t2._agent.tool_calls.filter((c) => c.name === 'withdraw_proposal' && c.ok)).toEqual([]);
+    expect((await heldOnLatestRow()).map((p) => p.chip_id), 'still held').toEqual([ref]);
+  }, 120_000);
 
   it('(4) RED: the model moves before the approval → refused, nothing written; and the door itself refuses a stale base with nothing held', async () => {
     graphOf.set(SCENARIO, seedGraph());

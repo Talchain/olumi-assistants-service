@@ -92,6 +92,17 @@ const MAX_LABEL = 80;
 export type CandidateNodeKind =
   | 'goal' | 'option' | 'factor' | 'risk' | 'outcome' | 'constraint' | 'decision';
 
+/** r5-stated-evidence-v1: construction-only UTF-16 spans; never persisted or copied into a range receipt. */
+export interface StatedOptionEvidence {
+  readonly quote: string;
+  readonly start: number;
+  readonly end: number;
+  readonly amount_start: number;
+  readonly option_quote: string;
+  readonly option_start: number;
+  readonly option_end: number;
+}
+
 /**
  * The decision the brief is asking about.
  *
@@ -154,6 +165,7 @@ export interface CandidateModel {
       value: number;
       unit?: string;
       provenance: string;
+      stated_evidence?: StatedOptionEvidence | null;
       /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
       range?: InterventionV3T['range'];
     }[];

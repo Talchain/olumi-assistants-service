@@ -291,7 +291,15 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // `edge_strength_edit`. The 200 changed dist lines naming a strength or a band are inferred type expansions in
     // handler-fact / handler-results / index .d.ts and the one handler-fact.js import line that gained
     // `RunDeliveryResultSchema` — none in an edge_strength_edit file (contrast: 27 changed lines name `run_delivery`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.79.0');
+    // 0.79.0 → 0.80.0 (schemas #91: `dominant_factor` + `flip_thresholds_status(_reason)` on the keep-list; main `5a538ef4`),
+    // RE-DERIVED on 7 Oct against the PUBLISHED tarballs (0.79.0 sha1 `fad0e0ad…`, 0.80.0 sha1 `d53e6524…`): the FILE SET naming
+    // `edge_strength_edit` is identical (5 files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0 changed
+    // lines naming `edge_strength_edit` (contrast: 16 changed dist lines name `dominant_factor`).
+    // 0.80.0 → 0.81.0 (schemas #92: `run_delta.goal_chances`; main `581a825b`), RE-DERIVED on 7 Oct against the PUBLISHED
+    // tarballs (0.80.0 sha1 `d53e6524…`, 0.81.0 sha1 `6ca5c614…`): the FILE SET naming `edge_strength_edit` is identical (5
+    // files); four are byte-unchanged and `dist/fixtures/index.js` differs, with 0 changed lines naming `edge_strength_edit`
+    // (contrast: 66 changed dist lines name `goal_chances`/`GoalChance`).
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.81.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

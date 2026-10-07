@@ -21,6 +21,7 @@ vi.mock('@sentry/node', () => ({
   init: (opts: any) => {
     capturedBeforeSend = opts.beforeSend;
   },
+  httpIntegration: (opts: unknown) => ({ name: 'Http', opts }),
   getCurrentScope: () => ({
     setTag: vi.fn(),
   }),

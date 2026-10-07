@@ -467,3 +467,55 @@ describe('R2 committed carrier read failure and bounded newest-offer identity', 
     expect(readCommittedTurn.mock.calls.map(c => c[1])).not.toContain('held-turn')
   })
 })
+
+/**
+ * ⭐ S-D RELOAD (lane EDIT-PANEL, design §4): a held product proposal comes back on the opt-in read with what it
+ * assumes and its exact card (`proposal_fields`), so a reload keeps it editable and approvable. Bound to THIS graph.
+ */
+describe('S-D reload: proposal_fields on the opt-in graph read', () => {
+  const gmHold = (pin: string): PendingAction => parsePendingAction({
+    id: '22222222-2222-4222-8222-222222222222', scenario_id: SCENARIO, chip_id: 'gmh_abcdefabcdef',
+    action: { kind: 'apply_proposed_change', proposal_ref: 'gmh_abcdefabcdef',
+      inline_patch: { handler_id: 'graph_management_held_v1', apply_wiring: 'held_execute_v1', operations: [
+        { op: 'add_node', path: 'risk_x', value: { id: 'risk_x', kind: 'risk', label: 'Long commute' } },
+        { op: 'add_edge', path: 'risk_x::n2', value: { from: 'risk_x', to: 'n2', strength: { mean: 0.5, std: 0.125 }, exists_probability: 0.8,
+          effect_direction: 'positive', defaulted: true, provenance: { source: 'cee_hypothesis' } } },
+      ] },
+      public_label: 'Approve 2 changes', public_message: "Yes, add risk 'Long commute' and link 'Long commute' to 'Commute time'." },
+    preconditions: { graph_hash: pin }, expires_at_turn_count: 24, expires_at_iso: '2099-01-01T00:00:00.000Z',
+    emitted_at_iso: new Date().toISOString(),
+  })!;
+
+  it('RED: the held risk returns with its placeholder link, its missing level and its exact card; absent without the opt-in', async () => {
+    const pin = computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT)!;
+    latest = [gmHold(pin)];
+    readRecent.mockResolvedValue([]);
+    const app = await buildApp();
+    try {
+      const res = await read(app, SCENARIO, { include_conversation_turns: true });
+      expect(res.statusCode, res.body.slice(0, 300)).toBe(200);
+      const fields = res.json().proposal_fields;
+      expect(fields?.graph_hash).toBe(pin);
+      expect(fields?.proposals.map((p: { proposal_id: string }) => p.proposal_id)).toEqual(['gmh_abcdefabcdef']);
+      expect(fields.proposals[0].revision).toBe('22222222-2222-4222-8222-222222222222');
+      expect(fields.proposals[0].approve_action).toEqual(expect.objectContaining({ id: 'agent-approve-proposal:gmh_abcdefabcdef',
+        message: "Yes, add risk 'Long commute' and link 'Long commute' to 'Commute time'." }));
+      expect(fields.proposals[0].fields).toEqual([expect.objectContaining({ field_id: 'link_strength:risk_x::n2', from_label: 'Long commute',
+        to_label: 'Commute time', current: { band: 'strong', source: 'placeholder' } })]);
+      expect(fields.proposals[0].missing).toEqual([{ node_id: 'risk_x', label: 'Long commute', kind: 'risk', what: 'level_today' }]);
+      const plain = await read(app, SCENARIO, {});
+      expect(plain.json().proposal_fields, 'the Agent’s own internal reads stay byte-identical').toBeUndefined();
+    } finally { await app.close(); latest = []; }
+  });
+
+  it('CONTROL: a hold pinned to another model is not served as editable here', async () => {
+    latest = [gmHold('f'.repeat(16))];
+    readRecent.mockResolvedValue([]);
+    const app = await buildApp();
+    try {
+      const res = await read(app, SCENARIO, { include_conversation_turns: true });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().proposal_fields).toBeUndefined();
+    } finally { await app.close(); latest = []; }
+  });
+});
