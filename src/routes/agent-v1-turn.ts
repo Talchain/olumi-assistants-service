@@ -117,7 +117,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
+import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type GateReplyPart, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -4012,11 +4012,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let leaderClaimEnforced = false;
     /** The paragraph the leader gate appended (its withheld reason): a must-face obligation for the reply composer. */
     let leaderGateClosing: string | null = null;
+    let leaderGateParts: readonly GateReplyPart[] = [];
     if (analysisBearing) {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1',
+        composeGateParts: true,
         userText: typedNow ?? undefined,
         mayNameLeadingOption: claim?.permitted === true,
         separationEstablished: claim?.separation === 'separated',
@@ -4035,6 +4037,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // The run's per-limit rows from the SAME readback: an estimate-only limit is said to have been checked.
         ...(limitVerdicts !== undefined ? { limitVerdicts, limitAskIds: limitAskIdsOf(readbackGraph) } : {}),
       });
+      leaderGateParts = enforced.gateParts ?? [];
       if (enforced.changed) {
         leaderClaimEnforced = true;
         const beforeGate = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
@@ -4046,7 +4049,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const afterGate = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
         const cut = afterGate.lastIndexOf('\n\n');
         const closing = (cut === -1 ? afterGate : afterGate.slice(cut + 2)).trim();
-        if (closing !== '' && !beforeGate.includes(closing)) leaderGateClosing = closing;
+        if (leaderGateParts.length === 0 && closing !== '' && !beforeGate.includes(closing)) leaderGateClosing = closing;
       }
     }
     /**
@@ -4280,6 +4283,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
       const composedReply = composeReplyShape({
         text: reply,
+        gateParts: leaderFreeEnvelope ? [] : leaderGateParts,
         detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
         obligations,
         graph: readbackGraph,

@@ -1,3 +1,4 @@
+import type { GateReplyPart } from './reply/compose-reply.js';
 import { readUnsizedPathLeaderCause, unsizedLinkSentence, unsizedLinkStatement, type UnsizedPathLink } from './unsized-path-cause.js';
 import { placeholderAskWords } from './goal-certainty.js';
 /**
@@ -1110,7 +1111,7 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
   return warnings.map((w) => (w as { code?: unknown } | null)?.code).filter((c): c is string => typeof c === 'string');
 }
 
-export type GoalFigureCoHold = { readonly subjects?: readonly string[]; readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
+export type GoalFigureCoHold = { readonly code?: string; readonly subjects?: readonly string[]; readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
 
 const DECLINES_LINK = /\b(?:not checking|not adding|won't add|don't add|leave (?:it|that|them) out|skip (?:it|that)|move on|not going to size|don't want to size|no need to size|not modelling)\b/i;
 /** A positive decline ("move on", "skip it", "leave it out") negated right before it is NOT a refusal ("let's not move on"). */
@@ -1172,7 +1173,7 @@ export function goalFigureCoHoldOf(blocks: unknown, graph: unknown, userText?: s
   // (never while a product gate withholds every option: no cause, no invitation).
   const words = userDeclinesLink(userText, links) ? unsizedLinkStatement(links)
     : (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
-  return words !== '' ? { why: words, say: words, subjects } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
+  return words !== '' ? { code: 'GOAL_FIGURES_PLACEHOLDER_PATH', why: words, say: words, subjects } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
 }
 
 /**
@@ -1740,6 +1741,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
      * A reply the drop would leave EMPTY still gets it — never a silent turn. Omitted ⇒ `true` (every other caller).
      */
     readonly sayWhyWithheld?: boolean;
+    /** The ONE composer will place typed causes; legacy callers retain their byte-identical path. */
+    readonly composeGateParts?: boolean;
     /** This turn's typed words: a refused named link keeps its cause but receives no sizing invitation. */
     readonly userText?: string;
     /** The run's per-limit rows from the SAME readback (`readBackState`'s `limitVerdicts`); absent = not attested. */
@@ -1754,7 +1757,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
      */
     readonly protectedHostLines?: readonly string[];
   },
-): WireLeaderClaimEnforcementResult {
+): WireLeaderClaimEnforcementResult & { readonly gateParts?: readonly GateReplyPart[] } {
+  let gateParts: readonly GateReplyPart[] = [];
   let next = response;
   let droppedSentences = 0;
   try {
@@ -1773,8 +1777,11 @@ export function enforceAgentLaneLeaderClaimsAtWire(
         : closingFor(coHold);
       // A second wire pass must not parse a deterministic closing as fresh model prose. Node labels can contain
       // punctuation and ranking words, so splitting that closing into sentences can otherwise drop half and append it twice.
+      const typedPlacement = opts.composeGateParts === true && !noResult && (coHold?.subjects?.length ?? 0) > 0
+        && (withheldReason === undefined || withheldReason === WITHHELD_GOAL_PATH_UNSIZED
+          || withheldReason === WITHHELD_SEPARATION_UNAVAILABLE || withheldReason === WITHHELD_LEADER_CAUSE_UNRECORDED);
       const trimmed = text.trimEnd();
-      const alreadyClosed = trimmed === closing || trimmed.endsWith(`\n\n${closing}`);
+      const alreadyClosed = !typedPlacement && (trimmed === closing || trimmed.endsWith(`\n\n${closing}`));
       const projectionInput = alreadyClosed ? trimmed.slice(0, -closing.length).trimEnd() : text;
       const resultBlock = Array.isArray(response.blocks)
         ? response.blocks.find((block) => (block as { type?: unknown } | null)?.type === 'analysis_result') : undefined;
@@ -1784,11 +1791,24 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const typedSay = (response as { analysis_state?: { run_state?: { kind?: unknown } } }).analysis_state?.run_state?.kind === 'complete_current'
         && typeof readbackSay === 'string' && readbackSay !== '' && readbackSay === opts.protectedGoalChanceSay
         ? readbackSay : null;
-      const protectedLines = [...(typedSay !== null && !typedSay.includes('\n') ? [typedSay] : []),
+      const protectedLines = [...(typedPlacement ? [closing] : []), ...(typedSay !== null && !typedSay.includes('\n') ? [typedSay] : []),
         ...(opts.protectedHostLines ?? []).filter((line) => line !== '' && !line.includes('\n'))];
       const projected = dropRankingSentences(projectionInput, rankingLabelContext(opts.graph, opts.analysisReady),
         protectedLines.length > 0 ? protectedLines : undefined);
-      if (projected.droppedSentences > 0) {
+      if (typedPlacement) {
+        // Eligibility and cause precedence remain here. There is no already-said test on this path.
+        if (projected.droppedSentences > 0 && (projected.text.trim() === '' || (opts.sayWhyWithheld !== false && !noResult))) {
+          const identity = { cause: [admissionModeReasonCode(opts.analysisReady), withheldReason, separationOf((response as { analysis_state?: unknown }).analysis_state), coHold!.code].filter(Boolean).join(':'), subjects: coHold!.subjects! };
+          gateParts = coHold!.ask === undefined
+            ? [{ role: 'withheld_reason', text: closing, subjects: identity.subjects, identity: { ...identity, slot: 'closing' } }]
+            : [
+              { role: 'withheld_reason', text: sentence(`because ${coHold!.why}`), subjects: identity.subjects, identity: { ...identity, slot: 'cause' } },
+              { role: 'ask', text: coHold!.ask, subjects: identity.subjects, identity: { ...identity, slot: 'ask' } },
+            ];
+        }
+        droppedSentences = projected.droppedSentences;
+        next = projected.droppedSentences === 0 ? response : { ...response, assistant_text: projected.text.trimEnd() } as OlumiResponse;
+      } else if (projected.droppedSentences > 0) {
         droppedSentences = projected.droppedSentences;
         /**
          * ⛔ NO "ON THIS RUN" WHEN NOTHING RAN (served 651a7fd, journey C run 2): on a run state that proves there is no
@@ -1853,6 +1873,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
   const edited = new Set<WireField>(['assistant_text', ...shared.editedFields]);
   return {
     response: shared.response,
+    ...(gateParts.length > 0 ? { gateParts } : {}),
     changed: true,
     editedFields: WIRE_ENFORCED_PROSE_FIELDS.filter((f) => edited.has(f)),
     blocksProjected: shared.blocksProjected,

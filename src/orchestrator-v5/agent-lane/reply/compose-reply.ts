@@ -80,6 +80,11 @@ export const REPLY_SHAPE_INSTRUCTION =
 export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence' | 'host' | 'detail';
 /** Overlapping obligations are one unit carrying the strongest role among them. */
 const ROLE_RANK: Record<FaceObligationRole, number> = { ask: 5, withheld_reason: 4, caveat: 3, evidence: 2, host: 1, detail: 0 };
+/** Identity supplied by a typed producer, never inferred from the words of a reply. */
+export interface ReplyPartIdentity { readonly cause: string; readonly subjects: readonly string[]; readonly slot: 'closing' | 'cause' | 'ask' }
+export interface GateReplyPart extends FaceObligation { readonly identity: ReplyPartIdentity }
+export interface NarratorReplyPart { readonly text: string; readonly identity: ReplyPartIdentity }
+const partKey = (id: ReplyPartIdentity): string => JSON.stringify([id.cause, [...id.subjects].sort(), id.slot]);
 export interface FaceObligation { readonly role: FaceObligationRole; readonly text: string; readonly subjects?: readonly string[] }
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
@@ -95,6 +100,10 @@ export interface ReplyComposeInput {
   /** The final prose, after every gate: exactly what would ship without the composer. */
   readonly text: string;
   readonly obligations?: readonly FaceObligation[];
+  /** Owed host parts; the gate owns eligibility, this composer owns placement. */
+  readonly gateParts?: readonly GateReplyPart[];
+  /** Narrator spans whose identity was attested by their producer. No prose classification. */
+  readonly narratorParts?: readonly NarratorReplyPart[];
   /** Code-authored disclosures owed once, under More detail even for a short reply. */
   readonly detailLines?: readonly string[];
   /** Node labels resolve narrator mentions to the typed directed link subjects. */
@@ -251,9 +260,13 @@ const isQuestionUnit = (u: Unit): boolean => QUESTION_END.test(u.text.trim());
  * Compose the reply's shape. Never throws; never deletes, rewrites or cuts a sentence.
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
+  const gateParts = [...new Map((input.gateParts ?? []).map(p => [partKey(p.identity), p])).values()];
+  // Exact text locates a producer's span; it does not decide whether a cause is owed or equivalent.
+  // Existing spans stay byte-identical. Only an absent owed span is inserted.
+  const placedText = [input.text, ...gateParts.filter(p => !input.text.includes(p.text)).map(p => p.text)].filter(Boolean).join('\n\n');
   const detailLines = [...new Set((input.detailLines ?? []).filter((line) => line.trim() !== ''))];
   // Move verbatim narrator copies to their typed detail position; never duplicate a risk sentence.
-  const body = detailLines.length === 0 ? input.text : detailLines.reduce((text, line) => text.replaceAll(line, ''), input.text)
+  const body = detailLines.length === 0 ? placedText : detailLines.reduce((text, line) => text.replaceAll(line, ''), placedText)
     .replace(/^[ \t]*[-•*][ \t]*$/gm, '').trim();
   const originalQuestions = detailLines.length === 0 ? null : openQuestionsSegment(body);
   // The questions toggle owns its segment; disclosures sit before it, never inside it.
@@ -265,7 +278,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   if (text.trim().length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty' };
 
   // Obligations still present in the final text (a later gate may have removed one: then it is no longer owed).
-  const present = [...(input.obligations ?? []), ...detailLines.map((text): FaceObligation => ({ role: 'detail', text }))].map((o) => ({ ...o, text: o.text.trim() }))
+  const present = [...(input.obligations ?? []), ...gateParts, ...detailLines.map((text): FaceObligation => ({ role: 'detail', text }))].map((o) => ({ ...o, text: o.text.trim() }))
     .filter((o) => o.text.length > 0 && text.includes(o.text))
     // In this explicit-detail path, questions already in their own toggle stay there.
     // Obligations in the ordinary reply remain subject to the same face checks.
@@ -305,6 +318,15 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const subjects = new Set(present.filter((o) => o.role === 'withheld_reason').flatMap((o) => o.subjects ?? []));
   const restatements = new Set(units.filter((u) => u.obligation === undefined && subjects.size > 0
     && UNSIZED_CAUSE.test(u.text) && namedUnsizedLinks(u.text, subjects, input.graph).size > 0));
+  const identities = new Set(gateParts.map(p => partKey(p.identity)));
+  for (const u of units) {
+    if (u.obligation === undefined && (input.narratorParts ?? []).some(p =>
+      p.text === u.text && identities.has(partKey(p.identity)))) restatements.add(u);
+  }
+  // Earlier verbatim copies of a bound host part carry the same identity and belong in detail.
+  for (const p of gateParts) for (const u of units) {
+    if (u.obligation === undefined && u.text === p.text) restatements.add(u);
+  }
   const eligible = (u: Unit): boolean => !restatements.has(u);
 
   const questions = units.filter((u) => eligible(u) && isQuestionUnit(u));

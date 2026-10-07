@@ -93,6 +93,22 @@ describe('D-03 through the real Agent route on a placeholder-path Run', () => {
     expect(face).not.toContain(closing);
   });
 
+  it('typed gate hand-off: a repeated closing has one face identity and its narrator copy in detail', async () => {
+    modelReply = `${ranking} ${prose}\n\n${closing}\n\n${closing}`;
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), message: 'What assumption remains unresolved?',
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    const b = response.json() as { assistant_text: string; _answer_shape?: AnswerShape };
+    expect(b.assistant_text).not.toContain(ranking);
+    expect(b._answer_shape).toBeDefined();
+    const face = [b._answer_shape!.headline, ...b._answer_shape!.bullets].join('\n');
+    expect(face.split(closing)).toHaveLength(2);
+    expect(b._answer_shape!.detail).toContain(closing);
+    expect(saved).toContain(b.assistant_text);
+    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
+  });
+
   it.each(['gate appended', 'already present'] as const)('%s: the face carries the cause once; the restatement stays in detail and durable text', async (source) => {
     if (source === 'already present') modelReply = `${prose}\n\n${closing}`;
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
