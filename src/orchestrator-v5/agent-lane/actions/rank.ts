@@ -5,7 +5,8 @@
  * A pure function of `ActionFacts` (a canonical read + RC's persisted history): the same read gives a byte-identical
  * bar, on a live turn and on the reload GET alike. RC stays the ranking authority (AIE 6036471065): an action ranks by
  * the RC row that names it (`eligibleGuidanceRows`, after RC's own cooldown), so a pressed row leaves the pills until
- * its state changes. Ties break by registry order. No model call, clock or random source.
+ * its state changes. Canonical standing gaps rank T0 on every reply, yielding to approval or a stale Run. Ties break
+ * by registry order. No model call, clock or random source.
  *
  * LAYOUT (§E.2: a maximum, never a requirement): `standard` = the four standard actions in FIXED order, each present
  * only while its typed contract can be offered; `priority` ≤2 = the most important other actions RC ranks P1–P3, never a
@@ -17,7 +18,7 @@ import { createHash } from 'node:crypto';
 import type { SelectedRow } from '../guidance/index.js';
 import { structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
 import { ACTION_IDS, ACTION_REGISTRY, STANDARD_ACTIONS, type ActionGroup, type ActionId } from './registry.js';
-import type { ActionFacts, ActionRevision } from './state.js';
+import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
 
 export type ItemRef =
   | { readonly kind: 'option' | 'factor' | 'risk' | 'outcome' | 'goal'; readonly id: string }
@@ -64,6 +65,14 @@ export const WHY_NOW = {
   more_options_W3: 'Your options all work through the same lever.',
   more_options_W4: 'There is no do-nothing option to compare against.',
   more_options_W5: 'Your options don’t separate in this model yet.',
+  frame_brief_T0: 'Your model has no goal yet, so nothing can be judged against it.',
+  frame_brief: 'See what your brief has and what it is missing.',
+  set_deadline: 'Your goal has no date yet, so no chance of meeting it can be worked out.',
+  set_goal: 'Your goal has no target yet, so no chance of meeting it can be worked out.',
+  more_risks_W6: 'Your model has at most one risk.',
+  more_risks: 'Find risks you haven’t considered yet.',
+  bias_anchoring: 'Test Olumi’s figures against your own evidence.',
+  check_estimates: 'See the Olumi estimates feeding this result.',
   test_link: 'This result is most sensitive to one link: see what happens without it.',
 } as const;
 
@@ -131,6 +140,25 @@ function drafts(f: ActionFacts): Draft[] {
   }
 
   if (f.readable) {
+    const standing = !f.goalPresent ? 'frame_brief'
+      : f.goalKind === 'chance_of_event' && f.deadline === null ? 'set_deadline'
+        : f.goalKind !== null && f.goalKind !== 'chance_of_event' && !f.targetPresent ? 'set_goal' : null;
+    out.push(draft(f, 'frame_brief', { enabled: true, why_now: standing === 'frame_brief' ? WHY_NOW.frame_brief_T0 : WHY_NOW.frame_brief },
+      standing === 'frame_brief' ? 0 : GENERIC_TIER));
+    if (standing === 'set_goal' || standing === 'set_deadline') {
+      out.push(draft(f, standing, { enabled: true, why_now: WHY_NOW[standing] }, 0));
+    }
+    if (f.risksAvailability !== 'omit') {
+      const risks = rc('RC-WIDEN', r => r.target === 'risks');
+      out.push(draft(f, 'more_risks', f.risksAvailability === 'run'
+        ? { enabled: true, why_now: risks?.variant === 'W6' ? WHY_NOW.more_risks_W6 : WHY_NOW.more_risks }
+        : { enabled: false, disabled_reason: DISABLED.needs_goal },
+      risks !== undefined ? tierOfPriority(risks) : GENERIC_TIER));
+    }
+    if (estimatePointsOf(f).length > 0) {
+      out.push(draft(f, 'bias_anchoring', { enabled: true, why_now: WHY_NOW.bias_anchoring }, GENERIC_TIER));
+      if (f.runBound) out.push(draft(f, 'check_estimates', { enabled: true, why_now: WHY_NOW.check_estimates }, GENERIC_TIER));
+    }
     const premortem = rc('RC-PREMORTEM');
     const date = f.deadline === null ? null : sayDate(f.deadline);
     // Contract v1.1 item 4: the user line names the horizon the model holds, never a default year.
@@ -165,7 +193,9 @@ export function actionBarOf(f: ActionFacts): ActionBarV1 {
   const all = drafts(f);
   const standard = STANDARD_ACTIONS.flatMap((id) => all.filter((d) => d.offer.action_id === id)).map((d) => d.offer);
   const others = all.filter((d) => !isStandard(d.offer.action_id)).sort(byRank);
-  const priority = others.filter((d) => d.offer.enabled && d.tier <= PILL_TIER_MAX).slice(0, PRIORITY_MAX);
+  const standing = others.find(d => d.tier === 0);
+  const priority = standing !== undefined && !f.approvalWaiting && !f.runStale ? [standing]
+    : others.filter(d => d.offer.enabled && d.tier > 0 && d.tier <= PILL_TIER_MAX).slice(0, PRIORITY_MAX);
   const more = others.filter((d) => !priority.includes(d)).slice(0, MORE_MAX);
   return { v: 1, state_key: f.stateKey, revision: f.revision, priority: priority.map((d) => d.offer), standard, more: more.map((d) => d.offer) };
 }
