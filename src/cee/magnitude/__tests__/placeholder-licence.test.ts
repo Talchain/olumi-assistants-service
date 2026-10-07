@@ -1,15 +1,19 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import type { GraphT } from '../../../schemas/graph.js';
 import { admitCandidateLinks } from '../../../orchestrator-v5/agent-lane/admit-candidate.js';
 import { placeholderGoalPaths } from '../../../orchestrator-v5/agent-lane/goal-certainty.js';
-import { isPlaceholderLink } from '../link-sizing.js';
+import { isPlaceholderLink, linkSizing } from '../link-sizing.js';
 import { frameDefaultedLinks } from '../frame-defaulted-links.js';
 import { legacyLeaderGoalLinks, unsizedLeaderGoalPaths } from '../../../orchestrator-v5/agent-lane/goal-certainty.js';
 import { hypothesisEdgeValue } from '../../../orchestrator-v5/routing/add-option-transaction.js';
 import { diffRunInputs } from '../../../orchestrator-v5/coaching/run-input-changes.js';
 import { buildAddRiskTransaction } from '../../../orchestrator-v5/routing/add-risk-transaction.js';
+import { transformEdgeToV3 } from '../../transforms/schema-v3.js';
+import { enrichGraphWithFactors, enrichGraphWithFactorsAsync } from '../../factor-extraction/enricher.js';
+import { placeholderPartsFinding, PLACEHOLDER_PARTS_REASON } from '../../../orchestrator/context/placeholder-parts.js';
 
 const parityBytes = readFileSync(new URL('./fixtures/placeholder-licence-parity.json', import.meta.url));
 const parity = JSON.parse(parityBytes.toString('utf8')) as Array<{ name: string; edge: unknown; placeholder: boolean }>;
@@ -197,4 +201,117 @@ it('buddy C RED: both stored MC walks agree: d2 empty and d1/d3 door paths retai
     expect(ordered(placeholderGoalPaths(graph, ids))).toEqual(d === 2 ? [] : [{ option_id: 'launch_starter_tier', links: expectedLinks }]);
     expect(ordered(unsizedLeaderGoalPaths(graph, ids))).toEqual(ordered(placeholderGoalPaths(graph, ids)));
   }
+});
+
+describe('Science 393023 LICENCE r4: V1 transform door', () => {
+  it('V1 with no strength_mean or weight writes defaulted and the placeholder tag', () => {
+    const { edge } = transformEdgeToV3({ from: 'x', to: 'g' }, 0, []);
+    expect(edge.defaulted).toBe(true);
+    expect(edge.provenance).toEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder' });
+    expect(isPlaceholderLink(edge)).toBe(true);
+  });
+
+  it('CONTROL: V1 authored strength_mean 0.5 has no defaulted or tag and is not a placeholder', () => {
+    const { edge } = transformEdgeToV3({ from: 'x', to: 'g', strength_mean: 0.5 }, 0, []);
+    expect(edge).not.toHaveProperty('defaulted');
+    expect(edge.provenance?.magnitude).toBeUndefined();
+    expect(isPlaceholderLink(edge)).toBe(false);
+    expect(linkSizing(edge)).toBe('unmarked');
+  });
+
+  it('CONTROL: V1 authored strength_mean 0.5 with user_specified remains user sized', () => {
+    const { edge } = transformEdgeToV3({ from: 'x', to: 'g', strength_mean: 0.5,
+      provenance: { source: 'user_specified' } }, 0, []);
+    expect(linkSizing(edge)).toBe('user');
+  });
+});
+
+describe('Science 393023 LICENCE r4: both factor-enricher doors', () => {
+  // Real CREATE fixture and brief from factor-extraction/__tests__/range-scale-derivation.test.ts.
+  const input = (): GraphT => ({
+    nodes: [{ id: 'goal-1', kind: 'outcome', label: 'Reach £30k MRR', data: {} }], edges: [],
+  } as unknown as GraphT);
+  const brief = "We're budgeting £80-120k for the first hire.";
+  const toV3 = (edge: Parameters<typeof transformEdgeToV3>[0]) => transformEdgeToV3(
+    edge, 0, input().nodes.map(({ id, kind, label }) => ({ id, kind, label })),
+  ).edge;
+
+  async function newDoorEdge(writer: 'sync' | 'async') {
+    const graph = input();
+    // Exercise the async writer deterministically through its regex path, with no LLM request.
+    vi.stubEnv('CEE_LLM_FIRST_EXTRACTION_ENABLED', 'false');
+    try {
+      const result = writer === 'sync' ? enrichGraphWithFactors(graph, brief)
+        : await enrichGraphWithFactorsAsync(graph, brief);
+      expect(result.factorsAdded).toBe(1);
+      expect(graph.edges).toEqual([]);
+      expect(result.graph.nodes.find(n => n.id === 'factor_budget_0')).toMatchObject({ kind: 'factor', label: 'Budget' });
+      const edge = result.graph.edges.find(e => e.from === 'factor_budget_0' && e.to === 'goal-1');
+      expect(edge, 'new factor_budget_0 → goal-1 connecting edge').toBeDefined();
+      return edge!;
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+
+  it.each(['sync', 'async'] as const)('%s enricher tags the new 0.5/0.2 default and V3 preserves the tag', async writer => {
+    const edge = await newDoorEdge(writer);
+    expect(edge.defaulted).toBe(true);
+    expect(edge.strength_mean).toBe(0.5);
+    expect(edge.strength_std).toBe(0.2);
+    expect(edge.provenance).toMatchObject({ magnitude: 'olumi_placeholder' });
+    const transformed = toV3(edge);
+    expect(transformed.defaulted).toBe(true);
+    expect(transformed.strength).toEqual({ mean: 0.5, std: 0.2 });
+    expect(transformed.provenance).toMatchObject({ magnitude: 'olumi_placeholder' });
+    expect(isPlaceholderLink(transformed)).toBe(true);
+  });
+
+  it.each(['sync', 'async'] as const)('CONTROL: %s enricher edge without the tag is still a 0.5/0.2 door placeholder', async writer => {
+    const transformed = toV3(await newDoorEdge(writer));
+    delete transformed.provenance!.magnitude;
+    expect(transformed.defaulted).toBe(true);
+    expect(linkSizing(transformed)).toBe('placeholder');
+    expect(isPlaceholderLink(transformed)).toBe(true);
+  });
+
+  it.each(['sync', 'async'] as const)('CONTROL: %s enricher edge without the tag or defaulted is unmarked', async writer => {
+    const transformed = toV3(await newDoorEdge(writer));
+    delete transformed.provenance!.magnitude;
+    delete transformed.defaulted;
+    expect(linkSizing(transformed)).toBe('unmarked');
+    expect(isPlaceholderLink(transformed)).toBe(false);
+  });
+});
+
+describe('Science 393023 LICENCE r4: ruling 1 precedence and placeholder-parts agreement', () => {
+  it('mean_projected with olumi_estimate and natural_effect fails closed as placeholder', () => {
+    const edge = { from: 'x', to: 'g', strength: { mean: 0.2, std: 0.05 },
+      provenance: { mean_projected: true, magnitude: 'olumi_estimate', natural_effect: {
+        amount: 2, amount_unit: 'GBP', per_source_change: 1, per_source_change_unit: 'people',
+        strength_mean: 0.2, strength_mean_frame: 'edge_strength',
+      } } };
+    expect(linkSizing(edge)).toBe('placeholder');
+  });
+
+  it('user_specified with mean_projected is placeholder', () => {
+    expect(linkSizing({ from: 'x', to: 'g', strength: { mean: 0.5, std: 0.125 },
+      provenance: { source: 'user_specified', mean_projected: true } })).toBe('placeholder');
+  });
+
+  it('CONTROL: user_stated with mean_projected remains user sized', () => {
+    expect(linkSizing({ from: 'x', to: 'g', strength: { mean: 0.5, std: 0.125 },
+      provenance: { magnitude: 'user_stated', mean_projected: true } })).toBe('user');
+  });
+
+  it('the same user_specified + mean_projected edge is not the user\'s in placeholder-parts and is placeholder in licence', () => {
+    const edge = { from: 'price', to: 'churn', strength: { mean: 0.5, std: 0.125 }, defaulted: true,
+      provenance: { source: 'user_specified', mean_projected: true } };
+    const nodes = [{ id: 'price', kind: 'factor', label: 'Price' }, { id: 'churn', kind: 'factor', label: 'Churn' }];
+    const before = structuredClone(edge);
+    expect(placeholderPartsFinding('churn', nodes, [edge], [{ interventions: { price: 59 } }]))
+      .toEqual({ reason: PLACEHOLDER_PARTS_REASON, partId: 'price' });
+    expect(linkSizing(edge)).toBe('placeholder');
+    expect(edge).toEqual(before);
+  });
 });
