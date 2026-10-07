@@ -31,7 +31,7 @@ const rangeRecord = {
 };
 const expectedRanges = {
   [A]: { range: 'between about 20% and 65%', depends_on: { kind: 'link_strength', from_label: 'Pro plan price', to_label: 'Monthly recurring revenue', among: 'unsized_links' } },
-  [B]: { range: 'between about 31% and 72%', depends_on: { kind: 'link_existence', from_label: 'missing_source', to_label: 'Monthly recurring revenue', among: 'all' } },
+  [B]: { range: 'between about 31% and 72%', depends_on: { kind: 'link_existence', from_label: 'Support cost', to_label: 'Monthly recurring revenue', among: 'all' } },
 };
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 function fixture(warnings: Json[] = [licence]): Json {
@@ -48,6 +48,7 @@ function fixture(warnings: Json[] = [licence]): Json {
   // The ids bind the range to graph labels, independently of the order of graph nodes.
   read.graph.nodes.find((n: Json) => n.id === 'pro_plan_price').label = 'Pro plan price';
   read.graph.nodes.find((n: Json) => n.id === 'mrr').label = 'Monthly recurring revenue';
+  read.graph.nodes.push({ id: 'missing_source', kind: 'factor', label: 'Support cost' });
   return read;
 }
 function capabilities(read: Json) {
@@ -166,6 +167,24 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     ]);
     for (const view of [await saved(read), await run(read)]) expect(view).not.toHaveProperty('goal_chance_range_display');
   });
+  // S2 review r1 #1 (Codex AMEND #87 6028260969): the chat's range words are the SCREEN's (DGAI goalChanceRangeLine).
+  it.each([
+    [0, 40, 'between less than 1% and 40%'], [0, 100, 'between less than 1% and more than 99%'],
+    [5, 100, 'between about 5% and more than 99%'], [20, 65, 'between about 20% and 65%'],
+  ])('(7d) endpoints %i/%i read as the screen: %s, on both doors', async (low, high, words) => {
+    const warning = clone(rangeRecord);
+    Object.assign(warning.range_by_option[A], { low_pct: low, high_pct: high, low_rounding: 'whole', high_rounding: 'whole' });
+    const read = fixture([licence, warning]);
+    for (const view of [await saved(read), await run(read)]) expect(view.goal_chance_range_display[A].range).toBe(words);
+  });
+  it('(7e) a link label that cannot be resolved drops THAT option’s range (the screen drops the line); never a raw id', async () => {
+    const read = fixture([licence, rangeRecord]);
+    read.graph.nodes = read.graph.nodes.filter((n: Json) => n.id !== 'missing_source');
+    for (const view of [await saved(read), await run(read)]) {
+      expect(view.goal_chance_range_display).toEqual({ [A]: expectedRanges[A] });
+      expect(JSON.stringify(view.goal_chance_range_display)).not.toContain('missing_source');
+    }
+  });
   it.each([
     { low_pct: 65, high_pct: 65 }, { low_pct: 70, high_pct: 65 }, { low_pct: 20.5 }, { high_pct: 65.5 },
     { low_pct: -1 }, { high_pct: 101 }, { kind: 'factor_value' }, { among: 'some' }, { from: 3 },
@@ -197,7 +216,7 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(await run(fixture())).not.toHaveProperty('goal_horizon_line');
   });
   it('(10) both reporting rules add the exact range/deadline words and retain the existing bans', () => {
-    const rangeRule = 'For an option in goal_chance_range_display, say its range exactly as given: “between about L% and H% chance of meeting your goal, in this model”. Then state what it depends on: for link_strength, “It depends most on how strongly ‘{from}’ affects ‘{to}’, which isn\'t sized in the model yet.”; for link_existence, “It depends most on whether ‘{from}’ affects ‘{to}’ at all, which Olumi assumed.” Use depends_on.from_label and depends_on.to_label for {from} and {to}. Prefix “Of the links not sized yet, ” when depends_on.among is unsized_links. Never state a single figure for that option, and never compare or order ranges.';
+    const rangeRule = 'For an option in goal_chance_range_display, say its range text exactly as given, then “ chance of meeting your goal, in this model” (for example “between less than 1% and 40% chance of meeting your goal, in this model”). Then state what it depends on: for link_strength, “It depends most on how strongly ‘{from}’ affects ‘{to}’, which isn\'t sized in the model yet.”; for link_existence, “It depends most on whether ‘{from}’ affects ‘{to}’ at all, which Olumi assumed.” Use depends_on.from_label and depends_on.to_label for {from} and {to}. Prefix “Of the links not sized yet, ” when depends_on.among is unsized_links. Never state a single figure for that option, and never compare or order ranges.';
     const horizonRule = 'When goal_horizon_line is present and you state any goal chance or range, add that sentence verbatim once, right after the chance or range.';
     const runRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('When you report an analysis,'), HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'));
     const savedRule = HOST_TOOL_CONTRACT.slice(HOST_TOOL_CONTRACT.indexOf('For a CURRENT saved Run,'), HOST_TOOL_CONTRACT.indexOf('Earlier assistant replies can describe a Run'));

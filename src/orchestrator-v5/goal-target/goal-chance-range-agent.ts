@@ -39,6 +39,8 @@ export interface GoalChanceRangeDisplay {
   };
 }
 
+const rangeEnd = (v: number): string => v === 0 ? 'less than 1%' : v === 100 ? 'more than 99%' : `about ${v}%`;
+
 /** PR-S1's carrier (`GOAL_CHANCE_RANGE`), read by its code. Conflicting records fail closed. */
 export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown): Record<string, GoalChanceRangeDisplay> | undefined {
   const records = warningsOf(result).filter((w) => w.code === GOAL_CHANCE_RANGE);
@@ -63,9 +65,14 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
       || (v.low_rounding === 'nearest_5' && v.low_pct % 5 !== 0) || (v.high_rounding === 'nearest_5' && v.high_pct % 5 !== 0)
       || (v.kind !== 'link_strength' && v.kind !== 'link_existence') || !id(v.from) || !id(v.to) || v.from === v.to
       || (v.among !== 'all' && v.among !== 'unsized_links')) return undefined;
+    // ⛔ S2 review r1 #1 (Codex AMEND #87 6028260969): the SCREEN's words (DGAI `goalChanceRangeLine`): 0 is "less than 1%",
+    // 100 is "more than 99%", the high end drops its "about"; an unresolved link label drops the line, never a raw id.
+    const fromLabel = labels.get(v.from);
+    const toLabel = labels.get(v.to);
+    if (fromLabel === undefined || toLabel === undefined) continue;
     Object.defineProperty(out, optionId, { enumerable: true, configurable: true, value: {
-      range: `between about ${v.low_pct}% and ${v.high_pct}%`,
-      depends_on: { kind: v.kind, from_label: labels.get(v.from) ?? v.from, to_label: labels.get(v.to) ?? v.to, among: v.among },
+      range: `between ${rangeEnd(v.low_pct)} and ${rangeEnd(v.high_pct).replace(/^about /, '')}`,
+      depends_on: { kind: v.kind, from_label: fromLabel, to_label: toLabel, among: v.among },
     } });
   }
   return out;
