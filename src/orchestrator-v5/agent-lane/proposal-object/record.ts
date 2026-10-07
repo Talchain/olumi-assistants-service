@@ -28,6 +28,8 @@ import { describeChangeset } from '../../handlers/describe-changeset.js';
 import { GM_HELD_GRADED_TODAY_KEY, GM_HELD_SWITCH_FACTORS_KEY, readGradedTodayMember } from '../../routing/add-option-transaction.js';
 import { GM_HELD_USER_TODAY_KEY, readUserTodayMember } from '../../routing/add-factor-transaction.js';
 import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
+import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember } from '../../routing/stated-event-risk.js';
+import { eventRiskLikelihoodWords } from '../stated-event-risk-draft.js';
 import { whoSized } from '../strength-authorship-words.js';
 import type { ProposalOperation } from '../proposal.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
@@ -227,6 +229,12 @@ function approveActionOf(pa: PendingAction, ops: readonly HeldOp[], graph: unkno
     const copy = buildGmHeldPublicCopy(changeset?.subject ?? null, changeset?.items);
     if (copy.label === label && copy.message === message) detail = copy.detail;
   } catch { detail = undefined; }
+  // The member reader validates the occurrence with EventRiskV1 before any copy is added.
+  const eventRisk = readUserEventRiskMember(patch[GM_HELD_USER_EVENT_RISK_KEY]);
+  if (eventRisk !== undefined) {
+    const line = `It may happen: ${eventRiskLikelihoodWords(eventRisk.event_risk)}, as you said.`;
+    detail = detail !== undefined ? `${detail}\n${line}` : line;
+  }
   return { id: `${APPROVE_PREFIX}${pa.chip_id}`, label, message, ...(detail !== undefined ? { detail } : {}) };
 }
 
@@ -254,6 +262,9 @@ export function productHoldRecord(pa: PendingAction, graph: unknown, nowMs: numb
   const missing = missingOf(pa, ops);
   const digest = createHash('sha256').update(JSON.stringify({
     p: pa.chip_id, r: pa.id, g: pin, m: approve.message,
+    // Bind the extra card words only on the opt-in event door; legacy digest bytes stay unchanged.
+    ...(readUserEventRiskMember(((pa.action as { inline_patch?: Rec }).inline_patch ?? {})[GM_HELD_USER_EVENT_RISK_KEY]) !== undefined
+      ? { event_risk_detail: approve.detail } : {}),
     f: fields.map((f) => [f.field_id, f.from_id, f.to_id, f.from_label, f.to_label, f.direction, f.current.band, f.current.source, f.editable]),
     x: missing.map((m) => [m.node_id, m.label, m.kind, m.what]),
   })).digest('hex').slice(0, 32);

@@ -133,6 +133,18 @@ describe('#2623 (B) at the one-link commit door: the gauge child edge is admitte
     const { after, links } = written(before);
     expect(linkStrengthsPostimageIsScoped(before, after, links)).toBe(true);
   });
+  it('P48: the receipt names the gauge it sized (after.also_changed_links), so "changed since the last Run" can mark it', () => {
+    const base = stored();
+    const prepared = prepareLinkEffectUnitReadings(base, 'price', 'strain', E2E, SAID);
+    const p = { persistedGraph: base, from: 'price', to: 'strain', effect: E2E, quote: SAID, unit_readings: prepared.unit_readings,
+      expected: { graph_hash: computeAnalysisAffectingGraphHash(base as never)!, edge_token: linkEffectEdgeToken(base, 'price', 'strain')! } };
+    const r = applyLinkEffectEdit({ ...p, reading_token: linkEffectReadingToken(p) });
+    if (r.kind !== 'mutated') throw new Error(JSON.stringify(r));
+    const after = (r.handlerFacts[0] as unknown as { result: { after: Rec } }).result.after;
+    expect(after.from).toBe('price');
+    expect(after.also_changed_links).toEqual([{ from: 'strain', to: 'mrr' }]);
+  });
+
   it('NOT-NAMED: a gauge-shaped write on an edge mediatorReadings does not name for the target → out of scope', () => {
     const before = withChurn();
     const { after, links } = written(before);

@@ -459,15 +459,23 @@ describe('S-B slice 2b through the real turn, composer and reload routes', () =>
     coldStore();
     expect((await reload()).action_bar).toEqual(b.action_bar);
   });
-  it('anchoring frame badge uses the canonical reader on a stale Run; no readable stage yields no badge', async () => {
-    setState('stale', estimateGraph());
+  it('anchoring needs a bound Run: stale and pre-Run presses say so (no badge, no offer); a current Run at the frame stage carries the badge', async () => {
+    for (const state of ['stale', 'pre_run'] as const) {
+      setState(state, estimateGraph());
+      const b = await press('act:bias_anchoring');
+      expect(b._action, state).toMatchObject({ outcome: 'cant_yet', reason: 'needs_current_analysis' });
+      expect(b._action?.science, state).toBeUndefined();
+      expect(offersOf(b.action_bar!).some(o => o.action_id === 'bias_anchoring'), state).toBe(false);
+    }
+    // A current Run on a one-option model reads the frame stage (canonical reader): the one badge rides.
+    const g = estimateGraph(); g.nodes = g.nodes.filter(n => n.id !== 'b');
+    setState('withheld', g);
+    const result = { ...(source.analysis.analysis_result as object), enrichment: { inference_warnings: [estimateLicence({ a: 'far' })] } };
+    source.analysis = { ...source.analysis, analysis_result: result, current_read: { analysis_ready: READY, result } };
     const frame = await press('act:bias_anchoring');
+    expect(frame._action).toMatchObject({ outcome: 'ran' });
     expect(frame._action?.science).toEqual(resolveDskClaimProvenance('DSK-B-001'));
     expect(JSON.stringify(frame._action).match(/DSK-B-001/g)).toHaveLength(1);
-    setState('pre_run', estimateGraph());
-    const noStage = await press('act:bias_anchoring');
-    expect(noStage._action).toMatchObject({ outcome: 'ran' });
-    expect(noStage._action?.science).toBeUndefined();
     expect(modelCalls).toBe(0);
   });
   it('stale anchoring offer after all eligible factors became user figures: exact no-trigger reply, cant_yet, no model calls', async () => {

@@ -208,6 +208,11 @@ export function approvalChipsFor(
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
     return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
   }
+  if (tool === 'propose_model_change' && stored?.proposal_id === proposalId && stored.operations.length === 1
+    && stored.operations[0]?.op === 'add_edge' && (stored.operations[0].value as { author?: unknown }).author === 'model_proposed') {
+    return [{ id: approvalChipIdFor(proposalId), label: 'Approve', message: approve.message, detail: stored.public_label }, AMEND_CHIP,
+      { id: `agent-decline-drawn-link:${proposalId}`, label: 'Decline', message: 'Decline this suggested link.' }];
+  }
   const adoption = stored?.operations.length === 1 && stored.operations[0]?.op === 'adopt_olumi_option'
     ? stored.operations[0].value as { approval_message?: unknown } | undefined : undefined;
   if (adoption !== undefined && typeof adoption.approval_message === 'string' && adoption.approval_message !== '') {

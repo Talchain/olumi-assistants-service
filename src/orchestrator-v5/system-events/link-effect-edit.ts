@@ -651,7 +651,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
       status: 'applied',
       before,
       after: { from, to, strength: { ...(writtenEdge.strength as Rec) }, effect_direction: direction, provenance: writtenEdge.provenance, stated_quote: params.quote,
-        ...(frameRefit.length > 0 ? { frame_refit: frameRefit } : {}) },
+        ...(frameRefit.length > 0 ? { frame_refit: frameRefit } : {}),
+        // P48 (buddy r1 P2-5): the gauge this answer sized also changed; name it so "changed since the last Run" marks it.
+        ...(gaugeEdge !== undefined ? { also_changed_links: [{ from: String(gaugeEdge.from), to: String(gaugeEdge.to) }] } : {}) },
     },
   });
   return { kind: 'mutated', mutatedGraph: written, graph: parsed.data, handlerFacts: [fact as HandlerFact],
