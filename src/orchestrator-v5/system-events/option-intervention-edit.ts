@@ -88,6 +88,8 @@ import { mediatorReadings, storedGaugesKept } from '../agent-lane/mediator-readi
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { clampForPersist, refitFramesForStatedEffects, refitKeepsOtherLinks } from '../agent-lane/refit-frames.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
+import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped, type ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
+import { goalDeadlineOf } from '../goal-target/goal-kind.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
 /**
@@ -845,6 +847,8 @@ export type OptionInterventionBatchExecutionInput =
     readonly linkEffects?: readonly ApprovedLinkEffect[];
     /** ⭐ One approved product confirmation: ONE append, alone (never with anything else). */
     readonly identityConfirm?: ApprovedIdentityConfirm;
+    /** ⭐ S-E GOALS: one approved deadline card, the goal's `goal_horizon` only: ONE append, alone (never with anything else). */
+    readonly goalHorizon?: ApprovedGoalHorizon;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
     readonly lastRunIdentityUse?: IdentityRunUse | null;
   };
@@ -871,7 +875,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   if (optionGaps.some(d => !input.targets.some(t => t.optionId === d.optionId))) {
     return { kind: 'refused', reason: 'option_gap_without_level_anchor' };
   }
-  if (optionGaps.length > 0 && ((input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined)) {
+  if (optionGaps.length > 0 && ((input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined
+    || input.goalHorizon !== undefined)) {
     return { kind: 'refused', reason: 'option_gaps_not_alone_with_identity_or_links' };
   }
   let before: unknown;
@@ -900,7 +905,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
-    linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, lastRunIdentityUse: _callerRunUse, ...common } = input;
+    linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, goalHorizon: _callerHorizon,
+    lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -1049,7 +1055,39 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       identityConfirm.factor_ids.map(id => `"${labelOfBefore(id)}"`).join(' times ')}, as you confirmed on the card: “${
       identityConfirm.words.trim()}”`];
   }
-  const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0);
+  /**
+   * ⭐ S-E GOALS — ONE DEADLINE CARD, the identity confirmation's own shape: alone, on the persisted base, through the one
+   * `goal_horizon` writer in memory, scoped to that one field, then the ONE append and read-back below. The date is outside
+   * the analysis hash, so the revision gate below proves only that nothing else moved; the writer's own gate is the date
+   * the goal held when the card was made.
+   */
+  const goalHorizon = input.goalHorizon;
+  if (goalHorizon !== undefined) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined || linkEffects.length > 0
+      || identityConfirm !== undefined || (expectedLinks?.length ?? 0) > 0) {
+      return { kind: 'refused', reason: 'goal_horizon_not_alone' };
+    }
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const written = applyGoalHorizonEdit(before, goalHorizon);
+    if (written.kind === 'refused') return { kind: 'refused', reason: `deadline_${written.reason}` };
+    const graph = projectGraphForPersistence(written.mutatedGraph);
+    if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id)
+      || goalDeadlineOf(graph.nodes.find((n) => n.id === goalHorizon.goal_id)) !== goalHorizon.deadline) {
+      return { kind: 'refused', reason: 'deadline_scope_mismatch' };
+    }
+    const appliedHash = computeAnalysisAffectingGraphHash(graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = graph;
+    levelBaseHash = appliedHash;
+    valueFacts = written.handlerFacts;
+    valueConfirmations = [written.confirmation];
+  }
+  const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0)
+    + (goalHorizon !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)

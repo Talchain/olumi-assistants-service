@@ -12,6 +12,7 @@
  */
 
 import {
+  GOAL_FIGURES_CHANCE_AS_GOAL,
   GOAL_FIGURES_OPTIONS_IDENTICAL,
   GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PRODUCT_NOT_READ,
@@ -153,8 +154,25 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown): Go
     ...(base.option_ids === undefined ? {} : { option_ids: [...new Set([...base.option_ids, ...ids])] }) };
 }
 
+/**
+ * ⛔ S-E GOALS (Science ruling 7 Oct §2): the goal is measured as a chance, so EVERY option's goal figures and every share
+ * went, ahead of any other cause; the reply says the ruling's one sentence and never offers to size a link into it.
+ */
+export const CHANCE_AS_GOAL_NOTE =
+  'This run withheld, for EVERY option, the chance and outcome for the goal and the share of runs that supported it: the goal '
+  + 'is measured as a chance of an event, which Olumi works out and never treats as a quantity. Never quote, estimate, rank or '
+  + 'compare a figure for the goal, never name a leading option, never ask the user for today\u2019s level of that chance or a '
+  + 'target for it, and never offer to size a link into it. Say `say` once, as written, when you describe the run.';
+
 /** The reader for every withhold code but gate 1 v2's; `warnings` is non-empty. */
 function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], opening: string): GoalChanceWithheld {
+  // S-E GOALS §2: a chance goal speaks alone, ahead of every other cause (`run-analysis.ts` writes no other beside it).
+  const chance = warnings.find((w) => w.code === GOAL_FIGURES_CHANCE_AS_GOAL);
+  if (chance !== undefined) {
+    const words = typeof chance.message === 'string' ? chance.message.trim() : '';
+    const ids = (key: string): string[] => (Array.isArray(chance[key]) ? (chance[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
+    return { withheld: true, say: words === '' ? opening : words, node_ids: ids('node_ids'), note: CHANCE_AS_GOAL_NOTE, option_ids: ids('option_ids') };
+  }
   // (S) speaks alone: CEE writes it only on a run PLoT did not already withhold (`run-analysis.ts`).
   if (warnings.every((w) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) {
     const w = warnings[0]!;

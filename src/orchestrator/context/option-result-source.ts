@@ -103,6 +103,13 @@ export const GOAL_FIGURES_OPTIONS_IDENTICAL = 'GOAL_FIGURES_OPTIONS_IDENTICAL';
  */
 export const GOAL_FIGURES_PROBABILITY_UNUSABLE = 'GOAL_FIGURES_PROBABILITY_UNUSABLE';
 
+/**
+ * ⛔ S-E GOALS (Science ruling 7 Oct §2, P0): the goal is measured as the CHANCE of an event ("% likelihood of on-time
+ * launch"), which Olumi computes and never propagates as a quantity. Written by `run_analysis` for EVERY scored option,
+ * ahead of every other withhold, with the ruling's one sentence (`goal-target/goal-kind.ts`); every share goes too.
+ */
+export const GOAL_FIGURES_CHANCE_AS_GOAL = 'GOAL_FIGURES_CHANCE_AS_GOAL';
+
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
@@ -112,6 +119,7 @@ export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_OPTIONS_IDENTICAL,
   GOAL_FIGURES_PROBABILITY_UNUSABLE,
+  GOAL_FIGURES_CHANCE_AS_GOAL,
 ]);
 
 /**

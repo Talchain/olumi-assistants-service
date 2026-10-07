@@ -50,7 +50,9 @@ import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/s
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { UNSIZED_PATH_LEADER_CAUSE_KEY, type UnsizedPathLeaderCause } from '../../agent-lane/unsized-path-cause.js';
 import { legacyLeaderGoalLinks, legacyGoalWarning, unsizedLeaderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
-import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { chanceGoalSentence, goalDeadlineOf, goalKindOf, soleGoalOf } from '../../goal-target/goal-kind.js';
+import { sayDate } from '../../goal-target/deadline-date.js';
+import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, appendInferenceWarning, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning, untestableGoalTargetRowId } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
@@ -1991,7 +1993,28 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     let withheldBecauseUnsizedPath: UnsizedPathLeaderCause | undefined;
     let legacyFiguresDisclosure = '';
     let legacyFiguresLinks: Array<{ from: string; to: string }> = [];
-    if (!runWithheldGoalFigures(envelope)) {
+    /**
+     * ⛔ S-E GOALS (Science ruling 7 Oct §2, P0; D-02): a goal measured as the CHANCE of an event is never propagated as a
+     * quantity. Served 6582edbc: "% likelihood of on-time launch" came back below zero for every option. Every option's
+     * goal figures and every win share are withheld under ONE code, said in ONE sentence, ahead of every other withhold
+     * (whose words would ask to size links into a chance): nothing else about the goal is said on this Run.
+     */
+    const chanceWithheld = withholdGoalFiguresForChanceGoal(response, graphForAnalysis);
+    const chanceGoalWithheld = chanceWithheld !== response;
+    if (chanceGoalWithheld) {
+      response = chanceWithheld;
+      log.info(
+        {
+          event: 'run_analysis.goal_figures_withheld_chance_as_goal',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          // Redacted: ids only.
+          goal_id: soleGoalOf(graphForAnalysis)?.id,
+        },
+        'run_analysis: goal figures withheld: the goal is measured as a chance, which Olumi computes',
+      );
+    }
+    if (!chanceGoalWithheld && !runWithheldGoalFigures(envelope)) {
       const scoredIds = [...new Set(readOptionResultSources(envelope).flat().map((r) => (typeof r.option_id === 'string' ? r.option_id : r.id))
         .filter((id): id is string => typeof id === 'string' && id !== ''))];
       const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
@@ -3763,6 +3786,27 @@ function goalFigureOptions(envelope: unknown): { scored: string[]; shown: string
  * e8 CONFIRMED): the shares, the leader and the brief STAY (`keepOrdering`), exactly as on a run with no target. Options an earlier withhold already took keep
  * that withhold's own reason. Returns `response` itself when nothing is left to withhold or the target is testable. Pure.
  */
+/**
+ * ⛔ S-E GOALS (Science ruling 7 Oct §2, P0; D-02): a goal measured as the CHANCE of an event is never propagated as a
+ * quantity. Served 6582edbc: "% likelihood of on-time launch" came back below zero for every option. EVERY scored option's
+ * goal figures and every win share are withheld under ONE code (`GOAL_FIGURES_CHANCE_AS_GOAL`), said in the ruling's ONE
+ * sentence, ahead of every other withhold (whose words would ask to size links into a chance). Returns `response` itself
+ * when the goal is not a chance. Pure.
+ */
+export function withholdGoalFiguresForChanceGoal<E>(response: E, graph: unknown): E {
+  const goal = soleGoalOf(graph);
+  if (goal === undefined || goalKindOf(goal) !== 'chance_of_event' || response === null || typeof response !== 'object') return response;
+  const scored = [...new Set(readOptionResultSources(response as Record<string, unknown>).flat()
+    .map((r) => (typeof r.option_id === 'string' ? r.option_id : r.id))
+    .filter((id): id is string => typeof id === 'string' && id !== ''))];
+  const deadline = goalDeadlineOf(goal);
+  return withholdOptionGoalFigures(response, new Set(scored), {
+    code: GOAL_FIGURES_CHANCE_AS_GOAL, severity: 'warning',
+    message: chanceGoalSentence(deadline === undefined ? undefined : sayDate(deadline)),
+    node_ids: [String(goal.id)], option_ids: scored,
+  });
+}
+
 export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown): E {
   const { scored, shown } = goalFigureOptions(response);
   // A run that shows no goal figure and was withheld by nothing still names no leader and no share under `exploratory`
