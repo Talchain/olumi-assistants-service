@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { readRateAsQuantity } from '../rate-as-quantity.js';
 import { goalKindOf } from '../goal-kind.js';
+import { withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 
 describe('Science (b) rows: a rate is a quantity, a one-off event stays a chance', () => {
   it.each([
@@ -65,5 +66,18 @@ describe('the goal’s label is read with its unit (the drafter often writes the
     ['New platform shipped by Q3', 'probability (0–1)'], // 1
   ])('SERVED CHANCE stays a chance: %s measured in %s', (label, unit) => {
     expect(goalKindOf({ kind: 'goal', label, goal_threshold_unit: unit })).toBe('chance_of_event');
+  });
+});
+
+describe('the Run (run-analysis withhold seam): a rate goal keeps its figures; a served event goal still withholds them', () => {
+  const envelope = () => ({ option_comparison: [{ option_id: 'a', probability_of_goal: 0.4, outcome: { mean: 2.5, p10: 1, p90: 4 } }], inference_warnings: [] });
+  const graph = (label: string, unit: string) => ({ nodes: [{ id: 'g', kind: 'goal', label, goal_threshold_unit: unit }] });
+  it('RED on staging: "Monthly churn" in "probability (%)" was withheld as a chance; now the envelope is returned as is', () => {
+    const e = envelope();
+    expect(withholdGoalFiguresForChanceGoal(e, graph('Monthly churn', 'probability (%)'))).toBe(e);
+  });
+  it('CONTROL: the served "ship the new platform by Q3" in "probability (%)" is still withheld for every option', () => {
+    const out = withholdGoalFiguresForChanceGoal(envelope(), graph('ship the new platform by Q3', 'probability (%)')) as { option_comparison: { probability_of_goal?: number }[] };
+    expect(out.option_comparison[0]?.probability_of_goal).toBeUndefined();
   });
 });
