@@ -13,6 +13,7 @@ import { goalChanceDriverDisplayForAgent } from '../../goal-target/goal-chance-r
 import {
   DRIVER_ABSENCE_CLAIM, GOAL_CHANCE_DRIVER_ABSENCE_REMOVED, removeDriverAbsenceClaims, withoutDriverAbsenceClaimsAtEgress,
   SENSITIVITY_ABSENCE_CLAIM, SENSITIVITY_ABSENCE_REMOVED, SENSITIVITY_ABSENCE_KEPT_UNSAFE, removeSensitivityAbsenceClaims, robustnessComputed,
+  screenNamesADriver,
 } from '../goal-chance-driver-egress.js';
 
 type Json = Record<string, any>;
@@ -435,5 +436,272 @@ describe('Wave B pilot, keys untouched: a Run whose robustness check ran never s
       else expect(final).toBe(base);
     }
     expect(n).toBe(16);
+  });
+});
+
+/**
+ * Wave B, unseen brief (7 Oct 03:0xZ, guest, CEE b568cc9, UI e3f2fc82), keys untouched. The screen showed RANGE lines
+ * ("It depends most on how strongly 'Fourth-shop net-profit contribution' affects 'monthly profit' …") and NO licensed
+ * driver, so S2's gate (licensed drivers only) never opened: the Run narration said "… so investigation priority is not
+ * established" and the Challenge reply "The run hasn't established which assumption changes the chances most." DL ruling:
+ * a range line's driver is a screen driver (the same unbarred options the screen draws).
+ */
+const UNSEEN_RUN1 = JSON.parse(fixture('waveB-unseen1-b568cc9-run1-turn003.json')) as Json;
+const UNSEEN_CHALLENGE = JSON.parse(fixture('waveB-unseen1-b568cc9-challenge-turn001.json')) as Json;
+const RUN1_CLAUSE = ', so investigation priority is not established.';
+const CHALLENGE_LINE = 'The run hasn’t established which assumption changes the chances most.\n\n';
+const withoutRange = (body: Json): Json => {
+  const out = clone(body);
+  blockOf(out).enrichment.inference_warnings = blockOf(out).enrichment.inference_warnings.filter((w: Json) => w.code !== 'GOAL_CHANCE_RANGE');
+  return out;
+};
+
+describe('Wave B unseen brief, keys untouched: a range line is a screen driver, so the reply never denies one', () => {
+  it('the gate opens on the range display alone (no licensed driver on this Run; robustness not computed)', () => {
+    for (const body of [UNSEEN_RUN1, UNSEEN_CHALLENGE]) {
+      expect(goalChanceDriverDisplayForAgent(blockOf(body), body.draft_graph)).toEqual({});
+      expect(robustnessComputed(blockOf(body))).toBe(false);
+      expect(screenNamesADriver(blockOf(body), body.draft_graph)).toBe(true);
+    }
+  });
+
+  it('RED at base: the Run narration loses only "so investigation priority is not established"', () => {
+    expect(UNSEEN_RUN1.assistant_text.endsWith(`Sensitivity was not measured${RUN1_CLAUSE}`)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(UNSEEN_RUN1, opts(UNSEEN_RUN1)) as Json;
+    expect(out.assistant_text).toBe(UNSEEN_RUN1.assistant_text.replace(RUN1_CLAUSE, '.'));
+    expect(out.assistant_text).toContain('Sensitivity was not measured.');
+    expectWellFormed(out.assistant_text);
+    expect({ ...out, assistant_text: UNSEEN_RUN1.assistant_text }).toEqual(UNSEEN_RUN1);
+  });
+
+  it('RED at base: the Challenge reply loses only its denial line', () => {
+    expect(UNSEEN_CHALLENGE.assistant_text.startsWith(CHALLENGE_LINE)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(UNSEEN_CHALLENGE, opts(UNSEEN_CHALLENGE)) as Json;
+    expect(out.assistant_text).toBe(UNSEEN_CHALLENGE.assistant_text.slice(CHALLENGE_LINE.length));
+    expectWellFormed(out.assistant_text);
+    expect({ ...out, assistant_text: UNSEEN_CHALLENGE.assistant_text }).toEqual(UNSEEN_CHALLENGE);
+  });
+
+  it('CONTROL no range record: the same replies are kept, by reference', () => {
+    for (const body of [withoutRange(UNSEEN_RUN1), withoutRange(UNSEEN_CHALLENGE)]) {
+      expect(screenNamesADriver(blockOf(body), body.draft_graph)).toBe(false);
+      expect(withoutDriverAbsenceClaimsAtEgress(body, opts(body))).toBe(body);
+    }
+  });
+
+  it('CONTROL every ranged option barred (product not read): the screen draws no range, so nothing is removed', () => {
+    const barred = clone(UNSEEN_CHALLENGE);
+    const range = blockOf(barred).enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_RANGE');
+    blockOf(barred).enrichment.inference_warnings.push({ code: 'GOAL_FIGURES_PRODUCT_NOT_READ', severity: 'warning', message: 'x', option_ids: range.option_ids });
+    expect(screenNamesADriver(blockOf(barred), barred.draft_graph)).toBe(false);
+    expect(withoutDriverAbsenceClaimsAtEgress(barred, opts(barred))).toBe(barred);
+  });
+
+  // The two missing forms (author-written paraphrases, labelled as such), each with its edited text.
+  it.each([
+    ['Six values are Olumi’s. The run hasn’t established which assumption changes the chances most.', 'Six values are Olumi’s.'],
+    ['This run does not show which factor moves the result most, and the deadline was not tested.', 'The deadline was not tested.'],
+    ['It cannot tell which input shifts your chances the most; check the churn figure.', 'Check the churn figure.'],
+    ['Figures are provisional; it has not established an investigation priority.', 'Figures are provisional.'],
+    ['There is no investigation priority yet; the deadline was not tested.', 'The deadline was not tested.'],
+    ['Olumi has not identified an investigation priority, so check the biggest figures first.', 'Check the biggest figures first.'],
+    ['Sensitivity was not measured, so investigation priority is not established.', 'Sensitivity was not measured.'],
+  ])('MUST FIRE (paraphrase): %s', (text, edited) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+    const out = removeDriverAbsenceClaims(text);
+    expect(out).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+    expectWellFormed(out.text);
+  });
+
+  it.each([
+    'Your investigation priority is the churn link.',
+    'Set an investigation priority with your team.',
+    'Investigation priorities are set by your team.',
+    'The price rise changes the chances most in this model.',
+    'We have not established which supplier changes the result most.',
+    'Which option changes the chances most is not something Olumi ranks.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  // DL: every new pattern at 20,000 whitespace stays linear (< 50 ms).
+  it.each([
+    ['"changes" + 20,000 spaces', `changes${' '.repeat(20000)}x`],
+    ['"changes the" + 20,000 spaces', `changes the${' '.repeat(20000)}x`],
+    ['"investigation" + 20,000 spaces', `investigation${' '.repeat(20000)}x`],
+    ['"no" + 20,000 spaces + "investigation"', `no${' '.repeat(20000)}investigation`],
+    ['"has not established" + 20,000 spaces', `has not established${' '.repeat(20000)}x`],
+    ['"which assumption" + 20,000 spaces', `which assumption${' '.repeat(20000)}x`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text);
+    removeDriverAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
+
+/**
+ * Wave B2 (7 Oct 03:34–03:38Z, guest, CEE 044faef3, UI e3f2fc82), keys untouched. S2c held on the Run narration, but two
+ * new paraphrases reached the user beside range lines: the provisional view "…it has not established which assumption
+ * deserves investigation priority." and the Challenge reply "The saved result does not establish which assumption would
+ * change these chances most." S2d adds ONE general, bounded limb (DL GO + guardrails): a denial of "which assumption …"
+ * with at most 6 words before "most" / "priority" / "most sensitive to" / "most weight" ENDING the clause.
+ */
+const B2_RUN1 = JSON.parse(fixture('waveB2-unseen2-044faef-run1-turn003.json')) as Json;
+const B2_CHALLENGE = JSON.parse(fixture('waveB2-unseen2-044faef-challenge-turn001.json')) as Json;
+const B2_PV_CLAUSE = '; it has not established which assumption deserves investigation priority.';
+const B2_CHALLENGE_LINE = 'The saved result does not establish which assumption would change these chances most.\n\n';
+
+describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
+  it('RED at base: the provisional view loses only its denial clause; the reply is untouched', () => {
+    const reasoning = B2_RUN1._agent.provisional_view.reasoning as string;
+    expect(reasoning.endsWith(B2_PV_CLAUSE)).toBe(true);
+    expect(screenNamesADriver(blockOf(B2_RUN1), B2_RUN1.draft_graph)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B2_RUN1, opts(B2_RUN1)) as Json;
+    expect(out._agent.provisional_view.reasoning).toBe(reasoning.replace(B2_PV_CLAUSE, '.'));
+    expect(out.assistant_text).toBe(B2_RUN1.assistant_text);
+    expectWellFormed(out._agent.provisional_view.reasoning);
+    expect({ ...out, _agent: B2_RUN1._agent }).toEqual(B2_RUN1);
+  });
+
+  it('RED at base: the Challenge reply loses only its denial line', () => {
+    expect(B2_CHALLENGE.assistant_text.startsWith(B2_CHALLENGE_LINE)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B2_CHALLENGE, opts(B2_CHALLENGE)) as Json;
+    expect(out.assistant_text).toBe(B2_CHALLENGE.assistant_text.slice(B2_CHALLENGE_LINE.length));
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('CONTROL no range record: both served turns kept, by reference', () => {
+    for (const body of [withoutRange(B2_RUN1), withoutRange(B2_CHALLENGE)]) {
+      expect(withoutDriverAbsenceClaimsAtEgress(body, opts(body))).toBe(body);
+    }
+  });
+
+  it.each([
+    ['Six values are Olumi’s. This run cannot say which factor your figures depend on most.', 'Six values are Olumi’s.'],
+    ['Figures are provisional; the analysis has not shown which input the chance is most sensitive to.', 'Figures are provisional.'],
+    ['Olumi has not identified which of the assumptions carries the most weight, so check the price figure.', 'Check the price figure.'],
+    ['The deadline was not tested, and it cannot tell which driver deserves attention priority.', 'The deadline was not tested.'],
+  ])('MUST FIRE (general limb, paraphrase): %s', (text, edited) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+  });
+
+  // DL guardrails: an ASSERTION, a QUESTION, a QUOTE, a person's preference, a temporal "first", "most" as a determiner.
+  it.each([
+    'This run shows which assumption deserves investigation first: price.',
+    'This run shows which assumption deserves investigation priority: price.',
+    'Has the run not established which assumption deserves investigation priority?',
+    'So the run hasn’t established which assumption deserves priority?', // only the "?" rule decides this one
+    'You wrote: "the run has not established which assumption deserves priority".',
+    'You wrote: "the run has not established which assumption deserves priority."',
+    'It has not established which assumption you care about most.',
+    'Olumi does not know which factor your team ranks most.',
+    'It has not established which assumption most users accept.',
+    'We do not know which input arrives first, the survey or the audit.',
+    'We have not established which supplier matters most.',
+    'The run does not establish which assumption most of the margin comes from yet, but price is the main one.',
+    // more than 6 words between the assumption and "most": too far to bind them (the gap is bounded)
+    'The run does not establish which assumption the planning committee at the regional office now values most.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  it.each([
+    ['denial + "which assumption" + 20,000 spaces', `has not established which assumption${' '.repeat(20000)}x`],
+    ['denial + gap word + 20,000 spaces + "most"', `has not established which assumption deserves${' '.repeat(20000)}most`],
+    ['"priority" + 20,000 spaces + "."', `does not establish which factor priority${' '.repeat(20000)}.`],
+    ['the limb repeated 2,000 times', 'does not establish which assumption deserves '.repeat(2000)],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text);
+    removeDriverAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
+
+/**
+ * Wave B3 (7 Oct 03:57–04:07Z, guest, CEE 7addf05, UI efbb0eef), keys untouched. New wordings beside range lines and a
+ * licensed T1b driver: Challenge "This result does not establish what changes chances most." / "It hasn’t established
+ * what changes the chances most: …" (a "what" with no assumption noun), and the T1b provisional view "…but the analysis
+ * has not tested the deadline or established investigation priority." (a coordinated tail: only the "or …" goes, so the
+ * true deadline caveat stays). S2e adds both forms; the route edits the view where it is built (pv-route test).
+ */
+const B3_CH1 = JSON.parse(fixture('waveB3-unseen1-7addf05-challenge-turn001.json')) as Json;
+const B3_CH2 = JSON.parse(fixture('waveB3-unseen2-7addf05-challenge-turn001.json')) as Json;
+const B3_T1B = JSON.parse(fixture('waveB3-t1b-7addf05-run1-turn003.json')) as Json;
+
+describe('Wave B3, keys untouched: the "what changes the chances most" form and the coordinated tail (S2e)', () => {
+  it('RED at base: Challenge b3-1 loses only its denial line', () => {
+    const line = 'This result does not establish what changes chances most.\n\n';
+    expect(B3_CH1.assistant_text.startsWith(line)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B3_CH1, opts(B3_CH1)) as Json;
+    expect(out.assistant_text).toBe(B3_CH1.assistant_text.slice(line.length));
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('RED at base: Challenge b3-2 loses the denial and keeps its reason, capitalised', () => {
+    const lead = 'It hasn’t established what changes the chances most: profit-generating effects still lack agreed sizes.';
+    expect(B3_CH2.assistant_text.startsWith(lead)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B3_CH2, opts(B3_CH2)) as Json;
+    expect(out.assistant_text).toBe(B3_CH2.assistant_text.replace(lead, 'Profit-generating effects still lack agreed sizes.'));
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('RED at base: the T1b provisional view loses only "or established investigation priority"; the deadline caveat stays', () => {
+    const reasoning = B3_T1B._agent.provisional_view.reasoning as string;
+    expect(reasoning.endsWith('but the analysis has not tested the deadline or established investigation priority.')).toBe(true);
+    expect(Object.keys(goalChanceDriverDisplayForAgent(blockOf(B3_T1B), B3_T1B.draft_graph)).length).toBeGreaterThan(0);
+    const out = withoutDriverAbsenceClaimsAtEgress(B3_T1B, opts(B3_T1B)) as Json;
+    expect(out._agent.provisional_view.reasoning).toBe(reasoning.replace(' or established investigation priority.', '.'));
+    expect(out._agent.provisional_view.reasoning).toContain('has not tested the deadline.');
+  });
+
+  it('CONTROL no range record: both Challenge turns kept, by reference', () => {
+    for (const body of [withoutRange(B3_CH1), withoutRange(B3_CH2)]) expect(withoutDriverAbsenceClaimsAtEgress(body, opts(body))).toBe(body);
+  });
+
+  it.each([
+    ['The run does not tell us what drives the result the most.', ''],
+    ['It has not checked the churn figure nor identified an investigation priority, so check it first.', 'It has not checked the churn figure, so check it first.'],
+    ['Figures are provisional; it cannot say what moves your chances most.', 'Figures are provisional.'],
+  ])('MUST FIRE (paraphrase): %s', (text, edited) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+  });
+
+  it.each([
+    'This run shows what changes the chances most: the price rise.',
+    'Does the run not establish what changes the chances most?',
+    'What changes the chances most is the price rise.',
+    'You asked "what changes the chances most".',
+    'It has not tested the deadline or the churn figure.',
+    'We have not set a budget or established investigation teams.',
+    'The team reviewed the risks or established investigation priority last quarter.', // no negation: only that guard decides
+    'Price changes the chances most, and the deadline was not tested.',
+    'The run did not establish what changes your mind most.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  it('kept-unsafe: a coordinated tail that would remove the deadline is kept', () => {
+    const text = 'It has not tested the churn figure or established investigation priority within the 9-month deadline.';
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
+  });
+
+  it.each([
+    ['negation + 20,000 spaces + coordinated tail', `has not tested${' '.repeat(20000)}or established investigation priority`],
+    ['"or" + 20,000 spaces', `has not tested the deadline or${' '.repeat(20000)}established investigation priority`],
+    ['"what" + 20,000 spaces', `does not establish what${' '.repeat(20000)}x`],
+    ['"what changes the chances" + 20,000 spaces + "most"', `does not establish what changes the chances${' '.repeat(20000)}most`],
+    ['tabs inside the lookbehind', `has not tested${'\t'.repeat(20000)}or established investigation priority`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text);
+    removeDriverAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
   });
 });

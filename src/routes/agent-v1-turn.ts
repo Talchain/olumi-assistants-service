@@ -3803,6 +3803,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1',
+        userText: typedNow ?? undefined,
         mayNameLeadingOption: claim?.permitted === true,
         separationEstablished: claim?.separation === 'separated',
         ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
@@ -3870,6 +3871,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       log.warn({ scenario_id: scenarioId, analysis_on_record: standing?.analysis_on_record ?? null, withheld: standing?.withheld ?? null },
         'agent-lane: a provisional view was given but the final readback does not withhold the leader — it is not shown');
     }
+    // ⭐ Wave B3 (7 Oct, CEE 7addf05): the final egress below (`withoutDriverAbsenceClaimsAtEgress`) runs BEFORE `_agent` and
+    // its provisional view are attached, so the view never reached it: "…investigation priority is not established"
+    // shipped beside a range line. The SAME function and gate clean the view here, where it is built.
+    const provisionalViewShown = provisionalView === null ? null : ((): typeof provisionalView => {
+      const viewBody: { assistant_text?: unknown; _agent: { provisional_view: typeof provisionalView } } = { _agent: { provisional_view: provisionalView } };
+      return withoutDriverAbsenceClaimsAtEgress(viewBody, {
+        analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view',
+        ...(turnId !== undefined ? { turnId } : {}),
+      })._agent.provisional_view;
+    })();
     /**
      * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:
      * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
@@ -4227,7 +4238,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // data — every figure, whose it is, and the target line — so a surface or a rewording never re-derives it.
         ...(breakEven !== null ? { break_even: breakEven } : {}),
         // ⭐ C5: the Agent's provisional view — ONLY here, typed, with its heading; never in `assistant_text` (see above).
-        ...(provisionalView !== null ? { provisional_view: provisionalView } : {}),
+        ...(provisionalViewShown !== null ? { provisional_view: provisionalViewShown } : {}),
       },
       /**
        * ⭐ EVERY GENERATIVE ATTEMPT THIS TURN MADE, off the provider policy's ledger

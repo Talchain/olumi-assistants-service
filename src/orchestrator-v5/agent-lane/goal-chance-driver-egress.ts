@@ -13,7 +13,7 @@
  * (code + turn id + counts, never prose) measures how often the prompt rule misses.
  */
 import { log } from '../../utils/telemetry.js';
-import { goalChanceDriverDisplayForAgent } from '../goal-target/goal-chance-range-agent.js';
+import { goalChanceDriverDisplayForAgent, goalChanceRangeBarredForAgent, goalChanceRangeDisplayForAgent } from '../goal-target/goal-chance-range-agent.js';
 
 export const GOAL_CHANCE_DRIVER_ABSENCE_REMOVED = 'GOAL_CHANCE_DRIVER_ABSENCE_REMOVED';
 export const GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE = 'GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE';
@@ -25,13 +25,23 @@ const ITEM = R`(?:assumption|factor|input|driver)s?`;
 const WHICH = R`(?:which|what)`;
 /** "which assumption in this model matters most": at most four words between the noun and its "most". */
 const GAP = R`(?:\s+[\w’'-]+){0,4}?`;
-const MOST = R`\s+(?:(?:matters?|mattered)\s+(?:the\s+)?most|(?:is|was|are|were)\s+(?:the\s+)?most\s+(?:worth\s+investigating|important|sensitive|influential|consequential|decisive)|(?:is|are|was|were)\s+the\s+(?:biggest|main|key|largest|strongest)\s+(?:driver|factor|assumption)|(?:deserves?|merits?|needs?)\s+(?:investigation|attention|checking|testing)\s+first|(?:to\s+)?(?:investigate|check|test|examine)\s+first|drives?\s+(?:the\s+)?(?:result|outcome|chance|comparison)\s+most|most\s+(?:affects?|influences?|drives?|moves?|shapes?|changes?)\b)`;
+const MOST = R`\s+(?:(?:matters?|mattered)\s+(?:the\s+)?most|(?:is|was|are|were)\s+(?:the\s+)?most\s+(?:worth\s+investigating|important|sensitive|influential|consequential|decisive)|(?:is|are|was|were)\s+the\s+(?:biggest|main|key|largest|strongest)\s+(?:driver|factor|assumption)|(?:deserves?|merits?|needs?)\s+(?:investigation|attention|checking|testing)\s+first|(?:to\s+)?(?:investigate|check|test|examine)\s+first|drives?\s+(?:the\s+)?(?:result|outcome|chance|comparison)\s+most|most\s+(?:affects?|influences?|drives?|moves?|shapes?|changes?)\b|(?:changes?|moves?|shifts?|affects?|drives?|influences?|swings?)\s+(?:(?:the|its|your)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most\b)`;
 const NEG = R`(?:\b(?:does|do|did|has|have|had|could|can|ca|was|were|will|wo|is|would)\s*(?:not|n[’']t)|\bcannot|\bnever)(?:\s+(?:yet|also|itself|still))*`;
 const VERB = R`\s+(?:been\s+)?(?:able\s+to\s+)?(?:establish|identif|determin|measur|show|tell|say|know|pin\w*\s+down|single\w*\s+out|isolat|find|found|reveal|indicat|clarif|settl)\w*`;
 const ABSENT = R`(?:\s*(?:not|n[’']t)\s*(?:yet\s+)?(?:been\s+)?(?:established|measurable|measured|identified|determined|clear|known|settled|found)|\s+(?:still\s+)?(?:unclear|unknown|undetermined|unmeasured|unestablished))`;
 /** "which assumption" · "which of the assumptions" · "what of these factors". */
 const WHICH_ITEM = R`${WHICH}\s+(?:of\s+(?:the|these|those|your)\s+)?${ITEM}`;
 const MOST_ADJ = R`most[-\s](?:sensitive|important|influential|consequential|decisive)`;
+
+/** S2d: 1–6 plain words, none a person who would own a preference (bounded: no `.*`, linear time). */
+const GEN_GAP = R`(?:\s+(?!(?:you|we|they|i|team|users?|people|customers?)\b)[\w’'-]+){1,6}?`;
+/** The clause ends here: , ; : . ! ) or the end, never "?" and never a closing quote straight after. */
+const CLAUSE_END = R`(?=[ \t]{0,4}(?:[.,;:!)](?![”"’'])|$))`;
+
+/** S2e: NEG with BOUNDED runs, for use inside a lookbehind (an unbounded run there is quadratic, DL #2712 r1). */
+const NEG_B = R`(?:\b(?:does|do|did|has|have|had|could|can|ca|was|were|will|wo|is|would)[ \t]{0,2}(?:not|n[’']t)|\bcannot|\bnever)`;
+/** S2e: a coordinated tail, cut from its "or" so the first, true half stays ("…has not tested the deadline"). */
+const COORDINATED_TAIL = /^[ \t]+(?:or|nor)[ \t]/i;
 
 /** The ONE claim class: "no assumption/factor is established as mattering most". Every form is a row in the tests. */
 export const DRIVER_ABSENCE_CLAIM = new RegExp([
@@ -51,6 +61,22 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   R`\bno\s+(?:single\s+)?${MOST_ADJ}\s+${ITEM}\s+(?:was|is|has\s+been|could\s+be|were|are)\s+(?:established|measurable|measured|identified|found|determined)`,
   // "no assumption has been identified as the most important"
   R`\bno\s+(?:single\s+)?${ITEM}\s+(?:has\s+been|was|is|could\s+be)\s+(?:identified|established|shown|found|singled\s+out)\s+as\s+(?:the\s+)?(?:most\s+(?:important|influential|sensitive)|(?:main|key|biggest)\s+driver)`,
+  // ⭐ Wave B2 (7 Oct 03:3xZ, CEE 044faef): paraphrases keep coming ("…has not established which assumption deserves
+  // investigation priority", "…does not establish which assumption would change these chances most"). ONE general,
+  // bounded limb: a DENIAL (NEG + VERB) of "which assumption/factor/input/driver", at most 6 words, then "most",
+  // "priority" or "most sensitive to" ENDING the clause. Never a question ("?"), never inside a quote (no closing quote
+  // after the end), never a person's preference ("which assumption you/we/they/the team … most").
+  R`${NEG}${VERB}\s+${WHICH_ITEM}${GEN_GAP}\s+(?:the\s+)?(?:most(?:\s+(?:sensitive\s+to|weight))?|priority)${CLAUSE_END}`,
+  // ⭐ Wave B3 (7 Oct, CEE 7addf05, Challenge): "This result does not establish what changes chances most." /
+  // "It hasn't established what changes the chances most: …" (a "what" with no assumption noun).
+  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
+  // ⭐ Wave B3 (T1b provisional view): "…the analysis has not tested the deadline or established investigation priority."
+  // Only the "or …" tail is the claim (bounded lookbehind to its negation); `cutOnce` cuts from the "or".
+  R`(?<=${NEG_B}(?:[ \t]{1,3}[\w’'-]+){1,6})[ \t]{1,3}(?:or|nor)[ \t]{1,3}(?:yet[ \t]{1,3})?(?:established?|identified|set|determined)[ \t]{1,3}(?:(?:an?|the|any)[ \t]{1,3})?(?:clear[ \t]{1,3})?investigation[ \t]{1,3}priorit(?:y|ies)\b`,
+  // Wave B (7 Oct, unseen-2 provisional view): "it has not established an investigation priority"
+  R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:clear\s+)?investigation\s+priorit(?:y|ies)\b`,
+  // "there is no investigation priority yet"
+  R`\bno\s+(?:clear\s+)?investigation\s+priorit(?:y|ies)\b`,
   // "no single assumption stands out" · "none of the assumptions stands out"
   R`\b(?:no\s+(?:single\s+)?|none\s+of\s+the\s+)${ITEM}\s+(?:stands?|stood)\s+out`,
   // predicative: "investigation priority is not established" · "the most important assumption is unknown"
@@ -110,6 +136,15 @@ type Cut = { kind: 'cut'; body: string } | { kind: 'lead_in_empty' } | { kind: '
 
 /** One claim out of one sentence body (no terminal punctuation), or why it must stay. */
 function cutOnce(body: string, m: RegExpExecArray, labels: readonly string[]): Cut {
+  // S2e: a coordinated tail is its own clause: cut from its "or" to the next clause stop; the same kept-unsafe rules hold.
+  if (COORDINATED_TAIL.test(m[0])) {
+    const after = body.slice(m.index + m[0].length);
+    const stop = RIGHT_STOP.exec(after);
+    const end = m.index + m[0].length + (stop === null ? after.length : stop.index);
+    const span = body.slice(m.index, end);
+    if (PROTECTED.test(span) || MONTH.test(span) || labels.some((l) => l !== '' && span.toLowerCase().includes(l.toLowerCase()))) return { kind: 'unsafe' };
+    return { kind: 'cut', body: `${body.slice(0, m.index)}${body.slice(end)}` };
+  }
   const pre = body.slice(0, m.index);
   const strong = lastMatch(STRONG_LEFT, pre);
   const comma = lastMatch(COMMA_CONNECTOR_LEFT, pre);
@@ -221,6 +256,17 @@ export interface DriverAbsenceEgressOpts {
  * reasonings carry the same claim, each with a clean clause boundary.
  */
 /**
+ * The screen names what a chance rests or depends on most: a licensed driver ("It rests most on …") OR, Wave B (7 Oct,
+ * unseen brief, CEE b568cc9), a shown range line ("It depends most on how strongly 'A' affects 'B' …"; the same options
+ * the screen draws, unbarred). Either makes "no assumption is established as mattering most" false.
+ */
+export function screenNamesADriver(analysisResult: unknown, graph: unknown): boolean {
+  if (Object.keys(goalChanceDriverDisplayForAgent(analysisResult, graph)).length > 0) return true;
+  const ranges = goalChanceRangeDisplayForAgent(analysisResult, graph);
+  return Object.keys(ranges ?? {}).some((optionId) => !goalChanceRangeBarredForAgent(analysisResult, optionId));
+}
+
+/**
  * The Run's robustness check RAN: a robustness record with a `fragile_edges` array (empty counts: computed, nothing
  * fragile) and its verdict. Absent, `{}` or no array = not computed, and "sensitivity was not measured" may be true.
  */
@@ -252,7 +298,7 @@ export function withoutDriverAbsenceClaimsAtEgress<T extends { assistant_text?: 
     const view = typeof reasoning === 'string' && reasoning !== '' ? reasoning : undefined;
     if (reply === undefined && view === undefined) return body;
     const classes = [
-      ...(Object.keys(goalChanceDriverDisplayForAgent(opts.analysisResult, opts.graph)).length > 0 ? [DRIVER_CLASS] : []),
+      ...(screenNamesADriver(opts.analysisResult, opts.graph) ? [DRIVER_CLASS] : []),
       ...(robustnessComputed(opts.analysisResult) ? [SENSITIVITY_CLASS] : []),
     ];
     if (classes.length === 0) return body;

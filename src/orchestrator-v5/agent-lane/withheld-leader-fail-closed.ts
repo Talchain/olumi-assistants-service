@@ -1,4 +1,4 @@
-import { readUnsizedPathLeaderCause, unsizedLinkSentence } from './unsized-path-cause.js';
+import { readUnsizedPathLeaderCause, unsizedLinkSentence, unsizedLinkStatement, type UnsizedPathLink } from './unsized-path-cause.js';
 import { placeholderAskWords } from './goal-certainty.js';
 /**
  * ⛔ AGENT LANE — WHEN THE LEADER IS WITHHELD, NO RANKING SENTENCE REACHES THE USER.
@@ -953,10 +953,32 @@ function measureBeforeFigure(between: string, labels: RankingLabelContext): bool
  */
 const POSITION_WORD = /\b(?:trails?|trailing|trailed|lags?|lagging|lagged|follows?\s+(?:at|on|with)|runner[-\s]up|(?:comes?|came|finish(?:es|ed)?|sits?|ranks?|ranked|is|was)\s+(?:in\s+)?(?:second|third|fourth|last)(?:\s+place)?|in\s+(?:second|third|fourth|last)\s+place|at\s+the\s+bottom)\b/i;
 
+/**
+ * c6 (D-a): the STAFFING noun ("First, appoint one lead for the route merge") is not a ranking word. Exempt ONLY the
+ * appointing form (review r1, DL ruling): a staffing verb + a/an/one/single/each + at most one ROLE word from an allowlist
+ * + "lead(s)" + a STAFFING COMPLEMENT (sentence end, for/per/to/who, or a possessive). appoint/assign/nominate/hire/
+ * designate/name may sit anywhere; pick/choose/select/need only when they open the sentence. Everything else still fires:
+ * "If you had to choose a lead today, it would be…", "Pick one lead: keeping…", "would need a bigger lead",
+ * "Name one lead and it is hiring", "Choose a lead-option now" (r0 probe + r1 review: 26 must-fire rows).
+ */
+const STAFFING_ROLE = String.raw`(?:project|operations|ops|delivery|site|depot|team|programme|program|product|technical|tech|engineering|sales|marketing|finance|pilot|implementation|change|integration|workstream|launch|migration|account|customer|clinical|design|data|commercial|regional|store|shift|route|named|dedicated|senior|interim|overall|single)`;
+/** Every whitespace run is BOUNDED (DL #2711 r2: two adjacent unbounded runs were quadratic, 806 ms at 20k spaces). */
+const STAFFING_NOUN = String.raw`(?:a|an|one|single|each)[ \t]{1,4}(?:${STAFFING_ROLE}[ \t]{1,4})?leads?\b(?=[ \t]{0,4}[.!]?[ \t]{0,4}(?:$|\n)|[ \t]{1,4}(?:for|per|to|who)\b|['’]s\b)`;
+const STAFFING_LEAD = new RegExp(String.raw`\b(?:appoint|assign|nominate|hire|designate|name)[ \t]{1,4}${STAFFING_NOUN}|^[ \t*_]{0,6}(?:(?:first|then|next|now)[ \t]{0,4},?[ \t]{1,4})?(?:pick|choose|select|need)[ \t]{1,4}${STAFFING_NOUN}`, 'giu');
+
+/** Blank only the appointed role noun; any other ranking words in the sentence still fire. */
+function blankStaffingLead(text: string, labels: RankingLabelContext): string {
+  if ((labels.optionLabels ?? []).some(label => optionLabelPattern(classificationCopy(label)).test(text))) return text;
+  const blanked = text.replace(STAFFING_LEAD, role => role.replace(/\bleads?\b/i, BLANK));
+  // r1 review: any OTHER lead-family word left in the sentence refuses the exemption ("Appoint one lead for the merge, as
+  // keeping the current team leads": "team leads" is a blanked idiom downstream, so the appointed noun must still fire).
+  return blanked !== text && /\b(?:lead|leads|leading|led|leaders?)\b/i.test(blanked) ? text : blanked;
+}
+
 /** Which ranking patterns a sentence trips, after idioms and ranking-shaped labels are blanked. */
 export function rankingCodesIn(sentence: string, labels: RankingLabelContext = NO_LABELS, prior = ''): string[] {
   if (typeof sentence !== 'string' || sentence.trim() === '') return [];
-  let text = classificationCopy(sentence);
+  let text = blankStaffingLead(classificationCopy(sentence), labels);
   for (const label of labels.rankingShapedLabels) text = text.replace(optionLabelPattern(classificationCopy(label)), BLANK);
   for (const word of labels.rankingShapedLabelWords) {
     // Case-SENSITIVE: the capitalised name, never the lower-case verb ("leads the comparison").
@@ -1090,8 +1112,31 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
 
 export type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
 
+const DECLINES_LINK = /\b(?:not checking|not adding|won't add|don't add|leave (?:it|that|them) out|skip (?:it|that)|move on|not going to size|don't want to size|no need to size|not modelling)\b/i;
+/** A positive decline ("move on", "skip it", "leave it out") negated right before it is NOT a refusal ("let's not move on"). */
+const NEGATED_BEFORE = /(?:\bnot|n't|\bnever|\bno)[ \t]{0,4}$/i;
+/** Clause ends: sentence punctuation, ";", a spaced dash, or ", but/and/so". A "?" marks its clause as a question. */
+const CLAUSE_SPLIT = /(?<=[.!?;])|[ \t][-–—][ \t]|,[ \t]{0,4}(?:but|and|so)\b/i;
+
+/**
+ * c6 (D-b), review r1 #4: a refusal of a co-held link is a decline phrase and that link's label in the SAME clause, in a
+ * clause that is not a question, with the decline not negated. "Why are we not adding return rate?", "Let's not move on
+ * yet; I want to size return rate", "Don't skip it - return rate matters" keep the invitation.
+ */
+function userDeclinesLink(userText: string | undefined, links: readonly UnsizedPathLink[]): boolean {
+  if (userText === undefined) return false;
+  const labels = links.flatMap(link => [link.from_label, link.to_label]).filter(label => label.trim() !== '')
+    .map(label => new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(classificationCopy(label).trim())}s?(?![\\p{L}\\p{N}_])`, 'iu'));
+  return classificationCopy(userText).split(CLAUSE_SPLIT).some(clause => {
+    if (clause.includes('?')) return false;
+    const m = DECLINES_LINK.exec(clause);
+    if (m === null || NEGATED_BEFORE.test(clause.slice(0, m.index))) return false;
+    return labels.some(label => label.test(clause));
+  });
+}
+
 /** The run's own goal-figure warning, kept separate from decision-brief limit warnings. */
-export function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold | undefined {
+export function goalFigureCoHoldOf(blocks: unknown, graph: unknown, userText?: string): GoalFigureCoHold | undefined {
   if (!Array.isArray(blocks)) return undefined;
   const result = blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as
     { enrichment?: { inference_warnings?: unknown }; inference_warnings?: unknown } | undefined;
@@ -1123,7 +1168,8 @@ export function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureC
     }) : legacyLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })));
   // No-dead-end (#2623): the reply says the SAME ask as the warning (one source), only for a Run that recorded the cause
   // (never while a product gate withholds every option: no cause, no invitation).
-  const words = (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
+  const words = userDeclinesLink(userText, links) ? unsizedLinkStatement(links)
+    : (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
   return words !== '' ? { why: words, say: words } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
 }
 
@@ -1692,6 +1738,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
      * A reply the drop would leave EMPTY still gets it — never a silent turn. Omitted ⇒ `true` (every other caller).
      */
     readonly sayWhyWithheld?: boolean;
+    /** This turn's typed words: a refused named link keeps its cause but receives no sizing invitation. */
+    readonly userText?: string;
     /** The run's per-limit rows from the SAME readback (`readBackState`'s `limitVerdicts`); absent = not attested. */
     readonly limitVerdicts?: StoredLimitVerdicts;
     /** The limits MG asks about on the same readback's graph (`limitAskIdsOf`): their ask replaces the generic one. */
@@ -1716,7 +1764,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const closingFor = (goalFigureCoHold: GoalFigureCoHold | undefined): string => agentNoLeaderSentence(withheldReason, opts.analysisReady,
         limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
         separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHold);
-      const coHold = noResult ? undefined : goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph);
+      const coHold = noResult ? undefined : goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph, opts.userText);
       // MC D1 (a), Codex buddy r1 P2: a Run with no result says that known cause, never "the reason is not recorded".
       const closing = noResult
         ? sentence(withheldReason === WITHHELD_NO_RESULT ? BY_WITHHELD_REASON[WITHHELD_NO_RESULT]! : REASON_NOT_RECORDED)

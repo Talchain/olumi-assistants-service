@@ -6,7 +6,7 @@
  * end on. This module is the PRODUCER half of fixing that. It answers two questions from TYPED inputs only:
  *
  *   1. Does a published DSK protocol apply here, and may the turn cite it? (`dsk`, or `not_cited` with the reason)
- *   2. Which model items can the method's claims rest on, each with the ONE existing change card that acts on it?
+ *   2. Which model items can the method's claims rest on, with a change card only when their provenance supports it?
  *      (`supplied_items`, in REASONING COACH's action-priority order)
  *
  * It is pure: no I/O beyond the hash-verified DSK bundle read, no LLM, no imports from the agent lane's hot files.
@@ -24,7 +24,10 @@
  * - REASONING COACH's typed signals (`REASONING-INTERVENTIONS.json` `signals{}`), by their policy names, exactly as the
  *   selector reads them. They are derived once, by AI HARNESS; this file never re-derives a path, a sizing or an
  *   authorship. `run.leader_licensed` is the ONE `leaderLicence` read (#2451); there is no second licence read here.
- * - The graph, ONLY for the limits on the plan's path (`goal_constraints`), which no signal carries.
+ * - The graph for path limits (`goal_constraints`), which no signal carries. Only an empty, current decision union
+ *   also reads own options' `interventions` targets and those factors' stored value/source/extraction/acceptance
+ *   metadata: the signals do not carry lever ownership or this eligibility. These levers ground stories only;
+ *   `cee_inference` with missing extraction metadata can also stamp a user's brief value, so it proves no estimate.
  */
 import { ANALYSIS_RUN_STATE_KINDS, type StageType } from '@talchain/schemas/boundary';
 
@@ -96,7 +99,7 @@ export interface MethodScienceInput {
   readonly user_selected_option_id?: string | null;
   /** Generic multi-option pre-mortem: use the own-path union when no plan has eligible grounding. */
   readonly decision_level?: boolean;
-  /** The current graph, read ONLY for the limits on the plan's path. */
+  /** The graph for path limits; the empty current decision branch also reads own lever targets and stored metadata. */
   readonly graph?: unknown;
 }
 
@@ -116,7 +119,10 @@ export interface SuppliedItem {
   readonly id: string;
   readonly kind: 'link' | 'factor' | 'risk' | 'limit';
   readonly labels: readonly string[];
-  readonly card: ItemCard;
+  /** Null for own levers selected by the empty decision branch: story grounding, with no estimate approval. */
+  readonly card: ItemCard | null;
+  /** Present only for those levers, to name the options that set them without asserting value authorship. */
+  readonly lever_option_labels?: readonly string[];
 }
 
 /** Why a protocol was not cited. A missing badge is the honest default; each reason names the clause that failed. */
@@ -366,7 +372,42 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
     && (selectedPlan !== null || s['run.leader_licensed'] === false) && input.user_selected_option_id == null
     && s['model.non_sq_option_ids'].length >= 2;
   const plan = decision ? null : selectedPlan;
-  const items = decision ? premortemItems(s, s['model.non_sq_option_ids'], input.graph) : planItems;
+  let items = decision ? premortemItems(s, s['model.non_sq_option_ids'], input.graph) : planItems;
+  // Only an empty, current decision union may use finite, unaccepted CEE-stamped values with no extraction metadata
+  // on its own options' lever factors. Such stamps can include user/brief values; they establish neither an Olumi
+  // estimate nor an approval basis. Explicit user/brief sources remain ineligible. Ground stories only, with no card;
+  // never widen a grounded union, licensed plan or explicit pick, or reinterpret unknown authorship as an estimate.
+  if (decision && items.length === 0 && s['run.kind'] === 'complete_current') {
+    const pathNodes = new Set(s['model.goal_path_links']
+      .filter(l => l.option_ids.some(id => s['model.non_sq_option_ids'].includes(id)))
+      .flatMap(l => l.link_id.split('->')));
+    const rawNodes = (input.graph as { nodes?: unknown } | null)?.nodes;
+    const nodes = Array.isArray(rawNodes) ? rawNodes : [];
+    const ownLevers = new Map<string, string[]>();
+    for (const n of nodes) {
+      const option = n as { id?: unknown; kind?: unknown; interventions?: unknown } | null;
+      if (option?.kind !== 'option' || typeof option.id !== 'string' || !s['model.non_sq_option_ids'].includes(option.id)) continue;
+      const interventions = option.interventions;
+      if (interventions === null || typeof interventions !== 'object' || Array.isArray(interventions)) continue;
+      for (const id of Object.keys(interventions)) {
+        const labels = ownLevers.get(id) ?? [];
+        labels.push(s['model.option_labels'][option.id]);
+        ownLevers.set(id, labels);
+      }
+    }
+    items = s['model.goal_path_factors'].filter(f => {
+      if (f.value_authorship !== 'unknown' || !pathNodes.has(f.factor_id) || !ownLevers.has(f.factor_id)) return false;
+      const node = nodes.find(n => (n as { id?: unknown } | null)?.id === f.factor_id) as {
+        extractionType?: unknown;
+        observed_state?: { source?: unknown; extractionType?: unknown; value?: unknown; reviewed_by_user?: unknown };
+      } | undefined;
+      const os = node?.observed_state;
+      return os?.source === 'cee_inference' && os.extractionType === undefined && node?.extractionType === undefined
+        && os.reviewed_by_user === undefined && typeof os.value === 'number' && Number.isFinite(os.value);
+    }).sort((a, b) => a.goal_distance - b.goal_distance || byCodepoint(a.factor_id, b.factor_id))
+      .map(f => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: null,
+        lever_option_labels: ownLevers.get(f.factor_id)! }));
+  }
   const { citation, reason } = adjudicate(input, plan, items);
   return {
     method: input.method,
