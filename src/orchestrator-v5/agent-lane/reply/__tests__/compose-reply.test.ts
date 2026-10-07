@@ -378,10 +378,18 @@ describe('the producer half: one shape rule for every model', () => {
   });
 });
 
-describe('timing: every regex on the path scales linearly (5k → 20k, min of 5, ratio < 8×)', () => {
-  const minMs = (f: () => void): number => {
+describe('timing: every regex on the path scales linearly (20k -> 80k, min of 7 batches, ratio < 8x)', () => {
+  // The batch size is calibrated so the LARGE sample runs >= ~60 ms: a 6.6 ms sample read 8.84x on a CI runner
+  // (7 Oct, #2761). Linear ~ 4x, quadratic ~ 16x; the bar stays < 8x. Measured 20k -> 80k -> 320k: ~4x each step.
+  const batchMs = (f: () => void, calls: number): number => {
+    const t0 = performance.now();
+    for (let j = 0; j < calls; j += 1) f();
+    return performance.now() - t0;
+  };
+  const minBatchMs = (f: () => void, calls: number): number => {
+    batchMs(f, calls); // warm-up
     let best = Infinity;
-    for (let i = 0; i < 5; i += 1) { const t = performance.now(); f(); best = Math.min(best, performance.now() - t); }
+    for (let i = 0; i < 7; i += 1) best = Math.min(best, batchMs(f, calls));
     return best;
   };
   const shapes: [string, (n: number) => string][] = [
@@ -390,12 +398,16 @@ describe('timing: every regex on the path scales linearly (5k → 20k, min of 5,
     ['sentences and bullets', (n) => Array.from({ length: Math.ceil(n / 20) }, (_, i) => (i % 3 === 0 ? `- Point ${i} is here.` : `Sentence ${i} is here.`)).join('\n')],
   ];
   it.each(shapes)('%s', (_name, make) => {
-    const small = make(5_000);
-    const large = make(20_000);
+    const small = make(20_000);
+    const large = make(80_000);
     expect(large.length).toBeGreaterThanOrEqual(small.length * 3);
-    const tSmall = Math.max(minMs(() => composeReplyShape({ text: small })), 0.05);
-    const tLarge = minMs(() => composeReplyShape({ text: large }));
-    expect(tLarge / tSmall, `5k ${tSmall.toFixed(2)} ms → 20k ${tLarge.toFixed(2)} ms`).toBeLessThan(8);
+    const runLarge = (): void => { composeReplyShape({ text: large }); };
+    const runSmall = (): void => { composeReplyShape({ text: small }); };
+    const oneCall = Math.max(Math.min(batchMs(runLarge, 1), batchMs(runLarge, 1), batchMs(runLarge, 1)), 0.001);
+    const calls = Math.min(Math.max(Math.ceil(60 / oneCall), 1), 50_000);
+    const tLarge = minBatchMs(runLarge, calls);
+    const tSmall = Math.max(minBatchMs(runSmall, calls), 0.05);
+    expect(tLarge / tSmall, `20k ${tSmall.toFixed(2)} ms -> 80k ${tLarge.toFixed(2)} ms (x${calls})`).toBeLessThan(8);
   });
 });
 

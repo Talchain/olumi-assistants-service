@@ -33,6 +33,9 @@ let failAnswerFor: string | null = null;
 /** `append_turn_atomic_v2` exactly as its migration defines it — and a PostgREST-shaped `from()`. */
 const fakeClient = {
   rpc: vi.fn(async (fn: string, a: Record<string, unknown>) => {
+    // S-D.1b (#2754) deploys BEFORE its migration: until the DL applies it, PostgREST answers the conditional answer RPC
+    // with PGRST202, and the store falls back to today's path. Modelled exactly; every other unknown RPC still fails loud.
+    if (fn === 'append_agent_answer_if_latest') return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.append_agent_answer_if_latest in the schema cache' } };
     if (fn !== 'append_turn_atomic_v2' && fn !== 'append_turn_atomic_v3') return { data: null, error: { message: `unexpected rpc ${fn}` } };
     if (failAnswerFor !== null && a.p_turn_id === failAnswerFor) return { data: null, error: { message: 'simulated persistence failure' } };
     const existing = table.find((r) => r.scenario_id === a.p_scenario_id && r.turn_id === a.p_turn_id);
