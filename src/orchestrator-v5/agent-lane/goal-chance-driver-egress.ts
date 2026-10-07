@@ -38,6 +38,11 @@ const GEN_GAP = R`(?:\s+(?!(?:you|we|they|i|team|users?|people|customers?)\b)[\w
 /** The clause ends here: , ; : . ! ) or the end, never "?" and never a closing quote straight after. */
 const CLAUSE_END = R`(?=[ \t]{0,4}(?:[.,;:!)](?![”"’'])|$))`;
 
+/** S2e: NEG with BOUNDED runs, for use inside a lookbehind (an unbounded run there is quadratic, DL #2712 r1). */
+const NEG_B = R`(?:\b(?:does|do|did|has|have|had|could|can|ca|was|were|will|wo|is|would)[ \t]{0,2}(?:not|n[’']t)|\bcannot|\bnever)`;
+/** S2e: a coordinated tail, cut from its "or" so the first, true half stays ("…has not tested the deadline"). */
+const COORDINATED_TAIL = /^[ \t]+(?:or|nor)[ \t]/i;
+
 /** The ONE claim class: "no assumption/factor is established as mattering most". Every form is a row in the tests. */
 export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // "this run does not establish which assumption matters most" · "sensitivity has not established which …"
@@ -62,6 +67,12 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // "priority" or "most sensitive to" ENDING the clause. Never a question ("?"), never inside a quote (no closing quote
   // after the end), never a person's preference ("which assumption you/we/they/the team … most").
   R`${NEG}${VERB}\s+${WHICH_ITEM}${GEN_GAP}\s+(?:the\s+)?(?:most(?:\s+(?:sensitive\s+to|weight))?|priority)${CLAUSE_END}`,
+  // ⭐ Wave B3 (7 Oct, CEE 7addf05, Challenge): "This result does not establish what changes chances most." /
+  // "It hasn't established what changes the chances most: …" (a "what" with no assumption noun).
+  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
+  // ⭐ Wave B3 (T1b provisional view): "…the analysis has not tested the deadline or established investigation priority."
+  // Only the "or …" tail is the claim (bounded lookbehind to its negation); `cutOnce` cuts from the "or".
+  R`(?<=${NEG_B}(?:[ \t]{1,3}[\w’'-]+){1,6})[ \t]{1,3}(?:or|nor)[ \t]{1,3}(?:yet[ \t]{1,3})?(?:established?|identified|set|determined)[ \t]{1,3}(?:(?:an?|the|any)[ \t]{1,3})?(?:clear[ \t]{1,3})?investigation[ \t]{1,3}priorit(?:y|ies)\b`,
   // Wave B (7 Oct, unseen-2 provisional view): "it has not established an investigation priority"
   R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:clear\s+)?investigation\s+priorit(?:y|ies)\b`,
   // "there is no investigation priority yet"
@@ -125,6 +136,15 @@ type Cut = { kind: 'cut'; body: string } | { kind: 'lead_in_empty' } | { kind: '
 
 /** One claim out of one sentence body (no terminal punctuation), or why it must stay. */
 function cutOnce(body: string, m: RegExpExecArray, labels: readonly string[]): Cut {
+  // S2e: a coordinated tail is its own clause: cut from its "or" to the next clause stop; the same kept-unsafe rules hold.
+  if (COORDINATED_TAIL.test(m[0])) {
+    const after = body.slice(m.index + m[0].length);
+    const stop = RIGHT_STOP.exec(after);
+    const end = m.index + m[0].length + (stop === null ? after.length : stop.index);
+    const span = body.slice(m.index, end);
+    if (PROTECTED.test(span) || MONTH.test(span) || labels.some((l) => l !== '' && span.toLowerCase().includes(l.toLowerCase()))) return { kind: 'unsafe' };
+    return { kind: 'cut', body: `${body.slice(0, m.index)}${body.slice(end)}` };
+  }
   const pre = body.slice(0, m.index);
   const strong = lastMatch(STRONG_LEFT, pre);
   const comma = lastMatch(COMMA_CONNECTOR_LEFT, pre);

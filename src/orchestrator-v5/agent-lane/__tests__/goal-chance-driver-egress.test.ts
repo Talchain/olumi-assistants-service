@@ -621,3 +621,87 @@ describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
     expect(performance.now() - t0).toBeLessThan(50);
   });
 });
+
+/**
+ * Wave B3 (7 Oct 03:57–04:07Z, guest, CEE 7addf05, UI efbb0eef), keys untouched. New wordings beside range lines and a
+ * licensed T1b driver: Challenge "This result does not establish what changes chances most." / "It hasn’t established
+ * what changes the chances most: …" (a "what" with no assumption noun), and the T1b provisional view "…but the analysis
+ * has not tested the deadline or established investigation priority." (a coordinated tail: only the "or …" goes, so the
+ * true deadline caveat stays). S2e adds both forms; the route edits the view where it is built (pv-route test).
+ */
+const B3_CH1 = JSON.parse(fixture('waveB3-unseen1-7addf05-challenge-turn001.json')) as Json;
+const B3_CH2 = JSON.parse(fixture('waveB3-unseen2-7addf05-challenge-turn001.json')) as Json;
+const B3_T1B = JSON.parse(fixture('waveB3-t1b-7addf05-run1-turn003.json')) as Json;
+
+describe('Wave B3, keys untouched: the "what changes the chances most" form and the coordinated tail (S2e)', () => {
+  it('RED at base: Challenge b3-1 loses only its denial line', () => {
+    const line = 'This result does not establish what changes chances most.\n\n';
+    expect(B3_CH1.assistant_text.startsWith(line)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B3_CH1, opts(B3_CH1)) as Json;
+    expect(out.assistant_text).toBe(B3_CH1.assistant_text.slice(line.length));
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('RED at base: Challenge b3-2 loses the denial and keeps its reason, capitalised', () => {
+    const lead = 'It hasn’t established what changes the chances most: profit-generating effects still lack agreed sizes.';
+    expect(B3_CH2.assistant_text.startsWith(lead)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B3_CH2, opts(B3_CH2)) as Json;
+    expect(out.assistant_text).toBe(B3_CH2.assistant_text.replace(lead, 'Profit-generating effects still lack agreed sizes.'));
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('RED at base: the T1b provisional view loses only "or established investigation priority"; the deadline caveat stays', () => {
+    const reasoning = B3_T1B._agent.provisional_view.reasoning as string;
+    expect(reasoning.endsWith('but the analysis has not tested the deadline or established investigation priority.')).toBe(true);
+    expect(Object.keys(goalChanceDriverDisplayForAgent(blockOf(B3_T1B), B3_T1B.draft_graph)).length).toBeGreaterThan(0);
+    const out = withoutDriverAbsenceClaimsAtEgress(B3_T1B, opts(B3_T1B)) as Json;
+    expect(out._agent.provisional_view.reasoning).toBe(reasoning.replace(' or established investigation priority.', '.'));
+    expect(out._agent.provisional_view.reasoning).toContain('has not tested the deadline.');
+  });
+
+  it('CONTROL no range record: both Challenge turns kept, by reference', () => {
+    for (const body of [withoutRange(B3_CH1), withoutRange(B3_CH2)]) expect(withoutDriverAbsenceClaimsAtEgress(body, opts(body))).toBe(body);
+  });
+
+  it.each([
+    ['The run does not tell us what drives the result the most.', ''],
+    ['It has not checked the churn figure nor identified an investigation priority, so check it first.', 'It has not checked the churn figure, so check it first.'],
+    ['Figures are provisional; it cannot say what moves your chances most.', 'Figures are provisional.'],
+  ])('MUST FIRE (paraphrase): %s', (text, edited) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+  });
+
+  it.each([
+    'This run shows what changes the chances most: the price rise.',
+    'Does the run not establish what changes the chances most?',
+    'What changes the chances most is the price rise.',
+    'You asked "what changes the chances most".',
+    'It has not tested the deadline or the churn figure.',
+    'We have not set a budget or established investigation teams.',
+    'The team reviewed the risks or established investigation priority last quarter.', // no negation: only that guard decides
+    'Price changes the chances most, and the deadline was not tested.',
+    'The run did not establish what changes your mind most.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  it('kept-unsafe: a coordinated tail that would remove the deadline is kept', () => {
+    const text = 'It has not tested the churn figure or established investigation priority within the 9-month deadline.';
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
+  });
+
+  it.each([
+    ['negation + 20,000 spaces + coordinated tail', `has not tested${' '.repeat(20000)}or established investigation priority`],
+    ['"or" + 20,000 spaces', `has not tested the deadline or${' '.repeat(20000)}established investigation priority`],
+    ['"what" + 20,000 spaces', `does not establish what${' '.repeat(20000)}x`],
+    ['"what changes the chances" + 20,000 spaces + "most"', `does not establish what changes the chances${' '.repeat(20000)}most`],
+    ['tabs inside the lookbehind', `has not tested${'\t'.repeat(20000)}or established investigation priority`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text);
+    removeDriverAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
