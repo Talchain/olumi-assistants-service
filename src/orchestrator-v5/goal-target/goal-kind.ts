@@ -22,12 +22,22 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
 
 export type GoalKind = 'chance_of_event' | 'change' | 'level';
 
-/** A unit naming a chance: likelihood, chance, probability, odds, "likely". Whole words; no nested repeats. */
-export const CHANCE_WORD = /(?:^|[^\p{L}])(?:likelihoods?|likeliness|chances?|probabilit(?:y|ies)|odds|likely)(?=$|[^\p{L}])/iu;
+/**
+ * A unit naming a chance: its MEASURE — the head noun, which in English is the LAST word before the first "of", "per",
+ * "for", "on", "in", "by" or "to" (a compound is head-final: "launch likelihood"; an of-phrase is head-first: "number of
+ * chances") — is likelihood, likeliness, chance(s), probability, odds or "likely". Codex buddy r1 on #2742: "number of
+ * chances created per match" is a COUNT (its measure is "number"), never a chance. Brackets and "%" are not words.
+ */
+export const UNIT_HEAD_CUT = /[ \t]{1,4}(?:of|per|for|on|in|by|to)(?:[ \t]{1,4}|$)/i;
+export const CHANCE_WORD = /^(?:likelihoods?|likeliness|chances?|probabilit(?:y|ies)|odds|likely)$/i;
 
 /** True when a goal unit names the chance of an event (Science ruling §2). Units over 200 characters are not read. */
 export function unitNamesAChance(unit: unknown): boolean {
-  return typeof unit === 'string' && unit.length <= 200 && CHANCE_WORD.test(unit);
+  if (typeof unit !== 'string' || unit.length > 200) return false;
+  const cut = UNIT_HEAD_CUT.exec(unit);
+  const measure = (cut === null ? unit : unit.slice(0, cut.index)).replace(/[()[\]%,.;:]/g, ' ').trim();
+  const words = measure.split(/[ \t]+/).filter((w) => w !== '');
+  return words.length > 0 && CHANCE_WORD.test(words[words.length - 1]!);
 }
 
 /** The unit the goal is measured in: its target's unit, else its level's. */
@@ -38,10 +48,14 @@ export function goalUnitOf(goal: Rec): string | undefined {
   return typeof os === 'string' && os.trim() !== '' ? os : undefined;
 }
 
-/** The kind of a goal node (see the header). */
+/**
+ * The kind of a goal node (see the header). EVERY unit the goal carries is read — its target's and its level's — so a
+ * chance in one is never masked by a plain "%" in the other (Codex buddy r1 on #2742).
+ */
 export function goalKindOf(goal: unknown): GoalKind {
   if (!isRec(goal)) return 'level';
-  if (unitNamesAChance(goalUnitOf(goal))) return 'chance_of_event';
+  const os = isRec(goal.observed_state) ? goal.observed_state.unit : undefined;
+  if (unitNamesAChance(goal.goal_threshold_unit) || unitNamesAChance(os)) return 'chance_of_event';
   const frame = goal.goal_threshold_frame;
   return frame === 'change_abs' || frame === 'change_rel' ? 'change' : 'level';
 }

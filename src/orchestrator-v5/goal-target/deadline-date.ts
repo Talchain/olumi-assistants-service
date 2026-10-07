@@ -16,7 +16,10 @@
  *  · "N weeks" / "N days" add 7N / N days;
  *  · "Qn [yyyy]" is the last day of that CALENDAR quarter; a fiscal quarter needs the user's fiscal calendar, so it is
  *    never assumed: a quarter that has passed this year without a year means next year's;
- *  · "[end of] <Month> [yyyy]" is that month's last day; "<day> <Month> [yyyy]" / "<Month> <day>[,] [yyyy]" that day; a
+ *  · "before …", "until …" and "till …" are never placed: whether the boundary day itself counts changes the date, so
+ *    the user is asked;
+ *  · "[end of] <Month> [yyyy]" (also "by" / "in <Month>") is that month's last day, the latest the words allow (the card
+ *    shows the date, and [Change date] corrects another reading); "<day> <Month> [yyyy]" / "<Month> <day>[,] [yyyy]" that day; a
  *    date without a year that has passed means next year's;
  *  · "end of (the) year" / "year-end" is 31 December;
  *  · a date that is today or has passed is not a deadline: `null`.
@@ -148,6 +151,9 @@ export function readStatedDeadline(phrase: string, today: string): StatedDeadlin
     if (placed !== undefined) return placed;
     const lead = LEAD_TOKEN.exec(body);
     if (lead === null) return null;
+    // ⛔ Codex buddy r1 on #2742: "before March" is NOT the end of March, and "until March" may or may not include it. A
+    // boundary word whose reading changes the date is never resolved here: the user is asked (`null`).
+    if (/^(?:before|until|till)\b/.test(lead[0])) return null;
     body = body.slice(lead[0].length).trim();
   }
   return null;

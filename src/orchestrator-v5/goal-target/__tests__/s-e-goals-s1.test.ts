@@ -28,7 +28,7 @@ import { executeOptionInterventionBatch } from '../../system-events/option-inter
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../goal-horizon-write.js';
 import { withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
-import { CHANCE_WORD, chanceGoalSentence, goalKindOf, unitNamesAChance } from '../goal-kind.js';
+import { CHANCE_WORD, chanceGoalSentence, goalKindOf, UNIT_HEAD_CUT, unitNamesAChance } from '../goal-kind.js';
 import { addMonths, DEADLINE_PATTERNS_FOR_TIMING, readStatedDeadline, sayDate, timeBetween, todayInLondon } from '../deadline-date.js';
 
 type Rec = Record<string, any>;
@@ -61,16 +61,22 @@ const servedPaths = (): Rec[] => (SERVED.served_placeholder_warning.option_ids a
   .map((option_id) => ({ option_id, links: SERVED.served_placeholder_warning.links }));
 
 describe('§2 guard (Science ruling 7 Oct): a unit naming the chance of an event is never a goal quantity', () => {
-  it.each(['% likelihood of on-time launch', 'chance of hitting the date', 'probability of launch on time', '% likely', 'Odds of shipping'])(
+  it.each(['% likelihood of on-time launch', 'chance of hitting the date', 'probability of launch on time', '% likely', 'Odds of shipping',
+    'on-time launch likelihood', 'probability (%)', 'Chances of shipping by Q2'])(
     'must-fire: %s', (unit) => {
       expect(unitNamesAChance(unit)).toBe(true);
       expect(goalKindOf({ kind: 'goal', goal_threshold_unit: unit })).toBe('chance_of_event');
     });
-  it.each(['% of launch done', '% of customers', 'churn %', '£', 'months', 'feature points per month', 'unlikelihoodish'])(
+  it.each(['% of launch done', '% of customers', 'churn %', '£', 'months', 'feature points per month', 'unlikelihoodish',
+    'number of chances created per match', 'chances created per match', '%'])(
     'must-not-fire: %s', (unit) => {
       expect(unitNamesAChance(unit)).toBe(false);
       expect(goalKindOf({ kind: 'goal', goal_threshold_unit: unit })).toBe('level');
     });
+  it('Codex r1: a chance in the LEVEL\u2019s unit is not masked by a plain "%" target unit', () => {
+    expect(goalKindOf({ kind: 'goal', goal_threshold_unit: '%', observed_state: { unit: '% likely' } })).toBe('chance_of_event');
+    expect(goalKindOf({ kind: 'goal', goal_threshold_unit: '%', observed_state: { unit: '% of launch done' } })).toBe('level');
+  });
   it('the served goal (run 1 input snapshot) is a chance goal; a change frame stays a change', () => {
     expect(goalKindOf(servedGraph().nodes[1])).toBe('chance_of_event');
     expect(goalKindOf({ kind: 'goal', goal_threshold_unit: '%', goal_threshold_frame: 'change_rel' })).toBe('change');
@@ -94,7 +100,8 @@ describe('§3 dates (Science ruling 7 Oct): deterministic, Europe/London, month-
     ['6-month deadline', '2027-04-07'], ['six months', '2027-04-07'], ['within 12 weeks', '2026-12-30'], ['by the end of March', '2027-03-31'],
     ['7 April 2027', '2027-04-07'], ['April 7, 2027', '2027-04-07'], ['end of the year', '2026-12-31'], ['a month', '2026-11-07'],
   ])('"%s" → %s', (words, date) => { expect(readStatedDeadline(words, '2026-10-07')?.date).toBe(date); });
-  it.each(['next sprint', 'soon', 'recruitment will take more than 3 months', 'the end of next quarter', '1 October 2026', '0 months'])(
+  it.each(['next sprint', 'soon', 'recruitment will take more than 3 months', 'the end of next quarter', '1 October 2026', '0 months',
+    'before March', 'until March', 'before Q2', 'till 7 April 2027'])(
     'never guessed: "%s" → null', (words) => { expect(readStatedDeadline(words, '2026-10-07')).toBeNull(); });
   it("today is London's day: 23:30Z on 6 April 2027 (BST) is 7 April; in winter, UTC's day", () => {
     expect(todayInLondon(new Date('2027-04-06T23:30:00Z'))).toBe('2027-04-07');
@@ -161,6 +168,12 @@ describe('run 3 (served 09:32:39Z): a chance goal’s figures are withheld for e
     expect(said).toEqual(expect.objectContaining({ withheld: true, say: CHANCE_SENTENCE }));
     expect(said?.note).toMatch(/never treats as a quantity/);
   });
+  it('Codex r1: beside an identical-arms withhold, the chance sentence still speaks alone', () => {
+    const out = withholdGoalFiguresForChanceGoal(envelope(), servedGraph()) as Rec;
+    out.inference_warnings.push({ code: 'GOAL_FIGURES_OPTIONS_IDENTICAL', severity: 'warning', message: 'Not shown. A and B come out the same.',
+      option_ids: ['hire_a_tech_lead', 'hire_two_developers'] });
+    expect(goalChanceWithheldForAgent({ enrichment: out })?.say).toBe(CHANCE_SENTENCE);
+  });
   it('with the date held, the sentence names it; the date never becomes a figure', () => {
     const g = servedGraph();
     g.nodes[1].goal_horizon = { deadline: '2027-04-07' };
@@ -209,6 +222,8 @@ function world(initial: Rec, now = new Date('2026-10-07T09:13:13Z')) {
       ...(input.goal_horizon !== undefined ? { goalHorizon: input.goal_horizon } : {}),
     }, store);
     if (out.kind === 'refused') return { status: 'refused', reason: out.reason };
+    // The door's own mapping of a verified no-op (`commitOptionLevelsInProcess`: `verified_no_op` → already applied).
+    if (out.kind === 'unchanged') return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: [], links_resized: [] };
     if (out.kind !== 'committed') throw new Error(`Real commit did not verify: ${JSON.stringify(out)}`);
     return { status: 'committed', graph_hash: out.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
   };
@@ -217,7 +232,8 @@ function world(initial: Rec, now = new Date('2026-10-07T09:13:13Z')) {
     const read = graph();
     return { status: 200, json: { graph: read, graph_hash: computeAnalysisAffectingGraphHash(read as never) } };
   };
-  return { caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels, now: () => now }), proposals, commits, graph };
+  return { caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels, now: () => now }), proposals, commits, graph,
+    commitOptionLevels };
 }
 const stored = (g: Rec = servedGraph()): Rec => assignEntityRefs(projectGraphForPersistence(g), { nodes: [], edges: [] }).graph as Rec;
 const ctxSaying = (user_text: string) => ({ scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'deadline', user_text, user_turn_text: user_text });
@@ -278,6 +294,25 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal }));
     expect(w.proposals.get(String(r.proposal_id))).toBeUndefined();
   });
+  it('Codex r1: the words must be WHOLE words of THIS message — "6 months" inside "16 months", or only in an earlier message, is refused', async () => {
+    const w = world(stored());
+    const inside = await w.caps.proposeGoalDeadline!(ctxSaying('The deadline is 16 months away.'), { deadline_words: '6 months', rationale: 'x' }) as Rec;
+    expect(inside).toEqual(expect.objectContaining({ ok: false, refusal: 'deadline_not_stated' }));
+    const earlier = await w.caps.proposeGoalDeadline!({ ...ctxSaying('Yes, add the freelance option.'), user_text: `${PAUL_0913}\nYes, add the freelance option.` },
+      { deadline_words: 'a deadline in 6 months', rationale: 'x' }) as Rec;
+    expect(earlier).toEqual(expect.objectContaining({ ok: false, refusal: 'deadline_not_stated' }));
+    // CONTROL: the same words typed in this message are the user's.
+    const typed = await w.caps.proposeGoalDeadline!(ctxSaying('The deadline is 6 months away.'), { deadline_words: '6 months', rationale: 'x' }) as Rec;
+    expect(typed).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 7 April 2027 (6 months from today)?' }));
+  });
+  it('Codex r1: a retry of a write that landed (same turn id) is a verified no-op, never "the deadline changed"', async () => {
+    const w = world(stored());
+    const input = { scenario_id: SCENARIO, base_graph_hash: computeAnalysisAffectingGraphHash(w.graph() as never), turn_id: 'deadline-retry',
+      links: [], levels: [], goal_horizon: { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null } } as CommitOptionLevelsInput;
+    expect(await w.commitOptionLevels(input)).toEqual(expect.objectContaining({ status: 'committed', already_applied: false }));
+    expect(await w.commitOptionLevels(input)).toEqual(expect.objectContaining({ status: 'committed', already_applied: true }));
+    expect(goalOf(w.graph()).goal_horizon).toEqual({ deadline: '2027-04-07' });
+  });
   it('a chance goal takes no target figure and no "today’s level", by name (the doors that asked for one)', async () => {
     const w = world(stored());
     const t = await w.caps.proposeGoalTarget!(ctxSaying('We need at least 80% likelihood of on-time launch.'),
@@ -297,6 +332,11 @@ describe('the one horizon writer (goal-horizon-write.ts): its own gates, without
     expect(applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null })).toEqual({ kind: 'refused', reason: 'deadline_changed' });
     expect(JSON.stringify(g)).toBe(before);
   });
+  it('the date already held is a verified no-op (a retry), checked before the stale gate', () => {
+    const g = stored();
+    goalOf(g).goal_horizon = { deadline: '2027-04-07' };
+    expect(applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null })).toEqual({ kind: 'unchanged' });
+  });
   it('only a goal, only a real calendar date; the postimage differs in goal_horizon alone', () => {
     const g = stored();
     expect(applyGoalHorizonEdit(g, { goal_id: 'feature_delivery_capacity', deadline: '2027-04-07', expected_deadline: null })).toEqual({ kind: 'refused', reason: 'not_a_goal' });
@@ -314,7 +354,7 @@ describe('the one horizon writer (goal-horizon-write.ts): its own gates, without
 describe('timing (preamble rule): every new regex at 5k → 20k characters, 3 shapes, scaling < 8× (min of 5)', () => {
   // The public readers gate their input (80 / 200 characters), so each PATTERN is timed directly, unanchored inputs included.
   const time = (f: () => unknown): number => { let best = Infinity; for (let i = 0; i < 5; i += 1) { const t = performance.now(); f(); best = Math.min(best, performance.now() - t); } return best; };
-  const patterns: readonly RegExp[] = [CHANCE_WORD, ...DEADLINE_PATTERNS_FOR_TIMING];
+  const patterns: readonly RegExp[] = [CHANCE_WORD, UNIT_HEAD_CUT, ...DEADLINE_PATTERNS_FOR_TIMING];
   it.each([
     ['spaces', (n: number) => ' '.repeat(n)],
     ['counts and lead words', (n: number) => 'in 6 months by the end of q2 '.repeat(Math.ceil(n / 29)).slice(0, n)],

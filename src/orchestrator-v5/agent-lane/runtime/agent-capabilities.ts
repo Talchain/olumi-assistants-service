@@ -4302,11 +4302,14 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'unreadable_deadline',
           detail: 'A deadline needs the user\u2019s own words for it (at most 80 characters). Nothing was prepared; ask the user for the date.' };
       }
-      // ⛔ The words must be the USER'S: a phrase the conversation's user messages contain (case and spacing aside).
+      // ⛔ The words must be the USER'S, typed in THIS turn, as whole words (Codex buddy r1 on #2742: "6 months" matched inside
+      // "16 months", and an earlier message's duration could stand in for today's). Case, spacing and dash/apostrophe forms aside.
       const plainOf = (t: string): string => t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u2013\u2014]/g, '-').replace(/\s+/g, ' ').trim();
-      if (typeof ctx.user_text !== 'string' || !plainOf(ctx.user_text).includes(plainOf(words))) {
+      const phrase = plainOf(words).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const typed = typeof ctx.user_turn_text === 'string' ? plainOf(ctx.user_turn_text) : '';
+      if (typed === '' || !new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, 'u').test(typed)) {
         return { ok: false, mutated: false, refusal: 'deadline_not_stated',
-          detail: `"${words}" is not something the user wrote, so nothing was prepared: it would be recorded as their deadline. Ask them for the date, in their own words.` };
+          detail: `"${words}" is not something the user wrote in this message, so nothing was prepared: it would be recorded as their deadline. Ask them for the date, in their own words.` };
       }
       const today = todayInLondon((opts.now ?? (() => new Date()))());
       const stated = readStatedDeadline(words, today);

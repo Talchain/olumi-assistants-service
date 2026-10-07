@@ -136,6 +136,9 @@ export function goalChanceWithheldForAgent(result: unknown, graph?: unknown): Go
     // Science R3: an explicitly empty scoped say leaves this target reason on the panel, with no chat sentence.
     .filter(w => !(opening === RANGE_OPENING && w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE && w.say === ''));
   if (warnings.length === 0) return undefined;
+  // S-E GOALS (Codex buddy r1 on #2742): a chance goal's withhold speaks ALONE, ahead of every other cause, identical arms too.
+  const chance = warnings.filter((w) => w.code === GOAL_FIGURES_CHANCE_AS_GOAL);
+  if (chance.length > 0) return goalChanceFromWarnings(chance, opening);
   // Gate 1 v2 (Codex #2574 P1): identical options keep their own reason and scope, alone or beside any other withhold.
   const identical = warnings.filter((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL);
   const others = warnings.filter((w) => w.code !== GOAL_FIGURES_OPTIONS_IDENTICAL);

@@ -2082,7 +2082,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // as on a run with no target. Runs after every earlier withhold, and withholds whatever options STILL show a goal
     // figure: (S) is per option, so "something was withheld" never means "every chance is gone" (AIQ's executed run: m1 +
     // one option's placeholder lever kept £59's 0.9929).
-    {
+    // S-E GOALS: a chance goal's ONE withhold speaks alone (Codex buddy r1 on #2742): no later goal-figure withhold is added.
+    if (!chanceGoalWithheld) {
       const before = response;
       response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis);
       if (response !== before) {
@@ -2099,7 +2100,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⛔ DL GATE 1 v2: two arms the Run could not tell apart split each other's wins, so the comparison it computed
     // (shares, leader, robustness, flips) is distorted. Withheld through the ONE goal-figure seam, every arm's outcome
     // distribution kept; runs after the earlier withholds so a placeholder path keeps its own reason too.
-    if (identicalArms.length > 0) {
+    if (identicalArms.length > 0 && !chanceGoalWithheld) {
       const said = buildIdenticalArmsDisclosure(identicalArms).trim();
       response = withholdOptionGoalFigures(response, new Set(identicalArms.flatMap((g) => g.option_ids)), {
         code: GOAL_FIGURES_OPTIONS_IDENTICAL,
@@ -2122,7 +2123,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ D3 step 1 (DL 0df0e1, PL rec 5; #87 6006078553): LAST among the goal-figure withholds — a goal chance reaches a
     // reader only as a finite probability in [0, 1] of meeting a STATED target (target, direction, unit; a ceiling scored
     // minimised), else it is withheld with its typed cause (`goal-chance-gate.ts`), the brief's `goal_fit` with it.
-    {
+    if (!chanceGoalWithheld) {
       const before = response;
       response = withholdUnusableGoalChances(response, graphForAnalysis, snapshot.goal_node_id);
       if (response !== before) {

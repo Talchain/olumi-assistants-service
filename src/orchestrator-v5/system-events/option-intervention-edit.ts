@@ -1074,6 +1074,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
     const written = applyGoalHorizonEdit(before, goalHorizon);
     if (written.kind === 'refused') return { kind: 'refused', reason: `deadline_${written.reason}` };
+    // A retry of a write that landed: the date is already held, so the batch is a verified no-op (`unchanged` below).
+    if (written.kind === 'unchanged') return { kind: 'unchanged' };
     const graph = projectGraphForPersistence(written.mutatedGraph);
     if (!isEditableGraph(graph) || !goalHorizonPostimageIsScoped(projectGraphForPersistence(before), graph, goalHorizon.goal_id)
       || goalDeadlineOf(graph.nodes.find((n) => n.id === goalHorizon.goal_id)) !== goalHorizon.deadline) {

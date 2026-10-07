@@ -41,6 +41,8 @@ export type GoalHorizonRefusal = 'invalid_graph' | 'goal_not_found' | 'not_a_goa
 
 export type GoalHorizonEditResult =
   | { readonly kind: 'mutated'; readonly mutatedGraph: Rec; readonly handlerFacts: readonly HandlerFact[]; readonly confirmation: string }
+  /** The goal already holds exactly this date: a verified no-op (a retry of a write that landed). Nothing is written. */
+  | { readonly kind: 'unchanged' }
   | { readonly kind: 'refused'; readonly reason: GoalHorizonRefusal };
 
 const isCalendarDate = (d: unknown): d is string => {
@@ -60,7 +62,11 @@ export function applyGoalHorizonEdit(persistedGraph: unknown, approved: Approved
   const matches = persistedGraph.nodes.filter((n): n is Rec => isRec(n) && n.id === approved.goal_id);
   if (matches.length !== 1) return { kind: 'refused', reason: 'goal_not_found' };
   if (matches[0]!.kind !== 'goal') return { kind: 'refused', reason: 'not_a_goal' };
-  if ((goalDeadlineOf(matches[0]) ?? null) !== approved.expected_deadline) return { kind: 'refused', reason: 'deadline_changed' };
+  // ⭐ IDEMPOTENT (Codex buddy r1 on #2742): a retry after a write that landed finds the date already held, and that is the
+  // approved outcome, never "the deadline changed". Checked BEFORE the stale gate, which the first write itself moved.
+  const held = goalDeadlineOf(matches[0]) ?? null;
+  if (held === approved.deadline) return { kind: 'unchanged' };
+  if (held !== approved.expected_deadline) return { kind: 'refused', reason: 'deadline_changed' };
 
   const graph = structuredClone(persistedGraph) as Rec & { nodes: unknown[] };
   const goal = graph.nodes.find((n): n is Rec => isRec(n) && n.id === approved.goal_id)!;
