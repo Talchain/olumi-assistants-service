@@ -745,7 +745,7 @@ export default async function route(app: FastifyInstance) {
             scenarioId, graph: graphPresent ? graph : null,
             ...(graphPresent ? { graphHash: computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined } : {}),
             analysisState: analysis.analysis_state, analysisReady: analysis.current_read.analysis_ready, analysisResult: analysis.analysis_result,
-            optionParticipation: analysis.analysis_option_participation, ...(evaluated !== undefined ? { identityEvaluated: evaluated } : {}), guidance,
+            optionParticipation: analysis.analysis_option_participation, ...(evaluated !== undefined ? { identityEvaluated: evaluated } : {}), guidance, pending: latestPending,
           }));
         } catch { actionBar = undefined; }
       }

@@ -209,6 +209,7 @@ import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
 import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
+import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
 import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
 import { scopeTargetNotTestableWithRanges } from '../../goal-target/scope-target-not-testable.js';
 import { perOptionTargetReasonsForRun } from '../../goal-target/target-testability-per-option.js';
@@ -2777,6 +2778,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // 0 or 1 counts only where this Run earned it.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, (optionId, p) =>
       goalCertainty.recorded && goalCertainty.decisions.some((d) => d.option_id === optionId && d.probability_of_goal === p && d.earned));
+    response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis);
 

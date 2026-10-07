@@ -6,7 +6,7 @@ import {
   GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_SHARE_APPROXIMATION,
 } from '../../orchestrator/context/option-result-source.js';
-import { agentLicenceRecordOf, goalChanceDisplayForAgent, goalChanceLicenceForAgent, isLicensedDriver } from './goal-chance-licence.js';
+import { agentLicenceRecordOf, goalChanceDisplayFromLicence, goalChanceLicenceForAgent, isLicensedDriver } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
 import { goalChanceRangeRecordOf } from './goal-chance-range-record.js';
 import { SHARE_BY_DATE_UNIT, isShareCalendarDate } from './goal-kind.js';
@@ -127,31 +127,36 @@ export function goalChanceRangeBarredForAgent(result: unknown, optionId: string)
 }
 
 /** The licensed point chances actually shown; ranges and scoped withholds keep their existing entitlement. */
-function pointDisplayForAgent(result: unknown, ranges: Record<string, GoalChanceRangeDisplay> | undefined): Record<string, string> {
-  const licence = goalChanceLicenceForAgent(result);
-  const withheld = new Set(licence?.withheld_option_ids ?? []);
-  return Object.fromEntries(Object.entries(goalChanceDisplayForAgent(result) ?? {})
-    .filter(([optionId]) => licence?.option_ids.includes(optionId) && !withheld.has(optionId)
-      && !goalChanceOptionWithheldForAgent(result, optionId) && !Object.hasOwn(ranges ?? {}, optionId)));
+function pointDisplayForAgent(result: unknown, ranges: Record<string, GoalChanceRangeDisplay> | undefined,
+  licence: Rec | undefined = agentLicenceRecordOf(result)): Record<string, string> {
+  if (licence === undefined) return {};
+  return Object.fromEntries(Object.entries(goalChanceDisplayFromLicence(licence) ?? {})
+    .filter(([optionId]) => !goalChanceOptionWithheldForAgent(result, optionId) && !Object.hasOwn(ranges ?? {}, optionId)));
+}
+
+/** The screen's licensed drivers in option order; shared by its sentences and the estimate actions. */
+export function goalChanceDriversForAgent(result: unknown, graph: unknown): { option_id: string; driver: Rec }[] {
+  const licence = agentLicenceRecordOf(result);
+  if (licence === undefined) return [];
+  const display = pointDisplayForAgent(result, goalChanceRangeDisplayForAgent(result, graph), licence);
+  const drivers = rec(licence.driver_by_option) ?? {};
+  const absent = rec(licence.no_driver_by_option) ?? {};
+  return (licence.option_ids as string[]).flatMap(optionId => {
+    if (!Object.hasOwn(display, optionId) || !Object.hasOwn(drivers, optionId) || absent[optionId] !== undefined) return [];
+    const d = rec(drivers[optionId]);
+    return d !== undefined && isLicensedDriver(d) ? [{ option_id: optionId, driver: d }] : [];
+  });
 }
 
 /** Screen's ruled driver sentences, from the selected Run's stored licence only; never from raw driver rows. */
 export function goalChanceDriverDisplayForAgent(result: unknown, graph: unknown): Record<string, string> {
-  const licence = agentLicenceRecordOf(result);
-  if (licence === undefined) return {};
-  const display = pointDisplayForAgent(result, goalChanceRangeDisplayForAgent(result, graph));
-  const drivers = rec(licence.driver_by_option) ?? {};
-  const absent = rec(licence.no_driver_by_option) ?? {};
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && id(n.id) && id(n.label)).map((n) => [n.id as string, n.label as string]));
   const about = (v: unknown): string => v === 0 ? 'less than 1%' : v === 100 ? 'more than 99%' : `about ${v}%`;
   const asked = new Set<string>();
   const out: Record<string, string> = {};
-  for (const optionId of licence.option_ids as string[]) {
-    if (!Object.hasOwn(display, optionId) || !Object.hasOwn(drivers, optionId) || absent[optionId] !== undefined) continue;
-    const d = rec(drivers[optionId]);
-    if (d === undefined || !isLicensedDriver(d)) continue;
+  for (const { option_id: optionId, driver: d } of goalChanceDriversForAgent(result, graph)) {
     let line: string;
     let question: string | undefined;
     let key: string | undefined;

@@ -325,7 +325,11 @@ export function nearestFiveGoalChancesForAgent(result: unknown): ReadonlyMap<str
 /** Screen copy (goalChanceCopy.ts): the licence's displayed percentage, including its non-certainty edge words. */
 export function goalChanceDisplayForAgent(result: unknown): Readonly<Record<string, string>> | undefined {
   const licence = agentLicenceRecordOf(result);
-  if (licence === undefined) return undefined;
+  return licence === undefined ? undefined : goalChanceDisplayFromLicence(licence);
+}
+
+/** Display projection of an already validated licence; shared readers do not re-read the same record. */
+export function goalChanceDisplayFromLicence(licence: Rec): Readonly<Record<string, string>> | undefined {
   const pct = isRec(licence.pct_by_option) ? licence.pct_by_option : {};
   const withheld = new Set(Array.isArray(licence.withheld_option_ids) ? licence.withheld_option_ids : []);
   const out: Record<string, string> = {};
