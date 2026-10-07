@@ -309,8 +309,13 @@ const B9_SQ = 'keep_pricing_as_it_is';
 /** The graph read projected exactly as `readBackState` projects it (same readers, same field names). */
 export function b9Read(): PremortemRead {
   const r = structuredClone(B9.read);
+  // S-DEF #2739 (d738949c) holds the validated definition Starter-tier MRR → MRR in the analysis-affecting hash, so the
+  // captured df15c8c1 `graph_hash` no longer equals today's derivation of the SAME graph. A Run computed on today's code
+  // carries today's hash on both the read and the result, so the served read is re-derived here, never re-captured.
+  const graphHash = computeAnalysisAffectingGraphHash(r.graph as never)!;
   return {
-    graph: r.graph, graphHash: r.graph_hash, analysisState: r.analysis_state, analysisResult: r.analysis_result,
+    graph: r.graph, graphHash, analysisState: r.analysis_state,
+    analysisResult: { ...(r.analysis_result as object), computed_against_hash: graphHash },
     analysisReady: r.analysis_ready, optionParticipation: readStoredOptionParticipation(r.analysis_option_participation),
     identityEvaluated: readEvaluatedIdentityNodeIds(r.analysis_identity_evaluated_node_ids),
   };

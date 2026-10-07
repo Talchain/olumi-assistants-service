@@ -21,7 +21,7 @@
 import { createHash } from 'node:crypto';
 
 import { agentRequestIdentity } from '../agent-lane/runtime/prompt-identity.js';
-import type { CallStructuredModel } from '../agent-lane/runtime/build-model.js';
+import { strictForTheDrafter, type CallStructuredModel } from '../agent-lane/runtime/build-model.js';
 
 /** The dedicated table. No window reader at any pin reads it (see the migration header). */
 export const DRAFTER_RAW_TABLE = 'cee_drafter_raw_responses';
@@ -94,7 +94,7 @@ export function recordingDrafter(inner: CallStructuredModel, calls: DrafterCallR
           instructions: req.instructions,
           max_output_tokens: req.max_output_tokens,
           ...(req.reasoning_effort !== undefined ? { reasoning: { effort: req.reasoning_effort } } : {}),
-          text: { format: { type: 'json_schema', schema: req.schema } },
+          text: { format: { type: 'json_schema', schema: strictForTheDrafter(req.schema) } },
         });
         const raw = capRawResponse(out?.text ?? '');
         calls.push({
