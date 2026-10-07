@@ -19,6 +19,7 @@ import { SessionLRUCache } from '../../orchestrator-v5/session/cache.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import { agentProposals } from '../../orchestrator-v5/agent-lane/held-approval-offers.js';
 import served from '../../orchestrator-v5/agent-lane/__tests__/fixtures/m1-s1-served-graphs.json';
+import { actionFactsOf } from '../../orchestrator-v5/agent-lane/actions/state.js';
 
 const { port, source, identity, logs } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -191,6 +192,22 @@ describe('every press reaches its typed path, never the free Agent turn', () => 
     expect(modelCalls).toBe(0);
     expect(b._action).toMatchObject({ action_id: 'review', outcome: 'cant_yet' });
   });
+  it('RED (Codex r1 P1-2): an act: press carrying a Run action_type is dispatched by its id, never run', async () => {
+    setState('withheld');
+    const b = await press('act:no_such_action', { action_type: 'run_analysis' });
+    expect(b._diagnostic_trace?.fast_path).toBe('method');
+    expect(b._agent?.tool_calls ?? []).toEqual([]);
+    expect(b._action).toMatchObject({ press_id: 'act:no_such_action', outcome: 'cant_yet', reason: 'unknown_action' });
+  });
+  it('RED (Codex r1 P2-3): a retried Review press on a stale Run replays the typed "can\'t yet" and its Run exit', async () => {
+    setState('stale');
+    const payload = { kind: 'message', scenario_id: scenario, turn_id: 'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1', message: 'pressed', source: 'chip', chip: { id: 'agent-next-review-decision' } };
+    const first = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload })).json() as Body;
+    const again = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload })).json() as Body;
+    expect(first.assistant_text).toBe('I can’t review this decision yet: it needs a current analysis first.');
+    expect(again.assistant_text).toBe(first.assistant_text);
+    expect(again.suggested_actions.map((a) => a.id)).toEqual(['agent-run-analysis']);
+  });
   it('CONTROL: a typed message and an ask:* chip are still ordinary Agent turns (ask:* is out of scope)', async () => {
     const typed = await turn({ message: 'What do you make of this?' });
     expect(typed._diagnostic_trace?.fast_path).toBeUndefined();
@@ -250,6 +267,28 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     expect(live.action_bar!.revision.graph_hash).toBe(hashOf(source.graph));
     expect(live.action_bar!.revision.run_key === null).toBe(state === 'pre_run');
     coldStore();
+    const again = await reload();
+    expect(JSON.stringify(again.action_bar)).toBe(JSON.stringify(live.action_bar));
+  });
+  it('RED (Codex r1 P2-4): live === reload also when this answer pushes an older guidance event out of the history window', async () => {
+    // One own option besides doing nothing: RC-WIDEN W2 ranks More options into priority unless pressed at this state.
+    const g = structuredClone(D3.graph) as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+    g.nodes = g.nodes.filter((n) => n.kind !== 'option' || n.id === 'switch_to_gcp' || n.id === 'stay_on_aws');
+    g.edges = g.edges.filter((e) => g.nodes.some((n) => n.id === e.from) && g.nodes.some((n) => n.id === e.to));
+    setState('pre_run', g);
+    const facts = actionFactsOf({ scenarioId: scenario, graph: g, graphHash: hashOf(g), analysisReady: READY });
+    const widen = facts.rcRows.find((r) => r.policy_id === 'RC-WIDEN')!;
+    expect(widen, 'precondition: RC-WIDEN holds on this state').toBeDefined();
+    // 20 answer rows: the OLDEST presses RC-WIDEN at this state; 19 newer carry another policy's event.
+    const row = (i: number, entries: Record<string, unknown>) => ({ id: `22222222-2222-4222-8222-${String(i).padStart(12, '0')}`, scenario_id: scenario,
+      user_id: OWNER, turn_id: `seed-${i}`, turn_class: 'direct_answer', handler_id: null, request_hash: `agent_turn:seed${i}`, response_emitted: true,
+      created_at: new Date(Date.parse('2026-10-07T11:00:00.000Z') + i * 1000).toISOString(), user_message: null, assistant_message: null,
+      pending_actions: [], agent_guidance: { version: 1, entries }, suggested_actions: null, suggested_actions_run_key: null });
+    table.push(row(0, { 'RC-WIDEN': { status: 'pressed', state_key_hash: widen.state_key_hash } }));
+    for (let i = 1; i < 20; i += 1) table.push(row(i, { 'RC-COACH-EDITS': { status: 'offered', state_key_hash: 'aaaaaaaaaaaa' } }));
+    coldStore();
+    const live = await turn({ message: 'Where are we?' });
+    expect(table.filter((r) => r.agent_guidance !== null).length, 'precondition: this answer wrote a guidance event').toBe(21);
     const again = await reload();
     expect(JSON.stringify(again.action_bar)).toBe(JSON.stringify(live.action_bar));
   });

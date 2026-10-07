@@ -83,9 +83,9 @@ export function sayDate(iso: string): string | null {
 
 const hash16 = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16);
 
-/** The offer's identity (§E.1): scenario + graph hash + action + target, and the Run only for a Run-dependent action. */
+/** The offer's identity (§E.1): scenario + graph hash (+ the goal's date) + action + target, and the Run only for a Run-dependent action. */
 export function offerKeyOf(f: ActionFacts, action: ActionId, target?: ItemRef): string {
-  return hash16(['offer', 1, f.scenarioId, f.revision.graph_hash, action, target ?? null,
+  return hash16(['offer', 1, f.scenarioId, f.revision.graph_hash, f.deadline, action, target ?? null,
     ACTION_REGISTRY[action].run_dependent ? f.revision.run_key : null]);
 }
 

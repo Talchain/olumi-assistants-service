@@ -98,6 +98,18 @@ describe('the ranker: same read → byte-identical bar; a changed revision → a
       'history is not the revision').toBe(base.state_key);
     expect(base.revision).toEqual({ graph_hash: hashOf(D1.graph), run_key: expect.stringMatching(/^[0-9a-f]{16}$/) });
   });
+  it('RED (Codex r1 P2-5): a change of the goal\'s date alone (outside graph_hash) moves state_key and the pre-mortem offer_key', () => {
+    const at = (deadline: string) => {
+      const g = structuredClone(D1.graph) as G;
+      (g.nodes.find((n) => n.kind === 'goal') as Record<string, unknown>).goal_horizon = { deadline };
+      return bar(preRun(g));
+    };
+    const april = at('2027-04-07'); const may = at('2027-05-07');
+    expect(april.revision.graph_hash, 'precondition: the date is outside graph_hash').toBe(may.revision.graph_hash);
+    expect(may.state_key).not.toBe(april.state_key);
+    const key = (b: ActionBarV1) => offers(b).find((o) => o.action_id === 'pre_mortem')!.offer_key;
+    expect(key(may)).not.toBe(key(april));
+  });
   it('an offer key binds the Run only for a Run-dependent action (§E.1)', () => {
     const before = actionFactsOf(ran(D1.graph, WITHHELD));
     const later = actionFactsOf({ ...ran(D1.graph, WITHHELD), analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-07T13:00:00.000Z' }, leader_claim: WITHHELD } });

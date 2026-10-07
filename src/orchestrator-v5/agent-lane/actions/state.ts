@@ -62,9 +62,13 @@ export interface ActionFacts {
 
 const hash16 = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16);
 
-/** The bar's identity: scenario + model revision. A changed graph or Run gives a different key. */
-export function stateKeyOf(scenarioId: string, revision: ActionRevision): string {
-  return hash16(['action_bar', 1, scenarioId, revision.graph_hash, revision.run_key]);
+/**
+ * The bar's identity: scenario + model revision, plus the goal's date, which the analysis-affecting `graph_hash` does
+ * not cover but an offer's words do (the pre-mortem names it; Codex r1 P2-5 on #2751). A changed graph, Run or date
+ * gives a different key.
+ */
+export function stateKeyOf(scenarioId: string, revision: ActionRevision, deadline: string | null = null): string {
+  return hash16(['action_bar', 1, scenarioId, revision.graph_hash, revision.run_key, deadline]);
 }
 
 function deadlineOf(goal: Rec | undefined): string | null {
@@ -78,12 +82,14 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
   const runKey = runChip === null ? null : runChip.id.slice(RUN_EXPLANATION_PREFIX.length);
   const revision: ActionRevision = { graph_hash: typeof read.graphHash === 'string' && read.graphHash !== '' ? read.graphHash : null, run_key: runKey };
   const ready = rec(read.analysisReady);
+  const raw = rec(read.graph);
+  const goals = Array.isArray(raw?.nodes) ? (raw!.nodes as unknown[]).map(rec).filter((n) => n?.kind === 'goal') : [];
+  const deadline = goals.length === 1 ? deadlineOf(goals[0]) : null;
   const base = {
-    scenarioId: read.scenarioId, revision, stateKey: stateKeyOf(read.scenarioId, revision), runBound: runKey !== null,
+    scenarioId: read.scenarioId, revision, stateKey: stateKeyOf(read.scenarioId, revision, deadline), runBound: runKey !== null,
     runAdmissible: typeof ready?.may_run === 'boolean' ? ready.may_run : ready?.status === 'ready',
   };
   const unread: ActionFacts = { ...base, readable: false, goalPresent: false, deadline: null, ownOptionCount: 0, rcRows: [], strengthenCard: false, testLink: null };
-  const raw = rec(read.graph);
   if (raw === undefined || !Array.isArray(raw.nodes)) return unread;
   try {
     const signals = assembleGuidanceSignals({
@@ -94,12 +100,11 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
       leaderLicensed: guidanceLeaderLicensed(leaderLicenceFromState(read.analysisState, read.analysisReady)),
     });
     const selectorSignals = selectorSignalsOf(signals, null, runKey ?? undefined);
-    const goals = (raw.nodes as unknown[]).map(rec).filter((n) => n?.kind === 'goal');
     return {
       ...base,
       readable: true,
       goalPresent: signals['model.goal_present'],
-      deadline: goals.length === 1 ? deadlineOf(goals[0]) : null,
+      deadline,
       ownOptionCount: signals['model.non_sq_option_ids'].length,
       rcRows: eligibleGuidanceRows(selectorSignals, selectorSignals.guidance ?? {}),
       strengthenCard: strengthenCardFor({ graph: read.graph, analysisState: read.analysisState, analysisResult: read.analysisResult,

@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "state_key": "64eb867eee176810",
+  "state_key": "ae7359c5a36eef84",
   "revision": {
     "graph_hash": "1d023b90daeaa01a",
     "run_key": null
@@ -16,7 +16,7 @@
       "user_line": "Review this decision: what should I check before relying on it?",
       "enabled": false,
       "disabled_reason": "Needs a current analysis.",
-      "offer_key": "55ec45edca37404d"
+      "offer_key": "ee35fa49fc62ebcf"
     },
     {
       "action_id": "what_changes",
@@ -27,7 +27,7 @@
       "user_line": "What would most likely change this result?",
       "enabled": false,
       "disabled_reason": "Needs a current analysis.",
-      "offer_key": "9232fb7c11438ab6"
+      "offer_key": "76ff5064c112a63f"
     },
     {
       "action_id": "strengthen",
@@ -38,7 +38,7 @@
       "user_line": "What would most strengthen this model?",
       "enabled": false,
       "disabled_reason": "Needs a current analysis.",
-      "offer_key": "bed55b29351906c8"
+      "offer_key": "1ba2cbd2508d32a7"
     },
     {
       "action_id": "pre_mortem",
@@ -49,7 +49,7 @@
       "user_line": "Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?",
       "enabled": true,
       "why_now": "Imagine this went badly and find the most likely causes.",
-      "offer_key": "0bffc7665b78117c"
+      "offer_key": "25cb467745ed3c8e"
     }
   ],
   "more": [
@@ -62,7 +62,7 @@
       "user_line": "Suggest options I haven’t considered.",
       "enabled": true,
       "why_now": "Find options you haven’t considered yet.",
-      "offer_key": "66d2fe5b467621ab"
+      "offer_key": "cfa3036851986af6"
     }
   ]
 }
