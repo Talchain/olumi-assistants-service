@@ -1559,7 +1559,9 @@ function projectNodeProvenance(
       typeof node.goal_threshold === "number" ||
       typeof node.goal_threshold_raw === "number" ||
       // The UI's stated goal target (#1921): a magnitude, the sibling of goal_threshold_raw.
-      typeof node.success_threshold === "number";
+      typeof node.success_threshold === "number" ||
+      // event_risk.v1: a stated occurrence range, attested by its own `basis` (src/schemas/event-risk.ts).
+      node.event_risk !== undefined;
     if (carriesValue) continue;
 
     const tokenCount = node.label.trim().split(/\s+/).filter(Boolean).length;
