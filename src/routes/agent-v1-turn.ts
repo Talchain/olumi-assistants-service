@@ -43,7 +43,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
-import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
+import { RESEARCH_CHIP_PREFIX, RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, withResearchControlTruth, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { firstAnalysisResultReply } from '../orchestrator-v5/agent-lane/first-analysis-result-reply.js';
@@ -119,7 +119,7 @@ import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipelin
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
-import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
+import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
@@ -405,8 +405,9 @@ function whatWouldChangeAnswer(scenarioId: string, read: Parameters<typeof tippi
  */
 const RESEARCH_OFFERS_MAX = 500;
 const researchOffers = new Map<string, Set<string>>();
-function rememberResearchOffers(key: string, offered: readonly OfferedAction[]): void {
-  const ids = offered.filter((a) => a.id.startsWith(RESEARCH_CHIP_PREFIX)).map((a) => a.id);
+function rememberResearchOffers(key: string, delivered: unknown): void {
+  const ids = (Array.isArray(delivered) ? delivered : []).map((a) => (a as { id?: unknown } | null | undefined)?.id)
+    .filter((id): id is string => typeof id === 'string' && id.startsWith(RESEARCH_CHIP_PREFIX));
   if (ids.length === 0) return;
   const held = researchOffers.get(key) ?? new Set<string>();
   researchOffers.delete(key);
@@ -1140,6 +1141,24 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
     leader_claim: composeLeaderClaim({ goalScopeClaimInput: scopeInput, canonical: null, rawRobustness: null },
       base.run_state, base.contradictions?.includes('fact_status_success_but_degraded_newer') === true),
   } };
+}
+
+/**
+ * ⭐ WOULD A SEARCH CONTROL FOR THIS QUERY BE SHOWN, ON THE STATE AS IT IS NOW? The early check behind
+ * `offer_public_research`: the gate's own rule (`controlSurvivesLeaderGate`) on this route's readback. An unsuccessful
+ * read licenses nothing (`readBackState` answers a failed read with missing authority, which reads as "no restriction").
+ * It is NOT the last word: a Run later in the same turn can change the licence, so the reply's final read decides again.
+ */
+export async function researchControlShowableNow(dispatch: InternalDispatch, scenarioId: string, query: string): Promise<boolean> {
+  const chip = researchChipFor(query);
+  if (chip === null) return false;
+  let readOk = false;
+  const read = await readBackState(async (path, body) => {
+    const res = await dispatch(path, body);
+    if (res.status === 200) readOk = true;
+    return res;
+  }, scenarioId);
+  return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
 export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
@@ -2391,6 +2410,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
         readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(readingDispatch, sid)),
+        // ⭐ The EARLY answer to "would this search control be shown", so a refusal reaches the model while it can still
+        // ask a neutral question. The turn's final read decides again, below (`withResearchControlTruth`).
+        researchControlShowable: (sid: string, query: string) => researchControlShowableNow(readingDispatch, sid, query),
         // ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door (ONE held change) and limit door (ONE commit),
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {
@@ -3510,6 +3532,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
     const composedRead = await withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues, String(req.id));
     const { analysisState, analysisResult } = composedRead;
+    // ONE set of leader-gate inputs from this turn's final read: the search controls offered below, the reply's words
+    // about them and the final egress all read this same object, so they cannot disagree.
+    const leaderGate = leaderGateInputsOf({ analysisState, analysisReady, graph: readbackGraph, scopeAuthorityUnavailable: composedRead.scopeAuthorityUnavailable });
+    // The search control for each query the Agent offered THIS turn (each query once).
+    const researchOffered = [...new Map(result.tool_results.flatMap((r) => {
+      const chip = researchChipFor(String((r as { offered_query?: unknown } | undefined)?.offered_query ?? ''));
+      return chip === null ? [] : [[chip.id, chip] as const];
+    })).values()];
     if (whatChangesRead !== undefined) {
       const answer = whatWouldChangeAnswer(scenarioId,
         await withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues, String(req.id)), measuredCandidate,
@@ -3711,11 +3741,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(startingAssumptions.length > 0 ? startingAssumptions
         : (runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
-      // The research control for each query the Agent offered THIS turn: the only way a query is ever sent.
-      ...[...new Map(result.tool_results.flatMap((r) => {
-        const chip = researchChipFor(String((r as { offered_query?: unknown } | undefined)?.offered_query ?? ''));
-        return chip === null ? [] : [[chip.id, chip] as const];
-      })).values()],
+      // The research control for each query the Agent offered THIS turn: the only way a query is ever sent. Only a
+      // control the final egress would ship is offered, and so remembered as pressable.
+      ...researchOffered.filter((chip) => controlSurvivesLeaderGate(chip, leaderGate)),
     ]);
     let guidanceHistory: Awaited<ReturnType<NonNullable<typeof store.readGuidanceHistory>>> | null = null;
     if (typeof store.readGuidanceHistory === 'function') {
@@ -3795,7 +3823,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Remembered only once the row's capacity is settled, so a card withdrawn above is never remembered as offered.
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
-    rememberResearchOffers(approveKey, offeredNow);
     // S-B (amendment 6): the card an offered action prepared, with the chips offered beside it, is remembered by its offer,
     // so the same offer pressed again re-offers it (an Agent proposal or a product hold alike). An S-D card re-offered for
     // an EARLIER held proposal is never taken for the card this press prepared.
@@ -4175,17 +4202,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     let leaderFreeEnvelope = false;
     {
-      const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
+      const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown } } | undefined)?.leader_claim;
       const finalEgress = enforceLeaderLicenceAtFinalEgress(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_final',
-        scopeAuthorityUnavailable: composedRead.scopeAuthorityUnavailable,
-        licence: leaderLicenceFromState(analysisState, analysisReady),
+        ...leaderGate,
         mayNameLeadingOption: claim?.permitted === true,
         separationEstablished: claim?.separation === 'separated',
-        ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
-        graph: readbackGraph ?? null,
-        analysisReady,
       });
       leaderFreeEnvelope = finalEgress.leaderFreeEnvelope === true;
       if (finalEgress.response !== wireBody) {
@@ -4211,6 +4234,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const preview = previewBesideItsChip(pendingPreview, approvalChipIdFor, wireBody.suggested_actions);
       if (preview !== undefined) wireBody = { ...wireBody, proposal_preview: preview };
     }
+    // ⭐ AFTER EVERY GATE THAT EDITS THE REPLY (buddy r2 on #2746): the reply's words follow the search controls it carries.
+    // A search the Agent offered with no control on THIS body is said so in fixed words, at rest (never behind the
+    // questions toggle, which the scope question below also drops). The gate's own envelope promises nothing, so it is
+    // left as it is. ⛔ Only a control that is DELIVERED is remembered as pressable: the envelope ships none.
+    if (!leaderFreeEnvelope) {
+      wireBody = withResearchControlTruth(wireBody, researchOffered, (chip) => controlSurvivesLeaderGate(chip, leaderGate),
+        (replyText, sentence) => withB3LinesAtRest(replyText, [sentence]));
+    }
+    rememberResearchOffers(approveKey, wireBody.suggested_actions);
     // Bind the question that is actually delivered after every prose gate.
     if (freshScopeQuestion !== null && !leaderFreeEnvelope) {
       const resting = textAtRest(String(wireBody.assistant_text ?? ''));
@@ -4251,6 +4283,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           .map((text) => ({ role: 'withheld_reason' as const, text, subjects: coHold?.subjects })),
         ...AGENT_NO_LEADER_SENTENCES.filter((text) => reply.includes(text))
           .map((text) => ({ role: 'withheld_reason' as const, text })),
+        // #2746: the fixed words that say an offered web search has no control under this reply stay on the face, never
+        // under "More detail": they answer the reply's own "press the control" (`withResearchControlTruth`).
+        ...[RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT].filter((text) => reply.includes(text))
+          .map((text) => ({ role: 'caveat' as const, text })),
         // #2565: a licensed Explain of a fragile Run names a finding; its robustness caveat qualifies it, on the face.
         ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat }] : []),
         // Required evidence, never hidden (AIE line review): the screen's chance lines, the comparison's basis, a root
