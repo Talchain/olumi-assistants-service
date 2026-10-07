@@ -1,0 +1,167 @@
+[
+  {
+    "sc": "a4d58afe",
+    "option": "Four Saturday sessions",
+    "factor": "Saturday sessions per month",
+    "value": 4,
+    "unit": "sessions/month",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "explicit",
+    "expected": "explicit"
+  },
+  {
+    "sc": "a4d58afe",
+    "option": "Extend weekdays",
+    "factor": "Weekday extended opening hours",
+    "value": 10,
+    "unit": "hours/week",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "ai_proposed",
+    "expected": "ai_proposed"
+  },
+  {
+    "sc": "fff05472",
+    "option": "Four Saturday sessions",
+    "factor": "Saturday sessions",
+    "value": 4,
+    "unit": "sessions/month",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "explicit",
+    "expected": "explicit"
+  },
+  {
+    "sc": "ca2cc3ca",
+    "option": "Launch starter tier",
+    "factor": "Starter tier subscribers",
+    "value": 150,
+    "unit": "subscribers",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "explicit",
+    "expected": "explicit"
+  },
+  {
+    "sc": "ca2cc3ca",
+    "option": "Launch starter tier",
+    "factor": "Starter tier monthly price",
+    "value": 49,
+    "unit": "\u00a3/starter subscriber/month",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "explicit",
+    "expected": "explicit"
+  },
+  {
+    "sc": "b7398aad",
+    "option": "Launch starter tier",
+    "factor": "Starter subscribers",
+    "value": 150,
+    "unit": "subscribers",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "ai_proposed",
+    "expected": "ai_proposed"
+  },
+  {
+    "sc": "b7398aad",
+    "option": "Launch starter tier",
+    "factor": "Starter-tier price",
+    "value": 49,
+    "unit": "\u00a3 per subscriber per month",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "explicit",
+    "expected": "explicit"
+  },
+  {
+    "sc": "f440be4a",
+    "option": "Launch starter tier",
+    "factor": "Starter-tier subscribers",
+    "value": 150,
+    "unit": "subscribers",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "explicit",
+    "expected": "explicit"
+  },
+  {
+    "sc": "689f4bb9",
+    "option": "Hire a Tech lead",
+    "factor": "Tech lead hires",
+    "value": 1,
+    "unit": "hires",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "ai_proposed",
+    "expected": "ai_proposed"
+  },
+  {
+    "sc": "689f4bb9",
+    "option": "Hire two developers",
+    "factor": "Developer hires",
+    "value": 2,
+    "unit": "hires",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "explicit",
+    "expected": "ai_proposed"
+  },
+  {
+    "sc": "e63bd10a",
+    "option": "Open Leeds shop",
+    "factor": "Leeds shop presence",
+    "value": 1,
+    "unit": "binary",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "explicit",
+    "expected": "ai_proposed"
+  },
+  {
+    "sc": "e63bd10a",
+    "option": "Open Leeds shop",
+    "factor": "Expansion budget",
+    "value": 45000,
+    "unit": "\u00a3",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "ai_proposed",
+    "expected": "ai_proposed"
+  },
+  {
+    "sc": "e63bd10a",
+    "option": "Open Leeds shop",
+    "factor": "Leeds monthly rent",
+    "value": 3000,
+    "unit": "\u00a3/month",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "explicit",
+    "expected": "explicit"
+  },
+  {
+    "sc": "549f6ab8",
+    "option": "Online Booking System",
+    "factor": "Online booking availability",
+    "value": 1,
+    "unit": "0-1",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "ai_proposed",
+    "expected": "ai_proposed"
+  },
+  {
+    "sc": "779c9319",
+    "option": "Open Leeds location",
+    "factor": "Leeds location open",
+    "value": 1,
+    "unit": "open locations",
+    "factor_baseline_known_after_credit": false,
+    "base": "ai_proposed",
+    "r1": "ai_proposed",
+    "expected": "ai_proposed"
+  }
+]

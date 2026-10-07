@@ -35,6 +35,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
  */
 
 import { createHash } from 'node:crypto';
+import { verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
 import { unsizedLeaderGoalPaths } from '../goal-certainty.js';
@@ -226,7 +227,12 @@ export function buildCandidateSchema(): Record<string, unknown> {
         items: { type: 'string' } },
       interventions: { type: 'array', description:
         'The factor level this option sets, or a signed addition to its baseline. Distinguish these meanings with value_kind. Preserve user numbers; an estimated level is ai_proposed, never explicit.',
-        items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, value_kind: { type: 'string', enum: ['absolute', 'additional'] }, unit: { type: 'string' }, provenance },
+        items: obj({ factor_label: { type: 'string' }, value: { type: 'number' }, value_kind: { type: 'string', enum: ['absolute', 'additional'] }, unit: { type: 'string' }, provenance,
+          stated_evidence: { anyOf: [{ type: 'null' }, obj({
+            quote: { type: 'string' }, start: { type: 'integer' }, end: { type: 'integer' }, amount_start: { type: 'integer' },
+            option_quote: { type: 'string' }, option_start: { type: 'integer' }, option_end: { type: 'integer' },
+          }, ['quote', 'start', 'end', 'amount_start', 'option_quote', 'option_start', 'option_end'])] },
+        },
           ['factor_label', 'value', 'value_kind', 'unit', 'provenance']) },
       // ⛔ THE HELD STATUS QUO MUST NOT DEPEND ON WORDING (served c673223: "Continue
       // Current Staffing" was not a readiness idiom, so the turn blocked). The drafter
@@ -300,6 +306,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
 }
 
 export const BUILD_INSTRUCTIONS = [
+  'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
   'Record the goal metric\u2019s CURRENT level in goal.baseline_value, in the goal unit. When the brief states it: baseline_known true, baseline_provenance "explicit". When it does not, leave baseline_value null with baseline_known false. Do not estimate it: a guessed current level would set the chance of reaching the target on a guess. It is where things stand today, never the target.',
@@ -722,7 +729,7 @@ export function carryFindingsAcrossRetry<P extends ReturnType<typeof prepareProv
   };
 }
 
-export function prepareProvisionalCandidate(drafted: CandidateModel): {
+export function prepareProvisionalCandidate(drafted: CandidateModel, brief?: string): {
   candidate: CandidateModel;
   /** Olumi option levels on a limited node the same option's levers move, dropped (`option-level-over-own-levers.ts`). */
   levels_over_own_levers: OptionLevelOverOwnLevers[];
@@ -749,7 +756,8 @@ export function prepareProvisionalCandidate(drafted: CandidateModel): {
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
         const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
-        if (intervention.provenance === 'explicit' && unknownBaseline) {
+        if (intervention.provenance === 'explicit' && unknownBaseline
+          && !(factors[0]!.baseline_value === 0 && verifiedOptionSetting(model, option, intervention, brief))) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed' });
         } else {
@@ -1533,7 +1541,7 @@ export async function buildModelFromBrief(
    * fewer risks"; `construction-keeps-drafted-risks.test.ts`) and change no result.
    */
   const trialGraph = (c: CandidateModel) => {
-    const a = admitCandidateModel(mintOrFold(prepareProvisionalCandidate(c).candidate).model, {}, brief, goalLevelTheUserWrote(c, brief), writtenAgain, (x) => briefGoalLevel(x, brief), sizeWritten, sizeRangeEnd);
+    const a = admitCandidateModel(mintOrFold(prepareProvisionalCandidate(c, brief).candidate).model, {}, brief, goalLevelTheUserWrote(c, brief), writtenAgain, (x) => briefGoalLevel(x, brief), sizeWritten, sizeRangeEnd);
     return { nodes: a.nodes, edges: a.edges };
   };
   const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
@@ -1548,7 +1556,7 @@ export async function buildModelFromBrief(
   let notToldApart = apart.ambiguous;
   let linksSetAside = apart.setAside;
   const firstCandidate = candidate;
-  let preparation = prepareProvisionalCandidate(candidate);
+  let preparation = prepareProvisionalCandidate(candidate, brief);
   candidate = preparation.candidate;
   const firstIdentity = mintOrFold(candidate);
   let foldedCarrier = firstIdentity.folded;
@@ -1682,7 +1690,7 @@ export async function buildModelFromBrief(
           neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryUnsupported.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
-        const retryPrepared = prepareProvisionalCandidate(retryRaw);
+        const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
         const retryCandidate = retryPrepared.candidate;
         const retryIdentity = mintOrFold(retryCandidate);
         const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
