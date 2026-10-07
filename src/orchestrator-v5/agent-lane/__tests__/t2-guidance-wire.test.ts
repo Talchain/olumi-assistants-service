@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from './licence-test-graphs.js';
 /**
  * ⭐ T2 — THE GUIDANCE ROW ON THE WIRE (M1; AI HARNESS lease 5940322790, DL 5940323402). On RC's banked served D1 Run
  * (`m1-s1-served-graphs.json`), a typed turn carries root `guidance.slot1` = RC-STRENGTHEN-ITEM S1, with `item_ref`
@@ -14,8 +15,12 @@ import { NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
 import { guidanceHistoryOf, type AnswerGuidance } from '../turn-context/guidance-history.js';
 import { entryKey } from '../guidance/index.js';
 
-const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
-const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const D1_SERVED = served.cases.find((c) => c.id === 'D1-sprint-run')!;
+const D1 = { ...D1_SERVED, graph: legacyDoorGraph(D1_SERVED.graph) };
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const D3_SERVED = served.cases.find((c) => c.id === 'D3-cost-run')!;
+const D3 = { ...D3_SERVED, graph: legacyDoorGraph(D3_SERVED.graph) };
 const CURRENT = { run_state: { kind: 'complete_current', computed_at: '2026-10-01T11:52:22.669Z' } };
 const PARTICIPATION = [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }];
 const AI = { from: 'sprint_capacity_for_ai_reporting', to: 'ai_reporting_module_availability' };
@@ -262,4 +267,11 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     expect((next.guidance as { slot1?: { item?: string } } | undefined)?.slot1?.item).not.toBe(`${AI.from}->${AI.to}`);
     expect(store.readGuidanceHistory).toHaveBeenCalledWith(SCENARIO);
   });
+});
+
+it('Science 393023: as-served D1 and D3 guidance names each new S1 link by ID', () => {
+  for (const [c, from, to] of [[D1_SERVED, 'enterprise_prospect_signing_likelihood', 'quarterly_revenue'], [D3_SERVED, 'gcp_workload_share', 'monthly_cloud_savings']] as const) {
+    const g = turnGuidanceFor(inputs({ state: { graph: structuredClone(c.graph), analysisState: CURRENT, optionParticipation: PARTICIPATION } }));
+    expect(g?.slot1).toMatchObject({ policy_id: 'RC-STRENGTHEN-ITEM', variant: 'S1', item_ref: { kind: 'link', from_id: from, to_id: to } });
+  }
 });

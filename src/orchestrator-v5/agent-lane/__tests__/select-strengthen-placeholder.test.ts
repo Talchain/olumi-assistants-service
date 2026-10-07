@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from './licence-test-graphs.js';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import served from './fixtures/m1-s1-served-graphs.json';
@@ -10,7 +11,8 @@ type Node = { id: string; kind: string; label?: string; [k: string]: unknown };
 type Graph = { nodes: Node[]; edges: Edge[] };
 const caseOf = (id: string) => served.cases.find((c) => c.id === id)!;
 const D1 = caseOf('D1-sprint-run');
-const d1 = (): Graph => structuredClone(D1.graph) as unknown as Graph;
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const d1 = (): Graph => legacyDoorGraph(D1.graph) as unknown as Graph;
 const AI = { from: 'sprint_capacity_for_ai_reporting', to: 'ai_reporting_module_availability' };
 const INTEGRATION = { from: 'sprint_capacity_for_integration_fix', to: 'integration_step_bug_resolution' };
 const edgeOf = (g: Graph, l: { from: string; to: string }) => g.edges.find((e) => e.from === l.from && e.to === l.to)!;
@@ -29,7 +31,8 @@ describe('M1 S1 target on served Run turns (RC contract a00cb9c8; expect = refer
     const graph = structuredClone(c.graph);
     const before = JSON.stringify(graph);
     const target = selectStrengthenPlaceholder(graph, c.current_run_option_ids);
-    expect(target === null ? null : { from_id: target.from_id, to_id: target.to_id }).toEqual(c.expect);
+    // Science 393023 LICENCE (a)/(b), 7 Oct: D1 sprint → prospect/revenue; D3 none → workload/savings.
+    expect(target === null ? null : { from_id: target.from_id, to_id: target.to_id }).toEqual(c.id === 'D1-sprint-run' ? { from_id: 'enterprise_prospect_signing_likelihood', to_id: 'quarterly_revenue' } : { from_id: 'gcp_workload_share', to_id: 'monthly_cloud_savings' });
     expect(JSON.stringify(graph)).toBe(before);
   });
   it('D1: the whole target — labels from the graph, band = the writer’s own band of |mean|', () => {

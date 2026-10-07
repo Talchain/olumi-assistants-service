@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { admitCandidateLinks } from '../../../orchestrator-v5/agent-lane/admit-candidate.js';
+import { placeholderGoalPaths } from '../../../orchestrator-v5/agent-lane/goal-certainty.js';
 import { isPlaceholderLink } from '../link-sizing.js';
 import { frameDefaultedLinks } from '../frame-defaulted-links.js';
 import { legacyLeaderGoalLinks, unsizedLeaderGoalPaths } from '../../../orchestrator-v5/agent-lane/goal-certainty.js';
@@ -62,6 +64,18 @@ describe('new default-link producers and re-sizing receipts', () => {
     expect(hypothesisEdgeValue('x', 'g', direction).provenance).toMatchObject({ magnitude: 'olumi_placeholder' });
   });
 
+  it('buddy A RED: an authored spread retains frameless eligibility; only the whole door default is tagged', () => {
+    const result = admitCandidateLinks([{ from: 'x', to: 'g', direction: 'positive', strength_std: 0.2, provenance: 'hypothesis' }]);
+    expect(result.edges[0].provenance).toMatchObject({ mean_projected: true });
+    expect(result.edges[0].provenance).not.toHaveProperty('magnitude');
+    const graph = { nodes: [{ id: 'x', kind: 'factor', label: 'Capacity' }, { id: 'g', kind: 'goal', label: 'Revenue' }], edges: result.edges };
+    const framed = frameDefaultedLinks(graph, 'x');
+    expect(framed.sized).toEqual([]);
+    expect(framed.graph.edges[0].strength.std).toBe(0.2);
+    expect(admitCandidateLinks([{ from: 'x', to: 'g', direction: 'positive', provenance: 'hypothesis' }]).edges[0].provenance)
+      .toMatchObject({ mean_projected: true, magnitude: 'olumi_placeholder' });
+  });
+
   const taggedGraph = () => ({
     nodes: [{ id: 'x', kind: 'factor', label: 'Capacity' }, { id: 'g', kind: 'goal', label: 'Revenue' }],
     edges: [{
@@ -119,6 +133,15 @@ describe('stored Run inputs across the reader change', () => {
     },
   );
 
+  it('buddy B RED: the same authorship digest cannot hide a sizing class change when size moves', () => {
+    const current = snapshot('unmarked', 'd'.repeat(64));
+    current.links[0].mean = 0.4;
+    current.links[0].std = 0.1;
+    const result = diffRunInputs(snapshot('placeholder', 'd'.repeat(64)), current);
+    expect(result.rows).toContainEqual({ entity_kind: 'link', entity_id: 'fac_price->fac_churn',
+      link: { from: 'fac_price', to: 'fac_churn' }, field: 'sizing', before: { raw: 'placeholder' }, after: { raw: 'unmarked' }, change: 'changed' });
+  });
+
   it('CONTROL: different authorship digests keep the sizing row and existing partial coverage', () => {
     const result = diffRunInputs(snapshot('unmarked', 'd'.repeat(64)), snapshot('placeholder', 'e'.repeat(64)));
     expect(result.rows).toContainEqual({ entity_kind: 'link', entity_id: 'fac_price->fac_churn',
@@ -162,4 +185,16 @@ describe('DL 19:0xZ: the "+" Risk / Option door is a producer in this class', ()
       expect(isPlaceholderLink(l)).toBe(true);
     }
   });
+});
+
+it('buddy C RED: both stored MC walks agree: d2 empty and d1/d3 door paths retained', () => {
+  for (const d of [1, 2, 3]) {
+    const graph = JSON.parse(readFileSync(new URL(`../../../orchestrator-v5/admission/__tests__/fixtures/mc-p0/draw${d}.json`, import.meta.url), 'utf8'));
+    const ids = graph.nodes.filter((n: { kind: string }) => n.kind === 'option').map((n: { id: string }) => n.id);
+    const expectedLinks = d === 1 ? [{ from: 'starter_support_cost', to: 'mrr_lost_to_starter_support_burden' }]
+      : [{ from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' }, { from: 'starter_subscribers', to: 'starter_tier_monthly_recurring_revenue' }];
+    const ordered = (paths: ReturnType<typeof placeholderGoalPaths>) => paths.map(p => ({ ...p, links: [...p.links].sort((a, b) => a.from.localeCompare(b.from)) }));
+    expect(ordered(placeholderGoalPaths(graph, ids))).toEqual(d === 2 ? [] : [{ option_id: 'launch_starter_tier', links: expectedLinks }]);
+    expect(ordered(unsizedLeaderGoalPaths(graph, ids))).toEqual(ordered(placeholderGoalPaths(graph, ids)));
+  }
 });

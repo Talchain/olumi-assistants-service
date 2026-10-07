@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from './licence-test-graphs.js';
 /**
  * ⭐ M1 — "STRENGTHEN THE MODEL" OPENS ONE CARD, WITH NO MODEL CALL (PTL 5938801653 #1; brief CODEX-M1-NOW @28cbdc2b).
  *
@@ -13,8 +14,12 @@ import { strengthenCardFor, STRENGTHEN_PRESS_CHIP_ID } from '../strengthen-press
 import { chipOperationOf, NEXT_STEP_CHIPS, sameAgentTurnRequest, withChipOperation } from '../../../routes/agent-v1-turn.js';
 import { linkStrengthCardFor } from '../approval-chips.js';
 
-const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
-const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const D1_SERVED = served.cases.find((c) => c.id === 'D1-sprint-run')!;
+const D1 = { ...D1_SERVED, graph: legacyDoorGraph(D1_SERVED.graph) };
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
+const D3_SERVED = served.cases.find((c) => c.id === 'D3-cost-run')!;
+const D3 = { ...D3_SERVED, graph: legacyDoorGraph(D3_SERVED.graph) };
 const CURRENT = { run_state: { kind: 'complete_current', computed_at: '2026-10-01T11:52:22.669Z' } };
 const STALE = { run_state: { kind: 'complete_stale', computed_at: '2026-10-01T11:52:22.669Z' } };
 const PARTICIPATION = [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }];
@@ -290,4 +295,11 @@ describe('the real route: the press → ONE held card, 0 model calls', () => {
     expect(modelCalls).toBeGreaterThan(0);
     expect((r.json() as Body)._diagnostic_trace?.fast_path).toBeUndefined();
   });
+});
+
+it('Science 393023: as-served D1 targets prospect → revenue; D3 now targets workload → savings', () => {
+  for (const [c, from, to] of [[D1_SERVED, 'enterprise_prospect_signing_likelihood', 'quarterly_revenue'], [D3_SERVED, 'gcp_workload_share', 'monthly_cloud_savings']] as const) {
+    const card = strengthenCardFor({ graph: structuredClone(c.graph), analysisState: CURRENT, optionParticipation: PARTICIPATION });
+    expect(card?.target).toMatchObject({ from_id: from, to_id: to, band: 'strong' });
+  }
 });

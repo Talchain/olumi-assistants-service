@@ -36,7 +36,13 @@ describe('get_canonical_state: every link says who sized it (served 799d1a5d)', 
     expect(s.ok, JSON.stringify(s)).toBe(true);
     const links = (s as unknown as { links: Link[] }).links;
     const key = (l: Link) => `${l.from}->${l.to}`;
-    expect(links.filter((l) => l.sizing === 'placeholder').map(key).sort()).toEqual([...REAL_PLACEHOLDERS].sort());
+    // Science 393023 LICENCE (a)/(b), 7 Oct: two → six placeholders; the parts/limit Olumi estimates stay sized.
+    expect(links.filter((l) => l.sizing === 'placeholder').map(key).sort()).toEqual([...REAL_PLACEHOLDERS,
+      'ai_reporting_module_completion->revenue_lost_to_rushed_ai_delivery',
+      'enterprise_prospect_contract_value->expected_enterprise_revenue',
+      'expected_revenue_per_completed_trial_profile->expected_trial_profile_revenue',
+      'trial_signup_starts->expected_trial_profile_revenue',
+    ].sort());
     for (const k of PARTS_ESTIMATES) expect(links.find((l) => key(l) === k)?.sizing, k).toBe('olumi_estimate');
     // `defaulted` is no sizing mark, so the Agent no longer sees it at all.
     expect(links.some((l) => 'defaulted' in l)).toBe(false);

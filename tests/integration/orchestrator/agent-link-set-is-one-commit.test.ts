@@ -353,8 +353,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
 
   it('R11 × P1-a (Canonical 5874263009, DL 5874274221): the band the user agreed to is their settled view — the magnitude contract never re-sizes it', async () => {
     const { frameDefaultedLinks } = await import('../../../src/cee/magnitude/frame-defaulted-links.js');
+    // Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on this test clone keeps R11's actual re-sizing control.
     // A magnitude-contract placeholder, as a served draft stamps it.
     const e = edge('capacityOverhead');
+    e.strength.std = 0.1;
     e.provenance = { ...(e.provenance ?? {}), magnitude: 'olumi_placeholder' };
     const id = 'human_assistant_capacity::assistant_coordination_overhead';
     // CONTROL: before the approval, a level move on "Human assistant capacity" re-sizes this placeholder (the value writer's own step).
@@ -365,6 +367,15 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(edge('capacityOverhead').strength.mean).toBe(0.3);
     expect((edge('capacityOverhead').provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'moderate' });
     expect(frameDefaultedLinks(persisted, 'human_assistant_capacity').sized, 'the agreed band is never re-sized').not.toContain(id);
+  });
+
+  it('Science 393023: a served door default with no size change has no false re-sizing receipt', async () => {
+    const { frameDefaultedLinks } = await import('../../../src/cee/magnitude/frame-defaulted-links.js');
+    const e = edge('capacityOverhead');
+    e.provenance = { ...(e.provenance ?? {}), magnitude: 'olumi_placeholder' };
+    const before = JSON.stringify(e);
+    expect(frameDefaultedLinks(persisted, 'human_assistant_capacity').sized).not.toContain('human_assistant_capacity::assistant_coordination_overhead');
+    expect(JSON.stringify(e)).toBe(before);
   });
 
   it('RED (B3, review): a link the user REVIEWED after the proposal (a canvas confirm writes only that stamp) is not changed — 0 rows', async () => {

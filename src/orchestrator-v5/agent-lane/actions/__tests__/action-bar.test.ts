@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../__tests__/licence-test-graphs.js';
 /**
  * ⭐ S-B — the registry, the ranker and the press dispatcher, pure (lane ACTION-BAR-CEE; ACTION-SYSTEM-DRAFT §C/§D/§E;
  * github-a2 contract amendments 1–11 + v1.1). The route rows (every press typed, reload === live, stale offers, double
@@ -14,6 +15,8 @@ import { HANDLERS, decidePress } from '../handlers.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
 const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone keeps the independent nothing-in-scope controls.
+const legacyD3 = () => legacyDoorGraph(D3.graph);
 const SCENARIO = '7d2e3f40-5b6c-4d7e-8f90-a1b2c3d4e5f6';
 const AT = '2026-10-07T12:00:00.000Z';
 const PARTICIPATION = [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }];
@@ -80,7 +83,7 @@ describe('the registry: ONE dispatch table, total', () => {
 
 describe('the ranker: same read → byte-identical bar; a changed revision → a different state_key', () => {
   const reads: [string, ActionRead][] = [
-    ['pre-run D1', preRun(D1.graph)], ['withheld D1', ran(D1.graph, WITHHELD)], ['licensed D3', ran(D3.graph, { permitted: true, separation: 'separated' })],
+    ['pre-run D1', preRun(D1.graph)], ['withheld D1', ran(D1.graph, WITHHELD)], ['licensed D3', ran(legacyD3(), { permitted: true, separation: 'separated' })],
     ['unreadable', { scenarioId: SCENARIO, graph: { nodes: 'x' } }],
   ];
   it.each(reads)('%s: two derivations from independent copies are byte-identical', (_name, read) => {
@@ -124,7 +127,7 @@ describe('the ranker: same read → byte-identical bar; a changed revision → a
 
 describe('the layout contract (github-a2 amendments 3–4; §E.2)', () => {
   const states: [string, ActionRead][] = [
-    ['pre-run D1', preRun(D1.graph)], ['withheld D1 (S1 card)', ran(D1.graph, WITHHELD)], ['licensed D3 (no S1 link)', ran(D3.graph, { permitted: true, separation: 'separated' })],
+    ['pre-run D1', preRun(D1.graph)], ['withheld D1 (S1 card)', ran(D1.graph, WITHHELD)], ['licensed D3 (no S1 link)', ran(legacyD3(), { permitted: true, separation: 'separated' })],
     ['no graph', { scenarioId: SCENARIO, graph: null }],
   ];
   it.each(states)('%s: priority holds no standard id; (action, target) is unique; every offer is complete', (_n, read) => {
@@ -151,7 +154,7 @@ describe('the layout contract (github-a2 amendments 3–4; §E.2)', () => {
   });
   it('Strengthen is S1 only: enabled with the S1 card (D1); NOT offered on a bound Run with no unsized link (D3)', () => {
     expect(offers(bar(ran(D1.graph, WITHHELD))).find((o) => o.action_id === 'strengthen')?.enabled).toBe(true);
-    expect(offers(bar(ran(D3.graph, { permitted: true, separation: 'separated' }))).some((o) => o.action_id === 'strengthen')).toBe(false);
+    expect(offers(bar(ran(legacyD3(), { permitted: true, separation: 'separated' }))).some((o) => o.action_id === 'strengthen')).toBe(false);
   });
   it('no goal → Pre-mortem and More options are disabled with a reason the user can act on', () => {
     const g = structuredClone(D3.graph) as G;
@@ -226,7 +229,7 @@ describe('the press dispatcher: re-derived on the CURRENT state (amendment 6)', 
       reply: { reason: 'needs_current_analysis', text: 'I can’t strengthen the model yet: it needs a current analysis first.', exits: [{ kind: 'run' }] } });
   });
   it('Strengthen on a bound Run with nothing in S1 scope → typed reply, with other offers as exits', () => {
-    const d = decidePress({ id: 'agent-next-strengthen' }, actionFactsOf(ran(D3.graph, { permitted: true, separation: 'separated' })));
+    const d = decidePress({ id: 'agent-next-strengthen' }, actionFactsOf(ran(legacyD3(), { permitted: true, separation: 'separated' })));
     expect(d.kind).toBe('reply');
     if (d.kind !== 'reply') return;
     expect(d.reply.reason).toBe('nothing_in_scope');
@@ -253,4 +256,10 @@ describe('the press dispatcher: re-derived on the CURRENT state (amendment 6)', 
     const b = bar(ran(D1.graph, WITHHELD));
     expect(currentOfferFor(b, 'test_link', { kind: 'link', from_id: 'nope', to_id: 'nope' })).toBeUndefined();
   });
+});
+
+it('Science 393023: as-served D3 none → Strengthen enabled and its press routes', () => {
+  const read = ran(D3.graph, { permitted: true, separation: 'separated' });
+  expect(offers(bar(read)).find(o => o.action_id === 'strengthen')?.enabled).toBe(true);
+  expect(decidePress({ id: 'agent-next-strengthen' }, actionFactsOf(read)).kind).toBe('route');
 });

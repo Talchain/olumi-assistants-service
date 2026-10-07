@@ -1,3 +1,4 @@
+import { legacyDoorGraph, reclassifiedCTurn, reclassifiedCPlan } from '../../../__tests__/licence-test-graphs.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
@@ -17,9 +18,10 @@ export const timings: Record<string, number[]> = {};
 export const r2Rows: Record<string, () => void> = {};
 function servedReadback(id: string): MethodReadback {
   const c = served.find((c: { id: string }) => c.id === id).body;
-  return { graph: c.draft_graph, analysisState: c.analysis_state, analysisResult: c.analysis_result,
+  return { graph: legacyDoorGraph(c.draft_graph), analysisState: c.analysis_state, analysisResult: c.analysis_result,
     optionParticipation: c.option_participation, analysisReady: { status: 'ready', may_run: true } };
 }
+// Science 393023 LICENCE (a)/(b), 7 Oct: std 0.125 → 0.1 on a clone preserves this independent claim; captured bytes stay unchanged.
 function captureReadback(name: string): MethodReadback {
   if (name === 'C') {
     const c = load('../fixtures/w9b/C.json').j;
@@ -148,12 +150,14 @@ for (const name of ['w9b-2', 'w9b-3', 'C', 'A-Q-D1-BUILD', 'draw2']) {
       assert.deepEqual(actual.labels, item.labels);
     }
     let groundedOptions = 0;
-    for (const [id, original] of Object.entries(base[name].plans) as Array<[string, RunMethodTurn]>) {
+    for (const [id, recorded] of Object.entries(base[name].plans) as Array<[string, RunMethodTurn]>) {
+      // Science 393023 LICENCE (a)/(b), 7 Oct: C's option-scoped turns also gain their newly unsized path link; all other fields stay pinned.
+      const original = name === 'C' ? reclassifiedCPlan(recorded, id) : recorded;
       const scoped = methodTurnForReadback(planPickChipId(id), rb);
       assert.equal(JSON.stringify(scoped), JSON.stringify(original), `${name} option ${id}`);
       if (original?.kind !== 'run') continue;
       const expected = original.context.supplied_items.filter(i => (i.kind === 'factor' || i.kind === 'link')
-        && base[name].turn.context.supplied_items.some((b: SuppliedItem) => b.id === i.id && b.kind === i.kind));
+        && (name === 'C' ? reclassifiedCTurn(base[name].turn) : base[name].turn).context.supplied_items.some((b: SuppliedItem) => b.id === i.id && b.kind === i.kind));
       if (expected.length > 0) groundedOptions++;
       // A2 premortem.ts:173-175 requires a row's labels/id/kind in both generic and option-scoped turns.
       const actual = original.context.supplied_items.filter(i => (i.kind === 'factor' || i.kind === 'link')
@@ -182,7 +186,8 @@ r2Rows['P1-4 R1: the ORIGINAL served D1 GOOD draft passes verbatim with no card'
 };
 r2Rows['P2: near-tie C WHOLE turn, check_inputs, directive and exact fallback/settlement pin'] = () => {
   const out = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, captureReadback('C')));
-  assert.equal(JSON.stringify(out), JSON.stringify(pinned.C.turn));
+  // Science 393023 LICENCE (a)/(b), 7 Oct: two → four unsized grounding links; fallback and settlement stay pinned.
+  assert.equal(JSON.stringify(out), JSON.stringify(reclassifiedCTurn(pinned.C.turn)));
   assert.equal(fallbackReply(out.context), pinned.C.fallback);
   assert.equal(JSON.stringify(settleMethodTurn(out, '')), JSON.stringify(pinned.C.settled));
 };
@@ -221,4 +226,14 @@ r2Rows['P2-5: one own lever uses a surviving union item for the second story'] =
   assert.ok(reply.includes('2. ‘Customers lost after price rise’ materialised'));
   assert.equal(settleMethodTurn(out, reply).passed, true);
   assert.ok(methodDirective(out.context).includes('no model change or approval card'));
+};
+
+r2Rows['Science 393023: as-served C supplies two newly grounded links; D1 differs from its legacy control'] = () => {
+  const c = captureReadback('C');
+  const current = requireRun(methodTurnForReadback(PREMORTEM_PRESS_ID, c));
+  assert.deepEqual(current.context.supplied_items.filter(i => ['price_rise->price_rise_churn', 'starter_tier_support_cost->support_capacity_strain'].includes(i.id)).map(i => i.id),
+    ['price_rise->price_rise_churn', 'starter_tier_support_cost->support_capacity_strain']);
+  const legacy = captureReadback('A-Q-D1-BUILD');
+  const graph = served.find((c: { id: string }) => c.id === 'A-Q-D1-BUILD').body.draft_graph;
+  assert.notEqual(JSON.stringify(methodTurnForReadback(PREMORTEM_PRESS_ID, { ...legacy, graph })), JSON.stringify(methodTurnForReadback(PREMORTEM_PRESS_ID, legacy)));
 };

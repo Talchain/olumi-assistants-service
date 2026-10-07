@@ -98,8 +98,16 @@ describe('MC P0 R4: target-independent licence on stored T1b paths', () => {
     expect(edge.provenance.magnitude).toBe('olumi_estimate'); expect(edge.provenance.natural_effect).toBeDefined();
     expect(licence(g, idsOf(g))).toEqual([]); expect((await run(g)).leading_option_id).toBe(idsOf(g)[0]);
   });
-  it('placeholder-only meaning stays unchanged for approval/coaching on the stored d1/d3', () => {
-    for (const d of [1, 3]) { const g = graph(d); expect(certainty.placeholderGoalPaths(g, idsOf(g))).toEqual([]); expect(licence(g, idsOf(g))).toEqual([]); }
+  it('approval/coaching and licence walks agree on stored d1/d2/d3', () => {
+    for (const d of [1, 2, 3]) {
+      const g = graph(d);
+      // Science 393023 LICENCE (a)/(b), 7 Oct: d1/d3 empty → the same door links as the handler row; d2 remains empty.
+      const links = d === 1 ? [{ from: 'starter_support_cost', to: 'mrr_lost_to_starter_support_burden' }]
+        : [{ from: 'starter_monthly_price', to: 'starter_tier_monthly_recurring_revenue' }, { from: 'starter_subscribers', to: 'starter_tier_monthly_recurring_revenue' }];
+      const expected = d === 2 ? [] : [{ option_id: 'launch_starter_tier', links }];
+      expect(certainty.placeholderGoalPaths(g, idsOf(g)).map(p => ({ ...p, links: [...p.links].sort((a, b) => a.from.localeCompare(b.from)) }))).toEqual(expected);
+      expect(licence(g, idsOf(g))).toEqual(expected);
+    }
   });
   it('P5 and the licence import the SAME exported walk and both call it (no copied walker)', () => {
     const p5 = target as any, leader = certainty as any;

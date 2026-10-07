@@ -1,3 +1,4 @@
+import { legacyDoorGraph } from '../../../src/orchestrator-v5/agent-lane/__tests__/licence-test-graphs.js';
 /**
  * ⭐ M1 (#2481): APPLYING THE STRENGTHEN CARD KEEPS THE FIGURE AND SIZES THE LINK — through the REAL in-process door
  * (CODEX_CLI_OVERFLOW P1 #1 + DL ruling on #2481). D1's S1 link holds Olumi's placeholder 0.25 ("moderate"); the card
@@ -24,7 +25,7 @@ const D1 = (JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-
  * writer carries it forward, so it is restored here by the writers' own rule (`assignEntityRefs` over itself).
  */
 function servedGraph(): unknown {
-  const projected = projectGraphForPersistence({ ...GraphV3.parse({ nodes: D1.graph.nodes, edges: D1.graph.edges }), options: [] as Array<Record<string, unknown>> });
+  const projected = projectGraphForPersistence({ ...GraphV3.parse({ nodes: D1.graph.nodes, edges: legacyDoorGraph(D1.graph).edges }), options: [] as Array<Record<string, unknown>> });
   return assignEntityRefs(projected, projected).graph;
 }
 
@@ -120,4 +121,10 @@ describe('M1: Apply on the Strengthen card holds D1\'s 0.25 and sizes that link'
     expect(after.provenance?.source, 'still Olumi\'s figure, never the user\'s').toBe(before.provenance?.source);
     expect(rows.size, 'ONE commit').toBe(1);
   });
+});
+
+it('Science 393023: as-served D1 sprint/moderate → prospect/revenue/strong before Apply', async () => {
+  const { strengthenCardFor } = await import('../../../src/orchestrator-v5/agent-lane/strengthen-press.js');
+  const card = strengthenCardFor({ graph: structuredClone(D1.graph), analysisState: { run_state: { kind: 'complete_current' } }, optionParticipation: [{ option_id: 'split_sprint_capacity', state: 'excluded_olumi_proposed' }] });
+  expect(card?.target).toMatchObject({ from_id: 'enterprise_prospect_signing_likelihood', to_id: 'quarterly_revenue', band: 'strong' });
 });

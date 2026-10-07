@@ -371,7 +371,8 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
       const readerReclassified = ((pl.sizing === 'unmarked' && cl.sizing === 'placeholder')
         || (pl.sizing === 'placeholder' && cl.sizing === 'unmarked'))
         && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined
-        && pl.authorship_digest === cl.authorship_digest;
+        && pl.authorship_digest === cl.authorship_digest
+        && pl.mean === cl.mean && pl.std === cl.std;
       if (pl.sizing !== cl.sizing && !readerReclassified) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
     } else if (pl.sizing !== cl.sizing) {
       complete = false;

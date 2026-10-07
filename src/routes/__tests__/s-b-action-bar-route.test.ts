@@ -309,7 +309,14 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
       expect(bar.revision.graph_hash, name).toBe(hashOf(source.graph));
       const file = new URL(`action-bar-v1-${name}.json`, FIXTURES);
       if (process.env.CAPTURE_ACTION_BAR_FIXTURES === '1') writeFileSync(file, `${JSON.stringify(bar, null, 2)}\n`);
-      expect(bar, name).toEqual(JSON.parse(readFileSync(file, 'utf8')));
+      const expected = JSON.parse(readFileSync(file, 'utf8'));
+      // Science 393023 LICENCE (a)/(b), 7 Oct: licensed D3 no Strengthen → enabled Strengthen for workload/savings; every other field stays pinned.
+      if (name === 'licensed-run') expected.standard.splice(2, 0, {
+        action_id: 'strengthen', label: 'Strengthen', icon: 'ShieldCheck', group: 'review',
+        press_id: 'agent-next-strengthen', user_line: 'What would most strengthen this model?', enabled: true,
+        why_now: 'A link on your goal’s path has no size yet.', offer_key: '82c52ea28c022f3b',
+      });
+      expect(bar, name).toEqual(expected);
     }
   });
 });
