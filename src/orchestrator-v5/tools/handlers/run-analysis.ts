@@ -209,6 +209,7 @@ import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
 import { scopeTargetNotTestableWithRanges } from '../../goal-target/scope-target-not-testable.js';
+import { perOptionTargetReasonsForRun } from '../../goal-target/target-testability-per-option.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 import { withHeldUserLinks } from '../../goal-target/held-user-links.js';
@@ -3829,7 +3830,15 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   if (warning === null) return response;
   // DL [R1] condition: each kept figure carries its sizing label — the options resting on Olumi's accepted estimates.
   const accepted = keepOutcome ? optionsRestingOnAcceptedOlumiSizes(graph, ids) : [];
-  return withholdOptionGoalFigures(response, new Set(ids), accepted.length > 0 ? { ...warning, rests_on_accepted_olumi: accepted } : warning, { keepOutcome, keepOrdering: true });
+  // ⭐ S-E GOALS S6 (DL 0fd71f routing, 7 Oct): each option's OWN reason, by option id, for the per-option panel; the
+  // Run-wide `message` stays for the whole-run box. The scoping seam (`scope-target-not-testable.ts`) rewrites it with the same functions.
+  const perOption = perOptionTargetReasonsForRun(graph, verdict, ids, Array.isArray(evaluations) ? evaluations : undefined);
+  const recorded = {
+    ...warning,
+    ...(accepted.length > 0 ? { rests_on_accepted_olumi: accepted } : {}),
+    ...(Object.keys(perOption).length > 0 ? { per_option: perOption } : {}),
+  };
+  return withholdOptionGoalFigures(response, new Set(ids), recorded, { keepOutcome, keepOrdering: true });
 }
 
 /** The target-testability failures that leave every option's outcome distribution meaningful in the goal's units. */
