@@ -17,6 +17,8 @@
  * on time", "% likely"; must-not-fire "% of launch done", "% of customers", "churn %".
  */
 
+import { readRateAsQuantity } from './rate-as-quantity.js';
+
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -59,7 +61,13 @@ export function goalUnitOf(goal: Rec): string | undefined {
 export function goalKindOf(goal: unknown): GoalKind {
   if (!isRec(goal)) return 'level';
   const os = isRec(goal.observed_state) ? goal.observed_state.unit : undefined;
-  if (unitNamesAChance(goal.goal_threshold_unit) || unitNamesAChance(os)) return 'chance_of_event';
+  const chanceUnits = [goal.goal_threshold_unit, os].filter(unitNamesAChance) as string[];
+  // P17, Science ruling (b): a population RATE written as a probability ("churn probability", "conversion probability per
+  // visitor") is a quantity. Its unit, then its label, are read by the ruling's four rules; a one-off event stays a chance.
+  if (chanceUnits.length > 0
+    && readRateAsQuantity([...chanceUnits, typeof goal.label === 'string' ? goal.label : ''].join(' | ')).kind === 'chance') {
+    return 'chance_of_event';
+  }
   const frame = goal.goal_threshold_frame;
   return frame === 'change_abs' || frame === 'change_rel' ? 'change' : 'level';
 }
