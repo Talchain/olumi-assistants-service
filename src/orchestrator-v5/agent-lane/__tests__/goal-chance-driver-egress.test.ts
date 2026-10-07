@@ -540,3 +540,84 @@ describe('Wave B unseen brief, keys untouched: a range line is a screen driver, 
     expect(performance.now() - t0).toBeLessThan(50);
   });
 });
+
+/**
+ * Wave B2 (7 Oct 03:34–03:38Z, guest, CEE 044faef3, UI e3f2fc82), keys untouched. S2c held on the Run narration, but two
+ * new paraphrases reached the user beside range lines: the provisional view "…it has not established which assumption
+ * deserves investigation priority." and the Challenge reply "The saved result does not establish which assumption would
+ * change these chances most." S2d adds ONE general, bounded limb (DL GO + guardrails): a denial of "which assumption …"
+ * with at most 6 words before "most" / "priority" / "most sensitive to" / "most weight" ENDING the clause.
+ */
+const B2_RUN1 = JSON.parse(fixture('waveB2-unseen2-044faef-run1-turn003.json')) as Json;
+const B2_CHALLENGE = JSON.parse(fixture('waveB2-unseen2-044faef-challenge-turn001.json')) as Json;
+const B2_PV_CLAUSE = '; it has not established which assumption deserves investigation priority.';
+const B2_CHALLENGE_LINE = 'The saved result does not establish which assumption would change these chances most.\n\n';
+
+describe('Wave B2, keys untouched: the general denial limb (S2d)', () => {
+  it('RED at base: the provisional view loses only its denial clause; the reply is untouched', () => {
+    const reasoning = B2_RUN1._agent.provisional_view.reasoning as string;
+    expect(reasoning.endsWith(B2_PV_CLAUSE)).toBe(true);
+    expect(screenNamesADriver(blockOf(B2_RUN1), B2_RUN1.draft_graph)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B2_RUN1, opts(B2_RUN1)) as Json;
+    expect(out._agent.provisional_view.reasoning).toBe(reasoning.replace(B2_PV_CLAUSE, '.'));
+    expect(out.assistant_text).toBe(B2_RUN1.assistant_text);
+    expectWellFormed(out._agent.provisional_view.reasoning);
+    expect({ ...out, _agent: B2_RUN1._agent }).toEqual(B2_RUN1);
+  });
+
+  it('RED at base: the Challenge reply loses only its denial line', () => {
+    expect(B2_CHALLENGE.assistant_text.startsWith(B2_CHALLENGE_LINE)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B2_CHALLENGE, opts(B2_CHALLENGE)) as Json;
+    expect(out.assistant_text).toBe(B2_CHALLENGE.assistant_text.slice(B2_CHALLENGE_LINE.length));
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('CONTROL no range record: both served turns kept, by reference', () => {
+    for (const body of [withoutRange(B2_RUN1), withoutRange(B2_CHALLENGE)]) {
+      expect(withoutDriverAbsenceClaimsAtEgress(body, opts(body))).toBe(body);
+    }
+  });
+
+  it.each([
+    ['Six values are Olumi’s. This run cannot say which factor your figures depend on most.', 'Six values are Olumi’s.'],
+    ['Figures are provisional; the analysis has not shown which input the chance is most sensitive to.', 'Figures are provisional.'],
+    ['Olumi has not identified which of the assumptions carries the most weight, so check the price figure.', 'Check the price figure.'],
+    ['The deadline was not tested, and it cannot tell which driver deserves attention priority.', 'The deadline was not tested.'],
+  ])('MUST FIRE (general limb, paraphrase): %s', (text, edited) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+  });
+
+  // DL guardrails: an ASSERTION, a QUESTION, a QUOTE, a person's preference, a temporal "first", "most" as a determiner.
+  it.each([
+    'This run shows which assumption deserves investigation first: price.',
+    'This run shows which assumption deserves investigation priority: price.',
+    'Has the run not established which assumption deserves investigation priority?',
+    'So the run hasn’t established which assumption deserves priority?', // only the "?" rule decides this one
+    'You wrote: "the run has not established which assumption deserves priority".',
+    'You wrote: "the run has not established which assumption deserves priority."',
+    'It has not established which assumption you care about most.',
+    'Olumi does not know which factor your team ranks most.',
+    'It has not established which assumption most users accept.',
+    'We do not know which input arrives first, the survey or the audit.',
+    'We have not established which supplier matters most.',
+    'The run does not establish which assumption most of the margin comes from yet, but price is the main one.',
+    // more than 6 words between the assumption and "most": too far to bind them (the gap is bounded)
+    'The run does not establish which assumption the planning committee at the regional office now values most.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  it.each([
+    ['denial + "which assumption" + 20,000 spaces', `has not established which assumption${' '.repeat(20000)}x`],
+    ['denial + gap word + 20,000 spaces + "most"', `has not established which assumption deserves${' '.repeat(20000)}most`],
+    ['"priority" + 20,000 spaces + "."', `does not establish which factor priority${' '.repeat(20000)}.`],
+    ['the limb repeated 2,000 times', 'does not establish which assumption deserves '.repeat(2000)],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text);
+    removeDriverAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
