@@ -4137,7 +4137,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     });
     const premortemWorksheet = premortemDiagnostics.worksheet;
     if (methodTurn?.kind === 'run' && (premortemWorksheet === undefined || premortemDiagnostics.dropped.length > 0)) {
-      log.info({ event: 'PREMORTEM_WORKSHEET_WITHHELD', stories: premortemDiagnostics.stories,
+      log.info({ event: 'PREMORTEM_WORKSHEET_WITHHELD', request_id: String(req.id), turn_id: turnId,
+        exit: premortemDiagnostics.exit, stories: premortemDiagnostics.stories,
         rows: premortemDiagnostics.rows, dropped: premortemDiagnostics.dropped.map(({ story_index, reason }) => ({ story_index, reason })) },
       'PREMORTEM_WORKSHEET_WITHHELD');
     }
