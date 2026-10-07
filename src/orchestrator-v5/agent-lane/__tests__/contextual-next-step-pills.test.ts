@@ -79,11 +79,13 @@ it('3 S3L: real S6 card is null, so the existing Strengthen the model press lead
   assert.equal(offered[0]!.message, NEXT_STEP_CHIPS[2].message);
   assert.equal(offered.filter(chip => chip.id === 'agent-next-strengthen').length, 1);
 });
-it('4 W5: witnessed pills byte-identical; Suggest options once', () => {
+it('4 W5: the witnessed pills, with the guidance press (Suggest options) leading; once each (DL 7 Oct re-pin)', () => {
   const { selection, offered } = compose(nearTie);
   assert.equal(selection?.slot1?.variant, 'W5');
-  assert.deepEqual(offered, nearTie.suggested_actions);
-  assert.deepEqual(offered, nextStepsWithWiden(NEXT_STEP_CHIPS, true));
+  // Captured served order was [pre-mortem, Suggest options, strengthen]; cut 7 R3 FAIL 6/6 ruled the press leads.
+  assert.deepEqual(offered.map(chip => chip.id), ['agent-next-widen', 'agent-next-pre-mortem', 'agent-next-strengthen']);
+  assert.deepEqual([...offered].sort((a, b) => a.id.localeCompare(b.id)),
+    [...(nearTie.suggested_actions as typeof offered)].sort((a, b) => a.id.localeCompare(b.id)));
   assert.equal(offered.filter(chip => chip.id === 'agent-next-widen').length, 1);
 });
 it('5 every composed id survives durable filtering and same-Run reload; stale and waiting suppress', () => {
@@ -147,13 +149,15 @@ it('product copy and source wiring: one selection boundary before offeredNow, sa
   assert.equal(source.includes('turnGuidanceFor('), false);
 });
 
-it('RC-WIDEN options W1–W5 preserve the complete base pool byte-for-byte', () => {
+it('RC-WIDEN options W1–W5: Suggest options leads when offered; not offered → the base pool byte-for-byte', () => {
   const row = compose(nearTie).selection!.slot1!;
   for (const variant of ['W1', 'W2', 'W3', 'W4', 'W5'] as const) {
-    for (const widen of [false, true]) {
-      assert.deepEqual(nextStepsFromGuidance(NEXT_STEP_CHIPS, { slot1: { ...row, variant } }, widen),
-        nextStepsWithWiden(NEXT_STEP_CHIPS, widen));
-    }
+    assert.deepEqual(nextStepsFromGuidance(NEXT_STEP_CHIPS, { slot1: { ...row, variant } }, false),
+      nextStepsWithWiden(NEXT_STEP_CHIPS, false));
+    const pool = nextStepsWithWiden(NEXT_STEP_CHIPS, true);
+    const widened = pool.find(chip => chip.id === 'agent-next-widen')!;
+    assert.deepEqual(nextStepsFromGuidance(NEXT_STEP_CHIPS, { slot1: { ...row, variant } }, true),
+      [widened, ...pool.filter(chip => chip.id !== 'agent-next-widen')].slice(0, 3));
   }
 });
 it('a new risks press reserves Suggest options and drops the last fixed chip', () => {
