@@ -216,7 +216,8 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(t1._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_option', true]]);
     const approve = approveChipOf(t1);
     expect(approve?.id, JSON.stringify(t1.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
-    expect(t1.suggested_actions.map((c) => c.id)).toEqual([approve!.id, 'agent-amend-proposal', 'agent-widen-something-else']);
+    // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
+    expect(t1.suggested_actions.map((c) => c.id)).toEqual([approve!.id, 'agent-amend-proposal', `agent-decline-proposal:${approve!.id.slice('agent-approve-proposal:'.length)}`, 'agent-widen-something-else']);
     // The card's text names BOTH options and what each moves; never the fallback beside a live card.
     expect(t1.assistant_text).toContain('Retention offer');
     expect(t1.assistant_text).toContain('Cut price to win share');
