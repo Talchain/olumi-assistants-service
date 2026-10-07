@@ -342,9 +342,9 @@ export interface DispatchSystemEventResult {
    */
   readonly graph: GraphV3T | null;
   /**
-   * Canonical analysis currency against the graph this turn actually wrote.
-   * Present on the edge writer only after a successful atomic commit; omitted
-   * on the reader floor so its deployed response remains byte-compatible.
+   * Canonical analysis currency against the authoritative graph. Writers supply
+   * their post-commit verdict; the shared return boundary reads it for
+   * graph-bearing committed no-write exits. Other exits retain their base verdict.
    */
   readonly freshness?: FreshnessDerivation;
   /**
@@ -1136,6 +1136,42 @@ export function buildReaderOnlyRefusal(payload: SystemEventTurnPayload): OlumiRe
 }
 
 export async function dispatchSystemEvent(
+  params: DispatchSystemEventParams,
+): Promise<DispatchSystemEventResult> {
+  const result = await dispatchSystemEventOperation(params);
+  // A writer's post-commit verdict stays authoritative. Acknowledgements and
+  // uncommitted refusals retain their existing return shape.
+  if (result.freshness !== undefined || result.graphConflict !== undefined
+    || result.graph === null || !result.commitPerformed) return result;
+
+  // A graph-bearing committed no-write exit still needs the scenario's verdict.
+  // Read RAW persisted bytes under the same deadline as the analysis reads:
+  // the presentation graph may have lost fields that participate in the hash.
+  try {
+    return await withAnalysisReadDeadline(async () => {
+      const persistedGraph = await loadPersistedGraphStrict(params.payload.scenario_id);
+      const parsed = GraphV3.safeParse(persistedGraph);
+      if (!parsed.success) return result;
+      const analysisInputs = await loadWriteReplyAnalysisInputs(params.payload.scenario_id, params.requestId);
+      const hash = computeAnalysisAffectingGraphHash(
+        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      );
+      return { ...result, graph: parsed.data,
+        analysisReady: result.analysisReady ?? buildCanonicalAnalysisReadyFromGraph(persistedGraph),
+        freshness: deriveWriteReplyFreshness(analysisInputs, hash, persistedGraph) };
+    });
+  } catch (error) {
+    // Observational only: a failed reread cannot suppress the user's answer or
+    // manufacture currentness. The existing degraded finaliser arm remains.
+    log.warn({ request_id: params.requestId, scenario_id: params.payload.scenario_id,
+      event_kind: params.payload.event.kind,
+      error_name: error instanceof Error ? error.name : typeof error },
+    'System-event analysis reread failed — currency cannot be confirmed');
+    return result;
+  }
+}
+
+async function dispatchSystemEventOperation(
   params: DispatchSystemEventParams,
 ): Promise<DispatchSystemEventResult> {
   const { payload, requestId } = params;
