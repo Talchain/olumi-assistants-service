@@ -39,7 +39,7 @@ function goalInState(state: unknown, ask: Ask): { label: string; unit?: string; 
   if (goal === undefined || typeof goal.raw_value === 'number') return null;
   const target = rec([...(rec(s.goal) !== undefined ? [rec(s.goal)!] : []), ...records(s.goals)].find((g) => g.id === goal.id)?.target);
   const held = typeof goal.unit === 'string' ? goal.unit : typeof target?.unit === 'string' ? target.unit : undefined;
-  const unit = isChangeOwnPercent({ frame: target?.frame, unit: held, metric: goal.label }) ? undefined : held;
+  const unit = isChangeOwnPercent({ frame: target?.frame, unit: held, metric: goal.label, value: target?.value }) ? undefined : held;
   // A changed metric/unit must not inherit an earlier question's answer licence.
   if (unit !== ask.action.goal_unit) return null;
   return { label: String(goal.label), ...(unit !== undefined ? { unit } : {}), entities };
@@ -90,7 +90,7 @@ export function currentLevelAskOnAnswer(input: {
     const goal = nodes.find((n) => n.id === first.node_id && n.kind === 'goal');
     if (goal === undefined || typeof goal.label !== 'string') continue;
     const held = rec(goal.observed_state)?.unit ?? goal.goal_threshold_unit;
-    const unit = isChangeOwnPercent({ frame: goal.goal_threshold_frame, unit: held, metric: goal.label }) ? undefined : held;
+    const unit = isChangeOwnPercent({ frame: goal.goal_threshold_frame, unit: held, metric: goal.label, value: goal.goal_threshold_raw }) ? undefined : held;
     const pa = parsePendingAction({
       id: randomUUID(), scenario_id: input.scenarioId, chip_id: 'agent-current-level-ask',
       action: { kind: 'elicit_goal_current_level', goal_id: goal.id, goal_label: goal.label, user_id: input.userId,

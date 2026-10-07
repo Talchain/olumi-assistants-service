@@ -250,6 +250,48 @@ export function readPercentUnit(unit: unknown): UnitParts | null {
   return parts?.kind === 'percent' ? parts : null;
 }
 
+const INCREASE_WORDS: ReadonlySet<string> = new Set([
+  'increase', 'rise', 'growth', 'gain', 'improvement', 'uplift', 'up', 'more', 'higher',
+].map(singular));
+const DECREASE_WORDS: ReadonlySet<string> = new Set([
+  'decrease', 'fall', 'drop', 'decline', 'reduction', 'down', 'less', 'lower',
+].map(singular));
+const RELATIVE_CHANGE_WORDS: ReadonlySet<string> = new Set(['change', ...INCREASE_WORDS, ...DECREASE_WORDS]);
+const CHANGE_REFERENCE_CONNECTORS: readonly (readonly string[])[] = [
+  ['from'], ['vs'], ['versus'].map(singular), ['over'], ['compared', 'to'], ['relative', 'to'],
+];
+const CHANGE_REFERENCE_LEVELS: ReadonlySet<string> = new Set([
+  'today', 'now', 'current', 'currently', 'baseline', 'the baseline', 'current level', 'present', 'start',
+  'starting point', 'before',
+]);
+
+/**
+ * A percent naming only a relative change's size, optionally against a reference level. Consume the ONE grammar's
+ * parts, never reparse the unit: bases, rates and named quantities cannot pass this closed word-family predicate.
+ * Direction words must agree with the signed change (candidate percent or stored fraction); missing/zero/non-finite
+ * signs and multiple direction words keep the unit. Neutral words need no sign. A prior period is not today's base.
+ * Whether the goal itself is a relative change of a non-percentage metric belongs to `isChangeOwnPercent`.
+ */
+export function isRelativeChangePercentUnit(unit: unknown, signedChange: unknown): boolean {
+  const parts = readPercentUnit(unit);
+  if (parts === null || parts.base !== null) return false;
+  const tail = parts.qualifiers ?? [];
+  let end = 0;
+  while (end < tail.length && RELATIVE_CHANGE_WORDS.has(tail[end]!)) end += 1;
+  const directions = tail.slice(0, end).filter(word => word !== 'change');
+  if (directions.length > 1) return false;
+  if (directions.length === 1) {
+    if (typeof signedChange !== 'number' || !Number.isFinite(signedChange) || signedChange === 0) return false;
+    if (INCREASE_WORDS.has(directions[0]!) !== (signedChange > 0)) return false;
+  }
+  if (end === tail.length) return true;
+  const reference = tail.slice(end);
+  const connector = CHANGE_REFERENCE_CONNECTORS.find((ws) => ws.every((w, i) => reference[i] === w));
+  if (connector === undefined) return false;
+  const level = reference.slice(connector.length);
+  return CHANGE_REFERENCE_LEVELS.has(level.join(' '));
+}
+
 const sameWords = (a: readonly string[], b: readonly string[]): boolean => a.join(' ') === b.join(' ');
 /** `outer` contains `inner` as a contiguous run (a stated "new subscriber" contains the declared "subscriber"). */
 const containsWords = (outer: readonly string[], inner: readonly string[]): boolean =>
