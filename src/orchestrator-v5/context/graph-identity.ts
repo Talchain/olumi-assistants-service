@@ -78,7 +78,9 @@ export function matchesHistoricalAnalysisIdentity(graph: GraphStateIngress, stor
   return computeAnalysisAffectingGraphHashSha256(graph) === storedHash
     || computeAnalysisAffectingGraphHashSha256(graph, 'legacy') === storedHash
     // Codex r2 #2643: a version recorded before hold-at-1.0 hashed its held links unheld; it is still that version.
-    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_hold') === storedHash;
+    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_hold') === storedHash
+    // d5 #87 6011224941: a version recorded under the user-only hold (before a validated definition held) is still that version.
+    || computeAnalysisAffectingGraphHashSha256(graph, 'pre_definition') === storedHash;
 }
 
 /** Compare's recorded Run and admission identity use the existing sanctioned seam.
@@ -96,7 +98,9 @@ export function matchesHistoricalRunAnalysisIdentity(
     && currentHash === computeAnalysisAffectingGraphHash(graph, 'legacy')) return false;
   // Codex r2 #2643: a Run computed before hold-at-1.0 is identified by the pre-hold projection (history only, never freshness).
   const preHoldHash = computeAnalysisAffectingGraphHash(graph, 'pre_hold');
-  if (currentHash !== storedHash && preHoldHash !== storedHash
+  // d5 #87 6011224941: and a Run computed under the user-only hold, before a validated definition held (history only).
+  const preDefinitionHash = computeAnalysisAffectingGraphHash(graph, 'pre_definition');
+  if (currentHash !== storedHash && preHoldHash !== storedHash && preDefinitionHash !== storedHash
     && (projection !== undefined || carriesGaps
       || computeAnalysisAffectingGraphHash(graph, 'legacy') !== storedHash)) return false;
   const snapshot = RunInputSnapshotSchema.safeParse(inputSnapshot);
