@@ -16,9 +16,13 @@
  *  - FINAL, on the body as it ships: the state can change AFTER an accepted offer (a Run later in the same turn; Codex
  *    buddy r1 on #2746), so the controls and the reply's words are settled on the turn's final read, from the SAME
  *    inputs object the gate is then given.
+ *    It runs AFTER every gate that can edit the reply (buddy r2): a sentence added earlier was removed by a later edit,
+ *    and a copy of the words inside a sentence the gate then deleted was trusted. Only a DELIVERED control is
+ *    remembered as pressable.
  * NOT covered here: a RETRIED turn (replay) re-offers no search control, as before this change.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
   RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT, researchChipFor, withResearchControlTruth,
@@ -28,6 +32,7 @@ import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf, type LeaderGateInputs } from '../leader-final-egress.js';
 import { findLeaderClaims, textAssertsLeadingOption, textNamesLeadingOption } from '../../compose/leading-option-egress-guard.js';
 import { WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../../compose/analysis-state-v1.js';
+import { textAtRest } from '../decision-input-ask.js';
 
 const SCENARIO = '8b3e4d5c-6f7a-4b8c-9d0e-1f2a3b4c5d70';
 const OPTIONS = ['Hire a tech lead', 'Hire two developers'] as const;
@@ -40,10 +45,13 @@ const NO_OFFER = 'I can describe the evidence that would help, but I have not of
 const WITHDRAWN = `${RESEARCH_NOT_ON_OFFER_TEXT} ${RESEARCH_WORDING_REASON_TEXT}`;
 
 const rows = new Map<string, Record<string, unknown>>();
+/** Every row the route asked the store to write, as it was handed over. */
+const writes: unknown[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_s: string, turnId: string) => rows.get(turnId) ?? null),
   append: vi.fn(async (w: Record<string, unknown>) => {
+    writes.push(w);
     rows.set(String(w.turn_id), { request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, response_emitted: w.response_emitted });
     return { id: `row-${rows.size}` };
   }),
@@ -62,6 +70,10 @@ describe('an accepted search offer has its control on the wire', () => {
   let run: 'withheld' | 'licensed' = 'withheld';
   /** The Agent starts a Run AFTER its offer, and that Run withholds its leader. */
   let runsAfterOffer = false;
+  /** What the Agent says after an ACCEPTED offer (default: the promise). */
+  let reply = PROMISE;
+  /** A critique code on the bound result. `__proto__` makes the gate's projector throw, so it ships its envelope. */
+  let critique: string | null = null;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const raw = String(init?.body ?? '{}');
@@ -74,7 +86,7 @@ describe('an accepted search offer has its control on the wire', () => {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'run_analysis', call_id: 'c2', arguments: JSON.stringify({ reason: 'asked' }) }] }), { status: 200 });
       }
       const accepted = raw.includes('The user now sees a control');
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: accepted ? PROMISE : NO_OFFER }] }] }), { status: 200 });
+      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: accepted ? reply : NO_OFFER }] }] }), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -96,7 +108,10 @@ describe('an accepted search offer has its control on the wire', () => {
         edges: [{ from: 'f', to: 'g' }],
       },
       graph_hash: '0123456789abcdef',
-      analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.', computed_against_hash: '0123456789abcdef' },
+      analysis_result: {
+        type: 'analysis_result', summary: 'A provisional first pass.', computed_against_hash: '0123456789abcdef',
+        ...(critique !== null ? { enrichment: { critiques: [{ code: critique }] } } : {}),
+      },
       ...(run === 'licensed' ? {
         analysis_ready: { status: 'ready', options: [], blockers: [], analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } },
         analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: true, separation: 'separated' } },
@@ -108,7 +123,7 @@ describe('an accepted search offer has its control on the wire', () => {
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { bodies = []; query = NEUTRAL; run = 'withheld'; runsAfterOffer = false; rows.clear(); });
+  beforeEach(() => { bodies = []; query = NEUTRAL; run = 'withheld'; runsAfterOffer = false; reply = PROMISE; critique = null; rows.clear(); writes.length = 0; });
 
   type Body = {
     assistant_text: string;
@@ -119,12 +134,15 @@ describe('an accepted search offer has its control on the wire', () => {
     const payload = runsAfterOffer
       ? { kind: 'message', scenario_id: SCENARIO, message: 'Find evidence for this, then run it again please' }
       : { kind: 'message', scenario_id: SCENARIO, message: 'What are the limits of this analysis?', source: 'chip', chip: { id: 'ask:limits' } };
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+    // Its own turn id, so the answer row is written (and the store mock sees the words a reload would show).
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { ...payload, turn_id: randomUUID() } });
     expect(r.statusCode).toBe(200);
     return r.json() as Body;
   };
   const offers = (b: Body) => (b._agent?.tool_calls ?? []).filter((c) => c.name === 'offer_public_research');
   const controls = (b: Body) => b.suggested_actions.filter((a) => a.id.startsWith('agent-public-research:'));
+  /** Did the route hand the store these exact words (what a reload shows)? */
+  const stored = (text: string): boolean => writes.some((w) => JSON.stringify(w).includes(JSON.stringify(text).slice(1, -1)));
 
   it('PRECONDITION: the gate’s own predicate reads the ranking query’s control as a leader claim, and not the neutral one', () => {
     const asserts = (q: string) => {
@@ -169,6 +187,28 @@ describe('an accepted search offer has its control on the wire', () => {
     expect(run, 'the Agent’s own Run ran, and withholds').toBe('withheld');
     expect(controls(b)).toEqual([]);
     expect(b.assistant_text.endsWith(WITHDRAWN), b.assistant_text).toBe(true);
+    expect(stored(b.assistant_text), 'the answer row holds the words the user saw').toBe(true);
+    expect(stored(PROMISE), 'POSITIVE CONTROL: the probe sees a stored reply').toBe(true);
+  });
+
+  const QUESTIONS = 'Questions this model does not answer yet: How long do new hires take?';
+
+  it('RED (buddy r2): the words are said AT REST, never behind the questions toggle that a later edit drops', async () => {
+    query = RANKING; run = 'licensed'; runsAfterOffer = true; reply = `${PROMISE}\n\n${QUESTIONS}`;
+    const b = await turn();
+    expect(controls(b)).toEqual([]);
+    expect(b.assistant_text, 'the questions keep their place, last').toContain(QUESTIONS);
+    expect(textAtRest(b.assistant_text), b.assistant_text).toBe(`${PROMISE}\n\n${WITHDRAWN}`);
+    expect(stored(b.assistant_text)).toBe(true);
+  });
+
+  it('RED (buddy r2): the same words inside a sentence the gate deletes are not trusted', async () => {
+    query = RANKING; run = 'licensed'; runsAfterOffer = true;
+    reply = `${PROMISE}\n\n${OPTIONS[0]} is the best option \u2014 ${RESEARCH_NOT_ON_OFFER_TEXT}`;
+    const b = await turn();
+    expect(controls(b)).toEqual([]);
+    expect(b.assistant_text, 'the gate edited the sentence that named a leader').not.toContain('is the best option');
+    expect(b.assistant_text.endsWith(WITHDRAWN), b.assistant_text).toBe(true);
   });
 
   it('CONTRAST: the same turn with a neutral query keeps its control, and nothing is added to the reply', async () => {
@@ -196,6 +236,27 @@ describe('an accepted search offer has its control on the wire', () => {
     runsAfterOffer = false;
     await press(researchChipFor(neverShown)!);
     expect(searchesSent()).toEqual([]);
+  });
+
+  it('RED (buddy r2): a control the gate\u2019s own envelope removed cannot buy a search either', async () => {
+    const hidden = 'How long does onboarding a senior engineer usually take?';
+    query = hidden; critique = '__proto__';
+    const b = await turn();
+    expect(offers(b), 'the offer was accepted').toEqual([expect.objectContaining({ ok: true })]);
+    expect(controls(b)).toEqual([]);
+    expect(b.assistant_text, 'the envelope\u2019s fixed line is left as it is').not.toContain(RESEARCH_NOT_ON_OFFER_TEXT);
+    expect(b.assistant_text).not.toContain('press the control');
+    critique = null;
+    await press(researchChipFor(hidden)!);
+    expect(searchesSent()).toEqual([]);
+  });
+
+  it('CONTRAST: with an ordinary critique code the control is delivered, and its press buys the search', async () => {
+    const shown = 'How long does onboarding a staff engineer usually take?';
+    query = shown; critique = 'ordinary_code';
+    expect(controls(await turn())).toEqual([researchChipFor(shown)]);
+    await press(researchChipFor(shown)!);
+    expect(searchesSent()).toHaveLength(1);
   });
 
   it('CONTRAST: the control that WAS shown buys exactly its query', async () => {
@@ -354,10 +415,9 @@ describe('the reply\u2019s words follow the controls it carries', () => {
     expect(out.assistant_text).toBe(`${PROMISE}\n\n${RESEARCH_ONLY_SHOWN_TEXT} ${RESEARCH_WORDING_REASON_TEXT}`);
   });
 
-  it('said once: a body that already says so is not told again', () => {
-    const once = withResearchControlTruth({ assistant_text: PROMISE, suggested_actions: [ranking] }, [ranking], neutralOnly);
-    const twice = withResearchControlTruth(once, [ranking], neutralOnly);
-    expect(twice.assistant_text).toBe(once.assistant_text);
+  it('the sentence goes where `place` puts it (the route keeps it out from behind the questions toggle)', () => {
+    const out = withResearchControlTruth({ assistant_text: PROMISE, suggested_actions: [] }, [ranking], neutralOnly, (text, sentence) => `${sentence} | ${text}`);
+    expect(out.assistant_text).toBe(`${WITHDRAWN} | ${PROMISE}`);
   });
 
   it('the fixed sentences name no option and use no leader vocabulary, and the gate leaves them as written', () => {
@@ -372,5 +432,11 @@ describe('the reply\u2019s words follow the controls it carries', () => {
       licence: 'withheld', graph: GRAPH, analysisReady: undefined, requestId: 'research-control', exitPath: 'test', mayNameLeadingOption: false, separationEstablished: false,
     });
     expect(out.response.assistant_text).toBe(said);
+    // And when the gate DOES edit a neighbouring sentence, the fixed words beside it are left whole.
+    const edited = enforceLeaderLicenceAtFinalEgress({ assistant_text: `${OPTIONS[0]} is the best option. ${WITHDRAWN}`, suggested_actions: [], blocks: [] }, {
+      licence: 'withheld', graph: GRAPH, analysisReady: undefined, requestId: 'research-control', exitPath: 'test', mayNameLeadingOption: false, separationEstablished: false,
+    });
+    expect(edited.response.assistant_text).not.toContain('is the best option');
+    expect(String(edited.response.assistant_text).endsWith(WITHDRAWN), String(edited.response.assistant_text)).toBe(true);
   });
 });

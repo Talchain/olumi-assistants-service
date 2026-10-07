@@ -393,8 +393,9 @@ function whatWouldChangeAnswer(scenarioId: string, read: Parameters<typeof tippi
  */
 const RESEARCH_OFFERS_MAX = 500;
 const researchOffers = new Map<string, Set<string>>();
-function rememberResearchOffers(key: string, offered: readonly OfferedAction[]): void {
-  const ids = offered.filter((a) => a.id.startsWith(RESEARCH_CHIP_PREFIX)).map((a) => a.id);
+function rememberResearchOffers(key: string, delivered: unknown): void {
+  const ids = (Array.isArray(delivered) ? delivered : []).map((a) => (a as { id?: unknown } | null | undefined)?.id)
+    .filter((id): id is string => typeof id === 'string' && id.startsWith(RESEARCH_CHIP_PREFIX));
   if (ids.length === 0) return;
   const held = researchOffers.get(key) ?? new Set<string>();
   researchOffers.delete(key);
@@ -3605,7 +3606,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offeredNow: OfferedAction[] = nextStepOffers.offered;
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
-    rememberResearchOffers(approveKey, offeredNow);
     // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
     // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
     // must not drop what a restart needs to find it).
@@ -3999,9 +3999,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * it ships — after the leader gate, break-even, A7 and the answer shape, before the answer row so a replay is the
      * same. One licence (`leaderLicenceFromState`) from this same final readback; a permitted turn is untouched.
      */
-    // ⭐ The reply's words follow the controls it carries: a search the Agent offered with no control on THIS body is said
-    // so in fixed words, before the gate reads the body exactly as it ships.
-    wireBody = withResearchControlTruth(wireBody, researchOffered, (chip) => controlSurvivesLeaderGate(chip, leaderGate));
     let leaderFreeEnvelope = false;
     {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown } } | undefined)?.leader_claim;
@@ -4036,6 +4033,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const preview = previewBesideItsChip(pendingPreview, approvalChipIdFor, wireBody.suggested_actions);
       if (preview !== undefined) wireBody = { ...wireBody, proposal_preview: preview };
     }
+    // ⭐ AFTER EVERY GATE THAT EDITS THE REPLY (buddy r2 on #2746): the reply's words follow the search controls it carries.
+    // A search the Agent offered with no control on THIS body is said so in fixed words, at rest (never behind the
+    // questions toggle, which the scope question below also drops). The gate's own envelope promises nothing, so it is
+    // left as it is. ⛔ Only a control that is DELIVERED is remembered as pressable: the envelope ships none.
+    if (!leaderFreeEnvelope) {
+      wireBody = withResearchControlTruth(wireBody, researchOffered, (chip) => controlSurvivesLeaderGate(chip, leaderGate),
+        (replyText, sentence) => withB3LinesAtRest(replyText, [sentence]));
+    }
+    rememberResearchOffers(approveKey, wireBody.suggested_actions);
     // Bind the question that is actually delivered after every prose gate.
     if (freshScopeQuestion !== null && !leaderFreeEnvelope) {
       const resting = textAtRest(String(wireBody.assistant_text ?? ''));
