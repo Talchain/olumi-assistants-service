@@ -4260,8 +4260,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // reply is coaching. Never chosen by reading the words.
       const madeProposal = approvalCalls.some((c) => c.ok && typeof c.proposal_id === 'string' && c.name !== 'authorise_change' && c.name !== WITHDRAW_PROPOSAL);
       const profile: ReplyProfile = fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
-      // No model wrote words this turn (a card press, an uninterpreted Run): every line is the host's, shipped as composed.
-      const narratorModel = fastPath === 'approve' || fastPath === 'strengthen' ? null
+      // No model wrote words this turn (a card press, an uninterpreted Run, the action bar's typed reply: S-B #2751's
+      // can't-yet / already-waiting words): every line is the host's, shipped as composed. The bar's sidecars (`_action`)
+      // are attached after this block and never pass the composer.
+      const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
       const composedReply = composeReplyShape({
         text: reply,
