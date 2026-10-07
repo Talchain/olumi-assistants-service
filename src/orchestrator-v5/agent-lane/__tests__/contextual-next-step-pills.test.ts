@@ -143,7 +143,8 @@ it('product copy and source wiring: one selection boundary before offeredNow, sa
   const source = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
   assert.equal(source.match(/nextStepOffersForTurn\(/g)?.length, 1);
   assert.ok(source.indexOf('const nextStepOffers = nextStepOffersForTurn(') < source.indexOf('const offeredNow:'));
-  assert.ok(source.includes('const offeredNow: OfferedAction[] = nextStepOffers.offered;'));
+  // S-D (#2743): a held proposal's own card (approve, change, not now) goes BESIDE the one selection, never instead of it.
+  assert.ok(source.includes('const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);'));
   assert.ok(source.includes('const guidance = nextStepOffers.selection;'));
   assert.ok(source.indexOf('let guidanceHistory:') < source.indexOf('const nextStepOffers = nextStepOffersForTurn('));
   assert.equal(source.includes('turnGuidanceFor('), false);

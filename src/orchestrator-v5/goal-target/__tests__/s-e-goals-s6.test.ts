@@ -246,8 +246,9 @@ describe('S-E GOALS S6: each option owns its target-testability reason', () => {
     const agent = analysisResultForAgent(block, served.graph) as Rec;
     expect(JSON.stringify(agent)).not.toContain('per_option');
     expect(JSON.stringify(agent)).not.toContain('It needs nothing more of its own');
-    // CONTROL: the Run-wide reason the model already read is still there, and nothing else in its view moved.
-    expect(warning(agent.enrichment).message).toBe(warning(scoped).message);
+    // CONTROL: the Agent keeps the warning's scoped identity (S2l #2749 rules its Run-wide words beside a range), and
+    // nothing else in its view moved.
+    expect(warning(agent.enrichment).option_ids).toEqual(['carry_on_as_now']);
     expect(agent).toEqual(analysisResultForAgent(withoutPanel, served.graph));
   });
 });

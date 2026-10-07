@@ -370,8 +370,9 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const ttlOffered = (await heldOnLatestRow())[0]!.expires_at_turn_count;
     await turn({ message: 'What would that change?' });
     expect((await heldOnLatestRow()).map((p) => p.chip_id), 'the question turn\'s answer row carries the hold').toEqual([approve.id.slice('agent-approve-proposal:'.length)]);
-    // Canonical #1933 condition 2: carried by the product's own survival rule, so the turn count runs down.
-    expect((await heldOnLatestRow())[0]!.expires_at_turn_count, 'one carried turn spends one turn of the hold').toBe(ttlOffered - 1);
+    // ⭐ S-D (lane EDIT-PANEL, Paul 7 Oct; supersedes Canonical #1933 condition 2, which counted ROWS and dropped Paul's
+    // held risk unsaid, D-08): a held proposal stays held until approved or declined — a carried turn refreshes it.
+    expect((await heldOnLatestRow())[0]!.expires_at_turn_count, 'a carried turn never runs the hold down').toBeGreaterThanOrEqual(ttlOffered);
     const t3 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(t3._agent.tool_calls[0]).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
@@ -433,15 +434,39 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(t2.assistant_text, 'nothing was written, so no readiness line').not.toMatch(/The analysis can/);
   }, 120_000);
 
-  it('[c2] the model moves after the offer → the next answer row does NOT carry the stale hold (it could only be refused)', async () => {
+  it('[c2] the model moves after the offer → the hold is re-checked against it: still sound → re-pinned and carried, and its card applies it on the moved model', async () => {
+    // ⭐ S-D (lane EDIT-PANEL, Paul 7 Oct; supersedes "the next answer row does NOT carry the stale hold"): a held proposal
+    // stays held until approved or declined. A moved model re-referees it (HOLD-WIPE's own rule) instead of dropping it
+    // unsaid — D-08 lost Paul's held risk exactly this way.
     graphOf.set(SCENARIO, seedGraph());
-    await proposeOptionC(54);
+    const approve = approveChipOf(await proposeOptionC(54))!;
     expect(await heldOnLatestRow()).toHaveLength(1);
     const g = graphNow();
     graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((x) => (x.id === 'opt_b' ? { ...x, interventions: { fac_price: { value: 0.3, raw_value: 60, unit: 'GBP' } } } : x)) });
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const movedHash = computeAnalysisAffectingGraphHash(graphNow() as never);
     script = [() => say('It would test the lower price before rollout.')];
-    await turn({ message: 'What would that change?' });
-    expect(await heldOnLatestRow(), 'a hold pinned to a model that has since moved is not carried forward').toEqual([]);
+    const t2 = await turn({ message: 'What would that change?' });
+    const held = (await heldOnLatestRow()) as unknown as { chip_id: string; preconditions: { graph_hash?: string } }[];
+    expect(held.map((p) => p.chip_id), 'still held').toEqual([approve.id.slice('agent-approve-proposal:'.length)]);
+    expect(held[0]!.preconditions.graph_hash, 're-pinned to the moved model').toBe(movedHash);
+    expect(approveChipOf(t2)?.id, 'its card is offered again').toBe(approve.id);
+    const t3 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(t3._agent.tool_calls[0], JSON.stringify(t3._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+    expect(newOption(), 'applied on the moved model').toBeDefined();
+  }, 120_000);
+
+  it('[c2b] the model moves so the hold no longer referees (its factor is gone) → it lapses, and the reply SAYS so', async () => {
+    graphOf.set(SCENARIO, seedGraph(2));
+    await proposeOptionC(54);
+    expect(await heldOnLatestRow()).toHaveLength(1);
+    const g = graphNow();
+    graphOf.set(SCENARIO, { ...g, nodes: g.nodes.filter((x) => x.id !== 'fac_price').map((x) => (x.kind === 'option' ? { ...x, interventions: {} } : x)),
+      edges: g.edges.filter((e) => e.from !== 'fac_price' && e.to !== 'fac_price') });
+    script = [() => say('Noted.')];
+    const t2 = await turn({ message: 'What would that change?' });
+    expect(await heldOnLatestRow(), 'not carried').toEqual([]);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/The held change to add the option 'Test £54 at release' no longer fits the model as it now stands, so it has lapsed; say the word if you still want it\./);
   }, 120_000);
 
   it('[c3] another writer lands the SAME option id, linked from the decision, while the confirm is in flight → the product refuses the stale hold (200), the hold is retired, and the Agent does NOT claim it', async () => {
