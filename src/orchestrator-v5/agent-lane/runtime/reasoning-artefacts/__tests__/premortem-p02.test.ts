@@ -71,6 +71,13 @@ describe('P02 ROW 1: a story about an EXISTING risk names it by id (already on y
     if (!turnOf(r).context.supplied_items.some(i => i.id === RISK)) return; // only when the risk is a supplied item
     expect(diagnose(ELIG3.assistant_text, candidates(true)).worksheet?.rows[0].on_map?.node_id).toBe(RISK);
   });
+  it('NEGATIVE (buddy r1 P1): an existing risk the story does not name is never attached to it', () => {
+    const c = candidates();
+    c[1].risk = { ...c[1].risk, label: 'Customers lost from price rise' };
+    const out = diagnose(ELIG3.assistant_text, c);
+    expect(out.worksheet).toBeUndefined();
+    expect(out.dropped).toContainEqual(expect.objectContaining({ story_index: 2, reason: 'risk_label' }));
+  });
   it('NEGATIVE: an existing FACTOR label is still not a new risk (drop risk_label)', () => {
     const c = candidates();
     c[0].risk = { ...c[0].risk, label: 'Price rise from current price' };
@@ -104,10 +111,12 @@ describe('P02 ROW 4: the directive carries the goal\'s approved horizon, never "
     expect(deadline.directive).toContain('It is 31 March 2027 and');
     expect(deadline.directive).not.toMatch(/a year/u);
     expect(withHorizon({ months: 9 }).directive).toContain('It is 9 months later and');
+    // Served elig-3 states "within 9 months" (goal_horizon_months, brief-extracted, not an approved deadline): the
+    // directive never says no period exists, and never invents one (buddy r1 P2).
     const none = turnOf(read());
     expect(none.context.horizon).toBeUndefined();
     expect(none.directive).not.toMatch(/a year/u);
-    expect(none.directive).toContain('set no date or period of your own');
+    expect(none.directive).toContain('use only a period the user stated, and invent none');
   });
   it('the horizon date is the user\'s figure: a composed story at it passes the decision figure ban', () => {
     const turn = withHorizon({ deadline: '2027-03-31' });

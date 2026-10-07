@@ -264,6 +264,7 @@ export function premortemWorksheetDiagnosticsFor(input: {
       let grounding: PremortemWorksheetV1['rows'][number]['grounding'];
       let mitigation = c.mitigation;
       if (c.grounding.kind === 'not_in_model') {
+        if (existingRisk) { drop('risk_label'); continue; } // an outside story is, by definition, not on the map
         if (c.story_index !== null || c.failure_way.includes('?') || fold(c.failure_way) === fold(blindspot)
           || rows.some(r => r.grounding.kind === 'not_in_model')) { drop('outside_invalid'); continue; }
         grounding = { kind: 'not_in_model', label: PREMORTEM_COPY.outside };
@@ -288,6 +289,9 @@ export function premortemWorksheetDiagnosticsFor(input: {
         if (supplied.some(i => !i || (i.kind === 'factor' || i.kind === 'risk' ? uniqueNode(i.id)?.label !== i.labels[0]
           : i.id.split('->').some((end, index) => uniqueNode(end)?.label !== i.labels[index])))) { drop('final_label_drift'); continue; }
         grounding = { kind: c.grounding.kind, ids: c.grounding.ids, labels: [...new Set(supplied.flatMap(i => i?.labels ?? []))] };
+        // An existing risk is named only when THIS story names it and it is on THIS option's own path (buddy r1 P1).
+        if (existingRisk && (!contains(story, String(existingRisk.label))
+          || !eligible.some(i => i.kind === 'risk' && i.id === existingRisk.id))) { drop('risk_label'); continue; }
       }
       const key = `${c.option_id}:${c.story_index ?? 'outside'}`;
       if (seen.has(key)) { drop('duplicate_key'); continue; }
@@ -328,8 +332,9 @@ export function premortemWorksheetDiagnosticsFor(input: {
       const optionIds = turn.context.plan !== null ? [turn.context.plan.option_id]
         // A lever names its options by label; each own option's label is unique (uniqueNode), so the id is recovered exactly.
         : item.lever_option_labels !== undefined
-          ? item.lever_option_labels.map(label => nodes.filter(n => n.kind === 'option' && typeof n.label === 'string' && fold(n.label) === fold(label)))
-            .map(found => found.length === 1 ? String(found[0].id) : '').filter(Boolean)
+          // Fail closed: one ambiguous label and the row binds to no option (buddy r1 P2).
+          ? ((found) => found.every(f => f.length === 1) ? found.map(f => String(f[0].id)) : [])(item.lever_option_labels
+            .map(label => nodes.filter(n => typeof n.label === 'string' && fold(n.label) === fold(label))))
           : (signals?.['model.non_sq_option_ids'] ?? []).filter(o => onOptionPath(o, item));
       const optionId = optionIds.length === 1 ? optionIds[0] : undefined;
       const option = optionId === undefined ? undefined : uniqueNode(optionId, 'option');

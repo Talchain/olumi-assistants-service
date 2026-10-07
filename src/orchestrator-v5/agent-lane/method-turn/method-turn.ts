@@ -333,8 +333,8 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
       : []),
     `Shape: ${CONTRACT.body.replaceAll(quote('Switch to GCP'), plan).replace(CONTRACT_HORIZON, horizonOpening(ctx.horizon ?? null))}`,
     ctx.horizon !== undefined
-      ? `The goal's approved horizon is ${horizonWords(ctx.horizon)}. Set every story at that horizon; never assume another.`
-      : 'The model holds no horizon for the goal: set no date or period of your own.',
+      ? `The goal's horizon, as the user set it, is ${horizonWords(ctx.horizon)}. Set every story at that horizon; never assume another.`
+      : 'No approved deadline is held for the goal: use only a period the user stated, and invent none.',
     `Format: ${CONTRACT.format}`,
     'Each story rests on at least one of these items from the user’s model, highest priority first. Name the item in '
       + 'its own words; for a link, name both ends:',
@@ -364,8 +364,8 @@ function checkInputsOf(ctx: RunMethodTurn['context'], graph: unknown): MethodInp
     ...(ctx.decision_level === true ? { decision_level: true } : { plan_label: ctx.plan?.label }),
     current_option_labels: ctx.current_option_labels,
     supplied_items: ctx.supplied_items.map(({ id, labels }) => ({ id, labels })),
-    // The horizon's own date is the user's approved figure, masked like a label.
-    model_labels: ctx.horizon !== undefined ? [...modelLabelsOf(graph), horizonWords(ctx.horizon)] : modelLabelsOf(graph),
+    // A deadline's date is the user's own figure, masked like a label (a month count is a duration, already exempt).
+    model_labels: ctx.horizon !== undefined && 'deadline' in ctx.horizon ? [...modelLabelsOf(graph), horizonWords(ctx.horizon)] : modelLabelsOf(graph),
   };
 }
 
