@@ -315,3 +315,16 @@ describe('Science 393023 LICENCE r4: ruling 1 precedence and placeholder-parts a
     expect(edge).toEqual(before);
   });
 });
+
+describe('Science 393023 LICENCE (b), buddy r2 P1: the V1 door tags only a size nobody stated', () => {
+  it('no mean but a STATED spread → no tag, no defaulted, not a placeholder (the spread is never re-sized); CONTROL: no spread → tagged', () => {
+    const stated = transformEdgeToV3({ from: 'x', to: 'g', strength_std: 0.3, provenance: { source: 'cee_hypothesis' } } as never, 0, []).edge as Record<string, any>;
+    expect(stated.strength.std).toBe(0.3);
+    expect(stated.defaulted).toBeUndefined();
+    expect(stated.provenance?.magnitude).toBeUndefined();
+    expect(isPlaceholderLink(stated)).toBe(false);
+    const bare = transformEdgeToV3({ from: 'x', to: 'g', provenance: { source: 'cee_hypothesis' } } as never, 0, []).edge as Record<string, any>;
+    expect(bare.defaulted).toBe(true);
+    expect(bare.provenance.magnitude).toBe('olumi_placeholder');
+  });
+});

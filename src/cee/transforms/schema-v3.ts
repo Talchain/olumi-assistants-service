@@ -1210,9 +1210,11 @@ export function transformEdgeToV3(
   // edge.provenance_source (flat enum from Anthropic structured outputs).
   const extracted = extractProvenanceForV3(edge.provenance)
     ?? (edge.provenance_source ? { source: mapToV3ProvenanceSource(edge.provenance_source) } : undefined);
-  // Science 393023 LICENCE (b), 7 Oct 20:48Z: a mean nobody stated is this door's default, so the edge carries
-  // `defaulted: true` AND the tag. A bare 0.5 (no `defaulted`) is never read as a placeholder: a user's 0.5 must never be.
-  const provenance = meanDefaulted
+  // Science 393023 LICENCE (b), 7 Oct 20:48Z: a size nobody stated (no mean AND no spread) is this door's default, so the
+  // edge carries `defaulted: true` AND the tag. A stated spread is kept untagged, exactly as before (buddy r2 P1: the tag
+  // would let the frame fallback overwrite it). A bare 0.5 (no `defaulted`) is never read as a placeholder.
+  const placeholderDefault = meanDefaulted && edge.strength_std === undefined;
+  const provenance = placeholderDefault
     ? { ...(extracted ?? { source: "cee_hypothesis" as const }), magnitude: "olumi_placeholder" as const }
     : extracted;
 
@@ -1232,7 +1234,7 @@ export function transformEdgeToV3(
       // Bidirected edges represent unmeasured confounding — preserve through pipeline. See 3A-trust.
       ...(edge.edge_type ? { edge_type: edge.edge_type } : {}),
       // F5: Preserve enrichment defaulted flag through V3 transform
-      ...(meanDefaulted ? { defaulted: true } : (edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
+      ...(placeholderDefault ? { defaulted: true } : (edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
       // Preserve validation pipeline metadata (two-pass parameter review)
       ...((edge as any).validation != null ? { validation: (edge as any).validation } : {}),
     },
