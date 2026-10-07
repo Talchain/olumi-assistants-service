@@ -53,7 +53,8 @@ describe('the receipt asks for a level readiness still needs from the user, even
   it('RED: the Agent route puts it in the reply beside "run it again", from THIS turn\'s readback', () => {
     const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     expect(route).toContain('const askLine = wroteThisTurn ? postWriteAskLine(readbackGraph, analysisReady) : null;');
-    expect(route).toMatch(/staleLine, readinessLine, askLine\]\.filter\(/);
+    // S-D (#2743): a held change that went without the user is said AFTER these lines, never instead of them.
+    expect(route).toMatch(/staleLine, readinessLine, askLine, \.\.\.heldLapseLines\]\.filter\(/);
   });
 
   it('CONTRAST: a button that does not admit a run, or a refused run, adds no ask here (the refusal sentence names the need)', async () => {
