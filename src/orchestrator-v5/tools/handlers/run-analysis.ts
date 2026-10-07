@@ -1930,10 +1930,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // carries (`level-limit-baseline.ts`), so PLoT scores every option; an option that moves the limit's target through an
     // unsized Olumi link has ITS P for that limit withheld HERE, before any reader (verdict, headline, fact, Agent), read
     // off the same analysed graph and the options PLoT scored — the one predicate the verdict's R-c reads.
+    const limitIdentityEvaluations = Array.isArray((response as Record<string, unknown>).identity_evaluations)
+      ? (response as Record<string, unknown>).identity_evaluations as unknown[] : undefined;
     const placeholderMovedByLimit = collectLimitLevelOwners(
       graphForAnalysis,
       readRatifiedConstraints(snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph),
       finalWireOptions,
+      limitIdentityEvaluations,
     ).placeholderMovedOptionIds;
     if (placeholderMovedByLimit.size > 0) {
       response = withholdOptionLimitScores(response, placeholderMovedByLimit);
@@ -2313,7 +2316,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       leaderEstimatedTargetIds,
       // (a) and WHOSE figure an estimate_only row was checked against (DL CR 5859853452), from the same one walk.
       // R-c: with the options PLoT scores, so a change limit moved only through unsized parts is withheld.
-      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions),
+      collectLimitLevelOwners(graphForAnalysis, ratifiedConstraints, finalWireOptions, limitIdentityEvaluations),
       strictThresholdPins,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A

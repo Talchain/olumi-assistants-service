@@ -261,8 +261,10 @@ function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefine
  */
 function userStatedStrength(edge: Rec): boolean {
   const p = isRec(edge.provenance) ? edge.provenance : undefined;
-  // This exemption is the user's BAND, not a natural figure in a conflicting or absent unit.
-  return p?.source === 'user_specified' && !isRec(p.natural_effect);
+  // A user-confirmed strength remains authored even when it also carries a natural figure.
+  // A user stamp cannot turn an Olumi estimate or projected mean into their own strength.
+  return p?.source === 'user_specified'
+    && !(typeof p.magnitude === 'string' && p.magnitude.startsWith('olumi_')) && p.mean_projected !== true;
 }
 
 /**
@@ -315,12 +317,13 @@ export function placeholderMovedOptions(
   edges: readonly Rec[],
   options: ReadonlyArray<Record<string, unknown>>,
   limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS,
+  identityEvaluations?: readonly unknown[],
 ): Map<string, PlaceholderPartsReason> {
   const out = new Map<string, PlaceholderPartsReason>();
   for (const o of options) {
     const id = optionIdOf(o);
     if (id === undefined || out.has(id)) continue;
-    const finding = placeholderPartsFinding(targetId, nodes, edges, [o], limitUnits);
+    const finding = placeholderPartsFinding(targetId, nodes, edges, [o], limitUnits, identityEvaluations);
     if (finding !== null) out.set(id, finding.reason);
   }
   return out;
@@ -382,7 +385,7 @@ export function placeholderPartsFinding(
       return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
     }
     const unitById = sizerUnitsOf(nodes, limitUnits, edges);
-    const exactOperands = exactIdentityOperandLinks(nodes, edges, identityEvaluations);
+    const exactOperands = exactIdentityOperandLinks(nodes, edges, identityEvaluations, 'evaluated_only');
     const unitOf = nodeUnitOf(nodes);
     const onPath = new Set<unknown>([...parts, targetId]);
     for (const iv of movers) {

@@ -1061,6 +1061,8 @@ export function collectLimitLevelOwners(
   ratified: readonly RatifiedConstraint[],
   /** The options PLoT scores (run_analysis's final wire options). Omitted = no limit is withheld for its parts. */
   options?: ReadonlyArray<Record<string, unknown>>,
+  /** Only identities evaluated by this response may exempt operand links in the limit walk. */
+  identityEvaluations?: readonly unknown[],
 ): {
   userBaselineIds: Set<string>;
   userAssumptionIds: Set<string>;
@@ -1105,7 +1107,7 @@ export function collectLimitLevelOwners(
     for (const c of ratified) {
       if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
       if (nodes.find((n) => n.id === c.node_id)?.kind === 'goal') continue;
-      const moved = placeholderMovedOptions(c.node_id, nodes, edges, options, limitUnits);
+      const moved = placeholderMovedOptions(c.node_id, nodes, edges, options, limitUnits, identityEvaluations);
       if (moved.size === 0) continue;
       out.placeholderMovedOptionIds.set(c.constraint_id, new Set(moved.keys()));
       const scored = options.map((o) => optionIdOf(o)).filter((id): id is string => id !== undefined);
