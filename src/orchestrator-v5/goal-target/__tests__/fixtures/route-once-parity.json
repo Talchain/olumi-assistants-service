@@ -1119,5 +1119,94 @@
       ]
     },
     "held": []
+  },
+  {
+    "name": "Retained excluded upstream",
+    "graph": {
+      "nodes": [
+        {
+          "id": "X",
+          "kind": "factor",
+          "label": "X",
+          "analysis_participation": "retained_excluded"
+        },
+        {
+          "id": "M",
+          "kind": "factor",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "from": "X",
+          "to": "M",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "M",
+          "to": "Y",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "Retained excluded upstream control",
+    "graph": {
+      "nodes": [
+        {
+          "id": "X",
+          "kind": "factor",
+          "label": "X"
+        },
+        {
+          "id": "M",
+          "kind": "factor",
+          "label": "M"
+        },
+        {
+          "id": "Y",
+          "kind": "goal",
+          "label": "Y"
+        }
+      ],
+      "edges": [
+        {
+          "from": "X",
+          "to": "M",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "M",
+          "to": "Y",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": [
+      "M->Y"
+    ]
   }
 ]

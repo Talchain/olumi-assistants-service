@@ -24,6 +24,7 @@
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { sameUnit } from '../agent-lane/same-unit.js';
+import { isRetainedExcluded } from '../tools/handlers/run-analysis-participation-guard.js';
 
 type Rec = Record<string, any>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -117,7 +118,12 @@ export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
     ? n.nonlinear_identity.factor_ids : [])] as const));
   const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
   const unitOf = nodeUnitOf(nodes);
-  const structural = (e: Rec): boolean => typeof e.from === 'string' && typeof e.to === 'string' && byId.has(e.from) && byId.has(e.to);
+  // The route structure is the graph the Run is SENT (Codex buddy r1 P1): `guardAnalysisParticipation` withholds a node the
+  // user kept out of the calculation, and every link touching it, before the hold. So such a node never covers, is never
+  // covered, and its links are never held — on the Run, the hash, the Agent and the LLM context alike.
+  const participating = new Set(nodes.filter((n) => !isRetainedExcluded(n)).map((n) => n.id));
+  const structural = (e: Rec): boolean => typeof e.from === 'string' && typeof e.to === 'string'
+    && participating.has(e.from) && participating.has(e.to);
   const baseEnds = (e: Rec): LinkEnds => ({
     fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label),
     fromUnit: unitOf(e.from), toUnit: unitOf(e.to), routeOnce: false,

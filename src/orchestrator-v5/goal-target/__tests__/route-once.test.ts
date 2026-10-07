@@ -17,12 +17,14 @@ import { diffRunInputs } from '../../coaching/run-input-changes.js';
 import { createAgentCapabilities, type InternalDispatch } from '../../agent-lane/runtime/agent-capabilities.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { ProposalStore } from '../../agent-lane/proposal.js';
+import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
+import { compactGraph } from '../../../orchestrator/context/serialise.js';
 
 type Rec = Record<string, any>;
 type Edge = Rec & { from: string; to: string; exists_probability?: number; strength?: { mean: number; std?: number } };
 type Graph = { nodes: Rec[]; edges: Edge[] };
 type Fixture = { name: string; graph: Graph; held: string[] };
-const PARITY_SHA256 = '0ec032000e8da9fbd931a79f46967f2a964988a879217ddf7cfafb612d115c79';
+const PARITY_SHA256 = '3fe10b78ec4d7ba7bfba42b35d9c137ebd9485f92b3d93593def140cbe2aec02';
 const bytes = readFileSync(new URL('./fixtures/route-once-parity.json', import.meta.url));
 const parity = JSON.parse(bytes.toString('utf8')) as Fixture[];
 const graphOf = (name: string): Graph => structuredClone(parity.find((row) => row.name === name)!.graph);
@@ -299,6 +301,33 @@ describe('rule R route-once', () => {
   it('run-input-changes (b): same graph before/after rule stays partial (coverage true on both sides)', () => {
     const graph = graphOf('R4');
     expect(diffRunInputs(snapshot(graph), snapshot(withHeldUserLinks(graph)))).toEqual({ rows: [], complete: false });
+  });
+
+  it('Participation (Codex buddy r1 P1): a node kept out of the calculation never covers — Run, hash, Agent and LLM agree', async () => {
+    const excluded = graphOf('Retained excluded upstream');
+    const control = graphOf('Retained excluded upstream control');
+    // The Run: the participation guard withholds X and X->M BEFORE the hold, so M->Y is the route's FIRST default.
+    const sent = withHeldUserLinks(guardAnalysisParticipation(excluded, { goalNodeId: 'Y' }).graph as Graph);
+    expect(sent.edges.map((e) => `${id(e)}@${e.exists_probability}`)).toEqual(['M->Y@0.8']);
+    // Every reader of the PERSISTED graph sees the same: no hold on M->Y (control: held once X participates).
+    expect(heldIds(excluded)).toEqual([]);
+    expect(heldIds(control)).toEqual(['M->Y']);
+    const llm = (g: Graph) => compactGraph(g as never).edges.find((e) => e.from === 'M' && e.to === 'Y')!.exists_probability;
+    expect([llm(excluded), llm(control)]).toEqual([0.8, 1]);
+    const agentRow = async (g: Graph): Promise<Rec> => {
+      const dispatch = vi.fn<InternalDispatch>(async () => ({ status: 200, json: { graph: g } }));
+      const state = await createAgentCapabilities(dispatch, new ProposalStore()).getCanonicalState({
+        scenario_id: '7c1f8e3b-4d5a-4f6b-8c9d-0e1f2a3b4c5d', authenticated_user_id: null, request_id: 'route-once-participation',
+      }) as Rec;
+      return state.links.find((e: Edge) => id(e) === 'M->Y');
+    };
+    expect(await agentRow(excluded)).toMatchObject({ exists_probability: 0.8 });
+    expect(await agentRow(excluded)).not.toHaveProperty('counted_once');
+    expect(await agentRow(control)).toMatchObject({ exists_probability: 1, counted_once: true });
+    // Freshness: a real change to M->Y's existence on the Run moves the current hash (it is not masked by a phantom hold).
+    const moved = graphOf('Retained excluded upstream');
+    edgeOf(moved, 'M->Y').exists_probability = 0.6;
+    expect(computeAnalysisAffectingGraphHash(moved as never)).not.toBe(computeAnalysisAffectingGraphHash(excluded as never));
   });
 
   it('Agent: get_canonical_state capacity->goal counted_once; hire->capacity byte-identical', async () => {
