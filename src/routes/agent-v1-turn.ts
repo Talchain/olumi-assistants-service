@@ -97,7 +97,7 @@ import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct-link.js';
 import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-sentence-route.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
-import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -126,7 +126,7 @@ import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js'
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
 import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
-import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../orchestrator-v5/compose/analysis-state-v1.js';
+import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED, WITHHELD_GOAL_PATH_UNSIZED, WITHHELD_SEPARATION_UNAVAILABLE, WITHHELD_LEADER_CAUSE_UNRECORDED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
@@ -4342,10 +4342,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
       // this same final body, plus the paragraph the gate appended and every fixed no-leader sentence present.
       const coHold = goalFigureCoHoldOf((wireBody as { blocks?: unknown }).blocks, readbackGraph ?? null, typedNow ?? undefined);
+      // The gate's typed cause precedence: a different claim reason does not name the co-held links.
+      const closingReason = claimPermissionsFrom(analysisState, analysisReady).withheld_reason;
+      const closingSubjects = closingReason === undefined || closingReason === WITHHELD_GOAL_PATH_UNSIZED
+        || closingReason === WITHHELD_SEPARATION_UNAVAILABLE || closingReason === WITHHELD_LEADER_CAUSE_UNRECORDED
+        ? coHold?.subjects : undefined;
       const obligations: FaceObligation[] = [
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
-        ...[leaderGateClosing, coHold?.say, coHold?.why, ...AGENT_NO_LEADER_SENTENCES.filter((line) => reply.includes(line))]
-          .filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'withheld_reason' as const, text })),
+        ...(leaderGateClosing !== null ? [{ role: 'withheld_reason' as const, text: leaderGateClosing, subjects: closingSubjects }] : []),
+        ...[coHold?.say, coHold?.why].filter((l): l is string => typeof l === 'string')
+          .map((text) => ({ role: 'withheld_reason' as const, text, subjects: coHold?.subjects })),
+        ...AGENT_NO_LEADER_SENTENCES.filter((text) => reply.includes(text))
+          .map((text) => ({ role: 'withheld_reason' as const, text })),
         // #2565: a licensed Explain of a fragile Run names a finding; its robustness caveat qualifies it, on the face.
         ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat }] : []),
         // Required evidence, never hidden (AIE line review): the screen's chance lines, the comparison's basis, a root
@@ -4382,14 +4390,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
       const composedReply = composeReplyShape({
         text: reply,
+        detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
         obligations,
+        graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
           : narratorModel === null ? { keepWhole: 'host_composed' as const } : {}),
       });
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
-      wireBody = (composedReply.shape !== null
-        ? { ...unshaped, assistant_text: composedReply.text, _answer_shape: composedReply.shape }
+      // Written only when the composer shaped the reply or placed owed detail lines: an unshaped, unchanged reply (or a
+      // body with no `assistant_text` at all) ships byte-identical, as before.
+      wireBody = (composedReply.shape !== null || composedReply.text !== reply
+        ? { ...unshaped, assistant_text: composedReply.text,
+          ...(composedReply.shape !== null ? { _answer_shape: composedReply.shape } : {}) }
         : unshaped) as OlumiResponse & Record<string, unknown>;
       log.info({
         event: 'agent_lane.reply_shaped', request_id: String(req.id), ...(turnId !== undefined ? { turn_id: turnId } : {}),
