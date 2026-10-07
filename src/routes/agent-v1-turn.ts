@@ -43,7 +43,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
-import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
+import { RESEARCH_CHIP_PREFIX, RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, withResearchControlTruth, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { firstAnalysisResultReply } from '../orchestrator-v5/agent-lane/first-analysis-result-reply.js';
@@ -76,9 +76,9 @@ import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js'
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, heldChangeName, isProductHold, productHoldRecord, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
-import { parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
-import { reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
+import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
+import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
 import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
@@ -107,7 +107,7 @@ import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, p
 import { identityCardToIssue, identityCardToReoffer } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { proposeProductIdentity } from '../orchestrator-v5/agent-lane/identity-proposal.js';
 import { identityConfirmBaseIsWritable } from '../orchestrator-v5/system-events/editable-graph.js';
-import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
+import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
@@ -119,7 +119,7 @@ import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipelin
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
-import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
+import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
@@ -331,6 +331,30 @@ type OfferedAction = SuggestedAction;
  */
 const OFFERED_ACTIONS_MAX = 500;
 const offeredActions = new Map<string, readonly OfferedAction[]>();
+/**
+ * ⭐ S-D: a held proposal set aside by the persistence floor (a concurrent arrival filled the row AFTER the reply was
+ * composed) is said at the start of the scenario's NEXT reply: the composer is the one last writer (#2748). In-process
+ * and bounded; a restart in between loses only that one sentence (the proposal itself is already gone from the row).
+ */
+const owedHeldLapses = new Map<string, string[]>();
+const OWED_HELD_LAPSES_MAX = 500;
+function oweHeldLapses(scenarioId: string, said: readonly string[]): void {
+  if (said.length === 0) return;
+  // (deliberately not named after the route's disclosure list, which a source scanner finds by its declaration)
+  const lines = [...(owedHeldLapses.get(scenarioId) ?? []), ...said];
+  owedHeldLapses.delete(scenarioId);
+  if (owedHeldLapses.size >= OWED_HELD_LAPSES_MAX) {
+    const oldest = owedHeldLapses.keys().next().value;
+    if (oldest !== undefined) owedHeldLapses.delete(oldest);
+  }
+  owedHeldLapses.set(scenarioId, lines);
+}
+function takeOwedHeldLapses(scenarioId: string): string[] {
+  const lines = owedHeldLapses.get(scenarioId) ?? [];
+  owedHeldLapses.delete(scenarioId);
+  return lines;
+}
+
 function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
   offeredActions.delete(key);
   if (offeredActions.size >= OFFERED_ACTIONS_MAX) {
@@ -405,8 +429,9 @@ function whatWouldChangeAnswer(scenarioId: string, read: Parameters<typeof tippi
  */
 const RESEARCH_OFFERS_MAX = 500;
 const researchOffers = new Map<string, Set<string>>();
-function rememberResearchOffers(key: string, offered: readonly OfferedAction[]): void {
-  const ids = offered.filter((a) => a.id.startsWith(RESEARCH_CHIP_PREFIX)).map((a) => a.id);
+function rememberResearchOffers(key: string, delivered: unknown): void {
+  const ids = (Array.isArray(delivered) ? delivered : []).map((a) => (a as { id?: unknown } | null | undefined)?.id)
+    .filter((id): id is string => typeof id === 'string' && id.startsWith(RESEARCH_CHIP_PREFIX));
   if (ids.length === 0) return;
   const held = researchOffers.get(key) ?? new Set<string>();
   researchOffers.delete(key);
@@ -483,6 +508,11 @@ export function stillValidOffers(
   now: { outstandingProposalIds: ReadonlySet<string>; analysisReady: unknown; analysisState: unknown; modelExists: boolean },
 ): OfferedAction[] {
   const approvals = stillValidApprovalOffers(offered, now.outstandingProposalIds);
+  const declines = offered.filter(a => {
+    const id = declinedProposalOf(a.id);
+    return id !== undefined && now.outstandingProposalIds.has(id)
+      && approvals.some(c => typedApprovalOf({ chip: { id: c.id } }) === id);
+  });
   const runKind = (now.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   const run = offered.some((a) => a.id === RUN_OFFER_CHIP.id)
     && admitsRunOffer(now.analysisReady) && runKind !== 'complete_current';
@@ -498,7 +528,7 @@ export function stillValidOffers(
   // next step after a blocked Run: after a restart the replay carries the words only).
   const nextSteps = offersNextSteps(now.analysisState) && now.outstandingProposalIds.size === 0
     ? offered.filter((a) => METHOD_PRESS_IDS.has(a.id) || isWidenAddPressId(a.id)) : [];  // Widen sits in a next step's place (DL P2 on #2512)
-  return [...approvals, ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
+  return [...approvals, ...declines, ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
 }
 const sessions = new SessionBindingRegistry();
 
@@ -1140,6 +1170,24 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
     leader_claim: composeLeaderClaim({ goalScopeClaimInput: scopeInput, canonical: null, rawRobustness: null },
       base.run_state, base.contradictions?.includes('fact_status_success_but_degraded_newer') === true),
   } };
+}
+
+/**
+ * ⭐ WOULD A SEARCH CONTROL FOR THIS QUERY BE SHOWN, ON THE STATE AS IT IS NOW? The early check behind
+ * `offer_public_research`: the gate's own rule (`controlSurvivesLeaderGate`) on this route's readback. An unsuccessful
+ * read licenses nothing (`readBackState` answers a failed read with missing authority, which reads as "no restriction").
+ * It is NOT the last word: a Run later in the same turn can change the licence, so the reply's final read decides again.
+ */
+export async function researchControlShowableNow(dispatch: InternalDispatch, scenarioId: string, query: string): Promise<boolean> {
+  const chip = researchChipFor(query);
+  if (chip === null) return false;
+  let readOk = false;
+  const read = await readBackState(async (path, body) => {
+    const res = await dispatch(path, body);
+    if (res.status === 200) readOk = true;
+    return res;
+  }, scenarioId);
+  return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
 export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
@@ -1973,7 +2021,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     const proposalEdits = approvedProposal !== undefined ? parseProposalEdits(body['proposal_edits']) : undefined;
     const editsForThisCard = proposalEdits !== undefined && proposalEdits !== null && proposalEdits.proposal_id === approvedProposal
-      && approvedProposal.startsWith('gmh_') && proposalEdits.fields.length > 0 ? proposalEdits : undefined;
+      ? proposalEdits : undefined;
     const explanationId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
     const ownOperation = approvedProposal !== undefined
       ? `approve:${approvedProposal}${editsForThisCard !== undefined ? `:${proposalEditsDigest(editsForThisCard)}` : ''}`
@@ -1999,8 +2047,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const replayed = async (prior: CommittedTurnRecord, scopeIssues: readonly PendingAction[] = []) => {
       const read = await readBackState(dispatch, scenarioId);
       // Failed readback cannot erase today's pending authority; never recover issues from the old answer row.
-      const currentScope = typeof store.readMostRecentPendingActions === 'function'
-        ? (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' })).filter(p => p.action.kind === 'reconcile_goal_scope') : [];
+      const currentPending = typeof store.readMostRecentPendingActions === 'function'
+        ? await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }) : [];
+      const currentScope = currentPending.filter(p => p.action.kind === 'reconcile_goal_scope');
+      const replayRecords = currentPending.flatMap(p => { const r = proposalRecord(p, read.graph); return r && r.base_graph_hash === read.graphHash ? [r] : []; })
+        .sort((a, b) => Date.parse(currentPending.find(p => p.id === a.revision)!.emitted_at_iso) - Date.parse(currentPending.find(p => p.id === b.revision)!.emitted_at_iso));
+      const replayFields = proposalFieldsWire(replayRecords, read.graphHash);
       const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
       /**
        * ⭐ RESULT-FIRST REPLAY (#2470; CODEX_CLI_OVERFLOW P1 + P2 5936280278). A retried turn of the two-request Run is
@@ -2138,7 +2190,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // A review replay offers ONLY its recomposed presses (Codex #2581 P2): a remembered offer from another Run is not one.
       const stillValid = decisionReviewReplay ? [] : stillValidOffers(offered, {
           outstandingProposalIds: new Set([
-            ...((id) => (id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
+            ...replayRecords.map(r => r.proposal_id),
+            ...executableWaitingProposalIds(scenarioId, userId, state.graphHash),
             ...(await liveHeldRefs(scenarioId)),
           ]),
           analysisReady: state.analysisReady,
@@ -2146,15 +2199,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // `draft_graph` is read back only when the graph has content.
           modelExists: state.draftGraph !== undefined,
         });
+      const replayCard = replayRecords[0];
+      const replayActions = firstOfEachId([...stillValid, ...boundControl]);
+      const methodTerminalReplay = approvedProposal === undefined && (whatChangesReplay || isMethodPress(explanationId)
+        || widenTargetOf(explanationId, message) !== null || isWidenAddPressId(explanationId) || pressedChipIsStructural
+        || actionPressOf(body['chip']) !== null
+        || (chiplessRetry && (prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)
+          || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
+      if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
+      for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: withoutProposalIds(replayText),
         stage: 'frame',
         answerKind: 'substantive',
         // The bound Explain control is re-derived from the canonical readback above, so it is valid by construction.
-        suggested_actions: firstOfEachId([...stillValid, ...boundControl]),
+        suggested_actions: firstOfEachId(replayActions),
       });
       const replayBody = {
         ...finaliseV5Response(composedReplay, { scenarioId, runDeltaBoundByCaller: true }),
+        ...(replayFields !== undefined ? { _proposal_fields: replayFields } : {}),
         ...(replayNarration !== undefined ? { narration: replayNarration } : {}),
         // The CURRENT result as the live turn carries it: the readback's bound block and its sidecars, same fact.
         ...(resultFirstReplay && state.analysisResult !== undefined ? { blocks: [state.analysisResult] } : {}),
@@ -2195,7 +2258,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * written, or the latest row would be that claim, which carries nothing. A failed read degrades to today's behaviour.
      */
     const approveKey = `${scenarioId}:${userId ?? ''}`;
+    const declinedProposal = declinedProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
     if ((approvedProposal !== undefined && proposals.get(approvedProposal) === undefined)
+      || (declinedProposal !== undefined && proposals.get(declinedProposal) === undefined)
       || proposals.outstanding(scenarioId, userId).length === 0) {
       if (typeof store.readMostRecentPendingActions === 'function') {
         try {
@@ -2391,6 +2456,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
         readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(readingDispatch, sid)),
+        // ⭐ The EARLY answer to "would this search control be shown", so a refusal reaches the model while it can still
+        // ask a neutral question. The turn's final read decides again, below (`withResearchControlTruth`).
+        researchControlShowable: (sid: string, query: string) => researchControlShowableNow(readingDispatch, sid, query),
         // ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door (ONE held change) and limit door (ONE commit),
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {
@@ -2445,16 +2513,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (this process's last offer, or the durable carrier after a restart); `applyLinkEffect` then requires them to be
     // exactly that card's reading. PR Review on #2275 @ fe509477: a right-looking id + reading for a proposal whose card
     // is not on offer carries no words, so it writes nothing.
-    const offeredCard = approvedProposal === undefined ? undefined : [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
-      .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
-    // A product hold is its own durable card; confirmHeld checks these words against that exact live hold.
-    const pressedApproval = approvedProposal !== undefined
-      ? { typed_approval_of: approvedProposal,
-        ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
-        ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
-    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
-    if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
-
     // Snapshot before any inner tool row: the outer answer carries/decrements this ask once,
     // even when Run or Explain bypasses the Agent loop. Claim rows are excluded by the store.
     /**
@@ -2465,11 +2523,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let heldAtStart: readonly PendingAction[] = [];
     if (typeof store.readMostRecentPendingActions === 'function') {
       try {
-        heldAtStart = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' })).filter(isProductHold);
+        heldAtStart = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' })).filter(isHeldProposal);
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: held proposals unreadable at turn start — the latest row rules');
       }
     }
+    const offeredCard = approvedProposal === undefined ? undefined : [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip,
+      ...heldAtStart.map(h => proposalRecord(h, undefined)?.approve_action)]
+      .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
+    // A product hold is its own durable card; confirmHeld checks these words against that exact live hold.
+    const pressedApproval = approvedProposal !== undefined
+      ? { typed_approval_of: approvedProposal,
+        ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
+        ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
+    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
+
     let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
     if (mode === 'full' && typeof store.readMostRecentPendingActions === 'function') {
       try {
@@ -2546,9 +2615,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const declinedHold = declinedProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
     if (declinedHold !== undefined && result === undefined) {
       const started = Date.now();
-      const named = heldAtStart.find((p) => p.chip_id === declinedHold);
+      const named = heldAtStart.find((p) => heldProposalId(p) === declinedHold);
       const withdrawn = await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: declinedHold }), toolCtx, capabilities, mode);
-      const said = withdrawn.ok === true ? heldDeclineSentence(named !== undefined ? heldChangeName(named) : undefined)
+      const said = withdrawn.ok === true ? heldDeclineSentence(named !== undefined ? heldChangeLabel(named) : undefined)
         : 'That change is no longer waiting, so there was nothing to set aside. Nothing in the model changed.';
       const ms = Date.now() - started;
       result = {
@@ -2565,8 +2634,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * proposal that takes none in slice 1) apply nothing: the proposal stays held, and the reply says why. Valid edits
      * ride the SAME approval below (the tool context's `proposal_edits`) to the existing door, which applies them in one commit.
      */
-    if (approvedProposal !== undefined && result === undefined && proposalEdits !== undefined && editsForThisCard === undefined
-      && !(proposalEdits !== null && proposalEdits.proposal_id === approvedProposal && proposalEdits.fields.length === 0)) {
+    if (approvedProposal !== undefined && result === undefined && proposalEdits !== undefined && editsForThisCard === undefined) {
       const said = editsRefusedSentence('malformed');
       result = {
         assistant_text: said,
@@ -2578,10 +2646,38 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     if (approvedProposal !== undefined && result === undefined) {
       const fastStartedAt = Date.now();
-      const applied = await dispatchTool(
-        'authorise_change', JSON.stringify({ proposal_id: approvedProposal }),
-        toolCtx, capabilities, mode,
-      );
+      let edited: ReturnType<typeof amendAgentProposal> | undefined;
+      let editsFailure: 'stale' | 'not_held' | 'refused' | undefined;
+      const originalCarrier = heldAtStart.find(h => heldProposalId(h) === approvedProposal);
+      const original = originalCarrier !== undefined ? agentProposalOf(originalCarrier) : undefined;
+      // A settled card has no held carrier; the store still owns its idempotent already-applied result.
+      if (approvedProposal.startsWith('prop_') && original === undefined && !proposals.isApplied(approvedProposal)
+        && typeof store.readMostRecentPendingActions === 'function') editsFailure = 'not_held';
+      if (editsForThisCard !== undefined && approvedProposal.startsWith('prop_')) {
+        const current = await readBackState(dispatch, scenarioId);
+        const record = originalCarrier !== undefined ? proposalRecord(originalCarrier, current.graph) : undefined;
+        if (!record || !original) editsFailure = 'not_held';
+        else if (record.revision !== editsForThisCard.revision || record.digest !== editsForThisCard.digest
+          || record.base_graph_hash !== editsForThisCard.graph_hash || current.graphHash !== editsForThisCard.graph_hash) editsFailure = 'stale';
+        else if (record.approve_action.id !== (body['chip'] as { id?: unknown })?.id || record.approve_action.message !== message) editsFailure = 'refused';
+        else {
+          if (editsForThisCard.fields.length > 0) {
+            edited = amendAgentProposal(record, original, editsForThisCard.fields);
+            if (!edited.ok) editsFailure = 'refused';
+            else if (edited.proposal.proposal_id !== approvedProposal) { proposals.put(edited.proposal); proposals.discard(approvedProposal); }
+            else edited = undefined;
+          }
+        }
+      }
+      const target = edited?.ok ? edited.proposal.proposal_id : approvedProposal;
+      const applied = editsFailure !== undefined
+        ? { ok: false, mutated: false, refusal: editsFailure === 'stale' ? 'edits_superseded' : editsFailure === 'not_held' ? 'unknown_proposal' : 'edits_refused' }
+        : await dispatchTool('authorise_change', JSON.stringify({ proposal_id: target }),
+          edited?.ok ? { ...toolCtx, typed_approval_of: target, proposal_edits: undefined } : toolCtx, capabilities, mode);
+      if (edited?.ok) {
+        if (applied.ok === true && applied.mutated === true) { proposals.discard(approvedProposal); Object.assign(applied, { user_edits: edited.userEdits }); }
+        else { proposals.discard(target); if (original !== undefined && applied.mutated !== true) proposals.put(original); }
+      }
       /**
        * ⛔ THE TYPED IDENTITY STAYS AUTHORITATIVE, EVEN WHEN THE PROPOSAL IS GONE
        * (independent review of #1782, 5804375960). Handing a click that consented to A
@@ -2615,7 +2711,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ S-D: what the user set vs what Olumi held, server-authored from the hold's own record, only once it landed.
         const editsApplied = applied.ok === true && applied.mutated === true ? readUserEdits(applied.user_edits) : undefined;
         editsRefusedThisTurn = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true;
-        const followUp = [guarded.text.trim(), editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
+        const editedLinks = editsApplied !== undefined && original !== undefined && original.operations.length > 0 && original.operations.every(o => o.op === 'set_link_strength');
+        const followUp = [editedLinks ? '' : guarded.text.trim(), editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
           editsRefusedThisTurn ? editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
@@ -3475,7 +3572,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (typeof store.readMostRecentPendingActions === 'function') {
       try {
         const priorPendings = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
-        for (const p of priorPendings) if (isProductHold(p)) heldSeenThisTurn.add(p.chip_id);
+        for (const p of priorPendings) if (isHeldProposal(p)) heldSeenThisTurn.add(p.chip_id);
         /*
          * ⭐ S-D: A HELD PROPOSAL IS HELD UNTIL IT IS APPROVED OR DECLINED (lane EDIT-PANEL; Paul 7 Oct; D-08). Supersedes
          * Canonical #70 5841421182 condition 2 ("the turn count runs down once per answer row"): that rule counted ROWS,
@@ -3492,15 +3589,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           && typeof c.proposal_id === 'string').map((c) => c.proposal_id as string));
         liveScopeIssues = computeSurvivingPriorPendingsDetailed(priorPendings.filter(p => p.action.kind === 'reconcile_goal_scope'), freshScopeIssues, [], graphHash, Date.now()).survivors;
         const reconciled = reconcileHeldProposals({ atStart: heldAtStart, latest: priorPendings, approved: approvedHolds,
+          isApplied: (id) => proposals.isApplied(id),
           declined: withdrawn, graph: readbackGraph, graphHash, scenarioId, requestId: String(req.id), nowMs: Date.now() });
         liveHolds = reconciled.carried;
-        heldLapseLines = reconciled.lapsed.map((l) => heldLapseSentence(heldChangeName(l.hold), l.reason));
+        for (const l of reconciled.lapsed) if (agentProposalOf(l.hold) !== undefined) proposals.discard(heldProposalId(l.hold));
+        heldLapseLines = [...takeOwedHeldLapses(scenarioId), ...reconciled.lapsed.map((l) => heldLapseSentence(heldChangeName(l.hold), l.reason))];
         // An earlier turn's held proposal the Agent set aside on the user's typed decline is SAID (the press says its own).
         if (declinedHold === undefined) {
-          const setAside = heldAtStart.filter((h) => withdrawn.has(h.chip_id));
-          heldLapseLines = [...setAside.map((h) => heldDeclineSentence(heldChangeName(h))), ...heldLapseLines];
+          const setAside = heldAtStart.filter((h) => withdrawn.has(heldProposalId(h)));
+          heldLapseLines = [...setAside.map((h) => heldDeclineSentence(heldChangeLabel(h))), ...heldLapseLines];
         }
-        heldRecords = liveHolds.flatMap((h) => { const r = productHoldRecord(h, readbackGraph); return r === undefined ? [] : [r]; });
+        heldRecords = liveHolds.flatMap((h) => { const r = proposalRecord(h, readbackGraph); return r === undefined ? [] : [r]; });
       } catch (err) {
         log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: refusing to erase unresolved scope or approval on a failed pending read');
         throw err;
@@ -3510,6 +3609,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
     const composedRead = await withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues, String(req.id));
     const { analysisState, analysisResult } = composedRead;
+    // ONE set of leader-gate inputs from this turn's final read: the search controls offered below, the reply's words
+    // about them and the final egress all read this same object, so they cannot disagree.
+    const leaderGate = leaderGateInputsOf({ analysisState, analysisReady, graph: readbackGraph, scopeAuthorityUnavailable: composedRead.scopeAuthorityUnavailable });
+    // The search control for each query the Agent offered THIS turn (each query once).
+    const researchOffered = [...new Map(result.tool_results.flatMap((r) => {
+      const chip = researchChipFor(String((r as { offered_query?: unknown } | undefined)?.offered_query ?? ''));
+      return chip === null ? [] : [[chip.id, chip] as const];
+    })).values()];
     if (whatChangesRead !== undefined) {
       const answer = whatWouldChangeAnswer(scenarioId,
         await withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues, String(req.id)), measuredCandidate,
@@ -3711,11 +3818,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(startingAssumptions.length > 0 ? startingAssumptions
         : (runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
-      // The research control for each query the Agent offered THIS turn: the only way a query is ever sent.
-      ...[...new Map(result.tool_results.flatMap((r) => {
-        const chip = researchChipFor(String((r as { offered_query?: unknown } | undefined)?.offered_query ?? ''));
-        return chip === null ? [] : [[chip.id, chip] as const];
-      })).values()],
+      // The research control for each query the Agent offered THIS turn: the only way a query is ever sent. Only a
+      // control the final egress would ship is offered, and so remembered as pressable.
+      ...researchOffered.filter((chip) => controlSurvivesLeaderGate(chip, leaderGate)),
     ]);
     let guidanceHistory: Awaited<ReturnType<NonNullable<typeof store.readGuidanceHistory>>> | null = null;
     if (typeof store.readGuidanceHistory === 'function') {
@@ -3746,10 +3851,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * turn's own next steps (a proposal held until decided must not take the user's other actions away while it waits).
      * Never on a method's terminal turn, whose controls are the method's own.
      */
-    const heldCardOffer: OfferedAction[] = approvals.length === 0 && carriedApproval.length === 0 && heldRecords.length > 0
+    const heldCard = heldRecords.find(r => r.proposal_id === approvedProposal) ?? heldRecords[0];
+    const heldCardOffer: OfferedAction[] = approvals.length === 0 && heldRecords.length > 0
       && fastPath !== 'method' && !decisionReviewRequested
+      && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated))
+        || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
-      ? [heldRecords[0]!.approve_action as OfferedAction, AMEND_CHIP, heldRecords[0]!.decline_action as OfferedAction] : [];
+      ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
     // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
@@ -3757,14 +3865,50 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offeredApprove = offeredNow.find((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
     const offeredProposal = offeredApprove !== undefined ? proposals.get(typedApprovalOf({ chip: { id: offeredApprove.id } }) as string) : undefined;
     const emittedAtIso = new Date().toISOString();
-    const approvalCarrier = carrierForAnswerRow({
-      offered: offeredApprove !== undefined && offeredProposal !== undefined ? { proposal: offeredProposal, chip: offeredApprove } : undefined,
-      carried: carriedProposals.get(approveKey),
-      store: proposals,
-      subject: { scenario_id: scenarioId, user_id: userId },
-      currentGraphHash: graphHash,
-      emittedAtIso,
-    });
+    // S-D: preserve a stored carrier's revision. Each proposal has its own pending item.
+    const approvalCarrier = offeredApprove !== undefined && offeredProposal !== undefined
+      ? liveHolds.find(h => heldProposalId(h) === offeredProposal.proposal_id)
+        ?? refreshedHold(proposalPendingAction(offeredProposal, offeredApprove, { scenario_id: scenarioId, emitted_at_iso: emittedAtIso }), Date.now()) : undefined;
+    if (approvalCarrier !== undefined && !liveHolds.some(h => h.chip_id === approvalCarrier.chip_id)) {
+      liveHolds = [...liveHolds, approvalCarrier];
+      const r = proposalRecord(approvalCarrier, readbackGraph);
+      if (r !== undefined) heldRecords.push(r);
+    }
+    /**
+     * ⛔ A NEWER AGENT OFFER FOR THE SAME THING REPLACES THE OLDER ONE (PR Review @ fe509477, `link-effect-card-route`): an
+     * older held Agent proposal whose every target this answer's offer also sets is not held beside it. Its press would
+     * write the figure the user has just corrected, and the newer card on screen is that same change, restated. Only
+     * OLDER holds are replaced, so re-offering an old card never drops a newer one.
+     */
+    const offeredAgent = approvalCarrier !== undefined ? agentProposalOf(approvalCarrier) : undefined;
+    if (offeredAgent !== undefined && approvalCarrier !== undefined) {
+      const targets = new Set(offeredAgent.operations.map((o) => o.path));
+      const replaced = liveHolds.filter((h) => {
+        const older = agentProposalOf(h);
+        return h.chip_id !== approvalCarrier.chip_id && older !== undefined && older.operations.length > 0
+          && h.emitted_at_iso < approvalCarrier.emitted_at_iso && older.operations.every((o) => targets.has(o.path));
+      });
+      for (const h of replaced) proposals.discard(heldProposalId(h));
+      // DL 7 Oct: recorded as superseded (log + the saved answer's words), never silently dropped.
+      if (replaced.length > 0) {
+        log.info({ event: 'agent_lane.held_superseded', scenario_id: scenarioId, superseded: replaced.map((h) => heldProposalId(h)), by: approvalCarrier.chip_id },
+          'agent-lane: a newer offer for the same targets replaced older held proposals');
+        heldLapseLines = [...heldLapseLines, ...replaced.map((h) => heldLapseSentence(heldChangeName(h), 'superseded'))];
+      }
+      liveHolds = liveHolds.filter((h) => !replaced.includes(h));
+      heldRecords = heldRecords.filter((r) => !replaced.some((h) => heldProposalId(h) === r.proposal_id));
+    }
+    const offeredRecord = heldRecords.find(r => r.approve_action.id === offeredApprove?.id);
+    // ⭐ S-D (DL 7 Oct, Canvas's served capture #2614): the PROPOSING turn offers "Not now" too, so a held proposal can be
+    // declined from the first moment, not only from the next reply (the record's own `decline_action`).
+    // One decline per card: a door that already offers its own decline for this proposal (#2776's drawn-link "Decline",
+    // a withdraw the lifecycle counts as declined) keeps it, and "Not now" is not added beside it.
+    if (offeredRecord !== undefined && !offeredNow.some(a => a.id === offeredRecord.decline_action.id
+      || (a.id.startsWith('agent-decline-') && a.id.endsWith(`:${offeredRecord.proposal_id}`)))) {
+      const amendIndex = offeredNow.findIndex(a => a.id === AMEND_CHIP.id);
+      offeredNow.splice(amendIndex >= 0 ? amendIndex + 1 : offeredNow.length, 0, offeredRecord.decline_action as OfferedAction);
+    }
+
     /**
      * ⛔ THIS ROW MUST CARRY THE PRODUCT'S HELD ADD-OPTION FORWARD (C52). Pending actions are read from the
      * LATEST answer row only (`supabase-store.ts` readMostRecentPendingActions: `.limit(1)`), and this row is
@@ -3781,10 +3925,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     {
       const holdRoom = Math.max(0, PENDING_ACTIONS_PER_TURN_CAP - retainedScopeIssues.length - (approvalCarrier !== undefined ? 1 : 0));
-      if (liveHolds.length > holdRoom) {
-        heldLapseLines = [...heldLapseLines, ...liveHolds.slice(holdRoom).map((h) => heldLapseSentence(heldChangeName(h), 'over_cap'))];
-        liveHolds = liveHolds.slice(0, holdRoom);
-        heldRecords = heldRecords.filter((r) => liveHolds.some((h) => h.chip_id === r.proposal_id));
+      const otherHolds = liveHolds.filter(h => h.chip_id !== approvalCarrier?.chip_id);
+      if (otherHolds.length > holdRoom) {
+        for (const h of otherHolds.slice(holdRoom)) if (agentProposalOf(h) !== undefined) proposals.discard(heldProposalId(h));
+        heldLapseLines = [...heldLapseLines, ...otherHolds.slice(holdRoom).map((h) => heldLapseSentence(heldChangeName(h), 'over_cap'))];
+        liveHolds = liveHolds.filter(h => h.chip_id === approvalCarrier?.chip_id || otherHolds.slice(0, holdRoom).includes(h));
+        heldRecords = heldRecords.filter((r) => liveHolds.some((h) => heldProposalId(h) === r.proposal_id));
         // The re-offered card belongs to the OLDEST hold; if even that one did not fit, its card goes with it.
         if (heldCardOffer.length > 0 && !heldRecords.some((r) => r.approve_action.id === heldCardOffer[0]!.id)) {
           const cardIds = new Set(heldCardOffer.map((c) => c.id));
@@ -3795,7 +3941,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Remembered only once the row's capacity is settled, so a card withdrawn above is never remembered as offered.
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
-    rememberResearchOffers(approveKey, offeredNow);
     // S-B (amendment 6): the card an offered action prepared, with the chips offered beside it, is remembered by its offer,
     // so the same offer pressed again re-offers it (an Agent proposal or a product hold alike). An S-D card re-offered for
     // an EARLIER held proposal is never taken for the card this press prepared.
@@ -3806,8 +3951,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const pendingCandidates = [
       ...retainedScopeIssues,
-      ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
-      ...liveHolds,
+      ...[...liveHolds].sort((a, b) => a.emitted_at_iso.localeCompare(b.emitted_at_iso)),
       ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
     ];
     // The row holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK): scope issues, the offered approval, the held proposals
@@ -3816,7 +3960,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       log.warn({ scenario_id: scenarioId, dropped: pendingCandidates.slice(PENDING_ACTIONS_PER_TURN_CAP).map((pa) => pa.action.kind) },
         'agent-lane: pending actions over the per-row cap — the lowest-priority items are not carried');
     }
-    const durablePending = pendingCandidates.slice(0, PENDING_ACTIONS_PER_TURN_CAP);
+    const durablePending = pendingCandidates.slice(0, PENDING_ACTIONS_PER_TURN_CAP)
+      .map(p => withApprovalOfferedOnRow(p, offeredNow.some(a => a.id === p.chip_id)));
 
     const lastRunBlocks = Array.isArray(lastRun?.blocks) ? lastRun.blocks : [];
     const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult, analysisReady });
@@ -4166,6 +4311,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // the final egress and only beside its surviving chip (`previewBesideItsChip`); never on the answer row.
       const offeredId = offeredApprove !== undefined ? typedApprovalOf({ chip: { id: offeredApprove.id } }) : undefined;
       pendingPreview = offeredId !== undefined && waitingIds.includes(offeredId)
+        && !heldCardOffer.some(a => a.id === offeredApprove?.id)
         ? proposalPreviewFor(offeredId, proposals.get(offeredId), readbackGraph) : undefined;
     }
     /**
@@ -4175,17 +4321,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     let leaderFreeEnvelope = false;
     {
-      const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
+      const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown } } | undefined)?.leader_claim;
       const finalEgress = enforceLeaderLicenceAtFinalEgress(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_final',
-        scopeAuthorityUnavailable: composedRead.scopeAuthorityUnavailable,
-        licence: leaderLicenceFromState(analysisState, analysisReady),
+        ...leaderGate,
         mayNameLeadingOption: claim?.permitted === true,
         separationEstablished: claim?.separation === 'separated',
-        ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
-        graph: readbackGraph ?? null,
-        analysisReady,
       });
       leaderFreeEnvelope = finalEgress.leaderFreeEnvelope === true;
       if (finalEgress.response !== wireBody) {
@@ -4211,6 +4353,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const preview = previewBesideItsChip(pendingPreview, approvalChipIdFor, wireBody.suggested_actions);
       if (preview !== undefined) wireBody = { ...wireBody, proposal_preview: preview };
     }
+    // ⭐ AFTER EVERY GATE THAT EDITS THE REPLY (buddy r2 on #2746): the reply's words follow the search controls it carries.
+    // A search the Agent offered with no control on THIS body is said so in fixed words, at rest (never behind the
+    // questions toggle, which the scope question below also drops). The gate's own envelope promises nothing, so it is
+    // left as it is. ⛔ Only a control that is DELIVERED is remembered as pressable: the envelope ships none.
+    if (!leaderFreeEnvelope) {
+      wireBody = withResearchControlTruth(wireBody, researchOffered, (chip) => controlSurvivesLeaderGate(chip, leaderGate),
+        (replyText, sentence) => withB3LinesAtRest(replyText, [sentence]));
+    }
+    rememberResearchOffers(approveKey, wireBody.suggested_actions);
     // Bind the question that is actually delivered after every prose gate.
     if (freshScopeQuestion !== null && !leaderFreeEnvelope) {
       const resting = textAtRest(String(wireBody.assistant_text ?? ''));
@@ -4251,6 +4402,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           .map((text) => ({ role: 'withheld_reason' as const, text, subjects: coHold?.subjects })),
         ...AGENT_NO_LEADER_SENTENCES.filter((text) => reply.includes(text))
           .map((text) => ({ role: 'withheld_reason' as const, text })),
+        // #2746: the fixed words that say an offered web search has no control under this reply stay on the face, never
+        // under "More detail": they answer the reply's own "press the control" (`withResearchControlTruth`).
+        ...[RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT].filter((text) => reply.includes(text))
+          .map((text) => ({ role: 'caveat' as const, text })),
         // #2565: a licensed Explain of a fragile Run names a finding; its robustness caveat qualifies it, on the face.
         ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat }] : []),
         // Required evidence, never hidden (AIE line review): the screen's chance lines, the comparison's basis, a root
@@ -4363,6 +4518,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
         // `store.append` stays inside it (C8). No graph rides on this row.
+        // S-D x S-D.1b: the floor may reconcile more than once (it re-reads when the latest row moved). Every attempt starts
+        // from the reply as composed BEFORE the floor, and a proposal that did not fit is set aside only after the append.
+        const wireBeforeFloor = wireBody;
+        let overCapAtAppend: readonly PendingAction[] = [];
+        let overCapSaid: readonly string[] = [];
         const outcome = await appendCheckedGraphWrite({
           store,
           writesGraph: false,
@@ -4371,7 +4531,33 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           withdrawnGoalScopeChipIds: [...scopeWithdrawals].filter((id): id is string => typeof id === 'string'),
           // ⭐ S-D: held proposals are reconciled again against the latest row just before the append: one another request
           // declined meanwhile is never resurrected, and one another request minted meanwhile is never erased.
-          heldProposals: { isHeld: isProductHold, seenByThisRequest: heldSeenThisTurn },
+          heldProposals: { isHeld: isHeldProposal, seenByThisRequest: heldSeenThisTurn,
+            offeredChipIds: new Set(offeredNow.filter(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined).map(a => a.id)),
+            onReconciled: (write, overCap) => {
+              heldRecords = (write.pending_actions ?? []).flatMap(p => {
+                const r = proposalRecord(p, readbackGraph); return r && r.base_graph_hash === graphHash ? [r] : [];
+              });
+              overCapAtAppend = overCap;
+              // ⛔ The reply composer is the ONE last writer of the reply (#2748): a lapse found HERE, after composing, is
+              // said at the start of this scenario's next reply (`owedHeldLapses`), never appended to this one.
+              overCapSaid = overCap.map(h => heldLapseSentence(heldChangeName(h), 'over_cap'));
+              const actions = (wireBeforeFloor.suggested_actions as OfferedAction[] | undefined ?? []).filter(a => {
+                const approved = typedApprovalOf({ chip: { id: a.id } }); const declined = declinedProposalOf(a.id);
+                return approved !== undefined ? heldRecords.some(r => r.proposal_id === approved)
+                  : declined !== undefined ? heldRecords.some(r => r.proposal_id === declined)
+                    : a.id !== AMEND_CHIP.id || heldRecords.length > 0;
+              });
+              const oldest = heldRecords.find(r => r.proposal_id === approvedProposal) ?? heldRecords[0];
+              if (oldest !== undefined && !actions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
+                && !offeredNow.some(a => a.id === oldest.approve_action.id)
+                && fastPath !== 'method' && !decisionReviewRequested
+                && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated))
+                  || heldRecords.some(r => r.proposal_id === approvedProposal))) actions.unshift(oldest.approve_action as OfferedAction, AMEND_CHIP, oldest.decline_action as OfferedAction);
+              wireBody = { ...wireBeforeFloor, suggested_actions: firstOfEachId(actions) };
+              return { ...write,
+                pending_actions: (write.pending_actions ?? []).map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
+                suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id, label, message })) };
+            } },
           write: {
           scenario_id: scenarioId,
           // The ANSWER row, under the client's own turn_id (the claim `<turn_id>:claim` was taken before
@@ -4401,6 +4587,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
           },
         });
+        for (const h of overCapAtAppend) if (agentProposalOf(h) !== undefined) proposals.discard(heldProposalId(h));
+        oweHeldLapses(scenarioId, overCapSaid);
         if (outcome.priorTurnConflict === true) {
           // A concurrent request with the SAME id and a DIFFERENT message won the
           // row. This answer is not the recorded one; say so rather than return it.

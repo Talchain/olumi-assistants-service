@@ -83,8 +83,7 @@ export const POLICY = {
             "id": "W4",
             "target": "options",
             "priority": "P3",
-            "when": "len(model.non_sq_option_ids) == 2 AND model.status_quo_option_id == null",
-            "bias_cue": "status_quo"
+            "when": "len(model.non_sq_option_ids) == 2 AND model.status_quo_option_id == null"
           },
           {
             "id": "W5",
@@ -185,8 +184,7 @@ export const POLICY = {
       ],
       "progressive_detail": "Why: one line on the variant's why_now, with its source (Grammar §3 coaching pattern). Detail on click: the science basis in one sentence.",
       "bias_cue": {
-        "narrow_framing": "These options all work through the same lever, which can hide better routes.",
-        "status_quo": "Without a 'carry on as now' option it is hard to see what each change really adds."
+        "narrow_framing": "These options all work through the same lever, which can hide better routes."
       },
       "state_key": {
         "fields": [
