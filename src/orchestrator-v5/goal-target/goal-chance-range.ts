@@ -9,7 +9,7 @@ import {
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
-import type { PlaceholderGoalPath } from '../agent-lane/goal-certainty.js';
+import { licenceUnsizedLink, type PlaceholderGoalPath } from '../agent-lane/goal-certainty.js';
 import { byIslRank, groupPct, linkEnds, runEdge, topDriverRow, type GoalChanceDisplayRounding } from './goal-chance-driver.js';
 
 type Rec = Record<string, unknown>;
@@ -83,8 +83,14 @@ export function goalChanceRangeOf(envelope: unknown, graph: unknown, optionId: s
     const ends = linkEnds(r);
     return ends !== null && links.some(l => l.from === ends.from && l.to === ends.to);
   };
-  const row = (block.drivers as Rec[]).slice().sort(byIslRank).find(onUnsizedLink);
-  if (row === undefined) return null;
+  const ranked = (block.drivers as Rec[]).slice().sort(byIslRank);
+  const at = ranked.findIndex(onUnsizedLink);
+  if (at < 0) return null;
+  const row = ranked[at]!;
+  // ⛔ S1 review r2 #1 (DL 6028386916; Science ruling, fail closed): "Of the links not sized yet, it depends most on X"
+  // is false when a link nobody sized (`licenceUnsizedLink`) OFF this option's path outranks X. Sizing that link would
+  // not show this option's chance, so it cannot stand in either: there is no range. Sized quantities may outrank X.
+  if (ranked.slice(0, at).some(r => { const e = linkEnds(r); return e !== null && licenceUnsizedLink(runEdge(graph, e.from, e.to)); })) return null;
   // ⛔ S1 review r1 #1: ISL omits `correlated` unless true (PLoT forwards only `true`); a missing key is uncorrelated,
   // exactly as `goalChanceDriverOf` reads it. Anything but absent/false is correlated.
   if (row.status !== 'resolved' || (row.correlated !== undefined && row.correlated !== false)
