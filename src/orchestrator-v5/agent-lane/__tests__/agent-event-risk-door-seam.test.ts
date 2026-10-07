@@ -228,6 +228,24 @@ describe('event_risk.v1 slice 2a — add-risk door', () => {
     expect(composeProposalReply('propose_new_risk', { whole_request: true }, result, EVENT_MSG)).toContain('may happen (about 10–30% within 6 months), as you said');
   }, 120_000);
 
+  it('1a-chip: the confirm chip the user reads states the likelihood, byte-equal to the card record (served 579f33db was wire-only)', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [() => fnCall('propose_new_risk', { label: 'Competitive response', affects: [{ target_label: 'Revenue', direction: 'negative' }],
+      caused_by: [], rationale: 'The user asked for it.' }), () => say('Shall I add the risk?')];
+    const response = await turn({ message: EVENT_MSG }) as Body & { _proposal_fields?: { proposals: { approve_action: Chip }[] } };
+    const chip = approveChipOf(response)!;
+    expect(chip.detail!.split('\n').at(-1)).toBe('It may happen: about 10–30% within 6 months, as you said.');
+    expect(chip.detail!.split('\n').filter((l) => l.startsWith('It may happen')).length).toBe(1);
+    const card = response._proposal_fields!.proposals.find((p) => p.approve_action.id === chip.id)!.approve_action;
+    expect(chip.detail).toBe(card.detail);
+  }, 120_000);
+
+  it('1a-chip-control: without a likelihood the confirm chip carries no likelihood line', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const { approve } = await offer('Add a competitive response risk that lowers revenue.');
+    expect(approve.detail ?? '').not.toContain('It may happen');
+  }, 120_000);
+
   it('2a-door-control: no likelihood commits the byte-identical ordinary risk and default link', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const { result, approve } = await offer('Add a competitive response risk that lowers revenue.');
