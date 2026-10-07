@@ -4422,7 +4422,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           }
         }
         return actionBarOf(actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady, analysisResult,
-          optionParticipation, identityEvaluated, guidance: history }));
+          optionParticipation, identityEvaluated, guidance: history, pending: durablePending }));
       } catch (err) {
         log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: action bar could not be ranked; the turn carries none');
         return undefined;

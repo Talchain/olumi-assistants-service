@@ -9,8 +9,13 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import { eligibleGuidanceRows, selectGuidance } from '../../guidance/index.js';
 import { ACTION_IDS, ACTION_REGISTRY, STANDARD_ACTIONS, actionOfPress, isUnknownActionPress, type ActionId } from '../registry.js';
 import { actionFactsOf, type ActionRead } from '../state.js';
-import { actionBarOf, currentOfferFor, offerKeyOf, sayDate, type ActionBarV1 } from '../rank.js';
+import { actionBarOf, currentOfferFor, DISABLED, offerKeyOf, sayDate, type ActionBarV1 } from '../rank.js';
 import { HANDLERS, decidePress } from '../handlers.js';
+import { chanceGoalDeadlineAsk } from '../../../goal-target/goal-kind.js';
+import { composeGoalTargetQuestion } from '../../../goal-target/decide-goal-target-ask.js';
+import { SUGGEST_RISKS_CHIP } from '../../method-turn/widen-turn.js';
+import type { PendingAction } from '../../../session/pending-action.js';
+import { reconciliationPending } from '../../goal-scope.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
 const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
@@ -41,9 +46,9 @@ describe('the registry: ONE dispatch table, total', () => {
   it('every action has its handler (tsc enforces the Record; this row pins the names)', () => {
     expect(Object.keys(HANDLERS).sort()).toEqual([...ACTION_IDS].sort());
   });
-  it('slice 1 is exactly the §E.4 set: review, what_changes, strengthen (S1), pre_mortem, more_options, test_link', () => {
-    expect([...ACTION_IDS]).toEqual(['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link']);
-    for (const held of ['frame_brief', 'set_target', 'check_estimates', 'more_risks', 'outside_view', 'trade_offs', 'bias_check', 'anchoring']) {
+  it('slices 1 + 2a are exactly the ten typed actions', () => {
+    expect([...ACTION_IDS]).toEqual(['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks']);
+    for (const held of ['set_target', 'check_estimates', 'outside_view', 'trade_offs', 'bias_check', 'anchoring']) {
       expect((ACTION_IDS as readonly string[]).includes(held), held).toBe(false);
     }
   });
@@ -53,15 +58,18 @@ describe('the registry: ONE dispatch table, total', () => {
       return p.kind === 'fixed' ? [[id, p.id]] : [];
     }));
     expect(fixed).toEqual({ review: 'agent-next-review-decision', what_changes: 'agent-next-what-would-change', strengthen: 'agent-next-strengthen',
-      pre_mortem: 'agent-next-pre-mortem', more_options: 'agent-next-widen' });
+      pre_mortem: 'agent-next-pre-mortem', more_options: 'agent-next-widen',
+      frame_brief: 'act:frame_brief', set_goal: 'act:set_goal', set_deadline: 'act:set_deadline', more_risks: SUGGEST_RISKS_CHIP.id });
     for (const [id, press] of Object.entries(fixed)) expect(actionOfPress(press)).toBe(id);
     expect(actionOfPress('agent-test-without-link:["a","b"]')).toBe('test_link');
   });
   it('an act: id the registry does not hold is an action press (never a free turn); ask:*, approvals and plain ids are not', () => {
-    expect(isUnknownActionPress('act:frame_brief')).toBe(true);
-    expect(actionOfPress('act:frame_brief')).toBeUndefined();
-    // S-C WIDEN #2744's own presses (risks door, canvas asks, per-item Add) never collide with a registry press id.
-    for (const other of ['ask:method-reframe', 'agent-approve-proposal:prop_1', 'agent-run-analysis', 'agent-next-suggest-risks', 'ask:risks', 'ask:widen',
+    expect(isUnknownActionPress('act:no_such_action')).toBe(true);
+    expect(actionOfPress('act:no_such_action')).toBeUndefined();
+    expect(isUnknownActionPress('act:frame_brief')).toBe(false);
+    expect(actionOfPress('act:frame_brief')).toBe('frame_brief');
+    // WIDEN's canvas asks and per-item Add remain outside the registry; its risks door is now registered.
+    for (const other of ['ask:method-reframe', 'agent-approve-proposal:prop_1', 'agent-run-analysis', 'ask:risks', 'ask:widen',
       'agent-widen-add:0123456789abcdef', 'agent-widen-something-else', undefined, 7]) {
       expect(actionOfPress(other), String(other)).toBeUndefined();
       expect(isUnknownActionPress(other), String(other)).toBe(false);
@@ -117,7 +125,9 @@ describe('the ranker: same read → byte-identical bar; a changed revision → a
     const later = actionFactsOf({ ...ran(D1.graph, WITHHELD), analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-07T13:00:00.000Z' }, leader_claim: WITHHELD } });
     expect(later.revision.run_key).not.toBe(before.revision.run_key);
     expect(offerKeyOf(later, 'pre_mortem')).toBe(offerKeyOf(before, 'pre_mortem'));
-    expect(offerKeyOf(later, 'more_options')).toBe(offerKeyOf(before, 'more_options'));
+    for (const id of ['more_options', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks'] as const) {
+      expect(offerKeyOf(later, id)).toBe(offerKeyOf(before, id));
+    }
     expect(offerKeyOf(later, 'review')).not.toBe(offerKeyOf(before, 'review'));
   });
 });
@@ -252,5 +262,133 @@ describe('the press dispatcher: re-derived on the CURRENT state (amendment 6)', 
   it('the current offer is found by (action, target) identity, never by a value another offer could satisfy', () => {
     const b = bar(ran(D1.graph, WITHHELD));
     expect(currentOfferFor(b, 'test_link', { kind: 'link', from_id: 'nope', to_id: 'nope' })).toBeUndefined();
+  });
+});
+
+
+const gapGraph = (chance = true): G => ({ nodes: [
+  { id: 'goal', kind: 'goal', label: 'Launch on time', observed_state: { unit: chance ? '% likelihood of on-time launch' : 'features' } },
+  { id: 'option', kind: 'option', label: 'Hire a developer' },
+], edges: [] });
+const approval = (graph: G, overrides: Partial<PendingAction> = {}): PendingAction => ({
+  id: 'pending', scenario_id: SCENARIO, chip_id: 'approve', action: { kind: 'apply_proposed_change', proposal_ref: 'held', inline_patch: {}, public_label: 'Approve', public_message: 'Approve the held change.' },
+  preconditions: { graph_hash: hashOf(graph) }, expires_at_turn_count: 12, expires_at_iso: '2099-01-01T00:00:00.000Z',
+  emitted_at_iso: AT, ...overrides,
+});
+
+describe('S-B slice 2a: standing gaps and typed replies', () => {
+  it('Paul: chance goal without a date has ONLY Set deadline in priority, even after RC cooldown', () => {
+    const g = gapGraph();
+    const b = bar({ ...preRun(g), guidance: { 'RC-PREMORTEM': { status: 'pressed', state_key_hash: '000000000000' } } });
+    expect(ids(b.priority)).toEqual(['set_deadline']);
+    expect(b.priority[0]).toMatchObject({ label: 'Set deadline', enabled: true });
+    expect(ids(offers(b))).not.toContain('set_goal');
+  });
+  it('non-chance goal without a target asks Set target; a raw target or own limit row removes the action', () => {
+    const g = gapGraph(false);
+    expect(ids(bar(preRun(g)).priority)).toEqual(['set_goal']);
+    g.nodes[0]!.goal_threshold_raw = 0;
+    expect(ids(offers(bar(preRun(g))))).not.toContain('set_goal');
+    delete g.nodes[0]!.goal_threshold_raw;
+    const rowTarget = { ...g, goal_constraints: [{ node_id: 'goal', operator: '<=', value: 4 }] };
+    expect(ids(offers(bar(preRun(rowTarget))))).not.toContain('set_goal');
+  });
+  it('no goal makes Frame brief the only priority; a dated chance goal offers no deadline action', () => {
+    const empty = actionFactsOf(preRun({ nodes: [], edges: [] }));
+    expect(ids(actionBarOf(empty).priority)).toEqual(['frame_brief']);
+    expect(decidePress({ id: 'act:frame_brief' }, empty)).toMatchObject({ kind: 'reply', reply: {
+      text: 'Your brief has: none of these elements yet.\n- What are you trying to achieve with this decision?'
+        + '\n- What else could you do instead?\n- What most affects whether your goal is met?\nAlso missing: risks, outcomes, limits.',
+    } });
+    const g = gapGraph(); g.nodes[0]!.goal_horizon = { deadline: '2027-04-07' };
+    expect(ids(offers(bar(preRun(g))))).not.toContain('set_deadline');
+  });
+  it('a surviving approval or stale Run moves the enabled standing gap to more; a current Run restores it', () => {
+    const g = gapGraph();
+    for (const read of [{ ...ran(g, WITHHELD), pending: [approval(g)] },
+      { ...ran(g, WITHHELD), analysisState: { run_state: { kind: 'complete_stale' } } }]) {
+      const b = bar(read);
+      expect(ids(b.priority)).not.toContain('set_deadline');
+      expect(b.more.find(o => o.action_id === 'set_deadline')).toMatchObject({ enabled: true });
+    }
+    expect(ids(bar(ran(g, WITHHELD)).priority)).toEqual(['set_deadline']);
+  });
+  it('goal-scope reconcile yields via its own survival rule, even after its answer-binding expiry', () => {
+    const g = gapGraph();
+    const pending = reconciliationPending(SCENARIO, {
+      kind: 'reconcile_goal_scope', goal_id: 'goal', goal_label: 'Launch on time', expected: 'billing_basis',
+      question: 'Which scope should this model represent?', operands: [], derivations: [],
+      scope: { modelled: 'all launches', alternative: 'one launch', extent: 'total', stated_in_brief: true, source: { quote: 'all launches' } },
+    }, 0);
+    const b = bar({ ...preRun(g), pending: [pending] });
+    expect(ids(b.priority)).not.toContain('set_deadline');
+    expect(b.more.find(o => o.action_id === 'set_deadline')).toMatchObject({ enabled: true });
+  });
+  it('expired, exhausted, hash-invalid approvals and ordinary asks do not displace the standing gap', () => {
+    const g = gapGraph();
+    for (const pending of [approval(g, { expires_at_iso: '2000-01-01T00:00:00.000Z' }),
+      approval(g, { expires_at_turn_count: 1 }), approval(g, { preconditions: { graph_hash: 'another-graph' } }),
+      approval(g, { action: { kind: 'run_analysis' } })]) {
+      expect(ids(bar({ ...preRun(g), pending: [pending] }).priority)).toEqual(['set_deadline']);
+    }
+  });
+  it('two goals: RC still reads a goal (no Frame brief T0, pre-mortem unchanged) and no sole-goal gap is asked', () => {
+    const g = gapGraph();
+    g.nodes.push({ id: 'goal2', kind: 'goal', label: 'Keep costs flat', observed_state: { unit: '% likelihood of on-time launch' } });
+    const b = bar(preRun(g));
+    expect(ids(b.priority)).toEqual(['more_options']);
+    for (const id of ['set_deadline', 'set_goal'] as const) expect(ids(offers(b))).not.toContain(id);
+    expect(b.more.find(o => o.action_id === 'frame_brief')).toMatchObject({ enabled: true, why_now: 'See what your brief has and what it is missing.' });
+    const premortem = offers(b).find(o => o.action_id === 'pre_mortem');
+    expect(premortem).toBeDefined();
+    expect(premortem!.disabled_reason).not.toBe(DISABLED.needs_goal);
+  });
+  it('gap presses return the canonical ask exactly, with no exits and a ran outcome', () => {
+    for (const [id, g, text] of [
+      ['act:set_deadline', gapGraph(), chanceGoalDeadlineAsk('Launch on time')],
+      ['act:set_goal', gapGraph(false), composeGoalTargetQuestion()],
+    ] as const) {
+      const d = decidePress({ id }, actionFactsOf(preRun(g)));
+      expect(d).toMatchObject({ kind: 'reply', reply: { text, exits: [], outcome: 'ran' } });
+    }
+  });
+  it('Frame brief gives the exact ordered target + risks questions and exits from the current bar', () => {
+    const g = { nodes: [
+      { id: 'goal', kind: 'goal', label: 'Grow revenue' },
+      { id: 'a', kind: 'option', interventions: { f: 1 } }, { id: 'b', kind: 'option', interventions: { f: 2 } }, { id: 'f', kind: 'factor' }, { id: 'o', kind: 'outcome' },
+    ], edges: [{ from: 'f', to: 'goal' }], goal_constraints: [{ node_id: 'f', value: 10, operator: '<=' }] };
+    const facts = actionFactsOf(preRun(g)); const b = actionBarOf(facts);
+    const d = decidePress({ id: 'act:frame_brief' }, facts, b);
+    expect(d).toMatchObject({ kind: 'reply', reply: { outcome: 'ran',
+      text: 'Your brief has: goal, options, factors, outcomes, limits.\n- ' + composeGoalTargetQuestion()
+        + '\n- What could go wrong that would stop ‘Grow revenue’?' } });
+    if (d.kind !== 'reply') return;
+    expect(d.reply.exits).toEqual(['set_goal', 'more_risks'].map(id => ({ kind: 'offer', offer: offers(b).find(o => o.action_id === id) })));
+  });
+  it('Frame brief asks at most three missing questions, then names the remaining gaps', () => {
+    const d = decidePress({ id: 'act:frame_brief' }, actionFactsOf(preRun(gapGraph())));
+    expect(d).toMatchObject({ kind: 'reply', reply: { text: 'Your brief has: goal.\n- ' + chanceGoalDeadlineAsk('Launch on time')
+      + '\n- What else could you do instead?\n- What most affects whether ‘Launch on time’ is met?\nAlso missing: risks, outcomes, limits.' } });
+  });
+  it('More risks uses the WIDEN message by identity and its own door eligibility; W6 uses its reason and tier', () => {
+    expect(ACTION_REGISTRY.more_risks.user_line).toBe(SUGGEST_RISKS_CHIP.message);
+    const facts = actionFactsOf(preRun(gapGraph()));
+    const row = facts.rcRows.find(r => r.policy_id === 'RC-WIDEN' && r.target === 'risks');
+    const o = offers(actionBarOf(facts)).find(o => o.action_id === 'more_risks');
+    expect(o).toMatchObject({ enabled: true, why_now: row ? 'Your model has at most one risk.' : 'Find risks you haven’t considered yet.' });
+    expect(offers(bar(preRun({ nodes: [], edges: [] }))).find(o => o.action_id === 'more_risks'))
+      .toMatchObject({ enabled: false, disabled_reason: 'Needs a goal in the model first.' });
+    expect(ids(offers(bar({ scenarioId: SCENARIO, graph: null })))).not.toContain('more_risks');
+    const w6Graph = structuredClone(D1.graph) as G;
+    w6Graph.nodes.find(n => n.kind === 'goal')!.goal_threshold_raw = 1;
+    const w6 = actionFactsOf(preRun(w6Graph));
+    const w6Row = w6.rcRows.find(r => r.policy_id === 'RC-WIDEN' && r.target === 'risks');
+    expect(w6Row, 'precondition: the RC risks row holds, not another WIDEN variant').toMatchObject({ variant: 'W6' });
+    expect(actionBarOf(w6).priority[0]).toMatchObject({ action_id: 'more_risks', why_now: 'Your model has at most one risk.' });
+    const cooled = actionFactsOf({ ...preRun(w6Graph), guidance: { 'RC-WIDEN': { status: 'pressed', state_key_hash: w6Row!.state_key_hash } } });
+    expect(cooled.rcRows.some(r => r.policy_id === 'RC-WIDEN')).toBe(false);
+    expect(actionBarOf(cooled).more.find(o => o.action_id === 'more_risks'))
+      .toMatchObject({ enabled: true, why_now: 'Find risks you haven’t considered yet.' });
+    expect(HANDLERS.more_risks).toEqual({ route: 'widen_turn', gate: 'own' });
   });
 });

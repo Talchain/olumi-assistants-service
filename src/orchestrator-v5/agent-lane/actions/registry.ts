@@ -10,16 +10,18 @@
  *
  * WIRE (D.1): labels, icons and press ids ride the `action_bar` sidecar, so DGAI treats `action_id` and `icon` as opaque
  * strings (github-a2 amendment 4). Existing press ids are kept, so stored chips and request hashes stay valid; new ones
- * are `act:<action_id>` (DL ruling 2). `user_line` is display only: nothing routes on it.
+ * are `act:<action_id>` (DL ruling 2). `user_line` is the visible press message; WIDEN’s risks door also matches its canonical message.
  *
  * SLICE 1 = the actions whose typed handler is complete today (ACTION-SYSTEM-DRAFT §E.4, binding): review, what_changes,
- * pre_mortem, more_options, test_link, and strengthen in its S1 scope only. frame_brief / set_target (S-E GOALS #2742),
- * check_estimates (S-D EDIT-PANEL), more_risks (S-C WIDEN #2744) and github-a2's method turns join this enum when their
+ * pre_mortem, more_options, test_link, and strengthen in its S1 scope only. SLICE 2a adds the canonical standing gaps
+ * (frame_brief, set_goal, set_deadline) and S-C WIDEN's risks door. check_estimates (S-D EDIT-PANEL) and further methods join when their
  * owner supplies a TOTAL typed handler; adding the id makes `tsc` demand its `HANDLERS` entry. Outside view, trade-offs,
  * bias review and the anchoring check stay held (AIE 6036471065 item 2). An id that is not here is never emitted.
  */
 
-export const ACTION_IDS = ['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link'] as const;
+import { SUGGEST_RISKS_CHIP } from '../method-turn/widen-turn.js';
+
+export const ACTION_IDS = ['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks'] as const;
 export type ActionId = (typeof ACTION_IDS)[number];
 
 /** The four standard actions, in their FIXED bar positions (D.3: users learn their places). */
@@ -98,6 +100,30 @@ export const ACTION_REGISTRY: Readonly<Record<ActionId, ActionEntry>> = {
     press: { kind: 'per_link' },
     user_line: 'Test without this link',
     authorities: { eligibility: 'CEE', science: null, quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: true,
+  },
+  frame_brief: {
+    label: 'Frame brief', icon: 'FileText', group: 'gap',
+    press: { kind: 'fixed', id: 'act:frame_brief' },
+    user_line: 'Help me frame my brief: what is missing from it?',
+    authorities: { eligibility: 'Canonical', science: null, quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: false,
+  },
+  set_goal: {
+    label: 'Set target', icon: 'Target', group: 'gap',
+    press: { kind: 'fixed', id: 'act:set_goal' },
+    user_line: 'Help me set a target for my goal.',
+    authorities: { eligibility: 'Canonical', science: null, quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: false,
+  },
+  set_deadline: {
+    label: 'Set deadline', icon: 'CalendarClock', group: 'gap',
+    press: { kind: 'fixed', id: 'act:set_deadline' },
+    user_line: 'Help me set the deadline for my goal.',
+    authorities: { eligibility: 'Canonical', science: null, quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: false,
+  },
+  more_risks: {
+    label: 'More risks', icon: 'ShieldAlert', group: 'gap',
+    press: { kind: 'fixed', id: SUGGEST_RISKS_CHIP.id },
+    user_line: SUGGEST_RISKS_CHIP.message,
+    authorities: { eligibility: 'RC', science: 'DSK', quantities: null }, contract: 'typed_method', run_dependent: false,
   },
 };
 

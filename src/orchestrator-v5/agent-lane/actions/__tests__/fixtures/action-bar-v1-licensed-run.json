@@ -69,5 +69,28 @@
       "offer_key": "ac8f78024406c132"
     }
   ],
-  "more": []
+  "more": [
+    {
+      "action_id": "frame_brief",
+      "label": "Frame brief",
+      "icon": "FileText",
+      "group": "gap",
+      "press_id": "act:frame_brief",
+      "user_line": "Help me frame my brief: what is missing from it?",
+      "enabled": true,
+      "why_now": "See what your brief has and what it is missing.",
+      "offer_key": "059a58a090450352"
+    },
+    {
+      "action_id": "more_risks",
+      "label": "More risks",
+      "icon": "ShieldAlert",
+      "group": "gap",
+      "press_id": "agent-next-suggest-risks",
+      "user_line": "Suggest risks I haven't considered.",
+      "enabled": true,
+      "why_now": "Find risks you haven’t considered yet.",
+      "offer_key": "124aba71579f3613"
+    }
+  ]
 }
