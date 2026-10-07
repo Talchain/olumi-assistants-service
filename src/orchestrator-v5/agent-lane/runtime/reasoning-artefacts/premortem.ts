@@ -84,6 +84,22 @@ const labelPattern = (label: string, flags = 'u') => {
 };
 const contains = (s: string, label: string) => labelPattern(label).test(fold(s));
 
+/**
+ * A story's three parts: before the first "Watch for:", between it and the next "Mitigate:", and after that; each part
+ * trimmed and non-empty, markers optionally bolded (served a2-2, 7 Oct). Linear marker search: the earlier lazy
+ * `^([\s\S]+?)\s*Watch for:` regex took 3.1 s on a story with 20k spaces after its marker.
+ */
+function storyParts(story: string): [string, string, string, string] | null {
+  const watch = /(?:\*\*)?Watch for:(?:\*\*)?/u.exec(story);
+  if (!watch) return null;
+  const afterWatch = watch.index + watch[0].length;
+  const mitigate = /(?:\*\*)?Mitigate:(?:\*\*)?/u.exec(story.slice(afterWatch));
+  if (!mitigate) return null;
+  const parts = [story.slice(0, watch.index), story.slice(afterWatch, afterWatch + mitigate.index), story.slice(afterWatch + mitigate.index + mitigate[0].length)]
+    .map(part => part.trim());
+  return parts.every(part => part !== '') ? [story, parts[0], parts[1], parts[2]] : null;
+}
+
 /** Ban Olumi-authored wording only; exact final-graph labels retain the user's words. */
 export function authoredBanAfterMasking(field: string, nodeLabels: readonly string[]): boolean {
   const labels = [...new Set(nodeLabels.map(fold).filter(Boolean))].sort((a, b) => b.length - a.length);
@@ -156,7 +172,8 @@ export function premortemWorksheetDiagnosticsFor(input: {
 }): PremortemWorksheetDiagnostics {
   const diagnostics: PremortemWorksheetDiagnostics = { worksheet: undefined, dropped: [], stories: 0, rows: 0 };
   try {
-    const stories = [...input.reply.matchAll(/^\s*[1-9]\.\s+([\s\S]*?)(?=^\s*[1-9]\.\s|^\s*Outside the model:|$(?![\s\S]))/gmu)].map(m => m[1].trim());
+    // Markers may arrive bolded (served a2-2, 7 Oct: "   **Watch for:** …"); `(?:\*\*)?` around each marker, nothing else.
+    const stories = [...input.reply.matchAll(/^[ \t]{0,8}[1-9]\.[ \t]{1,4}([\s\S]*?)(?=^[ \t]{0,8}[1-9]\.[ \t]|^[ \t]{0,8}(?:\*\*)?Outside the model:|$(?![\s\S]))/gmu)].map(m => m[1].trim());
     diagnostics.stories = stories.length;
     const { turn, initial, final, scenarioId } = input;
     if (!input.passed || turn === null || initial === undefined || input.turnId === undefined || !Array.isArray(input.candidates) || input.candidates.length > 4) return diagnostics;
@@ -170,7 +187,8 @@ export function premortemWorksheetDiagnosticsFor(input: {
       if (nodes.filter(n => typeof n.label === 'string' && fold(n.label) === fold(String(matches[0].label))).length !== 1) return undefined;
       return matches[0];
     };
-    const blindspot = /^\s*Outside the model:\s*(.+\?)\s*$/mu.exec(input.reply)?.[1];
+    // Whitespace runs bounded (DL 7 Oct): the unbounded `\s*` forms took 0.35–0.8 s on 20k newlines.
+    const blindspot = /^[ \t]{0,8}(?:\*\*)?Outside the model:(?:\*\*)?[ \t]{0,8}(.+\?)[ \t]{0,8}$/mu.exec(input.reply)?.[1];
     if (!blindspot) return diagnostics;
     const rows: PremortemWorksheetV1['rows'] = [];
     const seen = new Set<string>();
@@ -203,7 +221,7 @@ export function premortemWorksheetDiagnosticsFor(input: {
       } else {
         if (c.story_index === null) { drop('story_missing'); continue; }
         const story = stories[c.story_index - 1];
-        const parts = story && /^([\s\S]+?)\s*Watch for:\s*([\s\S]+?)\s*Mitigate:\s*([\s\S]+)$/u.exec(story);
+        const parts = story ? storyParts(story) : null;
         if (!parts || parts[1].trim() !== c.failure_way || parts[2].trim() !== c.early_warning || (c.mitigation !== undefined && parts[3].trim() !== c.mitigation)) { drop(story ? 'story_parts_mismatch' : 'story_missing'); continue; }
         const namedOptions = nodes.filter(n => n.kind === 'option' && typeof n.label === 'string' && contains(story, n.label));
         if (namedOptions.some(n => n.id !== c.option_id) || (turn.context.plan === null && namedOptions.length !== 1)) { drop('named_options'); continue; }

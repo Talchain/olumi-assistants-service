@@ -235,6 +235,21 @@ export function riskStories(): Input {
   };
 }
 
+// DL (7 Oct, served a2-2 on staging 6a7354fc; Render PREMORTEM_WORKSHEET_WITHHELD story_parts_mismatch ×2): the model
+// bolded and indented the markers ("   **Watch for:** …"), so both stories failed to parse and no row survived.
+function boldMarkers(withOutside = false): Input {
+  const out = twoStories();
+  out.reply = out.reply
+    .replace(/ Watch for: /gu, '\n   **Watch for:** ').replace(/ Mitigate: /gu, '\n   **Mitigate:** ')
+    .replace(/^Outside the model:/mu, withOutside ? '**Outside the model:**' : 'Outside the model:');
+  if (!out.reply.includes('**Watch for:**')) throw new Error('fixture: markers were not bolded');
+  return out;
+}
+export const boldCases: DiagnosticsCase[] = [
+  { name: 'two stories / bold, indented Watch for and Mitigate markers (served a2-2, RED at 6a7354fc)', make: () => boldMarkers(), emitted: true, rows: 2 },
+  { name: 'two stories / bold markers including Outside the model', make: () => boldMarkers(true), emitted: true, rows: 2 },
+];
+
 export const riskCases: DiagnosticsCase[] = [
   { name: 'two stories / supplied risk (RED at r2)', make: riskStories, emitted: true, rows: 2, stressTested: [SERVED_PRICE_OPTION, STARTER] },
   {
