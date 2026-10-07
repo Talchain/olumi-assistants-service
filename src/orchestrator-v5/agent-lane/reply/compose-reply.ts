@@ -346,6 +346,13 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host' && !mixedLead(u)) : undefined)
     ?? (units.length === 1 && eligible(units[0]!) && !mixedLead(units[0]!) ? units[0] : undefined);
   if (headline === undefined) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline' };
+  // ⭐ B15 (DL #2783, composed texts 8 Oct): the Agent's lead-in to the chance lines ("For reaching at least £126,000 …, on
+  // current information:") travels WITH the first chance finding, as the headline's opening line, so it still introduces
+  // the list and never ends the reply on a colon. Moved, never reworded; the line break keeps the sentence multiset.
+  const prior = headline === goalChanceHeadline && headline.idx > 0 ? units[headline.idx - 1]! : undefined;
+  const chanceLeadIn = prior !== undefined && prior.kind === 'sentence' && prior.obligation === undefined && eligible(prior)
+    && prior !== ask && /:["'”’)\]*]{0,4}$/.test(prior.text) ? prior : undefined;
+  const headlineText = chanceLeadIn !== undefined ? `${chanceLeadIn.text}\n${headline.text}` : headline.text;
 
   const mustFace = [...otherObligations.filter((u) => u !== headline), ...(ask !== undefined && ask !== headline ? [ask] : [])];
   const slots = Math.max(0, REPLY_FACE_MAX_BULLETS - mustFace.length);
@@ -353,7 +360,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     ? units.filter((u) => u.run === faceRun && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u))
     : units.filter((u) => u.idx > headline.idx && u.kind === 'sentence' && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u));
   // Fill the face in order up to the bullet cap AND the word budget; must-face lines are counted first and always kept.
-  let faceWords = wordCount(headline.text) + mustFace.reduce((n, u) => n + wordCount(u.text), 0);
+  let faceWords = wordCount(headlineText) + mustFace.reduce((n, u) => n + wordCount(u.text), 0);
   const fromPool: Unit[] = [];
   for (const u of pool) {
     if (fromPool.length >= slots) break;
@@ -362,10 +369,10 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     fromPool.push(u);
     faceWords += w;
   }
-  const faceSet = new Set<Unit>([headline, ...fromPool, ...mustFace]);
+  const faceSet = new Set<Unit>([headline, ...fromPool, ...mustFace, ...(chanceLeadIn !== undefined ? [chanceLeadIn] : [])]);
   // Face bullets keep the reply's own order, except: a caveat on the finding opens them (#2565: "the Explain robustness
   // caveat goes on the face as bullet 1"), and the ask closes them.
-  const inOrder = units.filter((u) => faceSet.has(u) && u !== headline && u !== ask);
+  const inOrder = units.filter((u) => faceSet.has(u) && u !== headline && u !== chanceLeadIn && u !== ask);
   const faceBullets = [...inOrder.filter((u) => u.obligation === 'caveat'), ...inOrder.filter((u) => u.obligation !== 'caveat')];
   if (ask !== undefined && ask !== headline) faceBullets.push(ask);
   const detailUnits = units.filter((u) => !faceSet.has(u));
@@ -378,7 +385,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     face_bullets: faceBullets.length,
     detail_units: detailUnits.length,
     restatements_to_detail: restatements.size,
-    face_words: wordCount(headline.text) + faceBullets.reduce((n, u) => n + wordCount(u.text), 0),
+    face_words: wordCount(headlineText) + faceBullets.reduce((n, u) => n + wordCount(u.text), 0),
     face_bullets_over_word_bar: faceBullets.filter((u) => wordCount(u.text) > BULLET_WORD_LOG_BAR).length,
     obligations_on_face: mustFace.length + (headline.obligation !== undefined ? 1 : 0),
     face_over_cap: faceBullets.length > REPLY_FACE_MAX_BULLETS,
@@ -402,7 +409,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // A typed host or goal-chance part can contain several sentences; narrator headlines keep the single-sentence contract.
   const schema = goalChanceHeadline === undefined && hostHeadline === undefined ? AnswerShapeSchema
     : AnswerShapeSchema.extend({ headline: z.string().trim().min(1) });
-  const parsed = schema.safeParse({ headline: headline.text, bullets: faceBullets.map((u) => u.text), detail });
+  const parsed = schema.safeParse({ headline: headlineText, bullets: faceBullets.map((u) => u.text), detail });
   if (!parsed.success) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline', measure };
   const shaped = deriveAnswerTextFromShape(parsed.data);
   // ⛔ THE INVARIANT: every sentence of the input, and nothing else, is in the derived text.

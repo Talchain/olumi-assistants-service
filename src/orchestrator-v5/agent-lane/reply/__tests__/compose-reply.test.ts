@@ -454,10 +454,18 @@ describe('B15: a present typed goal-chance finding is the headline, by identity'
   it('R4: served share-first reply → first typed chance exactly; share in bullets/detail; invariant', () => {
     const c = composeReplyShape({ text, obligations });
     expect(c.shape, 'typed goal chance produces a headline even below the face budget').not.toBeNull();
-    expect(c.shape!.headline).toBe(chances[0]);
+    expect(c.shape!.headline).toBe(`${servedLines[1]}\n${chances[0]}`);
     expect([...c.shape!.bullets, c.shape!.detail].join('\n')).toContain(share);
     expect(c.shape!.bullets).toEqual(chances.slice(1));
+    expect(c.shape!.detail, 'the lead-in is never left in detail, introducing nothing').not.toContain(servedLines[1]);
     assertDerivation(text, c);
+  });
+
+  it('R9 (DL #2783 reading order): no lead-in → the chance alone leads; a lead-in NOT ending in ":" never joins it', () => {
+    const plainLead = [share, chances[0]!, chances[1]!].join('\n');
+    expect(composeReplyShape({ text: plainLead, obligations }).shape?.headline).toBe(chances[0]);
+    const sentenceLead = [share, 'These are the chances in this model.', chances[0]!, chances[1]!].join('\n');
+    expect(composeReplyShape({ text: sentenceLead, obligations }).shape?.headline).toBe(chances[0]);
   });
 
   it('R5 control: identical words without chance obligations → today’s byte-identical passthrough', () => {
@@ -514,7 +522,8 @@ describe('B15: a present typed goal-chance finding is the headline, by identity'
       { role: 'evidence', text: second, lead: true },
       { role: 'withheld_reason', text: reason }, { role: 'ask', text: ask },
     ] });
-    expect(c.shape!.headline).toBe(joined);
+    // The lead-in travels with the first chance finding (DL, composed texts 8 Oct): it still introduces the list.
+    expect(c.shape!.headline).toBe(`For your goal, on current information:\n${joined}`);
     expect(c.shape!.bullets).toEqual([second, reason, ask]);
     expect(c.shape!.detail).toContain(share);
     assertDerivation(atomicText, c);

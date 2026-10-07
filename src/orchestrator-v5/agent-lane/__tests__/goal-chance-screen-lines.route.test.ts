@@ -125,9 +125,12 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     expect(SCREEN_T1B).toHaveLength(3);
     const b = await turn(run('No single option can be put forward: the comparison is a near tie.\n\nFor reaching at least £126,000 monthly recurring revenue, on current information:'), 'Run it');
     for (const line of SCREEN_T1B) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
-    // B15 (#2783, DL APPROVE): the first screen chance finding is the headline; the lead-in is still said once (moved, never removed).
-    expect(b.assistant_text.startsWith(SCREEN_T1B[0]!), b.assistant_text).toBe(true);
-    expect(count(b.assistant_text, 'on current information:')).toBe(1);
+    // B15 (#2783, DL): the lead-in opens the headline and is directly followed by the first screen chance finding; it
+    // still introduces the list and never ends the reply on a colon.
+    const lead = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
+    expect(b.assistant_text.startsWith(`${lead}\n${SCREEN_T1B[0]!}`), b.assistant_text).toBe(true);
+    expect(count(b.assistant_text, lead)).toBe(1);
+    expect(b.assistant_text.trimEnd().endsWith(':'), 'never ends on a colon').toBe(false);
   });
 
   it('POINTS through the REAL leader gate: the Agent writes the screen’s lines, the gate deletes them, and the user still reads each once', async () => {
