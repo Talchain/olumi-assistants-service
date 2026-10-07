@@ -22,5 +22,5 @@ export function authorshipReasonForRun<T>(response: T): T {
     changed = true;
     return { ...row, message };
   });
-  return changed ? { ...r, analysis_ready: { ...ready, analysis_admission: { ...admission, reasons } } } as T : response;
+  return changed ? { ...r, analysis_ready: { ...ready, analysis_admission: { ...admission, reasons } } } as T : response; // finaliser-exempt: only caller is response-finaliser.ts (finaliser sub-step); rewrites reason text inside an already-present analysis_ready, never sets it
 }
