@@ -141,7 +141,7 @@ describe('S-C risks reply: the named method, what each hits, nothing added, ONE 
       '- ‘Hire a Tech Lead’ relies on a Tech Lead removing the main delivery blocker. Risk: ‘Wrong bottleneck’ (dependency), through ‘Tech Lead Hires’. Watch for: delays persist after the Tech Lead starts.',
       '- ‘Hire Two Developers’ relies on new developers joining without slowing the team. Risk: ‘Coordination drag’ (people), through ‘Developer Hires’. Watch for: senior time spent on onboarding.',
       'Possible risks, not established facts. Nothing is added until you choose one and approve the change.',
-      'One gap: ‘meet our next feature-launch deadline’ has no target or deadline yet. What would count as meeting it, and by when?',
+      'What is the deadline for "meet our next feature-launch deadline"? A date or a time from now is fine, for example "6 months"; I\'ll propose it as your deadline.',
     ]);
     expect(settled.reply.match(/\?/gu)).toHaveLength(1);
     expect(settled.actions.map((a) => a.label)).toEqual(['Add ‘Recruitment delay’', 'Add ‘Wrong bottleneck’', 'Add ‘Coordination drag’', 'Something else']);
@@ -225,31 +225,48 @@ describe('S-C Add press: bound to its message AND the node ids; re-checked on th
 });
 
 describe('S-C standing gap signal: typed, from model state, ONE question', () => {
-  it('GP-1 (D-01, Paul\'s goal): no target and no deadline → the target-and-date question', () => {
-    expect(modelGapOf(fixture('v1'))).toEqual({ kind: 'goal_target_missing', goal_id: 'meet_our_next_feature_launch_deadline', deadline_known: false,
-      question: 'One gap: ‘meet our next feature-launch deadline’ has no target or deadline yet. What would count as meeting it, and by when?' });
+  const S1_ASK = 'What is the deadline for "meet our next feature-launch deadline"? A date or a time from now is fine, for example "6 months"; I\'ll propose it as your deadline.';
+  /** Paul's goal measured as a LEVEL (a quantity): the controls for the target ask. */
+  const asLevel = (g: Record<string, unknown>, over: Record<string, unknown> = {}) => ({ ...g, nodes: (g.nodes as Record<string, unknown>[])
+    .map((n) => (n.kind === 'goal' ? { ...n, goal_threshold_unit: 'features shipped', ...over } : n)) });
+  /** Paul's chance goal holding its date (#2742's carrier, `goal_horizon.deadline`). */
+  const chanceWithDate = (g: Record<string, unknown>) => ({ ...g, nodes: (g.nodes as Record<string, unknown>[])
+    .map((n) => (n.kind === 'goal' ? { ...n, goal_horizon: { deadline: '2027-04-07' } } : n)) });
+  it('GP-1 (PL/Codex 5443200599, joined with #2742 S1): Paul\'s CHANCE goal never gets a target ask — its one question is S1\'s deadline ask, byte for byte', () => {
+    expect(modelGapOf(fixture('v1'))).toEqual({ kind: 'deadline_missing', goal_id: 'meet_our_next_feature_launch_deadline', question: S1_ASK });
+    expect(JSON.stringify(modelGapOf(fixture('v1')))).not.toContain('What would count as meeting it');
+    // Even with a stray target figure on it, a chance goal is asked for its date, never a target.
+    const stray = { ...fixture('v1'), nodes: (fixture('v1').nodes as Record<string, unknown>[]).map((n) => (n.kind === 'goal' ? { ...n, goal_threshold_raw: 80 } : n)) };
+    expect(modelGapOf(stray)?.kind).toBe('deadline_missing');
+    // Holding its date, a chance goal is asked nothing more here (S1: "a chance goal that already holds its date is asked nothing more").
+    expect(modelGapOf(chanceWithDate(fixture('v1')))).toBeNull();
   });
-  it('GP-2 CONTROL: a goal WITH a stated target asks nothing about it; a deadline row drops "by when"', () => {
+  it('GP-2 CONTROL (level/change goals keep the target ask): no target and no deadline → target-and-date; a stated target → nothing; a deadline row drops "by when"', () => {
     const g = fixture('v1');
-    const withTarget = { ...g, nodes: (g.nodes as Record<string, unknown>[]).map((n) => (n.kind === 'goal' ? { ...n, goal_threshold_raw: 80 } : n)) };
-    expect(modelGapOf(withTarget)).toBeNull();
-    const withDeadline = { ...g, goal_constraints: [{ node_id: 'meet_our_next_feature_launch_deadline', operator: '<=', value: 6, deadline_metadata: { months: 6 } }] };
+    expect(modelGapOf(asLevel(g))).toEqual({ kind: 'goal_target_missing', goal_id: 'meet_our_next_feature_launch_deadline', deadline_known: false,
+      question: 'One gap: ‘meet our next feature-launch deadline’ has no target or deadline yet. What would count as meeting it, and by when?' });
+    expect(modelGapOf(asLevel(g, { goal_threshold_frame: 'change_rel' }))?.kind, 'a change goal is a quantity too').toBe('goal_target_missing');
+    expect(modelGapOf(asLevel(g, { goal_threshold_raw: 80 }))).toBeNull();
+    const withDeadline = { ...asLevel(g), goal_constraints: [{ node_id: 'meet_our_next_feature_launch_deadline', operator: '<=', value: 6, deadline_metadata: { months: 6 } }] };
     expect(modelGapOf(withDeadline)?.question).toBe('One gap: ‘meet our next feature-launch deadline’ has no target yet. What would count as meeting it?');
   });
   it('GP-3 (D-07, Paul\'s own words at 09:29:58Z): a stated budget with no limit in the model → the budget question; a limit row answers it', () => {
-    const g = fixture('v1');
-    const withTarget = { ...g, nodes: (g.nodes as Record<string, unknown>[]).map((n) => (n.kind === 'goal' ? { ...n, goal_threshold_raw: 80 } : n)) };
     const paul = 'Overlapping costs are a real risk, as we only have a budget for £200,000, with a £20,000 surplus that is held back for recruitment fees.';
-    expect(modelGapOf(withTarget, paul)?.kind).toBe('budget_without_limit');
-    expect(modelGapOf({ ...withTarget, goal_constraints: [{ node_id: 'developer_hires', operator: '<=', value: 200000, unit: '£' }] }, paul), 'a money limit answers it').toBeNull();
-    // Codex r1 P2: a hiring-count cap is not the budget.
-    expect(modelGapOf({ ...withTarget, goal_constraints: [{ node_id: 'developer_hires', operator: '<=', value: 2 }] }, 'Our budget is £200,000.')?.kind).toBe('budget_without_limit');
-    // Codex r2 P2: an explicit non-money unit decides, whatever the label says.
-    const reviewers = { ...withTarget, nodes: (withTarget.nodes as Record<string, unknown>[]).map((n) => (n.id === 'developer_hires' ? { ...n, label: 'Budget reviewers' } : n)),
-      goal_constraints: [{ node_id: 'developer_hires', operator: '<=', value: 2, unit: 'people' }] };
-    expect(modelGapOf(reviewers, 'Our budget is £200,000.')?.kind).toBe('budget_without_limit');
-    expect(modelGapOf(withTarget, 'We need to decide whether to hire a Tech lead or two developers.')).toBeNull();
-    expect(modelGapOf(withTarget, 'The budget is tight.')).toBeNull();
+    // Both goal kinds once their own gap is closed: a level goal with its target, Paul's chance goal with its date.
+    for (const base of [asLevel(fixture('v1'), { goal_threshold_raw: 80 }), chanceWithDate(fixture('v1'))]) {
+      expect(modelGapOf(base, paul)?.kind).toBe('budget_without_limit');
+      expect(modelGapOf({ ...base, goal_constraints: [{ node_id: 'developer_hires', operator: '<=', value: 200000, unit: '£' }] }, paul), 'a money limit answers it').toBeNull();
+      // Codex r1 P2: a hiring-count cap is not the budget.
+      expect(modelGapOf({ ...base, goal_constraints: [{ node_id: 'developer_hires', operator: '<=', value: 2 }] }, 'Our budget is £200,000.')?.kind).toBe('budget_without_limit');
+      // Codex r2 P2: an explicit non-money unit decides, whatever the label says.
+      const reviewers = { ...base, nodes: (base.nodes as Record<string, unknown>[]).map((n) => (n.id === 'developer_hires' ? { ...n, label: 'Budget reviewers' } : n)),
+        goal_constraints: [{ node_id: 'developer_hires', operator: '<=', value: 2, unit: 'people' }] };
+      expect(modelGapOf(reviewers, 'Our budget is £200,000.')?.kind).toBe('budget_without_limit');
+      expect(modelGapOf(base, 'We need to decide whether to hire a Tech lead or two developers.')).toBeNull();
+      expect(modelGapOf(base, 'The budget is tight.')).toBeNull();
+    }
+    // A chance goal with no date: S1's question outranks the budget one (ONE question).
+    expect(modelGapOf(fixture('v1'), paul)?.kind).toBe('deadline_missing');
   });
   it('GP-4: the budget phrase reads both orders and words for money; it never spans a sentence', () => {
     for (const yes of ['Our budget is $50k.', '£1.2m budget for the year', 'a budget of 200,000 pounds']) expect(STATED_BUDGET.test(yes), yes).toBe(true);

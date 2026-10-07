@@ -35,6 +35,7 @@ import { z } from 'zod';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { sameLabel } from '../../routing/add-option-transaction.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
+import { chanceGoalDeadlineAsk, goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
 
 const METHOD = 'RC-WIDEN' as const;
 const CONTRACT = POLICY.method_turns[METHOD];
@@ -726,6 +727,8 @@ export const WIDEN_ADD_PREFIX = 'agent-widen-add:';
 /** ⭐ THE STANDING GAP SIGNAL (S-C / S-E): typed, deterministic, from model state; ONE question at most. */
 export type ModelGap =
   | { readonly kind: 'goal_target_missing'; readonly goal_id: string; readonly deadline_known: boolean; readonly question: string }
+  /** A chance-of-event goal with no date: S1's ONE question, by its own function (never a target ask, #2742). */
+  | { readonly kind: 'deadline_missing'; readonly goal_id: string; readonly question: string }
   | { readonly kind: 'budget_without_limit'; readonly question: string };
 
 const finiteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -742,7 +745,13 @@ export function modelGapOf(graph: unknown, userWords: string = ''): ModelGap | n
   const raw = rec(graph);
   const g = graphOf(graph);
   const goal = goalOf(graph, g);
-  if (raw !== undefined && goal !== undefined && typeof goal.id === 'string' && labelOf(goal) !== null
+  // ⛔ THE GOAL-KIND REGISTRY DECIDES WHAT MAY BE ASKED (#2742 S1; PL/Codex 5443200599): a chance goal takes no target
+  // quantity — its one question is S1's deadline ask, byte for byte, and nothing once it holds its date.
+  const chance = goal !== undefined && goalKindOf(goal) === 'chance_of_event';
+  if (chance && typeof goal.id === 'string' && labelOf(goal) !== null && goalDeadlineOf(goal) === undefined) {
+    return { kind: 'deadline_missing', goal_id: goal.id, question: chanceGoalDeadlineAsk(labelOf(goal)!) };
+  }
+  if (!chance && raw !== undefined && goal !== undefined && typeof goal.id === 'string' && labelOf(goal) !== null
     && statedGoalTargetOf(raw, goal) === null) {
     const rows = Array.isArray(raw.goal_constraints) ? raw.goal_constraints.map(rec) : [];
     const horizon = rec(goal.goal_horizon);

@@ -184,6 +184,9 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   const candidates = (items: unknown) => say(`<risk_suggestions>${JSON.stringify(items)}</risk_suggestions>`);
   const nodeLabels = () => graphNow().nodes.map((x) => x.label).sort();
   const addChips = (b: Body) => b.suggested_actions.filter((c) => c.id.startsWith('agent-widen-add:'));
+  /** #2742 S1's ONE question for a chance goal with no date (`chanceGoalDeadlineAsk`), verbatim. */
+  const S1_ASK = 'What is the deadline for "meet our next feature-launch deadline"? A date or a time from now is fine, for example "6 months"; I\'ll propose it as your deadline.';
+  const gapOf = (b: Body) => (b as unknown as { model_gap?: { kind: string; question: string } }).model_gap;
 
   it('SR-1 RED (served turn #2): the press runs the method — ONE tool-less call, ≤3 risks each with an Add, Something else, the gap question; NOTHING stored', async () => {
     paulV1();
@@ -198,9 +201,9 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(t1.suggested_actions.map((c) => c.id).slice(3)).toEqual(['agent-widen-something-else']);
     expect(t1.assistant_text).toContain('(assumption-based planning)');
     expect(t1.assistant_text).toContain('- ‘Hire Two Developers’ relies on filling both developer roles quickly. Risk: ‘Recruitment delay’ (timing), through ‘Developer Hires’. Watch for: no accepted offer by week 4.');
-    expect((t1 as unknown as { model_gap?: { kind: string } }).model_gap?.kind, 'the typed gap rides the wire').toBe('goal_target_missing');
+    expect((t1 as unknown as { model_gap?: { kind: string } }).model_gap?.kind, 'the typed gap rides the wire').toBe('deadline_missing');
     expect(t1.assistant_text).not.toContain('<risk_suggestions>');
-    expect(t1.assistant_text.trim().split('\n').at(-1)).toBe('One gap: ‘meet our next feature-launch deadline’ has no target or deadline yet. What would count as meeting it, and by when?');
+    expect(t1.assistant_text.trim().split('\n').at(-1)).toBe(S1_ASK);
     expect(t1._agent.tool_calls).toEqual([]);
     expect(await heldOnLatestRow()).toEqual([]);
     expect(nodeLabels(), 'nothing is written by the suggestion').toEqual(before);
@@ -334,6 +337,31 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
       expect(addChips(t).map((c) => c.label)).toEqual(['Add ‘Recruitment delay’', 'Add ‘Wrong bottleneck’']);
     }, 120_000);
   }
+
+  it('SR-12 JOINED (PL/Codex 5443200599 with #2742 S1): on Paul\'s CHANCE goal only S1\'s deadline question survives — in the widen text, on the wire, and on an ordinary turn', async () => {
+    paulV1();
+    script = [() => candidates(TURN2)];
+    const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+    expect(t1.assistant_text).not.toContain('What would count as meeting it');
+    expect(t1.assistant_text.split(S1_ASK)).toHaveLength(2);
+    expect(t1.assistant_text.match(/\?/gu), 'ONE question in the reply').toHaveLength(1);
+    expect(gapOf(t1)).toEqual({ kind: 'deadline_missing', goal_id: 'meet_our_next_feature_launch_deadline', question: S1_ASK });
+    script = [() => say('We can look at the hiring options together.')];
+    const t2 = await turn({ message: 'What do you think about the two hires?' });
+    expect(JSON.stringify(t2)).not.toContain('What would count as meeting it');
+    expect(gapOf(t2)?.question).toBe(S1_ASK);
+  }, 120_000);
+
+  it('SR-13 CONTROL: the same model with a QUANTITY goal keeps the target ask on the wire and in the widen text', async () => {
+    paulV1();
+    const g = graphOf.get(SCENARIO) as { nodes: Record<string, unknown>[] };
+    graphOf.set(SCENARIO, { ...g, nodes: g.nodes.map((n) => (n['kind'] === 'goal' ? { ...n, goal_threshold_unit: 'features shipped' } : n)) });
+    script = [() => candidates(TURN2)];
+    const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+    expect(gapOf(t1)?.kind).toBe('goal_target_missing');
+    expect(t1.assistant_text.trim().split('\n').at(-1)).toBe('One gap: ‘meet our next feature-launch deadline’ has no target or deadline yet. What would count as meeting it, and by when?');
+    expect(t1.assistant_text).not.toContain(S1_ASK);
+  }, 120_000);
 
   it('SR-6 RED: the canvas "+" Option press (ask:widen) reaches the options door — its ONLY tool is propose_new_option', async () => {
     paulV1();
