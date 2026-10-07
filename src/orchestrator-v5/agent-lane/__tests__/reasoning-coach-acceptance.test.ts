@@ -8,6 +8,17 @@ import * as plans from '../guidance/plan.js';
 import { computeResponseHash } from '../../../utils/response-hash.js';
 import type { GuidanceSignals, GuidanceState, MethodInputs, MethodTurnId, PolicyId, SelectedRow } from '../guidance/types.js';
 
+const EXPECTED_WIDEN_WHY = {
+  "W1": "Finding another route could give you a way to reach the goal within your limit.",
+  "W2": "Alternatives expose trade-offs that a single proposed route leaves untested.",
+  "W3": "A different mechanism can reveal possibilities that variations on one lever miss.",
+  "W4": "A baseline separates the effect of changing course from what would happen anyway.",
+  "W5": "Combining complementary strengths may offer a useful route when the comparison is close.",
+  "W6": "Risks drive how far each option could fall short; one risk leaves most of that unexamined.",
+  "W7": "Missing drivers can hide dependencies that change how your routes affect the goal.",
+  "W2Z": "Concrete routes let you test how different actions could move the goal."
+} as const;
+
 const cases = acceptance.cases;
 const fixtures = acceptance.method_turn_fixtures;
 const stateOf = (id: string): GuidanceSignals => structuredClone(cases.find(c => c.id === id)!.state) as GuidanceSignals;
@@ -27,7 +38,7 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
     // R2 re-pin: claim predicates, duration exemption, kind-correct fallback and licensed control; historical fixtures stay intact.
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('87a29cb488501604302cb522f55304755cd9313aed58f0321ae5607c7661b1d5');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('62c88de383013184f30b1acea2bbf20bc96a0fcd0deeb0cc3c3683b218e96a70');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('0ed74500de3ebb72683ba212e1a48db0c080896c6ae7044256f96d4b72156df2');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
@@ -57,7 +68,8 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     if ('rendered_example' in c.expect && c.expect.rendered_example) for (const example of c.expect.rendered_example) {
       const row = rows.find(r => r.policy_id === example.policy_id)!;
       const copy = renderCopy(row, state);
-      expect({ policy_id: row.policy_id, variant: row.variant ?? null, item: row.item ?? null, ...copy }).toEqual(example);
+      expect({ policy_id: row.policy_id, variant: row.variant ?? null, item: row.item ?? null, ...copy }).toEqual(example.policy_id === 'RC-WIDEN'
+        ? { ...example, why: EXPECTED_WIDEN_WHY[example.variant as keyof typeof EXPECTED_WIDEN_WHY] } : example);
       expect(row.copy).toEqual(copy);
     }
     const copy = rows.flatMap(r => Object.values(r.copy)).filter(Boolean).join('\n');
@@ -341,5 +353,12 @@ describe('all deterministic text post-check ids, including methods without vendo
   it('Coach edits requires the stale line only for a stale run', () => {
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' })).toEqual({ pass: true, failed: [], targets: [] });
+  });
+});
+describe('Widen explains why the condition matters', () => {
+  it('W6 keeps the invitation and explains the coverage gap', () => {
+    expect(POLICY.rows[0].why_now).toEqual(EXPECTED_WIDEN_WHY);
+    expect(POLICY.rows[0].short_copy.W6).toBe('Only one risk is on the map. What else could go wrong?');
+    expect(POLICY.rows[0].why_now.W6).toBe('Risks drive how far each option could fall short; one risk leaves most of that unexamined.');
   });
 });

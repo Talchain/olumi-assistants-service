@@ -1,11 +1,11 @@
 import { planOf } from './plan.js';
 import { POLICY } from './policy.js';
+import { compactWordLabel } from '../reply/labels.js';
 import type { GuidanceSignals, RenderedCopy, RowIdentity } from './types.js';
 
-/** Python reference uses 39 code points, rstrip, then an ellipsis (40 in total). */
+/** Forty code points at most, with whole words retained. Questions bypass this helper. */
 export function cut(label: string): string {
-  const chars = Array.from(label);
-  return chars.length <= 40 ? label : `${chars.slice(0, 39).join('').trimEnd()}…`;
+  return compactWordLabel(label, 40);
 }
 export function midSentence(label: string): string {
   const chars = Array.from(label);
@@ -51,13 +51,15 @@ export function renderCopy(selected: RowIdentity, signals: GuidanceSignals): Ren
    * that itself contains `{…}` neither blanks the copy nor pulls in another field (HARNESS 5938345968 note 4). Any
    * placeholder without a value makes the whole field null: never an unresolved template.
    */
-  function fill(template?: string): string | null {
+  function fill(template?: string, question = false): string | null {
     if (template === undefined) return null;
     let missing = false;
     const out = template.replace(/\{([a-z_]+)\}/gu, (_match, key: string, offset: number) => {
       const value = fills[key];
       if (value === undefined) { missing = true; return ''; }
-      return ['option_label', 'plan_label', 'leader_label'].includes(key) ? `‘${cut(value)}’` : cut(offset === 0 ? value : midSentence(value));
+      const label = ['option_label', 'plan_label', 'leader_label'].includes(key) ? value : offset === 0 ? value : midSentence(value);
+      const shown = question ? label : cut(label);
+      return ['option_label', 'plan_label', 'leader_label'].includes(key) ? `‘${shown}’` : shown;
     });
     return missing ? null : out;
   }
@@ -65,5 +67,5 @@ export function renderCopy(selected: RowIdentity, signals: GuidanceSignals): Ren
   if (selected.policy_id === 'RC-PREMORTEM') question = pick(row.reasoning_question, fills.horizon ? 'dated' : 'undated');
   if (selected.policy_id === 'RC-WHAT-CHANGES') question = pick(row.reasoning_question,
     sensitive?.range === 'olumi_assumed' ? 'range_olumi_assumed' : 'range_yours_or_unknown');
-  return { title: fill(pick(row.short_copy, selected.variant)), why: fill(pick(row.why_now, selected.variant)), question: fill(question) };
+  return { title: fill(pick(row.short_copy, selected.variant)), why: fill(pick(row.why_now, selected.variant)), question: fill(question, true) };
 }

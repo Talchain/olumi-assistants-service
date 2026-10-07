@@ -74,18 +74,30 @@ const PRODUCER_SENTENCE =
 const AFTER_THE_QUESTIONS = new RegExp(String.raw`[.?!)]\s+(?=${PRODUCER_SENTENCE})`);
 const NO_QUESTION_FIRST = new RegExp(String.raw`^\s*${PRODUCER_SENTENCE}`);
 
-/** The words a reply leaves on screen with the questions toggle closed (the whole text when the panel does not split it). */
-export function textAtRest(text: string): string {
+/**
+ * The questions segment the panel puts behind its toggle, by the consumer's own predicate: the words before it (`lead`),
+ * the segment itself verbatim from the marker (`segment`), and the producer sentences after it (`after`). Null when the
+ * panel would not split this text. ONE predicate: `textAtRest` and the reply composer (`reply/compose-reply.ts`) both read it.
+ */
+export function openQuestionsSegment(text: string): { readonly lead: string; readonly segment: string; readonly after: string } | null {
   const at = text.indexOf(QUESTIONS_MARKER);
-  if (at === -1 || text.indexOf(QUESTIONS_MARKER, at + 1) !== -1 || !/\s$/.test(text.slice(0, at))) return text;
+  if (at === -1 || text.indexOf(QUESTIONS_MARKER, at + 1) !== -1 || !/\s$/.test(text.slice(0, at))) return null;
   const lead = text.slice(0, at).trimEnd();
   const tail = text.slice(at + QUESTIONS_MARKER.length);
-  if (NO_QUESTION_FIRST.test(tail)) return text;
+  if (NO_QUESTION_FIRST.test(tail)) return null;
   const end = tail.search(AFTER_THE_QUESTIONS);
   const questions = (end === -1 ? tail : tail.slice(0, end + 1)).trim();
-  if (lead.length === 0 || questions.length === 0) return text;
+  if (lead.length === 0 || questions.length === 0) return null;
   const after = end === -1 ? '' : tail.slice(end + 1).trim();
-  return after ? `${lead} ${after}` : lead;
+  const segment = text.slice(at, at + QUESTIONS_MARKER.length + (end === -1 ? tail.length : end + 1)).trim();
+  return { lead, segment, after };
+}
+
+/** The words a reply leaves on screen with the questions toggle closed (the whole text when the panel does not split it). */
+export function textAtRest(text: string): string {
+  const split = openQuestionsSegment(text);
+  if (split === null) return text;
+  return split.after ? `${split.lead} ${split.after}` : split.lead;
 }
 
 /** Keep selected host obligations visible using the existing consumer split. */

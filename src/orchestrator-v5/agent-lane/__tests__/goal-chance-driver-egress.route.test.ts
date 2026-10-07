@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { sentenceMultiset } from '../reply/compose-reply.js';
 
 type Json = Record<string, any>;
 const PROD = JSON.parse(readFileSync(new URL('./fixtures/prod-cut6-smoke-cdcd44c3-turn003.json', import.meta.url), 'utf8')) as Json;
@@ -82,7 +83,8 @@ describe('live Agent final egress respects the selected Run goal-chance drivers'
     const body = await liveTurn();
     expect(body.assistant_text.endsWith('Six underlying values were supplied by Olumi, not you.')).toBe(true);
     expect(body.assistant_text).not.toContain('has not established which assumption matters most');
-    expect(body.assistant_text).toBe(PROD.assistant_text.replace(ABSENCE_CLAUSE, '.'));
+    // S-A (#2748): only that clause changes; the ONE composer may then move sentences, never change one.
+    expect(sentenceMultiset(body.assistant_text)).toEqual(sentenceMultiset(PROD.assistant_text.replace(ABSENCE_CLAUSE, '.')));
   });
 
   it('CONTRAST: the same live turn without licensed drivers ships the clause unchanged', async () => {
@@ -91,6 +93,6 @@ describe('live Agent final egress respects the selected Run goal-chance drivers'
     licence.no_driver_by_option = Object.fromEntries(licence.option_ids.map((id: string) => [id, 'none']));
     const body = await liveTurn();
     expect(body.assistant_text).toContain(ABSENCE_CLAUSE);
-    expect(body.assistant_text).toBe(PROD.assistant_text);
+    expect(sentenceMultiset(body.assistant_text)).toEqual(sentenceMultiset(PROD.assistant_text));
   });
 });
