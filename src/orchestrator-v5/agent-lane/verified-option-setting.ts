@@ -7,6 +7,8 @@ import { parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { labelHead } from './label-head-unit.js';
 import { readUnitParts, statedTailParts, labelStandsForCountUnit, singular } from './same-unit.js';
 import { figureTheUserWroteForSpan } from './stated-by-user.js';
+import { periodAdverb, periodNoun } from '../../utils/unit-alphabet.js';
+import { log } from '../../utils/telemetry.js';
 
 type Option = CandidateModel['options'][number];
 type Intervention = NonNullable<Option['interventions']>[number];
@@ -45,13 +47,18 @@ function directContext(brief: string, a: Assertion): boolean {
 }
 const words = (s: string): string[] => s.toLowerCase().match(/[\p{L}\p{N}]{1,64}/gu) ?? [];
 const sameName = (a: string, b: string): boolean => singular(a) === singular(b);
-const GRAMMAR = new Set(['a', 'an', 'the', 'our', 'we', 'to', 'for', 'on', 'at', 'in', 'per', 'each', 'every',
-  'of', 'as', 'option', 'options', 'open', 'opening', 'run', 'launch', 'introduce', 'keep', 'extend', 'hire',
-  'cut', 'set', 'month', 'monthly', 'week', 'weekly', 'year', 'yearly', 'quarter']);
+const GRAMMAR_WORDS = new Set(['a', 'an', 'the', 'our', 'we', 'to', 'for', 'on', 'at', 'in', 'per', 'each', 'every',
+  'of', 'as', 'option', 'options', 'open', 'opening', 'run', 'launch', 'introduce', 'keep', 'extend', 'hire', 'cut', 'set']);
+/** Frame grammar. Period words come from the shared unit leaf (`utils/unit-alphabet.ts`), never a local list. */
+const grammar = (w: string): boolean => GRAMMAR_WORDS.has(w) || periodNoun(w) !== null || periodAdverb(w) !== null;
 const ACTIONS = new Set(['open', 'run', 'staff', 'hire', 'launch', 'introduce', 'set', 'cut', 'keep', 'extend',
   'expand', 'reduce', 'increase', 'switch', 'adopt', 'use', 'operate', 'fund', 'allocate', 'invest', 'retain']);
-const NOT_POINT = new Set(['not', 'cannot', 'no', 'least', 'most', 'minimum', 'maximum', 'min', 'max', 'fewer',
-  'more', 'exceeding', 'upwards', 'many', 'between', 'than', 'add', 'additional', 'extra', 'by', 'ignore']);
+/** A bound on a figure ("up to", "at most", "under", "nearly", "a ceiling"). Checked on the clause itself, so a bound
+ * refuses even when the drafter copied it into the option label; and in the next sentence ("At most.", DL 7 Oct). */
+const BOUNDS = new Set(['least', 'most', 'minimum', 'maximum', 'min', 'max', 'fewer', 'more', 'exceeding', 'upwards',
+  'up', 'under', 'over', 'below', 'above', 'nearly', 'almost', 'within', 'than', 'ceiling', 'cap', 'floor']);
+const NOT_POINT = new Set([...BOUNDS, 'not', 'cannot', 'no', 'many', 'between', 'add', 'additional', 'extra', 'by',
+  'ignore', 'another', 'further']);
 /** Verbs that open a sibling option arm in the same sentence ("…, or provide remote consultations"). */
 const ARMS = new Set([...ACTIONS, 'provide', 'offer', 'raise', 'lower', 'hold', 'stop', 'start', 'continue', 'maintain',
   'close', 'move', 'build', 'buy', 'lease', 'rent', 'delay', 'defer', 'do']);
@@ -61,7 +68,7 @@ const CLAUSE = new Set(['about', 'around', 'roughly', 'approximately', 'exactly'
 const figure = (w: string): number | null => /^[0-9]{1,12}$/u.test(w) ? Number(w) : parseCardinalAmount(w);
 function namedOption(model: CandidateModel, selected: Option, clause: string, value: number): boolean {
   const said = words(clause);
-  const content = (o: Option): string[] => words(o.label).filter(w => !GRAMMAR.has(w)
+  const content = (o: Option): string[] => words(o.label).filter(w => !grammar(w)
     && parseCardinalAmount(w) === null && !/^[0-9]{1,64}$/u.test(w));
   const matches = model.options.filter(o => {
     const figures = [...findStatedAmounts(o.label).map(a => a.magnitude),
@@ -90,6 +97,8 @@ function onlySiblingArms(model: CandidateModel, selected: Option, others: readon
     const arm = ws[0] === 'or' || ws[0] === 'and' || ws[0] === 'to' ? ws.slice(1) : ws;
     if (!ARMS.has(arm[0] ?? '')) return false;
     const figures = ws.flatMap(w => { const n = figure(w); return n === null ? [] : [n]; });
+    // DL 7 Oct (iii): an arm that writes the credited figure ("instead of the 4", "treat 4 as a ceiling") refuses.
+    if (figures.includes(value)) return false;
     return figures.length <= 1 && model.options.some(o => o !== selected && namedOption(model, o, text, figures[0] ?? Number.NaN));
   });
 }
@@ -141,17 +150,26 @@ function sameFrame(text: string, span: { start: number; end: number }, unit: unk
     && (expected.noun === null || (expected.noun.length > 0
       && expected.noun.every(w => stated.noun?.some(x => sameName(x, w)))));
 }
-/** DL 7 Oct: a repeated literal (including "the 4") in a neighbour, or Olumi attribution in the credited sentence
- * or a neighbour, refuses. Third-party attribution without either signal is ACCEPTED RESIDUAL (DL 7 Oct).
+/** In the brief the second person can only be Olumi, so any "you"/"your"/"assistant" is an attribution (DL 7 Oct). */
+const ATTRIBUTION = /\bOlumi\b|\byou(?:r|rs|rself|rselves)?\b|\bassistant\b/iu;
+/** DL 7 Oct, precision over recall. In the credited paragraph: any attribution (the credited sentence included), a
+ * repeated figure in any spelling ("the 4" / "four"), or a bound in the very next sentence ("At most.") refuses.
+ * Olumi named in either of the two paragraphs above refuses. Third-party attribution without any of these signals
+ * is ACCEPTED RESIDUAL (DL 7 Oct).
  */
 function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], literal: string, value: number): boolean {
   const breaks = [...brief.matchAll(/\n[ \t]{0,4}\n/gu)].map(m => m.index!);
-  const start = breaks.filter(n => n < a.start).at(-1) ?? -1;
+  const above = breaks.filter(n => n < a.start);
+  const start = above.at(-1) ?? -1;
   const end = breaks.find(n => n >= a.end) ?? brief.length;
+  if (above.length > 0 && /\bOlumi\b/iu.test(brief.slice((above.at(-3) ?? -1) + 1, start))) return false;
   const token = canonical(literal).toLowerCase();
-  return sentences.filter(s => s.start > start && s.start < end).every(s => {
-    if (/\bOlumi\b|\byou suggested\b|\byour (?:suggestion|last reply)\b/iu.test(s.text)) return false;
+  const paragraph = sentences.filter(s => s.start > start && s.start < end);
+  const next = paragraph.find(s => s.start >= a.end);
+  return paragraph.every(s => {
+    if (ATTRIBUTION.test(s.text)) return false;
     if (s === a) return true;
+    if (s === next && words(s.text).some(w => BOUNDS.has(w))) return false;
     // The same figure in another spelling ("the 4" beside "four", "four" beside "4") is the same literal.
     if (words(s.text).some(w => figure(w) === value)) return false;
     const text = s.text.toLowerCase();
@@ -165,7 +183,17 @@ function safeNeighbours(brief: string, a: Assertion, sentences: Assertion[], lit
   });
 }
 
+/** DL 7 Oct (v): schema-impossible drafter output (a missing array, a null label) refuses and logs; it never throws. */
 export function verifiedOptionSetting(model: CandidateModel, option: Option, intervention: Intervention, brief: string | undefined): boolean {
+  try {
+    return verified(model, option, intervention, brief);
+  } catch (err) {
+    log.warn({ event: 'agent_lane.stated_setting_unverifiable', err: err instanceof Error ? err.message : String(err) },
+      'agent-lane: a stated option setting could not be verified on a malformed draft; it stays Olumi\'s estimate');
+    return false;
+  }
+}
+function verified(model: CandidateModel, option: Option, intervention: Intervention, brief: string | undefined): boolean {
   const e = intervention.stated_evidence;
   if (typeof brief !== 'string' || e == null) return false;
   const sentences = assertions(brief);
@@ -194,7 +222,7 @@ export function verifiedOptionSetting(model: CandidateModel, option: Option, int
   // ("up to", "under"), a delta ("another"), a qualifier ("as a ceiling") or an attribution ("according to your
   // estimate") is outside that vocabulary and refuses. An allowlist, never a list of bad words.
   const vocab = [...words(option.label), ...words(factor.label), ...words(typeof factor.unit === 'string' ? factor.unit : ''), ...clause.frame];
-  if (!words(clause.text).every(w => figure(w) !== null || GRAMMAR.has(w) || CLAUSE.has(w) || vocab.some(v => sameName(v, w)))) return false;
+  if (!words(clause.text).every(w => figure(w) !== null || grammar(w) || CLAUSE.has(w) || vocab.some(v => sameName(v, w)))) return false;
   const head = labelHead(factor.label);
   const right = words(a.text.slice(span.end)).slice(0, 2);
   const left = words(a.text.slice(clause.start, span.start))

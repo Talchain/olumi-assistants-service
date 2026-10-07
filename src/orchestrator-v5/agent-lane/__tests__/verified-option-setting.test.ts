@@ -1,4 +1,4 @@
-import { describe, it } from 'vitest';
+import { describe, it, vi } from 'vitest';
 import { censusRows, probeRows, integrityRows, seamRows, rawRows, registrationRows, probes, level, assertCell, type Row } from './fixtures/r5-verified-cases.js';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
@@ -6,6 +6,7 @@ import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 import type { CandidateModel } from '../admit-model.js';
 import { verifiedOptionSetting } from '../verified-option-setting.js';
 import { prepareProvisionalCandidate } from '../runtime/build-model.js';
+import { log } from '../../../utils/telemetry.js';
 
 for (const [name, rows] of [
   ['census: generic credits, known under-credits and source refusals', censusRows],
@@ -36,6 +37,12 @@ const quoted = (text: string, quote: string) => {
   iv.stated_evidence = { ...iv.stated_evidence!, quote, option_quote: quote }; return i;
 };
 const ownSentence = (text: string) => quoted(text, text);
+/** As `ownSentence`, with the drafter's option label rewritten (it may copy the brief's qualifier into the label). */
+const relabelled = (text: string, label: string) => {
+  const i = ownSentence(text); i.model.options.find(o => o.label === i.option)!.label = label; return { ...i, option: label };
+};
+/** The served clinic draft with its schema-impossible shape broken, as no strict provider answer can be. */
+const malformed = (breakIt: (m: any) => void) => { const i = clinicCase(S); breakIt(i.model); return i; };
 const S4 = S.replace('4 Saturday', 'four Saturday');
 const setting = (sentence: string, option: string, factor: string, value: number, unit: string, siblings: string[] = []) => {
   const base = structuredClone(probes[0]!.model);
@@ -130,6 +137,37 @@ export const r2Cases: R2Case[] = [
   { name: 'N credited "four", neighbour retracts "the 4"', expected: false, input: () => quoted(S4 + ' Ignore the 4; we have not decided.', S4) },
   { name: 'N credited "4", neighbour retracts "the four"', expected: false, input: () => quoted(S + ' Ignore the four; we have not decided.', S) },
   { name: 'N control: credited "four" with no figure in a neighbour credits', expected: true, input: () => quoted(S4, S4) },
+  // Independent review r2 (7 Oct) rows, verbatim inputs. A: a bound or delta the drafter copied into the LABEL still refuses.
+  { name: 'A1 "up to 4", label "Up to four Saturday sessions"', expected: false, input: () => relabelled('We could open for up to 4 Saturday sessions each month.', 'Up to four Saturday sessions') },
+  { name: 'A2 "another 4", label "Another four Saturday sessions"', expected: false, input: () => relabelled('We could open for another 4 Saturday sessions each month.', 'Another four Saturday sessions') },
+  { name: 'A3 "under 4", label "Under four Saturday sessions"', expected: false, input: () => relabelled('We could open for under 4 Saturday sessions each month.', 'Under four Saturday sessions') },
+  { name: 'A4 "nearly 4", label "Nearly four Saturday sessions"', expected: false, input: () => relabelled('We could open for nearly 4 Saturday sessions each month.', 'Nearly four Saturday sessions') },
+  { name: 'A5 "over 4", label "Over four Saturday sessions"', expected: false, input: () => relabelled('We could open for over 4 Saturday sessions each month.', 'Over four Saturday sessions') },
+  // B: any second person or "assistant" in the credited paragraph is Olumi (DL 7 Oct: fail-closed).
+  { name: 'B1 "These are the options you proposed."', expected: false, input: () => clinicCase('These are the options you proposed. ' + S) },
+  { name: 'B2 "You recommended these options."', expected: false, input: () => clinicCase('You recommended these options. ' + S) },
+  { name: 'B3 "This list is from your previous answer."', expected: false, input: () => clinicCase('This list is from your previous answer. ' + S) },
+  { name: 'B4 "The assistant suggested this list."', expected: false, input: () => clinicCase('The assistant suggested this list. ' + S) },
+  { name: 'B5 "Copied from your earlier reply." after the setting', expected: false, input: () => clinicCase(S + ' Copied from your earlier reply.') },
+  { name: 'E3 "as you proposed" inside a sibling arm', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or keep the present timetable as you proposed.') },
+  // DL 7 Oct (i): a bound in the very next sentence qualifies the setting.
+  { name: 'C1 next sentence "At most."', expected: false, input: () => clinicCase(S + ' At most.') },
+  { name: 'C2 next sentence "Or fewer."', expected: false, input: () => clinicCase(S + ' Or fewer.') },
+  { name: 'C3 next sentence "That number is only a ceiling."', expected: false, input: () => clinicCase(S + ' That number is only a ceiling.') },
+  // DL 7 Oct (ii): Olumi named in either of the two paragraphs above. Control: three paragraphs up is outside the window.
+  { name: 'D1 "Here is what Olumi proposed last time" one paragraph up', expected: false, input: () => { const i = clinicCase(S); i.brief = 'Here is what Olumi proposed last time\n\n' + i.brief; return i; } },
+  { name: 'D2 Olumi named two paragraphs up', expected: false, input: () => { const i = clinicCase(S); i.brief = 'Olumi drafted these options.\n\n' + i.brief; return i; } },
+  { name: 'D control: Olumi named three paragraphs up is outside the DL window', expected: true, input: () => { const i = clinicCase(S); i.brief = 'Olumi helped with an earlier decision.\n\nThis one is about clinic opening.\n\n' + i.brief; return i; } },
+  // DL 7 Oct (iii): a sibling arm in the same sentence that repeats the credited figure.
+  { name: 'E1 arm "and treat 4 as a ceiling"', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or keep the present timetable and treat 4 as a ceiling.') },
+  { name: 'K1 arm "instead of the 4"', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or keep the present timetable instead of the 4.') },
+  // DL 7 Oct (iv). ACCEPTED RESIDUAL (DL 7 Oct): a third party as the subject of a prospective sentence, with the
+  // drafter copying that third party into the option label. Contrived; documented so a change in it is seen.
+  { name: 'H1 ACCEPTED RESIDUAL (DL 7 Oct): third-party prospective sentence, label "Clinic next door Saturday sessions"', expected: true, input: () => relabelled('The clinic next door would open for 4 Saturday sessions each month.', 'Clinic next door Saturday sessions') },
+  // DL 7 Oct (v): schema-impossible drafter output refuses (and logs) instead of throwing.
+  { name: 'X outcomes absent: no throw, refuses', expected: false, input: () => malformed(m => { delete m.outcomes; }) },
+  { name: 'X constraints absent: no throw, refuses', expected: false, input: () => malformed(m => { delete m.constraints; }) },
+  { name: 'X goal.metric null: no throw, refuses', expected: false, input: () => malformed(m => { m.goal.metric = null; }) },
 ];
 export const r2Rows: Row[] = r2Cases.map(c => ({ name: c.name, run: () => {
   const i = c.input(), o = i.model.options.find(o => o.label === i.option)!;
@@ -163,3 +201,19 @@ export function longSentenceRow(verify = verifiedOptionSetting): { small: number
 }
 r2Rows.push({ name: 'P0b one 5k to 20k sentence of 278 to 1,112 clauses: refused, scaling <8x (min of 5)', run: () => { assert.ok(longSentenceRow().ratio < 8); } });
 describe('round 2 general, linear and fail-closed', () => { for (const row of r2Rows) it(row.name, row.run); });
+describe('DL 7 Oct (v): a malformed draft refuses and logs; a well-formed refusal does not log', () => {
+  const run = (i: ReturnType<typeof clinicCase>): { verified: boolean; logged: boolean } => {
+    const spy = vi.spyOn(log, 'warn').mockImplementation(() => undefined as never);
+    try {
+      const o = i.model.options.find(o => o.label === i.option)!;
+      const verified = verifiedOptionSetting(i.model, o, level(i.model, i.option, i.factor), i.brief);
+      return { verified, logged: spy.mock.calls.some(c => (c[0] as { event?: string } | undefined)?.event === 'agent_lane.stated_setting_unverifiable') };
+    } finally { spy.mockRestore(); }
+  };
+  it('X outcomes absent: refuses and logs agent_lane.stated_setting_unverifiable', () => {
+    assert.deepEqual(run(malformed(m => { delete m.outcomes; })), { verified: false, logged: true });
+  });
+  it('X control: R5 (well-formed, refused by the neighbour rule) does not log', () => {
+    assert.deepEqual(run(clinicCase('Olumi suggested these options in its last reply. ' + S)), { verified: false, logged: false });
+  });
+});
