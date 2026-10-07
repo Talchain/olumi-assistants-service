@@ -115,6 +115,13 @@ import type { RoutedCoachingIntent } from './typed-intent-directive.js';
 const CHIP_ID_INTENT: ReadonlyMap<string, RoutedCoachingIntent> = new Map([
   ['chip_prompt_run_pre_mortem', 'pre_mortem'],
   ['chip_action_run_pre_mortem', 'pre_mortem'],
+  // The proactive DSK-P-002 offer's ENGAGE chip
+  // (`coaching/outside-view-offer.ts`). Clicking it asks for the method, so it
+  // resolves to the method. Its sibling DECLINE chip is deliberately NOT here
+  // and deliberately does not spell a routed intent — mapping a refusal to
+  // `outside_view` would make "Not now" invoke the exercise. See
+  // `OUTSIDE_VIEW_DECLINE_CHIP_ID`.
+  ['chip_prompt_outside_view_engage', 'outside_view'],
 ]);
 
 /**

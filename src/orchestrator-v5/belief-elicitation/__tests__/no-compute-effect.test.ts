@@ -113,6 +113,11 @@ const PERMITTED_CONSUMERS: Readonly<Record<string, string>> = {
     'the pre-route: composes a direct answer, commits with handler_facts: [] and pending_actions: []',
   'cee/belief-elicitation/index.ts':
     'the 2.722 guard: imports the grammar predicate only, to ASK instead of collapsing',
+  'orchestrator-v5/coaching/outside-view-offer.ts':
+    'the proactive DSK-P-002 offer: imports REFERENCE_CLASS_CONFIRM_PREFIX (a string constant) '
+    + 'ONLY to recognise the product\u2019s own confirm literal in durable turn history, so a '
+    + 'completed outside view suppresses a repeat offer. It derives the marker instead of '
+    + 'transcribing it. No posterior, no counts, no graph write, no ISL field, nothing to compute.',
 };
 
 describe('T7 — the compute boundary exists and is named', () => {
