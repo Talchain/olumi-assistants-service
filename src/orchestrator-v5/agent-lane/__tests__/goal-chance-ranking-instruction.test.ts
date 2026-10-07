@@ -41,10 +41,15 @@ describe('ruling C: the model sees the Run\'s goal-chance licence beside the cha
     expect((await canonicalState(withLicence(null))).analysis).not.toHaveProperty('goal_chance_licence');
   });
 
-  it('a withheld leader drops the chances (W3) — and the licence with them', async () => {
+  // ⛔ RE-PINNED (Science 393023, PR-S2; DL #87 6027191347 C1 supersedes W3's 29 Sep drop): the screen shows each licensed
+  // option's chance whatever the win-share leader licence says (DGAI `goalChanceHeroSays` has no leader gate), so a withheld
+  // leader keeps the chances and their licence for the Agent. Leader permission still governs naming a leader only.
+  it('a withheld leader keeps the licensed chances and their licence (C1 supersedes W3)', async () => {
     const read = withLicence(LICENCE);
     read.analysis_state.leader_claim = { permitted: false, withheld_reason: 'constraint_verdict_withheld' };
-    expect((await canonicalState(read)).analysis).not.toHaveProperty('goal_chance_licence');
+    const analysis = (await canonicalState(read)).analysis;
+    expect(analysis).toHaveProperty('goal_chance_licence');
+    expect(analysis).toHaveProperty('goal_chance_display');
   });
 
   it('Codex r2 #3: the Agent reader refuses a record at odds with itself (DGAI refuses the same records)', () => {

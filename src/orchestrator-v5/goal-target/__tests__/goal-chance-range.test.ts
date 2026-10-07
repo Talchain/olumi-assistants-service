@@ -181,6 +181,23 @@ describe('ruling 1: a range belongs to one option and one unsized path link', ()
     'unusable group endpoints/counts fail closed: %j', patch => absent(envelope(), graph(), inputs([row(patch)])),
   );
 
+  // ⛔ S1 review r2 #1 (DL 6028386916): an unsized link OFF this option's path outranking the on-path one makes "Of the
+  // links not sized yet, it depends most on Price → Revenue" false: no range (Science ruling, fail closed).
+  const offPath = (provenance: Json | undefined): Json => {
+    const g = graph();
+    g.nodes.push({ id: 'market', kind: 'factor', label: 'Market', observed_state: { value: 0.5, baseline: 0.5, raw_value: 50, unit: '£', cap: 100 } });
+    g.edges.push({ from: 'market', to: TO, strength: { mean: 0.5, std: 0.25 }, ...(provenance ? { provenance } : {}) });
+    return g;
+  };
+  const market = row({ quantity_id: `market->${TO}`, from: 'market', to: TO, spread: 0.50 });
+  const price = row({ spread: 0.30 });
+  it.each([{ magnitude: 'olumi_placeholder' }, { mean_projected: true }])('an off-path unsized link (%j) outranks the on-path one: no range', (provenance) => {
+    absent(envelope(), offPath(provenance), inputs([market, price]));
+  });
+  it('CONTROL: the same off-path link, sized, outranks it: the range shows, among unsized_links', () => {
+    expect(goalChanceRangeOf(envelope(), offPath(undefined), A, inputs([market, price]))).toEqual({ ...expected, among: 'unsized_links' });
+  });
+
   it('sized factor outranks the unsized link: among unsized_links; ISL order chooses the link', () => {
     expect(goalChanceRangeOf(envelope(), graph(), A, inputs([
       row(), { kind: 'factor_value', quantity_id: FROM, spread: 0.9, status: 'resolved', correlated: false },

@@ -113,6 +113,7 @@ import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipelin
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
+import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
 import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
@@ -2194,7 +2195,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       };
       // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
       const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
-      return enforceLeaderLicenceAtFinalEgress(replayBody, {
+      // ⭐ PR-S2 r5: a replayed reply never denies the driver the screen shows (`goal-chance-driver-egress.ts`).
+      return withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_replay',
         scopeAuthorityUnavailable: state.scopeAuthorityUnavailable,
@@ -2204,7 +2206,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(typeof replayClaim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: replayClaim.withheld_reason } : {}),
         graph: state.graph ?? null,
         analysisReady: state.analysisReady,
-      }).response;
+      }).response, {
+        analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
+        ...(turnId !== undefined ? { turnId } : {}),
+      });
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
@@ -3940,6 +3945,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (finalEgress.response !== wireBody) {
         const { _answer_shape: _stale, ...withoutShape } = finalEgress.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (finalEgress.proseEdited ? withoutShape : finalEgress.response) as OlumiResponse & Record<string, unknown>;
+      }
+    }
+    /**
+     * ⭐ PR-S2 r5 (prod cut-6 smoke 7 Oct, DL #87): while the Run's screen names what a chance rests on most, the reply
+     * never says no assumption is established or most worth investigating; only that clause goes, logged by code.
+     */
+    {
+      const edited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
+        analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_final',
+        ...(turnId !== undefined ? { turnId } : {}),
+      });
+      if (edited !== wireBody) {
+        const { _answer_shape: _stale, ...withoutShape } = edited as OlumiResponse & { _answer_shape?: unknown };
+        wireBody = withoutShape as OlumiResponse & Record<string, unknown>;
       }
     }
     {
