@@ -33,6 +33,8 @@ export type GoalKind = 'chance_of_event' | 'change' | 'level';
 export const UNIT_HEAD_CUT = /[ \t]{1,4}(?:of|per|for|on|in|by|to)(?:[ \t]{1,4}|$)/i;
 /** A bracketed scale note, bounded: "(0-1)", "(%)", "[0–100%]". */
 export const SCALE_NOTE = /\([^()]{0,40}\)|\[[^[\]]{0,40}\]/g;
+/** Words that open a clause after a chance word: "probability THAT …", "chance WE …", "chance A user …". */
+const CLAUSE_OPENERS = new Set(['that', 'we', 'i', 'you', 'they', 'it', 'a', 'an', 'the', 'our', 'my', 'their', 'each', 'any', 'every']);
 export const CHANCE_WORD = /^(?:likelihoods?|likeliness|chances?|probabilit(?:y|ies)|odds|likely)$/i;
 
 /** True when a goal unit names the chance of an event (Science ruling §2). Units over 200 characters are not read. */
@@ -43,7 +45,10 @@ export function unitNamesAChance(unit: unknown): boolean {
   const measure = (cut === null ? unit : unit.slice(0, cut.index)).replace(SCALE_NOTE, ' ')
     .replace(/[()[\]%,.;:]/g, ' ').trim();
   const words = measure.split(/[ \t]+/).filter((w) => w !== '');
-  return words.length > 0 && CHANCE_WORD.test(words[words.length - 1]!);
+  if (words.length > 0 && CHANCE_WORD.test(words[words.length - 1]!)) return true;
+  // P17: a chance word opening a clause is the measure too ("probability we hit the launch date", "the chance a trial
+  // user converts"); before, the clause's last word was read as the head and the goal read as a plain level.
+  return words.some((w, i) => CHANCE_WORD.test(w) && CLAUSE_OPENERS.has((words[i + 1] ?? '').toLowerCase()));
 }
 
 /** The unit the goal is measured in: its target's unit, else its level's. */
