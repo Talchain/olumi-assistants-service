@@ -1,0 +1,2244 @@
+{
+  "draw1": {
+    "turn": {
+      "kind": "run",
+      "context": {
+        "method": "pre_mortem",
+        "dsk": null,
+        "not_cited": "no_identified_plan",
+        "plan": null,
+        "decision_level": true,
+        "goal_label": "monthly recurring revenue",
+        "current_option_labels": [
+          "Raise prices by 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "price_rise_mrr_uplift->monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Price-rise MRR uplift",
+              "monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "customer_losses_from_price_rise",
+            "kind": "risk",
+            "labels": [
+              "Customer losses from price rise"
+            ],
+            "card": "propose_new_risk"
+          }
+        ],
+        "supplied_figures": []
+      },
+      "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘monthly recurring revenue’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘Raise prices by 10%’, ‘Launch starter tier’, ‘Keep pricing as it is’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Price-rise MRR uplift’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- ‘Customer losses from price rise’ (a risk on an option’s path)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+      "check_inputs": {
+        "decision_level": true,
+        "current_option_labels": [
+          "Raise prices by 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "price_rise_mrr_uplift->monthly_recurring_revenue",
+            "labels": [
+              "Price-rise MRR uplift",
+              "monthly recurring revenue"
+            ]
+          },
+          {
+            "id": "customer_losses_from_price_rise",
+            "labels": [
+              "Customer losses from price rise"
+            ]
+          }
+        ],
+        "model_labels": [
+          "Decision: monthly recurring revenue",
+          "monthly recurring revenue",
+          "Raise prices by 10%",
+          "Launch starter tier",
+          "Keep pricing as it is",
+          "Price rise",
+          "Starter-tier subscribers",
+          "Customer losses from price rise",
+          "Price-rise MRR uplift"
+        ]
+      }
+    },
+    "plans": {
+      "raise_prices_by_10": {
+        "kind": "unavailable",
+        "reason": "no_grounded_item",
+        "reply": "I can’t run the pre-mortem on ‘Launch starter tier’ yet because I have no supported model item to stress-test for it.",
+        "actions": [
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      },
+      "launch_starter_tier": {
+        "kind": "unavailable",
+        "reason": "no_grounded_item",
+        "reply": "I can’t run the pre-mortem on ‘Launch starter tier’ yet because I have no supported model item to stress-test for it.",
+        "actions": [
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      },
+      "keep_pricing_as_it_is": {
+        "kind": "unavailable",
+        "reason": "no_grounded_item",
+        "reply": "I can’t run the pre-mortem on ‘Launch starter tier’ yet because I have no supported model item to stress-test for it.",
+        "actions": [
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      }
+    },
+    "fallback": "Imagine this decision has gone badly. Start with how ‘Price-rise MRR uplift’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+    "settled": {
+      "reply": "Imagine this decision has gone badly. Start with how ‘Price-rise MRR uplift’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+      "passed": false,
+      "failed": [
+        "PM-COUNT",
+        "PM-GROUNDED",
+        "PM-WATCH-MITIGATE",
+        "PM-BLINDSPOT"
+      ],
+      "target": {
+        "id": "price_rise_mrr_uplift->monthly_recurring_revenue",
+        "kind": "link",
+        "labels": [
+          "Price-rise MRR uplift",
+          "monthly recurring revenue"
+        ],
+        "card": "propose_link_strengths"
+      }
+    }
+  },
+  "draw2": {
+    "turn": {
+      "kind": "run",
+      "context": {
+        "method": "pre_mortem",
+        "dsk": null,
+        "not_cited": "no_identified_plan",
+        "plan": null,
+        "decision_level": true,
+        "goal_label": "monthly recurring revenue",
+        "current_option_labels": [
+          "Raise prices by 10%",
+          "Launch starter tier",
+          "Keep pricing as is"
+        ],
+        "supplied_items": [
+          {
+            "id": "monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Monthly recurring revenue lost to price-driven churn",
+              "monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "monthly_recurring_revenue_lost_to_price_driven_churn",
+            "kind": "risk",
+            "labels": [
+              "Monthly recurring revenue lost to price-driven churn"
+            ],
+            "card": "propose_new_risk"
+          }
+        ],
+        "supplied_figures": []
+      },
+      "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘monthly recurring revenue’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘Raise prices by 10%’, ‘Launch starter tier’, ‘Keep pricing as is’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Monthly recurring revenue lost to price-driven churn’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- ‘Monthly recurring revenue lost to price-driven churn’ (a risk on an option’s path)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+      "check_inputs": {
+        "decision_level": true,
+        "current_option_labels": [
+          "Raise prices by 10%",
+          "Launch starter tier",
+          "Keep pricing as is"
+        ],
+        "supplied_items": [
+          {
+            "id": "monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue",
+            "labels": [
+              "Monthly recurring revenue lost to price-driven churn",
+              "monthly recurring revenue"
+            ]
+          },
+          {
+            "id": "monthly_recurring_revenue_lost_to_price_driven_churn",
+            "labels": [
+              "Monthly recurring revenue lost to price-driven churn"
+            ]
+          }
+        ],
+        "model_labels": [
+          "Decision: monthly recurring revenue",
+          "monthly recurring revenue",
+          "Raise prices by 10%",
+          "Launch starter tier",
+          "Keep pricing as is",
+          "Price change from today",
+          "Starter-tier availability",
+          "Price-driven customer losses",
+          "Starter subscribers",
+          "Monthly recurring revenue lost to price-driven churn"
+        ]
+      }
+    },
+    "plans": {
+      "raise_prices_by_10": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "no_identified_plan",
+          "plan": {
+            "option_id": "raise_prices_by_10",
+            "label": "Raise prices by 10%",
+            "basis": "user_selected"
+          },
+          "goal_label": "monthly recurring revenue",
+          "current_option_labels": [
+            "Raise prices by 10%",
+            "Launch starter tier",
+            "Keep pricing as is"
+          ],
+          "supplied_items": [
+            {
+              "id": "monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue",
+              "kind": "link",
+              "labels": [
+                "Monthly recurring revenue lost to price-driven churn",
+                "monthly recurring revenue"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "monthly_recurring_revenue_lost_to_price_driven_churn",
+              "kind": "risk",
+              "labels": [
+                "Monthly recurring revenue lost to price-driven churn"
+              ],
+              "card": "propose_new_risk"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Raise prices by 10%’. The goal is ‘monthly recurring revenue’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Raise prices by 10%’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Monthly recurring revenue lost to price-driven churn’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- ‘Monthly recurring revenue lost to price-driven churn’ (a risk on this plan’s path)\nName no option other than ‘Raise prices by 10%’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "Raise prices by 10%",
+          "current_option_labels": [
+            "Raise prices by 10%",
+            "Launch starter tier",
+            "Keep pricing as is"
+          ],
+          "supplied_items": [
+            {
+              "id": "monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue",
+              "labels": [
+                "Monthly recurring revenue lost to price-driven churn",
+                "monthly recurring revenue"
+              ]
+            },
+            {
+              "id": "monthly_recurring_revenue_lost_to_price_driven_churn",
+              "labels": [
+                "Monthly recurring revenue lost to price-driven churn"
+              ]
+            }
+          ],
+          "model_labels": [
+            "Decision: monthly recurring revenue",
+            "monthly recurring revenue",
+            "Raise prices by 10%",
+            "Launch starter tier",
+            "Keep pricing as is",
+            "Price change from today",
+            "Starter-tier availability",
+            "Price-driven customer losses",
+            "Starter subscribers",
+            "Monthly recurring revenue lost to price-driven churn"
+          ]
+        }
+      },
+      "launch_starter_tier": {
+        "kind": "unavailable",
+        "reason": "no_grounded_item",
+        "reply": "I can’t run the pre-mortem on ‘Launch starter tier’ yet because I have no supported model item to stress-test for it.",
+        "actions": [
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      },
+      "keep_pricing_as_is": {
+        "kind": "choose_plan",
+        "reply": "Which option do you want to stress-test?",
+        "actions": [
+          {
+            "id": "agent-premortem-plan:69a461c3bac3",
+            "label": "‘Launch starter tier’",
+            "message": "Run a pre-mortem on ‘Launch starter tier’."
+          },
+          {
+            "id": "agent-premortem-plan:b25910e8cfb4",
+            "label": "‘Raise prices by 10%’",
+            "message": "Run a pre-mortem on ‘Raise prices by 10%’."
+          },
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      }
+    },
+    "fallback": "Imagine this decision has gone badly. Start with how ‘Monthly recurring revenue lost to price-driven churn’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+    "settled": {
+      "reply": "Imagine this decision has gone badly. Start with how ‘Monthly recurring revenue lost to price-driven churn’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+      "passed": false,
+      "failed": [
+        "PM-COUNT",
+        "PM-GROUNDED",
+        "PM-WATCH-MITIGATE",
+        "PM-BLINDSPOT"
+      ],
+      "target": {
+        "id": "monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue",
+        "kind": "link",
+        "labels": [
+          "Monthly recurring revenue lost to price-driven churn",
+          "monthly recurring revenue"
+        ],
+        "card": "propose_link_strengths"
+      }
+    }
+  },
+  "w9b-2": {
+    "turn": {
+      "kind": "run",
+      "context": {
+        "method": "pre_mortem",
+        "dsk": null,
+        "not_cited": "no_identified_plan",
+        "plan": null,
+        "decision_level": true,
+        "goal_label": "monthly recurring revenue",
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Starter-tier monthly recurring revenue",
+              "monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "starter_tier_monthly_price->starter_tier_monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Starter-tier monthly price",
+              "Starter-tier monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "starter_tier_monthly_price",
+            "kind": "factor",
+            "labels": [
+              "Starter-tier monthly price"
+            ],
+            "card": "propose_assumptions"
+          },
+          {
+            "id": "starter_tier_launched",
+            "kind": "factor",
+            "labels": [
+              "Starter tier launched"
+            ],
+            "card": "propose_assumptions"
+          },
+          {
+            "id": "customers_lost_after_price_rise",
+            "kind": "risk",
+            "labels": [
+              "Customers lost after price rise"
+            ],
+            "card": "propose_new_risk"
+          }
+        ],
+        "supplied_figures": []
+      },
+      "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘monthly recurring revenue’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘Raise prices 10%’, ‘Launch starter tier’, ‘Keep pricing as it is’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- how ‘Starter-tier monthly price’ affects ‘Starter-tier monthly recurring revenue’ (nobody has sized this yet)\n- ‘Starter-tier monthly price’ (a figure Olumi estimated)\n- ‘Starter tier launched’ (a figure Olumi estimated)\n- ‘Customers lost after price rise’ (a risk on an option’s path)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+      "check_inputs": {
+        "decision_level": true,
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+            "labels": [
+              "Starter-tier monthly recurring revenue",
+              "monthly recurring revenue"
+            ]
+          },
+          {
+            "id": "starter_tier_monthly_price->starter_tier_monthly_recurring_revenue",
+            "labels": [
+              "Starter-tier monthly price",
+              "Starter-tier monthly recurring revenue"
+            ]
+          },
+          {
+            "id": "starter_tier_monthly_price",
+            "labels": [
+              "Starter-tier monthly price"
+            ]
+          },
+          {
+            "id": "starter_tier_launched",
+            "labels": [
+              "Starter tier launched"
+            ]
+          },
+          {
+            "id": "customers_lost_after_price_rise",
+            "labels": [
+              "Customers lost after price rise"
+            ]
+          }
+        ],
+        "model_labels": [
+          "Decision: monthly recurring revenue",
+          "monthly recurring revenue",
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is",
+          "Price rise",
+          "Starter tier launched",
+          "Starter-tier monthly price",
+          "Customers lost after price rise",
+          "Starter-tier subscribers",
+          "Starter-tier monthly recurring revenue"
+        ]
+      }
+    },
+    "plans": {
+      "raise_prices_10": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "no_identified_plan",
+          "plan": {
+            "option_id": "raise_prices_10",
+            "label": "Raise prices 10%",
+            "basis": "user_selected"
+          },
+          "goal_label": "monthly recurring revenue",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "customers_lost_after_price_rise",
+              "kind": "risk",
+              "labels": [
+                "Customers lost after price rise"
+              ],
+              "card": "propose_new_risk"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Raise prices 10%’. The goal is ‘monthly recurring revenue’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Raise prices 10%’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- ‘Customers lost after price rise’ (a risk on this plan’s path)\nName no option other than ‘Raise prices 10%’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "Raise prices 10%",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "customers_lost_after_price_rise",
+              "labels": [
+                "Customers lost after price rise"
+              ]
+            }
+          ],
+          "model_labels": [
+            "Decision: monthly recurring revenue",
+            "monthly recurring revenue",
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is",
+            "Price rise",
+            "Starter tier launched",
+            "Starter-tier monthly price",
+            "Customers lost after price rise",
+            "Starter-tier subscribers",
+            "Starter-tier monthly recurring revenue"
+          ]
+        }
+      },
+      "launch_starter_tier": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "no_identified_plan",
+          "plan": {
+            "option_id": "launch_starter_tier",
+            "label": "Launch starter tier",
+            "basis": "user_selected"
+          },
+          "goal_label": "monthly recurring revenue",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+              "kind": "link",
+              "labels": [
+                "Starter-tier monthly recurring revenue",
+                "monthly recurring revenue"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "starter_tier_monthly_price->starter_tier_monthly_recurring_revenue",
+              "kind": "link",
+              "labels": [
+                "Starter-tier monthly price",
+                "Starter-tier monthly recurring revenue"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "starter_tier_monthly_price",
+              "kind": "factor",
+              "labels": [
+                "Starter-tier monthly price"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "starter_tier_launched",
+              "kind": "factor",
+              "labels": [
+                "Starter tier launched"
+              ],
+              "card": "propose_assumptions"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Launch starter tier’. The goal is ‘monthly recurring revenue’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Launch starter tier’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- how ‘Starter-tier monthly price’ affects ‘Starter-tier monthly recurring revenue’ (nobody has sized this yet)\n- ‘Starter-tier monthly price’ (a figure Olumi estimated)\n- ‘Starter tier launched’ (a figure Olumi estimated)\nName no option other than ‘Launch starter tier’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "Launch starter tier",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+              "labels": [
+                "Starter-tier monthly recurring revenue",
+                "monthly recurring revenue"
+              ]
+            },
+            {
+              "id": "starter_tier_monthly_price->starter_tier_monthly_recurring_revenue",
+              "labels": [
+                "Starter-tier monthly price",
+                "Starter-tier monthly recurring revenue"
+              ]
+            },
+            {
+              "id": "starter_tier_monthly_price",
+              "labels": [
+                "Starter-tier monthly price"
+              ]
+            },
+            {
+              "id": "starter_tier_launched",
+              "labels": [
+                "Starter tier launched"
+              ]
+            }
+          ],
+          "model_labels": [
+            "Decision: monthly recurring revenue",
+            "monthly recurring revenue",
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is",
+            "Price rise",
+            "Starter tier launched",
+            "Starter-tier monthly price",
+            "Customers lost after price rise",
+            "Starter-tier subscribers",
+            "Starter-tier monthly recurring revenue"
+          ]
+        }
+      },
+      "keep_pricing_as_it_is": {
+        "kind": "choose_plan",
+        "reply": "Which option do you want to stress-test?",
+        "actions": [
+          {
+            "id": "agent-premortem-plan:69a461c3bac3",
+            "label": "‘Launch starter tier’",
+            "message": "Run a pre-mortem on ‘Launch starter tier’."
+          },
+          {
+            "id": "agent-premortem-plan:c8b553c4cf02",
+            "label": "‘Raise prices 10%’",
+            "message": "Run a pre-mortem on ‘Raise prices 10%’."
+          },
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      }
+    },
+    "fallback": "Imagine this decision has gone badly. Start with how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+    "settled": {
+      "reply": "Imagine this decision has gone badly. Start with how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+      "passed": false,
+      "failed": [
+        "PM-COUNT",
+        "PM-GROUNDED",
+        "PM-WATCH-MITIGATE",
+        "PM-BLINDSPOT"
+      ],
+      "target": {
+        "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+        "kind": "link",
+        "labels": [
+          "Starter-tier monthly recurring revenue",
+          "monthly recurring revenue"
+        ],
+        "card": "propose_link_strengths"
+      }
+    }
+  },
+  "w9b-3": {
+    "turn": {
+      "kind": "run",
+      "context": {
+        "method": "pre_mortem",
+        "dsk": null,
+        "not_cited": "no_identified_plan",
+        "plan": null,
+        "decision_level": true,
+        "goal_label": "monthly recurring revenue",
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Starter-tier monthly recurring revenue",
+              "monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "starter_monthly_price->starter_tier_monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Starter monthly price",
+              "Starter-tier monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          }
+        ],
+        "supplied_figures": []
+      },
+      "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘monthly recurring revenue’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘Raise prices 10%’, ‘Launch starter tier’, ‘Keep pricing as it is’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- how ‘Starter monthly price’ affects ‘Starter-tier monthly recurring revenue’ (nobody has sized this yet)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+      "check_inputs": {
+        "decision_level": true,
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+            "labels": [
+              "Starter-tier monthly recurring revenue",
+              "monthly recurring revenue"
+            ]
+          },
+          {
+            "id": "starter_monthly_price->starter_tier_monthly_recurring_revenue",
+            "labels": [
+              "Starter monthly price",
+              "Starter-tier monthly recurring revenue"
+            ]
+          }
+        ],
+        "model_labels": [
+          "Decision: monthly recurring revenue",
+          "monthly recurring revenue",
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is",
+          "Existing-customer price rise",
+          "Starter subscribers",
+          "Starter monthly price",
+          "Customers lost to price rise",
+          "Starter-tier monthly recurring revenue"
+        ]
+      }
+    },
+    "plans": {
+      "raise_prices_10": {
+        "kind": "unavailable",
+        "reason": "no_grounded_item",
+        "reply": "I can’t run the pre-mortem on ‘Raise prices 10%’ yet because I have no supported model item to stress-test for it.",
+        "actions": [
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      },
+      "launch_starter_tier": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "no_identified_plan",
+          "plan": {
+            "option_id": "launch_starter_tier",
+            "label": "Launch starter tier",
+            "basis": "user_selected"
+          },
+          "goal_label": "monthly recurring revenue",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+              "kind": "link",
+              "labels": [
+                "Starter-tier monthly recurring revenue",
+                "monthly recurring revenue"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "starter_monthly_price->starter_tier_monthly_recurring_revenue",
+              "kind": "link",
+              "labels": [
+                "Starter monthly price",
+                "Starter-tier monthly recurring revenue"
+              ],
+              "card": "propose_link_strengths"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Launch starter tier’. The goal is ‘monthly recurring revenue’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Launch starter tier’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- how ‘Starter monthly price’ affects ‘Starter-tier monthly recurring revenue’ (nobody has sized this yet)\nName no option other than ‘Launch starter tier’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "Launch starter tier",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+              "labels": [
+                "Starter-tier monthly recurring revenue",
+                "monthly recurring revenue"
+              ]
+            },
+            {
+              "id": "starter_monthly_price->starter_tier_monthly_recurring_revenue",
+              "labels": [
+                "Starter monthly price",
+                "Starter-tier monthly recurring revenue"
+              ]
+            }
+          ],
+          "model_labels": [
+            "Decision: monthly recurring revenue",
+            "monthly recurring revenue",
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is",
+            "Existing-customer price rise",
+            "Starter subscribers",
+            "Starter monthly price",
+            "Customers lost to price rise",
+            "Starter-tier monthly recurring revenue"
+          ]
+        }
+      },
+      "keep_pricing_as_it_is": {
+        "kind": "choose_plan",
+        "reply": "Which option do you want to stress-test?",
+        "actions": [
+          {
+            "id": "agent-premortem-plan:69a461c3bac3",
+            "label": "‘Launch starter tier’",
+            "message": "Run a pre-mortem on ‘Launch starter tier’."
+          },
+          {
+            "id": "agent-premortem-plan:c8b553c4cf02",
+            "label": "‘Raise prices 10%’",
+            "message": "Run a pre-mortem on ‘Raise prices 10%’."
+          },
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      }
+    },
+    "fallback": "Imagine this decision has gone badly. Start with how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+    "settled": {
+      "reply": "Imagine this decision has gone badly. Start with how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+      "passed": false,
+      "failed": [
+        "PM-COUNT",
+        "PM-GROUNDED",
+        "PM-WATCH-MITIGATE",
+        "PM-BLINDSPOT"
+      ],
+      "target": {
+        "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+        "kind": "link",
+        "labels": [
+          "Starter-tier monthly recurring revenue",
+          "monthly recurring revenue"
+        ],
+        "card": "propose_link_strengths"
+      }
+    }
+  },
+  "C": {
+    "turn": {
+      "kind": "run",
+      "context": {
+        "method": "pre_mortem",
+        "dsk": null,
+        "not_cited": "no_identified_plan",
+        "plan": null,
+        "decision_level": true,
+        "goal_label": "monthly recurring revenue",
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "support_capacity_strain->monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Support capacity strain",
+              "monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "starter_tier_subscribers->starter_tier_support_cost",
+            "kind": "link",
+            "labels": [
+              "Starter tier subscribers",
+              "Starter tier support cost"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "price_rise_churn",
+            "kind": "risk",
+            "labels": [
+              "Price-rise churn"
+            ],
+            "card": "propose_new_risk"
+          },
+          {
+            "id": "support_capacity_strain",
+            "kind": "risk",
+            "labels": [
+              "Support capacity strain"
+            ],
+            "card": "propose_new_risk"
+          }
+        ],
+        "supplied_figures": []
+      },
+      "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘monthly recurring revenue’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘Raise prices 10%’, ‘Launch starter tier’, ‘Keep pricing as it is’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Support capacity strain’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- how ‘Starter tier subscribers’ affects ‘Starter tier support cost’ (nobody has sized this yet)\n- ‘Price-rise churn’ (a risk on an option’s path)\n- ‘Support capacity strain’ (a risk on an option’s path)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+      "check_inputs": {
+        "decision_level": true,
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "support_capacity_strain->monthly_recurring_revenue",
+            "labels": [
+              "Support capacity strain",
+              "monthly recurring revenue"
+            ]
+          },
+          {
+            "id": "starter_tier_subscribers->starter_tier_support_cost",
+            "labels": [
+              "Starter tier subscribers",
+              "Starter tier support cost"
+            ]
+          },
+          {
+            "id": "price_rise_churn",
+            "labels": [
+              "Price-rise churn"
+            ]
+          },
+          {
+            "id": "support_capacity_strain",
+            "labels": [
+              "Support capacity strain"
+            ]
+          }
+        ],
+        "model_labels": [
+          "Decision: monthly recurring revenue",
+          "monthly recurring revenue",
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is",
+          "Price rise",
+          "Starter tier subscribers",
+          "Support cost per starter subscriber",
+          "Price-rise churn",
+          "Support capacity strain",
+          "Starter tier support cost"
+        ]
+      }
+    },
+    "plans": {
+      "raise_prices_10": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "no_identified_plan",
+          "plan": {
+            "option_id": "raise_prices_10",
+            "label": "Raise prices 10%",
+            "basis": "user_selected"
+          },
+          "goal_label": "monthly recurring revenue",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "price_rise_churn",
+              "kind": "risk",
+              "labels": [
+                "Price-rise churn"
+              ],
+              "card": "propose_new_risk"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Raise prices 10%’. The goal is ‘monthly recurring revenue’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Raise prices 10%’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- ‘Price-rise churn’ (a risk on this plan’s path)\nName no option other than ‘Raise prices 10%’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "Raise prices 10%",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "price_rise_churn",
+              "labels": [
+                "Price-rise churn"
+              ]
+            }
+          ],
+          "model_labels": [
+            "Decision: monthly recurring revenue",
+            "monthly recurring revenue",
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is",
+            "Price rise",
+            "Starter tier subscribers",
+            "Support cost per starter subscriber",
+            "Price-rise churn",
+            "Support capacity strain",
+            "Starter tier support cost"
+          ]
+        }
+      },
+      "launch_starter_tier": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "no_identified_plan",
+          "plan": {
+            "option_id": "launch_starter_tier",
+            "label": "Launch starter tier",
+            "basis": "user_selected"
+          },
+          "goal_label": "monthly recurring revenue",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "support_capacity_strain->monthly_recurring_revenue",
+              "kind": "link",
+              "labels": [
+                "Support capacity strain",
+                "monthly recurring revenue"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "starter_tier_subscribers->starter_tier_support_cost",
+              "kind": "link",
+              "labels": [
+                "Starter tier subscribers",
+                "Starter tier support cost"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "support_capacity_strain",
+              "kind": "risk",
+              "labels": [
+                "Support capacity strain"
+              ],
+              "card": "propose_new_risk"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Launch starter tier’. The goal is ‘monthly recurring revenue’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Launch starter tier’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Support capacity strain’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- how ‘Starter tier subscribers’ affects ‘Starter tier support cost’ (nobody has sized this yet)\n- ‘Support capacity strain’ (a risk on this plan’s path)\nName no option other than ‘Launch starter tier’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "Launch starter tier",
+          "current_option_labels": [
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is"
+          ],
+          "supplied_items": [
+            {
+              "id": "support_capacity_strain->monthly_recurring_revenue",
+              "labels": [
+                "Support capacity strain",
+                "monthly recurring revenue"
+              ]
+            },
+            {
+              "id": "starter_tier_subscribers->starter_tier_support_cost",
+              "labels": [
+                "Starter tier subscribers",
+                "Starter tier support cost"
+              ]
+            },
+            {
+              "id": "support_capacity_strain",
+              "labels": [
+                "Support capacity strain"
+              ]
+            }
+          ],
+          "model_labels": [
+            "Decision: monthly recurring revenue",
+            "monthly recurring revenue",
+            "Raise prices 10%",
+            "Launch starter tier",
+            "Keep pricing as it is",
+            "Price rise",
+            "Starter tier subscribers",
+            "Support cost per starter subscriber",
+            "Price-rise churn",
+            "Support capacity strain",
+            "Starter tier support cost"
+          ]
+        }
+      },
+      "keep_pricing_as_it_is": {
+        "kind": "choose_plan",
+        "reply": "Which option do you want to stress-test?",
+        "actions": [
+          {
+            "id": "agent-premortem-plan:69a461c3bac3",
+            "label": "‘Launch starter tier’",
+            "message": "Run a pre-mortem on ‘Launch starter tier’."
+          },
+          {
+            "id": "agent-premortem-plan:c8b553c4cf02",
+            "label": "‘Raise prices 10%’",
+            "message": "Run a pre-mortem on ‘Raise prices 10%’."
+          },
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      }
+    },
+    "fallback": "Imagine this decision has gone badly. Start with how ‘Support capacity strain’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+    "settled": {
+      "reply": "Imagine this decision has gone badly. Start with how ‘Support capacity strain’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+      "passed": false,
+      "failed": [
+        "PM-COUNT",
+        "PM-GROUNDED",
+        "PM-WATCH-MITIGATE",
+        "PM-BLINDSPOT"
+      ],
+      "target": {
+        "id": "support_capacity_strain->monthly_recurring_revenue",
+        "kind": "link",
+        "labels": [
+          "Support capacity strain",
+          "monthly recurring revenue"
+        ],
+        "card": "propose_link_strengths"
+      }
+    }
+  },
+  "A-Q-D1-BUILD": {
+    "turn": {
+      "kind": "run",
+      "context": {
+        "method": "pre_mortem",
+        "dsk": null,
+        "not_cited": "no_identified_plan",
+        "plan": null,
+        "decision_level": true,
+        "goal_label": "Quarterly revenue",
+        "current_option_labels": [
+          "AI Reporting Module Sprint",
+          "Integration Bug Fix Sprint",
+          "Split Sprint Capacity",
+          "Continue Current Plan"
+        ],
+        "supplied_items": [
+          {
+            "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+            "kind": "link",
+            "labels": [
+              "AI reporting module availability",
+              "Enterprise prospect signing likelihood"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+            "kind": "link",
+            "labels": [
+              "Integration-step bug resolution",
+              "Trial profile abandonment rate"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+            "kind": "link",
+            "labels": [
+              "Sprint capacity for AI reporting",
+              "AI reporting module availability"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+            "kind": "link",
+            "labels": [
+              "Sprint capacity for integration fix",
+              "Integration-step bug resolution"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "enterprise_prospect_signing_likelihood",
+            "kind": "factor",
+            "labels": [
+              "Enterprise prospect signing likelihood"
+            ],
+            "card": "propose_assumptions"
+          },
+          {
+            "id": "ai_reporting_module_availability",
+            "kind": "factor",
+            "labels": [
+              "AI reporting module availability"
+            ],
+            "card": "propose_assumptions"
+          },
+          {
+            "id": "sprint_capacity_for_ai_reporting",
+            "kind": "factor",
+            "labels": [
+              "Sprint capacity for AI reporting"
+            ],
+            "card": "propose_assumptions"
+          },
+          {
+            "id": "sprint_capacity_for_integration_fix",
+            "kind": "factor",
+            "labels": [
+              "Sprint capacity for integration fix"
+            ],
+            "card": "propose_assumptions"
+          },
+          {
+            "id": "revenue_lost_to_trial_abandonment",
+            "kind": "risk",
+            "labels": [
+              "Revenue lost to trial abandonment"
+            ],
+            "card": "propose_new_risk"
+          }
+        ],
+        "supplied_figures": []
+      },
+      "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘Quarterly revenue’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘AI Reporting Module Sprint’, ‘Integration Bug Fix Sprint’, ‘Split Sprint Capacity’, ‘Continue Current Plan’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘AI reporting module availability’ affects ‘Enterprise prospect signing likelihood’ (nobody has sized this yet)\n- how ‘Integration-step bug resolution’ affects ‘Trial profile abandonment rate’ (nobody has sized this yet)\n- how ‘Sprint capacity for AI reporting’ affects ‘AI reporting module availability’ (nobody has sized this yet)\n- how ‘Sprint capacity for integration fix’ affects ‘Integration-step bug resolution’ (nobody has sized this yet)\n- ‘Enterprise prospect signing likelihood’ (a figure Olumi estimated)\n- ‘AI reporting module availability’ (a figure Olumi estimated)\n- ‘Sprint capacity for AI reporting’ (a figure Olumi estimated)\n- ‘Sprint capacity for integration fix’ (a figure Olumi estimated)\n- ‘Revenue lost to trial abandonment’ (a risk on an option’s path)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+      "check_inputs": {
+        "decision_level": true,
+        "current_option_labels": [
+          "AI Reporting Module Sprint",
+          "Integration Bug Fix Sprint",
+          "Split Sprint Capacity",
+          "Continue Current Plan"
+        ],
+        "supplied_items": [
+          {
+            "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+            "labels": [
+              "AI reporting module availability",
+              "Enterprise prospect signing likelihood"
+            ]
+          },
+          {
+            "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+            "labels": [
+              "Integration-step bug resolution",
+              "Trial profile abandonment rate"
+            ]
+          },
+          {
+            "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+            "labels": [
+              "Sprint capacity for AI reporting",
+              "AI reporting module availability"
+            ]
+          },
+          {
+            "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+            "labels": [
+              "Sprint capacity for integration fix",
+              "Integration-step bug resolution"
+            ]
+          },
+          {
+            "id": "enterprise_prospect_signing_likelihood",
+            "labels": [
+              "Enterprise prospect signing likelihood"
+            ]
+          },
+          {
+            "id": "ai_reporting_module_availability",
+            "labels": [
+              "AI reporting module availability"
+            ]
+          },
+          {
+            "id": "sprint_capacity_for_ai_reporting",
+            "labels": [
+              "Sprint capacity for AI reporting"
+            ]
+          },
+          {
+            "id": "sprint_capacity_for_integration_fix",
+            "labels": [
+              "Sprint capacity for integration fix"
+            ]
+          },
+          {
+            "id": "revenue_lost_to_trial_abandonment",
+            "labels": [
+              "Revenue lost to trial abandonment"
+            ]
+          }
+        ],
+        "model_labels": [
+          "How should I approach this trade-off?",
+          "Quarterly revenue",
+          "AI Reporting Module Sprint",
+          "Integration Bug Fix Sprint",
+          "Split Sprint Capacity",
+          "Continue Current Plan",
+          "Sprint capacity for AI reporting",
+          "Sprint capacity for integration fix",
+          "AI reporting module availability",
+          "Enterprise prospect signing likelihood",
+          "Integration-step bug resolution",
+          "Trial profile abandonment rate",
+          "Revenue lost to trial abandonment"
+        ]
+      }
+    },
+    "plans": {
+      "ai_reporting_module_sprint": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "no_identified_plan",
+          "plan": {
+            "option_id": "ai_reporting_module_sprint",
+            "label": "AI Reporting Module Sprint",
+            "basis": "user_selected"
+          },
+          "goal_label": "Quarterly revenue",
+          "current_option_labels": [
+            "AI Reporting Module Sprint",
+            "Integration Bug Fix Sprint",
+            "Split Sprint Capacity",
+            "Continue Current Plan"
+          ],
+          "supplied_items": [
+            {
+              "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+              "kind": "link",
+              "labels": [
+                "AI reporting module availability",
+                "Enterprise prospect signing likelihood"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+              "kind": "link",
+              "labels": [
+                "Integration-step bug resolution",
+                "Trial profile abandonment rate"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+              "kind": "link",
+              "labels": [
+                "Sprint capacity for AI reporting",
+                "AI reporting module availability"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+              "kind": "link",
+              "labels": [
+                "Sprint capacity for integration fix",
+                "Integration-step bug resolution"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "enterprise_prospect_signing_likelihood",
+              "kind": "factor",
+              "labels": [
+                "Enterprise prospect signing likelihood"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "ai_reporting_module_availability",
+              "kind": "factor",
+              "labels": [
+                "AI reporting module availability"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "sprint_capacity_for_ai_reporting",
+              "kind": "factor",
+              "labels": [
+                "Sprint capacity for AI reporting"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "sprint_capacity_for_integration_fix",
+              "kind": "factor",
+              "labels": [
+                "Sprint capacity for integration fix"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "revenue_lost_to_trial_abandonment",
+              "kind": "risk",
+              "labels": [
+                "Revenue lost to trial abandonment"
+              ],
+              "card": "propose_new_risk"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘AI Reporting Module Sprint’. The goal is ‘Quarterly revenue’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘AI Reporting Module Sprint’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘AI reporting module availability’ affects ‘Enterprise prospect signing likelihood’ (nobody has sized this yet)\n- how ‘Integration-step bug resolution’ affects ‘Trial profile abandonment rate’ (nobody has sized this yet)\n- how ‘Sprint capacity for AI reporting’ affects ‘AI reporting module availability’ (nobody has sized this yet)\n- how ‘Sprint capacity for integration fix’ affects ‘Integration-step bug resolution’ (nobody has sized this yet)\n- ‘Enterprise prospect signing likelihood’ (a figure Olumi estimated)\n- ‘AI reporting module availability’ (a figure Olumi estimated)\n- ‘Sprint capacity for AI reporting’ (a figure Olumi estimated)\n- ‘Sprint capacity for integration fix’ (a figure Olumi estimated)\n- ‘Revenue lost to trial abandonment’ (a risk on this plan’s path)\nName no option other than ‘AI Reporting Module Sprint’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "AI Reporting Module Sprint",
+          "current_option_labels": [
+            "AI Reporting Module Sprint",
+            "Integration Bug Fix Sprint",
+            "Split Sprint Capacity",
+            "Continue Current Plan"
+          ],
+          "supplied_items": [
+            {
+              "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+              "labels": [
+                "AI reporting module availability",
+                "Enterprise prospect signing likelihood"
+              ]
+            },
+            {
+              "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+              "labels": [
+                "Integration-step bug resolution",
+                "Trial profile abandonment rate"
+              ]
+            },
+            {
+              "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+              "labels": [
+                "Sprint capacity for AI reporting",
+                "AI reporting module availability"
+              ]
+            },
+            {
+              "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+              "labels": [
+                "Sprint capacity for integration fix",
+                "Integration-step bug resolution"
+              ]
+            },
+            {
+              "id": "enterprise_prospect_signing_likelihood",
+              "labels": [
+                "Enterprise prospect signing likelihood"
+              ]
+            },
+            {
+              "id": "ai_reporting_module_availability",
+              "labels": [
+                "AI reporting module availability"
+              ]
+            },
+            {
+              "id": "sprint_capacity_for_ai_reporting",
+              "labels": [
+                "Sprint capacity for AI reporting"
+              ]
+            },
+            {
+              "id": "sprint_capacity_for_integration_fix",
+              "labels": [
+                "Sprint capacity for integration fix"
+              ]
+            },
+            {
+              "id": "revenue_lost_to_trial_abandonment",
+              "labels": [
+                "Revenue lost to trial abandonment"
+              ]
+            }
+          ],
+          "model_labels": [
+            "How should I approach this trade-off?",
+            "Quarterly revenue",
+            "AI Reporting Module Sprint",
+            "Integration Bug Fix Sprint",
+            "Split Sprint Capacity",
+            "Continue Current Plan",
+            "Sprint capacity for AI reporting",
+            "Sprint capacity for integration fix",
+            "AI reporting module availability",
+            "Enterprise prospect signing likelihood",
+            "Integration-step bug resolution",
+            "Trial profile abandonment rate",
+            "Revenue lost to trial abandonment"
+          ]
+        }
+      },
+      "integration_bug_fix_sprint": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "no_identified_plan",
+          "plan": {
+            "option_id": "integration_bug_fix_sprint",
+            "label": "Integration Bug Fix Sprint",
+            "basis": "user_selected"
+          },
+          "goal_label": "Quarterly revenue",
+          "current_option_labels": [
+            "AI Reporting Module Sprint",
+            "Integration Bug Fix Sprint",
+            "Split Sprint Capacity",
+            "Continue Current Plan"
+          ],
+          "supplied_items": [
+            {
+              "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+              "kind": "link",
+              "labels": [
+                "AI reporting module availability",
+                "Enterprise prospect signing likelihood"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+              "kind": "link",
+              "labels": [
+                "Integration-step bug resolution",
+                "Trial profile abandonment rate"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+              "kind": "link",
+              "labels": [
+                "Sprint capacity for AI reporting",
+                "AI reporting module availability"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+              "kind": "link",
+              "labels": [
+                "Sprint capacity for integration fix",
+                "Integration-step bug resolution"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "enterprise_prospect_signing_likelihood",
+              "kind": "factor",
+              "labels": [
+                "Enterprise prospect signing likelihood"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "ai_reporting_module_availability",
+              "kind": "factor",
+              "labels": [
+                "AI reporting module availability"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "sprint_capacity_for_ai_reporting",
+              "kind": "factor",
+              "labels": [
+                "Sprint capacity for AI reporting"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "sprint_capacity_for_integration_fix",
+              "kind": "factor",
+              "labels": [
+                "Sprint capacity for integration fix"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "revenue_lost_to_trial_abandonment",
+              "kind": "risk",
+              "labels": [
+                "Revenue lost to trial abandonment"
+              ],
+              "card": "propose_new_risk"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Integration Bug Fix Sprint’. The goal is ‘Quarterly revenue’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Integration Bug Fix Sprint’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘AI reporting module availability’ affects ‘Enterprise prospect signing likelihood’ (nobody has sized this yet)\n- how ‘Integration-step bug resolution’ affects ‘Trial profile abandonment rate’ (nobody has sized this yet)\n- how ‘Sprint capacity for AI reporting’ affects ‘AI reporting module availability’ (nobody has sized this yet)\n- how ‘Sprint capacity for integration fix’ affects ‘Integration-step bug resolution’ (nobody has sized this yet)\n- ‘Enterprise prospect signing likelihood’ (a figure Olumi estimated)\n- ‘AI reporting module availability’ (a figure Olumi estimated)\n- ‘Sprint capacity for AI reporting’ (a figure Olumi estimated)\n- ‘Sprint capacity for integration fix’ (a figure Olumi estimated)\n- ‘Revenue lost to trial abandonment’ (a risk on this plan’s path)\nName no option other than ‘Integration Bug Fix Sprint’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "Integration Bug Fix Sprint",
+          "current_option_labels": [
+            "AI Reporting Module Sprint",
+            "Integration Bug Fix Sprint",
+            "Split Sprint Capacity",
+            "Continue Current Plan"
+          ],
+          "supplied_items": [
+            {
+              "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+              "labels": [
+                "AI reporting module availability",
+                "Enterprise prospect signing likelihood"
+              ]
+            },
+            {
+              "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+              "labels": [
+                "Integration-step bug resolution",
+                "Trial profile abandonment rate"
+              ]
+            },
+            {
+              "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+              "labels": [
+                "Sprint capacity for AI reporting",
+                "AI reporting module availability"
+              ]
+            },
+            {
+              "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+              "labels": [
+                "Sprint capacity for integration fix",
+                "Integration-step bug resolution"
+              ]
+            },
+            {
+              "id": "enterprise_prospect_signing_likelihood",
+              "labels": [
+                "Enterprise prospect signing likelihood"
+              ]
+            },
+            {
+              "id": "ai_reporting_module_availability",
+              "labels": [
+                "AI reporting module availability"
+              ]
+            },
+            {
+              "id": "sprint_capacity_for_ai_reporting",
+              "labels": [
+                "Sprint capacity for AI reporting"
+              ]
+            },
+            {
+              "id": "sprint_capacity_for_integration_fix",
+              "labels": [
+                "Sprint capacity for integration fix"
+              ]
+            },
+            {
+              "id": "revenue_lost_to_trial_abandonment",
+              "labels": [
+                "Revenue lost to trial abandonment"
+              ]
+            }
+          ],
+          "model_labels": [
+            "How should I approach this trade-off?",
+            "Quarterly revenue",
+            "AI Reporting Module Sprint",
+            "Integration Bug Fix Sprint",
+            "Split Sprint Capacity",
+            "Continue Current Plan",
+            "Sprint capacity for AI reporting",
+            "Sprint capacity for integration fix",
+            "AI reporting module availability",
+            "Enterprise prospect signing likelihood",
+            "Integration-step bug resolution",
+            "Trial profile abandonment rate",
+            "Revenue lost to trial abandonment"
+          ]
+        }
+      },
+      "split_sprint_capacity": {
+        "kind": "choose_plan",
+        "reply": "Which option do you want to stress-test?",
+        "actions": [
+          {
+            "id": "agent-premortem-plan:113b308caf17",
+            "label": "‘AI Reporting Module Sprint’",
+            "message": "Run a pre-mortem on ‘AI Reporting Module Sprint’."
+          },
+          {
+            "id": "agent-premortem-plan:0df1cb335692",
+            "label": "‘Integration Bug Fix Sprint’",
+            "message": "Run a pre-mortem on ‘Integration Bug Fix Sprint’."
+          },
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      },
+      "continue_current_plan": {
+        "kind": "choose_plan",
+        "reply": "Which option do you want to stress-test?",
+        "actions": [
+          {
+            "id": "agent-premortem-plan:113b308caf17",
+            "label": "‘AI Reporting Module Sprint’",
+            "message": "Run a pre-mortem on ‘AI Reporting Module Sprint’."
+          },
+          {
+            "id": "agent-premortem-plan:0df1cb335692",
+            "label": "‘Integration Bug Fix Sprint’",
+            "message": "Run a pre-mortem on ‘Integration Bug Fix Sprint’."
+          },
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      }
+    },
+    "fallback": "Imagine this decision has gone badly. Start with how ‘AI reporting module availability’ affects ‘Enterprise prospect signing likelihood’: how would you notice it early, and what would you do?",
+    "settled": {
+      "reply": "Imagine this decision has gone badly. Start with how ‘AI reporting module availability’ affects ‘Enterprise prospect signing likelihood’: how would you notice it early, and what would you do?",
+      "passed": false,
+      "failed": [
+        "PM-COUNT",
+        "PM-GROUNDED",
+        "PM-WATCH-MITIGATE",
+        "PM-BLINDSPOT"
+      ],
+      "target": {
+        "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+        "kind": "link",
+        "labels": [
+          "AI reporting module availability",
+          "Enterprise prospect signing likelihood"
+        ],
+        "card": "propose_link_strengths"
+      }
+    }
+  },
+  "A-STALE-SILENT": {
+    "turn": {
+      "kind": "run",
+      "context": {
+        "method": "pre_mortem",
+        "dsk": null,
+        "not_cited": "stage_not_applicable",
+        "plan": null,
+        "decision_level": true,
+        "goal_label": "Monthly spend",
+        "current_option_labels": [
+          "Switch to GCP",
+          "Stay on AWS",
+          "Phased GCP migration"
+        ],
+        "supplied_items": [
+          {
+            "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+            "kind": "link",
+            "labels": [
+              "Monthly cloud overspend during migration",
+              "Monthly spend"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "monthly_cloud_savings->monthly_spend",
+            "kind": "link",
+            "labels": [
+              "Monthly cloud savings",
+              "Monthly spend"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+            "kind": "link",
+            "labels": [
+              "GCP workload share",
+              "Monthly cloud overspend during migration"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+            "kind": "link",
+            "labels": [
+              "Migration preparation effort",
+              "Monthly cloud overspend during migration"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "migration_preparation_effort",
+            "kind": "factor",
+            "labels": [
+              "Migration preparation effort"
+            ],
+            "card": "propose_assumptions"
+          },
+          {
+            "id": "monthly_cloud_overspend_during_migration",
+            "kind": "risk",
+            "labels": [
+              "Monthly cloud overspend during migration"
+            ],
+            "card": "propose_new_risk"
+          }
+        ],
+        "supplied_figures": []
+      },
+      "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘Monthly spend’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘Switch to GCP’, ‘Stay on AWS’, ‘Phased GCP migration’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Monthly cloud overspend during migration’ affects ‘Monthly spend’ (nobody has sized this yet)\n- how ‘Monthly cloud savings’ affects ‘Monthly spend’ (nobody has sized this yet)\n- how ‘GCP workload share’ affects ‘Monthly cloud overspend during migration’ (nobody has sized this yet)\n- how ‘Migration preparation effort’ affects ‘Monthly cloud overspend during migration’ (nobody has sized this yet)\n- ‘Migration preparation effort’ (a figure Olumi estimated)\n- ‘Monthly cloud overspend during migration’ (a risk on an option’s path)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+      "check_inputs": {
+        "decision_level": true,
+        "current_option_labels": [
+          "Switch to GCP",
+          "Stay on AWS",
+          "Phased GCP migration"
+        ],
+        "supplied_items": [
+          {
+            "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+            "labels": [
+              "Monthly cloud overspend during migration",
+              "Monthly spend"
+            ]
+          },
+          {
+            "id": "monthly_cloud_savings->monthly_spend",
+            "labels": [
+              "Monthly cloud savings",
+              "Monthly spend"
+            ]
+          },
+          {
+            "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+            "labels": [
+              "GCP workload share",
+              "Monthly cloud overspend during migration"
+            ]
+          },
+          {
+            "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+            "labels": [
+              "Migration preparation effort",
+              "Monthly cloud overspend during migration"
+            ]
+          },
+          {
+            "id": "migration_preparation_effort",
+            "labels": [
+              "Migration preparation effort"
+            ]
+          },
+          {
+            "id": "monthly_cloud_overspend_during_migration",
+            "labels": [
+              "Monthly cloud overspend during migration"
+            ]
+          }
+        ],
+        "model_labels": [
+          "Should we switch our cloud provider from AWS to GCP?",
+          "Monthly spend",
+          "Switch to GCP",
+          "Stay on AWS",
+          "Phased GCP migration",
+          "GCP workload share",
+          "Migration preparation effort",
+          "GCP savings at full migration",
+          "Monthly cloud overspend during migration",
+          "Monthly cloud savings",
+          "Migration downtime"
+        ]
+      }
+    },
+    "plans": {
+      "switch_to_gcp": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "stage_not_applicable",
+          "plan": {
+            "option_id": "switch_to_gcp",
+            "label": "Switch to GCP",
+            "basis": "user_selected"
+          },
+          "goal_label": "Monthly spend",
+          "current_option_labels": [
+            "Switch to GCP",
+            "Stay on AWS",
+            "Phased GCP migration"
+          ],
+          "supplied_items": [
+            {
+              "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+              "kind": "link",
+              "labels": [
+                "Monthly cloud overspend during migration",
+                "Monthly spend"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "monthly_cloud_savings->monthly_spend",
+              "kind": "link",
+              "labels": [
+                "Monthly cloud savings",
+                "Monthly spend"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+              "kind": "link",
+              "labels": [
+                "GCP workload share",
+                "Monthly cloud overspend during migration"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+              "kind": "link",
+              "labels": [
+                "Migration preparation effort",
+                "Monthly cloud overspend during migration"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "migration_preparation_effort",
+              "kind": "factor",
+              "labels": [
+                "Migration preparation effort"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "monthly_cloud_overspend_during_migration",
+              "kind": "risk",
+              "labels": [
+                "Monthly cloud overspend during migration"
+              ],
+              "card": "propose_new_risk"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Switch to GCP’. The goal is ‘Monthly spend’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Switch to GCP’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Monthly cloud overspend during migration’ affects ‘Monthly spend’ (nobody has sized this yet)\n- how ‘Monthly cloud savings’ affects ‘Monthly spend’ (nobody has sized this yet)\n- how ‘GCP workload share’ affects ‘Monthly cloud overspend during migration’ (nobody has sized this yet)\n- how ‘Migration preparation effort’ affects ‘Monthly cloud overspend during migration’ (nobody has sized this yet)\n- ‘Migration preparation effort’ (a figure Olumi estimated)\n- ‘Monthly cloud overspend during migration’ (a risk on this plan’s path)\nName no option other than ‘Switch to GCP’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "Switch to GCP",
+          "current_option_labels": [
+            "Switch to GCP",
+            "Stay on AWS",
+            "Phased GCP migration"
+          ],
+          "supplied_items": [
+            {
+              "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+              "labels": [
+                "Monthly cloud overspend during migration",
+                "Monthly spend"
+              ]
+            },
+            {
+              "id": "monthly_cloud_savings->monthly_spend",
+              "labels": [
+                "Monthly cloud savings",
+                "Monthly spend"
+              ]
+            },
+            {
+              "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+              "labels": [
+                "GCP workload share",
+                "Monthly cloud overspend during migration"
+              ]
+            },
+            {
+              "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+              "labels": [
+                "Migration preparation effort",
+                "Monthly cloud overspend during migration"
+              ]
+            },
+            {
+              "id": "migration_preparation_effort",
+              "labels": [
+                "Migration preparation effort"
+              ]
+            },
+            {
+              "id": "monthly_cloud_overspend_during_migration",
+              "labels": [
+                "Monthly cloud overspend during migration"
+              ]
+            }
+          ],
+          "model_labels": [
+            "Should we switch our cloud provider from AWS to GCP?",
+            "Monthly spend",
+            "Switch to GCP",
+            "Stay on AWS",
+            "Phased GCP migration",
+            "GCP workload share",
+            "Migration preparation effort",
+            "GCP savings at full migration",
+            "Monthly cloud overspend during migration",
+            "Monthly cloud savings",
+            "Migration downtime"
+          ]
+        }
+      },
+      "stay_on_aws": {
+        "kind": "choose_plan",
+        "reply": "Which option do you want to stress-test?",
+        "actions": [
+          {
+            "id": "agent-premortem-plan:ddfed9fa6bbc",
+            "label": "‘Phased GCP migration’",
+            "message": "Run a pre-mortem on ‘Phased GCP migration’."
+          },
+          {
+            "id": "agent-premortem-plan:65cef7602c65",
+            "label": "‘Switch to GCP’",
+            "message": "Run a pre-mortem on ‘Switch to GCP’."
+          },
+          {
+            "id": "agent-talk-it-through",
+            "label": "Talk it through",
+            "message": "Let’s talk it through."
+          }
+        ]
+      },
+      "phased_gcp_migration": {
+        "kind": "run",
+        "context": {
+          "method": "pre_mortem",
+          "dsk": null,
+          "not_cited": "stage_not_applicable",
+          "plan": {
+            "option_id": "phased_gcp_migration",
+            "label": "Phased GCP migration",
+            "basis": "user_selected"
+          },
+          "goal_label": "Monthly spend",
+          "current_option_labels": [
+            "Switch to GCP",
+            "Stay on AWS",
+            "Phased GCP migration"
+          ],
+          "supplied_items": [
+            {
+              "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+              "kind": "link",
+              "labels": [
+                "Monthly cloud overspend during migration",
+                "Monthly spend"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "monthly_cloud_savings->monthly_spend",
+              "kind": "link",
+              "labels": [
+                "Monthly cloud savings",
+                "Monthly spend"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+              "kind": "link",
+              "labels": [
+                "GCP workload share",
+                "Monthly cloud overspend during migration"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+              "kind": "link",
+              "labels": [
+                "Migration preparation effort",
+                "Monthly cloud overspend during migration"
+              ],
+              "card": "propose_link_strengths"
+            },
+            {
+              "id": "migration_preparation_effort",
+              "kind": "factor",
+              "labels": [
+                "Migration preparation effort"
+              ],
+              "card": "propose_assumptions"
+            },
+            {
+              "id": "monthly_cloud_overspend_during_migration",
+              "kind": "risk",
+              "labels": [
+                "Monthly cloud overspend during migration"
+              ],
+              "card": "propose_new_risk"
+            }
+          ],
+          "supplied_figures": []
+        },
+        "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Phased GCP migration’. The goal is ‘Monthly spend’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Phased GCP migration’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Monthly cloud overspend during migration’ affects ‘Monthly spend’ (nobody has sized this yet)\n- how ‘Monthly cloud savings’ affects ‘Monthly spend’ (nobody has sized this yet)\n- how ‘GCP workload share’ affects ‘Monthly cloud overspend during migration’ (nobody has sized this yet)\n- how ‘Migration preparation effort’ affects ‘Monthly cloud overspend during migration’ (nobody has sized this yet)\n- ‘Migration preparation effort’ (a figure Olumi estimated)\n- ‘Monthly cloud overspend during migration’ (a risk on this plan’s path)\nName no option other than ‘Phased GCP migration’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+        "check_inputs": {
+          "plan_label": "Phased GCP migration",
+          "current_option_labels": [
+            "Switch to GCP",
+            "Stay on AWS",
+            "Phased GCP migration"
+          ],
+          "supplied_items": [
+            {
+              "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+              "labels": [
+                "Monthly cloud overspend during migration",
+                "Monthly spend"
+              ]
+            },
+            {
+              "id": "monthly_cloud_savings->monthly_spend",
+              "labels": [
+                "Monthly cloud savings",
+                "Monthly spend"
+              ]
+            },
+            {
+              "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+              "labels": [
+                "GCP workload share",
+                "Monthly cloud overspend during migration"
+              ]
+            },
+            {
+              "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+              "labels": [
+                "Migration preparation effort",
+                "Monthly cloud overspend during migration"
+              ]
+            },
+            {
+              "id": "migration_preparation_effort",
+              "labels": [
+                "Migration preparation effort"
+              ]
+            },
+            {
+              "id": "monthly_cloud_overspend_during_migration",
+              "labels": [
+                "Monthly cloud overspend during migration"
+              ]
+            }
+          ],
+          "model_labels": [
+            "Should we switch our cloud provider from AWS to GCP?",
+            "Monthly spend",
+            "Switch to GCP",
+            "Stay on AWS",
+            "Phased GCP migration",
+            "GCP workload share",
+            "Migration preparation effort",
+            "GCP savings at full migration",
+            "Monthly cloud overspend during migration",
+            "Monthly cloud savings",
+            "Migration downtime"
+          ]
+        }
+      }
+    },
+    "fallback": "Imagine this decision has gone badly. Start with how ‘Monthly cloud overspend during migration’ affects ‘Monthly spend’: how would you notice it early, and what would you do?",
+    "settled": {
+      "reply": "Imagine this decision has gone badly. Start with how ‘Monthly cloud overspend during migration’ affects ‘Monthly spend’: how would you notice it early, and what would you do?",
+      "passed": false,
+      "failed": [
+        "PM-COUNT",
+        "PM-GROUNDED",
+        "PM-WATCH-MITIGATE",
+        "PM-BLINDSPOT"
+      ],
+      "target": {
+        "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+        "kind": "link",
+        "labels": [
+          "Monthly cloud overspend during migration",
+          "Monthly spend"
+        ],
+        "card": "propose_link_strengths"
+      }
+    }
+  }
+}

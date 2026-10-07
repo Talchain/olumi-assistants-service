@@ -322,6 +322,7 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
       : `- ${itemPhrase(item)} (${decision ? ITEM_CLASS[item.kind].replaceAll('this plan', 'an option') : ITEM_CLASS[item.kind]})`),
     `${decision ? 'Each story names at most one option. Never name a winner, best option or recommendation.' : `Name no option other than ${plan}.`} Outside an item's own name, use no percentage and none of these words: likely, `
       + 'likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.',
+    ...(storyOnlyDecision(ctx) ? ['Outside the model’s own labels, give no Run figures, leader or ranking claims; durations are allowed. This exercise prepares no model change or approval card.'] : []),
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
     `At most ${POLICY.method_turns.shared.max_words} words.`,
   ].join('\n');
@@ -346,7 +347,42 @@ function checkInputsOf(ctx: RunMethodTurn['context'], graph: unknown): MethodInp
   };
 }
 
+/** The typed producer flag preserves every original W9 licensed-decision control byte for byte. */
+function storyOnlyDecision(ctx: RunMethodTurn['context']): boolean {
+  return ctx.decision_story_only === true;
+}
+
+/** Qualitative, kind-correct stories: a risk materialises; only an intervention is called a lever. */
+function failureStory(item: SuppliedItem, goal: string): string {
+  if (item.lever_option_labels !== undefined) {
+    return `The effect of ${itemPhrase(item)} fell short of what ${goal} needed. Watch for: early results diverging from the expected effect. Mitigate: test this lever with a small group before expanding.`;
+  }
+  if (item.kind === 'link') {
+    return `The relationship between ${item.labels.map(quote).join(' and ')} differed from the model, undermining progress towards ${goal}. Watch for: the observed relationship diverging from the model. Mitigate: check this relationship before relying on it.`;
+  }
+  if (item.kind === 'risk') {
+    return `${itemPhrase(item)} materialised and undermined progress towards ${goal}. Watch for: early signs of this risk. Mitigate: prepare a response before committing further.`;
+  }
+  if (item.kind === 'limit') {
+    return `${itemPhrase(item)} was breached, undermining progress towards ${goal}. Watch for: approaching this limit. Mitigate: set a checkpoint before committing further.`;
+  }
+  return `${itemPhrase(item)} differed from the model, undermining progress towards ${goal}. Watch for: observations diverging from the model. Mitigate: check this assumption before relying on it.`;
+}
+
 export function fallbackReply(ctx: RunMethodTurn['context']): string {
+  if (storyOnlyDecision(ctx)) {
+    const first = ctx.supplied_items[0];
+    // Prefer a different option's lever for the second story; never infer a leader from the item order.
+    const second = ctx.supplied_items.find(item => item !== first && item.lever_option_labels?.some(label =>
+      !first.lever_option_labels?.includes(label))) ?? ctx.supplied_items[1] ?? first;
+    const goal = ctx.goal_label === null ? 'the goal' : quote(ctx.goal_label);
+    return [
+      'Imagine this decision has gone badly. Two failure stories to test:',
+      `1. ${failureStory(first, goal)}`,
+      `2. ${failureStory(second, goal)}`,
+      'Outside the model: what else could have blindsided this decision?',
+    ].join('\n');
+  }
   return FALLBACK_TEMPLATE
     .replace('‘{plan}’', ctx.plan === null ? 'this decision' : quote(ctx.plan.label))
     .replace('{first supplied item}', itemPhrase(ctx.supplied_items[0]));
@@ -370,7 +406,7 @@ export function settleMethodTurn(turn: RunMethodTurn, draft: string): SettledMet
     ({ reply: fallbackReply(turn.context), passed: false, failed, target: items[0] });
   let check: ReturnType<typeof checkMethodTurn>;
   try {
-    check = checkMethodTurn(METHOD, draft, turn.check_inputs);
+    check = checkMethodTurn(METHOD, draft, turn.check_inputs, storyOnlyDecision(turn.context));
   } catch {
     // The checker throws on contract drift; an unchecked draft is never sent.
     return fallback(['CHECKER_UNAVAILABLE']);
@@ -405,7 +441,7 @@ export type CardCall =
  * the writer resolves.
  *
  * Null = no card, and the turn offers 'Talk it through' only: a risk or a limit (its card would need a label drawn from
- * the story, i.e. model text: not in v1), a story-only own lever from the empty decision branch, or a target the graph
+ * the story, i.e. model text: not in v1), a decision story item, or a target the graph
  * no longer holds as it was read.
  */
 export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: string = PREMORTEM_CARD_RATIONALE): CardCall | null {

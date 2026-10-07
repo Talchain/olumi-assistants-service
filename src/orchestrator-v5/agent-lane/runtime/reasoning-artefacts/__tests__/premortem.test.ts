@@ -26,7 +26,8 @@ describe('A2 producer and coverage', () => {
     if (turn?.kind !== 'run') throw new Error('must run');
     expect(turn.context.plan).toBeNull();
     expect(turn.context.decision_level).toBe(true);
-    expect(turn.context.supplied_items.map(i => i.id)).toEqual(key === 'draw1' ? [LINK, 'customer_losses_from_price_rise'] : ['monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue', 'monthly_recurring_revenue_lost_to_price_driven_churn']);
+    // W9c #2724 (DL 7 Oct): an unlicensed decision puts the options' own levers FIRST, then keeps the W9 union intact.
+    expect(turn.context.supplied_items.map(i => i.id)).toEqual(key === 'draw1' ? [LINK, 'customer_losses_from_price_rise'] : ['price_change_from_today', 'starter_tier_availability', 'monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue', 'monthly_recurring_revenue_lost_to_price_driven_churn']);
     expect(JSON.stringify(c)).toBe(before);
   });
   it('all user-sized fixture still refuses; removed and ambiguous picks refuse even with a licence', () => {

@@ -409,6 +409,10 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // sentence into an enumerated list of suffixes or a lookup, it MUST move to
     // SIBLING_VOCABULARIES rather than staying here — the classification is
     // about what the file DOES, not about which words it contains.
+    // 7 Oct 2026 (W9c #2724) — INCIDENTAL. The pre-mortem checker's decision-claim pattern rejects comparative
+    // designations of an option ("the stronger option", "strongest option"); a leader-claim guard, not a magnitude.
+    'orchestrator-v5/agent-lane/guidance/method-turn-check.ts':
+      'Leader-claim pattern ("stronger/strongest option") in the pre-mortem checker; no alphabet, no word->value map, no parsing.',
     'orchestrator-v5/replacement/system-prompt.ts':
       'Prompt copy rule on spelling amounts in full; no alphabet, no word->value map, no parsing.',
     // 16 Sep 2026 — INCIDENTAL, and the mention is one word of English prose.
