@@ -60,7 +60,7 @@ describe('the no-leader sentence never asks for a rerun that cannot help', () =>
       } as unknown as OlumiResponse,
       { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'separation_unavailable', graph, analysisReady } as never,
     );
-    expect(out.response.assistant_text).toContain('This comparison turns on the link from ‘Expected GCP-related monthly saving’ to ‘Costs’, whose strength nobody has set yet.');
+    expect(out.response.assistant_text).toContain('This comparison turns on the link from ‘Expected GCP-related monthly saving’ to ‘Costs’, whose strength isn\'t sized in the model yet.');
     expect(out.response.assistant_text).toContain('Set it to see how much it matters.');
     expect(out.response.assistant_text).toContain('Set it to see how much it matters.');
     expect(out.response.assistant_text).not.toContain('set one of them yourself, then run the analysis again');
@@ -102,7 +102,7 @@ describe('the no-leader sentence never asks for a rerun that cannot help', () =>
       assistant_text: 'Continue with AWS is the front-runner. Model caveats remain.', blocks, suggested_actions: [],
       analysis_state: { leader_claim: { permitted: false, withheld_reason: 'separation_unavailable' } },
     } as unknown as OlumiResponse, opts);
-    expect(first.response.assistant_text).toContain('This comparison turns on the link from ‘A. Switch to GCP is the front-runner’ to ‘Costs’, whose strength nobody has set yet. Set it to see how much it matters.');
+    expect(first.response.assistant_text).toContain('This comparison turns on the link from ‘A. Switch to GCP is the front-runner’ to ‘Costs’, whose strength isn\'t sized in the model yet. Set it to see how much it matters.');
     const second = enforceAgentLaneLeaderClaimsAtWire(first.response, opts);
     expect(second.response.assistant_text).toBe(first.response.assistant_text);
   });

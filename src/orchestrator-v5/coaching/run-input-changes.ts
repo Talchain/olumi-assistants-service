@@ -26,6 +26,7 @@
 
 import type { RunDeltaInputChange } from '@talchain/schemas/boundary';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { routeOnceCoveredSources } from '../goal-target/held-user-links.js';
 import { olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
 import { edgeBandFromStrengthBand, edgeBandStd } from '../format/edge-strength-bands.js';
 import { valueWriteAuthorshipDigests } from '../tools/handlers/run-input-residual.js';
@@ -210,6 +211,14 @@ export function linksMovedWithinBand(
 /** The rows, and `complete: false` when a sent input changed that no row states. */
 export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot): { rows: Row[]; complete: boolean } {
   const rows: Row[] = [];
+  // Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
+  const coveredIn = (snapshot: RunInputSnapshot) => routeOnceCoveredSources(snapshot.links.map((link) => ({
+    from: link.from, to: link.to, isDefault: typeof link.exists_probability === 'number'
+      && Number.isFinite(link.exists_probability) && link.exists_probability > 0 && link.exists_probability < 1,
+  })));
+  const priorCovered = coveredIn(prior);
+  const currentCovered = coveredIn(current);
+
   // ⭐ 0.71.0 — `complete` means VERIFIED (DL ruling #2482 5939864517): the rows below can only speak for the fields the
   // snapshots record, so the pair is complete only when every OTHER analysis input is proven unchanged — both Runs
   // carry a residual digest (`run-input-residual.ts`) and they are equal. An older Run without one is never complete.
@@ -382,7 +391,12 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     const heldBySizing = pl.sizing !== undefined && pl.sizing !== 'user' && cl.sizing === 'user'
       && cl.exists_probability === 1 && typeof pl.exists_probability === 'number' && pl.exists_probability < 1;
     if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std) && !heldBySizing) complete = false;
-    if (pl.exists_probability !== cl.exists_probability && !heldBySizing) complete = false;
+    const doubtMoved = (certain: typeof pl, doubtful: typeof pl, certainCovered: ReadonlySet<string>, doubtfulCovered: ReadonlySet<string>): boolean =>
+      certain.exists_probability === 1 && typeof doubtful.exists_probability === 'number'
+      && Number.isFinite(doubtful.exists_probability) && doubtful.exists_probability > 0 && doubtful.exists_probability < 1
+      && certainCovered.has(certain.from) && !doubtfulCovered.has(doubtful.from);
+    const heldByRouteOnce = doubtMoved(pl, cl, priorCovered, currentCovered) || doubtMoved(cl, pl, currentCovered, priorCovered);
+    if (pl.exists_probability !== cl.exists_probability && !heldBySizing && !heldByRouteOnce) complete = false;
     if (!authorshipExplained(pl, cl)) complete = false;
   }
 

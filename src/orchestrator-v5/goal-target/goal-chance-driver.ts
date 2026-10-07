@@ -281,7 +281,7 @@ export function goalChanceDriverOf(record: Rec, optionId: string, graph: unknown
     ...groupPct(side === 'absent' ? pa : pp, side === 'absent' ? na : np),
     // Ruling 4: existence < 1 is ALWAYS Olumi's prior unless the link is held, even on the user's own link.
     // S-DEF: only the USER's own held link makes the doubt theirs; a definition's hold is nobody's doubt (and leaves the ranking).
-    authored_by: isUserStatedLink(edge) && heldLinkOf(edge, endsOfGraph(graph)(edge)) !== null ? 'user' : 'olumi',
+    authored_by: heldLinkOf(edge, endsOfGraph(graph)(edge))?.reason === 'user_range' ? 'user' : 'olumi',
     user_stated_link: isUserStatedLink(edge),
   } };
 }

@@ -1,14 +1,10 @@
 import type { SuggestedAction } from '../compose/types.js';
-import { nextStepsWithWiden, WIDEN_CHIP } from './method-turn/widen-turn.js';
+import { nextStepsWithWiden, SUGGEST_RISKS_CHIP, WIDEN_CHIP } from './method-turn/widen-turn.js';
 import { turnGuidanceFor, type GuidanceWire, type TurnGuidanceInputs } from './turn-context/guidance-wire.js';
 import { strengthenCardFor, type StrengthenPressState } from './strengthen-press.js';
 
-/** Existing plain-text chip contract: pressing asks the agent; a proposed risk still needs approval. */
-export const SUGGEST_RISKS_CHIP = {
-  id: 'agent-next-suggest-risks',
-  label: 'Suggest risks',
-  message: "Suggest risks I haven't considered.",
-} as const satisfies SuggestedAction;
+/** The W6 press: S-C's ONE widening door, target risks (`widen-turn.ts` `widenTargetOf`); re-exported for its readers. */
+export { SUGGEST_RISKS_CHIP };
 
 /** Slot one's press first in the base pool; preserve every options swap and existing press wording. */
 export function nextStepsFromGuidance(

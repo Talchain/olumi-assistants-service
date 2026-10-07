@@ -143,6 +143,7 @@ import { normaliseGraphNodeKindField } from "../orchestrator-v5/graph-registrati
 import { CEE_OWNED_EDGE_FIELDS } from "../orchestrator-v5/graph-management/field-safety.js";
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
+import { eventRiskIngressIssues } from "../schemas/event-risk.js";
 import type { GraphStateIngress } from "../orchestrator-v5/boundary/request-extensions.js";
 import {
   authorizeScenarioOwnership,
@@ -791,6 +792,20 @@ export default async function route(app: FastifyInstance) {
           "GRAPH_CONTRACT_INVALID",
           "This model does not match the graph contract.",
           { issues: parsed.error.issues.slice(0, 10) },
+        );
+      }
+
+      // event_risk.v1 — the write door (src/schemas/event-risk.ts). A malformed block, or one on a
+      // non-risk node, is REFUSED: stored, it would be dropped on read and the risk would run as an
+      // ordinary node. A graph with no block is untouched.
+      const eventRiskIssues = eventRiskIngressIssues(
+        parsed.data.nodes as ReadonlyArray<Record<string, unknown>>,
+      );
+      if (eventRiskIssues.length > 0) {
+        return invalid(
+          "EVENT_RISK_INVALID",
+          "A risk's event details do not match the event_risk v1 contract. Nothing was written.",
+          { issues: eventRiskIssues },
         );
       }
 

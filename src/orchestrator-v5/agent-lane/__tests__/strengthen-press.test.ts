@@ -273,11 +273,15 @@ describe('the real route: the press → ONE held card, 0 model calls', () => {
     expect(after.proposal_preview).toBeUndefined();
   });
 
-  it('CONTROL: the same press on a STALE Run → today\'s answer (the model is called, no card)', async () => {
+  // ⭐ S-B (ACTION-SYSTEM §D5/§E4, PL + DL binding, 7 Oct): Strengthen ships in its S1 scope with NO free-LLM fallback. This row
+  // pinned the old fallback ("today's answer: the model is called"); the spec now is a typed "can't yet" with a working exit.
+  it('S-B: the same press on a STALE Run → a typed "can\'t yet" (no model call, no card), the Run as its exit', async () => {
     analysisState = STALE;
     const b = await press();
-    expect(modelCalls).toBeGreaterThan(0);
-    expect(b._diagnostic_trace?.fast_path).toBeUndefined();
+    expect(modelCalls).toBe(0);
+    expect(b._diagnostic_trace?.fast_path).toBe('method');
+    expect(b.assistant_text).toBe('I can’t strengthen the model yet: it needs a current analysis first.');
+    expect(b._agent?.tool_calls ?? []).toEqual([]);
   });
 
   it('CONTROL: the same words TYPED (no chip) → the model answers; no fast card', async () => {

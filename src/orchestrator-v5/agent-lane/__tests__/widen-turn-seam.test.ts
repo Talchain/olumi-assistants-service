@@ -340,6 +340,25 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(optionLabels()).toEqual(before);
   }, 120_000);
 
+  it('S-B (Codex r1 P1-1 on #2751): the SAME offer pressed twice → ONE model call, ONE product hold; the second press re-offers it', async () => {
+    seeded();
+    const option = (label: string) => fnCall('propose_new_option', { options: [
+      { label, acts_on: [{ factor_label: 'Customer churn', direction: 'negative', level: est }] },
+    ], rationale: 'A different mechanism from the two price rises.' });
+    script = [() => option('Retention offer A'), () => option('Retention offer B')];
+    const offer = { id: WIDEN.id, parameters: { offer_key: '0123456789abcdef' } };
+    const t1 = await turn({ message: WIDEN.message, source: 'chip', chip: offer });
+    const approve = approveChipOf(t1);
+    expect(approve?.id).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    const t2 = await turn({ message: WIDEN.message, source: 'chip', chip: offer });
+    expect(openAiCalls, 'the second press prepares nothing').toBe(1);
+    expect(t2.suggested_actions.map((c) => c.id)).toEqual(t1.suggested_actions.map((c) => c.id));
+    expect((await heldOnLatestRow()).map((p) => p.chip_id)).toEqual([approve!.id.slice('agent-approve-proposal:'.length)]);
+    // CONTROL: a press with NO offer key is a new request: the door runs again.
+    await turn({ message: WIDEN.message, source: 'chip', chip: { id: WIDEN.id } });
+    expect(openAiCalls).toBe(2);
+  });
+
   it('W-R4 CONTROL: the same model reply on an ORDINARY turn (not a Widen press) is not gated — the door holds it', async () => {
     seeded();
     script = [
