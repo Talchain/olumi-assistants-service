@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 import {
   textAssertsLeadingOption,
   textNamesLeadingOption,
@@ -73,21 +74,11 @@ describe.each([
     expect(elapsed).toBeLessThan(50);
   });
 
-  it('scales below 8x from 5,000 to 20,000 characters (minimum of five)', () => {
-    const minimumTiming = (length: number): number => {
-      const text = 'The lead' + '\n'.repeat(length - 'The lead'.length);
-      const timings = Array.from({ length: 5 }, () => {
-        const start = performance.now();
-        const result = classify(text);
-        const elapsed = performance.now() - start;
-        expect(result).toBe(true);
-        return elapsed;
-      });
-      return Math.min(...timings);
-    };
-
-    const n = minimumTiming(5000);
-    const fourN = minimumTiming(20_000);
-    expect(fourN / n).toBeLessThan(8);
+  it('scales below 8x from 5,000 to 20,000 characters (minimum of seven calibrated batches)', () => {
+    const [n, fourN] = [5000, 20_000].map((length) => 'The lead' + '\n'.repeat(length - 'The lead'.length));
+    expect(classify(n)).toBe(true);
+    expect(classify(fourN)).toBe(true);
+    const m = scalingRatio(() => classify(n), () => classify(fourN));
+    expect(m.ratio, m.detail).toBeLessThan(8);
   });
 });
