@@ -42,7 +42,7 @@ const EVENT = new Set([
 /** Words that make "a <period>" a time window ("within a month"), never a per-period rate ("3% a month"). */
 const WINDOW = new Set(['within', 'in', 'by', 'before', 'after', 'for']);
 /** …and "a month FROM NOW" / "a year AWAY" is a date. */
-const DATE_AFTER = new Set(['from', 'away', 'later', 'ago', 'out', 'time']);
+const DATE_AFTER = new Set(['from', 'away', 'later', 'ago', 'out', 'time', 'after', 'before', 'into', 'since']);
 
 function wordsOf(text: string): string[] {
   const words: string[] = []; let word = '';
@@ -55,7 +55,8 @@ function wordsOf(text: string): string[] {
   if (word !== '') words.push(word);
   // "click-through" / "click through" are one noun.
   const click = (w: string | undefined): boolean => w === 'click' || w === 'clicks';
-  return words.flatMap((w, i) => (click(w) && words[i + 1] === 'through' ? ['clickthrough'] : w === 'through' && click(words[i - 1]) ? [] : [w]));
+  const through = (w: string | undefined): boolean => w === 'through' || w === 'throughs';
+  return words.flatMap((w, i) => (click(w) && through(words[i + 1]) ? ['clickthrough'] : through(w) && click(words[i - 1]) ? [] : [w]));
 }
 
 const isPeriod = (w: string | undefined): boolean => w !== undefined && periodNoun(w) !== null;
@@ -80,9 +81,11 @@ export function readRateAsQuantity(text: string): RateReading {
   if (text.length > 400) return { kind: 'chance', rule: 4 };
   const ws = wordsOf(text);
   if (perMarker(ws)) return { kind: 'quantity', rule: 1 };
-  const member = ws.some((w) => MEMBER_WORDS.has(w));
+  // The member must be the SUBJECT: named within the three words before ("a customer returns"), never after
+  // ("Return the customer deposit", buddy r2).
+  const subject = (i: number): boolean => [ws[i - 1], ws[i - 2], ws[i - 3]].some((n) => n !== undefined && MEMBER_WORDS.has(n));
   if (ws.some((w, i) => POPULATION.has(w) || (POPULATION_IF_SUBJECT.has(w)
-    && (member || [ws[i - 1], ws[i + 1], ws[i - 2], ws[i + 2]].some((n) => n !== undefined && CHANCE.has(n)))))) {
+    && (subject(i) || [ws[i - 1], ws[i + 1], ws[i - 2], ws[i + 2]].some((n) => n !== undefined && CHANCE.has(n)))))) {
     return { kind: 'quantity', rule: 2 };
   }
   if (oneOffEvent(ws)) return { kind: 'chance', rule: 3 };

@@ -320,7 +320,7 @@ function sameUnitPhrase(stated: string, goalUnit: string): boolean {
 export function readStatedGoalLevel(value: number, statedUnit: unknown, heldGoal: { readonly label: string; readonly unit: string | undefined }): StatedLevel {
   const stated = typeof statedUnit === 'string' ? statedUnit.trim() : '';
   // P17: a rate written in % ("Monthly churn" in "probability (%)") takes today's "5%" as its own unit.
-  const goal = { label: heldGoal.label, unit: rateUnitInPercent(heldGoal.unit) ?? heldGoal.unit };
+  const goal = { label: heldGoal.label, unit: rateUnitInPercent(heldGoal.unit, stated) ?? heldGoal.unit };
   if (goal.unit === undefined) return { ok: true, raw: value };
   const goalFamily = unitPhraseFamily(goal.unit) ?? (moneyInAlphabet(goal.unit) ? 'currency' : null);
   const goalHead = unitPhraseHead(goal.unit) ?? '';

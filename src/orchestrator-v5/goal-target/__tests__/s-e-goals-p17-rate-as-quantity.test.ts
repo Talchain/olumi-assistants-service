@@ -92,6 +92,18 @@ describe('Codex buddy r1 (#2780 @ 7ddad08b): event timing and everyday words nev
   });
 });
 
+describe('Codex buddy r2 (#2780 @ c0c84cfa): date offsets, subject-bound members, per-unit counts, plural click-throughs', () => {
+  it.each([
+    ['Launch a month after the funding round', 'probability (%)', 'chance_of_event'],
+    ['Return the customer deposit by Friday', 'probability (%)', 'chance_of_event'],
+    ['Visitor click-throughs', 'probability (%)', 'level'],
+    ['Scoring chances created', 'chances the team creates per match', 'level'],
+    ['Customer returns', 'probability (%)', 'level'],
+  ])('%s measured in %s → %s', (label, unit, kind) => {
+    expect(goalKindOf({ kind: 'goal', label, goal_threshold_unit: unit })).toBe(kind);
+  });
+});
+
 describe('the Run (run-analysis withhold seam): a rate goal keeps its figures; a served event goal still withholds them', () => {
   const envelope = () => ({ option_comparison: [{ option_id: 'a', probability_of_goal: 0.4, outcome: { mean: 2.5, p10: 1, p90: 4 } }], inference_warnings: [] });
   const graph = (label: string, unit: string) => ({ nodes: [{ id: 'g', kind: 'goal', label, goal_threshold_unit: unit }] });

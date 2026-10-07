@@ -395,6 +395,11 @@ describe('P17 (Codex r1 #2780): a RATE goal in a chance-named unit takes its own
       { goal_label: 'Monthly churn', value: 5, unit: '%', user_stated: true }) as Rec;
     expect(no).toEqual(expect.objectContaining({ ok: false }));
   });
+  it('buddy r2: a figure stated in the rate’s OWN unit keeps today’s path ("% churn probability per month")', async () => {
+    const own = await world(rateGoal('% churn probability per month')).caps.proposeGoalCurrentLevel!(ctxSaying('Our monthly churn is 5% churn probability per month today.'),
+      { goal_label: 'Monthly churn', value: 5, unit: '% churn probability per month', user_stated: true }) as Rec;
+    expect(own.refusal).toBeUndefined();
+  });
   it('a £ target is never a rate’s target ("conversion probability per visitor"); a % target is', async () => {
     const pounds = await world(rateGoal('conversion probability per visitor')).caps.proposeGoalTarget!(ctxSaying('We want at least £50 per visitor.'),
       { constraint_type: 'at_least', value: 50, unit: '£', rationale: 'x' }) as Rec;

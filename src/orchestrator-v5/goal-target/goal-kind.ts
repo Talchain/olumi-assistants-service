@@ -18,6 +18,7 @@
  */
 
 import { readRateAsQuantity } from './rate-as-quantity.js';
+import { shareKind } from '../../utils/unit-alphabet.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -48,6 +49,9 @@ export function unitNamesAChance(unit: unknown): boolean {
   if (words.length > 0 && CHANCE_WORD.test(words[words.length - 1]!)) return true;
   // P17: a chance word opening a clause is the measure too ("probability we hit the launch date", "the chance a trial
   // user converts"); before, the clause's last word was read as the head and the goal read as a plain level.
+  // Buddy r2 on #2780: a unit counted "per <x>" ("chances the team creates per match") is a count or a rate, never one
+  // event's chance, so a per-unit clause is not read this way (it stays a level, as on staging).
+  if (cut !== null && cut[0].trim().toLowerCase() === 'per') return false;
   return words.some((w, i) => CHANCE_WORD.test(w) && CLAUSE_OPENERS.has((words[i + 1] ?? '').toLowerCase()));
 }
 
@@ -60,7 +64,9 @@ export function unitNamesAChance(unit: unknown): boolean {
 export function rateUnitForFamily(unit: unknown): string | undefined {
   return unitNamesAChance(unit) ? '%' : undefined;
 }
-export function rateUnitInPercent(unit: unknown): string | undefined {
+export function rateUnitInPercent(unit: unknown, stated: unknown): string | undefined {
+  // Only a BARE percent figure is re-read ("5%"); a figure stated in the rate's own words keeps today's path (buddy r2).
+  if (typeof stated !== 'string' || shareKind(stated.trim()) !== 'percent') return undefined;
   if (!unitNamesAChance(unit) || typeof unit !== 'string') return undefined;
   const lower = unit.toLowerCase();
   return lower.includes('%') || lower.includes('percent') ? '%' : undefined;
