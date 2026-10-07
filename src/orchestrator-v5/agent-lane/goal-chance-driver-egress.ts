@@ -60,7 +60,10 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // "nothing in this run shows which assumption matters most"
   R`\bnothing\b(?:\s+[\w’'-]+){0,4}?\s+(?:shows?|establish(?:es)?|identifies|indicates|tells?\s+us)\s+${WHICH_ITEM}${GAP}${MOST}`,
   // "no most-sensitive assumption was measurable / has been established"
-  R`\bno\s+(?:single\s+)?${MOST_ADJ}\s+${ITEM}\s+(?:was|is|has\s+been|could\s+be|were|are)\s+(?:established|measurable|measured|identified|found|determined)`,
+  // ⭐ Wave B6 (7 Oct, CEE 4ce3583, Explain): "No most-sensitive assumption or tipping point was established." (a coordinated noun)
+  R`\bno\s+(?:single\s+)?${MOST_ADJ}\s+${ITEM}(?:[ \t]{1,3}or[ \t]{1,3}[\w’'-]{1,40}(?:[ \t]{1,3}[\w’'-]{1,40}){0,2})?\s+(?:was|is|has\s+been|could\s+be|were|are)\s+(?:established|measurable|measured|identified|found|determined)`,
+  // ⭐ Wave B6 (Challenge): "No recorded sensitivity result establishes which matters most across options."
+  R`\bno\s+(?:(?:recorded|measured|computed)\s+)?(?:(?:sensitivity|robustness)\s+)?(?:results?|analys[ie]s|findings?|evidence|checks?|tests?)\s+(?:yet\s+)?(?:establish|show|identif|determin|indicat|tell|reveal)\w*\s+(?:us\s+)?(?:which|what)(?:\s+(?:of\s+(?:the|these|those)\s+)?${ITEM})?\s+(?:matters?|counts?)\s+(?:the\s+)?most\b(?![ \t]{1,3}to[ \t]{1,3}(?:you|your|them|the[ \t]{1,3}team))`,
   // "no assumption has been identified as the most important"
   R`\bno\s+(?:single\s+)?${ITEM}\s+(?:has\s+been|was|is|could\s+be)\s+(?:identified|established|shown|found|singled\s+out)\s+as\s+(?:the\s+)?(?:most\s+(?:important|influential|sensitive)|(?:main|key|biggest)\s+driver)`,
   // ⭐ Wave B2 (7 Oct 03:3xZ, CEE 044faef): paraphrases keep coming ("…has not established which assumption deserves
