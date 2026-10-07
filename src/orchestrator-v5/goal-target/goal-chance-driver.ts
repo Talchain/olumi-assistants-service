@@ -24,7 +24,7 @@
 import { linkSizing, isSizedOnlyByOlumi } from '../../cee/magnitude/link-sizing.js';
 import { deriveInferredValues } from '../coaching/inferred-value-disclosure.js';
 import { readEdgeParams } from '../../cee/unified-pipeline/utils/edge-format.js';
-import { heldLinkOf, isUserStatedLink } from './held-user-links.js';
+import { endsOfGraph, heldLinkOf, isUserStatedLink, validatedDefinition } from './held-user-links.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -150,6 +150,27 @@ export function topDriverRow(record: Rec): Rec | null {
   return [...(rows as Rec[])].sort(byIslRank)[0]!;
 }
 
+/**
+ * ⭐ S-DEF (Science 393023, DL P0, 7 Oct): a link that holds BY DEFINITION carries no doubt, so it is never what an option's
+ * chance rests on. Served Wave B9 T1b: "‘Launch starter tier’ … It rests most on Olumi’s own estimate of how strongly
+ * ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’" — an identity (£1 per £1), whose rows topped
+ * the block only because it was drawn as a belief. The hold sends it at 1.0 / 0.01, but on a small frame (mean 0.05) that
+ * floor is still a numerical spread, not anyone's doubt. So its rows (strength and existence) leave the ranking; the top of
+ * the REST is the main driver (or none). A flag that fails validation is an ordinary link and stays.
+ */
+export function withoutDefinitionRows(record: Rec, graph: unknown): Rec {
+  const block = record.probability_of_goal_drivers;
+  if (!isRec(block) || !Array.isArray(block.drivers)) return record;
+  const endsOf = endsOfGraph(graph);
+  const drivers = block.drivers.filter((r) => {
+    if (!isRec(r) || (r.kind !== 'link_strength' && r.kind !== 'link_existence')) return true;
+    const ends = linkEnds(r);
+    const edge = ends === null ? undefined : runEdge(graph, ends.from, ends.to);
+    return edge === undefined || validatedDefinition(edge, endsOf(edge)) === undefined;
+  });
+  return drivers.length === block.drivers.length ? record : { ...record, probability_of_goal_drivers: { ...block, drivers } };
+}
+
 export function linkEnds(row: Rec): { from: string; to: string } | null {
   if (typeof row.from === 'string' && typeof row.to === 'string' && row.from !== '' && row.to !== '') return { from: row.from, to: row.to };
   const m = /^(.+)->(.+)$/.exec(String(row.quantity_id));
@@ -201,7 +222,7 @@ export function goalChanceDriverOf(record: Rec, optionId: string, graph: unknown
   // have been the top one, so no surviving row can be called the main driver. Any value but 0 fails closed.
   const block = record.probability_of_goal_drivers;
   if (isRec(block) && 'invalid_rows_dropped' in block && block.invalid_rows_dropped !== 0) return none('invalid_rows');
-  const top = topDriverRow(record);
+  const top = topDriverRow(withoutDefinitionRows(record, graph));
   if (top === null || !KINDS.has(top.kind as string)) return none('none');
   if (top.status === 'below_resolution') return none('below_resolution');
   if (top.status !== 'resolved') return none('none');
@@ -259,7 +280,8 @@ export function goalChanceDriverOf(record: Rec, optionId: string, graph: unknown
     quantity_id, kind: 'link_existence', from: ends.from, to: ends.to, side,
     ...groupPct(side === 'absent' ? pa : pp, side === 'absent' ? na : np),
     // Ruling 4: existence < 1 is ALWAYS Olumi's prior unless the link is held, even on the user's own link.
-    authored_by: heldLinkOf(edge) !== null ? 'user' : 'olumi',
+    // S-DEF: only the USER's own held link makes the doubt theirs; a definition's hold is nobody's doubt (and leaves the ranking).
+    authored_by: isUserStatedLink(edge) && heldLinkOf(edge, endsOfGraph(graph)(edge)) !== null ? 'user' : 'olumi',
     user_stated_link: isUserStatedLink(edge),
   } };
 }

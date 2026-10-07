@@ -23,7 +23,7 @@ import { projectOptionForCanonicalBuilder } from '../../orchestrator/tools/analy
 import { computeAnalysisReadyStatusWithReason } from '../../cee/transforms/option-status.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION as VOCABULARY } from '@talchain/schemas/boundary';
-import { heldLinkOf } from '../goal-target/held-user-links.js';
+import { endsOfGraph, heldLinkBeforeValidatedDefinition, heldLinkOf } from '../goal-target/held-user-links.js';
 import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
@@ -65,6 +65,13 @@ export function computeDeterministicGraphHash(
   const canonical = stableStringify({ nodes: nodeIdentity, edges: edgeIdentity });
   return createHash('sha256').update(canonical).digest('hex').slice(0, HASH_HEX_LENGTH);
 }
+
+/**
+ * Which analysis-affecting projection to hash. 'current' is the only one freshness ever reads. The others identify HISTORY
+ * only (`graph-identity.ts`): 'legacy' (frozen), 'pre_hold' (before hold-at-1.0, Codex r2 #2643) and 'pre_definition'
+ * (the user-only hold, before a validated definition held whoever drew it; Science d5 #87 6011224941).
+ */
+export type AnalysisHashProjection = 'current' | 'legacy' | 'pre_hold' | 'pre_definition';
 
 /**
  * Compute a deterministic 16-char hex hash of all graph fields that AFFECT
@@ -128,7 +135,7 @@ export function computeDeterministicGraphHash(
  */
 export function computeAnalysisAffectingGraphHash(
   graph: GraphStateIngress | null | undefined,
-  projection: 'current' | 'legacy' | 'pre_hold' = 'current',
+  projection: AnalysisHashProjection = 'current',
 ): string | null {
   const full = computeAnalysisAffectingGraphHashSha256(graph, projection);
   return full === null ? null : full.slice(0, HASH_HEX_LENGTH);
@@ -143,7 +150,7 @@ export function computeAnalysisAffectingGraphHash(
  */
 export function computeAnalysisAffectingGraphHashSha256(
   graph: GraphStateIngress | null | undefined,
-  projection: 'current' | 'legacy' | 'pre_hold' = 'current',
+  projection: AnalysisHashProjection = 'current',
 ): string | null {
   if (projection === 'legacy') return frozenLegacyProjectionHash(graph);
   if (!graph) return null;
@@ -164,6 +171,12 @@ export function computeAnalysisAffectingGraphHashSha256(
   }
 
   const factorIds = new Set(nodes.filter((node) => node != null && node.kind === 'factor').map((node) => node.id));
+  // The hold this projection hashes (`EdgeHold`): the current one reads this graph's ends (d5 6011224941: a VALIDATED
+  // definition holds whoever flagged it); 'pre_definition' is the user-only hold of #2643/#2653; 'pre_hold' none (history).
+  const endsOf = endsOfGraph(graph);
+  const hold: EdgeHold = projection === 'pre_hold' ? () => null
+    : projection === 'pre_definition' ? heldLinkBeforeValidatedDefinition
+      : (edge) => heldLinkOf(edge, endsOf(edge));
   const mirroredOptions = Array.isArray(options)
     ? options.map((option) => projectOptionForCanonicalBuilder(option, factorIds))
         .filter((option) => option !== null)
@@ -185,7 +198,7 @@ export function computeAnalysisAffectingGraphHashSha256(
       return { ...projectNode(node), ...projectAdmissionGaps(option, nodeOption?.unresolved_targets) };
     }).sort((a, b) => a.id.localeCompare(b.id)),
     edges: edges
-      .map((edge) => projectEdge(edge, projection !== 'pre_hold'))
+      .map((edge) => projectEdge(edge, hold))
       .sort((a, b) => {
         const fromCmp = a.from.localeCompare(b.from);
         return fromCmp !== 0 ? fromCmp : a.to.localeCompare(b.to);
@@ -374,10 +387,13 @@ interface EdgeProjection {
 }
 
 /**
- * `applyHold` false is the PRE-HOLD current projection (Codex r2 #2643): identical but for hold-at-1.0, so a model version
- * or Run recorded before the hold still validates as IMMUTABLE history. Never used for freshness.
+ * The hold a projection applies to one edge. The current projection's is `heldLinkOf` with the graph's ends. A HISTORY
+ * projection's is the hold of its day: none for 'pre_hold' (Codex r2 #2643), the user-only hold for 'pre_definition'
+ * (d5 #87 6011224941), so a model version or Run recorded then still validates as IMMUTABLE history. Never freshness.
  */
-function projectEdge(raw: unknown, applyHold = true): EdgeProjection {
+type EdgeHold = (edge: unknown) => { readonly std: number } | null;
+
+function projectEdge(raw: unknown, hold: EdgeHold): EdgeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const out: EdgeProjection = {
     from: typeof r.from === 'string' ? r.from : '',
@@ -411,7 +427,7 @@ function projectEdge(raw: unknown, applyHold = true): EdgeProjection {
   // ⭐ HOLD-AT-1.0 (d5 #87 6008807178; Codex r1 #2643 P1): the analysis-affecting identity of a HELD link is what the Run
   // is SENT — existence 1 and its range's spread — through the same fields (no new key), so a range edit is an input change
   // and a Run computed before the hold is not "fresh". Only a graph with a held link hashes differently.
-  const held = applyHold ? heldLinkOf(r) : null;
+  const held = hold(r);
   if (held !== null) {
     out.exists_probability = 1;
     out.strength = { ...(out.strength as Record<string, unknown> | undefined), std: held.std };
