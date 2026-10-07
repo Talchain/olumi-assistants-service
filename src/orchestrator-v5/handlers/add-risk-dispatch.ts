@@ -14,6 +14,7 @@
  * applies the WHOLE batch in ONE commit under CAS. This module writes no state, makes no model call and never throws;
  * the caller owns the frame read, the commit of the returned pending and what it answers.
  */
+import { GM_HELD_USER_EVENT_RISK_KEY, readUserEventRiskMember } from '../routing/stated-event-risk.js';
 import type { OlumiResponse, HeldProposalBlock } from '@talchain/schemas/boundary';
 
 import { evaluateEditGraphMutations, GM_HELD_OPERATIONS_MAX_JSON_CHARS, type EditGmChip, type EditGmGoverningVerdict } from './edit-graph-referee-gate.js';
@@ -27,6 +28,8 @@ type StageIndicator = OlumiResponse['stage_indicator'];
 export interface AddRiskTransactionInput {
   /** `{ risk: { id?, label }, links: [{ from_id? | to_id?, effect_direction }] }` — see `buildAddRiskTransaction`. */
   readonly params: unknown;
+  /** event_risk.v1 slice 2a: validates with EventRiskV1 before holding. */
+  readonly userEventRisk?: unknown;
   /** The PERSISTED pre-edit graph (the frame authority the hold is pinned to). */
   readonly currentGraph: unknown;
   /** Hash of `currentGraph`, resolved by the caller (never re-derived here). */
@@ -68,6 +71,11 @@ export function dispatchAddRiskTransaction(input: AddRiskTransactionInput): AddR
   const built = buildAddRiskTransaction(input.params, view);
   if (!built.matched) return { kind: 'refused', reason: built.reason };
   const { operations, riskId, riskLabel } = built.proposal;
+  const userEventRisk = input.userEventRisk === undefined ? undefined
+    : readUserEventRiskMember({ ...(input.userEventRisk as object), risk_id: riskId });
+  if (input.userEventRisk !== undefined && (userEventRisk === undefined || built.proposal.links.some((l) => l.to === riskId))) {
+    return { kind: 'refused', reason: 'parameters_invalid' };
+  }
   // Past the hold's payload cap the gate would mint a hold in the DECLINE posture, whose "yes" applies nothing.
   if (JSON.stringify(operations).length > GM_HELD_OPERATIONS_MAX_JSON_CHARS) return { kind: 'refused', reason: 'payload_too_large' };
 
@@ -101,5 +109,9 @@ export function dispatchAddRiskTransaction(input: AddRiskTransactionInput): AddR
     insights: [],
     stage_indicator: input.stage,
   } as OlumiResponse;
-  return { kind: 'held', response, pendingActions: decision.pendingActions, riskId, riskLabel, chip };
+  const pending = decision.pendingActions[0]!;
+  const pendingActions = userEventRisk === undefined ? decision.pendingActions : [{ ...pending, action: { ...pending.action,
+    inline_patch: { ...(pending.action as { inline_patch: Record<string, unknown> }).inline_patch, [GM_HELD_USER_EVENT_RISK_KEY]: userEventRisk },
+  } } as PendingAction];
+  return { kind: 'held', response, pendingActions, riskId, riskLabel, chip };
 }

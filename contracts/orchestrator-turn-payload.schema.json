@@ -474,6 +474,94 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 500
+                      },
+                      "event_risk": {
+                        "type": "object",
+                        "properties": {
+                          "version": {
+                            "type": "number",
+                            "const": 1
+                          },
+                          "occurrence": {
+                            "type": "object",
+                            "properties": {
+                              "p_low": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "p_high": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "meaning": {
+                                "type": "string",
+                                "const": "at_least_once_within_horizon"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "user",
+                                  "olumi",
+                                  "reference"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "p_low",
+                              "p_high",
+                              "basis"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "horizon": {
+                            "type": "object",
+                            "properties": {
+                              "months": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "maximum": 600
+                              }
+                            },
+                            "required": [
+                              "months"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "mitigations": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "factor_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[a-z0-9_:-]+$"
+                                },
+                                "occurrence_reduction": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              },
+                              "required": [
+                                "factor_id",
+                                "occurrence_reduction"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 8
+                          }
+                        },
+                        "required": [
+                          "version",
+                          "occurrence",
+                          "horizon"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
