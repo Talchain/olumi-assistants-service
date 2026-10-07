@@ -1,0 +1,177 @@
+{
+  "A": {
+    "kind": "unavailable",
+    "reason": "no_grounded_item",
+    "reply": "I can’t run the pre-mortem on this decision yet because I have no supported model item to stress-test for it.",
+    "actions": [
+      {
+        "id": "agent-talk-it-through",
+        "label": "Talk it through",
+        "message": "Let’s talk it through."
+      }
+    ]
+  },
+  "B": {
+    "kind": "run",
+    "context": {
+      "method": "pre_mortem",
+      "dsk": null,
+      "not_cited": "no_evidence_gap",
+      "plan": {
+        "option_id": "raise_prices_10",
+        "label": "Raise prices 10%",
+        "basis": "licensed_leader"
+      },
+      "goal_label": "monthly recurring revenue",
+      "current_option_labels": [
+        "Raise prices 10%",
+        "Launch starter tier",
+        "Keep pricing as it is"
+      ],
+      "supplied_items": [
+        {
+          "id": "price_rise_customer_losses",
+          "kind": "risk",
+          "labels": [
+            "Price-rise customer losses"
+          ],
+          "card": "propose_new_risk"
+        }
+      ],
+      "supplied_figures": []
+    },
+    "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nThe plan to stress-test is ‘Raise prices 10%’. The goal is ‘monthly recurring revenue’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Raise prices 10%’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- ‘Price-rise customer losses’ (a risk on this plan’s path)\nName no option other than ‘Raise prices 10%’. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+    "check_inputs": {
+      "plan_label": "Raise prices 10%",
+      "current_option_labels": [
+        "Raise prices 10%",
+        "Launch starter tier",
+        "Keep pricing as it is"
+      ],
+      "supplied_items": [
+        {
+          "id": "price_rise_customer_losses",
+          "labels": [
+            "Price-rise customer losses"
+          ]
+        }
+      ],
+      "model_labels": [
+        "Decision: monthly recurring revenue",
+        "monthly recurring revenue",
+        "Raise prices 10%",
+        "Launch starter tier",
+        "Keep pricing as it is",
+        "Price increase",
+        "Starter tier availability",
+        "Starter tier monthly price",
+        "Price-rise customer losses",
+        "Starter subscribers",
+        "Starter-tier monthly recurring revenue"
+      ]
+    }
+  },
+  "C": {
+    "kind": "run",
+    "context": {
+      "method": "pre_mortem",
+      "dsk": null,
+      "not_cited": "no_identified_plan",
+      "plan": null,
+      "decision_level": true,
+      "goal_label": "monthly recurring revenue",
+      "current_option_labels": [
+        "Raise prices 10%",
+        "Launch starter tier",
+        "Keep pricing as it is"
+      ],
+      "supplied_items": [
+        {
+          "id": "support_capacity_strain->monthly_recurring_revenue",
+          "kind": "link",
+          "labels": [
+            "Support capacity strain",
+            "monthly recurring revenue"
+          ],
+          "card": "propose_link_strengths"
+        },
+        {
+          "id": "starter_tier_subscribers->starter_tier_support_cost",
+          "kind": "link",
+          "labels": [
+            "Starter tier subscribers",
+            "Starter tier support cost"
+          ],
+          "card": "propose_link_strengths"
+        },
+        {
+          "id": "price_rise_churn",
+          "kind": "risk",
+          "labels": [
+            "Price-rise churn"
+          ],
+          "card": "propose_new_risk"
+        },
+        {
+          "id": "support_capacity_strain",
+          "kind": "risk",
+          "labels": [
+            "Support capacity strain"
+          ],
+          "card": "propose_new_risk"
+        }
+      ],
+      "supplied_figures": []
+    },
+    "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘monthly recurring revenue’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘Raise prices 10%’, ‘Launch starter tier’, ‘Keep pricing as it is’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Support capacity strain’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- how ‘Starter tier subscribers’ affects ‘Starter tier support cost’ (nobody has sized this yet)\n- ‘Price-rise churn’ (a risk on an option’s path)\n- ‘Support capacity strain’ (a risk on an option’s path)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+    "check_inputs": {
+      "decision_level": true,
+      "current_option_labels": [
+        "Raise prices 10%",
+        "Launch starter tier",
+        "Keep pricing as it is"
+      ],
+      "supplied_items": [
+        {
+          "id": "support_capacity_strain->monthly_recurring_revenue",
+          "labels": [
+            "Support capacity strain",
+            "monthly recurring revenue"
+          ]
+        },
+        {
+          "id": "starter_tier_subscribers->starter_tier_support_cost",
+          "labels": [
+            "Starter tier subscribers",
+            "Starter tier support cost"
+          ]
+        },
+        {
+          "id": "price_rise_churn",
+          "labels": [
+            "Price-rise churn"
+          ]
+        },
+        {
+          "id": "support_capacity_strain",
+          "labels": [
+            "Support capacity strain"
+          ]
+        }
+      ],
+      "model_labels": [
+        "Decision: monthly recurring revenue",
+        "monthly recurring revenue",
+        "Raise prices 10%",
+        "Launch starter tier",
+        "Keep pricing as it is",
+        "Price rise",
+        "Starter tier subscribers",
+        "Support cost per starter subscriber",
+        "Price-rise churn",
+        "Support capacity strain",
+        "Starter tier support cost"
+      ]
+    }
+  }
+}
