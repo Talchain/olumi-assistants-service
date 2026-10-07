@@ -645,10 +645,11 @@ export function noDeadEndAsks(
     const statement = unsizedLinkStatement(links.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), 400 - ask.length - 1);
     let message = statement === '' ? ask : `${statement} ${ask}`;
     let question = ask;
-    // The complete question is kept whenever it fits the 400 carrier on its own (D-04). Only a question that cannot
-    // fit alone shortens its labels, at word boundaries, with the statement (R10 Science: every link accounted for);
-    // `first.question` is then the question actually said, so the current-level ask still binds (Codex r1 P1, #2748).
-    if (ask.length > 400) {
+    // The complete question is kept whenever the cause still fits beside it in the 400 carrier (D-04). Otherwise the
+    // labels shorten, at word boundaries, in the statement AND the question together, so the reason is never lost
+    // (R10 Science: every link accounted for; Codex r2 P1 on #2748: a 308-character question left no room for the
+    // cause). `first.question` is the question actually said, so the current-level ask still binds (Codex r1 P1).
+    if (statement === '' || ask.length > 400) {
       for (budget = 120; budget > 12; budget -= 12) {
         const shortAsk = askOf();
         const b = budget;
