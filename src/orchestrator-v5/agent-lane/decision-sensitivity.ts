@@ -28,6 +28,7 @@
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 import { goalChanceDriverAvailabilityForAgent, nearestFiveGoalChancesForAgent } from '../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, runHasGoalChanceLicenceRecord } from '../goal-target/goal-chance-range-agent.js';
+import { robustnessComputed } from './goal-chance-driver-egress.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
@@ -148,8 +149,28 @@ export function tippingPointOf(enrichment: unknown): TippingPoint {
   };
 }
 
+/**
+ * ⭐ S2i (DL GO, Wave B2–B7): NO ABSENCE TO SAY BESIDE A SCREEN THAT SHOWS ONE. Every served Run of Waves B1–B7 and W3 (14)
+ * handed the Agent `decision_sensitivity: not_measured | none_measurable` and `tipping_point: not_evaluated` beside a
+ * screen naming each option's driver (a licensed driver, or a range's "depends most on") or a robustness check that ran,
+ * and each wave served a new wording of "nothing established which assumption matters most / sensitivity was not
+ * measured". The instruction to make no claim (RC 5950124321) did not hold, and the egress removes only the forms it
+ * knows. So on such a screen neither status is handed: `decision_sensitivity` unless `measured` (with the raw
+ * `factor_evppi` rows it is read from), and `tipping_point` when `not_evaluated`. A `measured` sensitivity and every
+ * tipping-point FINDING (`no_flip_in_range`, `unresolved`, a threshold) still are. `goal_chance_driver_availability` is
+ * not gated: it covers only the options with a point chance, so beside another option's range it is still true.
+ * `screenGraph` names the screen's labels for callers that do not pass `graph` (Explain, saved-run facts): it decides
+ * this gate only, never which facts are shown.
+ */
+function screenShowsSensitivity(block: Record<string, unknown>, graph: unknown, current: boolean): boolean {
+  const facts = goalChanceFactsForAgent(block, graph, current);
+  return Object.keys(facts.goal_chance_driver_display ?? {}).length > 0
+    || Object.keys(facts.goal_chance_range_display ?? {}).length > 0
+    || robustnessComputed(block);
+}
+
 /** The run's `analysis_result` block as the Agent reads it: (i)–(iii) above. Never mutates its input. */
-export function analysisResultForAgent(result: unknown, graph?: unknown, current = true): unknown {
+export function analysisResultForAgent(result: unknown, graph?: unknown, current = true, screenGraph?: unknown): unknown {
   const block = recordOf(result);
   if (block === undefined) return result;
   const enrichment = recordOf(block.enrichment);
@@ -208,7 +229,14 @@ export function analysisResultForAgent(result: unknown, graph?: unknown, current
     out.enrichment = rest;
     if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
-  out.decision_sensitivity = decisionSensitivityOf(enrichment);
+  const shown = screenShowsSensitivity(block, graph ?? screenGraph, current);
+  const sensitivity = decisionSensitivityOf(enrichment);
+  const projected = recordOf(out.enrichment);
+  if (!shown || sensitivity.status === 'measured') out.decision_sensitivity = sensitivity;
+  else if (projected !== undefined && 'factor_evppi' in projected) {
+    const { factor_evppi: _absenceSource, ...withoutEvppi } = projected;
+    out.enrichment = withoutEvppi;
+  }
   // CEE-owned facts stay outside enrichment's producer-prose filter. The licence, not EVPPI, owns this claim scope.
   Object.assign(out, goalFacts);
   if (goalFacts.goal_chance_display !== undefined) {
@@ -220,7 +248,8 @@ export function analysisResultForAgent(result: unknown, graph?: unknown, current
           : options.every((o) => o.status === 'none_licensed') ? 'none_licensed' : 'not_recorded' };
     }
   }
-  out.tipping_point = tippingPointOf(enrichment);
+  const tipping = tippingPointOf(enrichment);
+  if (!(shown && tipping.status === 'not_evaluated')) out.tipping_point = tipping;
   return out;
 }
 
