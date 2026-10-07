@@ -1122,7 +1122,8 @@ export function transformEdgeToV3(
   const edgeId = `${edge.from}->${edge.to}`;
   // V4 fields take precedence, fallback to legacy for backwards compatibility
   const rawStrength = edge.strength_mean ?? edge.weight ?? DEFAULT_STRENGTH_MEAN;
-  if (edge.strength_mean === undefined && edge.weight === undefined) {
+  const meanDefaulted = edge.strength_mean === undefined && edge.weight === undefined;
+  if (meanDefaulted) {
     defaults.push({ edge_id: edgeId, field: "strength_mean", default_value: DEFAULT_STRENGTH_MEAN, reason: "no LLM value" });
   }
 
@@ -1207,8 +1208,13 @@ export function transformEdgeToV3(
 
   // Extract provenance — prefer structured edge.provenance, fall back to
   // edge.provenance_source (flat enum from Anthropic structured outputs).
-  const provenance = extractProvenanceForV3(edge.provenance)
+  const extracted = extractProvenanceForV3(edge.provenance)
     ?? (edge.provenance_source ? { source: mapToV3ProvenanceSource(edge.provenance_source) } : undefined);
+  // Science 393023 LICENCE (b), 7 Oct 20:48Z: a mean nobody stated is this door's default, so the edge carries
+  // `defaulted: true` AND the tag. A bare 0.5 (no `defaulted`) is never read as a placeholder: a user's 0.5 must never be.
+  const provenance = meanDefaulted
+    ? { ...(extracted ?? { source: "cee_hypothesis" as const }), magnitude: "olumi_placeholder" as const }
+    : extracted;
 
   return {
     edge: {
@@ -1226,7 +1232,7 @@ export function transformEdgeToV3(
       // Bidirected edges represent unmeasured confounding — preserve through pipeline. See 3A-trust.
       ...(edge.edge_type ? { edge_type: edge.edge_type } : {}),
       // F5: Preserve enrichment defaulted flag through V3 transform
-      ...((edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
+      ...(meanDefaulted ? { defaulted: true } : (edge as any).defaulted != null ? { defaulted: (edge as any).defaulted } : {}),
       // Preserve validation pipeline metadata (two-pass parameter review)
       ...((edge as any).validation != null ? { validation: (edge as any).validation } : {}),
     },
@@ -1263,7 +1269,7 @@ function mapToV3ProvenanceSource(source: string): V3ProvenanceSource {
  */
 function extractProvenanceForV3(
   prov?: string | ProvenanceObject
-): { source: V3ProvenanceSource; reasoning?: string } | undefined {
+): { source: V3ProvenanceSource; reasoning?: string; magnitude?: "olumi_placeholder" } | undefined {
   if (!prov) return undefined;
 
   if (typeof prov === "string") {
@@ -1273,6 +1279,8 @@ function extractProvenanceForV3(
   return {
     source: mapToV3ProvenanceSource(prov.source),
     reasoning: prov.quote,
+    // Science 393023 LICENCE (b): a default door's tag survives the transform (the enricher writes it).
+    ...(prov.magnitude === "olumi_placeholder" ? { magnitude: "olumi_placeholder" as const } : {}),
   };
 }
 

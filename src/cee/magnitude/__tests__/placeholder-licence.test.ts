@@ -18,7 +18,7 @@ describe('Science 393023 LICENCE (a)/(b), 7 Oct: one pure placeholder reader', (
   it('pins the byte-identical DGAI parity fixture', () => {
     expect(parity.length).toBeGreaterThanOrEqual(14);
     expect(createHash('sha256').update(parityBytes).digest('hex'))
-      .toBe('a72374b1ff1e60ca3749cab42fa487257b966e013820149d99cb5c4332f69641');
+      .toBe('67fd0050970378c46acd843f7b00424b954d547fabbd8a17b5ee9e3ba08f2ec9');
   });
 
   it.each(parity)('$name → placeholder=$placeholder', ({ edge, placeholder }) => {

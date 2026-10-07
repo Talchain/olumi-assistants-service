@@ -41,19 +41,41 @@ function reviewedByUser(p: Rec): boolean {
   return isRec(r) && r.intent === 'confirm';
 }
 
-function isUntaggedProducerDefault(edge: unknown, p: Rec | undefined): boolean {
-  return (p?.magnitude === undefined && p?.natural_effect === undefined)
-    && (p?.mean_projected === true || (isRec(edge) && edge.defaulted === true && isRec(edge.strength)
-      && typeof edge.strength.mean === 'number' && Math.abs(edge.strength.mean) === STRENGTH_DEFAULT_SIGNATURE.mean
-      && edge.strength.std === STRENGTH_DEFAULT_SIGNATURE.std));
+/**
+ * The default doors (Science 393023 LICENCE (b), 7 Oct 20:48Z): every producer that writes a size nobody chose writes
+ * `defaulted: true` and the tag; this table is how the reader still knows the links a door wrote before it tagged.
+ * One row per door, never only `hypothesisEdgeValue`'s. A bare 0.5 with no `defaulted` is never matched: a user's 0.5
+ * must never read as a placeholder.
+ */
+export const DOOR_DEFAULT_CONSTANTS: ReadonlyArray<{ readonly door: string; readonly mean: number; readonly std: number }> = [
+  { door: 'hypothesisEdgeValue (+ Option / + Risk / add-factor)', mean: STRENGTH_DEFAULT_SIGNATURE.mean, std: STRENGTH_DEFAULT_SIGNATURE.std },
+  { door: 'factor enricher (enricher.ts)', mean: 0.5, std: 0.2 },
+];
+
+function isUntaggedDoorDefault(edge: unknown, p: Rec | undefined): boolean {
+  if (p?.magnitude !== undefined || p?.natural_effect !== undefined) return false;
+  if (!isRec(edge) || edge.defaulted !== true || !isRec(edge.strength)) return false;
+  const { mean, std } = edge.strength;
+  return typeof mean === 'number' && DOOR_DEFAULT_CONSTANTS.some((d) => Math.abs(mean) === d.mean && std === d.std);
 }
 
+/**
+ * Order (Science 393023 LICENCE rulings 1-2, 7 Oct 20:48Z):
+ *   1. `magnitude: 'user_stated'`: the user stated the size.
+ *   2. `mean_projected`: a projected mean is unsized WHATEVER its magnitude or natural_effect (a contradictory record
+ *      fails closed: a misreading may only withhold or range) and whatever its source (`user_specified` + a projected
+ *      mean = the user drew the link but gave no number).
+ *   3. `source: 'user_specified'`.
+ *   4. the tag, the other `olumi_*` classes, then the untagged door constants ({@link DOOR_DEFAULT_CONSTANTS}).
+ */
 export function linkSizing(edge: unknown): LinkSizing {
   const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
-  if (p?.source === 'user_specified' || p?.magnitude === 'user_stated') return 'user';
+  if (p?.magnitude === 'user_stated') return 'user';
+  if (p?.mean_projected === true) return 'placeholder';
+  if (p?.source === 'user_specified') return 'user';
   if (p?.magnitude === PLACEHOLDER_MAGNITUDE) return 'placeholder';
   if (typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) return reviewedByUser(p) ? 'olumi_accepted' : 'olumi_estimate';
-  if (isUntaggedProducerDefault(edge, p)) return 'placeholder';
+  if (isUntaggedDoorDefault(edge, p)) return 'placeholder';
   return 'unmarked';
 }
 
