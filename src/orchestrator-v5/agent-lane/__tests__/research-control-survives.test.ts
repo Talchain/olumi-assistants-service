@@ -202,7 +202,9 @@ describe('an accepted search offer has its control on the wire', () => {
     expect(stored(b.assistant_text)).toBe(true);
   });
 
-  it('RED (buddy r2): the same words inside a sentence the gate deletes are not trusted', async () => {
+  // ⚠ NOT RED EVIDENCE: this row also passes on the round-2 code (an EARLIER gate edits the sentence in this fixture). The
+  // buddy's own reproducer needs an unresolved-scope turn, which is not replayed here.
+  it('the same words inside a sentence the gate deletes are not trusted (holds; not a RED row)', async () => {
     query = RANKING; run = 'licensed'; runsAfterOffer = true;
     reply = `${PROMISE}\n\n${OPTIONS[0]} is the best option \u2014 ${RESEARCH_NOT_ON_OFFER_TEXT}`;
     const b = await turn();
