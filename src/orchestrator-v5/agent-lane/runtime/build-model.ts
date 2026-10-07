@@ -1,3 +1,4 @@
+import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
@@ -170,6 +171,8 @@ export function buildCandidateSchema(): Record<string, unknown> {
      * flag is how this estate gets silent defaults.
      */
     goal: obj({
+      kind: { anyOf: [{ type: 'string', enum: ['event_by_date'] }, { type: 'null' }] },
+      deliverable: { anyOf: [{ type: 'string', maxLength: 100 }, { type: 'null' }] },
       metric: { type: 'string' }, operator: { type: 'string', enum: ['>=', '<=', '>', '<'] },
       target_stated: { type: 'boolean' },
       value: { anyOf: [{ type: 'number' }, { type: 'null' }] }, unit: { type: 'string' },
@@ -242,6 +245,11 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // Current Staffing" was not a readiness idiom, so the turn blocked). The drafter
       // DECLARES the current-state option; admission reads this first. Strict output
       // requires every key, so "optional" is `null`.
+      added_capacity: { anyOf: [{ type: 'null' }, obj({
+        monthly_share_pct: { type: 'number', minimum: 0 },
+        lead_months_low: { type: 'number', minimum: 0 },
+        lead_months_high: { type: 'number', minimum: 0 },
+      }, ['monthly_share_pct', 'lead_months_low', 'lead_months_high'])] },
       is_status_quo: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
         'true ONLY for the one option that keeps things as they are now (the current state or status quo), whatever it is called. null for every other option. Never true on more than one option.' },
     }, ['label', 'provenance', 'changes', 'interventions', 'is_status_quo']) },
@@ -310,6 +318,7 @@ export function buildCandidateSchema(): Record<string, unknown> {
 }
 
 export const BUILD_INSTRUCTIONS = [
+  'For an EVENT by a date (meet the deadline, launch by, deliver on time, ship by Q2), emit goal.kind event_by_date and goal.deliverable as a short noun phrase such as the feature launch. Never use likelihood, chance or probability as its quantity. A QUANTITY with a deadline (£150k MRR by March) keeps its present level goal with kind and deliverable null. For event_by_date, do not draft a goal baseline or user target; admission defines completion as 100%. Each option adding capacity supplies added_capacity {monthly_share_pct, lead_months_low, lead_months_high}: your estimate of extra percentage of the deliverable per month and recruitment/notice/onboarding lead time. Disclose these as Olumi’s estimates, never user figures. The status quo has added_capacity null. The event-share parts replace the ordinary causal goal links; leave its factors, risks, outcomes, links and identities empty for this slice. Ask for the date first, then how long today’s team takes, then when new people start. Never ask today’s level of the event goal.',
   'r5-stated-evidence-v1: For an EXPLICIT absolute option setting only, supply stated_evidence with its complete verbatim assertion (quote,start,end), the owned-option anchor (option_quote,option_start,option_end), and amount_start at the written figure. All offsets are UTF-16, end-exclusive, in the original brief. Include the full sentence, including bounds or alternatives; never shorten it to hide context. Use null for estimates, bounds, unresolved alternatives, additions or ambiguous ownership.',
   'Produce a complete causal decision model from the brief in ONE pass.',
   'Preserve exact user facts, numbers, constraint semantics and time horizon. The first model must support a PROVISIONAL calculation before user adoption: provide defensible starting estimates where the brief gives no baseline, mark those factors ai_proposed with baseline_known:false, and explain the uncertainty in unknowns. These are modelling assumptions, never measurements or user-validated facts. If no defensible estimate is possible, leave it null and name the specific unresolved input.',
@@ -2002,7 +2011,10 @@ export async function buildModelFromBrief(
   // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
   // 8th of 10, two shown), and a month count the drafter typed for it was asked as the deadline. Olumi's count is never
   // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
-  if (statedGoal.horizon.status === 'unresolved') {
+  if (candidate.goal.kind === 'event_by_date') {
+    openQuestions.splice(0);
+    openQuestions.push(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
+  } else if (statedGoal.horizon.status === 'unresolved') {
     const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
     openQuestions.unshift(deadlineHeld
       ? `Which date does "${deadlineWords}" mean? It is the deadline your brief sets${goalName}; the model keeps your words but no date, so no result answers whether it is met by then.`

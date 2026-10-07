@@ -1,3 +1,4 @@
+import { draftedTeamPartOf } from '../goal-target/event-by-date-model.js';
 import { unsizedLinkSentence, unsizedLinkStatement, legacyLinkSentence } from './unsized-path-cause.js';
 /**
  * ⭐ IS A GOAL CERTAINTY EARNED? — ONE typed decision the reply and every goal-probability display read (AI Quality
@@ -626,6 +627,8 @@ export function noDeadEndAsks(
     const deadline = goalDeadlineOf(goal);
     return { message: chanceGoalSentence(deadline === undefined ? undefined : sayDate(deadline)), gaugeLinks: new Set() };
   }
+  // The host owns the date -> team-time question; a forecast has no level today.
+  if (draftedTeamPartOf(graph) !== null) return { gaugeLinks: new Set() };
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
   const goalView = typeof goal?.id === 'string' ? view.get(goal.id) : undefined;
   if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {

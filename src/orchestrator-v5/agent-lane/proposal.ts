@@ -113,7 +113,8 @@ export interface ProposalOperation {
      * is outside the analysis hash), the words, and the day it was counted from. Written only through the atomic level
      * door's `goal_horizon` member (`commitOptionLevels`), alone, as `NodeV3.goal_horizon.deadline`.
      */
-    | 'set_goal_deadline';
+    | 'set_goal_deadline'
+    | 'set_team_time';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;

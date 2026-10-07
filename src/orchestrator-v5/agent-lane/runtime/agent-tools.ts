@@ -487,6 +487,11 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     }, ['constraint_type', 'value', 'unit', 'rationale']),
   },
   {
+    type: 'function', name: 'propose_team_time',
+    description: 'Propose the time today’s team would take to finish the event deliverable, after its deadline is held. Use numeric months from THIS user message only, as low_months and high_months (about 8 months means both 8). Never use recruitment time, a historical duration or an earlier message. This prepares a card; authorise_change writes it only after approval.',
+    parameters: obj({ low_months: { type: 'number', exclusiveMinimum: 0 }, high_months: { type: 'number', exclusiveMinimum: 0 } }, ['low_months', 'high_months']),
+  },
+  {
     type: 'function',
     name: 'propose_goal_deadline',
     description:
@@ -805,7 +810,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_goal_deadline', 'propose_team_time', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -883,6 +888,7 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
   /** S-E GOALS: the user's stated deadline as a date on the goal (`goal_horizon.deadline`), proposed for approval. */
+  proposeTeamTime?(ctx: AgentToolContext, args: { low_months: number; high_months: number }): Promise<ToolResult>;
   proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string }): Promise<ToolResult>;
   proposeOptionStatus?(ctx: AgentToolContext, args: {
     option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
@@ -1004,6 +1010,8 @@ export async function dispatchTool(
       return caps.proposeGoalTarget !== undefined
         ? caps.proposeGoalTarget(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
+    case 'propose_team_time':
+      return caps.proposeTeamTime !== undefined ? caps.proposeTeamTime(ctx, args as never) : { ok: false, mutated: false, refusal: 'unsupported' };
     case 'propose_goal_deadline':
       return caps.proposeGoalDeadline !== undefined
         ? caps.proposeGoalDeadline(ctx, args as never)

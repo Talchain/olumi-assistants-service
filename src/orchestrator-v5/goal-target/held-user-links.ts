@@ -108,6 +108,11 @@ export function validatedDefinition(e: unknown, ends: LinkEnds): string | undefi
   const u = currentDefinitionalCarrier(e);
   if (u === undefined) return undefined;
   if (ends.toUnit === undefined || !sameUnit(ends.toUnit, u) || (ends.fromUnit !== undefined && !sameUnit(ends.fromUnit, u))) return undefined;
+  // S2b's named team part is the share definition, despite different verbs in the two labels.
+  if (u.startsWith('% of ') && ends.toLabel?.startsWith(`Share of ${u.slice(5)} done by `)) {
+    const date = ends.toLabel.slice(`Share of ${u.slice(5)} done by `.length);
+    if (ends.fromLabel === `Share today's team finishes by ${date}`) return u;
+  }
   return ends.fromLabel !== undefined && ends.toLabel !== undefined && labelHoldsQuantity(ends.fromLabel, ends.toLabel) ? u : undefined;
 }
 

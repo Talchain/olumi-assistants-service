@@ -70,6 +70,7 @@ export const FIELD_CLASS_BY_OP: Readonly<Record<PatchOperation['op'] | ProposalO
   set_link_effect: 'none', // the user's own verbatim figures: shown, never re-authored
   set_goal_target: 'slice_3',
   set_limit: 'slice_3',
+  set_team_time: 'slice_3',
   set_goal_deadline: 'slice_3', // the goal's date (`goal_horizon.deadline`, new on staging 7 Oct): with goal target and limits (S3, S-E)
   confirm_identity: 'none',
   set_option_status: 'none',

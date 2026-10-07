@@ -68,6 +68,8 @@ import {
   type AdmittedConstraint,
 } from './admit-constraint.js';
 
+import { admitEventByDate } from '../goal-target/event-by-date-model.js';
+
 const MAX_ID = 100;
 
 /**
@@ -120,6 +122,8 @@ export interface StatedOptionEvidence {
 export interface CandidateModel {
   readonly goal: {
     metric: string; operator: string; unit: string; horizon_months: number | null; provenance: string;
+    kind?: 'event_by_date' | null;
+    deliverable?: string | null;
     /**
      * `false` means the brief named a DIRECTION and no number. Optional because the
      * originally banked candidate contract has no such field: a candidate from before
@@ -153,6 +157,7 @@ export interface CandidateModel {
   };
   readonly constraints: readonly CandidateConstraint[];
   readonly options: readonly {
+    added_capacity?: { monthly_share_pct: number; lead_months_low: number; lead_months_high: number } | null;
     label: string;
     provenance: string;
     /**
@@ -3041,6 +3046,7 @@ export function admitCandidateModel(
    */
   sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
 ): AdmittedModel {
+  if (candidateModel.goal.kind === 'event_by_date') return admitEventByDate(candidateModel);
   candidateModel = withQuantityFrames(candidateModel);
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)

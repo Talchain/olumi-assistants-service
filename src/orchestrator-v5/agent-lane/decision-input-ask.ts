@@ -1,3 +1,4 @@
+import { draftedTeamPartOf, teamTimeAsk } from '../goal-target/event-by-date-model.js';
 /**
  * ⭐ OLUMI ASKS FOR THE DECISION INPUT IT LACKS (DL #75 5923918068: R3's dry run D1 "no ask for the minimum amount" + A7
  * "the deadline neither asked nor scored"; lease 5923944336).
@@ -191,6 +192,8 @@ export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown): E {
 
 /** The one ask writer, before display scrubbing or turn eligibility. */
 function rawDecisionInputAsk(graph: unknown): string | null {
+  const part = draftedTeamPartOf(graph);
+  if (part !== null) return goalDeadlineOf(part.goal) === undefined ? chanceGoalDeadlineAsk(part.deliverable) : teamTimeAsk(graph);
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return null;
@@ -240,6 +243,7 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
 
 /** The host's framing or target ask, recognised by every selector and replay reader. */
 export function isDecisionInputAsk(line: string): boolean {
+  if (line.startsWith('How long would ') && line.endsWith(' take with the team you have now?')) return true;
   return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith('What should this model help you explore?');
 }
 
