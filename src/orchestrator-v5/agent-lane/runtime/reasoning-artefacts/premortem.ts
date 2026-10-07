@@ -15,7 +15,6 @@ const text = z.string().min(1).max(1600).refine(s => s.trim().length > 0);
 const id = z.string().min(1).max(160);
 const direction = z.enum(['positive', 'negative']);
 const authoredBan = /%|\b(?:most likely|likely|likelihood|chance|probability|probable|odds|best|winners?|winning|recommend\w*|leads?|ahead|beats?)\b/iu;
-const safeText = text.refine(s => !authoredBan.test(s), 'unlicensed wording');
 const runSchema = z.object({
   graph_hash_at_run: z.string().regex(/^[0-9a-f]{16}$/u),
   computed_at: z.string().refine(s => Number.isFinite(Date.parse(s)) && new Date(s).toISOString() === s),
@@ -29,12 +28,13 @@ const dependencySchema = z.object({
 const bindingSchema = z.object({ scenario_id: id, graph_revision: id, dependencies: z.array(dependencySchema).min(2) }).strict();
 const groundingSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('factor'), ids: z.array(id).min(1), labels: z.array(text).min(1) }).strict(),
+  z.object({ kind: z.literal('risk'), ids: z.array(id).min(1), labels: z.array(text).min(1) }).strict(),
   z.object({ kind: z.literal('link'), ids: z.array(id).min(1), labels: z.array(text).min(2) }).strict(),
   z.object({ kind: z.literal('not_in_model'), label: z.literal(PREMORTEM_COPY.outside) }).strict(),
 ]);
 const riskRequestSchema = z.object({
   chip_id: z.literal('agent-next-suggest-risks'),
-  message: safeText,
+  message: text,
   affected_node_id: id,
   direction,
   grounding_ids: z.array(id),
@@ -44,7 +44,7 @@ export const PremortemWorksheetV1Schema = z.object({
   run: runSchema, binding: bindingSchema,
   rows: z.array(z.object({
     row_id: id, option_id: id, option_label: text,
-    failure_way: safeText, early_warning: safeText, mitigation: safeText.optional(),
+    failure_way: text, early_warning: text, mitigation: text.optional(),
     grounding: groundingSchema, provenance: z.literal('olumi_hypothesis'), risk_request: riskRequestSchema,
   }).strict()).min(1).max(4),
   coverage: z.array(z.object({ option_id: id, option_label: text, status: z.enum(['stress_tested', 'not_stress_tested']) }).strict()),
@@ -65,22 +65,34 @@ export type PremortemWorksheetV1 = z.infer<typeof PremortemWorksheetV1Schema>;
 // The model supplies rows only; all identities, coverage, provenance, labels and requests are server-bound.
 const candidateSchema = z.object({
   option_id: id, story_index: z.number().int().min(1).max(3).nullable(),
-  failure_way: safeText, early_warning: safeText, mitigation: safeText.optional(),
+  failure_way: text, early_warning: text, mitigation: text.optional(),
   grounding: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('factor'), ids: z.array(id).min(1).max(3) }).strict(),
+    z.object({ kind: z.literal('risk'), ids: z.array(id).min(1).max(3) }).strict(),
     z.object({ kind: z.literal('link'), ids: z.array(id).min(1).max(3) }).strict(),
     z.object({ kind: z.literal('not_in_model') }).strict(),
   ]),
-  risk: z.object({ label: safeText, affected_node_id: id, direction }).strict(),
+  risk: z.object({ label: text, affected_node_id: id, direction }).strict(),
 }).strict();
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
 const records = (v: unknown): Rec[] => Array.isArray(v) ? v.map(rec).filter((x): x is Rec => x !== undefined) : [];
 const fold = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[‘’]/gu, "'").replace(/\s+/gu, ' ').trim();
-const contains = (s: string, label: string) => {
+const labelPattern = (label: string, flags = 'u') => {
   const escape = fold(label).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  return new RegExp(`(?<![\\p{L}\\p{N}_])${escape}(?![\\p{L}\\p{N}_])`, 'u').test(fold(s));
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${escape}(?![\\p{L}\\p{N}_])`, flags);
 };
+const contains = (s: string, label: string) => labelPattern(label).test(fold(s));
+
+/** Ban Olumi-authored wording only; exact final-graph labels retain the user's words. */
+export function authoredBanAfterMasking(field: string, nodeLabels: readonly string[]): boolean {
+  const labels = [...new Set(nodeLabels.map(fold).filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (labels.length === 0) return authoredBan.test(fold(field));
+  // One pass (DL: 50 per-label passes took 24 ms at 20k chars); longest first inside the alternation.
+  const alternation = labels.map(label => label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|');
+  const masked = fold(field).replace(new RegExp(`(?<![\\p{L}\\p{N}_])(?:${alternation})(?![\\p{L}\\p{N}_])`, 'gu'), ' ');
+  return authoredBan.test(masked);
+}
 
 /** Append to the existing directive; its prose grammar and checker remain unchanged. */
 export function premortemProducerDirective(turn: RunMethodTurn, graph: unknown): string {
@@ -88,15 +100,16 @@ export function premortemProducerDirective(turn: RunMethodTurn, graph: unknown):
   const options = nodes.filter(n => n.kind === 'option').map(n => ({ id: n.id, label: n.label }));
   return [
     'After the complete prose reply, on a new line append <premortem_rows>JSON array</premortem_rows>. This appendix is separate from the prose word cap.',
-    'Each row: {option_id,story_index,failure_way,early_warning,mitigation?,grounding:{kind:"factor"|"link",ids:[supplied ids]}|{kind:"not_in_model"},risk:{label,affected_node_id,direction:"positive"|"negative"}}.',
+    'Each row: {option_id,story_index,failure_way,early_warning,mitigation?,grounding:{kind:"factor"|"link"|"risk",ids:[supplied ids]}|{kind:"not_in_model"},risk:{label,affected_node_id,direction:"positive"|"negative"}}.',
     'For grounded rows story_index is the numbered prose story (1-based). Copy failure_way exactly from that story before Watch for:, early_warning exactly after Watch for: and before Mitigate:, and mitigation exactly after Mitigate:.',
     'Each story must bind to one option. On a generic turn name that option in the story. Never guess an option from an ambiguous shared path.',
     'At most one outside candidate, separately imagined, with story_index:null and zero model ids. Never convert the Outside the model QUESTION into a failure way. Omit uncertain rows.',
     `Chosen option: ${turn.context.plan?.option_id ?? 'none; bind each story explicitly'}. Model options: ${JSON.stringify(options)}.`,
-    `Eligible grounding: ${JSON.stringify(turn.context.supplied_items.filter(i => i.kind === 'factor' || i.kind === 'link').map(({ id, kind, labels }) => ({ id, kind, labels })))}.`,
+    // Limit grounding needs its own validation and is a follow-up.
+    `Eligible grounding: ${JSON.stringify(turn.context.supplied_items.filter(i => i.kind === 'factor' || i.kind === 'link' || i.kind === 'risk').map(({ id, kind, labels }) => ({ id, kind, labels })))}.`,
     `Risk destinations (goal/outcome only): ${JSON.stringify(nodes.filter(n => n.kind === 'goal' || n.kind === 'outcome').map(n => ({ id: n.id, label: n.label })))}.`,
     'Risk label names one new risk, copied verbatim as a short phrase from failure_way. Direction says whether it raises or lowers the destination, as an Olumi hypothesis for the user to challenge. No invented ids.',
-    'No most likely, best, winner, recommend, leads, ahead, beats, probability, likelihood, chance, odds or percentages anywhere in rows.',
+    'No most likely, best, winner, recommend, leads, ahead, beats, probability, likelihood, chance, odds or percentages in your authored words. Copy supplied node labels exactly, even when those labels contain these words or percentages.',
   ].join('\n');
 }
 
@@ -123,71 +136,99 @@ function stamp(read: PremortemRead, scenarioId: string): PremortemWorksheetV1['r
     ...(typeof result.run_id === 'string' ? { run_id: result.run_id } : {}) };
 }
 
+export type PremortemDropReason =
+  | 'schema' | 'scoped_not_run' | 'plan_mismatch' | 'destination' | 'risk_label'
+  | 'outside_invalid' | 'story_missing' | 'story_parts_mismatch' | 'named_options'
+  | 'dup_ids' | 'supplied_mismatch' | 'grounding_invalid' | 'final_label_drift'
+  | 'duplicate_key' | 'risk_request_schema' | 'authored_ban';
+export interface PremortemWorksheetDiagnostics {
+  worksheet: PremortemWorksheetV1 | undefined;
+  dropped: { story_index: number | null; option_id: string | null; reason: PremortemDropReason }[];
+  stories: number;
+  /** Validated rows before the all-or-nothing emission gate, including an optional outside row. */
+  rows: number;
+}
+
 /** Total, fail-closed emission boundary. Never mint a Run stamp from the current graph alone. */
-export function premortemWorksheetFor(input: {
+export function premortemWorksheetDiagnosticsFor(input: {
   scenarioId: string; turnId: string | undefined; turn: RunMethodTurn | null;
   passed: boolean; reply: string; candidates: unknown; initial: PremortemRead | undefined; final: PremortemRead;
-}): PremortemWorksheetV1 | undefined {
+}): PremortemWorksheetDiagnostics {
+  const diagnostics: PremortemWorksheetDiagnostics = { worksheet: undefined, dropped: [], stories: 0, rows: 0 };
   try {
+    const stories = [...input.reply.matchAll(/^\s*[1-9]\.\s+([\s\S]*?)(?=^\s*[1-9]\.\s|^\s*Outside the model:|$(?![\s\S]))/gmu)].map(m => m[1].trim());
+    diagnostics.stories = stories.length;
     const { turn, initial, final, scenarioId } = input;
-    if (!input.passed || turn === null || initial === undefined || input.turnId === undefined || !Array.isArray(input.candidates) || input.candidates.length > 4) return undefined;
+    if (!input.passed || turn === null || initial === undefined || input.turnId === undefined || !Array.isArray(input.candidates) || input.candidates.length > 4) return diagnostics;
     const run = stamp(initial, scenarioId), finalRun = stamp(final, scenarioId);
-    if (run === null || finalRun === null || contentHash(run) !== contentHash(finalRun) || contentHash(initial.graph) !== contentHash(final.graph)) return undefined;
+    if (run === null || finalRun === null || contentHash(run) !== contentHash(finalRun) || contentHash(initial.graph) !== contentHash(final.graph)) return diagnostics;
     const nodes = records(rec(final.graph)?.nodes), edges = records(rec(final.graph)?.edges);
+    const nodeLabels = nodes.flatMap(n => typeof n.label === 'string' ? [n.label] : []);
     const uniqueNode = (nodeId: string, kind?: string): Rec | undefined => {
       const matches = nodes.filter(n => n.id === nodeId && (kind === undefined || n.kind === kind));
       if (matches.length !== 1 || typeof matches[0].label !== 'string') return undefined;
       if (nodes.filter(n => typeof n.label === 'string' && fold(n.label) === fold(String(matches[0].label))).length !== 1) return undefined;
       return matches[0];
     };
-    const stories = [...input.reply.matchAll(/^\s*[1-9]\.\s+([\s\S]*?)(?=^\s*[1-9]\.\s|^\s*Outside the model:|$(?![\s\S]))/gmu)].map(m => m[1].trim());
     const blindspot = /^\s*Outside the model:\s*(.+\?)\s*$/mu.exec(input.reply)?.[1];
-    if (!blindspot) return undefined;
+    if (!blindspot) return diagnostics;
     const rows: PremortemWorksheetV1['rows'] = [];
     const seen = new Set<string>();
+    const representedStories = new Set<number>();
     for (const raw of input.candidates) {
+      // Even malformed candidates expose only validated ids and indices, never their prose.
+      const metadata = rec(raw);
+      const parsedId = id.safeParse(metadata?.option_id);
+      const storyIndex = typeof metadata?.story_index === 'number' && Number.isInteger(metadata.story_index)
+        && metadata.story_index >= 1 && metadata.story_index <= 3 ? metadata.story_index : null;
+      const drop = (reason: PremortemDropReason) => diagnostics.dropped.push({
+        story_index: storyIndex, option_id: parsedId.success ? parsedId.data : null, reason,
+      });
       const parsed = candidateSchema.safeParse(raw);
-      if (!parsed.success) continue;
+      if (!parsed.success) { drop('schema'); continue; }
       const c = parsed.data;
       const option = uniqueNode(c.option_id, 'option');
       const scoped = methodTurnForReadback(planPickChipId(c.option_id), final);
       // The existing selectors own eligibility and per-option path membership. No second path authority.
-      if (scoped?.kind !== 'run') continue;
-      if (!option || (turn.context.plan !== null && c.option_id !== turn.context.plan.option_id)) continue;
+      if (scoped?.kind !== 'run') { drop('scoped_not_run'); continue; }
+      if (!option || (turn.context.plan !== null && c.option_id !== turn.context.plan.option_id)) { drop('plan_mismatch'); continue; }
       const destination = uniqueNode(c.risk.affected_node_id);
-      if (!destination || (destination.kind !== 'goal' && destination.kind !== 'outcome')) continue;
-      if (!contains(c.failure_way, c.risk.label) || nodes.some(n => typeof n.label === 'string' && fold(n.label) === fold(c.risk.label))) continue;
+      if (!destination || (destination.kind !== 'goal' && destination.kind !== 'outcome')) { drop('destination'); continue; }
+      if (!contains(c.failure_way, c.risk.label) || nodes.some(n => typeof n.label === 'string' && fold(n.label) === fold(c.risk.label))) { drop('risk_label'); continue; }
       let grounding: PremortemWorksheetV1['rows'][number]['grounding'];
       if (c.grounding.kind === 'not_in_model') {
         if (c.story_index !== null || c.failure_way.includes('?') || fold(c.failure_way) === fold(blindspot)
-          || rows.some(r => r.grounding.kind === 'not_in_model')) continue;
+          || rows.some(r => r.grounding.kind === 'not_in_model')) { drop('outside_invalid'); continue; }
         grounding = { kind: 'not_in_model', label: PREMORTEM_COPY.outside };
       } else {
-        if (c.story_index === null) continue;
+        if (c.story_index === null) { drop('story_missing'); continue; }
         const story = stories[c.story_index - 1];
         const parts = story && /^([\s\S]+?)\s*Watch for:\s*([\s\S]+?)\s*Mitigate:\s*([\s\S]+)$/u.exec(story);
-        if (!parts || parts[1].trim() !== c.failure_way || parts[2].trim() !== c.early_warning || (c.mitigation !== undefined && parts[3].trim() !== c.mitigation)) continue;
+        if (!parts || parts[1].trim() !== c.failure_way || parts[2].trim() !== c.early_warning || (c.mitigation !== undefined && parts[3].trim() !== c.mitigation)) { drop(story ? 'story_parts_mismatch' : 'story_missing'); continue; }
         const namedOptions = nodes.filter(n => n.kind === 'option' && typeof n.label === 'string' && contains(story, n.label));
-        if (namedOptions.some(n => n.id !== c.option_id) || (turn.context.plan === null && namedOptions.length !== 1)) continue;
-        if (new Set(c.grounding.ids).size !== c.grounding.ids.length) continue;
+        if (namedOptions.some(n => n.id !== c.option_id) || (turn.context.plan === null && namedOptions.length !== 1)) { drop('named_options'); continue; }
+        if (new Set(c.grounding.ids).size !== c.grounding.ids.length) { drop('dup_ids'); continue; }
         const supplied = c.grounding.ids.map(id => scoped.context.supplied_items.find(i => i.id === id && i.kind === c.grounding.kind));
         if (supplied.some(i => !i || !i.labels.every(l => contains(story, l))
-          || !turn.context.supplied_items.some(initialItem => initialItem.id === i.id && initialItem.kind === i.kind && JSON.stringify(initialItem.labels) === JSON.stringify(i.labels)))) continue;
-        const valid = c.grounding.ids.every(id => c.grounding.kind === 'factor'
-          ? uniqueNode(id, 'factor') !== undefined
+          || !turn.context.supplied_items.some(initialItem => initialItem.id === i.id && initialItem.kind === i.kind && JSON.stringify(initialItem.labels) === JSON.stringify(i.labels)))) { drop('supplied_mismatch'); continue; }
+        const valid = c.grounding.ids.every(id => c.grounding.kind === 'factor' || c.grounding.kind === 'risk'
+          ? uniqueNode(id, c.grounding.kind) !== undefined
           : edges.filter(e => `${String(e.from)}->${String(e.to)}` === id).length === 1
             && id.split('->').every(end => uniqueNode(end) !== undefined));
-        if (!valid) continue;
+        if (!valid) { drop('grounding_invalid'); continue; }
         // A labelled supplied item must still describe the final graph exactly.
-        if (supplied.some(i => !i || (i.kind === 'factor' ? uniqueNode(i.id)?.label !== i.labels[0]
-          : i.id.split('->').some((end, index) => uniqueNode(end)?.label !== i.labels[index])))) continue;
+        if (supplied.some(i => !i || (i.kind === 'factor' || i.kind === 'risk' ? uniqueNode(i.id)?.label !== i.labels[0]
+          : i.id.split('->').some((end, index) => uniqueNode(end)?.label !== i.labels[index])))) { drop('final_label_drift'); continue; }
         grounding = { kind: c.grounding.kind, ids: c.grounding.ids, labels: [...new Set(supplied.flatMap(i => i?.labels ?? []))] };
       }
       const key = `${c.option_id}:${c.story_index ?? 'outside'}`;
-      if (seen.has(key)) continue;
+      if (seen.has(key)) { drop('duplicate_key'); continue; }
       seen.add(key);
       const groundingIds = grounding.kind === 'not_in_model' ? [] : grounding.ids;
       const message = `Prepare one risk called ${JSON.stringify(c.risk.label)}: ${c.failure_way} It would ${c.risk.direction === 'negative' ? 'lower' : 'raise'} ${JSON.stringify(destination.label)}. Early warning: ${c.early_warning} Olumi hypothesis — for you to challenge. Show the proposed change for approval.`;
+      // Schemas own shape and length; only this boundary has every final node label.
+      if ([c.failure_way, c.early_warning, c.mitigation, c.risk.label, message]
+        .some(field => field !== undefined && authoredBanAfterMasking(field, nodeLabels))) { drop('authored_ban'); continue; }
       const row: PremortemWorksheetV1['rows'][number] = {
         row_id: `pm_${contentHash({ scenarioId, run, key, candidate: c }).slice(0, 24)}`,
         option_id: c.option_id, option_label: String(option.label), failure_way: c.failure_way, early_warning: c.early_warning,
@@ -195,9 +236,19 @@ export function premortemWorksheetFor(input: {
         provenance: provenance('olumi_hypothesis') as 'olumi_hypothesis',
         risk_request: { chip_id: 'agent-next-suggest-risks', message, affected_node_id: c.risk.affected_node_id, direction: c.risk.direction, grounding_ids: groundingIds },
       };
-      // Per-row checks drop only the offending row, including generated request wording.
-      if (riskRequestSchema.safeParse(row.risk_request).success) rows.push(row);
+      if (!riskRequestSchema.safeParse(row.risk_request).success) { drop('risk_request_schema'); continue; }
+      rows.push(row);
+      if (c.story_index !== null) representedStories.add(c.story_index);
     }
+    diagnostics.rows = rows.length;
+    // An optional outside row cannot stand in for a numbered story. Extra invalid candidates
+    // do not withhold a worksheet when every story still has a validated row.
+    for (let index = 1; index <= stories.length; index++) {
+      if (!representedStories.has(index) && !diagnostics.dropped.some(d => d.story_index === index)) {
+        diagnostics.dropped.push({ story_index: index, option_id: null, reason: 'story_missing' });
+      }
+    }
+    if (stories.some((_, index) => !representedStories.has(index + 1))) return diagnostics;
     const envelope = {
       kind: 'premortem', version: 1, scenario_id: scenarioId, turn_id: input.turnId, run,
       binding: binding(scenarioId, run.graph_hash_at_run, [dependency('map_structure', 'whole_graph', final.graph), dependency('analysis', 'run', run)]),
@@ -205,6 +256,12 @@ export function premortemWorksheetFor(input: {
       blindspot_question: blindspot,
     };
     const checked = PremortemWorksheetV1Schema.safeParse(envelope);
-    return checked.success ? checked.data : undefined;
-  } catch { return undefined; }
+    diagnostics.worksheet = checked.success ? checked.data : undefined;
+    return diagnostics;
+  } catch { return diagnostics; }
+}
+
+/** Existing callers retain the worksheet-only API. */
+export function premortemWorksheetFor(input: Parameters<typeof premortemWorksheetDiagnosticsFor>[0]): PremortemWorksheetV1 | undefined {
+  return premortemWorksheetDiagnosticsFor(input).worksheet;
 }
