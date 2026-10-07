@@ -90,9 +90,11 @@ for (const [phrase, failed] of Object.entries({
     const out = turn(capture('w9b-2'));
     const reply = `${phrase}.\n${draftFor('w9b-2')}`;
     const result = settleMethodTurn(out, reply);
-    assert.equal(result.passed, false, phrase);
+    // The draft is refused for exactly these codes; P02 sends its passing stories in the server's frame instead.
     assert.deepEqual(result.failed, failed, phrase);
-    assert.equal(result.reply, fallbackReply(out.context));
+    assert.ok(!result.reply.includes(phrase), phrase);
+    assert.equal(result.passed, true, phrase);
+    assert.equal(checkMethodTurn('RC-PREMORTEM', result.reply, out.check_inputs, true).pass, true, phrase);
   };
 }
 r2Rows['P2-6: the whole-ban label Leader cannot mask a leader assertion'] = () => {

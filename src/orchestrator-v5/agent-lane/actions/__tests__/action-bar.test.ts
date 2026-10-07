@@ -559,9 +559,14 @@ describe('S-B slice 2b: one estimate selection and Science exact words', () => {
   it('offers are enabled only with points, always in more; check_estimates also needs a bound Run; both keys bind changed Runs', () => {
     const r = read(); const facts = actionFactsOf(r); const b = actionBarOf(facts);
     for (const id of ['bias_anchoring', 'check_estimates'] as const) expect(b.more.find(o => o.action_id === id)).toMatchObject({ enabled: true });
-    const pre = bar(preRun(estimateGraph()));
-    expect(pre.more.some(o => o.action_id === 'bias_anchoring')).toBe(true);
-    expect(offers(pre).some(o => o.action_id === 'check_estimates')).toBe(false);
+    // DL on #2766: both speak of "this result", so a pre-Run bar offers neither; a stale press says it needs a Run.
+    const preFacts = actionFactsOf(preRun(estimateGraph()));
+    const pre = actionBarOf(preFacts);
+    expect(estimatePointsOf(preFacts).length, 'precondition: the model has Olumi estimates').toBeGreaterThan(0);
+    for (const id of ['bias_anchoring', 'check_estimates'] as const) {
+      expect(offers(pre).some(o => o.action_id === id), id).toBe(false);
+      expect(decidePress({ id: `act:${id}` }, preFacts)).toMatchObject({ kind: 'reply', reply: { reason: 'needs_current_analysis', exits: [{ kind: 'run' }] } });
+    }
     const later = actionFactsOf({ ...r, analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-07T13:00:00.000Z' } } });
     for (const id of ['bias_anchoring', 'check_estimates'] as const) expect(offerKeyOf(later, id)).not.toBe(offerKeyOf(facts, id));
     const empty = actionFactsOf(preRun({ nodes: [], edges: [] }));
