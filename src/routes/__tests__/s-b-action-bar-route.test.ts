@@ -312,6 +312,17 @@ describe('action_bar v1 on every turn, and the reload derives the same bar (amen
     const after = (await reload()).action_bar!;
     expect(after.state_key).not.toBe(before.state_key);
   });
+  it('P45: the bias-risk row rides the live bar and reloads byte-identical; every item presses an enabled offer on that same bar', async () => {
+    setState('licensed'); coldStore();
+    const live = (await turn({ message: 'Where are we?' })).action_bar!;
+    expect(live.bias_risk?.items.map(i => i.claim_id)).toEqual(['DSK-B-007', 'DSK-B-001']);
+    const offers = [...live.priority, ...live.standard, ...live.more];
+    for (const item of live.bias_risk!.items) {
+      expect(offers.find(o => o.offer_key === item.offer_key && o.press_id === item.press_id && o.enabled), item.claim_id).toBeDefined();
+    }
+    const again = (await reload()).action_bar!;
+    expect(JSON.stringify(again.bias_risk)).toBe(JSON.stringify(live.bias_risk));
+  });
   it('the three captured bars are the committed fixtures DGAI binds to (pre-Run, withheld Run, licensed Run)', async () => {
     scenario = '6f1e2d3c-4b5a-4e6d-9c7b-00000000f1c5';
     for (const [state, name] of [['pre_run', 'pre-run'], ['withheld', 'withheld-run'], ['licensed', 'licensed-run']] as const) {

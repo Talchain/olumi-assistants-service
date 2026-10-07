@@ -24,6 +24,7 @@ function facts(over: Partial<ActionFacts> = {}): ActionFacts {
     runStale: false,
     deadline: null,
     ownOptionCount: 0,
+    optionFrame: { nonSqOptionLabels: [], statusQuoPresent: false, sameLever: false },
     goalPathFactorCount: 0,
     riskCount: 0,
     outcomeCount: 0,
@@ -211,5 +212,8 @@ describe('biasRiskOf', () => {
     expect(result?.items).toHaveLength(1);
     expect(result?.items[0]?.claim_id).toBe('DSK-B-007');
     expect(result?.items[0]?.why).toBe('These options all work through the same lever, which can hide better routes.');
+  });
+  it('never names an unlabelled only option (no internal id reaches the user)', () => {
+    expect(biasRiskOf(facts(), [offer('more_options')], frame({ nonSqOptionLabels: [''] }))).toBeUndefined();
   });
 });

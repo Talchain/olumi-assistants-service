@@ -109,5 +109,18 @@
       "why_now": "Test Olumi’s figures against your own evidence.",
       "offer_key": "665d59f6b8824852"
     }
-  ]
+  ],
+  "bias_risk": {
+    "v": 1,
+    "items": [
+      {
+        "claim_id": "DSK-B-001",
+        "name": "Anchoring",
+        "why": "Olumi’s starting figure for ‘Enterprise prospect signing likelihood’ could pull later estimates towards it.",
+        "action_id": "bias_anchoring",
+        "press_id": "act:bias_anchoring",
+        "offer_key": "665d59f6b8824852"
+      }
+    ]
+  }
 }

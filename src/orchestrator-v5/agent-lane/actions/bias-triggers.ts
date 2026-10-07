@@ -65,7 +65,7 @@ export function biasRiskOf(f: ActionFacts, offers: readonly ActionOffer[], frame
   };
 
   const moreOptions = enabledOffer('more_options');
-  if (moreOptions !== undefined && (frame.sameLever || frame.nonSqOptionLabels.length === 1)) {
+  if (moreOptions !== undefined && (frame.sameLever || (frame.nonSqOptionLabels.length === 1 && frame.nonSqOptionLabels[0] !== ''))) {
     const o = frame.nonSqOptionLabels[0];
     add('DSK-B-007', 'Narrow framing', frame.sameLever
       ? BIAS_CUE.narrow_framing
