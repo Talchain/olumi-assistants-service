@@ -30,6 +30,11 @@ const clinicCase = (text: string) => {
     option_start: p.evidence.option_start + delta, option_end: p.evidence.option_end + delta };
   return { model, brief, option: p.option, factor: p.factor };
 };
+/** The credited sentence itself replaced: the model quotes the new sentence (offsets are ignored). */
+const ownSentence = (text: string) => {
+  const i = clinicCase(text); const iv = level(i.model, i.option, i.factor);
+  iv.stated_evidence = { ...iv.stated_evidence!, quote: text, option_quote: text }; return i;
+};
 const setting = (sentence: string, option: string, factor: string, value: number, unit: string) => {
   const base = structuredClone(probes[0]!.model);
   const amountAt = findStatedAmounts(sentence).find(n => n.magnitude === value)?.index ?? sentence.indexOf('four');
@@ -90,6 +95,21 @@ export const r2Cases: R2Case[] = [
   { name: 'O distinctive word must not merely be a prefix', expected: false, input: () => setting('One option is to run 4 Mondayish clinics each month.', 'Monday clinics', 'Monday clinics', 4, 'clinics/month') },
   { name: 'U count noun must not merely be a prefix', expected: false, input: () => setting('One option is to hire 3 engineerspecialists.', 'Hire engineers', 'Engineers', 3, 'engineers') },
   { name: 'U wrong period', expected: false, input: () => setting('We will run four mobile clinics each quarter.', 'Mobile clinics', 'Mobile clinics', 4, 'clinics/month') },
+  // Q: the other clauses of the credited sentence. Each must be a sibling option arm; a qualifier, an elliptical
+  // alternative or an attribution after the setting refuses. Only a range bracketing the figure may follow it.
+  { name: 'Q ", at most" bounds the setting', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, at most.') },
+  { name: 'Q ", as a ceiling" bounds the setting', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, as a ceiling.') },
+  { name: 'Q ", or fewer" bounds the setting', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or fewer.') },
+  { name: 'Q ", or 5" is a numeric alternative', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or 5.') },
+  { name: 'Q ", or open for 5" is an elliptical alternative', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or open for 5.') },
+  { name: 'Q ", or open for 5 Saturday sessions" names no other option', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, or open for 5 Saturday sessions.') },
+  { name: 'Q ", between 5 and 8" does not bracket the figure', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, between 5 and 8.') },
+  { name: 'Q ", but we have not decided" withdraws the setting', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, but we have not decided.') },
+  { name: 'Q ", like the clinic next door does" is a benchmark', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month, like the clinic next door does.') },
+  { name: 'Q Olumi named inside the credited clause', expected: false, input: () => ownSentence('We could open for 4 Saturday sessions each month as Olumi suggested.') },
+  { name: 'Q control: ", and extend weekday opening" is a sibling arm', expected: true, input: () => ownSentence('We could open for 4 Saturday sessions each month, and extend weekday opening by 10 hours a week.') },
+  { name: 'Q control: "or provide remote consultations" is a sibling arm', expected: true, input: () => ownSentence('We could open for 4 Saturday sessions each month or provide remote consultations.') },
+  { name: 'Q control: ", between 2 and 6" brackets the figure', expected: true, input: () => ownSentence('We could open for 4 Saturday sessions each month, between 2 and 6.') },
 ];
 export const r2Rows: Row[] = r2Cases.map(c => ({ name: c.name, run: () => {
   const i = c.input(), o = i.model.options.find(o => o.label === i.option)!;
