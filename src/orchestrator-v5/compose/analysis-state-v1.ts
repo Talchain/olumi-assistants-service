@@ -1030,14 +1030,17 @@ export function composeLeaderClaim(
           ? WITHHELD_NO_OPTION_MEETS_LIMIT
         : input.everyOptionLimit === 'likely_breaks' && runState.kind !== 'complete_stale'
           ? WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT
+        // P1-d + DL 7 Oct (W1c, served 15:03Z: a stale Run read `goal_path_unsized` after the user's own link edit):
+        // when the Run is out of date, the out-of-date reason LEADS. Like the limit verdicts above, the identity and
+        // unsized-path causes describe the revision the Run analysed, which the user has since changed. The policy
+        // causes (no result, an unrequested first pass) still outrank it.
+        : runState.kind === 'complete_stale'
+          ? WITHHELD_RUN_OUT_OF_DATE
         : input.withheldBecauseNonlinearIdentity === true
           ? WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN
-          // The Run caller attests its unsized link; this cause outranks staleness too.
+          // The Run caller attests its unsized link.
           : input.withheldBecauseUnsizedPath !== undefined
             ? WITHHELD_GOAL_PATH_UNSIZED
-          // P1-d: an out-of-date run is not "withheld for a limit" (see WITHHELD_RUN_OUT_OF_DATE).
-          : runState.kind === 'complete_stale'
-            ? WITHHELD_RUN_OUT_OF_DATE
             : input.withheldWithoutConstraintCause === true
               ? WITHHELD_LEADER_CAUSE_UNRECORDED
             : WITHHELD_CONSTRAINT_VERDICT
