@@ -173,7 +173,8 @@ describe('the "Review this decision" press on the live route', () => {
     runKind = 'complete_stale';
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
-      expect(((await press(turnId)).json() as Body).assistant_text, `restart=${restart}`).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+      // S-B (Codex r1 P2-3 on #2751): the replay says what the live press says today: the typed "can't yet" with its exit.
+      expect(((await press(turnId)).json() as Body).assistant_text, `restart=${restart}`).toBe('I can’t review this decision yet: it needs a current analysis first.');
     }
   });
 
