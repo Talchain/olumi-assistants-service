@@ -10,6 +10,7 @@
 import { statedIdentityFrameGaps } from '../../cee/graph-readiness/identity-frames.js';
 import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
+import { EventRiskV1 } from "../../schemas/event-risk.js";
 import type { GraphPatchBlockData } from "../types.js";
 import { log } from "../../utils/telemetry.js";
 import {
@@ -1285,6 +1286,9 @@ function goalRootsWithoutStatusQuoLevel(
     // around a finite `observed_state.value` (translator-v3.ts first pass), so
     // ISL still centres the factor on 0.0.
     if (hasSampledPrior((node as { prior?: unknown }).prior)) continue;
+    // event_risk.v1: an event risk's level is its OCCURRENCE, which ISL draws (0/1 per draw);
+    // it is never held at zero, so it needs no level today. Only a block the write doors accept counts.
+    if (EventRiskV1.safeParse(node.event_risk).success) continue;
     const magnitudeNode: MagnitudeNode = {
       label: node.label ?? node.id,
       kind: 'factor',
