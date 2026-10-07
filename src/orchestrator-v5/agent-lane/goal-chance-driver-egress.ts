@@ -64,7 +64,8 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
  * computed with no fragile link. Its own gate (`robustnessComputed`), the same clause cutter and kept-unsafe rules.
  * The subject must open its clause ("Customers' price sensitivity has not been measured" is a fact about the data).
  */
-const SENS_OPEN = R`(?<=^|\n[ \t]*(?:(?:[-*•]|\d+[.)])[ \t]+)?|[.;:!?,—–(*_“"‘]\s*|\b(?:and|but|so|yet|while|though|although|because|also|that|as)\s+)`;
+/** Bounded runs only (DL #2712 r1): an unbounded run inside a lookbehind is rescanned at every position (quadratic). */
+const SENS_OPEN = R`(?<=^|\n[ \t]{0,8}(?:(?:[-*•]|\d{1,3}[.)])[ \t]{1,4})?|[.;:!?,—–(*_“"‘][ \t\n]{0,4}|\b(?:and|but|so|yet|while|though|although|because|also|that|as)[ \t\n]{1,4})`;
 const SENS_SUBJECT = R`(?:(?:the|overall|decision|factor|option[-\s]comparison|comparison)\s+)*sensitivity(?:\s+(?:analysis|check|checks|testing|tests?))?(?:\s+of\s+(?:the\s+)?(?:option\s+)?(?:comparison|options|results?|ranking|decision))?`;
 const SENS_ROBUST_SUBJECT = R`(?:the\s+)?(?:robustness(?:\s+and\s+sensitivity)?|sensitivity\s+and\s+robustness)(?:\s+(?:analysis|check|checks))?`;
 const SENS_NOT_DONE = R`\s+(?:has|have|was|were|is|are|had)\s*(?:not|n[’']t)\s+(?:yet\s+)?(?:been\s+)?(?:measured|assessed|tested|run|computed|checked|analysed|analyzed|done|carried\s+out|performed|quantified)`;

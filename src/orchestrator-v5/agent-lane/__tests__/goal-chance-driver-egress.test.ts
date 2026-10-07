@@ -383,6 +383,22 @@ describe('Wave B pilot, keys untouched: a Run whose robustness check ran never s
     expect(removeSensitivityAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
   });
 
+  // DL #2712 r1 BLOCKER: an unbounded run inside the clause-opening lookbehind was rescanned at every position
+  // (quadratic: "Sensitivity" + 20,000 spaces took 9.6 s). Every run is bounded; each input is linear time.
+  it.each([
+    ['"Sensitivity" + 2,000 spaces + "x"', `Sensitivity${' '.repeat(2000)}x`, 50],
+    ['newline + 2,000 spaces + "x"', `\n${' '.repeat(2000)}x`, 50],
+    ['"." + 2,000 spaces + "x"', `.${' '.repeat(2000)}x`, 50],
+    ['"and" + 2,000 spaces + "x"', `and${' '.repeat(2000)}x`, 50],
+    ['"Sensitivity" + 20,000 spaces + "x"', `Sensitivity${' '.repeat(20000)}x`, 200],
+    ['newline + 20,000 spaces + "x"', `\n${' '.repeat(20000)}x`, 200],
+  ])('LINEAR TIME: %s', (_name, text, ms) => {
+    const t0 = performance.now();
+    SENSITIVITY_ABSENCE_CLAIM.test(text);
+    removeSensitivityAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(ms);
+  });
+
   it('kept-unsafe rules unchanged: a span holding the deadline is kept and counted', () => {
     const text = 'Figures are provisional. Sensitivity has not been measured within the 9 months.';
     expect(removeSensitivityAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
