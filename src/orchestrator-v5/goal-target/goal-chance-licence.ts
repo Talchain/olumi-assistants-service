@@ -30,6 +30,8 @@ import { readOptionResultSources } from '../../orchestrator/context/option-resul
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
+import { shareByDateGoalOf } from './goal-kind.js';
+import { shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import {
   displayedPctAt, displayRoundingFor, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
@@ -64,7 +66,7 @@ export interface GoalChanceLicence {
   readonly leader_option_id?: string;
   readonly next_option_id?: string;
   /** The target as the user stated it: the UI says it in these words, never re-derives the comparator. */
-  readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string };
+  readonly target: { readonly comparator: GoalChanceComparator; readonly value: number; readonly unit: string; readonly by_date?: string };
   /**
    * ⭐ D3 cut 5 (DL 0df0e1; Science d5 #87 6008242694 / 6008252938): present iff a USER-STATED link on a licensed option's
    * path to the goal carries an existence probability below 1 — the chances then also count Olumi's own assumption that
@@ -113,6 +115,7 @@ export function goalChanceLicenceOf(
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
+  const share = shareByDateGoalOf(graph);
   const target = goal === undefined ? null : statedGoalTargetOf(graph as Rec, goal);
   // A LEVEL target only: a target stated as a change ("cut by 20%") has no ruled sentence yet.
   if (target === null || (target.frame !== undefined && target.frame !== 'level')) return null;
@@ -133,6 +136,9 @@ export function goalChanceLicenceOf(
     if (id === undefined || option_ids.includes(id)) continue;
     const p = r.probability_of_goal;
     option_ids.push(id);
+    if (share !== null && share.goal.id === goalId && shareGateForOption(graph, id)?.form !== 'point') {
+      withheld.push(id); continue;
+    }
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
     if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) { withheld.push(id); continue; }
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
@@ -194,7 +200,8 @@ export function goalChanceLicenceOf(
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
-    target: { comparator, value: target.value, unit: target.unit },
+    target: { comparator, value: target.value, unit: target.unit,
+      ...(share !== null && share.goal.id === goalId ? { by_date: share.deadline } : {}) },
     ...(existence !== undefined ? { user_link_existence: existence } : {}),
     ...(priorOnPath ? { summary_withheld: { cause: 'olumi_existence_assumption' as const, form: summary as Exclude<GoalChanceForm, 'each'> } } : {}),
     ...(Object.keys(rounding).length > 0 ? { display_rounding_by_option: rounding } : {}),

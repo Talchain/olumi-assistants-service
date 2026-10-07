@@ -207,6 +207,8 @@ import { buildSeparabilityDisclosure } from '../../coaching/separability-disclos
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { withShareByDateFrame } from '../../goal-target/share-by-date-run.js';
+import { withShareByDateChanceGate } from '../../goal-target/goal-chance-range.js';
 import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
 import { scopeTargetNotTestableWithRanges } from '../../goal-target/scope-target-not-testable.js';
 import { perOptionTargetReasonsForRun } from '../../goal-target/target-testability-per-option.js';
@@ -1121,7 +1123,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
     const plotPayload: Record<string, unknown> = {
-      graph: heldWireGraph,
+      graph: withShareByDateFrame(heldWireGraph, snapshot.rawPersistedGraph ?? snapshot.graph),
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -2141,6 +2143,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // ⭐ A7 AS A TYPED FACT (DL 0df0e1, beat 2): a held deadline no duration limit scores is untested, and the Run says so
     // on the carrier a consumer reads, in A7's own sentence (`decision-input-ask.ts`, the one rule the chat line uses too).
+    response = withShareByDateChanceGate(response, snapshot.rawPersistedGraph ?? snapshot.graph, snapshot.goal_node_id);
     response = withUntestedHorizonWarning(response, graphForAnalysis);
     response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 

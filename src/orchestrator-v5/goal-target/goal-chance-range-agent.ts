@@ -3,6 +3,7 @@ import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
 import {
   GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES,
   GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+  GOAL_FIGURES_SHARE_APPROXIMATION,
 } from '../../orchestrator/context/option-result-source.js';
 import { agentLicenceRecordOf, goalChanceDisplayForAgent, goalChanceLicenceForAgent, isLicensedDriver } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
@@ -32,7 +33,7 @@ export function runHasGoalChanceLicenceRecord(result: unknown): boolean {
 export interface GoalChanceRangeDisplay {
   readonly range: string;
   readonly depends_on: {
-    readonly kind: 'link_strength' | 'link_existence';
+    readonly kind: 'link_strength' | 'link_existence' | 'stated_time';
     readonly from_label: string;
     readonly to_label: string;
     readonly among: 'all' | 'unsized_links';
@@ -63,8 +64,13 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
     if (v === undefined || !pct(v.low_pct) || !pct(v.high_pct) || v.low_pct >= v.high_pct
       || !rounding(v.low_rounding) || !rounding(v.high_rounding)
       || (v.low_rounding === 'nearest_5' && v.low_pct % 5 !== 0) || (v.high_rounding === 'nearest_5' && v.high_pct % 5 !== 0)
-      || (v.kind !== 'link_strength' && v.kind !== 'link_existence') || !id(v.from) || !id(v.to) || v.from === v.to
+      || (v.kind !== 'link_strength' && v.kind !== 'link_existence' && v.kind !== 'stated_time') || !id(v.from) || !id(v.to) || v.from === v.to
       || (v.among !== 'all' && v.among !== 'unsized_links')) return undefined;
+    if (v.kind === 'stated_time' && (v.basis !== 'stated_time'
+      || (v.quantity !== 'months_to_finish' && v.quantity !== 'share_per_month')
+      || typeof v.low !== 'number' || typeof v.high !== 'number' || !Number.isFinite(v.low) || !Number.isFinite(v.high)
+      || v.low < 0 || v.high > 1 || v.low > v.high
+      || Math.round(v.low * 100) !== v.low_pct || Math.round(v.high * 100) !== v.high_pct)) return undefined;
     // ⛔ S2 review r1 #1 (Codex AMEND #87 6028260969): the SCREEN's words (DGAI `goalChanceRangeLine`): 0 is "less than 1%",
     // 100 is "more than 99%", the high end drops its "about"; an unresolved link label drops the line, never a raw id.
     const fromLabel = labels.get(v.from);
@@ -102,7 +108,7 @@ export function goalChanceOptionWithheldForAgent(result: unknown, optionId: stri
  * never bar the range; every other withhold (PLoT's run-wide pair, product not read, options identical, probability
  * unusable) still does, with the point predicate's own scope.
  */
-const RANGE_COMPATIBLE_WITHHOLDS: ReadonlySet<string> = new Set([GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE]);
+const RANGE_COMPATIBLE_WITHHOLDS: ReadonlySet<string> = new Set([GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_SHARE_APPROXIMATION]);
 export function goalChanceRangeBarredForAgent(result: unknown, optionId: string): boolean {
   return warningsOf(result).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
     && !RANGE_COMPATIBLE_WITHHOLDS.has(w.code)
