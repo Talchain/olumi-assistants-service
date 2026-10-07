@@ -76,9 +76,9 @@ export const REPLY_SHAPE_INSTRUCTION =
  * detail"; `host` (a receipt, a status, CEE's own run words, the arithmetic) is one atomic part that may sit in detail (R1)
  * but is never split. A reply with no model sentence outside host parts ships as the host composed it.
  */
-export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence' | 'host';
+export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence' | 'host' | 'detail';
 /** Overlapping obligations are one unit carrying the strongest role among them. */
-const ROLE_RANK: Record<FaceObligationRole, number> = { ask: 5, withheld_reason: 4, caveat: 3, evidence: 2, host: 1 };
+const ROLE_RANK: Record<FaceObligationRole, number> = { ask: 5, withheld_reason: 4, caveat: 3, evidence: 2, host: 1, detail: 0 };
 export interface FaceObligation { readonly role: FaceObligationRole; readonly text: string }
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
@@ -94,6 +94,8 @@ export interface ReplyComposeInput {
   /** The final prose, after every gate: exactly what would ship without the composer. */
   readonly text: string;
   readonly obligations?: readonly FaceObligation[];
+  /** Code-authored disclosures owed once, under More detail even for a short reply. */
+  readonly detailLines?: readonly string[];
   /** The typed response profile for this turn kind (default `coaching`). */
   readonly profile?: ReplyProfile;
   readonly keepWhole?: KeepWholeReason;
@@ -245,14 +247,26 @@ const isQuestionUnit = (u: Unit): boolean => QUESTION_END.test(u.text.trim());
  * Compose the reply's shape. Never throws; never deletes, rewrites or cuts a sentence.
  */
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
-  const text = input.text;
+  const detailLines = [...new Set((input.detailLines ?? []).filter((line) => line.trim() !== ''))];
+  // Move verbatim narrator copies to their typed detail position; never duplicate a risk sentence.
+  const body = detailLines.length === 0 ? input.text : detailLines.reduce((text, line) => text.replaceAll(line, ''), input.text)
+    .replace(/^[ \t]*[-•*][ \t]*$/gm, '').trim();
+  const originalQuestions = detailLines.length === 0 ? null : openQuestionsSegment(body);
+  // The questions toggle owns its segment; disclosures sit before it, never inside it.
+  const text = detailLines.length === 0 ? body
+    : [originalQuestions?.lead ?? body, ...detailLines, originalQuestions?.segment ?? '', originalQuestions?.after ?? '']
+      .filter(Boolean).join('\n\n');
   if (input.keepWhole !== undefined) return { text, shape: null, outcome: 'kept_whole', reason: input.keepWhole };
   if (input.profile === 'method_step' || input.profile === 'proposal') return { text, shape: null, outcome: 'kept_whole', reason: input.profile };
   if (text.trim().length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty' };
 
   // Obligations still present in the final text (a later gate may have removed one: then it is no longer owed).
-  const present = (input.obligations ?? []).map((o) => ({ role: o.role, text: o.text.trim() }))
+  const present = [...(input.obligations ?? []), ...detailLines.map((text) => ({ role: 'detail' as const, text }))].map((o) => ({ role: o.role, text: o.text.trim() }))
     .filter((o) => o.text.length > 0 && text.includes(o.text))
+    // In this explicit-detail path, questions already in their own toggle stay there.
+    // Obligations in the ordinary reply remain subject to the same face checks.
+    .filter((o) => originalQuestions === null || o.role !== 'ask'
+      || originalQuestions.lead.includes(o.text) || originalQuestions.after.includes(o.text))
     .sort((a, b) => b.text.length - a.text.length);
   // Overlapping obligations are ONE unit (the gate's closing can carry the ask): the larger span stands for both, and it
   // is the ask when it holds one, so it closes the face.
@@ -271,7 +285,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   if (units.length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty' };
 
   // Each obligation binds its LAST occurrence (the host appends); an earlier narrator copy is an ordinary unit.
-  for (const role of ['ask', 'withheld_reason', 'caveat', 'evidence', 'host'] as const) {
+  for (const role of ['ask', 'withheld_reason', 'caveat', 'evidence', 'host', 'detail'] as const) {
     const tagged = units.filter((u) => u.obligation === role);
     for (const u of tagged.slice(0, -1)) {
       const sameText = tagged.at(-1)!.text === u.text;
@@ -289,7 +303,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // line that ends on its own question is evidence, kept in its place, never moved to close the face). Every other
   // question goes to detail (D-12).
   const ask = hostAsks.at(-1) ?? questions.filter((u) => u.obligation === undefined).at(-1);
-  const otherObligations = units.filter((u) => u.obligation !== undefined && u.obligation !== 'ask' && u.obligation !== 'host' && u !== ask);
+  const otherObligations = units.filter((u) => u.obligation !== undefined && u.obligation !== 'ask' && u.obligation !== 'host' && u.obligation !== 'detail' && u !== ask);
 
   // The face's list: the first bullet run with a point that is not an obligation; its lead-in becomes the headline.
   const faceRun = runs.find((r) => units.some((u) => u.run === r && u.obligation === undefined && u !== ask && !isQuestionUnit(u)));
@@ -343,8 +357,8 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   };
   // Already in shape, shipped exactly as written: the whole reply fits the face budget with at most one question, or
   // too little would go behind "More detail" to be worth a click.
-  if (measure.words_in <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
-  if (detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS) return { text, shape: null, outcome: 'already_in_shape', measure };
+  if (detailLines.length === 0 && measure.words_in <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
+  if (detailLines.length === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS) return { text, shape: null, outcome: 'already_in_shape', measure };
   // More obligations than the face holds: hiding one would break its rule, so the reply ships whole (counted).
   if (measure.face_over_cap) return { text, shape: null, outcome: 'kept_whole', reason: 'face_over_cap', measure };
   // ⛔ A lead-in stays with what it introduces ("…, on current information:" before the screen's chance lines): a face

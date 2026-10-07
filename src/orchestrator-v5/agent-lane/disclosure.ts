@@ -49,6 +49,14 @@ export function disclosuresFor(outcomes: readonly DisclosableOutcome[]): readonl
   return owed;
 }
 
+// Only successful construction writes owe these code-authored loss sentences.
+export function eventRiskDisclosuresFor(outcomes: readonly {
+  readonly ok?: boolean; readonly mutated: boolean; readonly event_risk_disclosures?: unknown;
+}[]): readonly string[] {
+  return [...new Set(outcomes.flatMap((o) => o.ok === true && o.mutated === true && Array.isArray(o.event_risk_disclosures)
+    ? o.event_risk_disclosures.filter((line): line is string => typeof line === 'string' && line.trim() !== '') : []))];
+}
+
 /** Append owed disclosures to the Agent's own text, without rewriting it. */
 export function withDisclosures(assistantText: string, owed: readonly string[]): string {
   if (owed.length === 0) return assistantText;
