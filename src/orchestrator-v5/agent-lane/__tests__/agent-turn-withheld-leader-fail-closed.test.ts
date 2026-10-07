@@ -13,6 +13,15 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
+const wireGateCalls = vi.hoisted(() => vi.fn());
+vi.mock('../withheld-leader-fail-closed.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../withheld-leader-fail-closed.js')>();
+  return { ...actual, enforceAgentLaneLeaderClaimsAtWire: (...args: Parameters<typeof actual.enforceAgentLaneLeaderClaimsAtWire>) => {
+    wireGateCalls(...args);
+    return actual.enforceAgentLaneLeaderClaimsAtWire(...args);
+  } };
+});
+
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
   state: { draft_graph: unknown; analysis_state: { leader_claim: Record<string, unknown> } & Record<string, unknown>; analysis_ready: unknown };
   replies: Array<{ id: string; label: string; leak_phrases: string[]; text: string }>;
@@ -76,11 +85,11 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); });
+  beforeEach(() => { rows.clear(); wireGateCalls.mockClear(); });
 
   let turnSeq = 0;
   let turnId = '';
-  const runThenReply = () => {
+  const runThenReply = (message = 'Should we raise Pro to £59?') => {
     callModelOutputs = [
       [{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'c1' }],
       [{ type: 'message', content: [{ type: 'output_text', text: REPLY.text }] }],
@@ -88,7 +97,7 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     // A client turn id, so the answer row is written — the row a lost-response retry replays.
     turnSeq += 1;
     turnId = `7a1b2c3d-4e5f-4a6b-8c7d-${String(turnSeq).padStart(12, '0')}`;
-    return app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Should we raise Pro to £59?', turn_id: turnId } });
+    return app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, turn_id: turnId } });
   };
 
   it('fixture control: the reply carries its leak phrase and the ranking sentence exactly once', () => {
@@ -117,5 +126,14 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     expect((r.json().analysis_state as { leader_claim?: { permitted?: boolean } }).leader_claim?.permitted).toBe(true);
     expect(r.json().assistant_text).toBe(REPLY.text);
     expect(rows.get(turnId)?.assistant_message).toBe(REPLY.text);
+  });
+
+  it('c6 wiring: the live analysis-bearing route passes this turn’s typed refusal to the wire gate', async () => {
+    readbackState = WITHHELD_STATE;
+    const userText = "We're not checking return rates or adding that to the model. Move on. What do we do first?";
+    const r = await runThenReply(userText);
+    expect(r.statusCode).toBe(200);
+    expect(callModelOutputs).toEqual([]);
+    expect(wireGateCalls).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ userText }));
   });
 });

@@ -3803,6 +3803,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1',
+        userText: typedNow ?? undefined,
         mayNameLeadingOption: claim?.permitted === true,
         separationEstablished: claim?.separation === 'separated',
         ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
