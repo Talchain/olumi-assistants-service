@@ -4260,7 +4260,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // structured prompt; a turn that made a proposal is its typed card plus this reply as the disclosure; every other
       // reply is coaching. Never chosen by reading the words.
       const madeProposal = approvalCalls.some((c) => c.ok && typeof c.proposal_id === 'string' && c.name !== 'authorise_change' && c.name !== WITHDRAW_PROPOSAL);
-      const profile: ReplyProfile = fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
+      // S-C (#2759): the widen Add press is a method press whose ONLY output is its held card's own reply — the `proposal`
+      // profile (by identity: `widenAdd` and a made proposal), so the door's words ship whole, never reshaped.
+      const profile: ReplyProfile = widenAdd !== null && madeProposal ? 'proposal'
+        : fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
       // No model wrote words this turn (a card press, an uninterpreted Run, the action bar's typed reply: S-B #2751's
       // can't-yet / already-waiting words): every line is the host's, shipped as composed. The bar's sidecars (`_action`)
       // are attached after this block and never pass the composer.

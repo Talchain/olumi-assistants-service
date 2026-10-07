@@ -408,9 +408,16 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(t2.assistant_text).not.toContain('I couldn’t prepare that risk');
     expect(t2.assistant_text).toContain('I’ve prepared this change');
     expect(t2.assistant_text).toContain('Weak starter demand');
-    // The door's OWN typed reply (`newRiskReply`), not the fallback: the press is the whole request.
-    expect(t2.assistant_text).toContain('It threatens Starter-plan MRR (lowers it).');
-    expect(t2.assistant_text).toContain('It is driven by Starter-plan paying subscribers (more of it makes the risk less likely).');
+    // The door's OWN typed reply (`newRiskReply`), not the fallback: the press is the whole request. Through #2748's ONE
+    // composer it is the `proposal` profile, so it ships WHOLE, byte for byte, with no reshaped `_answer_shape` (DL 17:3xZ).
+    expect(t2.assistant_text).toBe([
+      'I’ve prepared this change: add risk \'Weak starter demand\', link \'Weak starter demand\' to \'Starter-plan MRR\' and link \'Starter-plan paying subscribers\' to \'Weak starter demand\'.',
+      'It threatens Starter-plan MRR (lowers it).',
+      'It is driven by Starter-plan paying subscribers (more of it makes the risk less likely).',
+      'How strongly it acts is not known yet: Olumi uses a placeholder strength for each link, not an estimate, for you to correct.',
+      'Approve these 3 changes?',
+    ].join('\n\n'));
+    expect((t2 as unknown as { _answer_shape?: unknown })._answer_shape, 'kept whole: no reshaped answer shape').toBeUndefined();
     const held = await heldOnLatestRow();
     expect(held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`))
       .toEqual(['add_node risk_weak_starter_demand', 'add_edge risk_weak_starter_demand::out_starter_mrr', 'add_edge fac_subs::risk_weak_starter_demand']);
