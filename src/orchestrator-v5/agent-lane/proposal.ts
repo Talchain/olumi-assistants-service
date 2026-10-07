@@ -294,6 +294,11 @@ export class ProposalStore {
     return this.items.get(id);
   }
 
+  /** Applied state survives the carrier: it is the authority for an idempotent card re-press. */
+  isApplied(id: string): boolean {
+    return this.applied.has(id);
+  }
+
   markApplied(id: string, receipts: readonly ReceiptSummary[] = []): void {
     this.applied.set(id, receipts);
     this.partial.delete(id);

@@ -2630,7 +2630,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let editsFailure: 'stale' | 'not_held' | 'refused' | undefined;
       const originalCarrier = heldAtStart.find(h => heldProposalId(h) === approvedProposal);
       const original = originalCarrier !== undefined ? agentProposalOf(originalCarrier) : undefined;
-      if (approvedProposal.startsWith('prop_') && original === undefined) editsFailure = 'not_held';
+      // A settled card has no held carrier; the store still owns its idempotent already-applied result.
+      if (approvedProposal.startsWith('prop_') && original === undefined && !proposals.isApplied(approvedProposal)) editsFailure = 'not_held';
       if (editsForThisCard !== undefined && approvedProposal.startsWith('prop_')) {
         const current = await readBackState(dispatch, scenarioId);
         const record = originalCarrier !== undefined ? proposalRecord(originalCarrier, current.graph) : undefined;
@@ -3454,6 +3455,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           && typeof c.proposal_id === 'string').map((c) => c.proposal_id as string));
         liveScopeIssues = computeSurvivingPriorPendingsDetailed(priorPendings.filter(p => p.action.kind === 'reconcile_goal_scope'), freshScopeIssues, [], graphHash, Date.now()).survivors;
         const reconciled = reconcileHeldProposals({ atStart: heldAtStart, latest: priorPendings, approved: approvedHolds,
+          isApplied: (id) => proposals.isApplied(id),
           declined: withdrawn, graph: readbackGraph, graphHash, scenarioId, requestId: String(req.id), nowMs: Date.now() });
         liveHolds = reconciled.carried;
         for (const l of reconciled.lapsed) if (agentProposalOf(l.hold) !== undefined) proposals.discard(heldProposalId(l.hold));

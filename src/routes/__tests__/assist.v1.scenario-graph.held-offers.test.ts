@@ -390,13 +390,15 @@ describe('R2 graph read isolation from the turn approval authority', () => {
     store.readMostRecentPendingActions.mockImplementation(async (sid?: string) => sid === controlSid ? [controlCarrier] : latest)
     const control = await runTurn(controlSid)
     const controlWrite = append.mock.calls.at(-1)?.[0] as unknown as { pending_actions: PendingAction[] }
-    expect(control.suggested_actions.map((a: { id: string }) => a.id)).toEqual([controlChip.id, 'agent-amend-proposal'])
+    // S-D slice 2 offers Not now on the proposing turn, after amend.
+    expect(control.suggested_actions.map((a: { id: string }) => a.id)).toEqual([controlChip.id, 'agent-amend-proposal', `agent-decline-proposal:${controlProposal.proposal_id}`])
     const controlAnswerCarrier = controlWrite.pending_actions.find(pa => pa.chip_id === controlChip.id)
     expect(controlAnswerCarrier).toBeDefined()
     append.mockClear()
     await heldRead()
     const body = await runTurn()
-    expect(body.suggested_actions).toEqual([chip, { id: 'agent-amend-proposal', label: 'Change something first', message: 'Before you apply it, I want to change some of it.' }])
+    expect(body.suggested_actions).toEqual([chip, { id: 'agent-amend-proposal', label: 'Change something first', message: 'Before you apply it, I want to change some of it.' },
+      { id: `agent-decline-proposal:${proposalOf(offered).proposal_id}`, label: 'Not now', message: 'Not now.' }])
     const answer = append.mock.calls.at(-1)?.[0] as unknown as { pending_actions: PendingAction[] }
     const carried = answer?.pending_actions.find(pa => pa.chip_id === chip.id)
     expect(carried).toBeDefined()

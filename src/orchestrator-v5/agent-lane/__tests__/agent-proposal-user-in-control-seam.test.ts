@@ -212,6 +212,28 @@ describe('S-D slice 2 Agent proposals', () => {
     ]);
     expect(b.suggested_actions).toContainEqual(p.decline_action);
   }, 120_000);
+  it('APPLIED A1 stays silently settled on the next ordinary turn and its approve card remains idempotent', async () => {
+    seed(); const b = await assumptions(); const p = shown(b);
+    const applied = await turn(press(p));
+    expect(applied._agent.tool_calls).toEqual([expect.objectContaining({ ok: true, mutated: true })]);
+    // Durable, not only in-process: the approve turn's own row no longer carries the applied proposal (a restart
+    // between the approval and the next turn must not find it "held" and say it lapsed).
+    const carriedAfter = (await pending()).filter((x) => (x.action as { inline_patch?: { agent_proposal?: { proposal_id?: string } } })
+      .inline_patch?.agent_proposal?.proposal_id === p.proposal_id);
+    expect(carriedAfter, 'the applied proposal is not carried').toEqual([]);
+    const before = bytes(); const writes = graphWrites.get(SCENARIO);
+    const next = await turn({ message: 'Explain the assumptions.' });
+    expect(next.assistant_text).toBe('Done.');
+    expect(next._proposal_fields).toBeUndefined();
+    expect((await pending()).filter((x) => (x.action as { inline_patch?: { agent_proposal?: { proposal_id?: string } } })
+      .inline_patch?.agent_proposal?.proposal_id === p.proposal_id), 'nor is it carried by the next ordinary turn').toEqual([]);
+    expect(next.suggested_actions.map(c => c.id)).not.toContain(p.approve_action.id);
+    expect(next.suggested_actions.map(c => c.id)).not.toContain(p.decline_action.id);
+    expect(await pending()).not.toContainEqual(expect.objectContaining({ chip_id: p.approve_action.id }));
+    const again = await turn(press(p));
+    expect(again._agent.tool_calls).toEqual([expect.objectContaining({ ok: true, mutated: false, proposal_id: p.proposal_id })]);
+    expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO)).toBe(writes);
+  }, 120_000);
   it('A1 edits RED: one user value, untouched Olumi value, one commit and both receipt lines', async () => {
     seed(); const b = await assumptions();
     const r = await submit(b, [{ field_id: 'factor_value:fac_hours', value: 12 }]);

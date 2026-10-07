@@ -75,6 +75,8 @@ export interface ReconcileInput {
   readonly latest: readonly PendingAction[];
   /** Held proposals this request's own door applied. */
   readonly approved: ReadonlySet<string>;
+  /** Agent store authority, including proposals applied on an earlier turn. Never infer this from graph ops. */
+  readonly isApplied?: (proposalId: string) => boolean;
   /** Held proposals the user declined (typed decline) or the Agent withdrew on their words, this turn. */
   readonly declined: ReadonlySet<string>;
   readonly graph: unknown;
@@ -90,7 +92,7 @@ export function reconcileHeldProposals(input: ReconcileInput): { carried: Pendin
   const latestHolds = input.latest.filter((pa) => isHeldProposal(pa) && pa.scenario_id === input.scenarioId);
   const live: PendingAction[] = [];
   for (const hold of latestHolds) {
-    if (input.approved.has(heldProposalId(hold)) || input.declined.has(heldProposalId(hold))) continue;
+    if (input.approved.has(heldProposalId(hold)) || input.declined.has(heldProposalId(hold)) || input.isApplied?.(heldProposalId(hold))) continue;
     if (fulfilledIn(hold, input.graph)) continue;
     if (isPendingActionExpired(hold, input.nowMs)) { lapsed.push({ hold, reason: 'idle' }); continue; }
     if (!isProductHold(hold) && input.graphHash !== undefined && hold.preconditions.graph_hash !== input.graphHash) {
@@ -109,7 +111,7 @@ export function reconcileHeldProposals(input: ReconcileInput): { carried: Pendin
   const onLatest = new Set(latestHolds.map((h) => h.chip_id));
   for (const hold of input.atStart) {
     if (!isHeldProposal(hold) || hold.scenario_id !== input.scenarioId || onLatest.has(hold.chip_id)) continue;
-    if (input.approved.has(heldProposalId(hold)) || input.declined.has(heldProposalId(hold)) || fulfilledIn(hold, input.graph)) continue;
+    if (input.approved.has(heldProposalId(hold)) || input.declined.has(heldProposalId(hold)) || input.isApplied?.(heldProposalId(hold)) || fulfilledIn(hold, input.graph)) continue;
     lapsed.push({ hold, reason: !isProductHold(hold) && input.graphHash !== undefined && hold.preconditions.graph_hash !== input.graphHash ? 'model_changed' : 'gone' });
   }
   return { carried: [...thread.threaded, ...live.filter(h => !isProductHold(h))].sort((a, b) => a.emitted_at_iso.localeCompare(b.emitted_at_iso)).map((h) => refreshedHold(h, input.nowMs)), lapsed };

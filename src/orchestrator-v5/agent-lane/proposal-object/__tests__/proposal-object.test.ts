@@ -342,6 +342,19 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     const idle = { ...carrier, expires_at_iso: new Date(nowMs - 1).toISOString() };
     expect(reconcileHeldProposals({ ...base, latest: [idle] }).lapsed[0]?.reason).toBe('idle');
   });
+  it('applied Agent carriers disappear silently before pin or idle checks, including a missing latest carrier', async () => {
+    const { ProposalStore } = await import('../../proposal.js');
+    const { p, carrier, g } = await fixture(); const nowMs = Date.now();
+    const proposals = new ProposalStore(); proposals.put(p); proposals.markApplied(p.proposal_id);
+    const base = { atStart: [carrier], approved: new Set<string>(), declined: new Set<string>(), graph: g,
+      graphHash: 'own approval moved the pin', scenarioId: SID, requestId: 'request', nowMs,
+      isApplied: (id: string) => proposals.isApplied(id) };
+    for (const latest of [[carrier], [{ ...carrier, expires_at_iso: new Date(nowMs - 1).toISOString() }], []]) {
+      expect(reconcileHeldProposals({ ...base, latest })).toEqual({ carried: [], lapsed: [] });
+    }
+    expect(proposals.authorise({ proposal_id: p.proposal_id, scenario_id: SID, authenticated_user_id: null,
+      current_graph_identity_hash: base.graphHash }).status).toBe('already_applied');
+  });
 
   it('RED bounds preserve a declared signed domain and do not invent a lower bound for unscaled figures', async () => {
     const { factorValueAllowed } = await import('../amend.js'); const { record } = await fixture();
