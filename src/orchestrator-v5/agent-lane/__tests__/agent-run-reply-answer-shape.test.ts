@@ -268,8 +268,11 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
 
   it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {
     hostRunFixture();
+    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
+    expect(screen, 'positive control: the replayed Run has screen chance lines').toHaveLength(2);
     const { b: first, turnId } = await runOnly();
     expect(first._answer_shape).toBeDefined();
+    expect(first._answer_shape!.headline, 'B15: the live Run leads with its first chance finding').toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
     expect(rows.get(turnId)?.assistant_message).toBe(deriveAnswerTextFromShape(first._answer_shape!));
     expect(rows.get(turnId)?.assistant_message!.startsWith(first._answer_shape!.headline)).toBe(true);
     expect(first._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);

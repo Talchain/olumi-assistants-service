@@ -98,6 +98,7 @@ import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct
 import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-sentence-route.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -2088,7 +2089,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
           const say = goalChanceWithheldForAgent(state.analysisResult, state.graph)?.say;
-          const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
+          // The live Run turn's methods note (`disclosuresFor`, a Run on this turn) comes first in its owed lines.
+          const indexNow = indexGoalWeightsMessages(state.analysisResult);
+          const owedNow = [...indexNow, ...(typeof say === 'string' && say.trim() !== '' ? [say] : [])];
           // MC D1 (c): the same #416 ask the live Run turn said, from the same readback.
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
           if (askNow !== null) owedNow.push(askNow);
@@ -2110,16 +2113,28 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const breakEvenNow = (state.analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
             ? (state.scopeOpen ? null : breakEvenFor(state.graph, state.identityEvaluated)) : null;
           if (breakEvenNow !== null) rebuilt = withBreakEvenAnswer(rebuilt, breakEvenNow, { afterIdentityAsk: false });
+          // B15: the live Run turn's screen chance lines, at the live turn's stage (after break-even, before A7), by its
+          // helpers on the same readback: without them the replay loses the typed chance headline the user first saw.
+          const screenNow = goalChanceScreenLinesForAgent(state.analysisResult, state.graph,
+            (state.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current');
+          rebuilt = withScreenLinesOwed(rebuilt, screenNow).text;
           replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
           replayObligations = [
             { role: 'host', text: RUN_RESULT_READY_TEXT },
             ...(typeof say === 'string' && say.trim() !== '' ? [say, ...sentencesOf(say)].map((text): FaceObligation => ({ role: 'withheld_reason', text })) : []),
             ...[askNow, ...lines].filter((l): l is string => typeof l === 'string' && l.includes('?')).map((text): FaceObligation => ({ role: 'ask', text })),
-            ...[rootNow, owedNow.find((l) => l !== say && l !== askNow && l !== rootNow && !l.includes('?'))]
+            ...indexNow.map((text): FaceObligation => ({ role: 'host', text })),
+            ...[rootNow, owedNow.find((l) => l !== say && l !== askNow && l !== rootNow && !indexNow.includes(l) && !l.includes('?'))]
               .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text): FaceObligation => ({ role: 'evidence', text })),
             // The live turn types its decision lines and break-even arithmetic as host parts (a line that asks is the ask).
             ...lines.filter((l) => !l.includes('?')).map((text): FaceObligation => ({ role: 'host', text })),
             ...(breakEvenNow !== null ? [{ role: 'host' as const, text: breakEvenLine(breakEvenNow, { afterIdentityAsk: false }) }] : []),
+            // The live turn's typing of the same lines (one finding = chance + depends; lead: true).
+            ...screenNow.flatMap((l): FaceObligation[] => [
+              ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: `${l.chance} ${l.depends}`, lead: true as const }]),
+              { role: 'evidence', text: l.chance, lead: true },
+              ...(l.depends === '' ? [] : [{ role: 'evidence' as const, text: l.depends }]),
+            ]),
           ];
           replayNarration = { status: 'pending', run_key: replayChip.id.slice(RUN_EXPLANATION_PREFIX.length) };
           boundControl.push(replayChip);
