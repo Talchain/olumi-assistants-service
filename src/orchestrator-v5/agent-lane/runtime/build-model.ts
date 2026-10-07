@@ -1,3 +1,4 @@
+import { draftedTeamPartOf } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
@@ -2011,9 +2012,8 @@ export async function buildModelFromBrief(
   // wording `attestHorizon` kept was read by nothing: the served reply never said "Q3" (the drafter's own question sat
   // 8th of 10, two shown), and a month count the drafter typed for it was asked as the deadline. Olumi's count is never
   // asked as the user's. The wording is still held on no field: that is Canonical's shape (PJ-A2 row 27, second half).
-  if (candidate.goal.kind === 'event_by_date') {
-    openQuestions.splice(0);
-    openQuestions.push(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
+  if (draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null) {
+    openQuestions.unshift(chanceGoalDeadlineAsk(candidate.goal.deliverable!));
   } else if (statedGoal.horizon.status === 'unresolved') {
     const goalName = typeof candidate.goal?.metric === 'string' && candidate.goal.metric.trim() !== '' ? ` for "${candidate.goal.metric}"` : '';
     openQuestions.unshift(deadlineHeld
@@ -2243,6 +2243,7 @@ export async function buildModelFromBrief(
     // strategic additions in `unknowns`, and on the common path (a first pass already
     // within budget — 3 of 3 live benchmark runs) nothing else ever showed them.
     ...(openQuestions.length > 0 ? { open_questions: openQuestions } : {}),
+    ...(draftedTeamPartOf({ nodes: admitted.nodes, edges: admitted.edges }) !== null ? { displayed_next_question: chanceGoalDeadlineAsk(candidate.goal.deliverable!) } : {}),
     // Condition 2's typed twin of its sentence in `open_questions`, above.
     ...(levelAsks.length > 0 ? { level_asks: levelAsks } : {}),
     // B1/B2 (review 5822711266), machine-readable beside the sentences below.

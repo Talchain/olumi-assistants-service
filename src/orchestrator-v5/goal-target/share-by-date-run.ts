@@ -1,4 +1,5 @@
 /** S2a Run-only frame attestation and per-option mathematical licence input. */
+import { missingEventCapacityOptionIds } from './event-by-date-model.js';
 import { shareByDateGoalOf, statedTeamShareOf } from './goal-kind.js';
 import { timeBetween } from './deadline-date.js';
 import { gate, type ShareGate, type ShareParts } from './event-by-date-share.js';
@@ -15,6 +16,7 @@ export function withShareByDateFrame<G>(wireGraph: G, persistedGraph: unknown): 
 }
 
 export function sharePartsForOption(graph: unknown, optionId: string): ShareParts | null {
+  if (missingEventCapacityOptionIds(graph).includes(optionId)) return null;
   const share = shareByDateGoalOf(graph);
   if (share === null) return null;
   const g = graph as Rec;

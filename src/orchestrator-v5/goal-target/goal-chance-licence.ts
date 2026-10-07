@@ -1,3 +1,4 @@
+import { shareGoalChanceWords } from './share-goal-chance-words.js';
 /**
  * ⭐ D3 MILESTONE 1, STEP 2 — EACH OPTION'S CHANCE OF MEETING THE GOAL, AND WHAT MAY BE SAID ABOUT IT (DL 0df0e1 #87
  * 6005048156 + plan 6006078553; Science d5 6005138341 / 6005279728 / 6005640764; Wording c6 6005196947 + rulings 6 Oct).
@@ -30,6 +31,7 @@ import { readOptionResultSources } from '../../orchestrator/context/option-resul
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
+import { isEventShareForecast } from './event-by-date-model.js';
 import { shareByDateGoalOf } from './goal-kind.js';
 import { shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
@@ -116,6 +118,7 @@ export function goalChanceLicenceOf(
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
   const share = shareByDateGoalOf(graph);
+  if (share === null && isEventShareForecast(graph)) return null;
   const target = goal === undefined ? null : statedGoalTargetOf(graph as Rec, goal);
   // A LEVEL target only: a target stated as a change ("cut by 20%") has no ruled sentence yet.
   if (target === null || (target.frame !== undefined && target.frame !== 'level')) return null;
@@ -193,7 +196,8 @@ export function goalChanceLicenceOf(
   return {
     code: GOAL_CHANCE_LICENSED,
     severity: 'info',
-    message: 'Each option’s chance of meeting your goal is licensed on this Run.',
+    message: `Each option’s ${share === null ? 'chance of meeting your goal'
+      : shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)} is licensed on this Run.`,
     form,
     option_ids,
     pct_by_option: pct,

@@ -11,17 +11,14 @@ import { displayedPctAt } from './goal-chance-driver.js';
 
 type Rec = Record<string, any>;
 /** Bounded numeric/time grammar. One numeric range, months only; never word-form numbers. */
-export const TEAM_TIME = /(?:^|[^\p{L}\p{N}.])([0-9]{1,3}(?:\.[0-9]{1,2})?)[ \t]{0,4}(?:(?:–|-|to)[ \t]{0,4}([0-9]{1,3}(?:\.[0-9]{1,2})?)[ \t]{0,4})?months?\b/gu;
+export const TEAM_TIME = /^(?:(?:between[ \t]{1,4}([0-9]{1,3}(?:\.[0-9]{1,2})?)[ \t]{1,4}and[ \t]{1,4}([0-9]{1,3}(?:\.[0-9]{1,2})?))|(?:(?:about|around|roughly)[ \t]{1,4})?([0-9]{1,3}(?:\.[0-9]{1,2})?)(?:[ \t]{0,4}(?:–|—|-|to)[ \t]{0,4}([0-9]{1,3}(?:\.[0-9]{1,2})?))?)[ \t]{0,4}months?$/iu;
 export function readTeamTime(words: unknown): { low_months: number; high_months: number } | null {
   if (typeof words !== 'string' || words.length > 1000) return null;
-  TEAM_TIME.lastIndex = 0;
-  const matches = [...words.matchAll(TEAM_TIME)];
-  if (matches.length !== 1) return null;
-  const m = matches[0]!, tail = words.slice(m.index! + m[0].length).trim().toLowerCase();
-  if (tail.startsWith('ago') || tail.startsWith('away')) return null;
-  const lower = words.toLowerCase();
-  if (['recruit', 'onboard', 'notice', 'deadline', 'started', 'start in'].some(w => lower.includes(w))) return null;
-  const low = Number(m[1]), high = Number(m[2] ?? m[1]);
+  // Consume the complete duration clause. Unsupported prefixes never expose a numeric suffix.
+  const expression = words.trim().replace(/[.!]$/, '').replace(/^(?:it(?:['’]ll| will)[ \t]{1,4}take|it[ \t]{1,4}(?:takes|would[ \t]{1,4}take)|the[ \t]{1,4}team[ \t]{1,4}(?:takes|needs))[ \t]{1,4}/i, '');
+  const m = TEAM_TIME.exec(expression);
+  if (m === null) return null;
+  const low = Number(m[1] ?? m[3]), high = Number(m[2] ?? m[4] ?? m[3]);
   const amounts = findStatedAmounts(words);
   if (!(low > 0 && high >= low) || ![low, high].every(n => amounts.some(a => a.magnitude === n))) return null;
   return { low_months: low, high_months: high };

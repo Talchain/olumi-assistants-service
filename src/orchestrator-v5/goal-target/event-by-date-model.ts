@@ -7,6 +7,36 @@ import { extraShareMoments, teamShareMoments } from './event-by-date-share.js';
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
+/** Brief-owned event/deadline scope; drafter flags never attest it. Bounded linear scans. */
+export const EVENT_WORDS = /\b(?:deadlines?|launch(?:ing)?|deliver(?:y|ing)?|ship(?:ping)?|on[ \t]{1,4}time|go[ \t]{1,4}live|release)\b/i;
+export const EVENT_DEADLINE = /\b(?:deadlines?|on[ \t]{1,4}time|by[ \t]{1,4}(?:\d{1,4}\b|Q[1-4]\b|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|next|the|year|month|week)|within[ \t]{1,4}\d{1,3}[ \t]{1,4}(?:days?|weeks?|months?))\b/i;
+export const QUANTITY_TARGET = /[£$€][ \t]{0,4}\d|\b\d[\d,.]{0,20}[ \t]{0,4}(?:%|(?!(?:days?|weeks?|months?|years?|developers?|people|leads?|January|February|March|April|May|June|July|August|September|October|November|December)\b)[a-z][a-z-]{0,40}\b)/i;
+export function briefAttestsEventByDate(brief: unknown, goal?: CandidateModel['goal']): boolean {
+  if (typeof brief !== 'string' || brief.length > 20000) return false;
+  if (goal && (!EVENT_WORDS.test(goal.metric) || QUANTITY_TARGET.test(goal.metric)
+    || (goal.value !== null && goal.value !== undefined))) return false;
+  return brief.split(/[.!?;\n]/).some(sentence => EVENT_WORDS.test(sentence)
+    && EVENT_DEADLINE.test(sentence) && !QUANTITY_TARGET.test(sentence));
+}
+
+/** Persisted provenance is passthrough at every graph boundary, unlike node labels. */
+export function eventShareCarrierOf(graph: unknown): Rec | null {
+  const goal = soleGoalOf(graph);
+  if (!rec(graph) || !goal || !Array.isArray(graph.edges)) return null;
+  const carriers = graph.edges.filter((e: Rec) => e.to === goal.id && e.provenance?.share_by_date?.role === 'team');
+  return carriers.length === 1 ? carriers[0] : null;
+}
+export function isEventShareForecast(graph: unknown): boolean {
+  const goal = soleGoalOf(graph);
+  return !!goal && (eventShareCarrierOf(graph) !== null || (goal.threshold_source === 'definitional'
+    && typeof goal.goal_threshold_unit === 'string' && goal.goal_threshold_unit.startsWith('% of ')));
+}
+export function missingEventCapacityOptionIds(graph: unknown): string[] {
+  const ids = eventShareCarrierOf(graph)?.provenance?.share_by_date?.unresolved_option_ids;
+  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+}
+export const EVENT_START_GAP = "This doesn't yet model when new people start contributing, which decides a deadline. When would they start?";
+
 /** Recognises the drafted (not yet analysable) team part by identity and definition. */
 export function draftedTeamPartOf(graph: unknown): { goal: Rec; team: Rec; deliverable: string } | null {
   const goal = soleGoalOf(graph);
@@ -14,12 +44,12 @@ export function draftedTeamPartOf(graph: unknown): { goal: Rec; team: Rec; deliv
     || goal.goal_threshold_cap !== 100 || goal.goal_threshold_frame !== 'level' || goal.goal_direction !== '>='
     || typeof goal.goal_threshold_unit !== 'string' || !goal.goal_threshold_unit.startsWith('% of ')) return null;
   const deliverable = goal.goal_threshold_unit.slice(5);
-  const by = goalDeadlineOf(goal) === undefined ? 'the deadline' : sayDate(goalDeadlineOf(goal)!);
-  if (goal.label !== `Share of ${deliverable} done by ${by}`) return null;
-  const teams = graph.nodes.filter((n: Rec) => n.kind === 'factor' && n.label === `Share today's team finishes by ${by}`
-    && (n.observed_state === undefined || n.observed_state.unit === goal.goal_threshold_unit) && graph.edges.some((e: Rec) => e.from === n.id && e.to === goal.id
-      && e.provenance?.definitional === true && e.provenance?.natural_effect?.amount_unit === goal.goal_threshold_unit
-      && e.strength?.mean === 1));
+  const carrier = eventShareCarrierOf(graph);
+  if (carrier === null || carrier.provenance.share_by_date.deliverable !== deliverable) return null;
+  const teams = graph.nodes.filter((n: Rec) => n.kind === 'factor' && n.id === carrier.from
+    && (n.observed_state === undefined || n.observed_state.unit === goal.goal_threshold_unit)
+    && carrier.provenance?.definitional === true && carrier.provenance?.natural_effect?.amount_unit === goal.goal_threshold_unit
+    && carrier.strength?.mean === 1);
   return teams.length === 1 ? { goal, team: teams[0], deliverable } : null;
 }
 
@@ -44,6 +74,8 @@ export function admitEventByDate(candidate: CandidateModel): AdmittedModel {
   ];
   const edges: Rec[] = [{ from: 'event_team', to: 'event_goal', exists_probability: 1,
     strength: { mean: 1, std: 0.01 }, effect_direction: 'positive', provenance: { source: 'cee_hypothesis', definitional: true,
+      share_by_date: { role: 'team', deliverable, unresolved_option_ids: candidate.options.flatMap((o, i) =>
+        o.is_status_quo !== true && !o.added_capacity ? [`event_option_${i + 1}`] : []) },
       natural_effect: { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit,
         strength_mean: 1, strength_mean_frame: 'edge_strength' } } }];
   const switches: string[] = [];
@@ -83,21 +115,22 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
     || timeBetween(reference, deadline, 'months') <= 0) return graph;
   const out = structuredClone(graph) as Rec;
   const goal = out.nodes.find((n: Rec) => n.id === part.goal.id), team = out.nodes.find((n: Rec) => n.id === part.team.id);
-  const D = timeBetween(reference, deadline, 'months'), unit = goal.goal_threshold_unit;
+  const unit = goal.goal_threshold_unit;
   goal.goal_horizon = { deadline };
   goal.label = `Share of ${part.deliverable} done by ${sayDate(deadline)}`;
   team.label = `Share today's team finishes by ${sayDate(deadline)}`;
   const stated = team.observed_state?.stated_time;
   if (stated?.quantity === 'months_to_finish') {
-    const m = teamShareMoments(D, stated.low, stated.high);
+    const estimateReference = stated.reference_date;
+    const m = teamShareMoments(timeBetween(estimateReference, deadline, 'months'), stated.low, stated.high);
     Object.assign(team.observed_state, { value: m.mean, std: m.sd, raw_value: m.mean * 100,
-      stated_time: { ...stated, deadline, reference_date: reference } });
+      stated_time: { ...stated, deadline } });
   }
   for (const edge of out.edges.filter((e: Rec) => e.to === goal.id && e.from !== team.id)) {
     const c = out.nodes.find((n: Rec) => n.id === edge.from)?.observed_state?.extra_share_by_date;
     if (!c) continue;
-    Object.assign(c, { deadline, reference_date: reference });
-    const m = extraShareMoments(c.monthly_share / 100, D, c.lead_low, c.lead_high);
+    Object.assign(c, { deadline, reference_date: c.reference_date ?? reference });
+    const m = extraShareMoments(c.monthly_share / 100, timeBetween(c.reference_date, deadline, 'months'), c.lead_low, c.lead_high);
     edge.strength = { mean: m.mean, std: m.sd };
     delete edge.defaulted;
     edge.provenance.natural_effect = { amount: m.mean * 100, amount_unit: unit, per_source_change: 1,

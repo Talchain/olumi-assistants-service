@@ -56,6 +56,8 @@ export function currentDefinitionalCarrier(e: unknown): string | undefined {
  */
 export interface LinkEnds {
   readonly fromLabel: string | undefined;
+  readonly fromId?: string;
+  readonly toId?: string;
   readonly toLabel: string | undefined;
   readonly fromUnit: string | undefined;
   readonly toUnit: string | undefined;
@@ -70,7 +72,7 @@ export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
   const unitOf = nodeUnitOf(nodes);
   return (e) => (isRec(e)
-    ? { fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label), fromUnit: unitOf(e.from), toUnit: unitOf(e.to) }
+    ? { fromId: text(e.from), toId: text(e.to), fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label), fromUnit: unitOf(e.from), toUnit: unitOf(e.to) }
     : UNVALIDATED_ENDS);
 }
 
@@ -108,11 +110,10 @@ export function validatedDefinition(e: unknown, ends: LinkEnds): string | undefi
   const u = currentDefinitionalCarrier(e);
   if (u === undefined) return undefined;
   if (ends.toUnit === undefined || !sameUnit(ends.toUnit, u) || (ends.fromUnit !== undefined && !sameUnit(ends.fromUnit, u))) return undefined;
-  // S2b's named team part is the share definition, despite different verbs in the two labels.
-  if (u.startsWith('% of ') && ends.toLabel?.startsWith(`Share of ${u.slice(5)} done by `)) {
-    const date = ends.toLabel.slice(`Share of ${u.slice(5)} done by `.length);
-    if (ends.fromLabel === `Share today's team finishes by ${date}`) return u;
-  }
+  // Admission's durable, endpoint-bound team definition survives renaming.
+  const carrier = isRec(e) && isRec(e.provenance) ? e.provenance.share_by_date : undefined;
+  if (isRec(carrier) && carrier.role === 'team' && u === `% of ${carrier.deliverable}`
+    && ends.fromId === (e as Rec).from && ends.toId === (e as Rec).to) return u;
   return ends.fromLabel !== undefined && ends.toLabel !== undefined && labelHoldsQuantity(ends.fromLabel, ends.toLabel) ? u : undefined;
 }
 

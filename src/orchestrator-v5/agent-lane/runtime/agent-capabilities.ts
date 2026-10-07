@@ -1,3 +1,4 @@
+import { goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeCard, teamObservedState, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf } from '../../goal-target/event-by-date-model.js';
 /**
@@ -3110,6 +3111,11 @@ export function createAgentCapabilities(
         ...(draftedTeamPartOf(approvedRead.raw) !== null ? { reference_date: (op.value as { reference?: string }).reference } : {}) },
     });
     if (res.status === 'unconfirmed') {
+      const reread = await readGraph(ctx.scenario_id);
+      if (reread !== null && goalDeadlineOf(reread.nodes.find(n => n.id === op.path)) === v.deadline
+        && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference)) {
+        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [] });
+      }
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
         detail: 'This deadline was sent, but Olumi could not read the model back to confirm it. Say exactly that; never say it was recorded or not recorded.' };
     }
@@ -3128,7 +3134,7 @@ export function createAgentCapabilities(
     }
     proposals.markApplied(parent.proposal_id, receipts);
     return {
-      ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
+      ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
       follow_up: `Your deadline for "${String(goal.label)}" is now ${date}.`,
     };
   };

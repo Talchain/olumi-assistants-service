@@ -326,11 +326,13 @@ function openQuestionsLine(r: ToolResult): string {
   const qs = openQuestionsForReply(r);
   if (qs.length === 0) return '';
   // Each question kept whole, so it still reads as a question the team can take up.
-  const shown = qs.slice(0, OPEN_QUESTIONS_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
-  const rest = qs.length - OPEN_QUESTIONS_SHOWN;
+  const next = typeof r.displayed_next_question === 'string' ? r.displayed_next_question : null;
+  const shownCount = next === null ? OPEN_QUESTIONS_SHOWN : 1;
+  const shown = (next === null ? qs.slice(0, shownCount) : [next]).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
+  const rest = qs.length - shownCount;
   // DL #70 5851835121: no promise the Agent does not keep ("Ask me for the other N" — asked, it summarised). The count
   // alone is true on every surface: the UI's disclosure lists all of them (`_agent.open_questions`); raw text says how many.
-  const more = rest > 0 ? ` (${OPEN_QUESTIONS_SHOWN} of ${qs.length} shown.)` : '';
+  const more = rest > 0 ? ` (${shownCount} of ${qs.length} shown.)` : '';
   return ` Questions this model does not answer yet: ${shown}${more}`;
 }
 

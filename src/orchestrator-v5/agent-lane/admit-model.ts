@@ -68,7 +68,7 @@ import {
   type AdmittedConstraint,
 } from './admit-constraint.js';
 
-import { admitEventByDate } from '../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, admitEventByDate } from '../goal-target/event-by-date-model.js';
 
 const MAX_ID = 100;
 
@@ -3046,7 +3046,7 @@ export function admitCandidateModel(
    */
   sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
 ): AdmittedModel {
-  if (candidateModel.goal.kind === 'event_by_date') return admitEventByDate(candidateModel);
+  if (candidateModel.goal.kind === 'event_by_date' && briefAttestsEventByDate(brief, candidateModel.goal)) return admitEventByDate(candidateModel);
   candidateModel = withQuantityFrames(candidateModel);
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)

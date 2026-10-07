@@ -1,3 +1,6 @@
+import { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
+export { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
+import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
 /**
  * ⭐ S4c (Wave B4/B5, 7 Oct): THE SCREEN'S CHANCE LINES ARE SAID BY OLUMI.
  *
@@ -38,6 +41,9 @@ const CHANCE_LABEL = 'chance of meeting your goal, in this model';
 /** The screen's chance lines for the selected Run (`current` = its run state is complete and current); [] otherwise. */
 export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, current: boolean): GoalChanceScreenLine[] {
   const facts = goalChanceFactsForAgent(result, graph, current);
+  const share = shareByDateGoalOf(graph);
+  const chanceWords = share === null ? CHANCE_LABEL
+    : `${shareGoalChanceWords(String(share.goal.goal_threshold_unit).slice(5), share.deadline)}, in this model`;
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
@@ -45,7 +51,7 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   const line = (optionId: string, figure: string, depends: string): GoalChanceScreenLine[] => {
     const label = labels.get(optionId);
     // An option the graph cannot name has no line (the screen drops it too); never an id.
-    return label === undefined ? [] : [{ option_id: optionId, label, figure, chance: `‘${label}’: ${figure} ${CHANCE_LABEL}.`, depends }];
+    return label === undefined ? [] : [{ option_id: optionId, label, figure, chance: `‘${label}’: ${figure} ${chanceWords}.`, depends }];
   };
   const points = facts.goal_chance_licence?.form === 'each' && facts.goal_chance_display !== undefined
     ? facts.goal_chance_licence.option_ids.flatMap((id) => {
@@ -56,10 +62,11 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
     if (d.depends_on.kind === 'stated_time') {
       const label = labels.get(id), stated = d.stated_time;
       if (label === undefined || stated === undefined) return [];
-      const goal = stated.launching ? 'launching' : 'meeting your goal';
-      const by = stated.by_date === undefined ? '' : ` by ${sayDate(stated.by_date)}`;
+      const words = stated.deliverable !== undefined && stated.by_date !== undefined
+        ? shareGoalChanceWords(stated.deliverable, stated.by_date)
+        : `chance of meeting your goal${stated.by_date === undefined ? '' : ` by ${sayDate(stated.by_date)}`}`;
       return [{ option_id: id, label, figure: d.range,
-        chance: `‘${label}’: ${d.range} chance of ${goal}${by}, in this model, from the slow end of your ${stated.estimate} to the fast end.`,
+        chance: `‘${label}’: ${d.range} ${words}, in this model, from the slow end of your ${stated.estimate} to the fast end.`,
         depends: '' }];
     }
     const lead = d.depends_on.among === 'unsized_links' ? 'Of the links not sized yet, it depends most on' : 'It depends most on';

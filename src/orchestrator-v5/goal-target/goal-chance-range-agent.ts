@@ -1,3 +1,4 @@
+import { shareGoalChanceWords } from './share-goal-chance-words.js';
 /** Agent-only readers of the selected Run's licences. No inference from figures or prose. */
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
 import {
@@ -8,7 +9,7 @@ import {
 import { agentLicenceRecordOf, goalChanceDisplayForAgent, goalChanceLicenceForAgent, isLicensedDriver } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
 import { goalChanceRangeRecordOf } from './goal-chance-range-record.js';
-import { isShareCalendarDate } from './goal-kind.js';
+import { SHARE_BY_DATE_UNIT, isShareCalendarDate } from './goal-kind.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined;
@@ -35,7 +36,8 @@ export interface GoalChanceRangeDisplay {
   readonly stated_time?: {
     readonly estimate: string;
     readonly by_date?: string;
-    readonly launching: boolean;
+    readonly deliverable?: string;
+    readonly chance_words?: string;
   };
   readonly depends_on: {
     readonly kind: 'link_strength' | 'link_existence' | 'stated_time';
@@ -82,7 +84,10 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
       range: `between ${rangeEnd(v.low_pct)} and ${rangeEnd(v.high_pct).replace(/^about /, '')}`,
       depends_on: { kind: v.kind, from_label: fromLabel, to_label: toLabel, among: v.among },
       ...(v.kind === 'stated_time' ? { stated_time: { estimate,
-        launching: target?.value === 100 && target.unit === '% of launch',
+        ...(typeof target?.unit === 'string' && SHARE_BY_DATE_UNIT.test(target.unit)
+          ? { deliverable: target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''),
+            ...(isShareCalendarDate(target.by_date) ? { chance_words: shareGoalChanceWords(
+              target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), target.by_date) } : {}) } : {}),
         ...(isShareCalendarDate(target?.by_date) ? { by_date: target.by_date } : {}) } } : {}),
     } });
   }
@@ -196,6 +201,7 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   goal_chance_display?: Record<string, string>;
   goal_chance_driver_display?: Record<string, string>;
   goal_chance_range_display?: Record<string, GoalChanceRangeDisplay>;
+  goal_chance_words?: string;
   goal_horizon_line?: string;
 } {
   if (!current) return {};
@@ -205,12 +211,16 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
     .filter(([optionId]) => !goalChanceRangeBarredForAgent(result, optionId)));
   const display = pointDisplayForAgent(result, ranges);
   const hasChance = Object.keys(display).length > 0;
+  const target = rec(agentLicenceRecordOf(result)?.target);
+  const shareWords = hasChance && typeof target?.unit === 'string' && SHARE_BY_DATE_UNIT.test(target.unit) && isShareCalendarDate(target.by_date)
+    ? shareGoalChanceWords(target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), target.by_date) : undefined;
   const drivers = hasChance ? goalChanceDriverDisplayForAgent(result, graph) : {};
   const hasRange = Object.keys(rangeDisplay).length > 0;
   const horizon = warningsOf(result).filter((w) => w.code === GOAL_HORIZON_NOT_TESTED);
   const line = horizon.length === 1 && horizon[0]!.severity === 'info' && id(horizon[0]!.message) ? horizon[0]!.message : undefined;
   return {
     ...(hasChance ? { goal_chance_licence: licence, goal_chance_display: display } : {}),
+    ...(shareWords !== undefined ? { goal_chance_words: shareWords } : {}),
     ...(Object.keys(drivers).length > 0 ? { goal_chance_driver_display: drivers } : {}),
     ...(hasRange ? { goal_chance_range_display: rangeDisplay } : {}),
     ...((hasChance || hasRange) && line !== undefined ? { goal_horizon_line: line } : {}),

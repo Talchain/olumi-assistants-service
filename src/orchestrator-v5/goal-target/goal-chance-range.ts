@@ -8,6 +8,7 @@ import {
   GOAL_FIGURES_SHARE_APPROXIMATION, readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
+import { isEventShareForecast, missingEventCapacityOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
 import { shareByDateGoalOf } from './goal-kind.js';
 import { shareGateForOption } from './share-by-date-run.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
@@ -143,9 +144,19 @@ export function withGoalChanceRange<E>(envelope: E, graph: unknown, inputs: Goal
  */
 export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId: unknown): E {
   const share = shareByDateGoalOf(graph);
-  if (share === null || share.goal.id !== goalId || !isRec(envelope)) return envelope;
-  const records = readOptionResultSources(envelope).find(s => s.length > 0) ?? [];
-  const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings.filter(isRec) : [];
+  if (!isRec(envelope)) return envelope;
+  if (share === null) return isEventShareForecast(graph)
+    ? withholdOptionGoalFigures(envelope, new Set((readOptionResultSources(envelope).find(s => s.length > 0) ?? []).flatMap(r => {
+      const id = r.option_id ?? r.id; return typeof id === 'string' ? [id] : []; })), { code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning',
+      message: 'Not shown. This model does not yet hold a supported forecast of finishing by the deadline.' }, { keepOutcome: true, keepOrdering: true })
+    : envelope;
+  if (share.goal.id !== goalId) return envelope;
+  const missing = missingEventCapacityOptionIds(graph);
+  const scopedEnvelope = missing.length > 0 ? withholdOptionGoalFigures(envelope, new Set(missing), {
+    code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: missing, message: EVENT_START_GAP,
+  }, { keepOutcome: true, keepOrdering: true }) : envelope;
+  const records = readOptionResultSources(scopedEnvelope).find(s => s.length > 0) ?? [];
+  const warnings = Array.isArray(scopedEnvelope.inference_warnings) ? scopedEnvelope.inference_warnings.filter(isRec) : [];
   const ranges: Record<string, GoalChanceRange> = {};
   const withheld = new Set<string>();
   for (const r of records) {
@@ -170,8 +181,8 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
       quantity: stated.quantity as 'months_to_finish' | 'share_per_month', low: decision.low, high: decision.high,
       from: share.team_part_id, to: goalId as string, among: 'all' };
   }
-  if (withheld.size === 0) return envelope;
-  let out = envelope;
+  if (withheld.size === 0) return scopedEnvelope;
+  let out = scopedEnvelope;
   for (const shownAsRange of [false, true]) {
     const ids = [...withheld].filter(id => Object.hasOwn(ranges, id) === shownAsRange);
     if (ids.length === 0) continue;
