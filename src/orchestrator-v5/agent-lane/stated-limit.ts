@@ -7,6 +7,7 @@ import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/pro
 import { figureTheUserWroteFor, ownUnitsOf, sentenceNamesOtherQuantity } from './stated-by-user.js';
 import { factorUnitOf } from './unit-conflict.js';
 import { readUnitParts, statedTailParts } from './same-unit.js';
+import { periodAdverb } from '../../utils/unit-alphabet.js';
 
 export interface NewLimitValue {
   node_id: string;
@@ -31,7 +32,11 @@ const has = (ws: readonly string[], phrase: string): boolean => {
   const wanted = phrase.split(' ');
   return ws.some((_, i) => wanted.every((w, j) => ws[i + j] === w));
 };
-const ceilings = ['within', 'only have', 'budget', 'at most', 'no more than', 'can t spend more than', 'cannot spend more than'];
+const ceilings = ['within', 'only have', 'budget', 'at most', 'up to', 'no more than', 'can t spend more than', 'cannot spend more than'];
+/** Words that may stand before a budget cue: first-party, neutral, or a period word ("Our monthly budget", "Budget:"). */
+const budgetSubjects = ['our', 'we', 'i', 'my', 'us', 'the', 'a', 'an', 'total', 'overall', 'have', 've', 'got', 'has', 'can', 'only', 'so', 'and', 'project'];
+/** A reserve the user takes back in the same breath ("keep back £20k — actually no"). */
+const reserveRejections = ['no', 'forget', 'ignore', 'scratch'];
 const notLimits = ['competitor', 'rival', 'their', 'his', 'her', 'its', 'unless', 'provided', 'when', 'last year', 'if', 'suppose', 'imagine', 'would', 'could', 'used to', 'previously', 'spent', 'not', 'never', 'isn t', 'was', 'had', 'don t', 'doesn t'];
 /** Display the currency magnitude and the period the writer carries unchanged. */
 export function limitFigure(value: number, unit: string): string {
@@ -112,10 +117,26 @@ export function readNewLimit(raw: Record<string, unknown>, text: string, value: 
     const right = limitWords(text.slice(a.index + a.matchedText.length, span.end));
     const ws = limitWords(clause);
     const wholeSentence = limitWords(text.slice(sentence.start, sentence.end));
-    if (notLimits.some(p => has(ws, p)) || foreignPossessive(clause)
+    // A later clause of the same sentence that holds no amount qualifies this figure ("…£200k, but that was last year").
+    let qualified = false;
+    for (let at = span.end; at < sentence.end;) {
+      const piece = spanAt(text, at + 1, true);
+      at = piece.end;
+      if (amounts.some(r => r.index >= piece.start && r.index < piece.end)) continue;
+      if (notLimits.some(p => has(limitWords(text.slice(piece.start, piece.end)), p))) qualified = true;
+    }
+    if (qualified || notLimits.some(p => has(ws, p)) || foreignPossessive(clause)
       || ['if', 'unless', 'provided', 'when'].some(p => has(wholeSentence, p))
       || !(ceilings.some(p => has(left, p)) || has(right, 'is all we have'))) continue;
-    const statedUnit = statedTailParts(text, a);
+    const tail = statedTailParts(text, a);
+    // A period word before the figure ("Our monthly budget is £200k") states its period as surely as one after it.
+    const leftPeriods = [...new Set(left.flatMap(w => periodAdverb(w) ?? []))];
+    if (leftPeriods.length > 1 || (leftPeriods.length === 1 && tail?.period != null && tail.period !== leftPeriods[0])) continue;
+    const statedUnit = tail === null ? null : { ...tail, period: tail.period ?? leftPeriods[0] ?? null };
+    // Every word before the first budget cue is first-party or neutral: "Acme has a budget of £200k for our project" is Acme's.
+    const cueAt = left.findIndex((_, i) => [...ceilings, 'spend'].some(p => has(left.slice(i, i + p.split(' ').length), p)));
+    const subject = (w: string) => budgetSubjects.includes(w) || periodAdverb(w) !== null;
+    const ownedBudget = cueAt >= 0 ? left.slice(0, cueAt).every(subject) : left.every(subject) && has(right, 'is all we have');
     const matches = eligible.filter(n => {
       if (n.reading.currencyCode !== a.currencyCode || a.magnitude !== value * n.reading.multiplier) return false;
       const ownUnit = readUnitParts(n.unit);
@@ -124,8 +145,7 @@ export function readNewLimit(raw: Record<string, unknown>, text: string, value: 
       const labelWords = limitWords(n.label);
       const named = has(ws, labelWords.join(' '));
       const totalCost = ['total cost', 'total costs', 'overall cost', 'overall costs'].includes(labelWords.join(' '));
-      const firstParty = ['our', 'we', 'i', 'my', 'us'].some(p => has(ws, p));
-      const budgetNamesCost = totalCost && firstParty && (has(left, 'budget') || has(left, 'spend') || has(left, 'only have') || has(right, 'is all we have'));
+      const budgetNamesCost = totalCost && ownedBudget && (has(left, 'budget') || has(left, 'spend') || has(left, 'only have') || has(right, 'is all we have'));
       if (!named && !budgetNamesCost) return false;
       const targets = [n.label, ...(budgetNamesCost ? ['budget', 'spend', 'only have', 'all we have'] : [])];
       const others = money.filter(o => o !== n).map(o => o.label);
@@ -154,7 +174,7 @@ export function readNewLimit(raw: Record<string, unknown>, text: string, value: 
     const candidate = reserves.length === 1 ? reserves[0] : undefined;
     const boundStart = originalAt[a.index]!;
     if (candidate !== undefined && candidate.amount.magnitude < a.magnitude
-      && !notLimits.some(p => has(candidate.words, p)) && !foreignPossessive(candidate.local)
+      && ![...notLimits, ...reserveRejections].some(p => has(candidate.words, p)) && !foreignPossessive(candidate.local)
       && originalAt[candidate.amount.index + candidate.amount.matchedText.length - 1]! + 1 - boundStart <= 200) {
       const reserveUnit = statedTailParts(text, candidate.amount);
       if (reserveUnit !== null && reserveUnit.period === statedUnit!.period) {
@@ -167,6 +187,8 @@ export function readNewLimit(raw: Record<string, unknown>, text: string, value: 
       }
     }
     const boundEnd = originalAt[quoteEnd - 1]! + 1;
+    // A figure the 200-character quote cannot hold whole is not quoted by halves.
+    if (originalAt[a.index + a.matchedText.length - 1]! + 1 - boundStart > 200) return null;
     const quoteStart = Math.max(0, boundStart - Math.floor((200 - (boundEnd - boundStart)) / 2));
     result.source_quote = original.slice(quoteStart, quoteStart + 200);
     return result;

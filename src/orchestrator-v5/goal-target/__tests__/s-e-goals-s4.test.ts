@@ -160,6 +160,58 @@ describe('D-07: one approved limit on the quantity the user names', () => {
       expect(w.graph().goal_constraints).toEqual([expect.objectContaining({ node_id: COST, value })]);
     }
   });
+  // ── buddy r2 (824a98b8) findings: each refused row has an admitted control in the same block ──
+  it.each([
+    ['Our monthly budget is £200k', '£', 200000, false],
+    ['Our annual budget is £20k', '£/month', 20000, false],
+    ['Our monthly budget is £20k', '£/month', 20000, true],
+  ])('r2 P1-1 a period word before the figure is the stated period: %s on %s', async (text, unit, value, admitted) => {
+    const g = model(); g.nodes[2].observed_state.unit = unit;
+    const w = world(g); const r = await w.propose(text, value);
+    expect(r.ok).toBe(admitted);
+    if (admitted) expect(r.public_label).toBe('Keep total cost within £20,000 a month?');
+    else expect(w.chips(r)).toEqual([]);
+  });
+  it.each([
+    ['Our budget is £200k, but that was last year', false],
+    ['Our budget is £200k, not counting last year', false],
+    ['Our budget is £200k, all in', true],
+  ])('r2 P1-3a a trailing clause of the same sentence qualifies the figure: %s', async (text, admitted) => {
+    const w = world(); const r = await w.propose(text);
+    expect(r.ok).toBe(admitted);
+    if (!admitted) expect(w.chips(r)).toEqual([]);
+  });
+  it.each([
+    ['Acme has a budget of £200k for our project', false],
+    ['The supplier has a budget of £200k for us', false],
+    ['We have a budget of £200k for our project.', true],
+    ['Budget: £200k', true],
+    ['The budget is £200k', true],
+    ['We can spend up to £200k in total.', true],
+  ])('r2 P1-3b/admission the budget is first-party or unowned: %s', async (text, admitted) => {
+    const w = world(); const r = await w.propose(text);
+    expect(r.ok).toBe(admitted);
+    if (admitted) expect(r.public_label).toBe('Keep total cost within £200,000?');
+    else expect(w.chips(r)).toEqual([]);
+  });
+  it.each([
+    ['Our budget is £200k, keep back £20k — actually no', ['Yes', 'Change']],
+    ['Our budget is £200k, keep back £20k, no, forget that', ['Yes', 'Change']],
+    ['Our budget is £200k, keep back £20k', ['Yes', 'Change', 'Use £180,000']],
+  ])('r2 P1-4 a rejected reserve offers no alternative: %s', async (text, labels) => {
+    const w = world(); const r = await w.propose(text);
+    expect(r.ok).toBe(true); expect(w.chips(r).map(c => c.label)).toEqual(labels);
+  });
+  it.each([['Use £180,000', 180000], ['use £180,000', 180000], ['Use £190,000', null]])('r2 P1-5 typed chip label %s', async (message, value) => {
+    const w = world(); const r = await w.propose();
+    const result = await w.caps.authoriseChange(ctx(message), { proposal_id: r.proposal_id as string });
+    if (value === null) { expect(result).toMatchObject({ ok: false, refusal: 'approval_words_mismatch' }); expect(w.writes).toHaveLength(0); }
+    else expect(w.graph().goal_constraints).toEqual([expect.objectContaining({ node_id: COST, value })]);
+  });
+  it.each([[201, false], [150, true]])('r2 P2 a figure spread over %i blanks cannot be quoted whole', async (n, admitted) => {
+    const w = world(); const r = await w.propose(`Our budget is £${' '.repeat(n)}200k`);
+    expect(r.ok).toBe(admitted);
+  });
   it('P2-6 verbatim quote surrounds bound figures after a 200-character preamble', async () => {
     const text = `${'Context only. '.repeat(20)}Our budget is £200k, with a £20k reserve held back for recruitment fees.`;
     const w = world(); const r = await w.propose(text);

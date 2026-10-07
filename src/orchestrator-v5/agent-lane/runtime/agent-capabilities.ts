@@ -5771,7 +5771,8 @@ export function createAgentCapabilities(
         const v = op.value as NewLimitValue;
         const pid = decision.proposal.proposal_id;
         const words = limitApprovalWords(ctx.typed_approval_words ?? ctx.user_turn_text ?? '');
-        const useReserve = v.reserve !== undefined && words === limitApprovalWords(v.reserve.message);
+        const useReserve = v.reserve !== undefined
+          && (words === limitApprovalWords(v.reserve.message) || words === limitApprovalWords(v.reserve.label));
         // A forged chip/message cannot substitute another figure for this stored card.
         if (!['yes', 'yes, record that limit'].includes(words) && !useReserve) {
           return { ok: false, mutated: false, refusal: 'approval_words_mismatch' };
