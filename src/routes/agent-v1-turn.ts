@@ -134,7 +134,7 @@ import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/b
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import { premortemProducerDirective, readPremortemProduction, premortemWorksheetDiagnosticsFor } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
-  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, risksTurnForReadback,
+  CANVAS_OPTIONS_PRESS_ID, CANVAS_RISKS_PRESS_ID, isWidenAddPressId, keptProposalOf, modelGapOf, RISK_ADD_REFUSED_REPLY, riskHeldReply, risksTurnForReadback,
   settleRisksTurn, settleWidenTurn, SUGGEST_RISKS_CHIP as RISKS_PRESS, widenAddCallOf, widenGate, widenNotAdded, widenOffered,
   widenPassingArgs, widenTargetOf, widenTurnForReadback, WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type RunRisksWidenTurn,
   type WidenGateResult, type WidenTurn, type WidenUnavailableTurn,
@@ -3049,7 +3049,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const call = widenAddCallOf(pressedChipId, message, rb);
       const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode);
       const held = issued?.ok === true && typeof issued.proposal_id === 'string';
-      const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? RISK_ADD_REFUSED_REPLY : RISK_ADD_REFUSED_REPLY;
+      // A held card is NEVER worded as a refusal: the door's own reply, else what is held (served sc-plus-1 defect).
+      const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? riskHeldReply(call!) : RISK_ADD_REFUSED_REPLY;
       fastPath = 'method';
       widenAdd = { actions: held ? [] : [RISKS_PRESS] };
       result = {
@@ -4259,7 +4260,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // structured prompt; a turn that made a proposal is its typed card plus this reply as the disclosure; every other
       // reply is coaching. Never chosen by reading the words.
       const madeProposal = approvalCalls.some((c) => c.ok && typeof c.proposal_id === 'string' && c.name !== 'authorise_change' && c.name !== WITHDRAW_PROPOSAL);
-      const profile: ReplyProfile = fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
+      // S-C (#2759): the widen Add press is a method press whose ONLY output is its held card's own reply — the `proposal`
+      // profile (by identity: `widenAdd` and a made proposal), so the door's words ship whole, never reshaped.
+      const profile: ReplyProfile = widenAdd !== null && madeProposal ? 'proposal'
+        : fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
       // No model wrote words this turn (a card press, an uninterpreted Run, the action bar's typed reply: S-B #2751's
       // can't-yet / already-waiting words): every line is the host's, shipped as composed. The bar's sidecars (`_action`)
       // are attached after this block and never pass the composer.
