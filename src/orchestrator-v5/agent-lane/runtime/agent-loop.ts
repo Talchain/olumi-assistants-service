@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto';
 import { toolsFor, dispatchTool, MUTATION_TOOLS, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
-import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
+import { isProposingTool, proposalsAwaitingApproval, NOT_ON_NARRATION, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
 import {
@@ -35,7 +35,7 @@ export interface ModelCallRequest {
   readonly tools: readonly unknown[];
   readonly max_output_tokens: number;
   /** The ONE tool this call must make (`AgentTurnInput.firstCallTool`), sent only on the turn's first call. */
-  readonly tool_choice?: { readonly type: 'function'; readonly name: string } | 'none';
+  readonly tool_choice?: { readonly type: 'function'; readonly name: string };
   /** A caller-set deadline: the call aborts at it and is never retried (`withTransportRetry`). */
   readonly deadline_ms?: number;
   /** T1 (b): the ledger's purpose for a cache prewarm (`PREWARM_OUTPUT_TOKENS`); never sent to the provider. */
@@ -244,6 +244,15 @@ const DEFAULT_MAX_HOPS = 6;
  */
 export const NARRATE_LABEL_LINE = 'Name the change you proposed by its exact label, in quotes.';
 const NARRATE_ITEM = { role: 'developer', content: [{ type: 'input_text', text: NARRATE_LABEL_LINE }] } as const;
+
+/**
+ * The refusal an approval gets on a narrating call (Codex buddy r1 P1 / r2 P2 on #2781; DL 58e392 ruling B). The lowered
+ * call keeps its tools (same cached prefix) so it can still withdraw and correct what it just held (measured at low: the
+ * wrong "very strong" withdrawn 2/2, and the next hop, at the budget's own effort, re-proposed "strong" 2/2). It may not
+ * approve: an approval is the user's, and is never decided at the lowered effort.
+ */
+export { NOT_ON_NARRATION };
+const AUTHORISE_TOOL = 'authorise_change';
 
 export function hopOnlyHeldProposals(calls: readonly { name: string }[], results: readonly ToolResult[]): boolean {
   return calls.length > 0 && calls.length === results.length && calls.every((c, i) => {
@@ -463,6 +472,7 @@ export async function runAgentTurn(
     // Eligibility, not the raw catalogue. `eligibleTools` starts from
     // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
     // and a context packet can never widen the surface.
+    const narrateHop = narrateNext;
     const offered = (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
       .filter((t) => !withheld.has(t.name));
     const hostCall = hop === 0 && input.hostFirstCall !== undefined && offered.some((t) => t.name === input.hostFirstCall!.name)
@@ -475,9 +485,7 @@ export async function runAgentTurn(
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
-      // Narration only (Codex buddy r1 P1, #2781): a lowered call makes no tool decision, so it may call none. The tools
-      // stay declared, so the cached prefix is the same bytes.
-      ...(narrateNext ? { reasoning_role: 'narrate' as const, tool_choice: 'none' as const } : {}),
+      ...(narrateNext ? { reasoning_role: 'narrate' as const } : {}),
     };
     if (hostCall !== undefined) {
       void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
@@ -550,7 +558,12 @@ export async function runAgentTurn(
       const toolStartedAt = now();
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
-      const result: ToolResult = withheld.has(String(call.name))
+      const result: ToolResult = narrateHop && String(call.name) === AUTHORISE_TOOL
+        ? {
+            ok: false, mutated: false, refusal: NOT_ON_NARRATION,
+            detail: 'The change you just prepared is waiting for the user’s yes. Show it and ask; nothing was approved or changed.',
+          }
+        : withheld.has(String(call.name))
         ? {
             ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
             detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',

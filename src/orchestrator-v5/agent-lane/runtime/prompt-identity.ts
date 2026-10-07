@@ -57,9 +57,7 @@ export function agentPromptIdentity(alias: AgentPromptAlias, instructions: unkno
  * The conversation call's alias. The Run fast path's ONE interpreting call is the only `callModel` request that sets
  * `tool_choice: 'none'` (`agent-v1-turn.ts`, fast path 3) — the same test the transport uses to forward it.
  */
-export function conversationPromptAlias(toolChoice: unknown, reasoningRole?: unknown): AgentPromptAlias {
-  // P44 S1: a narrating call (`reasoning_role: 'narrate'`) sends `tool_choice: 'none'` but is still the converse prompt.
-  if (reasoningRole === 'narrate') return 'agent.converse';
+export function conversationPromptAlias(toolChoice: unknown): AgentPromptAlias {
   return toolChoice === 'none' ? 'agent.interpret' : 'agent.converse';
 }
 

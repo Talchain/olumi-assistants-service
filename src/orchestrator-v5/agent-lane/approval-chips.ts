@@ -93,6 +93,9 @@ export const ONE_CHANGE_PER_APPROVAL_DETAIL =
   + 'have answered. Never ask them to approve both.';
 
 /** Whether a tool leaves a proposal awaiting the user's yes — the approve chip's own list. */
+/** P44 S1: `authorise_change` refused on a narrating call (`agent-loop.ts`); the held change stays offered. */
+export const NOT_ON_NARRATION = 'not_on_narration';
+
 export const isProposingTool = (name: string): boolean => APPROVE[name] !== undefined;
 
 /**
@@ -128,7 +131,7 @@ export const AMEND_CHIP: SuggestedAction = {
  * authorisation's identity is unknown: never a guess about which proposal it consumed.
  */
 export function proposalsAwaitingApproval(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
 ): ReadonlyMap<string, string> {
   /**
    * A turn that authorised something consumes THOSE proposals only: one that approved A and proposed
@@ -141,7 +144,8 @@ export function proposalsAwaitingApproval(
    * (Codex #1806 5807933515: propose B on H0, then approve A → H1, offered a chip that could not
    * commit). So only a proposal made AFTER the turn's last model change is still offerable.
    */
-  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change');
+  // An approval refused on a narrating call (`NOT_ON_NARRATION`, P44 S1) never reached the store: it consumes nothing.
+  const authorisations = toolCalls.filter((c) => c.name === 'authorise_change' && c.refusal !== NOT_ON_NARRATION);
   if (authorisations.some((c) => typeof c.proposal_id !== 'string')) return new Map();
   const consumed = new Set(authorisations.map((c) => c.proposal_id as string));
   // A change the Agent withdrew this turn is neither offered nor carried (`WITHDRAW_PROPOSAL`).
@@ -161,7 +165,7 @@ export interface ApprovalLabelSource {
 }
 
 export function approvalChipsFor(
-  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
+  toolCalls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string; refusal?: string }[],
   labelSourceFor?: (proposalId: string) => ApprovalLabelSource | undefined,
 ): SuggestedAction[] {
   const offered = proposalsAwaitingApproval(toolCalls);

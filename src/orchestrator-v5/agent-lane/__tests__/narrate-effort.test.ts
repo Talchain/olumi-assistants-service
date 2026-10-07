@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { hopOnlyHeldProposals, NARRATE_LABEL_LINE, runAgentTurn, type ModelCallRequest } from '../runtime/agent-loop.js';
 import type { AgentCapabilities } from '../runtime/agent-tools.js';
 import { budgetFor, callEffortFor, conversationBudgetFor } from '../model-budgets.js';
-import { conversationPromptAlias } from '../runtime/prompt-identity.js';
+import { approvalChipsFor, NOT_ON_NARRATION, proposalsAwaitingApproval } from '../approval-chips.js';
 
 /** agent-capabilities.ts `proposeNewRisk`, held (its success shape). */
 const HELD = {
@@ -56,10 +56,6 @@ describe('the loop: the narrating call is tagged and carries the label line', ()
     expect(first!.reasoning_role).toBeUndefined();
     expect(lastText(first!)).not.toContain(NARRATE_LABEL_LINE);
     expect(second!.reasoning_role).toBe('narrate');
-    // Narration only (Codex r1 P1): the lowered call may make no tool decision; its tools stay declared (same prefix).
-    expect(second!.tool_choice).toBe('none');
-    expect(second!.tools).toEqual(first!.tools);
-    expect(first!.tool_choice).toBeUndefined();
     expect(lastText(second!)).toContain(NARRATE_LABEL_LINE);
     expect(JSON.stringify(r.items)).not.toContain(NARRATE_LABEL_LINE);
     expect(r.assistant_text).toBe('Shall I add it?');
@@ -71,18 +67,54 @@ describe('the loop: the narrating call is tagged and carries the label line', ()
     await runAgentTurn({ ...base, composeReply: () => null } as never, caps, callModel as never);
     const second = callModel.mock.calls[1]![0] as ModelCallRequest;
     expect(second.reasoning_role).toBeUndefined();
-    expect(second.tool_choice).toBeUndefined();
     expect(JSON.stringify(second.input)).not.toContain(NARRATE_LABEL_LINE);
   });
 });
 
-describe('conversationPromptAlias: a narrating call is still the converse prompt', () => {
-  it('RED: tool_choice none + narrate → agent.converse (keeps the developer-breakpoint cache carrier)', () => {
-    expect(conversationPromptAlias('none', 'narrate')).toBe('agent.converse');
+describe('the narrating call may withdraw, never approve (Codex r1 P1 / r2 P2; DL ruling B)', () => {
+  const call = { type: 'function_call', call_id: 'c1', name: 'propose_new_risk', arguments: JSON.stringify({ label: 'R', affects: [{ target_label: 'G', direction: 'negative' }], rationale: 'r', whole_request: false }) };
+  const base = { ctx: { scenario_id: 's', authenticated_user_id: 'u', request_id: 'r' }, history: [], message: 'Add a risk.', instructions: 'i', maxOutputTokens: 500 };
+  const answer = { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Shall I add it?' }] }] };
+  const fc = (name: string, args: unknown, id: string) => ({ type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) });
+
+  it('RED: authorise_change on the narrating call is refused before dispatch, and the held change keeps its approve card', async () => {
+    const authoriseChange = vi.fn(async () => ({ ok: true, mutated: true }));
+    const caps = { proposeNewRisk: vi.fn(async () => HELD), authoriseChange } as unknown as AgentCapabilities;
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ output: [call] })
+      .mockResolvedValueOnce({ output: [fc('authorise_change', { proposal_id: HELD.proposal_id }, 'c2')] })
+      .mockResolvedValueOnce(answer);
+    const r = await runAgentTurn({ ...base, composeReply: () => null } as never, caps, callModel as never);
+    expect(authoriseChange).not.toHaveBeenCalled();
+    expect(r.tool_calls.map((c) => [c.name, c.ok, c.refusal ?? null])).toEqual([['propose_new_risk', true, null], ['authorise_change', false, NOT_ON_NARRATION]]);
+    expect(r.mutated).toBe(false);
+    expect(approvalChipsFor(r.tool_calls).map((c) => c.id)).toContain(`agent-approve-proposal:${HELD.proposal_id}`);
+    expect([...proposalsAwaitingApproval(r.tool_calls).keys()]).toEqual([HELD.proposal_id]);
   });
-  it('CONTROL: the Run\'s interpreting call is still agent.interpret; an ordinary call agent.converse', () => {
-    expect(conversationPromptAlias('none')).toBe('agent.interpret');
-    expect(conversationPromptAlias(undefined)).toBe('agent.converse');
+
+  it('CONTROL: withdraw_proposal on the narrating call is dispatched (correction stays possible)', async () => {
+    const withdrawProposal = vi.fn(async () => ({ ok: true, mutated: false, proposal_id: HELD.proposal_id }));
+    const caps = { proposeNewRisk: vi.fn(async () => HELD), withdrawProposal } as unknown as AgentCapabilities;
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ output: [call] })
+      .mockResolvedValueOnce({ output: [fc('withdraw_proposal', { proposal_id: HELD.proposal_id }, 'c2')] })
+      .mockResolvedValueOnce(answer);
+    const r = await runAgentTurn({ ...base, composeReply: () => null } as never, caps, callModel as never);
+    expect(withdrawProposal).toHaveBeenCalledTimes(1);
+    // The hop after a withdraw is not narration: the budget's own effort, no label line.
+    const third = callModel.mock.calls[2]![0] as ModelCallRequest;
+    expect(third.reasoning_role).toBeUndefined();
+    expect(r.tool_calls.map((c) => c.name)).toEqual(['propose_new_risk', 'withdraw_proposal']);
+  });
+
+  it('CONTROL: authorise_change on an ordinary (non-narrating) call is still dispatched', async () => {
+    const authoriseChange = vi.fn(async () => ({ ok: true, mutated: true }));
+    const caps = { authoriseChange } as unknown as AgentCapabilities;
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ output: [fc('authorise_change', { proposal_id: 'gmh_earlier' }, 'c1')] })
+      .mockResolvedValueOnce(answer);
+    await runAgentTurn({ ...base, message: 'Yes, approve it.', composeReply: () => null } as never, caps, callModel as never);
+    expect(authoriseChange).toHaveBeenCalledTimes(1);
   });
 });
 

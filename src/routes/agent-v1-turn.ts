@@ -1509,7 +1509,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * the interpret-only constraint changes it.
      */
     // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
-    const alias = conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice, req.reasoning_role);
+    const alias = conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice);
     const plainBody: Record<string, unknown> = {
       model: budget.model,
       instructions: req.instructions,
