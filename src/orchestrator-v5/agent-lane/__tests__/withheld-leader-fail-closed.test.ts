@@ -18,6 +18,141 @@ import {
   sentenceRanksOptions,
 } from '../withheld-leader-fail-closed.js';
 import { PROVISIONAL_FIGURES_CAVEAT } from '../../compose/leading-option-wire-enforcement.js';
+import { unsizedLinkSentence, unsizedLinkStatement } from '../unsized-path-cause.js';
+
+describe('c6: an appointed lead is a staffing role, with option labels still guarded', () => {
+  const labels = rankingLabelContext({ nodes: [
+    { id: 'raise', kind: 'option', label: 'Raise prices' },
+    { id: 'starter', kind: 'option', label: 'Launch starter tier' },
+  ] }, undefined);
+
+  it.each([
+    'Appoint one lead.',
+    'First, appoint one lead for the route merge.',
+    'First, appoint one operations lead to own the waste-contract change and set a launch date.',
+    'Name a lead for the depot work.',
+    'Pick a project lead and two drivers.',
+    'Assign one operations lead to own the waste contract.',
+    'Assign one lead per site.',
+    'Have each depot nominate a lead.',
+    'Nominate a project lead.',
+    'Appoint one lead’s deputy.',
+    'Hire a lead.', 'Need a lead.', 'Designate one lead.',
+    'Choose a lead.', 'Pick a single lead.', 'Pick a single lead to coordinate drivers.',
+  ])('STAFFING: kept byte-identical: %s', text => {
+    expect(rankingCodesIn(text, labels)).toEqual([]);
+    expect(dropRankingSentences(text, labels)).toEqual({ text, droppedSentences: 0 });
+  });
+
+  it.each([
+    'Raise prices leads.', 'One option leads.', 'The lead is not stable.',
+    '‘Raise prices’ is in the lead.',
+    'Make ‘Raise prices’ the lead option.',
+    'Appoint ‘Launch starter tier’ as the lead.',
+    'It takes the lead in 60% of runs.',
+    'Make ‘RAISE PRICES’ the lead.',
+    'Appoint one lead who leads the comparison.',
+    'Appoint one lead; the lead is not stable.',
+    'Appoint staff and the lead is not stable.',
+    'Appoint staff\nThe lead is not stable.',
+    'Appoint staff — the lead is not stable.',
+    // r0 probe (DL review): paraphrases that do NOT quote an option label. A wider exemption (have/get/put/make/find,
+    // "the", words in between) let all ten through; each must stay a ranking sentence on a withheld turn.
+    'Raise would have the lead in this model.',
+    'Raising prices would have a narrow lead.',
+    'This would put the starter tier in the lead.',
+    'That would make the starter tier the lead option.',
+    'The starter tier would get the lead once churn falls.',
+    'You would need a clear lead before committing to the starter tier.',
+    'Raising prices would have a lead of about 10 points.',
+    'Pick the lead option and move on.',
+    'Choose a lead option now.',
+    'Name the lead option.',
+    'Pick one lead of the three.',
+    'Appoint one lead, and the starter tier leads.',
+  ])('RANKING: still fires: %s', text => {
+    expect(rankingCodesIn(text, labels)).toContain('lead');
+    expect(dropRankingSentences(text, labels).droppedSentences).toBeGreaterThan(0);
+  });
+
+  // Fail-closed by choice: outside the tight appointing form the noun is NOT exempt, so these are still dropped on a
+  // withheld turn (a lost staffing sentence is recoverable; a leaked leader claim is not).
+  it.each([
+    'Make Sam the lead on this.', 'Appoint Sam as the lead.',
+    'The lead you appoint should own the pilot.', 'Get a lead.', 'Find a lead.', 'Put the lead on the pilot.',
+  ])('FAIL-CLOSED outside the tight form: still classified as ranking: %s', text => {
+    expect(rankingCodesIn(text, labels)).toContain('lead');
+  });
+
+  it('the staffing exemption does not blank another shared ranking claim', () => {
+    expect(rankingCodesIn('Make Sam the lead; this is the best option.', labels)).toContain('shared_leader_vocabulary');
+  });
+});
+
+describe('c6: the closing states a refused unsized link without re-inviting it', () => {
+  const link = { from: 'route', to: 'returns', from_label: 'Route merge', to_label: 'Return rate' };
+  const graph = { nodes: [
+    { id: link.from, kind: 'factor', label: link.from_label },
+    { id: link.to, kind: 'goal', label: link.to_label },
+  ], edges: [{ from: link.from, to: link.to }] };
+  const analysisReady = { analysis_admission: { permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+  const response = (recordedCause: boolean, links = [link]): OlumiResponse => ({
+    assistant_text: 'One option leads. First, appoint one lead for the route merge.',
+    blocks: [{ type: 'analysis_result', enrichment: {
+      inference_warnings: [{ code: 'GOAL_FIGURES_PLACEHOLDER_PATH', links, node_ids: ['route', 'returns'] }],
+      ...(recordedCause ? { __cee_unsized_path_leader_cause: { ...links[0], links } } : {}),
+    } }], suggested_actions: [],
+    analysis_state: { leader_claim: { permitted: false, withheld_reason: 'goal_path_unsized' } },
+  } as unknown as OlumiResponse);
+  const opts = (userText?: string) => ({ requestId: 'c6', exitPath: 'agent_lane_v1',
+    mayNameLeadingOption: false, leaderClaimWithheldReason: 'goal_path_unsized', graph, analysisReady, userText });
+  const refusal = "We're not checking return rates or adding that to the model. Move on. What do we do first?";
+
+  it.each([false, true])('REFUSAL naming the link, recorded cause=%s: retains staffing and states the unsized link without an invitation', recorded => {
+    const out = enforceAgentLaneLeaderClaimsAtWire(response(recorded), opts(refusal));
+    expect(out.changed).toBe(true);
+    expect(out.response.assistant_text).toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkStatement([link])}`);
+    expect(out.response.assistant_text).not.toMatch(/Set (?:it|them)/);
+    expect(enforceAgentLaneLeaderClaimsAtWire(out.response, opts(refusal)).response.assistant_text).toBe(out.response.assistant_text);
+  });
+
+  it.each([
+    'not checking', 'not adding', "won't add", "don't add", 'leave it out', 'leave that out', 'leave them out',
+    'skip it', 'skip that', 'move on', 'not going to size', "don't want to size", 'no need to size', 'not modelling',
+  ])('REFUSAL phrase: %s', phrase => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts(`Return rates: ${phrase}.`)).response.assistant_text)
+      .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkStatement([link])}`);
+  });
+
+  it.each([undefined, 'What do we do first?', 'Can we check return rates?'])('CONTROL no refusal (%s): invitation stays byte-identical', userText => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts(userText)).response.assistant_text)
+      .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkSentence([link])}`);
+  });
+
+  it('CONTROL refusal naming a different link: invitation stays byte-identical', () => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts("We're not checking delivery delays. Move on.")).response.assistant_text)
+      .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkSentence([link])}`);
+  });
+
+  it('CONTROL a label inside another word is not the named link', () => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts('Not checking return ratepayers.')).response.assistant_text)
+      .toContain(unsizedLinkSentence([link]));
+  });
+
+  it('a refusal can name the from label, case-insensitively', () => {
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts('Do not proceed: skip it for ROUTE MERGES.')).response.assistant_text)
+      .toContain(unsizedLinkStatement([link]));
+    expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts('Do not proceed: skip it for ROUTE MERGES.')).response.assistant_text)
+      .not.toContain('Set it');
+  });
+
+  it('a refusal naming one co-held link also removes the plural invitation', () => {
+    const links = [link, { from: 'delays', to: 'cost', from_label: 'Delivery delays', to_label: 'Cost' }];
+    const out = enforceAgentLaneLeaderClaimsAtWire(response(true, links), opts(refusal));
+    expect(out.response.assistant_text).toContain(unsizedLinkStatement(links));
+    expect(out.response.assistant_text).not.toMatch(/Set (?:it|them)/);
+  });
+});
 
 /** Paraphrases the shared exact-label gate cannot see — none uses an option's label verbatim. */
 const RANKING: readonly string[] = [

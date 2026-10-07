@@ -1,4 +1,4 @@
-import { readUnsizedPathLeaderCause, unsizedLinkSentence } from './unsized-path-cause.js';
+import { readUnsizedPathLeaderCause, unsizedLinkSentence, unsizedLinkStatement, type UnsizedPathLink } from './unsized-path-cause.js';
 import { placeholderAskWords } from './goal-certainty.js';
 /**
  * ⛔ AGENT LANE — WHEN THE LEADER IS WITHHELD, NO RANKING SENTENCE REACHES THE USER.
@@ -953,10 +953,29 @@ function measureBeforeFigure(between: string, labels: RankingLabelContext): bool
  */
 const POSITION_WORD = /\b(?:trails?|trailing|trailed|lags?|lagging|lagged|follows?\s+(?:at|on|with)|runner[-\s]up|(?:comes?|came|finish(?:es|ed)?|sits?|ranks?|ranked|is|was)\s+(?:in\s+)?(?:second|third|fourth|last)(?:\s+place)?|in\s+(?:second|third|fourth|last)\s+place|at\s+the\s+bottom)\b/i;
 
+/**
+ * c6 (D-a): the STAFFING noun ("First, appoint one lead for the route merge") is not a ranking word. Only the tight form
+ * the wire carries is exempt: an appointing verb IMMEDIATELY followed by a/an/one/single/each, at most one modifier that
+ * is not a margin word, then "lead(s)" not followed by an option or margin word. No "the", no words in between, no
+ * have/get/put/make/find: "would have the lead", "put Manchester in the lead", "make Manchester the lead option",
+ * "choose a lead option" and "a narrow lead" all still fire (DL r0 probe: the wider form leaked 10 of 13 paraphrases).
+ */
+const STAFFING_VERB = String.raw`(?:appoint|name|assign|nominate|hire|designate|pick|choose|select|need)`;
+const STAFFING_NOT_MODIFIER = String.raw`(?:and|or|but|while|whereas|lead|leads|clear|slight|narrow|big|strong|comfortable|small|large|commanding|decisive|early|overall|outright|firm|solid|real|definite)`;
+const STAFFING_MODIFIER = String.raw`(?!${STAFFING_NOT_MODIFIER}\b)[\p{L}\p{N}']+(?:-[\p{L}\p{N}']+)*`;
+const STAFFING_NOT_AFTER = String.raw`(?![ \t]+(?:options?|choices?|candidates?|alternatives?|routes?|positions?|paths?|plans?|scenarios?|of|over|by)\b)`;
+const STAFFING_LEAD = new RegExp(String.raw`\b${STAFFING_VERB}[ \t]+(?:a|an|one|single|each)[ \t]+(?:${STAFFING_MODIFIER}[ \t]+)?leads?\b${STAFFING_NOT_AFTER}`, 'giu');
+
+/** Blank only the appointed role noun; any other ranking words in the sentence still fire. */
+function blankStaffingLead(text: string, labels: RankingLabelContext): string {
+  if ((labels.optionLabels ?? []).some(label => optionLabelPattern(classificationCopy(label)).test(text))) return text;
+  return text.replace(STAFFING_LEAD, role => role.replace(/\bleads?\b/i, BLANK));
+}
+
 /** Which ranking patterns a sentence trips, after idioms and ranking-shaped labels are blanked. */
 export function rankingCodesIn(sentence: string, labels: RankingLabelContext = NO_LABELS, prior = ''): string[] {
   if (typeof sentence !== 'string' || sentence.trim() === '') return [];
-  let text = classificationCopy(sentence);
+  let text = blankStaffingLead(classificationCopy(sentence), labels);
   for (const label of labels.rankingShapedLabels) text = text.replace(optionLabelPattern(classificationCopy(label)), BLANK);
   for (const word of labels.rankingShapedLabelWords) {
     // Case-SENSITIVE: the capitalised name, never the lower-case verb ("leads the comparison").
@@ -1090,8 +1109,16 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
 
 export type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
 
+const DECLINES_LINK = /\b(?:not checking|not adding|won't add|don't add|leave (?:it|that|them) out|skip (?:it|that)|move on|not going to size|don't want to size|no need to size|not modelling)\b/i;
+
+function userDeclinesLink(userText: string | undefined, links: readonly UnsizedPathLink[]): boolean {
+  if (userText === undefined || !DECLINES_LINK.test(classificationCopy(userText))) return false;
+  return links.some(link => [link.from_label, link.to_label].some(label => label.trim() !== ''
+    && new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(classificationCopy(label).trim())}s?(?![\\p{L}\\p{N}_])`, 'iu').test(classificationCopy(userText))));
+}
+
 /** The run's own goal-figure warning, kept separate from decision-brief limit warnings. */
-export function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold | undefined {
+export function goalFigureCoHoldOf(blocks: unknown, graph: unknown, userText?: string): GoalFigureCoHold | undefined {
   if (!Array.isArray(blocks)) return undefined;
   const result = blocks.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as
     { enrichment?: { inference_warnings?: unknown }; inference_warnings?: unknown } | undefined;
@@ -1123,7 +1150,8 @@ export function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureC
     }) : legacyLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })));
   // No-dead-end (#2623): the reply says the SAME ask as the warning (one source), only for a Run that recorded the cause
   // (never while a product gate withholds every option: no cause, no invitation).
-  const words = (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
+  const words = userDeclinesLink(userText, links) ? unsizedLinkStatement(links)
+    : (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
   return words !== '' ? { why: words, say: words } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
 }
 
@@ -1692,6 +1720,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
      * A reply the drop would leave EMPTY still gets it — never a silent turn. Omitted ⇒ `true` (every other caller).
      */
     readonly sayWhyWithheld?: boolean;
+    /** This turn's typed words: a refused named link keeps its cause but receives no sizing invitation. */
+    readonly userText?: string;
     /** The run's per-limit rows from the SAME readback (`readBackState`'s `limitVerdicts`); absent = not attested. */
     readonly limitVerdicts?: StoredLimitVerdicts;
     /** The limits MG asks about on the same readback's graph (`limitAskIdsOf`): their ask replaces the generic one. */
@@ -1716,7 +1746,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const closingFor = (goalFigureCoHold: GoalFigureCoHold | undefined): string => agentNoLeaderSentence(withheldReason, opts.analysisReady,
         limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
         separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHold);
-      const coHold = noResult ? undefined : goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph);
+      const coHold = noResult ? undefined : goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph, opts.userText);
       // MC D1 (a), Codex buddy r1 P2: a Run with no result says that known cause, never "the reason is not recorded".
       const closing = noResult
         ? sentence(withheldReason === WITHHELD_NO_RESULT ? BY_WITHHELD_REASON[WITHHELD_NO_RESULT]! : REASON_NOT_RECORDED)
