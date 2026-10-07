@@ -120,6 +120,10 @@ export function approvalSizes(edge: unknown): boolean {
  */
 export function sizedByApproval<P extends object>(provenance: P, edge: unknown): P {
   if (!approvalSizes(edge)) return provenance;
+  // R8-3 (Science 393023 ruling 1): a projected mean beside Olumi's estimate is a placeholder, but an approval that would
+  // write the same magnitude would clear the carrier ALONE, and the carrier is outside the analysis hash. Nothing is
+  // written: the link stays a placeholder (fail-closed) rather than reading sized against an unchanged hash.
+  if ((provenance as { magnitude?: unknown }).magnitude === ESTIMATE_MAGNITUDE) return provenance;
   // R8 hash safety: approval changes magnitude; confirm-only review keeps the carrier.
   const { mean_projected: _projectedMean, ...kept } = provenance as P & { mean_projected?: unknown };
   return { ...kept, magnitude: ESTIMATE_MAGNITUDE } as P;

@@ -198,9 +198,15 @@ it('R8-1: identity exactInto, user sizing and estimates never withhold, legacy d
   const g = graph(); g.nodes[0].nonlinear_identity = { operation: 'product', factor_ids: ['x'], stated_in_brief: true };
   expect(unsizedLeaderGoalPaths(g, ids)).toEqual([]);
   delete g.nodes[0].nonlinear_identity;
-  for (const provenance of [{ source: 'user_specified', mean_projected: true }, { source: 'cee_hypothesis', magnitude: 'user_stated', mean_projected: true }, { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1 } }]) {
+  for (const provenance of [{ source: 'cee_hypothesis', magnitude: 'user_stated', mean_projected: true }, { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1 } }]) {
     link(g).provenance = provenance; expect(unsizedLeaderGoalPaths(g, ids)).toEqual([]);
   }
+  // Science 393023 LICENCE ruling 1 (7 Oct 20:48Z), re-derived: `user_specified` + `mean_projected` = the user drew the
+  // link and gave no number, so it is unsized and withholds (was: read as the user's size).
+  link(g).provenance = { source: 'user_specified', mean_projected: true };
+  const withheld = unsizedLeaderGoalPaths(g, ids);
+  expect(withheld.map(p => p.option_id).sort()).toEqual([...ids].sort());
+  for (const p of withheld) expect(p.links).toContainEqual({ from: link(g).from, to: link(g).to });
   g.nodes.push({ id: 'dead', kind: 'factor', label: 'Unused' }); g.edges.push(edge('x', 'dead', { source: 'cee_hypothesis' }));
   expect(legacyLeaderGoalLinks(g, ids)).toEqual([]);
 });
