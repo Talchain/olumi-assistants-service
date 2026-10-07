@@ -95,6 +95,7 @@ import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-senten
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { GOAL_CHANCE_SCREEN_LINES_OWED, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -3858,6 +3859,23 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // After "The figures don't add up … Which is right?", the arithmetic is one side of the conflict: it opens on its
       // condition, "If MRR is …", with no lead-in that reads as an answer (AIQ #72 5868909577).
       wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven, { afterIdentityAsk: runOutcomeKind === 'identity_ask' }) };
+    }
+    /**
+     * ⭐ S4c (Wave B4/B5, 7 Oct): THE SCREEN'S CHANCE LINES ARE SAID BY OLUMI. On a turn that ran an analysis, each option's
+     * chance line (a range; a point on the `each` licence) in the screen's own words, unless the reply already gives that
+     * option's figure. AFTER the leader gate on purpose (as break-even): a per-option chance line is not a ranking, and the
+     * gate's classifier codes it as one (B5 T1b: it deleted all three). From the final readback, only while its Run is
+     * complete and current. Logged by code, never the prose.
+     */
+    if (ranAnalysisThisTurn && typeof wireBody.assistant_text === 'string') {
+      const rangeCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
+      const ranged = withScreenLinesOwed(wireBody.assistant_text, goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, rangeCurrent));
+      if (ranged.added > 0) {
+        wireBody = { ...wireBody, assistant_text: ranged.text };
+        log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
+          ...(turnId !== undefined ? { turn_id: turnId } : {}), added_count: ranged.added },
+        'agent-lane: the screen\'s chance line was said by Olumi (the reply did not say it)');
+      }
     }
     /**
      * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470: "Yes, labelled provisional"). AFTER the leader gate
