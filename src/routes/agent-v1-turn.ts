@@ -113,7 +113,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, type FaceObligation, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
+import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -149,7 +149,7 @@ import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
-import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { breakEvenFor, breakEvenLine, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import {
   leaderStandingOf,
@@ -2446,6 +2446,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let runOutcomeSaid = false;
     /** Which typed outcome this turn's Run was said as (`run-outcome.ts`), on either path; `undefined` when none. */
     let runOutcomeKind: RunOutcome['kind'] | undefined;
+    /** CEE's own words for a Run that did not run (the Run button), a typed host part for the composer. */
+    let runOutcomeText: string | undefined;
     let result: AgentTurnResult | undefined;
     const keptProposal = keptProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
     if (keptProposal !== undefined) {
@@ -2667,6 +2669,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ];
       const outcome = (ran as { run_outcome?: RunOutcome }).run_outcome;
       if (outcome !== undefined) { runOutcomeChips = outcome.chips.map((c) => ({ ...c })); runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
+      if (ran.ran !== true && outcome !== undefined) runOutcomeText = outcome.text;
       const text = ran.ran === true ? RUN_RESULT_READY_TEXT
         : outcome !== undefined ? outcome.text : interpretationUnavailableText(ran);
       fastPath = 'run';
@@ -3189,6 +3192,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * time; the control beside it (next step, or Run) is added to the chips below.
      */
     const firstAnalysisSaid = firstAnalysis !== undefined ? firstAnalysisSentence(firstAnalysis.outcome) : null;
+    const goalChanceOwed = goalChanceLineOwed(result.tool_results, text);
     const owed = stateFacts.current_state_unknown === true
       ? [...valueChangeDisclosures(stateFacts)]
       : [
@@ -3196,7 +3200,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...valueChangeDisclosures(stateFacts),
         ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
         // ⛔ A withheld goal chance's reason is said as written, unless the Agent already said it (AIQ 5887805333 (3)).
-        ...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
+        ...[goalChanceOwed].filter((x): x is string => x !== null),
         // MC D1 (c): the Run's #416 ask, after its reason (never a bare "couldn't calculate it" with nothing to answer).
         ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
@@ -3778,7 +3782,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const breakEven = ranAnalysisThisTurn
       && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && retainedScopeIssues.length === 0 ? breakEvenFor(readbackGraph, identityEvaluated) : null;
+    let breakEvenSaid: string | null = null;
     if (breakEven !== null && typeof wireBody.assistant_text === 'string') {
+      breakEvenSaid = breakEvenLine(breakEven, { afterIdentityAsk: runOutcomeKind === 'identity_ask' });
       // After "The figures don't add up … Which is right?", the arithmetic is one side of the conflict: it opens on its
       // condition, "If MRR is …", with no lead-in that reads as an answer (AIQ #72 5868909577).
       wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven, { afterIdentityAsk: runOutcomeKind === 'identity_ask' }) };
@@ -3929,8 +3935,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * method_step (one structured prompt, never reshaped: R3, the worksheet is the chat verbatim), proposal (typed card +
      * this reply as its disclosure, never reshaped: R2, consent before brevity). Must-face on coaching, by identity: the
      * turn's asks, the leader gate's closing and every no-leader sentence, the Explain caveat, and required evidence (screen
-     * chance lines, basis, a root treated as zero). Receipts and status may go to detail (R1). The leader-free envelope
-     * ships whole.
+     * chance lines, basis, a root treated as zero) and the withheld goal chance's reason (S-E GOALS #2742). Every other host
+     * line (owed disclosures, the status/receipt, CEE's run words, the arithmetic) is ONE typed part, never split, that may
+     * go to detail (R1). The leader-free envelope, and a turn no model wrote words for (`host_composed`), ship whole.
      * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
      */
     {
@@ -3951,17 +3958,31 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // `withScreenLinesOwed` writes it) binds as one unit when present, else each sentence binds where it stands.
         ...[...screenLines.flatMap((l) => [l.depends === '' ? null : `${l.chance} ${l.depends}`, l.chance, l.depends]), basis, rootLine]
           .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text) => ({ role: 'evidence' as const, text })),
+        // The withheld goal chance's reason (S-E GOALS #2742: the chance-goal sentence speaks alone) is a withheld reason:
+        // the whole owed line when it stands, else each of its sentences where it stands (a re-ask may have dropped one).
+        ...(goalChanceOwed !== null ? [goalChanceOwed, ...sentencesOf(goalChanceOwed)] : [])
+          .map((text) => ({ role: 'withheld_reason' as const, text })),
+        // Every other host line is ONE typed part, never split (S-A: host lines inserted by identity): the owed
+        // disclosures and value changes, the status/receipt, CEE's own run words, and the arithmetic. A line that asks is
+        // the ask; the rest may sit under More detail (R1).
+        ...[...owed.filter((l) => l !== goalChanceOwed), narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
+          .filter((l): l is string => typeof l === 'string' && l.trim() !== '')
+          .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),
       ];
       // THE TYPED RESPONSE PROFILE, by the turn's kind (DL, AIE line review 6037446159 item 5): a method press is one
       // structured prompt; a turn that made a proposal is its typed card plus this reply as the disclosure; every other
       // reply is coaching. Never chosen by reading the words.
       const madeProposal = approvalCalls.some((c) => c.ok && typeof c.proposal_id === 'string' && c.name !== 'authorise_change' && c.name !== WITHDRAW_PROPOSAL);
       const profile: ReplyProfile = fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
+      // No model wrote words this turn (a card press, an uninterpreted Run): every line is the host's, shipped as composed.
+      const narratorModel = fastPath === 'approve' || fastPath === 'strengthen' ? null
+        : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
       const composedReply = composeReplyShape({
         text: reply,
         obligations,
         profile,
-        ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const } : {}),
+        ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
+          : narratorModel === null ? { keepWhole: 'host_composed' as const } : {}),
       });
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
       wireBody = (composedReply.shape !== null
@@ -3971,8 +3992,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         event: 'agent_lane.reply_shaped', request_id: String(req.id), ...(turnId !== undefined ? { turn_id: turnId } : {}),
         outcome: composedReply.outcome, ...(composedReply.reason !== undefined ? { reason: composedReply.reason } : {}),
         fast_path: fastPath ?? 'agent', profile,
-        narrator_model: fastPath === 'approve' || fastPath === 'strengthen' ? null
-          : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model,
+        narrator_model: narratorModel,
         obligations: obligations.length,
         ...(composedReply.measure ?? {}),
       }, 'agent-lane: the reply passed the one composer');

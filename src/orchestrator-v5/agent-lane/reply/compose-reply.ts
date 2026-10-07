@@ -71,15 +71,24 @@ export const REPLY_SHAPE_INSTRUCTION =
   + 'generic advice. Put any further explanation after the bullets, after a blank line: Olumi shows it under More '
   + 'detail, so never repeat it in the bullets. If you ask a question, it stays your last sentence.';
 
-export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence';
-/** A host line the user must see without opening "More detail", by its exact text. */
+/**
+ * A host line by its exact text. `ask`, `withheld_reason`, `caveat` and `evidence` must be seen without opening "More
+ * detail"; `host` (a receipt, a status, CEE's own run words, the arithmetic) is one atomic part that may sit in detail (R1)
+ * but is never split. A reply with no model sentence outside host parts ships as the host composed it.
+ */
+export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence' | 'host';
+/** Overlapping obligations are one unit carrying the strongest role among them. */
+const ROLE_RANK: Record<FaceObligationRole, number> = { ask: 5, withheld_reason: 4, caveat: 3, evidence: 2, host: 1 };
 export interface FaceObligation { readonly role: FaceObligationRole; readonly text: string }
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
 /** The typed response profile, chosen by the turn kind (never by reading the words). */
 export type ReplyProfile = 'coaching' | 'method_step' | 'proposal';
-/** Why a reply ships whole by the turn's identity: its profile is not `coaching`, or the egress replaced the body. */
-export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope';
+/**
+ * Why a reply ships whole by the turn's identity: its profile is not `coaching`, the egress replaced the body, or no model
+ * wrote words this turn (a card press, an uninterpreted Run: the host composed every line, `host_composed`).
+ */
+export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed';
 
 export interface ReplyComposeInput {
   /** The final prose, after every gate: exactly what would ship without the composer. */
@@ -215,7 +224,8 @@ function parseUnits(text: string, obligations: readonly FaceObligation[], paraBa
 }
 
 /** Every sentence of a text, glyphs stripped and whitespace collapsed: the invariant's multiset. */
-function sentenceMultiset(text: string): string[] {
+/** The composer's invariant, exported so route rows pin "moved, never changed" with the same measure. */
+export function sentenceMultiset(text: string): string[] {
   const out: string[] = [];
   for (const raw of text.split('\n')) {
     if (raw.trim().length === 0) continue;
@@ -250,7 +260,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   for (const o of present) {
     const container = owed.find((k) => k.text.includes(o.text));
     if (container === undefined) owed.push({ ...o });
-    else if (o.role === 'ask') container.role = 'ask';
+    else if (ROLE_RANK[o.role] > ROLE_RANK[container.role]) container.role = o.role;
   }
   if (owed.some((o) => o.text.includes('\n'))) return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated' };
 
@@ -261,7 +271,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   if (units.length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty' };
 
   // Each obligation binds its LAST occurrence (the host appends); an earlier narrator copy is an ordinary unit.
-  for (const role of ['ask', 'withheld_reason', 'caveat', 'evidence'] as const) {
+  for (const role of ['ask', 'withheld_reason', 'caveat', 'evidence', 'host'] as const) {
     const tagged = units.filter((u) => u.obligation === role);
     for (const u of tagged.slice(0, -1)) {
       const sameText = tagged.at(-1)!.text === u.text;
@@ -279,7 +289,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // line that ends on its own question is evidence, kept in its place, never moved to close the face). Every other
   // question goes to detail (D-12).
   const ask = hostAsks.at(-1) ?? questions.filter((u) => u.obligation === undefined).at(-1);
-  const otherObligations = units.filter((u) => u.obligation !== undefined && u.obligation !== 'ask' && u !== ask);
+  const otherObligations = units.filter((u) => u.obligation !== undefined && u.obligation !== 'ask' && u.obligation !== 'host' && u !== ask);
 
   // The face's list: the first bullet run with a point that is not an obligation; its lead-in becomes the headline.
   const faceRun = runs.find((r) => units.some((u) => u.run === r && u.obligation === undefined && u !== ask && !isQuestionUnit(u)));

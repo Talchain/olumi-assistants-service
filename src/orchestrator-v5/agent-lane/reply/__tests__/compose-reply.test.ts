@@ -14,6 +14,7 @@
  * Quality's 17 real gpt-5.6-terra replies (`compose/__tests__/fixtures/leader-gate-real-replies.json`). Text from outside
  * this author's head.
  */
+import { chanceGoalDeadlineAsk, chanceGoalSentence } from '../../../goal-target/goal-kind.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
@@ -228,6 +229,42 @@ describe('obligations on a coaching reply (DL R1 + AIE): the headline, the ONE a
     expect(c.outcome).toBe('shaped');
     expect(c.shape!.bullets).toEqual([EQ, EL, EK]);
     everySentenceKept(text, c.text);
+  });
+
+  // S-A host parts (DL: "host lines as typed parts inserted by identity"); served words from run-outcome-follow-ups / s5t.
+  const IDENTITY = "The figures don't add up: Pro plan price × Pro paying subscribers gives £14,700/month, but you said MRR is £20,000/month. Which is right?";
+  const ARITHMETIC = 'If MRR is Pro plan price × Pro paying subscribers: at £49/month and 300 Pro paying subscribers, MRR is £14,700/month today. At £59/month, MRR stays at least that while 250 or more of the 300 stay. £20,000/month needs 339 at £59/month or 409 at £49/month. This is arithmetic on these figures, not the analysis ranking the options.';
+  const RECEIPT = 'Recorded your figure for how "Enterprise win rate" moves "quarterly revenue", as you confirmed. Olumi rescaled ‘quarterly revenue’ so your figure fits. Your other links mean the same as before, though some strength words may read differently.';
+  it('a reply made only of host parts (the identity ask + the arithmetic) ships as the host composed it', () => {
+    const text = `${IDENTITY}\n\n${ARITHMETIC}`;
+    expect(composeReplyShape({ text, obligations: [{ role: 'ask', text: IDENTITY }, { role: 'host', text: ARITHMETIC }] }))
+      .toMatchObject({ outcome: 'kept_whole', reason: 'no_headline', text });
+    expect(composeReplyShape({ text }).text, 'the control: untyped, the same words are reshaped').not.toBe(text);
+  });
+  it('a host part is ONE unit, never split: right after the headline it still sits whole (under More detail, R1)', () => {
+    const text = `The figure is recorded in the model now. ${RECEIPT} ${NARRATOR}\n\n${ASK}`;
+    const c = composeReplyShape({ text, obligations: [{ role: 'host', text: RECEIPT }, { role: 'ask', text: ASK }] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.text).toContain(RECEIPT);
+    expect(face(c)).not.toContain(RECEIPT);
+    const untyped = composeReplyShape({ text, obligations: [{ role: 'ask', text: ASK }] });
+    expect(untyped.text, 'the control: untyped, the face takes the receipt apart').not.toContain(RECEIPT);
+  });
+  it('overlapping parts carry the strongest role: a host line holding the withheld reason is on the face', () => {
+    const HOST = `${WITHHELD} ${BASIS}`;
+    const text = `${NARRATOR}\n\n${HOST}\n\n${SAVED} More words follow here to pass the detail floor easily enough.`;
+    const c = composeReplyShape({ text, obligations: [{ role: 'host', text: HOST }, { role: 'withheld_reason', text: WITHHELD }] });
+    expect(face(c)).toContain(HOST);
+  });
+
+  it('S-E GOALS (#2742): the chance-goal sentence (withheld reason) and the deadline ask stay on the face, by their producers’ words', () => {
+    const CHANCE = chanceGoalSentence(undefined);
+    const DEADLINE = chanceGoalDeadlineAsk('meet our next feature-launch deadline');
+    const text = `${NARRATOR}\n\n${CHANCE}\n\n${DEADLINE}`;
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: CHANCE }, { role: 'ask', text: DEADLINE }] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.bullets.slice(-2)).toEqual([CHANCE, DEADLINE]);
+    expect(composeReplyShape({ text }).shape!.detail, 'the control: untyped, the chance sentence goes to detail').toContain(CHANCE);
   });
 
   it('an obligation a gate already removed is no longer owed: the reply is shaped without it', () => {

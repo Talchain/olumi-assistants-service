@@ -419,7 +419,13 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     expect(body.analysis_state.leader_claim.permitted).toBe(true);
     // Capture only on the pristine base, before applying production changes.
     if (process.env.CAPTURE_FRESH_SCOPE_BASELINE === '1') writeFileSync(baselineUrl, `${bytes}\n`);
-    expect(bytes).toBe(readFileSync(baselineUrl, 'utf8').trimEnd());
+    // The capture predates S-A's absorbed W why-now reasons (#2748, Codex WORDING): the captured bytes with that ONE field
+    // as the vocabulary owner now words it. The fixture itself stays as captured.
+    const captured = JSON.parse(readFileSync(baselineUrl, 'utf8'));
+    expect(captured.guidance.slot1.copy.why).toBe("There is no 'carry on as now' option to compare with.");
+    captured.guidance.slot1.copy.why = 'A baseline separates the effect of changing course from what would happen anyway.';
+    expect(JSON.stringify(captured), 'the capture is compact JSON').toBe(readFileSync(baselineUrl, 'utf8').trimEnd().replace("There is no 'carry on as now' option to compare with.", 'A baseline separates the effect of changing course from what would happen anyway.'));
+    expect(bytes).toBe(JSON.stringify(captured));
   });
   it('an analysis-bearing turn gates the same fresh issue at the leader wire gate too', async () => {
     scripted.toolName = 'run_analysis'; scripted.results = [{ ok: true, pending_action: pending() }];
