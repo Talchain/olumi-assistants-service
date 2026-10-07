@@ -1,0 +1,539 @@
+{
+ "source": "Every assistant_text and provisional_view reasoning in ~/olumi-work/acceptance-pd/output/**/*.json (served Acceptance/scout/witness/Wave captures, staging + prod), mined 7 Oct 06:2xZ",
+ "population": "FILES 2307 · texts 3858 · distinct keyword sentences 119 · occurrences 530 · fire 55 (removed 8, kept-unsafe 47) · keep 64",
+ "keyword_filter": "/(withheld|no option|none of the options|not one of the options|how likely|every option|each option|all options|any option|chances? (?:for|of) (?:every|each|all|any))/i",
+ "review": "Every row classified and every edit read by Science 393023 (7 Oct). Kept-unsafe fires hold a figure, the horizon, or a long/comma subject (shared rules: a missed removal is the old behaviour). The 43 \"I can't yet say how likely any option is to keep … £…\" rows are the producer's pre-S4b sentence: TRUE when nothing is shown (gate closed); beside a shown chance it stays kept-unsafe (it holds the target figure) and logs GOAL_CHANCE_ALL_WITHHELD_KEPT_UNSAFE. Out of scope, kept: \"It also withholds every option’s revenue outcome and chance …\" (object-first; a cut would leave a subject-less tail). The producer's own opening \"This run doesn’t show how often each option reaches the goal’s target.\" is kept: the producer owns its words (S4b swaps it for the range opening).",
+ "rows": [
+  {
+   "sentence": "'Starter-tier MRR' depends on Starter subscribers × Starter monthly price, but this run couldn't calculate it that way, so the figures for each option would be wrong.",
+   "fire": false
+  },
+  {
+   "sentence": "- At least one run withheld this claim.",
+   "fire": false
+  },
+  {
+   "sentence": "- ‘Hire a Tech lead’: productivity figure withheld.",
+   "fire": false
+  },
+  {
+   "sentence": "- ‘Hire two developers’: productivity figure withheld.",
+   "fire": false
+  },
+  {
+   "sentence": "All three options were analysed, but usable MRR outcomes are withheld.",
+   "fire": false
+  },
+  {
+   "sentence": "All three options were analysed, but usable revenue outcomes were withheld.",
+   "fire": false
+  },
+  {
+   "sentence": "For **at least £126,000/month**, each option reaches the target in:",
+   "fire": false
+  },
+  {
+   "sentence": "How likely or how large is it today?",
+   "fire": false
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep Monthly booked appointments at or above 1,600 appointments / month: I need a size for the links from Receptionist headcount to Monthly booked appointments, from Online booking availability to Monthly booked appointments and from Additional evening opening hours to Monthly booked appointments.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep Monthly recurring revenue at or above £126,000 / month: I need a size for the links from Service strain from starter support to Monthly recurring revenue, from Starter-tier monthly price to New starter subscribers and from Starter-tier monthly support cost to Service strain from starter support.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly booked appointments at or above 1,600 appointments / month: I need a size for the links from Receptionist headcount to monthly booked appointments, from Online booking availability to monthly booked appointments and from Evening opening hours to monthly booked appointments and 3 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly profit at or above £24,000 / month: I need a size for the links from Fourth shop fit-out cost to monthly profit, from Loyalty app launch to Loyalty app incremental gross profit and from Fourth shop operation to Fourth shop incremental gross profit and 4 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly profit at or above £24,000 / month: I need a size for the links from Loyalty app active members to monthly profit, from Wholesale office accounts to monthly profit and from Fourth-shop opening delay to monthly profit and 2 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly profit at or above £24,000 / month: I need a size for the links from Loyalty app active to Incremental monthly profit from loyalty app, from Fourth shop active to Fourth-shop monthly operating contribution and from Fourth shop active to Monthly profit lost to fourth-shop underperformance and 2 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly profit at or above £24,000 / month: I need a size for the links from Loyalty app active to Incremental monthly profit from loyalty app, from Fourth shop active to Monthly profit lost to fourth-shop underperformance and from Fourth-shop fit-out to Monthly fit-out charge and 1 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly profit at or above £24,000 / month: I need a size for the links from Loyalty app active to Loyalty-app monthly gross profit, from Fourth shop operating to Fourth-shop monthly operating profit and from Wholesale sales effort to Wholesale monthly operating profit and 4 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly profit at or above £24,000 / month: I need a size for the links from Loyalty app availability to Loyalty-app monthly gross profit, from Fourth shop open to Fourth-shop monthly operating profit and from Fourth-shop fit-out investment to Monthly profit lost to fit-out financing and 1 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly profit at or above £24,000 / month: I need a size for the links from Loyalty-app gross-profit uplift to monthly profit, from Loyalty-app operating cost to monthly profit and from Fourth-shop net-profit contribution to monthly profit and 8 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Existing-price increase to Existing-customer MRR uplift.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Price rise to MRR lost to price-driven churn.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Price rise to Price-uplift MRR.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Service strain from starter support to monthly recurring revenue.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter monthly price to Starter-tier MRR.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter subscribers won to Monthly starter support cost.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier availability to Starter subscribers.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier monthly price to Starter-tier monthly recurring revenue.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier price to Starter subscribers.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter tier price to Starter tier monthly recurring revenue.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Starter-tier support cost to Price-rise customer losses.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the link from Support capacity strain to monthly recurring revenue.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Incremental price-rise MRR to monthly recurring revenue, from Support capacity strain to monthly recurring revenue and from Price increase to Incremental price-rise MRR.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Paying customers to monthly recurring revenue, from Support capacity strain to monthly recurring revenue and from Customers lost from price rise to Paying customers and 1 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Starter subscription price to Starter-tier MRR and from Starter tier launched to Starter subscribers.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Starter support strain to monthly recurring revenue and from Starter support cost to Starter support strain.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Starter tier monthly price to Starter-tier MRR and from Starter tier launched to Starter subscribers.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Starter-tier service strain to monthly recurring revenue and from Monthly starter support cost to Starter-tier service strain.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Support capacity strain to monthly recurring revenue and from Starter monthly support cost to Support capacity strain.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Support capacity strain to monthly recurring revenue and from Starter-tier support cost to Support capacity strain.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep monthly recurring revenue at or above £126,000 / month: I need a size for the links from Support capacity strain to monthly recurring revenue, from Price rise to Price-rise churn and from Starter tier support cost to Support capacity strain.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep productivity at or above 0.1: I need today's level.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep productivity up at least 10% from today: I need today's level.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Enterprise deals won to quarterly revenue, from Trial users completing integration to quarterly revenue and from Enterprise win rate to Enterprise deals won and 3 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Enterprise deals won to quarterly revenue, from Trial users retained past integration to quarterly revenue and from AI reporting build effort to Quarterly revenue lost to AI delivery shortfall and 4 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Enterprise win rate to quarterly revenue, from Integration-step abandonment rate to quarterly revenue and from AI reporting module availability to Enterprise win rate and 1 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Enterprise win rate to quarterly revenue, from Integration-step abandonment to quarterly revenue and from AI reporting availability to Enterprise win rate and 3 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Enterprise win rate to quarterly revenue, from Integration-step trial abandonment to quarterly revenue and from AI reporting module availability to Enterprise win rate and 3 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Enterprise win rate to quarterly revenue, from Integration-step trial abandonment to quarterly revenue and from AI reporting module available to Enterprise win rate and 2 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Enterprise win rate to quarterly revenue, from Paid trial conversions to quarterly revenue and from AI reporting module availability to Enterprise win rate and 3 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Enterprise wins per quarter to quarterly revenue, from Trial users retained past integration to quarterly revenue and from AI reporting build effort to Revenue lost to AI build displacement and 4 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Enterprise wins to quarterly revenue, from Trial users retained past integration to quarterly revenue and from Enterprise win rate to Enterprise wins and 3 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely any option is to keep quarterly revenue at or above £2,800,000 / quarter: I need a size for the links from Integration-step trial abandonment to quarterly revenue, from AI reporting module available to Enterprise win rate and from Integration-step bug fixed to Integration-step trial abandonment and 1 more.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "I can't yet say how likely ‘Loyalty App’ is to keep monthly profit at or above £24,000 / month: I need a size for the link from Loyalty app active to Loyalty-app incremental gross profit.",
+   "fire": false
+  },
+  {
+   "sentence": "I can't yet say how likely ‘Loyalty App’ is to keep monthly profit at or above £24,000 / month: I need a size for the link from Loyalty app availability to Loyalty app incremental monthly profit.",
+   "fire": false
+  },
+  {
+   "sentence": "In fact, goal chances are withheld for every option.",
+   "fire": true,
+   "edited": ""
+  },
+  {
+   "sentence": "It also withholds every option’s revenue outcome and chance of reaching your target, and does not test the 9-month horizon.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this Run yet.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this Run: key effects remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this current run.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this result.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run yet.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: a revenue link still has a placeholder strength, and the target calculation is not testable for the other options.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: important relationships on the goal path remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: important relationships remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: key effects remain unsized, and Olumi supplied 22 underlying values, not you.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: key relationships remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: key revenue relationships remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: some relationships connecting the options to revenue still lack usable sizing.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: some relationships needed to calculate MRR remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: the effect of starter support burden on revenue is still unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: the links translating enterprise deals and completed integrations into revenue still use placeholders.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: the model has not sized the assumed link from starter support costs to lost recurring revenue.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: the revenue relationships remain unsized, and 16 inputs were supplied by Olumi rather than you.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: the support-cost → capacity-strain → revenue pathway still contains unsized assumptions.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: the support-cost → service-strain → revenue pathway contains unsized assumptions introduced by Olumi.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: two links remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward yet.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward yet: important revenue relationships remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward yet: key effects on productivity remain unsized, and Olumi supplied 20 values.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: important relationships remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: key effects on productivity remain unsized, and this provisional comparison rests on Olumi’s assumptions.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: key effects on productivity remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: revenue pathways remain unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: the assumed link from starter support costs to recurring revenue lost through support strain remains unsized.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: the comparison is a near tie, and small changes could alter it.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: the effects are unsized, the mapping to your brief is unconfirmed, and 11 values are Olumi’s assumptions—not yours.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: this model gives a near tie, and small changes can reverse the comparison.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: this model shows a near tie that small changes could overturn.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: this model shows a near tie, and small changes could reverse the comparison.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward: this model’s comparison is a near tie and changes under small perturbations.",
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward; links still need sizing:",
+   "fire": false
+  },
+  {
+   "sentence": "No option’s target chance or profit outcome is established yet.",
+   "fire": true,
+   "edited": ""
+  },
+  {
+   "sentence": "Olumi added that pathway, and its unsized links now prevent reporting goal chances for every option.",
+   "fire": true,
+   "edited": "Olumi added that pathway."
+  },
+  {
+   "sentence": "Olumi’s model adds that causal path, and its unsized links prevent goal-chance reporting for every option.",
+   "fire": true,
+   "edited": "Olumi’s model adds that causal path."
+  },
+  {
+   "sentence": "Revenue outcomes were withheld for the bug fix and current roadmap too.",
+   "fire": false
+  },
+  {
+   "sentence": "The calculation completed, but no option can be put forward from this result.",
+   "fire": false
+  },
+  {
+   "sentence": "The current run uses placeholders on the AI path and cannot test the £2.8M quarterly revenue target for any option.",
+   "fire": false
+  },
+  {
+   "sentence": "The missing calculation prevents this run from reporting trustworthy goal chances for any option.",
+   "fire": true,
+   "edited": ""
+  },
+  {
+   "sentence": "The model adds a support-strain pathway whose two unsized links prevent goal-chance claims for every option.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "The model also cannot establish whether any option gets there within 9 months.",
+   "fire": false
+  },
+  {
+   "sentence": "The model also does not test whether any option gets there within 9 months.",
+   "fire": false
+  },
+  {
+   "sentence": "The model includes that assumed pathway, and its unsized links prevent goal-chance claims for every option.",
+   "fire": true,
+   "edited": "The model includes that assumed pathway."
+  },
+  {
+   "sentence": "The run still withholds goal chances for every option and does not test the nine-month horizon.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "The service-strain pathway is an Olumi assumption with unsized links, and this run withholds goal chances for every option.",
+   "fire": true,
+   "edited": "The service-strain pathway is an Olumi assumption with unsized links."
+  },
+  {
+   "sentence": "These two relationships have no set strengths, which prevents this run from reporting target chances for any option.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "This model doesn't yet say whether any option gets there within 12 months.",
+   "fire": false
+  },
+  {
+   "sentence": "This model doesn't yet say whether any option gets there within 9 months.",
+   "fire": false
+  },
+  {
+   "sentence": "This run doesn’t show how often each option reaches the goal’s target.",
+   "fire": false
+  },
+  {
+   "sentence": "This unsized relationship is preventing the current model from reporting goal chances for every option.",
+   "fire": true,
+   "edited": ""
+  },
+  {
+   "sentence": "Unsized links prevent putting any option forward.",
+   "fire": false
+  },
+  {
+   "sentence": "What’s each option’s likely range for ‘Annual hiring spend’?",
+   "fire": false
+  },
+  {
+   "sentence": "What’s each option’s likely range for ‘Annual incremental operating cost’?",
+   "fire": false
+  },
+  {
+   "sentence": "What’s each option’s likely range for ‘Hiring cost’?",
+   "fire": false
+  },
+  {
+   "sentence": "What’s each option’s likely range for ‘Hiring spend before launch’?",
+   "fire": false
+  },
+  {
+   "sentence": "What’s each option’s likely range for ‘Incremental hiring cost’?",
+   "fire": false
+  },
+  {
+   "sentence": "What’s each option’s likely range for ‘Total hiring cost’?",
+   "fire": false
+  },
+  {
+   "sentence": "You supplied this figure explicitly, but the current run says that relationship is not sized and therefore withholds goal outcomes and chances for every option.",
+   "fire": true,
+   "kept_unsafe": true
+  },
+  {
+   "sentence": "‘Annual implementation cost’ isn’t shown for any option.",
+   "fire": false
+  },
+  {
+   "sentence": "‘Code quality score’ isn’t shown for any option.",
+   "fire": false
+  }
+ ]
+}
