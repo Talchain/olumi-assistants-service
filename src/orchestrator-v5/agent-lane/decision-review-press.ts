@@ -190,11 +190,11 @@ export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead):
 
   // F3/F4: the Run withheld goal figures, in the typed reason's own words when they reach the user whole; otherwise the
   // reader's own fail-closed opening (the withhold is still said, its label-bearing reason is not; Codex r2 P2).
-  const withheld = goalChanceWithheldForAgent(analysisResult);
+  const withheld = goalChanceWithheldForAgent(analysisResult, graph);
   const withheldSay = str(withheld?.say);
   if (withheldSay !== null) {
     const said = withoutAskedQuestion(survivesReplyEditors(withheldSay, graph, analysisReady) ? withheldSay
-      : str(goalChanceWithheldForAgent(withoutWarningWords(analysisResult))?.say) ?? withheldSay, read.recentReplies ?? []);
+      : str(goalChanceWithheldForAgent(withoutWarningWords(analysisResult), graph)?.say) ?? withheldSay, read.recentReplies ?? []);
     if (said.trim() !== '') lines.push(said);
   }
 

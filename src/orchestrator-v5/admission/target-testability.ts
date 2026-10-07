@@ -463,14 +463,14 @@ export function targetWarningSentence(graph: unknown, verdict: TargetTestability
  * "…: Olumi can't yet test a '{op} {X}' target." with no question; beside needs, "…: I need {A}. Olumi also can't yet
  * test a '{op} {X}' target. {question for A}".
  */
-export function untestableTargetTail(graph: unknown, verdict: TargetTestability): string | null {
+export function untestableTargetTail(graph: unknown, verdict: TargetTestability, optionLabels?: readonly string[]): string | null {
   const parts = untestableTargetParts(graph, verdict);
   if (parts === null || parts.tailTarget === null) return null;
   const { needs, untestableComparator } = parts;
-  const opening = `I can't yet say how likely any option is to keep ${parts.name} ${parts.tailTarget}:`;
+  const opening = `I can't yet say how likely ${optionLabels === undefined ? 'any option' : optionLabels.map(label => `‘${label}’`).join(' or ')} is to keep ${parts.name} ${parts.tailTarget}:`;
   const question = parts.question !== null ? ` ${parts.question}` : '';
   if (needs.length === 0) {
-    return untestableComparator === null ? null : `${opening} Olumi can't yet test a ${untestableComparator} target.`;
+    return untestableComparator === null ? (optionLabels === undefined ? null : `${opening.slice(0, -1)}.`) : `${opening} Olumi can't yet test a ${untestableComparator} target.`;
   }
   const need = needs.length === 1 ? needs[0] : `${needs.slice(0, -1).join(', ')}, and ${needs[needs.length - 1]}`;
   const gap = untestableComparator === null ? '' : ` Olumi also can't yet test a ${untestableComparator} target.`;

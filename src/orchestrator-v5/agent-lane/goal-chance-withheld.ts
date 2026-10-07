@@ -21,6 +21,8 @@ import {
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
 } from '../../orchestrator/context/option-result-source.js';
 
+import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
+
 import { composeIdentityAskForNode } from '../coaching/identity-not-evaluated-ask.js';
 
 export { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED };
@@ -37,6 +39,7 @@ export interface GoalChanceWithheld {
 
 // AIQ 5887096626: the one register ("reaches the target in N% of model runs", 5885116642).
 const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
+const RANGE_OPENING = 'This run shows some options’ chances only as a range.';
 /** PLoT's words open "Not shown." — right beside a missing figure, not in a reply; the reason after it is kept verbatim. */
 const UI_OPENING = /^Not shown\.\s*/;
 
@@ -120,7 +123,7 @@ const recordOf = (v: unknown): Record<string, unknown> | undefined =>
  * where the run carries it (`enrichment.inference_warnings`) or where a kept, withheld run moved it (`inference_warnings`).
  * The typed code decides; a warning with no usable words is still withheld, with the opening alone (fail closed).
  */
-export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld | undefined {
+export function goalChanceWithheldForAgent(result: unknown, graph?: unknown): GoalChanceWithheld | undefined {
   const block = recordOf(result);
   if (block === undefined) return undefined;
   const warnings = [recordOf(block.enrichment)?.inference_warnings, block.inference_warnings]
@@ -128,32 +131,34 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
     .map(recordOf)
     .filter((w): w is Record<string, unknown> => w !== undefined && typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
   if (warnings.length === 0) return undefined;
+  const opening = Object.keys(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display ?? {}).length > 0
+    ? RANGE_OPENING : OPENING;
   // Gate 1 v2 (Codex #2574 P1): identical options keep their own reason and scope, alone or beside any other withhold.
   const identical = warnings.filter((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL);
   const others = warnings.filter((w) => w.code !== GOAL_FIGURES_OPTIONS_IDENTICAL);
-  if (identical.length === 0) return goalChanceFromWarnings(others);
+  if (identical.length === 0) return goalChanceFromWarnings(others, opening);
   const words = identical.map((w) => (typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : ''))
     .find((m) => m !== '') ?? '';
   const ids = [...new Set(identical.flatMap((w) => (Array.isArray(w.option_ids) ? w.option_ids : []))
     .filter((id): id is string => typeof id === 'string'))];
   if (others.length === 0) {
-    return { withheld: true, say: words === '' ? OPENING : words, node_ids: [], note: OPTIONS_IDENTICAL_NOTE, option_ids: ids };
+    return { withheld: true, say: words === '' ? opening : words, node_ids: [], note: OPTIONS_IDENTICAL_NOTE, option_ids: ids };
   }
   // Mixed: the other cause keeps its own reader, note and words; the identical reason is added, and a scoped withhold
   // widens to the identical options too (an every-option withhold already covers them).
-  const base = goalChanceFromWarnings(others);
+  const base = goalChanceFromWarnings(others, opening);
   return { ...base, say: words === '' ? base.say : `${base.say} ${words}`,
     ...(base.option_ids === undefined ? {} : { option_ids: [...new Set([...base.option_ids, ...ids])] }) };
 }
 
 /** The reader for every withhold code but gate 1 v2's; `warnings` is non-empty. */
-function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): GoalChanceWithheld {
+function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], opening: string): GoalChanceWithheld {
   // (S) speaks alone: CEE writes it only on a run PLoT did not already withhold (`run-analysis.ts`).
   if (warnings.every((w) => w.code === GOAL_FIGURES_PLACEHOLDER_PATH)) {
     const w = warnings[0]!;
     const words = typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
-    return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PLACEHOLDER_PATH_NOTE, option_ids: ids('option_ids') };
+    return { withheld: true, say: words === '' ? opening : words, node_ids: ids('node_ids'), note: PLACEHOLDER_PATH_NOTE, option_ids: ids('option_ids') };
   }
   // Gate 5 covers EVERY option and keeps its existing explanation when a per-option path also withholds.
   const product = warnings.find((w) => w.code === GOAL_FIGURES_PRODUCT_NOT_READ);
@@ -161,7 +166,7 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
     const w = product;
     const words = typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
-    return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PRODUCT_NOT_READ_NOTE, option_ids: ids('option_ids') };
+    return { withheld: true, say: words === '' ? opening : words, node_ids: ids('node_ids'), note: PRODUCT_NOT_READ_NOTE, option_ids: ids('option_ids') };
   }
   // RT-10 B′ R2: every withhold is the untestable target and it KEPT the shares (no `win_share` withheld) → the target-only
   // licence, and the reply says the B′ tail the warning carries (`say`, from `untestableTargetParts`).
@@ -171,7 +176,7 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
     const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
     const tail = warnings.map((w) => (typeof w.say === 'string' ? w.say.trim() : '')).find((t) => t !== '');
     const outcomeWithheld = warnings.some((w) => (w.withheld_claims as unknown[]).includes('outcome'));
-    return { withheld: true, say: tail ?? OPENING, node_ids: nodeIds, note: outcomeWithheld ? TARGET_ONLY_NOTE : TARGET_ONLY_OUTCOME_KEPT_NOTE };
+    return { withheld: true, say: tail === undefined ? opening : opening === RANGE_OPENING ? `${opening} ${tail}` : tail, node_ids: nodeIds, note: outcomeWithheld ? TARGET_ONLY_NOTE : TARGET_ONLY_OUTCOME_KEPT_NOTE };
   }
   // F1b [R1]: every withhold is the untestable target with the outcome KEPT → the outcome-kept licence, never the ban on
   // quoting an option's value (which would contradict the outcomes the panel now shows).
@@ -179,7 +184,8 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
     && Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('outcome'));
   if (outcomeKept) {
     const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
-    return { withheld: true, say: OPENING, node_ids: nodeIds, note: OUTCOME_KEPT_NOTE };
+    const tail = opening === RANGE_OPENING ? warnings.map(w => typeof w.say === 'string' ? w.say.trim() : '').find(t => t !== '') : undefined;
+    return { withheld: true, say: tail === undefined ? opening : `${opening} ${tail}`, node_ids: nodeIds, note: OUTCOME_KEPT_NOTE };
   }
   // One reason per cause, identity first (unchanged when it is alone), then PLoT #422's cut link — each in PLoT's words.
   const reasonFor = (code: string): string => {
@@ -199,7 +205,7 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[]): G
   const reason = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED),
     sizingReason].filter((r) => r !== '').join(' ');
   const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
-  return { withheld: true, say: reason === '' ? OPENING : `${OPENING} ${reason}`, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
+  return { withheld: true, say: reason === '' ? opening : `${opening} ${reason}`, node_ids: nodeIds, note: GOAL_CHANCE_WITHHELD_NOTE };
 }
 
 /**
@@ -216,8 +222,9 @@ export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: s
   if (say === null || sameWordsIn(replyText, say)) return null;
   // MC D1 (Codex buddy r2 P2): a composite line (the opening + a warning's own words) owes only what the reply does not
   // already carry — the Agent quoting the placeholder's "Set them …" must not get it a second time.
-  if (say.startsWith(OPENING) && say.length > OPENING.length && sameWordsIn(replyText, say.slice(OPENING.length).trim())) {
-    return sameWordsIn(replyText, OPENING) ? null : OPENING;
+  const opening = [OPENING, RANGE_OPENING].find(line => say.startsWith(line));
+  if (opening !== undefined && say.length > opening.length && sameWordsIn(replyText, say.slice(opening.length).trim())) {
+    return sameWordsIn(replyText, opening) ? null : opening;
   }
   return say;
 }

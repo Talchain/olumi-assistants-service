@@ -1728,7 +1728,7 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       const projectionInput = alreadyClosed ? trimmed.slice(0, -closing.length).trimEnd() : text;
       const resultBlock = Array.isArray(response.blocks)
         ? response.blocks.find((block) => (block as { type?: unknown } | null)?.type === 'analysis_result') : undefined;
-      const readbackSay = goalChanceWithheldForAgent(resultBlock)?.say;
+      const readbackSay = goalChanceWithheldForAgent(resultBlock, opts.graph)?.say;
       // An earlier Run may have supplied the tool sentence, then been superseded before final readback.
       // Protect it only when the current saved result independently carries the exact same typed reason.
       const typedSay = (response as { analysis_state?: { run_state?: { kind?: unknown } } }).analysis_state?.run_state?.kind === 'complete_current'
