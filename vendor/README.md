@@ -7,7 +7,23 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.79.0.tgz` ← **THE CURRENT PIN** (SD-1 Slice R on the agent lane: READER first; DL ruling #87 option A, 6 Oct)
+### `talchain-schemas-0.80.0.tgz` ← **THE CURRENT PIN** (keep-list: `dominant_factor` + `flip_thresholds_status(_reason)`; a8's carry, opened by 0a5c9f per DL 0fd71f, 7 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.80.0/d53e6524c5464c7b82b54abc7df3d258c67c65fd`; registry gitHead
+`5a538ef40f8771708ca5d1fc4746ed68c2aada8b` (olumi-schemas `main` after #91, DL merge). **842,252 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  d53e6524c5464c7b82b54abc7df3d258c67c65fd   (the registry download id)
+integrity (sha512) sha512-Aql/3HcFITmeJ2vO6sh7Zv7O24mhjX+zIqhB4RmcXnumTdk4un5i6FBmznP9LknrN8dlmBe6TyFIbExZlMvNuQ==
+sha256             bc3fbe9b75fc1a2ba2eb0549a5fe78d9807411f1191cf0f1179d6c0cb74206fa   (the .sha256 sidecar)
+```
+
+0.80.0 adds `dominant_factor`, `flip_thresholds_status` and `flip_thresholds_status_reason` to `CEE_UI_ENRICHMENT_KEEP_LIST`
+(19 → 22 keys); `compose.ts` P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP carries the same three in this PR (the keep-list drift bolt
+in `tests/contract/cee-to-ui.contract.test.ts` pins them equal). Additive and optional: older UI pins carry them unread.
+
+### `talchain-schemas-0.79.0.tgz` (historical — no longer vendored as of 0.80.0) (SD-1 Slice R on the agent lane: READER first; DL ruling #87 option A, 6 Oct)
 
 **Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
 `https://npm.pkg.github.com/download/@talchain/schemas/0.79.0/fad0e0ad5476e89a56a9a33de7f8adf8c57cb573`; registry gitHead
