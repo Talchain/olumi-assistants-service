@@ -5,7 +5,7 @@
  * persisted graph is untouched. No range → no hold (never mean ± k·std: circular).
  */
 import { describe, expect, it } from 'vitest';
-import { endsOfGraph, heldLinkOf, labelHoldsQuantity, validatedDefinition, withHeldUserLinks, type LinkEnds } from '../held-user-links.js';
+import { endsOfGraph, heldLinkOf, isUserStatedLink, labelHoldsQuantity, validatedDefinition, withHeldUserLinks, type LinkEnds } from '../held-user-links.js';
 import { goalChanceLicenceOf, olumiExistenceOnGoalPath, userStatedLinksBelowOne } from '../goal-chance-licence.js';
 
 type Rec = Record<string, any>;
@@ -344,6 +344,10 @@ const SERVED_T1B = {
   fa1: '../../agent-lane/__tests__/fixtures/fa1-served-graph.json',
   // red team 19, guest T1b near tie on CEE 328d01fe: ‘Starter-tier monthly recurring revenue’ → MRR (+1), units 'GBP/month'.
   ts2: '../../admission/__tests__/fixtures/ts2-near-tie-served-graph.json',
+  // ⭐ S-DEF (Science 393023, DL P0, 7 Oct): Wave B9 T1b, guest, CEE df15c8c1 + UI 19e4dd53, the graph read after Run 1. Its
+  // screen said "‘Launch starter tier’: about 52% … It rests most on Olumi’s own estimate of how strongly ‘Starter-tier monthly
+  // recurring revenue’ affects ‘monthly recurring revenue’ … How sure are you of that size?": the chance rested on an identity.
+  b9: '../../agent-lane/__tests__/fixtures/waveB9-t1b-df15c8c-read-after-run1-graph.json',
 } as const;
 const GOAL = 'monthly_recurring_revenue';
 const servedGraph = async (key: keyof typeof SERVED_T1B): Promise<Rec> => {
@@ -359,7 +363,8 @@ const nodeOf = (g: Rec, id: string): Rec => (g.nodes as Rec[]).find((n) => n.id 
 
 describe('a VALIDATED drafter-only definition holds at 1.0 / 0.01 (the predicate, on the served drafts)', () => {
   it('PRECONDITION: each served link is Olumi\'s drafter-only definition at the 0.8 prior', async () => {
-    for (const [key, from] of [['fa1', 'starter_tier_mrr'], ['fa1', 'mrr_lost_to_starter_support_strain'], ['ts2', 'starter_tier_monthly_recurring_revenue']] as const) {
+    for (const [key, from] of [['fa1', 'starter_tier_mrr'], ['fa1', 'mrr_lost_to_starter_support_strain'], ['ts2', 'starter_tier_monthly_recurring_revenue'],
+      ['b9', 'starter_tier_monthly_recurring_revenue']] as const) {
       const e = edgeOf(await servedGraph(key), from, GOAL);
       expect(e).toMatchObject({ exists_probability: 0.8, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', definitional: true } });
     }
@@ -368,6 +373,7 @@ describe('a VALIDATED drafter-only definition holds at 1.0 / 0.01 (the predicate
     ['fa1', 'starter_tier_mrr', '£/month'],
     ['fa1', 'mrr_lost_to_starter_support_strain', '£/month'],
     ['ts2', 'starter_tier_monthly_recurring_revenue', 'GBP/month'],
+    ['b9', 'starter_tier_monthly_recurring_revenue', '£/month'],
   ] as const)('%s %s → MRR: validated in %s, held {std 0.01}', async (key, from, unit) => {
     const g = await servedGraph(key);
     const e = edgeOf(g, from, GOAL);
@@ -381,6 +387,14 @@ describe('a VALIDATED drafter-only definition holds at 1.0 / 0.01 (the predicate
     expect(ends).toMatchObject({ fromLabel: 'Starter-tier MRR', toLabel: 'monthly recurring revenue', fromUnit: undefined, toUnit: '£/month' });
     expect(validatedDefinition(e, { ...ends, toUnit: undefined })).toBeUndefined();
     expect(validatedDefinition(e, { ...ends, toUnit: 'GBP/month' }), 'the same unit spelled another way').toBe('£/month');
+  });
+  it('CONTROL (B9): apart from the user\'s own ranged link, the only link held is the definition', async () => {
+    const g = await servedGraph('b9');
+    const endsOf = endsOfGraph(g);
+    const held = (g.edges as Rec[]).filter((e) => heldLinkOf(e, endsOf(e)) !== null && !isUserStatedLink(e)).map((e) => `${e.from}->${e.to}`);
+    expect(held).toEqual(['starter_tier_monthly_recurring_revenue->monthly_recurring_revenue']);
+    // The arithmetic parts upstream (subscribers × price) carry no flag: they stay beliefs, drawn at the prior.
+    expect(heldLinkOf(edgeOf(g, 'starter_subscribers', 'starter_tier_monthly_recurring_revenue'), endsOf(edgeOf(g, 'starter_subscribers', 'starter_tier_monthly_recurring_revenue')))).toBeNull();
   });
   it('CONTROL: no CAUSAL link on the served drafts holds (Olumi\'s and the brief\'s point links keep their prior)', async () => {
     for (const key of ['fa1', 'ts2'] as const) {
@@ -425,6 +439,17 @@ describe('the Run sends PLoT the validated definition at 1.0 / 0.01; causal link
   it('⭐ RED (T1b ts2): ‘Starter-tier monthly recurring revenue’ → MRR (GBP/month) is sent at existence 1.0, std 0.01', async () => {
     const { wire } = await plotGraphFor(await servedGraph('ts2'));
     expect(edgeOf(wire, 'starter_tier_monthly_recurring_revenue', GOAL)).toMatchObject({ exists_probability: 1, strength: { std: 0.01 } });
+  });
+  it('⭐ RED (B9 T1b, the served S-DEF Run): the identity the Starter chance "rested most on" is sent at existence 1.0, std 0.01', async () => {
+    const g = await servedGraph('b9');
+    const served = edgeOf(g, 'starter_tier_monthly_recurring_revenue', GOAL);
+    expect(served).toMatchObject({ exists_probability: 0.8, strength: { std: 0.024999999999999998 } });
+    const { wire } = await plotGraphFor(g);
+    expect(edgeOf(wire, 'starter_tier_monthly_recurring_revenue', GOAL)).toMatchObject({ exists_probability: 1, strength: { mean: served.strength.mean, std: 0.01 } });
+    // CONTROL on the same Run: an unflagged part into the identity (a belief at Olumi's 0.8 prior) keeps its prior and spread.
+    const part = edgeOf(g, 'starter_subscribers', 'starter_tier_monthly_recurring_revenue');
+    expect(part).toMatchObject({ exists_probability: 0.8, strength: { std: 0.125 } });
+    expect(edgeOf(wire, 'starter_subscribers', 'starter_tier_monthly_recurring_revenue')).toMatchObject({ exists_probability: 0.8, strength: { std: 0.125 } });
   });
   it('CONTROL: the CAUSAL Olumi links into and around the part keep 0.8 and their own spread (the doubt stays upstream)', async () => {
     const g = await servedGraph('fa1');
