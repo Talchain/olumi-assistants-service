@@ -12,6 +12,7 @@
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
 import type { ReconcileGoalScopeArgs } from '../reconcile-goal-scope.js';
+import type { ProposalEditsRequest } from '../proposal-object/amend.js';
 import { sendableQuery } from './public-research.js';
 import { PROVISIONAL_VIEW_RULE } from '../provisional-view.js';
 
@@ -113,6 +114,11 @@ export interface AgentToolContext {
   readonly typed_approval_of?: string;
   /** That chip's words, bound only when a card for the proposal is on offer: a link-effect card's words carry its reading. */
   readonly typed_approval_words?: string;
+  /**
+   * ⭐ S-D: the values the user set in the change's panel, sent WITH that card's press and bound by the route to it —
+   * never model output. Only a held product proposal (`gmh_`) takes them in slice 1.
+   */
+  readonly proposal_edits?: ProposalEditsRequest;
 }
 
 export interface ToolDefinition {

@@ -406,7 +406,7 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
     count: 2,
     why: 'Bounded recovery copy from a constant builder (NOT the leader-serving buildBoundedFallbackCopyAndChips — verified separately).',
   },
-  'buildGmHeldAppliedReceipt(': { stance: 'structural', why: 'Goal-metric receipt; names a metric, never an option ranking.' },
+  gmAppliedText: { stance: 'structural', why: 'Goal-metric receipt (buildGmHeldAppliedReceipt; names a metric, never an option ranking), plus HOLD-WIPE\'s fixed lapse notice for any other held change the commit made unfit (S-D, #2743).' },
   receiptText: { stance: 'structural', why: 'Mutation receipt; describes the edit just applied.' },
   noPendingAssistantText: { stance: 'structural', why: 'Pending-action recovery template.' },
   '"The analysis is no longer fresh': { stance: 'structural', why: 'Literal staleness copy.' },

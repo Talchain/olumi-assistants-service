@@ -211,6 +211,8 @@ import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
 import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
+import { productHoldRecord } from '../proposal-object/record.js';
+import { amendHeldOperations, proposalEditsDigest, type UserEdit } from '../proposal-object/amend.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isUnadoptedOlumiSuggestion, optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
@@ -2241,9 +2243,39 @@ export function createAgentCapabilities(
     }
     const before = await readGraph(ctx.scenario_id);
     if (before === null) return { ok: false, mutated: false, refusal: 'not_found', proposal_id: ref };
+    /**
+     * ⭐ S-D APPROVE-WITH-EDITS (lane EDIT-PANEL): the values the user set in the panel, bound by the route to THIS card.
+     * Checked here against the revision and model the panel showed (nothing written on a mismatch), then carried to the
+     * door with the confirm, which applies them to the stored hold in the same execution. What Olumi held for each field
+     * is returned for the reply ("You set … ; Olumi had …"); the door's own amendment is the one that lands.
+     */
+    const edits = ctx.proposal_edits;
+    let userEdits: readonly UserEdit[] | undefined;
+    if (edits !== undefined) {
+      if (edits.proposal_id !== ref || edits.revision !== hold.id || edits.graph_hash !== hold.preconditions.graph_hash
+        || edits.graph_hash !== before.graph_hash) {
+        return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
+          detail: 'Nothing changed. These values were set on an earlier version of this change or of the model.' };
+      }
+      const record = productHoldRecord(hold, before);
+      if (record !== undefined && record.digest !== edits.digest) {
+        return { ok: false, mutated: false, refusal: 'edits_superseded', proposal_id: ref,
+          detail: 'Nothing changed. What this change shows has changed since these values were set.' };
+      }
+      const amended = record === undefined ? undefined : amendHeldOperations(record, edits.fields);
+      if (amended === undefined || !amended.ok) {
+        return { ok: false, mutated: false, refusal: 'edits_refused', proposal_id: ref,
+          detail: 'Nothing changed. Those values do not belong to this waiting change.' };
+      }
+      userEdits = amended.userEdits;
+    }
     const r = await dispatch('/orchestrate/v2/turn', {
-      kind: 'message', turn_id: authorisationTurnId(`agent_confirm_held:${hold.id}`), scenario_id: ctx.scenario_id,
-      stage: 'frame', turn_class: 'frame', source: 'chip', message: copy.message, chip: { id: ref },
+      kind: 'message',
+      // The edits are part of the confirm's identity: the same card pressed with other values is another request.
+      turn_id: authorisationTurnId(`agent_confirm_held:${hold.id}${edits !== undefined ? `:${proposalEditsDigest(edits)}` : ''}`),
+      scenario_id: ctx.scenario_id,
+      stage: 'frame', turn_class: 'frame', source: 'chip', message: copy.message,
+      chip: { id: ref, ...(edits !== undefined ? { parameters: { proposal_edits: edits } } : {}) },
     });
     const after = await readGraph(ctx.scenario_id);
     let stillHeld = true;
@@ -2379,6 +2411,7 @@ export function createAgentCapabilities(
       ...(unreadable ? { receipt_unreadable: true } : {}),
       follow_up: sentences.join(' '),
       ...(rangesAdded.length > 0 ? { ranges_added_for_analysis: rangesAdded } : {}),
+      ...(userEdits !== undefined ? { user_edits: userEdits } : {}),
     };
   };
 
@@ -7837,9 +7870,12 @@ export function createAgentCapabilities(
         }
       }
       if (!heldBatchOk) {
+        // ⭐ S-D: a hold the product minted that is NOT the change asked for is never kept: held proposals now live until
+        // approved or declined, so one nobody can be shown is declined here, by this door, before anyone sees it.
+        if (heldChip !== undefined) withdrawnHolds.add(ref);
         // A change the product REFUSED with its own sentence (no hold offered) — say that sentence, never a bare "could not".
         const said = heldChip === undefined && r.status === 200 && typeof r.json.assistant_text === 'string' ? r.json.assistant_text.trim() : '';
-        return { ok: false, mutated: false, refusal: 'not_prepared',
+        return { ok: false, mutated: false, refusal: 'not_prepared', ...(heldChip !== undefined ? { withdrawn_hold: ref } : {}),
           detail: said !== ''
             ? `Olumi did not prepare that change, so nothing was added. Olumi said: "${said}" Tell the user plainly; do not retry it in other words.`
             : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };

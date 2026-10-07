@@ -223,7 +223,9 @@ function goalChanceFromWarnings(warnings: readonly Record<string, unknown>[], op
     && warnings.some((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
   const targetSay = warnings.filter((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)
     .map((w) => (typeof w.say === 'string' ? w.say.trim() : '')).find((s) => s !== '');
-  const sizingReason = mixedTarget ? (targetSay ?? reasonFor(GOAL_FIGURES_TARGET_NOT_TESTABLE))
+  // ⛔ S2l (Codex r1 P0): beside a range the target's raw `message` is the producer's unscoped "can't yet test them against
+  // your target", false of the ranged options; with no scoped `say` the placeholder's own reason speaks instead.
+  const sizingReason = mixedTarget ? (targetSay ?? reasonFor(opening === RANGE_OPENING ? GOAL_FIGURES_PLACEHOLDER_PATH : GOAL_FIGURES_TARGET_NOT_TESTABLE))
     : reasonFor(GOAL_FIGURES_PLACEHOLDER_PATH);
   const reason = [reasonFor(GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED), reasonFor(GOAL_FIGURES_USER_EFFECT_CLAMPED),
     sizingReason].filter((r) => r !== '').join(' ');

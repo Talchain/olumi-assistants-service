@@ -98,6 +98,25 @@ const pending = (scenarioId = SID): PendingAction => ({ ...reconciliationPending
   question: 'Which revenue scope should this model represent?', /* #2613-successor (Science d5 6006584860): an UNTYPED question no longer blocks; this fixture's open issue is a typed one. */ scope: { modelled: 'all revenue', alternative: 'one stream', extent: 'total', stated_in_brief: true, source: { quote: 'all revenue' } }, expected: 'billing_basis', operands: [], derivations: [],
 }, Date.parse(AT)), id: PENDING_ID });
 
+
+/**
+ * S-C/S-E (#2744): every agent-lane turn may carry the typed standing gap signal `model_gap` (DL ruling 3, 7 Oct). It is
+ * orthogonal to the leader egress these captures pin, so it is taken out — asserted present and typed first — and every
+ * OTHER byte must still equal the pristine pre-fix capture (the baselines are not re-recorded).
+ */
+function withoutModelGap(raw: string, live = true): string {
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  // A replay re-sends the stored answer and carries no live signal, exactly as it carries no live guidance row.
+  if (!live) { expect(parsed['model_gap']).toBeUndefined(); return raw; }
+  const gap = parsed['model_gap'] as { kind?: unknown; question?: unknown } | undefined;
+  expect(gap?.kind).toBe('goal_target_missing');
+  expect(typeof gap?.question).toBe('string');
+  delete parsed['model_gap'];
+  const rest = JSON.stringify(parsed);
+  expect(rest.length, 'only the model_gap key was removed').toBe(raw.length - JSON.stringify({ model_gap: gap }).length + 1);
+  return rest;
+}
+
 describe('fresh goal scope reaches the canonical leader claim at every route egress', () => {
   let app: FastifyInstance;
   let readState: ReturnType<typeof composeAnalysisStateV1>;
@@ -364,7 +383,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     const replay = await measuredTurn(true);
     expect(replay.body.assistant_text).toBe(live.body.assistant_text);
     expect(replay.body._agent.replayed).toBe(true);
-    const bytes = { live: live.bytes, replay: replay.bytes };
+    const bytes = { live: withoutModelGap(live.bytes), replay: withoutModelGap(replay.bytes, false) };
     if (process.env.CAPTURE_FRESH_SCOPE_BASELINE === '1') writeFileSync(measuredBaselineUrl, `${JSON.stringify(bytes)}\n`);
     expect(bytes).toEqual(JSON.parse(readFileSync(measuredBaselineUrl, 'utf8')));
     expect(scripted.calls).toBe(0); expect(scripted.measureCalls).toBe(1);
@@ -425,7 +444,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     expect(captured.guidance.slot1.copy.why).toBe("There is no 'carry on as now' option to compare with.");
     captured.guidance.slot1.copy.why = 'A baseline separates the effect of changing course from what would happen anyway.';
     expect(JSON.stringify(captured), 'the capture is compact JSON').toBe(readFileSync(baselineUrl, 'utf8').trimEnd().replace("There is no 'carry on as now' option to compare with.", 'A baseline separates the effect of changing course from what would happen anyway.'));
-    expect(bytes).toBe(JSON.stringify(captured));
+    expect(withoutModelGap(bytes)).toBe(JSON.stringify(captured));
   });
   it('an analysis-bearing turn gates the same fresh issue at the leader wire gate too', async () => {
     scripted.toolName = 'run_analysis'; scripted.results = [{ ok: true, pending_action: pending() }];
