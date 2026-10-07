@@ -4422,8 +4422,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             try { history = await store.readGuidanceHistory(scenarioId); } catch { /* keep the overlay: the read failed, not the bar */ }
           }
         }
+        // The approval carrier the reload reads: the latest PERSISTED pending row, after the persistence floor's held-proposal
+        // reconcile (Codex r1 P1-1 on #2766). This turn's own carrier only when that read is unavailable.
+        let pending: readonly PendingAction[] = durablePending;
+        if (typeof store.readMostRecentPendingActions === 'function') {
+          try { pending = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }); } catch { /* keep this turn's carrier */ }
+        }
         return actionBarOf(actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady, analysisResult,
-          optionParticipation, identityEvaluated, guidance: history, pending: durablePending }));
+          optionParticipation, identityEvaluated, guidance: history, pending }));
       } catch (err) {
         log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: action bar could not be ranked; the turn carries none');
         return undefined;

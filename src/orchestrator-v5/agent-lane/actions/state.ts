@@ -18,8 +18,8 @@ import { strengthenCardFor } from '../strengthen-press.js';
 import { testableFragileLinkOf } from '../decision-review-press.js';
 import { soleGoalOf, goalKindOf, goalDeadlineOf, type GoalKind } from '../../goal-target/goal-kind.js';
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
-import { computeSurvivingPriorPendingsDetailed } from '../../commit.js';
-import { CONFIRMATION_EXPECTING_ACTION_TYPES, type PendingAction } from '../../session/pending-action.js';
+import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
+import { approvalChipIdFor, typedApprovalOf } from '../approval-chips.js';
 import type { StageType } from '@talchain/schemas/boundary';
 import type { GoalPathFactor, ValueAuthorship } from '../turn-context/guidance-signals.js';
 import { canonicalStageOf } from '../method-turn/method-turn.js';
@@ -98,10 +98,22 @@ export function stateKeyOf(scenarioId: string, revision: ActionRevision, deadlin
   return hash16(['action_bar', 1, scenarioId, revision.graph_hash, revision.run_key, deadline]);
 }
 
-/** Both egresses ask the same survival and approval authorities about the latest pending carrier. */
+/**
+ * Whether an APPROVAL CARD waits for the user's yes in the latest pending carrier (the DL's "consent first": the standing
+ * gap yields to it). An approval is a typed approval (`typedApprovalOf`: a `prop_` or `gmh_` proposal, carried either as
+ * its approve chip or, for a product hold, as its own id), alive by the ONE read-time liveness authority
+ * (`isPendingActionExpired`, as the reload's own held-offer and answer-offer reads use it; Codex r1 P2-3 on #2766: the
+ * carry-forward survival rule decrements first and so drops an approval a turn early), and offered on THIS model
+ * revision (its `graph_hash` precondition). A goal-scope question is not an approval card (Codex r1 P1-2). Both egresses
+ * pass the latest PERSISTED carrier (Codex r1 P1-1), so the live bar and the reload bar agree.
+ */
 export function approvalWaitingOf(pending: readonly PendingAction[], graphHash: string | undefined, nowMs = Date.now()): boolean {
-  return computeSurvivingPriorPendingsDetailed(pending, [], [], graphHash, nowMs).survivors
-    .some(pa => CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) || pa.action.kind === 'reconcile_goal_scope');
+  return pending.some((pa) => {
+    const typed = typedApprovalOf({ chip: { id: pa.chip_id } }) ?? typedApprovalOf({ chip: { id: approvalChipIdFor(pa.chip_id) } });
+    if (typed === undefined || isPendingActionExpired(pa, nowMs)) return false;
+    const offeredOn = pa.preconditions.graph_hash;
+    return offeredOn === undefined || graphHash === undefined || offeredOn === graphHash;
+  });
 }
 
 /** The facts the bar ranks on. An unreadable model offers no model-dependent action. */

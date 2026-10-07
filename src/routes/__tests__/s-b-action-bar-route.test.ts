@@ -371,6 +371,15 @@ describe('S-B slice 2a through the real routes', () => {
     setState('withheld', paulGraph());
     expect((await reload()).action_bar!.priority.map(o => o.action_id)).toEqual(['set_deadline']);
   });
+  it('the live bar reads the PERSISTED approval carrier, like the reload (Codex r1 P1-1 on #2766)', async () => {
+    setState('withheld', paulGraph());
+    // The persistence floor (or a concurrent decline) leaves no approval on the row this turn writes.
+    port.append.mockImplementation((w: SessionTurnWrite) => realStore.append({ ...w, pending_actions: [] }));
+    const card = await press('agent-next-strengthen');
+    expect(card.action_bar!.priority.map(o => o.action_id)).toEqual(['set_deadline']);
+    coldStore();
+    expect(JSON.stringify((await reload()).action_bar)).toBe(JSON.stringify(card.action_bar));
+  });
   it.each(['set_deadline', 'set_goal'] as const)('%s press ships the exact canonical question, zero model calls, and a ran receipt', async action => {
     const g = paulGraph(action === 'set_deadline'); setState('pre_run', g);
     const b = await press(`act:${action}`);

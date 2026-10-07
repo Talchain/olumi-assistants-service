@@ -22,6 +22,7 @@ import * as goalLicenceReader from '../../../goal-target/goal-chance-licence.js'
 import { goalChanceDriversForAgent, goalChanceDriverDisplayForAgent } from '../../../goal-target/goal-chance-range-agent.js';
 import { resolveDskClaimProvenance } from '../../../compose/dsk-claim-record.js';
 import { reconciliationPending } from '../../goal-scope.js';
+import { approvalChipIdFor } from '../../approval-chips.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
 const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
@@ -283,7 +284,7 @@ const gapGraph = (chance = true): G => ({ nodes: [
   { id: 'option', kind: 'option', label: 'Hire a developer' },
 ], edges: [] });
 const approval = (graph: G, overrides: Partial<PendingAction> = {}): PendingAction => ({
-  id: 'pending', scenario_id: SCENARIO, chip_id: 'approve', action: { kind: 'apply_proposed_change', proposal_ref: 'held', inline_patch: {}, public_label: 'Approve', public_message: 'Approve the held change.' },
+  id: 'pending', scenario_id: SCENARIO, chip_id: approvalChipIdFor('prop_0123456789ab'), action: { kind: 'apply_proposed_change', proposal_ref: 'prop_0123456789ab', inline_patch: {}, public_label: 'Approve', public_message: 'Approve the held change.' },
   preconditions: { graph_hash: hashOf(graph) }, expires_at_turn_count: 12, expires_at_iso: '2099-01-01T00:00:00.000Z',
   emitted_at_iso: AT, ...overrides,
 });
@@ -325,22 +326,30 @@ describe('S-B slice 2a: standing gaps and typed replies', () => {
     }
     expect(ids(bar(ran(g, WITHHELD)).priority)).toEqual(['set_deadline']);
   });
-  it('goal-scope reconcile yields via its own survival rule, even after its answer-binding expiry', () => {
+  it('a goal-scope question is NOT an approval card: the standing gap keeps priority (Codex r1 P1-2 on #2766)', () => {
     const g = gapGraph();
     const pending = reconciliationPending(SCENARIO, {
       kind: 'reconcile_goal_scope', goal_id: 'goal', goal_label: 'Launch on time', expected: 'billing_basis',
       question: 'Which scope should this model represent?', operands: [], derivations: [],
       scope: { modelled: 'all launches', alternative: 'one launch', extent: 'total', stated_in_brief: true, source: { quote: 'all launches' } },
     }, 0);
-    const b = bar({ ...preRun(g), pending: [pending] });
-    expect(ids(b.priority)).not.toContain('set_deadline');
-    expect(b.more.find(o => o.action_id === 'set_deadline')).toMatchObject({ enabled: true });
+    expect(ids(bar({ ...preRun(g), pending: [pending] }).priority)).toEqual(['set_deadline']);
+    // CONTROL: a live approval card on this revision yields.
+    expect(ids(bar({ ...preRun(g), pending: [pending, approval(g)] }).priority)).not.toContain('set_deadline');
   });
-  it('expired, exhausted, hash-invalid approvals and ordinary asks do not displace the standing gap', () => {
+  it('an approval with one turn left is still a live card and yields; none left does not (Codex r1 P2-3); a product hold yields too', () => {
+    const g = gapGraph();
+    expect(ids(bar({ ...preRun(g), pending: [approval(g, { expires_at_turn_count: 1 })] }).priority)).not.toContain('set_deadline');
+    expect(ids(bar({ ...preRun(g), pending: [approval(g, { expires_at_turn_count: 0 })] }).priority)).toEqual(['set_deadline']);
+    // A product hold (WIDEN / S-D) carries its own gmh_ id as chip_id.
+    const hold = approval(g, { chip_id: 'gmh_0123456789ab' });
+    expect(ids(bar({ ...preRun(g), pending: [hold] }).priority)).not.toContain('set_deadline');
+  });
+  it('expired, exhausted (0 turns), hash-invalid approvals and ordinary asks do not displace the standing gap', () => {
     const g = gapGraph();
     for (const pending of [approval(g, { expires_at_iso: '2000-01-01T00:00:00.000Z' }),
-      approval(g, { expires_at_turn_count: 1 }), approval(g, { preconditions: { graph_hash: 'another-graph' } }),
-      approval(g, { action: { kind: 'run_analysis' } })]) {
+      approval(g, { expires_at_turn_count: 0 }), approval(g, { preconditions: { graph_hash: 'another-graph' } }),
+      approval(g, { chip_id: 'agent-run-analysis', action: { kind: 'run_analysis' } })]) {
       expect(ids(bar({ ...preRun(g), pending: [pending] }).priority)).toEqual(['set_deadline']);
     }
   });
