@@ -186,6 +186,14 @@ export const GM_HELD_APPLY_WIRING_DECLINE = 'decline_with_clarify_v0';
 export const GM_HELD_OPERATIONS_MAX_JSON_CHARS = 16_000;
 
 /**
+ * ⭐ S-D (lane EDIT-PANEL, Paul 7 Oct): stamped on a GM hold's `inline_patch` by the Agent lane's lifecycle when it
+ * keeps the hold until the user approves or declines it (`agent-lane/proposal-object/lifecycle.ts`), so its stored
+ * lifetime runs past the default offer window. The conventional bare-confirm reads it to keep CONSENT eligibility at
+ * the original window (`deterministic-short-confirm.ts` `bareConfirmEligible`): durable retention is not consent.
+ */
+export const GM_HELD_UNTIL_DECIDED_KEY = 'held_until_decided';
+
+/**
  * F-HELD fix 2a (wire finding 2026-07-11) — GM holds get their OWN turn-TTL,
  * longer than the chip-suggestion default (`PENDING_ACTION_DEFAULT_TURN_TTL`
  * = 2). A hold is an explicit consent question, not a disposable suggestion:

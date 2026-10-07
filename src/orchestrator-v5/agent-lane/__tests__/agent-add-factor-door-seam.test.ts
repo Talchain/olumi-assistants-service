@@ -520,23 +520,37 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     expect(bytes()).toBe(moved);
   }, 120_000);
 
-  it('(d) RED: declined, then left to expire → BYTE-IDENTICAL, and the old button then writes nothing', async () => {
+  /**
+   * ⭐ S-D (#2743, Paul 7 Oct; D-08): a held proposal stays held until the user approves or declines it, and is never
+   * silently expired. Words alone never set it aside (Codex r1 P1 on #2743: the Agent could withdraw on ANY typed
+   * turn), so a typed "no" writes nothing and the card stays on offer WITH its "Not now"; the press sets it aside, said;
+   * and the old button then writes nothing (this row's original safety claim, now reached by the decline, not a timer).
+   */
+  it('(d) RED: a typed "no" writes nothing; the hold is NEVER silently expired (still held, its "Not now" on offer); the press sets it aside, said; the old button then writes nothing', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
     const approve = approveChipOf(await propose(factorArgs()))!;
     expect(approve).toBeDefined();
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
     script = [() => say('Understood, I will leave them out.')];
     await turn({ message: 'No, leave those out.' });
-    expect(bytes(), 'a decline writes nothing').toBe(before);
-    for (let i = 0; i < 8 && (await heldOnLatestRow()).length > 0; i += 1) {
+    expect(bytes(), 'a typed no writes nothing').toBe(before);
+    let last: Body | undefined;
+    for (let i = 0; i < 8; i += 1) {
       script = [() => say('Headcount drives capacity.')];
-      await turn({ message: 'What drives delivery capacity?' });
+      last = await turn({ message: 'What drives delivery capacity?' });
     }
-    expect(await heldOnLatestRow(), 'the hold expired').toEqual([]);
+    expect((await heldOnLatestRow()).map((h) => h.chip_id), 'never silently expired (D-08)').toEqual([ref]);
+    expect(last!.suggested_actions.map((c) => c.id), JSON.stringify(last!.suggested_actions))
+      .toEqual(expect.arrayContaining([approve.id, `agent-decline-proposal:${ref}`]));
     expect(bytes()).toBe(before);
+    const declined = await turn({ message: 'Not now.', source: 'chip', chip: { id: `agent-decline-proposal:${ref}` } });
+    expect(await heldOnLatestRow(), 'set aside by the press').toEqual([]);
+    expect(declined.assistant_text, declined.assistant_text)
+      .toContain("Set aside: the factors 'Senior engineer salary' and 'Junior engineer salary'. Nothing in the model changed.");
     const late = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(late._agent.tool_calls[0], JSON.stringify(late._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false }));
-    expect(bytes(), 'an expired hold writes nothing').toBe(before);
+    expect(bytes(), 'a declined hold writes nothing').toBe(before);
     expect(newFactors()).toEqual([]);
   }, 180_000);
 

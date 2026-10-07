@@ -217,6 +217,7 @@ import {
 } from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
+import { productHoldRecord, proposalFieldsWire } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -748,10 +749,21 @@ export default async function route(app: FastifyInstance) {
           }));
         } catch { actionBar = undefined; }
       }
+      /**
+       * ⭐ S-D RELOAD (lane EDIT-PANEL; design §4): the proposals still held, with what each assumes and its exact card,
+       * so a reload keeps them editable and approvable. The SAME projection the Agent turn sends (`_proposal_fields`),
+       * from the latest row's holds read above, pinned to THIS graph's hash. Opt-in with the conversation, so the
+       * Agent's own internal reads stay byte-identical.
+       */
+      const proposalFields = conversationRequested && graphPresent
+        ? proposalFieldsWire(latestPending.flatMap((pa) => { const r = productHoldRecord(pa, graph); return r === undefined ? [] : [r]; }),
+          computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined)
+        : undefined;
 
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         ...(heldOffers !== undefined && heldOffers.length > 0 ? { held_proposal_offers: heldOffers } : {}),
+        ...(proposalFields !== undefined ? { proposal_fields: proposalFields } : {}),
         scenario_id: scenarioId,
         graph: graphPresent ? graph : null,
         graph_present: graphPresent,

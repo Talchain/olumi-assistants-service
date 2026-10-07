@@ -229,12 +229,14 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow);');
     expect(route).not.toContain('userWordsOf(history');
     expect(route).not.toContain('{ scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }');
-    // Declared once; used at the seven dispatch sites (incl. the route-issued confirm card, #2310, the M1 Strengthen card,
-    // #2481, the T3 method turn's ONE card, and the held Keep withdrawal) and the turn's state read (slice C1).
+    // Declared once; used at the eight dispatch sites (incl. the route-issued confirm card, #2310, the M1 Strengthen card,
+    // #2481, the T3 method turn's ONE card, the held Keep withdrawal, and the S-D typed decline of a held proposal,
+    // #2743) and the turn's state read (slice C1).
     expect(route).toContain("dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode)");
     expect(route).toContain("dispatchTool('propose_link_strengths', JSON.stringify(card.args), toolCtx, capabilities, mode)");
     expect(route).toContain('await dispatchTool(card.tool, JSON.stringify(card.args), toolCtx, capabilities, mode)');
     expect(route).toContain('await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: keptProposal }), toolCtx, capabilities, mode)');
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the seven dispatch sites and the state read').toBe(9);
+    expect(route).toContain('await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: declinedHold }), toolCtx, capabilities, mode)');
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eight dispatch sites and the state read').toBe(10);
   });
 });
