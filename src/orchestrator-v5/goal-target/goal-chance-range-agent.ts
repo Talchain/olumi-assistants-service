@@ -1,7 +1,8 @@
 /** Agent-only readers of the selected Run's licences. No inference from figures or prose. */
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
 import {
-  GOAL_FIGURES_WITHHELD_CODES, GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
+  GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES,
+  GOAL_FIGURES_USER_EFFECT_CLAMPED, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
 } from '../../orchestrator/context/option-result-source.js';
 import { agentLicenceRecordOf, goalChanceDisplayForAgent, goalChanceLicenceForAgent, isLicensedDriver } from './goal-chance-licence.js';
 import { GOAL_CHANCE_RANGE } from './goal-chance-range.js';
@@ -73,6 +74,20 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
 /** Scoped withholds remove only their own options; PLoT #416/#422 always withhold the whole Run. */
 export function goalChanceOptionWithheldForAgent(result: unknown, optionId: string): boolean {
   return warningsOf(result).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
+    && (w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
+      || !ids(w.option_ids) || w.option_ids.includes(optionId)));
+}
+
+/**
+ * Codex AMEND (#87 6028220756, DL accepted): a range exists BECAUSE its option's point figure was withheld for an unsized
+ * path, and PR-S1 writes one only beside `GOAL_FIGURES_PLACEHOLDER_PATH` or `GOAL_FIGURES_TARGET_NOT_TESTABLE`. Those two
+ * never bar the range; every other withhold (PLoT's run-wide pair, product not read, options identical, probability
+ * unusable) still does, with the point predicate's own scope.
+ */
+const RANGE_COMPATIBLE_WITHHOLDS: ReadonlySet<string> = new Set([GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE]);
+export function goalChanceRangeBarredForAgent(result: unknown, optionId: string): boolean {
+  return warningsOf(result).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
+    && !RANGE_COMPATIBLE_WITHHOLDS.has(w.code)
     && (w.code === GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED || w.code === GOAL_FIGURES_USER_EFFECT_CLAMPED
       || !ids(w.option_ids) || w.option_ids.includes(optionId)));
 }
@@ -158,7 +173,7 @@ export function goalChanceFactsForAgent(result: unknown, graph: unknown, current
   const licence = goalChanceLicenceForAgent(result);
   const ranges = goalChanceRangeDisplayForAgent(result, graph);
   const rangeDisplay = Object.fromEntries(Object.entries(ranges ?? {})
-    .filter(([optionId]) => !goalChanceOptionWithheldForAgent(result, optionId)));
+    .filter(([optionId]) => !goalChanceRangeBarredForAgent(result, optionId)));
   const display = pointDisplayForAgent(result, ranges);
   const hasChance = Object.keys(display).length > 0;
   const drivers = hasChance ? goalChanceDriverDisplayForAgent(result, graph) : {};

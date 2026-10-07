@@ -6,7 +6,8 @@ import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import {
-  GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_USER_EFFECT_CLAMPED,
+  GOAL_CHANCE_COMPANION_KEYS, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ,
+  GOAL_FIGURES_PROBABILITY_UNUSABLE, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
 } from '../../../orchestrator/context/option-result-source.js';
 
@@ -143,6 +144,27 @@ describe('PR-S2: same-Run per-option chance, range and deadline licences', () =>
     expect(JSON.stringify(read)).toContain('"code":"GOAL_CHANCE_RANGE"');
     expect(JSON.stringify(views[1])).not.toContain('"code":"GOAL_CHANCE_RANGE"');
     expect(read).toEqual(before);
+  });
+  // Codex AMEND (#87 6028220756): a REAL range sits beside the withhold that made it (PR-S1 writes one only there). RED at
+  // b0955242: the point predicate barred both codes, so the range never reached the chat.
+  const rangeRun = (code: string, withheldBy: string = code): Json => fixture([
+    { ...licence, withheld_option_ids: [A, B], pct_by_option: { [C]: 25 }, display_rounding_by_option: { [C]: 'whole' } },
+    rangeRecord, { code: withheldBy, severity: 'info', message: 'Withheld for this option.', option_ids: [A, B] },
+  ]);
+  it.each([GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE])('(7b) the range shows beside its own %s withhold, on both doors', async (code) => {
+    const read = rangeRun(code);
+    for (const view of [await saved(read), await run(read)]) {
+      expect(view.goal_chance_range_display).toEqual(expectedRanges);
+      expect(view.goal_chance_display).toEqual({ [C]: 'about 25%' });
+    }
+  });
+  it.each([GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_OPTIONS_IDENTICAL, GOAL_FIGURES_PROBABILITY_UNUSABLE])('(7c) CONTROL: %s on the same options still bars their range, on both doors', async (code) => {
+    const read = fixture([
+      { ...licence, withheld_option_ids: [A, B], pct_by_option: { [C]: 25 }, display_rounding_by_option: { [C]: 'whole' } },
+      rangeRecord, { code: GOAL_FIGURES_PLACEHOLDER_PATH, severity: 'info', message: 'Withheld.', option_ids: [A, B] },
+      { code, severity: 'info', message: 'Not shown.', option_ids: [A, B] },
+    ]);
+    for (const view of [await saved(read), await run(read)]) expect(view).not.toHaveProperty('goal_chance_range_display');
   });
   it.each([
     { low_pct: 65, high_pct: 65 }, { low_pct: 70, high_pct: 65 }, { low_pct: 20.5 }, { high_pct: 65.5 },
