@@ -17,6 +17,8 @@ import { goalChanceDriverDisplayForAgent } from '../goal-target/goal-chance-rang
 
 export const GOAL_CHANCE_DRIVER_ABSENCE_REMOVED = 'GOAL_CHANCE_DRIVER_ABSENCE_REMOVED';
 export const GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE = 'GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE';
+export const SENSITIVITY_ABSENCE_REMOVED = 'SENSITIVITY_ABSENCE_REMOVED';
+export const SENSITIVITY_ABSENCE_KEPT_UNSAFE = 'SENSITIVITY_ABSENCE_KEPT_UNSAFE';
 
 const R = String.raw;
 const ITEM = R`(?:assumption|factor|input|driver)s?`;
@@ -53,6 +55,32 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   R`\b(?:no\s+(?:single\s+)?|none\s+of\s+the\s+)${ITEM}\s+(?:stands?|stood)\s+out`,
   // predicative: "investigation priority is not established" · "the most important assumption is unknown"
   R`\b(?:investigation\s+priority|(?:the\s+)?${MOST_ADJ}\s+${ITEM}|(?:the\s+)?${ITEM}\s+(?:that|which)\s+matters?\s+most|(?:the\s+)?key\s+${ITEM})\s+(?:is|was|has|remains?)${ABSENT}`,
+].join('|'), 'i');
+
+/**
+ * ⭐ Wave B pilot (7 Oct 02:26Z, T1b, CEE 86ccaf3): the Run narration said "Sensitivity of the option comparison has not
+ * been measured." while the same Run's robustness check had measured it (a critical fragile link, switch 0.86) and the
+ * screen showed "Tipping point: …". DL ruling: the claim is FALSE whenever the Run's robustness was computed, including
+ * computed with no fragile link. Its own gate (`robustnessComputed`), the same clause cutter and kept-unsafe rules.
+ * The subject must open its clause ("Customers' price sensitivity has not been measured" is a fact about the data).
+ */
+const SENS_OPEN = R`(?<=^|\n[ \t]*(?:(?:[-*•]|\d+[.)])[ \t]+)?|[.;:!?,—–(*_“"‘]\s*|\b(?:and|but|so|yet|while|though|although|because|also|that|as)\s+)`;
+const SENS_SUBJECT = R`(?:(?:the|overall|decision|factor|option[-\s]comparison|comparison)\s+)*sensitivity(?:\s+(?:analysis|check|checks|testing|tests?))?(?:\s+of\s+(?:the\s+)?(?:option\s+)?(?:comparison|options|results?|ranking|decision))?`;
+const SENS_ROBUST_SUBJECT = R`(?:the\s+)?(?:robustness(?:\s+and\s+sensitivity)?|sensitivity\s+and\s+robustness)(?:\s+(?:analysis|check|checks))?`;
+const SENS_NOT_DONE = R`\s+(?:has|have|was|were|is|are|had)\s*(?:not|n[’']t)\s+(?:yet\s+)?(?:been\s+)?(?:measured|assessed|tested|run|computed|checked|analysed|analyzed|done|carried\s+out|performed|quantified)`;
+export const SENSITIVITY_ABSENCE_CLAIM = new RegExp([
+  // "Sensitivity of the option comparison has not been measured" · "decision sensitivity was not measured"
+  R`${SENS_OPEN}${SENS_SUBJECT}${SENS_NOT_DONE}`,
+  // "robustness and sensitivity were not assessed"
+  R`${SENS_OPEN}${SENS_ROBUST_SUBJECT}${SENS_NOT_DONE}`,
+  // headline form: "sensitivity not measured"
+  R`${SENS_OPEN}${SENS_SUBJECT}\s+not\s+(?:yet\s+)?(?:measured|assessed|tested|computed|quantified)`,
+  // "sensitivity is unmeasured / remains untested"
+  R`${SENS_OPEN}${SENS_SUBJECT}\s+(?:is|was|remains?)\s+(?:still\s+)?(?:unmeasured|untested|unassessed|unquantified)`,
+  // "the run has not measured sensitivity" · "Olumi didn't run a sensitivity analysis"
+  R`${NEG}\s+(?:measured?|assess(?:ed)?|test(?:ed)?|check(?:ed)?|run|ran|done|did|quantif(?:y|ied)|comput(?:e|ed))\s+(?:the\s+|a\s+|any\s+)?(?:(?:overall|decision|factor)\s+)?sensitivity\b`,
+  // "there was no sensitivity analysis" · "no sensitivity check was run"
+  R`\bno\s+(?:(?:overall|decision|factor)\s+)?sensitivity\s+(?:analysis|check|checks|testing|test)\b(?:\s+(?:was|has\s+been|is|were)\s+(?:run|done|carried\s+out|performed|measured))?`,
 ].join('|'), 'i');
 
 const CONNECTOR = /^\s*(?:and|but|so|yet|while|though|although|because|which\s+means)\b\s*/i;
@@ -117,11 +145,11 @@ function cutOnce(body: string, m: RegExpExecArray, labels: readonly string[]): C
 
 type SentenceCut = { body: string; removed: number; kept: number; leadInEmpty: boolean };
 
-function bodyWithoutClaim(body: string, labels: readonly string[]): SentenceCut {
+function bodyWithoutClaim(body: string, labels: readonly string[], claim: RegExp): SentenceCut {
   let out = body;
   let removed = 0;
   for (let guard = 0; guard < 4; guard += 1) {
-    const m = DRIVER_ABSENCE_CLAIM.exec(out);
+    const m = claim.exec(out);
     if (m === null) break;
     const cut = cutOnce(out, m, labels);
     if (cut.kind === 'unsafe') return { body, removed: 0, kept: 1, leadInEmpty: false };
@@ -137,21 +165,30 @@ function bodyWithoutClaim(body: string, labels: readonly string[]): SentenceCut 
  * whose whole content was the claim drops its line only when that sentence is the whole line; otherwise it is kept.
  */
 export function removeDriverAbsenceClaims(text: string, labels: readonly string[] = []): { text: string; removed: number; keptUnsafe: number } {
+  return removeClaims(text, labels, DRIVER_ABSENCE_CLAIM);
+}
+
+/** The same edit for the sensitivity-absence class (its own gate at the egress: `robustnessComputed`). */
+export function removeSensitivityAbsenceClaims(text: string, labels: readonly string[] = []): { text: string; removed: number; keptUnsafe: number } {
+  return removeClaims(text, labels, SENSITIVITY_ABSENCE_CLAIM);
+}
+
+function removeClaims(text: string, labels: readonly string[], claim: RegExp): { text: string; removed: number; keptUnsafe: number } {
   let removed = 0;
   let keptUnsafe = 0;
   const lines = text.split('\n').map((line) => {
     const prefix = /^(\s*(?:[-*•]|\d+[.)])\s+|\s*)/.exec(line)![0];
     const content = line.slice(prefix.length);
-    if (!DRIVER_ABSENCE_CLAIM.test(content)) return line;
+    if (!claim.test(content)) return line;
     // Sentences end at . ! ? (plus any closing markdown or quote) followed by space or end ("4.1%" is not an end).
     const parts = content.split(/(?<=[.!?][*_”’"')\]]*)(?=\s+)/);
     let dropLine = false;
     const kept = parts.map((part) => {
       const lead = /^\s*/.exec(part)![0];
       const sentence = part.slice(lead.length);
-      if (!DRIVER_ABSENCE_CLAIM.test(sentence)) return part;
+      if (!claim.test(sentence)) return part;
       const end = /[.!?]+[*_”’"')\]]*$/.exec(sentence)?.[0] ?? '';
-      const cut = bodyWithoutClaim(sentence.slice(0, sentence.length - end.length), labels);
+      const cut = bodyWithoutClaim(sentence.slice(0, sentence.length - end.length), labels, claim);
       if (cut.leadInEmpty) {
         if (parts.length === 1) { dropLine = true; removed += 1; return ''; }
         keptUnsafe += 1;
@@ -182,6 +219,30 @@ export interface DriverAbsenceEgressOpts {
  * reasoning shown beneath it) denied one. Never throws. Measured 7 Oct: 8 of 93 distinct served provisional-view
  * reasonings carry the same claim, each with a clean clause boundary.
  */
+/**
+ * The Run's robustness check RAN: a robustness record with a `fragile_edges` array (empty counts: computed, nothing
+ * fragile) and its verdict. Absent, `{}` or no array = not computed, and "sensitivity was not measured" may be true.
+ */
+export function robustnessComputed(analysisResult: unknown): boolean {
+  const ar = analysisResult as { robustness?: unknown; enrichment?: { robustness?: unknown } } | null | undefined;
+  const r = (ar?.enrichment?.robustness ?? ar?.robustness) as
+    { fragile_edges?: unknown; is_robust?: unknown; display_verdict?: unknown; level?: unknown } | null | undefined;
+  if (r === null || typeof r !== 'object' || !Array.isArray(r.fragile_edges)) return false;
+  return typeof r.is_robust === 'boolean' || typeof r.display_verdict === 'string' || typeof r.level === 'string';
+}
+
+type EgressClass = { readonly remove: (text: string, labels: readonly string[]) => { text: string; removed: number; keptUnsafe: number };
+  readonly removedCode: string; readonly keptCode: string; readonly event: string; readonly what: string };
+const DRIVER_CLASS: EgressClass = { remove: removeDriverAbsenceClaims, removedCode: GOAL_CHANCE_DRIVER_ABSENCE_REMOVED,
+  keptCode: GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE, event: 'goal_chance_driver_absence', what: 'denied a goal-chance driver the screen shows' };
+const SENSITIVITY_CLASS: EgressClass = { remove: removeSensitivityAbsenceClaims, removedCode: SENSITIVITY_ABSENCE_REMOVED,
+  keptCode: SENSITIVITY_ABSENCE_KEPT_UNSAFE, event: 'sensitivity_absence', what: 'said sensitivity was not measured on a Run whose robustness check ran' };
+
+/**
+ * Final-egress edit: the body by reference unless the Run shows a driver (or ran its robustness check) AND the reply (or
+ * the provisional view's reasoning shown beneath it) denied it. Never throws. Measured 7 Oct: 8 of 93 distinct served
+ * provisional-view reasonings carry the driver claim, each with a clean clause boundary.
+ */
 export function withoutDriverAbsenceClaimsAtEgress<T extends { assistant_text?: unknown }>(body: T, opts: DriverAbsenceEgressOpts): T {
   try {
     const agent = (body as { _agent?: { provisional_view?: { reasoning?: unknown } } })._agent;
@@ -189,38 +250,53 @@ export function withoutDriverAbsenceClaimsAtEgress<T extends { assistant_text?: 
     const reply = typeof body.assistant_text === 'string' && body.assistant_text !== '' ? body.assistant_text : undefined;
     const view = typeof reasoning === 'string' && reasoning !== '' ? reasoning : undefined;
     if (reply === undefined && view === undefined) return body;
-    if (Object.keys(goalChanceDriverDisplayForAgent(opts.analysisResult, opts.graph)).length === 0) return body;
+    const classes = [
+      ...(Object.keys(goalChanceDriverDisplayForAgent(opts.analysisResult, opts.graph)).length > 0 ? [DRIVER_CLASS] : []),
+      ...(robustnessComputed(opts.analysisResult) ? [SENSITIVITY_CLASS] : []),
+    ];
+    if (classes.length === 0) return body;
     const nodes = (opts.graph as { nodes?: unknown } | null | undefined)?.nodes;
     const labels = (Array.isArray(nodes) ? nodes : []).flatMap((n) => {
       const node = n as { kind?: unknown; label?: unknown } | null;
       return node?.kind === 'option' && typeof node.label === 'string' && node.label.trim() !== '' ? [node.label.trim()] : [];
     });
-    let removed = 0;
-    let keptUnsafe = 0;
+    const removed = new Map<EgressClass, number>();
+    const keptUnsafe = new Map<EgressClass, number>();
+    const add = (m: Map<EgressClass, number>, c: EgressClass, n: number): void => { if (n > 0) m.set(c, (m.get(c) ?? 0) + n); };
     // A text that would be left empty is kept whole: nothing true would remain to send (logged, never silent).
     const edited = (text: string | undefined): string | undefined => {
       if (text === undefined) return undefined;
-      const edit = removeDriverAbsenceClaims(text, labels);
-      keptUnsafe += edit.keptUnsafe + (edit.removed > 0 && edit.text === '' ? edit.removed : 0);
-      if (edit.removed === 0 || edit.text === '') return undefined;
-      removed += edit.removed;
-      return edit.text;
+      let out = text;
+      const counts: Array<[EgressClass, number]> = [];
+      for (const c of classes) {
+        const edit = c.remove(out, labels);
+        add(keptUnsafe, c, edit.keptUnsafe);
+        if (edit.removed === 0) continue;
+        counts.push([c, edit.removed]);
+        out = edit.text;
+      }
+      if (counts.length === 0) return undefined;
+      if (out === '') { for (const [c, n] of counts) add(keptUnsafe, c, n); return undefined; }
+      for (const [c, n] of counts) add(removed, c, n);
+      return out;
     };
     const newReply = edited(reply);
     const newView = edited(view);
-    if (keptUnsafe > 0) {
+    for (const [c, n] of keptUnsafe) {
       log.warn(
-        { event: 'agent_lane.goal_chance_driver_absence_kept_unsafe', code: GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE, turn_id: opts.turnId ?? null,
-          request_id: opts.requestId, exit_path: opts.exitPath, kept_count: keptUnsafe },
-        'agent-lane: a reply denied a goal-chance driver the screen shows, but no clean clause boundary exists; the sentence was kept',
+        { event: `agent_lane.${c.event}_kept_unsafe`, code: c.keptCode, turn_id: opts.turnId ?? null,
+          request_id: opts.requestId, exit_path: opts.exitPath, kept_count: n },
+        `agent-lane: a reply ${c.what}, but no clean clause boundary exists; the sentence was kept`,
       );
     }
     if (newReply === undefined && newView === undefined) return body;
-    log.warn(
-      { event: 'agent_lane.goal_chance_driver_absence_removed', code: GOAL_CHANCE_DRIVER_ABSENCE_REMOVED, turn_id: opts.turnId ?? null,
-        request_id: opts.requestId, exit_path: opts.exitPath, removed_count: removed },
-      'agent-lane: the reply denied a goal-chance driver the screen shows; the clause was removed (prompt rule missed)',
-    );
+    for (const [c, n] of removed) {
+      log.warn(
+        { event: `agent_lane.${c.event}_removed`, code: c.removedCode, turn_id: opts.turnId ?? null,
+          request_id: opts.requestId, exit_path: opts.exitPath, removed_count: n },
+        `agent-lane: the reply ${c.what}; the clause was removed (prompt rule missed)`,
+      );
+    }
     return {
       ...body,
       ...(newReply !== undefined ? { assistant_text: newReply } : {}),
