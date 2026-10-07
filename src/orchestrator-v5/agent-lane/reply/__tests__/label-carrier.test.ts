@@ -18,7 +18,9 @@ const graphWith = (unit: string) => ({
 
 describe('the goal warning keeps its reason and its question’s identity inside the 400 carrier', () => {
   it.each([
-    ['a long unit (the question alone is ~308 characters)', 'probability of launch by the agreed deadline (%)'],
+    // S-E GOALS (#2742): a unit naming a chance ("probability of launch …", Codex's r2 unit) is now a chance goal, which
+    // asks no level at all; the carrier row keeps a long unit of the same length that measures a level.
+    ['a long unit (the question alone is ~308 characters)', 'hours of onboarding per enterprise account (hours)'],
     ['CONTROL: a short unit', '%'],
   ])('%s', (_what, unit) => {
     const g = graphWith(unit);

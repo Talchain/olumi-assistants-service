@@ -86,7 +86,7 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, isDecisionInputAsk, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, isDecisionInputAsk, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
@@ -3192,6 +3192,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * time; the control beside it (next step, or Run) is added to the chips below.
      */
     const firstAnalysisSaid = firstAnalysis !== undefined ? firstAnalysisSentence(firstAnalysis.outcome) : null;
+    /** The withheld goal chance's reason as owed this turn (pure; the same value as its owed line below), typed for the composer. */
     const goalChanceOwed = goalChanceLineOwed(result.tool_results, text);
     const owed = stateFacts.current_state_unknown === true
       ? [...valueChangeDisclosures(stateFacts)]
@@ -3200,7 +3201,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...valueChangeDisclosures(stateFacts),
         ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
         // ⛔ A withheld goal chance's reason is said as written, unless the Agent already said it (AIQ 5887805333 (3)).
-        ...[goalChanceOwed].filter((x): x is string => x !== null),
+        ...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
         // MC D1 (c): the Run's #416 ask, after its reason (never a bare "couldn't calculate it" with nothing to answer).
         ...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),
       ];
@@ -3965,8 +3966,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Every other host line is ONE typed part, never split (S-A: host lines inserted by identity): the owed
         // disclosures and value changes, the status/receipt, CEE's own run words, and the arithmetic. A line that asks is
         // the ask; the rest may sit under More detail (R1).
+        // A host line that carries the open-questions segment is typed up to it: the segment has its own place (detail,
+        // DGAI's questions toggle), and a part spanning it could not be located as one unit.
         ...[...owed.filter((l) => l !== goalChanceOwed), narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
-          .filter((l): l is string => typeof l === 'string' && l.trim() !== '')
+          .map((l) => (typeof l === 'string' ? (openQuestionsSegment(l)?.lead ?? l).trim() : l))
+          .filter((l): l is string => typeof l === 'string' && l !== '')
           .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),
       ];
       // THE TYPED RESPONSE PROFILE, by the turn's kind (DL, AIE line review 6037446159 item 5): a method press is one
