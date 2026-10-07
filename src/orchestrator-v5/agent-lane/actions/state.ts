@@ -20,6 +20,12 @@ import { soleGoalOf, goalKindOf, goalDeadlineOf, type GoalKind } from '../../goa
 import { statedGoalTargetOf } from '../../goal-target/stated-goal-target.js';
 import { computeSurvivingPriorPendingsDetailed } from '../../commit.js';
 import { CONFIRMATION_EXPECTING_ACTION_TYPES, type PendingAction } from '../../session/pending-action.js';
+import type { StageType } from '@talchain/schemas/boundary';
+import type { GoalPathFactor, ValueAuthorship } from '../turn-context/guidance-signals.js';
+import { canonicalStageOf } from '../method-turn/method-turn.js';
+import { goalChanceDriversForAgent } from '../../goal-target/goal-chance-range-agent.js';
+import { keptFigureFor } from '../kept-figure.js';
+import { proposalFigure } from '../proposal-reply.js';
 import { risksTurnForReadback } from '../method-turn/widen-turn.js';
 
 type Rec = Record<string, unknown>;
@@ -46,6 +52,9 @@ export interface ActionRevision { readonly graph_hash: string | null; readonly r
 
 export interface ActionFacts {
   readonly scenarioId: string;
+  readonly canonicalStage: StageType | null;
+  readonly estimateCandidates: readonly (GoalPathFactor & { readonly figure: string })[];
+  readonly estimateDriverIds: readonly string[];
   readonly revision: ActionRevision;
   /** 16-hex hash of (scenario, revision): the bar's identity (contract v1.1: state_key is the revision's hash). */
   readonly stateKey: string;
@@ -111,8 +120,9 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
     runAdmissible: typeof ready?.may_run === 'boolean' ? ready.may_run : ready?.status === 'ready',
   };
   const unread: ActionFacts = { ...base, readable: false, goalPresent: false, goalLabel: '', goalKind: null, targetPresent: false, deadline: null, ownOptionCount: 0,
-    goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
+    estimateCandidates: [], estimateDriverIds: [], canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
   if (raw === undefined || !Array.isArray(raw.nodes)) return unread;
+  const nodes = raw.nodes.map(rec);
   try {
     const signals = assembleGuidanceSignals({
       request: 'turn', offeredSpecific: [], graph: read.graph, analysisState: read.analysisState, analysisResult: read.analysisResult,
@@ -127,6 +137,17 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
     return {
       ...base,
       readable: true,
+      canonicalStage: canonicalStageOf(signals['run.kind'], read.graph),
+      estimateCandidates: signals['model.goal_path_factors'].flatMap(f => {
+        if (f.value_authorship !== 'olumi_estimate' && f.value_authorship !== 'olumi_accepted') return [];
+        const node = nodes.find(n => n?.id === f.factor_id);
+        if (node === undefined) return [];
+        const unit = rec(node.observed_state)?.unit;
+        const value = keptFigureFor(node, typeof unit === 'string' ? unit : '');
+        return value === undefined ? [] : [{ ...f, figure: proposalFigure(value, unit) }];
+      }),
+      estimateDriverIds: runKey === null ? [] : goalChanceDriversForAgent(read.analysisResult, read.graph)
+        .flatMap(({ driver }) => driver.kind === 'factor_value' && driver.authored_by === 'olumi' ? [driver.factor_id as string] : []),
       // RC's own goal read (slice 1 unchanged); the goal's kind, target, label and date come from the SOLE goal only.
       goalPresent: signals['model.goal_present'],
       goalLabel: typeof goal?.label === 'string' ? goal.label : '',
@@ -147,4 +168,34 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
   } catch {
     return unread;
   }
+}
+
+export interface EstimatePoint {
+  readonly factor_id: string;
+  readonly label: string;
+  readonly figure: string;
+  readonly authorship: ValueAuthorship;
+  readonly via: 'driver' | 'goal_path' | 'shown_first';
+}
+
+/**
+ * ONE selection, at most three. No influence stability licence exists, so the remainder uses Strengthen's goal
+ * distance/id order. run_delta value rows carry amounts, not both ends' authorship or proof of presentation; Run input
+ * snapshots carry source plus an opaque authorship digest, not a shown-to-user receipt. Pending proposals record the
+ * held change, not a persisted prefilled-and-edited pair. None proves rule (ii): user/unknown figures stay excluded.
+ */
+export function estimatePointsOf(f: ActionFacts): EstimatePoint[] {
+  const candidates = f.estimateCandidates.filter(p => p.value_authorship === 'olumi_estimate' || p.value_authorship === 'olumi_accepted');
+  const nearest = [...candidates].sort((a, b) => a.goal_distance - b.goal_distance
+    || (a.factor_id < b.factor_id ? -1 : a.factor_id > b.factor_id ? 1 : 0));
+  const driverIds = new Set(f.estimateDriverIds);
+  const ordered = [...f.estimateDriverIds.flatMap(id => candidates.filter(p => p.factor_id === id)), ...nearest];
+  const seen = new Set<string>();
+  return ordered.filter(p => {
+    if (seen.has(p.factor_id)) return false;
+    seen.add(p.factor_id);
+    return true;
+  }).slice(0, 3)
+    .map(p => ({ factor_id: p.factor_id, label: p.label, figure: p.figure, authorship: p.value_authorship,
+      via: driverIds.has(p.factor_id) ? 'driver' : 'goal_path' }));
 }

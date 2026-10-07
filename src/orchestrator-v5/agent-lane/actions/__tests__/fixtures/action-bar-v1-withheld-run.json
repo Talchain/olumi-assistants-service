@@ -97,6 +97,28 @@
       "enabled": true,
       "why_now": "See what your brief has and what it is missing.",
       "offer_key": "524f6501fd806533"
+    },
+    {
+      "action_id": "bias_anchoring",
+      "label": "Anchoring",
+      "icon": "Anchor",
+      "group": "method",
+      "press_id": "act:bias_anchoring",
+      "user_line": "Walk me through where a first number could be pulling my estimates.",
+      "enabled": true,
+      "why_now": "Test Olumi’s figures against your own evidence.",
+      "offer_key": "a7161271d00a3ec5"
+    },
+    {
+      "action_id": "check_estimates",
+      "label": "Check estimates",
+      "icon": "BadgeCheck",
+      "group": "review",
+      "press_id": "act:check_estimates",
+      "user_line": "Show me Olumi's estimates that this result rests on.",
+      "enabled": true,
+      "why_now": "See the Olumi estimates feeding this result.",
+      "offer_key": "cbeea79decf31897"
     }
   ]
 }

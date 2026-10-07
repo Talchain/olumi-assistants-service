@@ -2,7 +2,7 @@
  * ⭐ S-B ACTION SYSTEM — THE ONE DISPATCH REGISTRY (CEE half; lane ACTION-BAR-CEE under the S-B owner github-a2;
  * ACTION-SYSTEM-DRAFT §C1 + PL/DL rulings §D; AIE amendment #87 6036471065; github-a2 contract amendments 1–11).
  *
- * WHAT IT IS: the closed list of the PoC's ten actions, each with what the bar shows (label ≤2 words, icon key, menu
+ * WHAT IT IS: the closed list of the PoC's typed actions, each with what the bar shows (label ≤2 words, icon key, menu
  * group), the chip id a press sends, and the visible user line. It is the authority on DISPATCH only. Every entry names
  * the existing authority for everything else (AIE 6036471065): RC owns eligibility, priority and method-turn state (the
  * guidance selector), Science/DSK owns applicability and badges, Canonical owns quantities, dates and provenance (the
@@ -14,14 +14,14 @@
  *
  * SLICE 1 = the actions whose typed handler is complete today (ACTION-SYSTEM-DRAFT §E.4, binding): review, what_changes,
  * pre_mortem, more_options, test_link, and strengthen in its S1 scope only. SLICE 2a adds the canonical standing gaps
- * (frame_brief, set_goal, set_deadline) and S-C WIDEN's risks door. check_estimates (S-D EDIT-PANEL) and further methods join when their
+ * (frame_brief, set_goal, set_deadline) and S-C WIDEN's risks door. SLICE 2b adds bias_anchoring and check_estimates. Further methods join when their
  * owner supplies a TOTAL typed handler; adding the id makes `tsc` demand its `HANDLERS` entry. Outside view, trade-offs,
- * bias review and the anchoring check stay held (AIE 6036471065 item 2). An id that is not here is never emitted.
+ * bias review stay held (AIE 6036471065 item 2). An id that is not here is never emitted.
  */
 
 import { SUGGEST_RISKS_CHIP, widenTargetOf } from '../method-turn/widen-turn.js';
 
-export const ACTION_IDS = ['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks'] as const;
+export const ACTION_IDS = ['review', 'what_changes', 'strengthen', 'pre_mortem', 'more_options', 'test_link', 'frame_brief', 'set_goal', 'set_deadline', 'more_risks', 'bias_anchoring', 'check_estimates'] as const;
 export type ActionId = (typeof ACTION_IDS)[number];
 
 /** The four standard actions, in their FIXED bar positions (D.3: users learn their places). */
@@ -47,7 +47,7 @@ export interface ActionAuthorities {
 
 export interface ActionEntry {
   readonly label: string;
-  /** A lucide-react 0.344.0 icon name (DGAI's installed library; each name checked present in its dist). */
+  /** A lucide-react 0.344.0 icon name (DGAI's installed library; slice 1 names checked in its dist; slice 2b names await the DGAI icon list). */
   readonly icon: string;
   readonly group: ActionGroup;
   /** The chip id a press sends; `per_link` = the existing per-link id, built from the offer's target. */
@@ -124,6 +124,18 @@ export const ACTION_REGISTRY: Readonly<Record<ActionId, ActionEntry>> = {
     press: { kind: 'fixed', id: SUGGEST_RISKS_CHIP.id },
     user_line: SUGGEST_RISKS_CHIP.message,
     authorities: { eligibility: 'RC', science: 'DSK', quantities: null }, contract: 'typed_method', run_dependent: false,
+  },
+  bias_anchoring: {
+    label: 'Anchoring', icon: 'Anchor', group: 'method',
+    press: { kind: 'fixed', id: 'act:bias_anchoring' },
+    user_line: 'Walk me through where a first number could be pulling my estimates.',
+    authorities: { eligibility: 'Canonical', science: 'DSK', quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: true,
+  },
+  check_estimates: {
+    label: 'Check estimates', icon: 'BadgeCheck', group: 'review',
+    press: { kind: 'fixed', id: 'act:check_estimates' },
+    user_line: "Show me Olumi's estimates that this result rests on.",
+    authorities: { eligibility: 'Canonical', science: null, quantities: 'Canonical' }, contract: 'typed_reply', run_dependent: true,
   },
 };
 

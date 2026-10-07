@@ -24,7 +24,9 @@ import { composeGoalTargetQuestion } from '../../orchestrator-v5/goal-target/dec
 import { ACTION_REGISTRY } from '../../orchestrator-v5/agent-lane/actions/registry.js';
 import { SUGGEST_RISKS_CHIP } from '../../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
-import { actionFactsOf } from '../../orchestrator-v5/agent-lane/actions/state.js';
+import { estimateGraph, estimateLicence } from '../../orchestrator-v5/agent-lane/actions/__tests__/estimate-fixture.js';
+import { resolveDskClaimProvenance } from '../../orchestrator-v5/compose/dsk-claim-record.js';
+import { actionFactsOf, estimatePointsOf } from '../../orchestrator-v5/agent-lane/actions/state.js';
 
 const { port, source, identity, logs } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -176,7 +178,7 @@ const reload = async (): Promise<{ action_bar?: Bar }> => {
 };
 const offersOf = (b: Bar) => [...b.priority, ...b.standard, ...b.more];
 const PRESS_IDS = ['agent-next-review-decision', 'agent-next-what-would-change', 'agent-next-strengthen', 'agent-next-pre-mortem', 'agent-next-widen',
-  'act:frame_brief', 'act:set_goal', 'act:set_deadline', SUGGEST_RISKS_CHIP.id,
+  'act:frame_brief', 'act:set_goal', 'act:set_deadline', SUGGEST_RISKS_CHIP.id, 'act:bias_anchoring', 'act:check_estimates',
   'agent-test-without-link:["sprint_capacity_for_ai_reporting","ai_reporting_module_availability"]', 'act:no_such_action'];
 
 describe('every press reaches its typed path, never the free Agent turn', () => {
@@ -396,5 +398,67 @@ describe('S-B slice 2a through the real routes', () => {
     expect(b._diagnostic_trace?.fast_path).toBe('method');
     expect(b._action).toMatchObject({ action_id: 'more_risks', outcome: 'ran' });
     expect(modelCalls).toBeGreaterThan(0);
+  });
+});
+
+
+describe('S-B slice 2b through the real turn, composer and reload routes', () => {
+  const setEstimates = () => {
+    setState('withheld', estimateGraph());
+    const result = { ...(source.analysis.analysis_result as object), enrichment: { inference_warnings: [estimateLicence()] } };
+    source.analysis = { ...source.analysis, analysis_result: result, current_read: { analysis_ready: READY, result } };
+  };
+  it.each(['bias_anchoring', 'check_estimates'] as const)('%s press is an exact typed reply, zero model calls, with live/reload parity and both enabled menu offers', async id => {
+    setEstimates();
+    const b = await press(`act:${id}`, { parameters: { offer_key: '0123456789abcdef' } });
+    expect(b._diagnostic_trace?.fast_path).toBe('method');
+    expect(modelCalls).toBe(0);
+    expect(b._action).toMatchObject({ action_id: id, outcome: 'ran', offer_key: '0123456789abcdef' });
+    const points = estimatePointsOf(actionFactsOf({ scenarioId: scenario, graph: source.graph, graphHash: hashOf(source.graph),
+      analysisState: source.analysis.analysis_state, analysisResult: source.analysis.analysis_result, analysisReady: READY }));
+    expect(points.map(p => p.factor_id)).toEqual(['far', 'near', 'znear']);
+    const expected = id === 'bias_anchoring' ? [
+      "A first number can pull later estimates towards it. Here are Olumi's figures this result leans on, to test against your own evidence.",
+      ...[['Far', '25%'], ['Near', '15%'], ['Extra', '10%']].map(([label, figure]) => `- Olumi put ‘${label}’ at ${figure}. That's Olumi's estimate, not a measured figure. What would make the real value much lower than that? And what would make it much higher? From your own evidence, what range would you give, and what is it based on?`),
+      'Which of these would you check first?',
+    ].join('\n') : [
+      "Olumi's estimates that this result rests on:",
+      "- ‘Far’: 25%. That's Olumi's estimate, not a measured figure.",
+      "- ‘Near’: 15%. That's Olumi's estimate, not a measured figure.",
+      "- ‘Extra’: 10%. That's Olumi's estimate, not a measured figure.",
+      "If you have your own figure for any of these, tell me and I'll propose it for you to approve.",
+    ].join('\n');
+    expect(b.assistant_text).toBe(expected);
+    expect(b.assistant_text).not.toMatch(/\b(most|top|biggest|strongest|best|winner|recommend|leader|ahead|beats)\b/i);
+    expect(b.suggested_actions).toEqual([]);
+    expect(b._action?.science).toBeUndefined(); // two options + current Run: canonicalStageOf reads decide
+    for (const action_id of ['bias_anchoring', 'check_estimates']) expect(b.action_bar!.more.find(o => o.action_id === action_id)).toMatchObject({ enabled: true });
+    coldStore();
+    expect((await reload()).action_bar).toEqual(b.action_bar);
+  });
+  it('anchoring frame badge uses the canonical reader on a stale Run; no readable stage yields no badge', async () => {
+    setState('stale', estimateGraph());
+    const frame = await press('act:bias_anchoring');
+    expect(frame._action?.science).toEqual(resolveDskClaimProvenance('DSK-B-001'));
+    expect(JSON.stringify(frame._action).match(/DSK-B-001/g)).toHaveLength(1);
+    setState('pre_run', estimateGraph());
+    const noStage = await press('act:bias_anchoring');
+    expect(noStage._action).toMatchObject({ outcome: 'ran' });
+    expect(noStage._action?.science).toBeUndefined();
+    expect(modelCalls).toBe(0);
+  });
+  it('stale anchoring offer after all eligible factors became user figures: exact no-trigger reply, cant_yet, no model calls', async () => {
+    setEstimates();
+    const old = (await press('act:check_estimates')).action_bar!.more.find(o => o.action_id === 'bias_anchoring')!;
+    const g = estimateGraph();
+    for (const n of g.nodes) if (n.kind === 'factor' && n.observed_state) n.observed_state = { ...n.observed_state, source: 'user_edited' };
+    setState('withheld', g);
+    const b = await press('act:bias_anchoring', { parameters: { offer_key: old.offer_key } });
+    expect(b.assistant_text).toBe("None of these patterns' triggers fire in this model.");
+    expect(b._action).toMatchObject({ action_id: 'bias_anchoring', outcome: 'cant_yet', reason: 'nothing_in_scope' });
+    expect(b._action?.science).toBeUndefined();
+    expect(b.suggested_actions).toEqual([]);
+    expect(modelCalls).toBe(0);
+    expect(offersOf(b.action_bar!).some(o => o.action_id === 'bias_anchoring' || o.action_id === 'check_estimates')).toBe(false);
   });
 });

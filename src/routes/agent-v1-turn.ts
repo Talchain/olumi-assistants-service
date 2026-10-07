@@ -3729,7 +3729,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       guidance: guidanceHistory,
       ...(guidanceRunKey !== undefined ? { runKey: guidanceRunKey } : {}),
       state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
-    }, offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
+      // S-B typed replies own their exits, including an intentional empty list (Science's estimate questions).
+    }, actionReply === null && offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash) === undefined,
       widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }), offeredSpecific);
     /**
@@ -4453,7 +4454,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       ...(actionBar !== undefined ? { action_bar: actionBar } : {}),
       ...(actionPress !== null && actionFactsAtPress !== undefined ? { _action: actionReceiptOf(actionPress, actionFactsAtPress.revision,
-        actionReply === null || actionReply.outcome === 'ran' ? 'ran' : 'cant_yet', actionReply?.reason) } : {}),
+        actionReply === null || actionReply.outcome === 'ran' ? 'ran' : 'cant_yet', actionReply?.reason, actionReply?.science) } : {}),
       /**
        * ⭐ A7 (DL #70 5855437928; Canonical 5855435365): the graph read's `not_modelled`, exactly as read, beside the
        * `graph_hash` of that same read. Derived by the read route, never here; never on the answer row; absent when the

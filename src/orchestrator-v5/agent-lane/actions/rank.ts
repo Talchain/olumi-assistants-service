@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import type { SelectedRow } from '../guidance/index.js';
 import { structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
 import { ACTION_IDS, ACTION_REGISTRY, STANDARD_ACTIONS, type ActionGroup, type ActionId } from './registry.js';
-import type { ActionFacts, ActionRevision } from './state.js';
+import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
 
 export type ItemRef =
   | { readonly kind: 'option' | 'factor' | 'risk' | 'outcome' | 'goal'; readonly id: string }
@@ -71,6 +71,8 @@ export const WHY_NOW = {
   set_goal: 'Your goal has no target yet, so no chance of meeting it can be worked out.',
   more_risks_W6: 'Your model has at most one risk.',
   more_risks: 'Find risks you haven’t considered yet.',
+  bias_anchoring: 'Test Olumi’s figures against your own evidence.',
+  check_estimates: 'See the Olumi estimates feeding this result.',
   test_link: 'This result is most sensitive to one link: see what happens without it.',
 } as const;
 
@@ -152,6 +154,10 @@ function drafts(f: ActionFacts): Draft[] {
         ? { enabled: true, why_now: risks?.variant === 'W6' ? WHY_NOW.more_risks_W6 : WHY_NOW.more_risks }
         : { enabled: false, disabled_reason: DISABLED.needs_goal },
       risks !== undefined ? tierOfPriority(risks) : GENERIC_TIER));
+    }
+    if (estimatePointsOf(f).length > 0) {
+      out.push(draft(f, 'bias_anchoring', { enabled: true, why_now: WHY_NOW.bias_anchoring }, GENERIC_TIER));
+      if (f.runBound) out.push(draft(f, 'check_estimates', { enabled: true, why_now: WHY_NOW.check_estimates }, GENERIC_TIER));
     }
     const premortem = rc('RC-PREMORTEM');
     const date = f.deadline === null ? null : sayDate(f.deadline);

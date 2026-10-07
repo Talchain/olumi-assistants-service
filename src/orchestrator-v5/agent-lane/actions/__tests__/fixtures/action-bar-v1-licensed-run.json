@@ -91,6 +91,28 @@
       "enabled": true,
       "why_now": "Find risks you haven’t considered yet.",
       "offer_key": "124aba71579f3613"
+    },
+    {
+      "action_id": "bias_anchoring",
+      "label": "Anchoring",
+      "icon": "Anchor",
+      "group": "method",
+      "press_id": "act:bias_anchoring",
+      "user_line": "Walk me through where a first number could be pulling my estimates.",
+      "enabled": true,
+      "why_now": "Test Olumi’s figures against your own evidence.",
+      "offer_key": "be2a321235e1a126"
+    },
+    {
+      "action_id": "check_estimates",
+      "label": "Check estimates",
+      "icon": "BadgeCheck",
+      "group": "review",
+      "press_id": "act:check_estimates",
+      "user_line": "Show me Olumi's estimates that this result rests on.",
+      "enabled": true,
+      "why_now": "See the Olumi estimates feeding this result.",
+      "offer_key": "dd3b10d47a3e0c30"
     }
   ]
 }

@@ -70,7 +70,7 @@ const LINK_SET_KEYS: ReadonlySet<string> = new Set(['ok', 'mutated', 'proposal_i
 
 const q = (label: string): string => `‘${label}’`;
 /** A level as the user writes it ("£15,000 over 6 months"): the lane's one figure formatter, as the consent subject says it. */
-const shown = (value: number, unit: unknown): string => {
+export const proposalFigure = (value: number, unit: unknown): string => {
   const u = nonEmpty(unit) ? unit.trim() : null;
   return sayFigureExactly(value, u ?? '') ?? formatFactorValue(value, u)?.display ?? (u === null ? String(value) : `${value} ${u}`);
 };
@@ -82,7 +82,7 @@ const levelSources = (levels: readonly unknown[]): unknown[] => levels.flatMap((
 });
 const setting = (value: number, unit: unknown, nodes: readonly unknown[], factor: string): string => {
   const state = twoStateLevelWords(value, unit, nodes, factor);
-  return state === null ? `set to ${shown(value, unit)}` : `switched ${state}`;
+  return state === null ? `set to ${proposalFigure(value, unit)}` : `switched ${state}`;
 };
 const question = (publicLabel: unknown): string => {
   const n = typeof publicLabel === 'string' ? /^Approve (\d+) changes$/.exec(publicLabel.trim())?.[1] : undefined;
@@ -178,11 +178,11 @@ function newFactorReply(r: Rec): string | null {
     if (f === undefined || cv === undefined || !nonEmpty(f.label) || !nonEmpty(f.affects)
       || typeof cv.value !== 'number' || !Number.isFinite(cv.value) || f.how_strongly !== FACTOR_PLACEHOLDER_STRENGTH) return null;
     if (cv.stated_by === 'user') {
-      lines.push(`${q(f.label)} is ${twoStateLevelWords(cv.value, cv.unit) === null ? shown(cv.value, cv.unit) : `switched ${twoStateLevelWords(cv.value, cv.unit)}`}, the figure you gave, and affects ${f.affects.trim()}.`);
+      lines.push(`${q(f.label)} is ${twoStateLevelWords(cv.value, cv.unit) === null ? proposalFigure(cv.value, cv.unit) : `switched ${twoStateLevelWords(cv.value, cv.unit)}`}, the figure you gave, and affects ${f.affects.trim()}.`);
     } else if (cv.stated_by === 'user_to_confirm' && nonEmpty(cv.quote)) {
       // ⛔ DL ruling on #2235: the PAIRING is Olumi's until the user approves it, so the card shows it with their own words.
       toConfirm = true;
-      lines.push(`${q(f.label)}: ${shown(cv.value, cv.unit)}, from your message “${cv.quote.trim()}”; it affects ${f.affects.trim()}.`);
+      lines.push(`${q(f.label)}: ${proposalFigure(cv.value, cv.unit)}, from your message “${cv.quote.trim()}”; it affects ${f.affects.trim()}.`);
     } else {
       return null;
     }
