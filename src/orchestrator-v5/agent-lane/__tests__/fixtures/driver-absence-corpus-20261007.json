@@ -1,0 +1,633 @@
+{
+ "source": "Every assistant_text in ~/olumi-work/acceptance-pd/output/**/*.json (served Acceptance/scout/witness captures, staging + prod), mined 7 Oct 00:5xZ",
+ "population": "FILES 867 · assistant_text 446 · distinct keyword sentences 117 · occurrences 379 · fire 40 · keep 77",
+ "keyword_filter": "/(assumption|factor|sensitiv|investigat|matters? most|driver|stands? out)/i",
+ "review": "Every row classified and every edit read by Science 393023 (7 Oct); keeps include the EVPPI-status family (\"no measurable factor sensitivity was established\"), deliberately out of scope",
+ "rows": [
+  {
+   "sentence": "These are factor starting values on the comparison’s paths.",
+   "n": 112,
+   "fire": false
+  },
+  {
+   "sentence": "Other model assumptions may also affect the result.",
+   "n": 112,
+   "fire": false
+  },
+  {
+   "sentence": "The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.",
+   "n": 17,
+   "fire": false
+  },
+  {
+   "sentence": "Sensitivity was not measured, so this result does not establish which assumption matters most.",
+   "n": 6,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "Sensitivity was not measured, so this result does not establish which assumption deserves investigation first.",
+   "n": 5,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "Sensitivity was not measured, so this run does not establish which assumption matters most.",
+   "n": 5,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "Sensitivity was not measured, so investigation priority is not established.",
+   "n": 4,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "No measurable factor sensitivity was established, so this run does not identify which assumption matters most.",
+   "n": 3,
+   "fire": true,
+   "edited": "No measurable factor sensitivity was established."
+  },
+  {
+   "sentence": "No single option can be put forward yet, because the options came out too close together on this run to tell apart; tell me what matters most to you between them.",
+   "n": 2,
+   "fire": false
+  },
+  {
+   "sentence": "The analysis does not establish which assumption is most worth investigating.",
+   "n": 2,
+   "fire": true,
+   "edited": ""
+  },
+  {
+   "sentence": "Sensitivity was not measured, so the run does not establish which assumption matters most.",
+   "n": 2,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "Sensitivity was not measured.",
+   "n": 2,
+   "fire": false
+  },
+  {
+   "sentence": "Sensitivity was not measured, so this run does not establish which assumption deserves investigation first.",
+   "n": 2,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "Small assumption changes can alter the comparison.",
+   "n": 2,
+   "fire": false
+  },
+  {
+   "sentence": "The link from ‘Price rise’ to ‘monthly recurring revenue’ is one of the links this result is most sensitive to.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The analysis has not measured which assumption matters most to the comparison.",
+   "n": 1,
+   "fire": true,
+   "edited": ""
+  },
+  {
+   "sentence": "Driver rankings and other diagnostic scores aren't compared between the two versions, because they shift with how the model is scaled.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The run cannot establish which choice meets your requirements; 15 inputs are Olumi’s assumptions, not yours.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Olumi supplied 10 unstated values; sensitivity and tipping points were not measured, so this run does not establish which assumption deserves investigation first.",
+   "n": 1,
+   "fire": true,
+   "edited": "Olumi supplied 10 unstated values; sensitivity and tipping points were not measured."
+  },
+  {
+   "sentence": "The comparison also rests on Olumi-supplied assumptions, not validated evidence.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Your stated effects inform the model, but uncertainty and whether relationships hold include Olumi assumptions.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "No most-sensitive assumption was measurable.",
+   "n": 1,
+   "fire": true,
+   "edited": ""
+  },
+  {
+   "sentence": "Your three-month deadline remains untested; the run also does not establish which assumption matters most.",
+   "n": 1,
+   "fire": true,
+   "edited": "Your three-month deadline remains untested."
+  },
+  {
+   "sentence": "No option can be put forward: key effects on productivity remain unsized, and this provisional comparison rests on Olumi’s assumptions.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Its 14 supplied values are Olumi’s assumptions, not yours; launch delay risk defaults to zero.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "In this model, 60% of runs supported ‘Launch starter tier’, provisionally on assumptions that include Olumi’s starting estimates; small assumption changes could alter that result.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The nine-month deadline was not tested.** The analysis also has not established which assumption is most worth investigating.",
+   "n": 1,
+   "fire": true,
+   "edited": "The nine-month deadline was not tested.**"
+  },
+  {
+   "sentence": "In this model, 58% of runs supported ‘AI Reporting Module Sprint’, provisionally on Olumi’s starting estimates and the unconfirmed assumption that higher revenue is better.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "In this model, 57% of runs supported ‘AI Reporting Module Sprint’—a provisional finding resting on Olumi’s starting estimates and an unconfirmed assumption that higher revenue is better.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Small assumption changes could change the comparison, particularly changes to the modelled links between module availability, prospect signing and revenue.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Watch for:** Revenue lost through price-related cancellations exceeding the planning assumption.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Your brief supplied the effect sizes; Olumi supplied assumptions about uncertainty and whether relationships hold.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The analysis did not measure which assumption most affects the comparison.",
+   "n": 1,
+   "fire": true,
+   "edited": ""
+  },
+  {
+   "sentence": "Olumi supplied 21 values, not you, so this remains an assumption-based comparison.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Sensitivity was not measured, and no tipping point was evaluated.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Small changes to assumptions could change the comparison.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Tests highlighted the links connecting reporting availability, enterprise signing and revenue; they do not establish which assumption to investigate first.",
+   "n": 1,
+   "fire": true,
+   "edited": "Tests highlighted the links connecting reporting availability, enterprise signing and revenue."
+  },
+  {
+   "sentence": "Six underlying values were supplied by Olumi, not you; sensitivity has not established which assumption matters most.",
+   "n": 1,
+   "fire": true,
+   "edited": "Six underlying values were supplied by Olumi, not you."
+  },
+  {
+   "sentence": "“Hire a Tech Lead who owns the platform roadmap, mentors the current developers and runs the weekly d” leads provisionally on this model’s assumptions**, scoring highest in about 73% of simulations—not a 73% chance of meeting the deadline.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The comparison is provisional: small assumption changes could alter which option it supports.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Three starting values were Olumi’s assumptions, not yours.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Sensitivity was not measured, so these results do not establish which assumption matters most.",
+   "n": 1,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "This first pass cannot put an option forward: it rests on unvalidated Olumi assumptions, and sensitivity has not been measured.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Sensitivity and tipping points were not measured, so investigation priority is not established.",
+   "n": 1,
+   "fire": true,
+   "edited": "Sensitivity and tipping points were not measured."
+  },
+  {
+   "sentence": "Robustness and sensitivity were not assessed, so this run does not establish which assumption matters most.",
+   "n": 1,
+   "fire": true,
+   "edited": "Robustness and sensitivity were not assessed."
+  },
+  {
+   "sentence": "Sensitivity was not measured, so the link tests do not establish which assumption matters most.",
+   "n": 1,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "In this model, raising prices by 10% has the highest chance of reaching at least £126,000/month—but small assumption changes could alter that comparison.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Your brief supplies the link sizes; Olumi supplied two starting values and assumptions about uncertainty and whether links hold.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The nine-month deadline remains untested.** Factor sensitivity was not measured, so this result does not establish which assumption deserves investigation first.",
+   "n": 1,
+   "fire": true,
+   "edited": "The nine-month deadline remains untested.** Factor sensitivity was not measured."
+  },
+  {
+   "sentence": "In this model, 58% of runs supported ‘Raise prices 10%’, provisionally on assumptions that include Olumi’s starting estimates; the nine-month deadline was not tested.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Robustness is low: changes to assumptions can alter the ordering.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Keep pricing as it is: 0% under the no-change assumption.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Three underlying values are Olumi’s assumptions, not yours; sensitivity was not measured, so investigation priority is not established.",
+   "n": 1,
+   "fire": true,
+   "edited": "Three underlying values are Olumi’s assumptions, not yours; sensitivity was not measured."
+  },
+  {
+   "sentence": "The comparison can change under tested relationship changes; no most-sensitive assumption was established.",
+   "n": 1,
+   "fire": true,
+   "edited": "The comparison can change under tested relationship changes."
+  },
+  {
+   "sentence": "Effect sizes came from your brief, but uncertainty includes Olumi’s assumptions.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Sensitivity was not measured, so it does not establish which assumption deserves investigation first.",
+   "n": 1,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "No option can be put forward: the effects are unsized, the mapping to your brief is unconfirmed, and 11 values are Olumi’s assumptions—not yours.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "I can’t record that as stated: **‘Decision: no-shows’ is the choice itself, not a numerical factor**, and the model has no direct link from it to ‘no-shows’.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Which factor and unit did you mean—for example, 10 percentage points of Text reminder coverage or £10 of No-show charge level?",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Eight underlying values are Olumi’s assumptions, not yours.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Sensitivity has not been measured, and the nine-month deadline was not tested.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The nine-month deadline was not tested; sensitivity and robustness were not assessed.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "In this model, 58% of runs supported ‘Raise prices 10%’, provisionally on Olumi’s starting estimates; small assumption changes could alter that result.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The nine-month deadline was not tested.** Relationship sizes came from your brief; some uncertainty assumptions came from Olumi.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Investigation priority was not established.",
+   "n": 1,
+   "fire": true,
+   "edited": ""
+  },
+  {
+   "sentence": "The model also does not test the nine-month deadline, and sensitivity has not been measured.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Nine underlying values are Olumi’s assumptions; sensitivity and tipping points were not measured.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Sensitivity was not measured, and the 9-month deadline was not tested.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "It also rests on six values supplied by Olumi, not you; no most-sensitive assumption has been established.",
+   "n": 1,
+   "fire": true,
+   "edited": "It also rests on six values supplied by Olumi, not you."
+  },
+  {
+   "sentence": "Seven input values were supplied by Olumi, not you; sensitivity was not measured, so investigation priority is not established.",
+   "n": 1,
+   "fire": true,
+   "edited": "Seven input values were supplied by Olumi, not you; sensitivity was not measured."
+  },
+  {
+   "sentence": "Sensitivity was not measured, so the run does not establish which assumption deserves investigation first.",
+   "n": 1,
+   "fire": true,
+   "edited": "Sensitivity was not measured."
+  },
+  {
+   "sentence": "Overall decision sensitivity and tipping points were not measured, so this run does not establish which assumption deserves investigation first.",
+   "n": 1,
+   "fire": true,
+   "edited": "Overall decision sensitivity and tipping points were not measured."
+  },
+  {
+   "sentence": "That share is comparative support, not target success; small assumption changes could alter it.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Small assumption changes could alter this finding.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Robustness is low, and no most-sensitive factor was measurable; 14 inputs came from Olumi.",
+   "n": 1,
+   "fire": true,
+   "edited": "Robustness is low; 14 inputs came from Olumi."
+  },
+  {
+   "sentence": "Fifteen inputs were Olumi’s assumptions, not yours.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Robustness is low; outcomes were almost identical, and no most-sensitive factor was measurable.",
+   "n": 1,
+   "fire": true,
+   "edited": "Robustness is low; outcomes were almost identical."
+  },
+  {
+   "sentence": "Overall robustness is low; no measurable factor sensitivity was established.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Robustness is low; no measurable factor sensitivity was established.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "No single option can be put forward: the comparison is a near tie, rests on 18 Olumi-supplied values, and identifies no measurable factor sensitivity.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Four underlying values were supplied by Olumi, not you; sensitivity was not measured, so this run does not establish which assumption matters most.",
+   "n": 1,
+   "fire": true,
+   "edited": "Four underlying values were supplied by Olumi, not you; sensitivity was not measured."
+  },
+  {
+   "sentence": "Your brief supplied the relationship sizes, but Olumi supplied assumptions about uncertainty and whether relationships hold.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Eight underlying values were supplied by Olumi, not you; sensitivity was not measured, so investigation priority is not established.",
+   "n": 1,
+   "fire": true,
+   "edited": "Eight underlying values were supplied by Olumi, not you; sensitivity was not measured."
+  },
+  {
+   "sentence": "Eight values were supplied by Olumi, not you; no most-sensitive assumption was established.",
+   "n": 1,
+   "fire": true,
+   "edited": "Eight values were supplied by Olumi, not you."
+  },
+  {
+   "sentence": "That uncertainty is the finding; no individual factor sensitivity was measurable.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The 9-month horizon remains untested, and four starting values are Olumi’s assumptions, not yours.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: the support-cost → capacity-strain → revenue pathway still contains unsized assumptions.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The run also does not test your nine-month deadline, and decision sensitivity was not measured.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The comparison is not settled: options produced nearly identical outcomes, robustness is very low, and no factor sensitivity was measurable.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "This model does not yet offer a settled choice: robustness is very low, outcomes are nearly identical, and no factor sensitivity was measurable.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Link sizes come from your brief; their uncertainty includes Olumi’s assumptions.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Your brief supplied the relationship sizes; Olumi supplied assumptions about uncertainty.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "No option can be put forward from this run: the support-cost → service-strain → revenue pathway contains unsized assumptions introduced by Olumi.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "But the run does not test your nine-month deadline, and sensitivity was not measured.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "In this model, 52% of runs supported ‘Raise prices 10%’, provisionally on Olumi’s starting estimates; small assumption changes could alter the comparison.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Seven input values are also Olumi’s assumptions.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "All three options were analysed, but the nine-month deadline was not tested, and sensitivity was not measured.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Ten underlying values are Olumi’s assumptions, not your figures.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Factor sensitivity was not measured, so this run does not establish which assumption deserves investigation first.",
+   "n": 1,
+   "fire": true,
+   "edited": "Factor sensitivity was not measured."
+  },
+  {
+   "sentence": "Eleven underlying values are Olumi’s assumptions, not yours.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "In this model, 55% of runs supported ‘Launch £49 starter tier’, provisionally on assumptions that include eight Olumi-supplied values.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Small assumption changes could alter the comparison; no most-sensitive assumption has been established.",
+   "n": 1,
+   "fire": true,
+   "edited": "Small assumption changes could alter the comparison."
+  },
+  {
+   "sentence": "The comparison is provisional: small assumption changes could alter it, and the model produces almost identical outcomes across options.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "It includes eight Olumi-supplied values; no most-sensitive assumption has been established.",
+   "n": 1,
+   "fire": true,
+   "edited": "It includes eight Olumi-supplied values."
+  },
+  {
+   "sentence": "Sixteen inputs were Olumi’s assumptions, not your figures.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The comparison rests on 13 Olumi-supplied assumptions.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Olumi supplied 13 underlying values; they are assumptions, not your figures.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "The comparison remains uncertain: small assumption changes could alter the ordering.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "It rests partly on Olumi’s estimates, and no measurable factor sensitivity was established.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "In this model, 53% of runs supported ‘Build AI reporting’, provisionally on Olumi’s estimates; small assumption changes could alter that.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Overall decision sensitivity was not measured, so the link tests do not establish which assumption deserves investigation first.",
+   "n": 1,
+   "fire": true,
+   "edited": "Overall decision sensitivity was not measured."
+  },
+  {
+   "sentence": "Sensitivity and robustness were not assessed, and seven underlying values were supplied by Olumi rather than you.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "Robustness and sensitivity were not assessed, and seven underlying values are Olumi’s assumptions, not yours.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "No measurable factor sensitivity was established, so this run does not establish which assumption to investigate first.",
+   "n": 1,
+   "fire": true,
+   "edited": "No measurable factor sensitivity was established."
+  },
+  {
+   "sentence": "No measurable factor sensitivity was established; that does not mean the assumptions are harmless.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "In this model, 54% of runs supported ‘Raise prices 10%’, provisionally on Olumi’s starting estimates; small assumption changes could alter that support.",
+   "n": 1,
+   "fire": false
+  },
+  {
+   "sentence": "No measurable factor sensitivity was established, so this run cannot identify which assumption matters most or deserves investigation first.",
+   "n": 1,
+   "fire": true,
+   "edited": "No measurable factor sensitivity was established."
+  }
+ ]
+}
