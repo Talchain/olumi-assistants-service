@@ -987,6 +987,8 @@ export function isWidenAddPressId(id: unknown): boolean {
 
 export type WidenAddCall = { readonly tool: 'propose_new_risk'; readonly args: {
   label: string; rationale: string;
+  /** The press IS the whole request (server-owned): the door's own typed reply composes it (`composeProposalReply`). */
+  whole_request: true;
   affects: { target_label: string; direction: 'positive' | 'negative' }[];
   caused_by: { factor_label: string; direction: 'positive' | 'negative' }[];
 } };
@@ -1039,6 +1041,7 @@ export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodRead
               affects: [{ target_label: labelOf(a)!, direction: ad }],
               caused_by: [{ factor_label: labelOf(f)!, direction: td }],
               rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
+              whole_request: true,
             } };
           }
         }
@@ -1046,6 +1049,17 @@ export function widenAddCallOf(chipId: unknown, message: unknown, rb: MethodRead
     }
   }
   return null;
+}
+
+/**
+ * The Add press HELD its card but the door's typed reply could not be composed: say what is held, never the refusal
+ * (served sc-plus-1, 7 Oct 16:58Z: `held: true`, yet the user read "I couldn't prepare that risk").
+ */
+export function riskHeldReply(call: WidenAddCall): string {
+  const a = call.args;
+  return `I’ve prepared this change: add the risk ${quote(a.label)}, driven by ${a.caused_by[0]!.direction === 'positive' ? 'more' : 'less'} `
+    + `${quote(a.caused_by[0]!.factor_label)}; it would ${a.affects[0]!.direction === 'negative' ? 'lower' : 'raise'} ${quote(a.affects[0]!.target_label)}. `
+    + 'How strongly is not known yet. Nothing is added until you approve it.';
 }
 
 /** The Add press refused at the door: said plainly, nothing held, and the way back. */
