@@ -36,10 +36,6 @@ const single = (said: string, quote: string, amount: number) => {
   const w = world();
   return (w.caps.proposeLinkEffect!(ctxSaying(said), { ...ENDS, ...FIGS(amount), quote }) as Promise<Json>).then((r) => ({ r, w }));
 };
-const grouped = (said: string, quote: string, amount: number) => {
-  const w = world();
-  return (w.caps.proposeLinkEffect!(ctxSaying(said), { links: [{ ...ENDS, ...FIGS(amount), quote }] }) as Promise<Json>).then((r) => ({ r, w }));
-};
 /** Nothing is written before Approve: the only dispatch is the graph READ (no write path, no mutation). */
 const onlyReads = (w: ReturnType<typeof world>) => {
   expect(w.calls.length).toBeGreaterThan(0);
