@@ -744,7 +744,7 @@ function projectBlocksForWithheldClaim(
     if (roster.length > 0) {
       let omitChip = false;
       for (const field of BLOCK_PROSE_FIELDS) {
-        const value = (next ?? source)[field];
+        const value = field === 'body' ? (next ?? source)[field] : source[field];
         if (typeof value !== 'string') continue;
         const result = projectField(value, roster);
         if (result === null) continue;
@@ -778,22 +778,64 @@ function projectRobustnessProse(value: string, roster: readonly string[]): strin
   const asserts = (text: string): boolean => textAssertsLeadingOption(text, context);
   if (!asserts(value)) return null;
   const clauses = value.split(/([,;])/);
-  const borrowsName = textNamesAnOption(value, roster) && clauses.flatMap(splitIntoRedactableUnits).some(
+  // Bound classifier calls on untyped transport prose. Over-budget fields
+  // fail closed rather than spending one classifier pass per separator.
+  if (Math.ceil(clauses.length / 2) > 128) return WIRE_WITHHELD_LEADER_REPLACEMENT;
+
+  const neutralised = clauses.map((clause, index) => index % 2 === 1 ? clause :
+    splitIntoRedactableUnits(clause).map((unit) => {
+      // PLoT RESULT_CHANGE_PHRASE at cddc7560f3350238685b6561fb0f83295f1fe8cb.
+      // Replace the referent in place, preserving its same-clause science.
+      // A copular designation (including a rosterless named subject) still
+      // needs clause replacement; it is not an unnamed result reference.
+      if (textNamesAnOption(unit, roster)
+        || /\b(?:is|are|was|were|remains?)\s+the\s+most[-\s]+supported\s+option\b/i.test(unit)) return unit;
+      return unit.replace(/\b(?:the\s+)?most[-\s]+supported\s+option\b/gi, 'the result');
+    }).join(''));
+  const borrowsName = textNamesAnOption(value, roster) && neutralised.flatMap(splitIntoRedactableUnits).some(
     (clause) => asserts(clause) && !assertedLeaderNamesItsOwnSubject(clause, context),
   );
   const project = (unit: string): boolean => asserts(unit) || (borrowsName && textNamesAnOption(unit, roster));
-  const projected = clauses.map((clause, index) => {
-    if (index % 2 === 1) return clause;
+  const out: string[] = [];
+  let previousReplaced = false;
+  for (let index = 0; index < neutralised.length; index += 2) {
+    const clause = neutralised[index];
     let text = replaceAssertingUnits(clause, project, WIRE_WITHHELD_LEADER_REPLACEMENT);
-    // A substituted clause before a comma/semicolon continues the sentence.
-    // Remove only the replacement's full stop; retain the original separator.
-    if (text !== clause && index + 1 < clauses.length && text.trimEnd().endsWith(WIRE_WITHHELD_LEADER_REPLACEMENT)) {
-      const stop = text.lastIndexOf('.');
-      text = text.slice(0, stop) + text.slice(stop + 1);
+    const replaced = text !== clause;
+    const onlyReplacement = replaced && text.trim() === WIRE_WITHHELD_LEADER_REPLACEMENT;
+    if (onlyReplacement && previousReplaced) {
+      // Collapse a contiguous run across comma/semicolon separators as well
+      // as across sentence units. Keep the LAST run's following separator.
+      out.pop();
+      out.pop();
     }
-    return text;
-  }).join('');
-  return asserts(projected) ? WIRE_WITHHELD_LEADER_REPLACEMENT : projected;
+    if (replaced) {
+      const leadingSource = out.length === 0 ? value : clause;
+      const leading = leadingSource.slice(0, leadingSource.length - leadingSource.trimStart().length);
+      text = leading + text.trimStart();
+      // A replacement after a surviving comma is part of that sentence.
+      if (out.length > 0 && /^[,;]$/.test(out[out.length - 1])) {
+        text = text.replace(/^\s*No single/, ' no single');
+      }
+      // A substituted clause before a comma/semicolon continues the sentence.
+      // Remove only the replacement's full stop; retain the original separator.
+      if (index + 1 < neutralised.length && text.trimEnd().toLowerCase().endsWith(WIRE_WITHHELD_LEADER_REPLACEMENT.toLowerCase())) {
+        const stop = text.lastIndexOf('.');
+        text = text.slice(0, stop) + text.slice(stop + 1);
+      }
+    }
+    out.push(text);
+    if (index + 1 < neutralised.length) out.push(neutralised[index + 1]);
+    previousReplaced = onlyReplacement;
+  }
+  const projected = out.join('');
+  // Appositive fragments, dangling separators or repeated refusals have no
+  // clean clause surgery. Use one complete, nonempty sentence instead.
+  if (asserts(projected) || /[,;]\s*$|[,;]\s*(?:is|are|was|were)\b/i.test(projected)
+    || (projected.match(/no single option can be put forward yet/gi)?.length ?? 0) > 1) {
+    return WIRE_WITHHELD_LEADER_REPLACEMENT;
+  }
+  return projected;
 }
 
 /**
