@@ -64,8 +64,10 @@ describe('W6: untestable change targets use the level card formatter', () => {
     const graph = graphWith({ goal_direction: held, goal_threshold_frame: 'change_abs', goal_threshold_raw: value, goal_threshold_unit: unit });
     const verdict = targetTestabilityOf(graph);
     expect(sayGoalChange('change_abs', value as number, unit as string, figure, held)).toBe(expected);
-    expect(untestableTargetParts(graph, verdict)).toMatchObject({ target: expected, tailTarget: expected });
-    expect(untestableTargetTail(graph, verdict)).toContain(`keep productivity ${expected}:`);
+    // W6b: an absolute change needs no today's level; isolate this formatter pin from the real verdict.
+    expect(verdict).toEqual({ kind: 'unchecked', goal_id: 'productivity', unchecked: ['P5'] });
+    expect(untestableTargetParts(graph, missingLevel)).toMatchObject({ target: expected, tailTarget: expected });
+    expect(untestableTargetTail(graph, missingLevel)).toContain(`keep productivity ${expected}:`);
   });
 
   it('a level target keeps the existing tail and readiness sentence byte-for-byte', () => {
@@ -105,7 +107,7 @@ describe('W6: untestable change targets use the level card formatter', () => {
     const linkGap: TargetTestability = { kind: 'not_testable', goal_id: 'productivity', failures: [
       { precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'headcount', link_to: 'productivity', link: { from: 'headcount', to: 'productivity' } },
     ] };
-    expect(untestableTargetParts(graph, linkGap)?.question).toContain('To test your up at least 10% from today target');
+    expect(untestableTargetParts(graph, linkGap)?.question).toContain('To test your target (up at least 10% from today)');
     const strictGraph = graphWith({ goal_direction: '<', goal_threshold_raw: -0.05 });
     const gap: TargetTestability = { kind: 'not_testable', goal_id: 'productivity', failures: [
       { precondition: 'P3', case: 'b', code: 'comparator_unscorable' },
