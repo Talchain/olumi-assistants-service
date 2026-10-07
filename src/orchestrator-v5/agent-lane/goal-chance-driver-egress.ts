@@ -71,7 +71,8 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   R`${NEG}${VERB}\s+${WHICH_ITEM}${GEN_GAP}\s+(?:the\s+)?(?:most(?:\s+(?:sensitive\s+to|weight))?|priority)${CLAUSE_END}`,
   // ⭐ Wave B3 (7 Oct, CEE 7addf05, Challenge): "This result does not establish what changes chances most." /
   // "It hasn't established what changes the chances most: …" (a "what" with no assumption noun).
-  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
+  // ⭐ Wave B5 (7 Oct, CEE 5a260e3, Challenge): "This run doesn’t establish what would change the chances most: …" (a modal).
+  R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+(?:(?:would|could|might|will|can|does|do)\s+)?(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
   // ⭐ Wave B3 (T1b provisional view): "…the analysis has not tested the deadline or established investigation priority."
   // Only the "or …" tail is the claim (bounded lookbehind to its negation); `cutOnce` cuts from the "or".
   // ⛔ S2f: the "or" is checked FIRST (lookahead), and each word is bounded: tried at every position, the lookbehind
