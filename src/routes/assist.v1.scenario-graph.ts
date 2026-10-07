@@ -240,6 +240,7 @@ import { actionBarOf, type ActionBarV1 } from '../orchestrator-v5/agent-lane/act
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
 import { readChangedSinceRun } from '../orchestrator-v5/context/changed-since-run.js';
+import { deriveDecisionContextGraphHash } from '../orchestrator-v5/build-turn-context.js';
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_SCHEMA = "scenario_graph.v1" as const;
@@ -766,7 +767,9 @@ export default async function route(app: FastifyInstance) {
        * Run and a reload keeps the marks. Recomputed from the durable receipts (`context/changed-since-run.ts`). Opt-in
        * with the conversation, so the Agent's own internal reads stay byte-identical; absent = could not answer.
        */
-      const changedSinceRun = conversationRequested && graphPresent ? await readChangedSinceRun(store, scenarioId) : undefined;
+      const changedSinceRun = conversationRequested && graphPresent ? await readChangedSinceRun(store, scenarioId,
+        // The Run's own projection (CS-AN-2): the raw-bytes hash never equals `graph_hash_at_run` on a promoted graph.
+        deriveDecisionContextGraphHash(graph)) : undefined;
 
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,

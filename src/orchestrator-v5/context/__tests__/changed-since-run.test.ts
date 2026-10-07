@@ -11,6 +11,7 @@ import {
   newestRunBoundary,
   projectChangedSinceRun,
   readChangedSinceRun,
+  isoToMicros,
   type ChangedSinceRunReads,
 } from '../changed-since-run.js';
 import type { IdentifiedHandlerFact } from '../../types/handler-fact.js';
@@ -35,9 +36,9 @@ const editGraph = (entities: unknown[]) => ({
   fact_type: 'edit_graph', fact_version: 1, noop: false,
   result: { edit_kind: 'add_node', status: 'applied', operations_count: 1, affected_entities: entities, graph_hash_before: null, graph_hash_after: null, safe_summary: 'Added a risk.', impact: 'low', rerun_recommended: true },
 }) as unknown as HandlerFact;
-const runFact = (runId?: string) => ({
+const runFact = (runId?: string, hash = 'aaaa') => ({
   fact_type: 'run_analysis', fact_version: 1, noop: false,
-  result: { ...(runId !== undefined ? { run_id: runId } : {}), graph_hash_at_run: 'aaaa', computed_at: RUN_AT },
+  result: { ...(runId !== undefined ? { run_id: runId } : {}), graph_hash_at_run: hash, computed_at: RUN_AT },
 }) as unknown as HandlerFact;
 
 const BOUNDARY = { run_id: 'run_b', created_at: RUN_AT };
@@ -113,6 +114,36 @@ describe('projectChangedSinceRun', () => {
   });
 });
 
+describe('buddy r1 rows', () => {
+  const HASHED = { ...BOUNDARY, graph_hash_at_run: 'h_run' };
+  it('P1: the graph moved but no receipt after the Run names it → marks are NOT complete (never "nothing changed")', () => {
+    const out = projectChangedSinceRun([at('2026-10-07T19:59:59.000Z', factorValue('fac_price'))], HASHED, false, 'h_now');
+    expect(out.node_ids).toEqual([]);
+    expect(out.complete).toBe(false);
+  });
+  it('P1 control: the graph IS the analysed one → empty and complete, even with receipts after the Run', () => {
+    const out = projectChangedSinceRun([at('2026-10-07T20:05:00.000Z', factorValue('fac_price'))], HASHED, false, 'h_run');
+    expect(out).toEqual({ version: 1, since_run_id: 'run_b', node_ids: [], links: [], unattributed_changes: 0, complete: true });
+  });
+  it('P2: a receipt 100µs after the Run is after it', () => {
+    const out = projectChangedSinceRun([at('2026-10-07T20:00:00.000200+00:00', factorValue('fac_price'))],
+      { run_id: 'run_b', created_at: '2026-10-07T20:00:00.000100+00:00' }, false);
+    expect(out.node_ids).toEqual(['fac_price']);
+    expect(isoToMicros('2026-10-07T20:00:00.000200Z')! - isoToMicros('2026-10-07T20:00:00.0001Z')!).toBe(100n);
+  });
+  it('P2: a limit moved from one node to another marks both', () => {
+    const moved = { fact_type: 'add_constraint', fact_version: 1, noop: false, result: { target_id: 'con_1', status: 'applied',
+      before: { constraint_id: 'con_1', node_id: 'fac_old' }, after: { constraint_id: 'con_1', node_id: 'fac_new' } } } as unknown as HandlerFact;
+    expect(projectChangedSinceRun([at('2026-10-07T20:05:00.000Z', moved)], BOUNDARY, false).node_ids.sort()).toEqual(['fac_new', 'fac_old']);
+  });
+  it('P2: the gauge a link answer sized (after.also_changed_links) is marked', () => {
+    const f = linkStrength('fac_price', 'fac_strain') as unknown as { result: { after: Record<string, unknown> } };
+    f.result.after.also_changed_links = [{ from: 'fac_strain', to: 'out_mrr' }];
+    const out = projectChangedSinceRun([at('2026-10-07T20:05:00.000Z', f as unknown as HandlerFact)], BOUNDARY, false);
+    expect(out.links).toEqual([{ from: 'fac_price', to: 'fac_strain' }, { from: 'fac_strain', to: 'out_mrr' }]);
+  });
+});
+
 describe('idsOfReceipt', () => {
   it('names no ids for a fact outside the receipt class', () => {
     expect(idsOfReceipt(runFact('run_b'))).toBeNull();
@@ -125,13 +156,13 @@ describe('newestRunBoundary', () => {
       at('2026-10-07T20:10:00.000Z', runFact()),
       at(RUN_AT, runFact('run_b')),
       at('2026-10-07T19:00:00.000Z', runFact('run_a')),
-    ])).toEqual({ run_id: 'run_b', created_at: RUN_AT });
+    ])).toEqual({ run_id: 'run_b', created_at: RUN_AT, graph_hash_at_run: 'aaaa' });
   });
 });
 
 describe('readChangedSinceRun', () => {
   const storeWith = (runFacts: IdentifiedHandlerFact[], receipts: IdentifiedHandlerFact[] | Error) => ({
-    readScenarioRunAnalysisFactsFor: vi.fn(async () => ({ facts: runFacts, total_count: runFacts.length })),
+    readScenarioRunAnalysisFactsFor: vi.fn(async (_s: string, limit: number) => ({ facts: runFacts.slice(0, limit), total_count: runFacts.length })),
     readRecentAppliedMutationFactsFor: vi.fn(async () => { if (receipts instanceof Error) throw receipts; return receipts; }),
   }) as unknown as ChangedSinceRunReads;
 
@@ -149,6 +180,14 @@ describe('readChangedSinceRun', () => {
   it('Runs recorded but none with an id: undefined, never "everything ever changed"', async () => {
     const store = storeWith([at(RUN_AT, runFact())], [at('2026-10-07T19:05:00.000Z', factorValue('fac_price'))]);
     expect(await readChangedSinceRun(store, 's1')).toBeUndefined();
+  });
+
+  it('P2: five refused attempts after a real Run do not hide its boundary', async () => {
+    const refused = [6, 5, 4, 3, 2].map((m) => at(`2026-10-07T20:0${m}:30.000Z`, runFact()));
+    const store = storeWith([...refused, at(RUN_AT, runFact('run_b'))], [at('2026-10-07T20:01:00.000Z', factorValue('fac_price'))]);
+    const out = await readChangedSinceRun(store, 's1');
+    expect(out?.since_run_id).toBe('run_b');
+    expect(out?.node_ids).toEqual(['fac_price']);
   });
 
   it('a store without the reads answers undefined', async () => {

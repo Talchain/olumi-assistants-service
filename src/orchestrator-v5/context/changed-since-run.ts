@@ -25,7 +25,8 @@ import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
 import type { IdentifiedHandlerFact } from '../types/handler-fact.js';
 
 export const CHANGED_SINCE_RUN_READ_LIMIT = 50;
-const RUN_FACT_LOOKAHEAD = 5;
+// Wide enough that a run of refused attempts after a real Run cannot hide its boundary (buddy r1 P2-3).
+const RUN_FACT_LOOKAHEAD = 50;
 const MAX_NODE_IDS = 200;
 const MAX_EDGES = 400;
 
@@ -47,6 +48,8 @@ export interface ChangedSinceRunV1 {
 export interface RunBoundary {
   readonly run_id: string;
   readonly created_at: string;
+  /** The analysis-affecting hash of the graph the Run analysed (`run_analysis.result.graph_hash_at_run`). */
+  readonly graph_hash_at_run?: string;
 }
 
 type Rec = Record<string, unknown>;
@@ -71,15 +74,18 @@ export function idsOfReceipt(fact: HandlerFact): { nodes: string[]; links: Chang
     }
     case 'add_constraint': {
       // The limit sits on its target node (GoalConstraint.node_id); the constraint id is not a canvas element.
-      const node = id((isRec(result.after) ? result.after : {}).node_id) ?? id((isRec(result.before) ? result.before : {}).node_id);
-      return node === null ? null : { nodes: [node], links: [] };
+      // A correction that moves a limit changes both nodes: mark each end (buddy r1 P2-4).
+      const nodes = [...new Set([isRec(result.after) ? id(result.after.node_id) : null, isRec(result.before) ? id(result.before.node_id) : null]
+        .filter((n): n is string => n !== null))];
+      return nodes.length === 0 ? null : { nodes, links: [] };
     }
     case 'adjust_edge_strength': {
       const main = linkOf(result.after) ?? linkOf(result.before);
       if (main === null) return null;
-      const refit = isRec(result.after) && Array.isArray(result.after.frame_refit)
-        ? result.after.frame_refit.map(linkOf).filter((l): l is ChangedSinceRunLink => l !== null) : [];
-      return { nodes: [], links: [main, ...refit] };
+      // The links the refit rescaled, and any other link the write changed (the gauge it sized; buddy r1 P2-5).
+      const others = (key: string): ChangedSinceRunLink[] => isRec(result.after) && Array.isArray(result.after[key])
+        ? (result.after[key] as unknown[]).map(linkOf).filter((l): l is ChangedSinceRunLink => l !== null) : [];
+      return { nodes: [], links: [main, ...others('frame_refit'), ...others('also_changed_links')] };
     }
     case 'edit_graph': {
       // Forward-compatible: `affected_entities[].id` (and `from`/`to` for a link) arrive with the schemas field.
@@ -107,6 +113,19 @@ export function idsOfReceipt(fact: HandlerFact): { nodes: string[]; links: Chang
 }
 
 /**
+ * An ISO timestamp as integer MICROseconds. Postgres stores microseconds; `Date.parse` keeps milliseconds, which made
+ * a receipt 100µs after its Run read as the same instant (buddy r1 P2-2). `null` when unreadable.
+ */
+export function isoToMicros(iso: string): bigint | null {
+  const m = /^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:?\d{2})$/.exec(iso);
+  if (m === null) return null;
+  const seconds = Date.parse(`${m[1]}${m[3]}`);
+  if (!Number.isFinite(seconds)) return null;
+  const micros = BigInt((m[2] ?? '').padEnd(6, '0').slice(0, 6));
+  return BigInt(seconds) * 1000n + micros;
+}
+
+/**
  * Project the receipts recorded after `boundary` (all of them when `null`). `facts` newest-first, as the store
  * returns them. `windowFull`: the read returned its whole limit, so older receipts may exist.
  */
@@ -114,15 +133,22 @@ export function projectChangedSinceRun(
   facts: readonly IdentifiedHandlerFact[],
   boundary: RunBoundary | null,
   windowFull: boolean,
+  /** The analysis-affecting hash of the graph as it stands now (the same projection `graph_hash_at_run` uses). */
+  currentGraphHash?: string | null,
 ): ChangedSinceRunV1 {
-  const since = boundary === null ? null : Date.parse(boundary.created_at);
+  // ⭐ The graph IS the one the Run analysed: nothing has changed since it, whatever receipts were written meanwhile
+  // (an edit and its reversal; an edit the Run already included).
+  if (boundary?.graph_hash_at_run !== undefined && typeof currentGraphHash === 'string' && currentGraphHash === boundary.graph_hash_at_run) {
+    return { version: 1, since_run_id: boundary.run_id, node_ids: [], links: [], unattributed_changes: 0, complete: true };
+  }
+  const since = boundary === null ? null : isoToMicros(boundary.created_at);
   const nodes = new Set<string>();
   const links = new Map<string, ChangedSinceRunLink>();
   let unattributed = 0;
   let reachedBoundary = false;
   for (const entry of facts) {
-    const at = Date.parse(entry.fact_created_at);
-    if (since !== null && (!Number.isFinite(at) || at <= since)) { reachedBoundary = true; break; }
+    const at = isoToMicros(entry.fact_created_at);
+    if (since !== null && (at === null || at <= since)) { reachedBoundary = true; break; }
     const fact = entry.fact;
     if (!MUTATION_RECEIPT_FACT_TYPES.has(fact.fact_type) || isNoopFact(fact)) continue;
     const ids = idsOfReceipt(fact);
@@ -132,6 +158,11 @@ export function projectChangedSinceRun(
   }
   const nodeIds = [...nodes];
   const linkList = [...links.values()];
+  // The graph moved since the Run, but no receipt after the Run's persistence names the change (an edit that landed
+  // while the Run was computing, so its receipt is older than the Run's): say the marks are not the whole story
+  // (buddy r1 P1) rather than "nothing changed".
+  const hashMovedUnplaced = boundary?.graph_hash_at_run !== undefined && typeof currentGraphHash === 'string'
+    && currentGraphHash !== boundary.graph_hash_at_run && nodes.size === 0 && links.size === 0 && unattributed === 0;
   const overCap = nodeIds.length > MAX_NODE_IDS || linkList.length > MAX_EDGES;
   return {
     version: 1,
@@ -139,7 +170,7 @@ export function projectChangedSinceRun(
     node_ids: nodeIds.slice(0, MAX_NODE_IDS),
     links: linkList.slice(0, MAX_EDGES),
     unattributed_changes: unattributed,
-    complete: !overCap && (reachedBoundary || !windowFull),
+    complete: !overCap && (reachedBoundary || !windowFull) && !hashMovedUnplaced,
   };
 }
 
@@ -147,8 +178,10 @@ export function projectChangedSinceRun(
 export function newestRunBoundary(runFacts: readonly IdentifiedHandlerFact[]): RunBoundary | null {
   for (const entry of runFacts) {
     if (entry.fact.fact_type !== 'run_analysis') continue;
-    const runId = id((entry.fact as { result?: { run_id?: unknown } }).result?.run_id);
-    if (runId !== null) return { run_id: runId, created_at: entry.fact_created_at };
+    const result = (entry.fact as { result?: { run_id?: unknown; graph_hash_at_run?: unknown } }).result;
+    const runId = id(result?.run_id);
+    const hash = typeof result?.graph_hash_at_run === 'string' && result.graph_hash_at_run.length > 0 ? result.graph_hash_at_run : undefined;
+    if (runId !== null) return { run_id: runId, created_at: entry.fact_created_at, ...(hash !== undefined ? { graph_hash_at_run: hash } : {}) };
   }
   return null;
 }
@@ -163,7 +196,7 @@ export interface ChangedSinceRunReads {
 }
 
 /** Read and project. Never throws: `undefined` = could not answer (the caller omits the key, never sends empty). */
-export async function readChangedSinceRun(store: ChangedSinceRunReads, scenarioId: string): Promise<ChangedSinceRunV1 | undefined> {
+export async function readChangedSinceRun(store: ChangedSinceRunReads, scenarioId: string, currentGraphHash?: string | null): Promise<ChangedSinceRunV1 | undefined> {
   if (typeof store.readScenarioRunAnalysisFactsFor !== 'function' || typeof store.readRecentAppliedMutationFactsFor !== 'function') {
     return undefined;
   }
@@ -176,7 +209,7 @@ export async function readChangedSinceRun(store: ChangedSinceRunReads, scenarioI
     // A Run page that holds Runs but none with an id is an older Run we cannot place: say nothing rather than mark
     // every receipt ever recorded.
     if (boundary === null && runPage.facts.length > 0) return undefined;
-    return projectChangedSinceRun(receipts, boundary, receipts.length >= CHANGED_SINCE_RUN_READ_LIMIT);
+    return projectChangedSinceRun(receipts, boundary, receipts.length >= CHANGED_SINCE_RUN_READ_LIMIT, currentGraphHash);
   } catch {
     return undefined;
   }
