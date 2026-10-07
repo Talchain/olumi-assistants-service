@@ -2027,7 +2027,7 @@ export function createAgentCapabilities(
     readonly readLeaderStanding?: (scenarioId: string) => Promise<LeaderStanding | null>;
     /**
      * Whether a search control quoting this query would survive the final egress gate, read by the ROUTE from its own
-     * readback through the gate's own chip rule (`chipSurvivesLeaderGate`). Absent ⇒ every sendable query is accepted.
+     * readback through the gate's own chip rule (`controlSurvivesLeaderGate`). Absent ⇒ every sendable query is accepted.
      * Throwing ⇒ the dispatcher refuses the offer (fail closed): a control that may not arrive is never promised.
      */
     readonly researchControlShowable?: (scenarioId: string, query: string) => Promise<boolean>;
