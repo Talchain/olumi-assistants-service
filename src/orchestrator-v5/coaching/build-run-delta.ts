@@ -52,6 +52,7 @@ import {
   type RunDelta,
   type RunDeltaAttributionCaseLiteral,
   type RunDeltaBuildsEqualityLiteral,
+  type RunDeltaGoalChanceDelta,
   type RunDeltaNoiseVerdictLiteral,
   type RunDeltaWinProbabilitiesUnavailableLiteral,
   type RunDeltaWinProbabilityDelta,
@@ -59,11 +60,13 @@ import {
 
 import {
   identityBoundWinProbabilities,
+  readOptionResultSources,
   runWithheldWinShares,
 } from '../../orchestrator/context/option-result-source.js';
 import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
 import { unsizedPathLeaderWithheld } from '../agent-lane/unsized-path-cause.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
+import { goalChanceSideOf } from '../goal-target/goal-chance-sides.js';
 import { mayPresentComparedRunLeader, mayPresentComparedRunVerdicts } from './compared-run-leader.js';
 
 import { projectRunFact, selectTwoNewestRunAnalysisFacts, type RunPair } from './compare-runs.js';
@@ -840,6 +843,20 @@ export function buildRunDelta(input: {
   }
   // Deterministic order so a captured wire body is byte-stable across replays.
   winProbabilities.sort((a, b) => a.option_id.localeCompare(b.option_id));
+
+  // Compare chances have their OWN per-Run display licences, independent of leader permission.
+  // Read identities even when the option's win share was withheld; retain current-first record order.
+  const optionIds = (enrichment: Record<string, unknown>): Set<string> => new Set(
+    readOptionResultSources(enrichment).flatMap((rows) => rows.flatMap((row) =>
+      typeof row.option_id === 'string' && row.option_id.length > 0 ? [row.option_id] : [])),
+  );
+  const priorOptionIds = optionIds(priorEchoes.enrichment);
+  const goalChances: RunDeltaGoalChanceDelta[] = [...optionIds(currentEchoes.enrichment)]
+    .filter((id) => priorOptionIds.has(id)).map((option_id) => ({
+      option_id,
+      prior: goalChanceSideOf((pair.prior as { result?: unknown }).result, option_id),
+      current: goalChanceSideOf((pair.current as { result?: unknown }).result, option_id),
+    }));
   // ⭐ 0.70.0 (CANVAS 5936762171, RC 5936776917): WHY there are no shares, typed — only when the cause is known:
   //   - `prior_withheld`: THIS Run may show its shares, the earlier Run's were withheld → "compared for the first time";
   //   - `no_matched_option`: both Runs show shares, and no option has one on both sides.
@@ -879,6 +896,7 @@ export function buildRunDelta(input: {
     pair_provenance: pairProvenance,
     leader,
     win_probabilities: winProbabilities,
+    goal_chances: goalChances,
     ...(winProbabilitiesUnavailable !== undefined ? { win_probabilities_unavailable: winProbabilitiesUnavailable } : {}),
     // ⭐ THE WITHHELD FLIP-THRESHOLD SLOT, TAKEN FROM THE CAGE — NEVER WRITTEN
     // HERE. `flip_thresholds` is a ratified Tier-3 deny key and
