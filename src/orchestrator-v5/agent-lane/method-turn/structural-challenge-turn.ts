@@ -356,6 +356,8 @@ export interface StructuralChallengeRow {
   readonly text: string;
   readonly kind: 'provisional' | 'tested' | 'goal' | 'limit' | 'not_saved';
   readonly option_id?: string;
+  /** A limit line's constraint: one option can carry several limits, so it is part of the row's identity. */
+  readonly constraint_id?: string;
   readonly figures: readonly string[];
 }
 
@@ -374,11 +376,15 @@ export function structuralChallengeRowsOf(turn: StructuralChallengeTurn): Struct
     { text: STRUCTURAL_CHALLENGE_LINES.provisional, kind: 'provisional', figures: [] },
     { text: STRUCTURAL_CHALLENGE_LINES.tested, kind: 'tested', figures: [] },
     ...result.claims.flatMap((c): StructuralChallengeRow[] => c.kind === 'goal_probability' || c.kind === 'constraint_probability'
-      ? [{ text: claimLine(c, label, turn.certainty), kind: c.kind === 'goal_probability' ? 'goal' : 'limit', option_id: c.option_id, figures: claimFigures(c, turn.certainty) }]
+      ? [{ text: claimLine(c, label, turn.certainty), kind: c.kind === 'goal_probability' ? 'goal' : 'limit', option_id: c.option_id,
+        ...(c.kind === 'constraint_probability' && c.constraint_id ? { constraint_id: c.constraint_id } : {}), figures: claimFigures(c, turn.certainty) }]
       : []),
     { text: STRUCTURAL_CHALLENGE_LINES.not_saved, kind: 'not_saved', figures: [] },
   ];
-  const at = (row: StructuralChallengeRow) => turn.reply.indexOf(row.text);
+  // Whole reply lines only (bare, or as the composer's `- ` bullet): a substring hit would admit a claim the composer
+  // aggregated away whose text sits inside another line (a label, the headline), and would misorder rows (Codex r1).
+  const replyLines = turn.reply.split('\n');
+  const at = (row: StructuralChallengeRow) => replyLines.findIndex((l) => l === row.text || l === `- ${row.text}`);
   return candidates.filter((row) => at(row) >= 0).sort((a, b) => at(a) - at(b));
 }
 

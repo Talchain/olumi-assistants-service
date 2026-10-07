@@ -114,7 +114,8 @@ export function testLinkMethodResult(turn: StructuralChallengeTurn, ctx: MethodR
   if (result.status !== 'completed') return { ...base, outcome: TEST_LINK_OUTCOME[result.status] ?? 'unavailable', rows: [] };
   const link = linkRef(result.alternative.from_id, result.alternative.to_id);
   const rows = structuralChallengeRowsOf(turn).map((row): MethodResultRowV1 => ({
-    row_id: row.option_id !== undefined ? `${row.kind}:${row.option_id}` : row.kind,
+    row_id: row.option_id === undefined ? row.kind
+      : row.constraint_id !== undefined ? `${row.kind}:${row.option_id}:${row.constraint_id}` : `${row.kind}:${row.option_id}`,
     item_refs: row.kind === 'provisional' || row.kind === 'not_saved' ? []
       : row.option_id !== undefined ? [{ kind: 'option', id: row.option_id }, link] : [link],
     text: row.text,

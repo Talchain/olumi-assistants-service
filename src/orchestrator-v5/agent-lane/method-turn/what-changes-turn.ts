@@ -248,6 +248,10 @@ export async function whatChangesTurnFor(chipId: unknown, rb: MethodReadback, as
   // sentences stay verbatim (the fixture row binds them); the frame opens the answer once.
   return rows.length === 0 ? honest() : {
     reply: `${IN_THIS_MODEL}${rows.map((row) => row.text).join(' ')}`, outcome: 'measured', actions,
-    measured: { rows, run: shown, leaderId, optionIds: Object.keys(s['model.option_labels']) },
+    // Ruling 4 compares the options the Run scored (the status quo + every option it did not exclude), never an option
+    // kept in the graph but taken out of the Run, whose side would read withheld and drop every row (Codex r1).
+    measured: { rows, run: shown, leaderId, optionIds: [
+      ...(s['model.status_quo_option_id'] !== null ? [s['model.status_quo_option_id']] : []), ...s['model.non_sq_option_ids'],
+    ] },
   };
 }

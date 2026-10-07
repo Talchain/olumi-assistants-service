@@ -15,7 +15,7 @@ import type { StructuralChallengeFinalRead } from '../../../handlers/structural-
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 import type { DecisionFlipDispatchResult, FlipLinkRef } from '../../../handlers/decision-flip-dispatch.js';
 import type { MethodReadback } from '../../method-turn/method-turn.js';
-import { STRUCTURAL_CHALLENGE_LINES, structuralChallengePressId, structuralChallengeTurnFor, type StructuralChallengeTurn } from '../../method-turn/structural-challenge-turn.js';
+import { composeStructuralChallengeReply, STRUCTURAL_CHALLENGE_LINES, structuralChallengePressId, structuralChallengeTurnFor, type StructuralChallengeTurn } from '../../method-turn/structural-challenge-turn.js';
 import { WHAT_CHANGES_PRESS_ID, whatChangesTurnFor } from '../../method-turn/what-changes-turn.js';
 import { changeRowsAgreeWithHero, methodResultForEgress, testLinkMethodResult, whatChangesMethodResult } from '../method-result.js';
 
@@ -126,6 +126,28 @@ describe('"Test without this link": rows are the reply\'s allowlisted lines, bou
     expect(r2.every((ref) => ref.kind === 'link' && ref.from_id === L2.from_id && ref.to_id === L2.to_id)).toBe(true);
   });
 
+  it('Codex r1: a row is a WHOLE reply line — its text inside another line is not that line (control: the whole line is)', async () => {
+    const turn = await testLinkTurn();
+    const starter = testLinkMethodResult(turn, CTX)!.rows.find((r) => r.row_id === `goal:${STARTER}`)!;
+    expect(turn.reply.split('\n')).toContain(`- ${starter.text}`);
+    const embedded = { ...turn, reply: turn.reply.replace(`- ${starter.text}`, `- Headline: ${starter.text} (aggregated)`) };
+    expect(embedded.reply).toContain(starter.text); // the substring is still there …
+    expect(testLinkMethodResult(embedded, CTX)!.rows.map((r) => r.row_id)).not.toContain(`goal:${STARTER}`); // … the row is not
+  });
+
+  it('Codex r1: two limits on one option are two rows with distinct ids, each bound to its option', async () => {
+    const turn = await testLinkTurn();
+    const result = turn.result!;
+    const limit = (constraint_id: string, baseline: number, alternative: number) => ({ kind: 'constraint_probability' as const,
+      option_id: STARTER, constraint_id, baseline, alternative, target: null, constraint_boundary: null,
+      noise_verdict: 'signal' as const, verdict: 'delta_only' as const, basis: 'no_licensed_boundary' as const, invariant_by_construction: false });
+    const two = StructuralChallengeResultV1Schema.parse({ ...result, claims: [...result.claims, limit(GOAL, 0.3, 0.6), limit(KEEP, 0.2, 0.7)] });
+    const reply = composeStructuralChallengeReply({ result: two, labels: turn.labels, certainty: turn.certainty });
+    const ids = testLinkMethodResult({ ...turn, result: two, reply }, CTX)!.rows.map((r) => r.row_id);
+    expect(ids).toEqual(expect.arrayContaining([`limit:${STARTER}:${GOAL}`, `limit:${STARTER}:${KEEP}`]));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it('control pair: a stale test is a sidecar with no rows (completed has rows)', async () => {
     const stale = testLinkMethodResult(await testLinkTurn(L1, 'stale'), CTX)!;
     expect(stale).toMatchObject({ outcome: 'stale', rows: [] });
@@ -163,6 +185,14 @@ describe('"What would change this?": RC\'s measured lines only, and only beside 
     tied.enrichment.inference_warnings.find((w: Json) => w.code === 'GOAL_CHANCE_LICENSED').pct_by_option[RAISE] = 52;
     expect(changeRowsAgreeWithHero(tied, options, STARTER)).toBe(false);
     expect(changeRowsAgreeWithHero(BLOCK, [RAISE, KEEP], STARTER)).toBe(false);
+  });
+
+  it('Codex r1: ruling 4 reads the options the Run scored — the excluded graph option (phased_gcp_migration) is not one', async () => {
+    const turn = (await whatChanges())!;
+    expect([...turn.measured!.optionIds].sort()).toEqual(['stay_on_aws', 'switch_to_gcp']);
+    expect(D3.body.draft_graph.nodes.some((n: Json) => n.id === 'phased_gcp_migration')).toBe(true); // control: it is in the graph
+    // Why it matters: on T1b, one unscored option would read withheld and drop every row.
+    expect(changeRowsAgreeWithHero(BLOCK, [RAISE, STARTER, KEEP, 'phased_gcp_migration'], STARTER)).toBe(false);
   });
 
   it('a hero that disagrees withholds every row (the chat reply is untouched)', async () => {
