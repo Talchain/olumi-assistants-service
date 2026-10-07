@@ -3416,7 +3416,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const owed = stateFacts.current_state_unknown === true
       ? [...valueChangeDisclosures(stateFacts)]
       : [
-        ...disclosuresFor(result.tool_results),
+        ...disclosuresFor(result.tool_results, text),
         ...valueChangeDisclosures(stateFacts),
         ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
         // ⛔ A withheld goal chance's reason is said as written, unless the Agent already said it (AIQ 5887805333 (3)).
