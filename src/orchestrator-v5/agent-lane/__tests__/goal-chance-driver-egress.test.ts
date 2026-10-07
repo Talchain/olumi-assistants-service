@@ -9,11 +9,12 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { log } from '../../../utils/telemetry.js';
-import { goalChanceDriverDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
+import { goalChanceDriverDisplayForAgent, goalChanceRangeDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import {
   DRIVER_ABSENCE_CLAIM, GOAL_CHANCE_DRIVER_ABSENCE_REMOVED, removeDriverAbsenceClaims, withoutDriverAbsenceClaimsAtEgress,
   SENSITIVITY_ABSENCE_CLAIM, SENSITIVITY_ABSENCE_REMOVED, SENSITIVITY_ABSENCE_KEPT_UNSAFE, removeSensitivityAbsenceClaims, robustnessComputed,
   screenNamesADriver,
+  ALL_WITHHELD_CLAIM, GOAL_CHANCE_ALL_WITHHELD_REMOVED, GOAL_CHANCE_ALL_WITHHELD_KEPT_UNSAFE, removeAllWithheldClaims, screenShowsAChance,
 } from '../goal-chance-driver-egress.js';
 
 type Json = Record<string, any>;
@@ -719,5 +720,207 @@ describe('Wave B3, keys untouched: the "what changes the chances most" form and 
     DRIVER_ABSENCE_CLAIM.test(text);
     removeDriverAbsenceClaims(text);
     expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
+
+/**
+ * Wave B4 (7 Oct 05:00–05:08Z, guest, the 7b tuple CEE 01a2b27 + UI efbb0eef), keys untouched. Beside range lines the Run
+ * narration said "In fact, goal chances are withheld for every option." (b4-1) and "No option’s target chance or profit
+ * outcome is established yet." (b4-2); the b4-2 Challenge said "This result doesn’t identify an overall “most influential”
+ * assumption." S2f: the all-withheld class, gated on the screen showing ANY option's chance (a point or a range line;
+ * `screenShowsAChance`), and the "(an overall) most influential assumption" driver form. With nothing shown (the founder
+ * brief) the all-withheld sentence is TRUE and is kept. The corpus is every keyword sentence in every served reply on disk.
+ */
+const B4_RUN1 = JSON.parse(fixture('waveB4-unseen1-01a2b27-run1-turn003.json')) as Json;
+const B4_RUN2 = JSON.parse(fixture('waveB4-unseen2-01a2b27-run1-turn003.json')) as Json;
+const B4_CH2 = JSON.parse(fixture('waveB4-unseen2-01a2b27-challenge-turn001.json')) as Json;
+const NOTHING_SHOWN = JSON.parse(fixture('served-g1b-d4-rerun-5f8f24ce.json')) as Json;
+const AW_CORPUS = JSON.parse(fixture('all-withheld-corpus-20261007.json')) as {
+  population: string; rows: { sentence: string; fire: boolean; edited?: string; kept_unsafe?: boolean }[];
+};
+const B4_LINE_1 = 'In fact, goal chances are withheld for every option. ';
+const B4_LINE_2 = 'No option’s target chance or profit outcome is established yet. ';
+const B4_LINE_CH = 'This result doesn’t identify an overall “most influential” assumption. ';
+
+describe('Wave B4, keys untouched: no "withheld for every option" beside a shown chance (S2f)', () => {
+  it('the gate: a range line or a point line opens it; with neither it stays shut', () => {
+    for (const body of [B4_RUN1, B4_RUN2, B4_CH2]) {
+      expect(Object.keys(goalChanceRangeDisplayForAgent(blockOf(body), body.draft_graph) ?? {}).length).toBeGreaterThan(0);
+      expect(screenShowsAChance(blockOf(body), body.draft_graph)).toBe(true);
+      expect(screenShowsAChance(blockOf(withoutRange(body)), body.draft_graph)).toBe(false);
+    }
+    // point lines only (prod cut-6 T1b: three licensed chances, no range record)
+    expect(goalChanceRangeDisplayForAgent(blockOf(PROD), PROD.draft_graph) ?? {}).toEqual({});
+    expect(screenShowsAChance(blockOf(PROD), PROD.draft_graph)).toBe(true);
+    // served, nothing shown (G1b d4 rerun)
+    expect(screenShowsAChance(blockOf(NOTHING_SHOWN), NOTHING_SHOWN.draft_graph)).toBe(false);
+  });
+
+  it('RED at base: the b4-1 Run narration loses only "In fact, goal chances are withheld for every option."', () => {
+    expect(B4_RUN1.assistant_text).toContain(`${B4_LINE_1}Sensitivity was not measured.`);
+    const out = withoutDriverAbsenceClaimsAtEgress(B4_RUN1, opts(B4_RUN1)) as Json;
+    expect(out.assistant_text).toBe(B4_RUN1.assistant_text.replace(B4_LINE_1, ''));
+    expectWellFormed(out.assistant_text);
+    expect({ ...out, assistant_text: B4_RUN1.assistant_text }).toEqual(B4_RUN1);
+  });
+
+  it('RED at base: the b4-2 Run narration loses only "No option’s target chance or profit outcome is established yet."', () => {
+    expect(B4_RUN2.assistant_text).toContain(`${B4_LINE_2}The result is not yet robust`);
+    const out = withoutDriverAbsenceClaimsAtEgress(B4_RUN2, opts(B4_RUN2)) as Json;
+    expect(out.assistant_text).toBe(B4_RUN2.assistant_text.replace(B4_LINE_2, ''));
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('RED at base: the b4-2 Challenge loses only the "overall “most influential” assumption" line', () => {
+    expect(B4_CH2.assistant_text).toContain(`${B4_LINE_CH}Challenge Olumi’s profit-uplift estimates`);
+    const out = withoutDriverAbsenceClaimsAtEgress(B4_CH2, opts(B4_CH2)) as Json;
+    expect(out.assistant_text).toBe(B4_CH2.assistant_text.replace(B4_LINE_CH, ''));
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('the scoped producer sentence (ruling (b)) and its range lead-in stay', () => {
+    const out = withoutDriverAbsenceClaimsAtEgress(B4_RUN1, opts(B4_RUN1)) as Json;
+    expect(out.assistant_text).toContain('This run shows some options’ chances only as a range. I can\'t yet say how likely ‘Loyalty App’ is');
+  });
+
+  it('CONTROL no range record (nothing shown): all three turns kept, by reference', () => {
+    for (const body of [withoutRange(B4_RUN1), withoutRange(B4_RUN2), withoutRange(B4_CH2)]) {
+      expect(withoutDriverAbsenceClaimsAtEgress(body, opts(body))).toBe(body);
+    }
+  });
+
+  it('POINT half of the gate (paraphrase on the served prod T1b screen): the claim goes beside point lines too', () => {
+    const body = { ...PROD, assistant_text: `${PROD.assistant_text}\n\nIn fact, goal chances are withheld for every option.` };
+    const out = withoutDriverAbsenceClaimsAtEgress(body, opts(body)) as Json;
+    expect(out.assistant_text).toBe(withoutDriverAbsenceClaimsAtEgress(PROD, opts(PROD)).assistant_text);
+  });
+
+  it('logs by code, never the prose; a kept sentence logs kept_unsafe', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined as never);
+    withoutDriverAbsenceClaimsAtEgress(B4_RUN2, opts(B4_RUN2));
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toEqual({ event: 'agent_lane.goal_chance_all_withheld_removed', code: GOAL_CHANCE_ALL_WITHHELD_REMOVED,
+      turn_id: 'turn-s2', request_id: 'req-s2', exit_path: 'agent_lane_v1_final', removed_count: 1 });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('target chance');
+    warn.mockClear();
+    const kept = { ...B4_RUN2, assistant_text: 'I can\'t yet say how likely any option is to keep monthly profit at or above £24,000 / month.' };
+    expect(withoutDriverAbsenceClaimsAtEgress(kept, opts(kept))).toBe(kept);
+    expect(warn.mock.calls.map((c) => (c[0] as Json).code)).toEqual([GOAL_CHANCE_ALL_WITHHELD_KEPT_UNSAFE]);
+  });
+
+  it('served corpus: the population is whole', () => {
+    expect(AW_CORPUS.population).toBe('FILES 2307 · texts 3858 · distinct keyword sentences 119 · occurrences 530 · fire 55 (removed 8, kept-unsafe 47) · keep 64');
+    expect(AW_CORPUS.rows).toHaveLength(119);
+  });
+  it.each(AW_CORPUS.rows.filter((r) => r.fire && !r.kept_unsafe).map((r) => [r.sentence, r.edited!]))('served, fires and edits well: %s', (sentence, edited) => {
+    expect(ALL_WITHHELD_CLAIM.test(sentence)).toBe(true);
+    expect(removeAllWithheldClaims(sentence)).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+    if (edited !== '') { expect(ALL_WITHHELD_CLAIM.test(edited)).toBe(false); expectWellFormed(edited); }
+  });
+  it.each(AW_CORPUS.rows.filter((r) => r.kept_unsafe).map((r) => [r.sentence]))('served, fires but kept (figure / horizon / long subject): %s', (sentence) => {
+    expect(removeAllWithheldClaims(sentence)).toEqual({ text: sentence, removed: 0, keptUnsafe: 1 });
+  });
+  it.each(AW_CORPUS.rows.filter((r) => !r.fire).map((r) => [r.sentence]))('served, keeps: %s', (sentence) => {
+    expect(ALL_WITHHELD_CLAIM.test(sentence)).toBe(false);
+    expect(removeAllWithheldClaims(sentence)).toEqual({ text: sentence, removed: 0, keptUnsafe: 0 });
+  });
+
+  it.each([
+    ['So far, no option’s goal chance is established.', ''],
+    ['Goal chances are withheld for every option, so treat this as provisional.', 'Treat this as provisional.'],
+    ['The run still withholds goal chances for every option.', ''],
+    ['None of the options has a chance shown yet.', ''],
+    ['Figures are provisional; chances for every option are not yet shown.', 'Figures are provisional.'],
+    ['Its unsized links prevent reporting goal chances for every option.', ''],
+  ])('MUST FIRE (paraphrase): %s', (text, edited) => {
+    expect(ALL_WITHHELD_CLAIM.test(text)).toBe(true);
+    expect(removeAllWithheldClaims(text)).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+  });
+
+  it.each([
+    // precision: the point figure only is withheld; true beside a range-only screen
+    'Point chances are withheld for every option; each shows as a range.',
+    'Exact goal chances are withheld for every option.',
+    'The run withholds point chances for every option and shows ranges instead.',
+    'No option’s single-figure chance is established yet.',
+    // negated, asked, a question
+    'This run does not withhold goal chances for every option: one shows a range.',
+    'It doesn\'t prevent goal-chance reporting for every option.',
+    'Is the run withholding goal chances for every option?',
+    'You asked why the run withholds goal chances for every option.',
+    // one option, the deadline, a leader statement, a share, the producer's lead-in
+    'Goal chances are withheld for ‘Loyalty App’ until its link is sized.',
+    'This model doesn\'t yet say whether any option gets there within 9 months.',
+    'No option can be put forward from this run: key effects remain unsized.',
+    'Unsized links prevent putting any option forward.',
+    'That share is not its chance of meeting your target.',
+    'This run shows some options’ chances only as a range.',
+    'Chances for every option are shown as ranges.',
+    'The run does not show how often each option was supported.',
+    // the producer's own opening (served verbatim on Wave B/B3): the producer owns its words
+    'This run doesn’t show how often each option reaches the goal’s target.',
+    // the gate's own no-target message (goal-chance-gate.ts)
+    'The goal has no stated target, so no option has a chance of meeting one to show.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(ALL_WITHHELD_CLAIM.test(text)).toBe(false);
+    expect(removeAllWithheldClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  it.each([
+    'The run does not identify a single most important factor.',
+    'It has not established a clear most-sensitive input.',
+    'The analysis can\'t show any most decisive driver.',
+  ])('MUST FIRE (paraphrase, driver class): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text: '', removed: 1, keptUnsafe: 0 });
+  });
+
+  it.each([
+    'This result doesn’t identify an overall “most influential” option.',
+    'The run identifies the most influential assumption: churn.',
+    'Does this result not identify an overall most influential assumption?',
+    'The run does not identify a single most important customer.',
+  ])('MUST NOT FIRE (twin, driver class): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
+  });
+
+  it.each([
+    ['"withholds" + 20,000 spaces', `withholds${' '.repeat(20000)}x`],
+    ['"no option" + 20,000 spaces', `no option${' '.repeat(20000)}x`],
+    ['"chances" + 20,000 spaces', `chances${' '.repeat(20000)}x`],
+    ['tabs inside the noun-phrase lookbehind', `and${'\t'.repeat(20000)}chances are withheld for every option`],
+    ['20,000 chars inside the "asked" lookbehind window', `asked ${'x'.repeat(20000)} withholds goal chances for every option`],
+    ['20,000 words after "prevent"', `prevent ${'a '.repeat(10000)}`],
+    // ~25k chars each (above the 20k bar); absolute bars on 90k inputs flaked on CI (#2723). Scaling row below.
+    ['the verb-object limb repeated', 'prevents goal chances for '.repeat(1000)],
+    ['the passive limb repeated', 'chances are withheld for '.repeat(1000)],
+    ['"an overall" + 20,000 spaces', `does not identify an overall${' '.repeat(20000)}x`],
+    // ⛔ RED at base 01a2b27 (S2e's coordinated limb tried its lookbehind at every position: 370 ms / 182 ms here)
+    ['one 20,000-character word', 'x'.repeat(20000)],
+    ['a 20,000-character word, then a coordinated tail', `has not tested ${'x'.repeat(20000)} or established investigation priority`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    ALL_WITHHELD_CLAIM.test(text);
+    removeAllWithheldClaims(text);
+    DRIVER_ABSENCE_CLAIM.test(text);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+  it.each([
+    ['the verb-object limb', (n: number) => 'prevents goal chances for '.repeat(n)],
+    ['the passive limb', (n: number) => 'chances are withheld for '.repeat(n)],
+  // 4× the input, min of 5 timings: linear ≈ 4×, quadratic ≈ 16× (the #2728 pattern; a 2× step flaked at 3.5× on CI).
+  ])('LINEAR TIME: 4× %s costs under 8× (quadratic would be 16×)', (_name, make) => {
+    const cost = (n: number): number => {
+      const text = make(n);
+      removeAllWithheldClaims(text);
+      return Math.min(...[0, 1, 2, 3, 4].map(() => {
+        const t0 = performance.now();
+        ALL_WITHHELD_CLAIM.test(text);
+        removeAllWithheldClaims(text);
+        DRIVER_ABSENCE_CLAIM.test(text);
+        return performance.now() - t0;
+      }));
+    };
+    expect(cost(4000) / cost(1000)).toBeLessThan(8);
   });
 });

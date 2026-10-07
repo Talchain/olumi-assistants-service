@@ -13,12 +13,14 @@
  * (code + turn id + counts, never prose) measures how often the prompt rule misses.
  */
 import { log } from '../../utils/telemetry.js';
-import { goalChanceDriverDisplayForAgent, goalChanceRangeBarredForAgent, goalChanceRangeDisplayForAgent } from '../goal-target/goal-chance-range-agent.js';
+import { goalChanceDriverDisplayForAgent, goalChanceFactsForAgent, goalChanceRangeBarredForAgent, goalChanceRangeDisplayForAgent } from '../goal-target/goal-chance-range-agent.js';
 
 export const GOAL_CHANCE_DRIVER_ABSENCE_REMOVED = 'GOAL_CHANCE_DRIVER_ABSENCE_REMOVED';
 export const GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE = 'GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE';
 export const SENSITIVITY_ABSENCE_REMOVED = 'SENSITIVITY_ABSENCE_REMOVED';
 export const SENSITIVITY_ABSENCE_KEPT_UNSAFE = 'SENSITIVITY_ABSENCE_KEPT_UNSAFE';
+export const GOAL_CHANCE_ALL_WITHHELD_REMOVED = 'GOAL_CHANCE_ALL_WITHHELD_REMOVED';
+export const GOAL_CHANCE_ALL_WITHHELD_KEPT_UNSAFE = 'GOAL_CHANCE_ALL_WITHHELD_KEPT_UNSAFE';
 
 const R = String.raw;
 const ITEM = R`(?:assumption|factor|input|driver)s?`;
@@ -72,7 +74,11 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   R`${NEG}${VERB}(?:\s+(?:us|you))?\s+what\s+(?:changes?|moves?|shifts?|drives?|affects?|influences?|swings?)\s+(?:(?:the|its|your|these|those)\s+)?(?:chances?|results?|outcomes?|comparison|figures?|answer)\s+(?:the\s+)?most${CLAUSE_END}`,
   // ⭐ Wave B3 (T1b provisional view): "…the analysis has not tested the deadline or established investigation priority."
   // Only the "or …" tail is the claim (bounded lookbehind to its negation); `cutOnce` cuts from the "or".
-  R`(?<=${NEG_B}(?:[ \t]{1,3}[\w’'-]+){1,6})[ \t]{1,3}(?:or|nor)[ \t]{1,3}(?:yet[ \t]{1,3})?(?:established?|identified|set|determined)[ \t]{1,3}(?:(?:an?|the|any)[ \t]{1,3})?(?:clear[ \t]{1,3})?investigation[ \t]{1,3}priorit(?:y|ies)\b`,
+  // ⛔ S2f: the "or" is checked FIRST (lookahead), and each word is bounded: tried at every position, the lookbehind
+  // rescanned a long word (base 01a2b27: 380 ms on one 20,000-character word, near-quadratic).
+  R`(?=[ \t]{1,3}(?:or|nor)[ \t])(?<=${NEG_B}(?:[ \t]{1,3}[\w’'-]{1,40}){1,6})[ \t]{1,3}(?:or|nor)[ \t]{1,3}(?:yet[ \t]{1,3})?(?:established?|identified|set|determined)[ \t]{1,3}(?:(?:an?|the|any)[ \t]{1,3})?(?:clear[ \t]{1,3})?investigation[ \t]{1,3}priorit(?:y|ies)\b`,
+  // ⭐ Wave B4 (7 Oct, CEE 01a2b27, Challenge): "This result doesn’t identify an overall “most influential” assumption."
+  R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:(?:overall|single|clear)\s+)?[“"‘']?${MOST_ADJ}[”"’']?\s+${ITEM}`,
   // Wave B (7 Oct, unseen-2 provisional view): "it has not established an investigation priority"
   R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:clear\s+)?investigation\s+priorit(?:y|ies)\b`,
   // "there is no investigation priority yet"
@@ -108,6 +114,42 @@ export const SENSITIVITY_ABSENCE_CLAIM = new RegExp([
   R`${NEG}\s+(?:measured?|assess(?:ed)?|test(?:ed)?|check(?:ed)?|run|ran|done|did|quantif(?:y|ied)|comput(?:e|ed))\s+(?:the\s+|a\s+|any\s+)?(?:(?:overall|decision|factor)\s+)?sensitivity\b`,
   // "there was no sensitivity analysis" · "no sensitivity check was run"
   R`\bno\s+(?:(?:overall|decision|factor)\s+)?sensitivity\s+(?:analysis|check|checks|testing|test)\b(?:\s+(?:was|has\s+been|is|were)\s+(?:run|done|carried\s+out|performed|measured))?`,
+].join('|'), 'i');
+
+/**
+ * ⭐ Wave B4 (7 Oct, CEE 01a2b27 = the 7b tuple, UI efbb0eef): beside range lines the Run narration said "In fact, goal
+ * chances are withheld for every option." / "No option’s target chance or profit outcome is established yet." Each is
+ * FALSE while the screen shows any option's chance (a range or a point line); it stays TRUE when nothing is shown (the
+ * founder brief), so the class has its own gate (`screenShowsAChance`). Never the deadline sentence ("doesn't yet say
+ * whether any option gets there"), never "No option can be put forward" (a leader statement).
+ */
+const OPT = R`(?:every|each|all|all\s+the|any)\s+options?`;
+/** A sentence adverb before the subject ("In fact, …") goes with the claim; the shared subject rule refuses a comma. */
+const ADV = R`(?:\b(?:in[ \t]{1,4}fact|right[ \t]{1,4}now|for[ \t]{1,4}now|so[ \t]{1,4}far|at[ \t]{1,4}(?:the[ \t]{1,4}moment|present)|currently)[ \t]{0,4},[ \t]{1,4})?`;
+/**
+ * A noun-subject limb starts its noun phrase: never mid-phrase, so "point / exact chances are withheld for every option"
+ * (TRUE beside a range-only screen) never matches from "chances". A plain connector may precede it.
+ */
+const NP_START = R`(?:(?<![\w’'-][ \t]{0,3})|(?<=\b(?:and|but|so|yet|while|because|that|as|also|now|then)[ \t]{1,3}))`;
+/** Precision words: a sentence about the point figure only is true beside a range line. */
+const PRECISE = R`(?:point|exact|precise|single|numeric(?:al)?|headline)\b`;
+export const ALL_WITHHELD_CLAIM = new RegExp([
+  // "(In fact,) goal chances are withheld for every option"
+  R`${NP_START}${ADV}\b(?:the\s+)?(?:(?:goal|target)\s+)?chances?\s+(?:are|is|were|was|remains?)\s+(?:(?:being|still)\s+)?withheld\s+(?:for|from)\s+${OPT}\b`,
+  // "No option’s target chance (or profit outcome) is established yet"
+  R`${ADV}\bno\s+option(?:['’]s)?\s+(?:(?:goal|target)\s+)?chances?(?:\s+or\s+[\w’'-]+(?:\s+[\w’'-]+){0,2})?\s+(?:is|are|has\s+been|have\s+been)\s+(?:yet\s+)?(?:established|known|available|shown|computed)\b`,
+  // "none of the options has a chance (shown) yet"
+  R`${ADV}\b(?:none|not\s+one)\s+of\s+the\s+options\s+(?:has|have)\s+(?:an?\s+)?(?:(?:goal|target)\s+)?chances?\b`,
+  // "I can't yet say how likely any option is …" (never the producer's own opening, "This run doesn’t show how often each
+  // option reaches the goal’s target.": the producer owns its words, and S4b swaps it for the range opening)
+  R`${NEG}${VERB}\s+how\s+likely\s+${OPT}\b`,
+  // "chances for every option are not shown / withheld"
+  R`${NP_START}${ADV}\bchances?\s+(?:for|of)\s+${OPT}\s+(?:are|is)\s+(?:not\s+(?:yet\s+)?(?:shown|established|available)|withheld|unavailable)\b`,
+  // served (corpus): "its unsized links prevent reporting goal chances for every option" · "this run withholds goal chances
+  // for every option" · "prevents this run from reporting target chances for any option" · "prevent goal-chance claims for every option"
+  // Never negated ("does not withhold … for every option" is the opposite claim), asked about, or a question.
+  // The verb is checked first (lookahead), so the lookbehinds run only where it is: linear on any input.
+  R`\b(?=withh|prevent)(?<!(?:\b(?:not|never|nothing|no)|n[’']t)[ \t]{1,3})(?<!\b(?:why|whether|asked|asks|ask)\b[^.!?\n]{0,60})(?:withh(?:old|eld)s?|withholding|prevent(?:s|ing|ed)?)(?:\s+(?!${PRECISE})[\w’'-]+){0,6}?\s+(?:(?:goal|target)-)?chances?(?:\s+[\w’'-]+){0,2}?\s+(?:for|of)\s+${OPT}\b(?![^.!?\n]{0,160}\?)`,
 ].join('|'), 'i');
 
 const CONNECTOR = /^\s*(?:and|but|so|yet|while|though|although|because|which\s+means)\b\s*/i;
@@ -204,6 +246,11 @@ export function removeDriverAbsenceClaims(text: string, labels: readonly string[
   return removeClaims(text, labels, DRIVER_ABSENCE_CLAIM);
 }
 
+/** S2f: the same edit for the all-withheld class (its own gate at the egress: `screenShowsAChance`). */
+export function removeAllWithheldClaims(text: string, labels: readonly string[] = []): { text: string; removed: number; keptUnsafe: number } {
+  return removeClaims(text, labels, ALL_WITHHELD_CLAIM);
+}
+
 /** The same edit for the sensitivity-absence class (its own gate at the egress: `robustnessComputed`). */
 export function removeSensitivityAbsenceClaims(text: string, labels: readonly string[] = []): { text: string; removed: number; keptUnsafe: number } {
   return removeClaims(text, labels, SENSITIVITY_ABSENCE_CLAIM);
@@ -266,6 +313,12 @@ export function screenNamesADriver(analysisResult: unknown, graph: unknown): boo
   return Object.keys(ranges ?? {}).some((optionId) => !goalChanceRangeBarredForAgent(analysisResult, optionId));
 }
 
+/** S2f: the screen shows at least one option's chance, as a range or a point line (the Agent's own display entitlement). */
+export function screenShowsAChance(analysisResult: unknown, graph: unknown): boolean {
+  const facts = goalChanceFactsForAgent(analysisResult, graph, true);
+  return Object.keys(facts.goal_chance_display ?? {}).length > 0 || Object.keys(facts.goal_chance_range_display ?? {}).length > 0;
+}
+
 /**
  * The Run's robustness check RAN: a robustness record with a `fragile_edges` array (empty counts: computed, nothing
  * fragile) and its verdict. Absent, `{}` or no array = not computed, and "sensitivity was not measured" may be true.
@@ -282,6 +335,8 @@ type EgressClass = { readonly remove: (text: string, labels: readonly string[]) 
   readonly removedCode: string; readonly keptCode: string; readonly event: string; readonly what: string };
 const DRIVER_CLASS: EgressClass = { remove: removeDriverAbsenceClaims, removedCode: GOAL_CHANCE_DRIVER_ABSENCE_REMOVED,
   keptCode: GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE, event: 'goal_chance_driver_absence', what: 'denied a goal-chance driver the screen shows' };
+const ALL_WITHHELD_CLASS: EgressClass = { remove: removeAllWithheldClaims, removedCode: GOAL_CHANCE_ALL_WITHHELD_REMOVED,
+  keptCode: GOAL_CHANCE_ALL_WITHHELD_KEPT_UNSAFE, event: 'goal_chance_all_withheld', what: 'said no option has a chance while the screen shows one' };
 const SENSITIVITY_CLASS: EgressClass = { remove: removeSensitivityAbsenceClaims, removedCode: SENSITIVITY_ABSENCE_REMOVED,
   keptCode: SENSITIVITY_ABSENCE_KEPT_UNSAFE, event: 'sensitivity_absence', what: 'said sensitivity was not measured on a Run whose robustness check ran' };
 
@@ -300,6 +355,7 @@ export function withoutDriverAbsenceClaimsAtEgress<T extends { assistant_text?: 
     const classes = [
       ...(screenNamesADriver(opts.analysisResult, opts.graph) ? [DRIVER_CLASS] : []),
       ...(robustnessComputed(opts.analysisResult) ? [SENSITIVITY_CLASS] : []),
+      ...(screenShowsAChance(opts.analysisResult, opts.graph) ? [ALL_WITHHELD_CLASS] : []),
     ];
     if (classes.length === 0) return body;
     const nodes = (opts.graph as { nodes?: unknown } | null | undefined)?.nodes;
