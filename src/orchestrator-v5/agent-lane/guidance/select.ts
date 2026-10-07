@@ -174,6 +174,24 @@ function selected(d: Draft, s: GuidanceSignals): SelectedRow | undefined {
     ...(d.target ? { target: d.target } : {}), ...(d.item ? { item: d.item } : {}), primary_action, state_key_hash: stateKeyHash(d.fields), copy };
 }
 
+/**
+ * ⭐ S-B: EVERY row RC would offer on this state, not only the one its budget keeps (`selectGuidance` below keeps one
+ * coaching row). Each policy's first candidate after RC's own cooldown, in RC's own order (priority, then policy order).
+ * The action bar's ranker (`actions/rank.ts`) EXTENDS the selector with this; RC stays the authority on eligibility,
+ * priority and cooldown. It reads state only: no turn request, decision point or method press suppresses a row here.
+ */
+export function eligibleGuidanceRows(signals: GuidanceSignals, guidance: GuidanceState): SelectedRow[] {
+  const rows: SelectedRow[] = [];
+  for (const id of IDS) {
+    for (const draft of evaluate(id, signals).candidates) {
+      if (cooled(draft, guidance)) continue;
+      const row = selected(draft, signals);
+      if (row) { rows.push(row); break; }
+    }
+  }
+  return rows.sort((a, b) => compareId(a.priority, b.priority) || IDS.indexOf(a.policy_id) - IDS.indexOf(b.policy_id));
+}
+
 export function selectGuidance(signals: GuidanceSignals, guidance: GuidanceState): Selection {
   const suppressAll = (reason: SuppressionReason): Selection => ({ suppressed: IDS.map(policy_id => ({ policy_id, reason })) });
   if (signals['open.decision_point'] === true) return suppressAll('decision_point');

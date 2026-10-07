@@ -148,6 +148,10 @@ import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn, t
 import { guidanceRequestOf, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { nextStepOffersForTurn, SUGGEST_RISKS_CHIP } from '../orchestrator-v5/agent-lane/next-steps-from-guidance.js';
 import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
+import { actionFactsOf, type ActionFacts } from '../orchestrator-v5/agent-lane/actions/state.js';
+import type { GuidanceState } from '../orchestrator-v5/agent-lane/guidance/index.js';
+import { actionBarOf } from '../orchestrator-v5/agent-lane/actions/rank.js';
+import { actionPressOf, actionReceiptOf, decidePress, declinedReply, type ActionExit, type ActionPress, type ActionTypedReply } from '../orchestrator-v5/agent-lane/actions/handlers.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
@@ -424,6 +428,25 @@ function takeResearchOffer(key: string, id: unknown): boolean {
  */
 const LAST_APPROVE_MAX = 500;
 const lastApproveOffer = new Map<string, OfferedAction>();
+/**
+ * ⭐ S-B (github-a2 amendment 6): the typed card an action press prepared (an Agent `prop_` proposal or a product `gmh_`
+ * hold) and the chips offered with it, by `${scenario}:${offer_key}`, so the same offer pressed twice (a double click, a
+ * retry under a new turn id) re-offers that card while it still waits, never a second one.
+ * Process-local and bounded, like `lastApproveOffer`; a restart loses only the re-offer (the card itself stays durable).
+ */
+const ACTION_OFFER_PROPOSALS_MAX = 500;
+const actionOfferProposals = new Map<string, { readonly proposalId: string; readonly chips: readonly OfferedAction[] }>();
+function rememberActionOfferProposal(key: string, entry: { readonly proposalId: string; readonly chips: readonly OfferedAction[] }): void {
+  actionOfferProposals.delete(key);
+  actionOfferProposals.set(key, entry);
+  while (actionOfferProposals.size > ACTION_OFFER_PROPOSALS_MAX) actionOfferProposals.delete(actionOfferProposals.keys().next().value as string);
+}
+/** A typed "can't yet" reply's exits as chips: an offer's own press, the Run, or the existing "what it still needs" turn. */
+function actionExitChips(exits: readonly ActionExit[]): OfferedAction[] {
+  return exits.map((exit): OfferedAction => exit.kind === 'run' ? { ...RUN_OFFER_CHIP }
+    : exit.kind === 'what_it_needs' ? { ...NEXT_STEP_AFTER_BLOCKED_RUN_CHIP }
+      : { id: exit.offer.press_id, label: exit.offer.label, message: exit.offer.user_line });
+}
 function rememberApprove(key: string, offered: readonly OfferedAction[]): void {
   const approve = offered.find((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
   if (approve === undefined) return;
@@ -1129,6 +1152,8 @@ export function typedRunOf(body: Record<string, unknown>): boolean {
   const chip = body['chip'] as { action_type?: unknown; id?: unknown } | null | undefined;
   // A "Test without this link" press is terminal SCI-DEEP whatever else the chip carries: never an ordinary Run.
   if (typeof chip?.id === 'string' && chip.id.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) return false;
+  // ⭐ S-B (Codex r1 P1-2 on #2751): an action press is dispatched by its id whatever else the chip carries: never a Run.
+  if (actionPressOf(chip) !== null) return false;
   // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
   return (body['kind'] === undefined || body['kind'] === 'message') && (chip?.action_type === 'run_analysis' || chip?.id === RUN_OFFER_CHIP.id);
 }
@@ -2086,8 +2111,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const review = decisionReviewFor(scenarioId, { ...state,
           factorEnrichments: await persistedFactorReviewFor(scenarioId, state, String(req.id)), recentReplies: await repliesToCheckAsks(
           [goalChanceWithheldForAgent(state.analysisResult, state.graph)?.say], store, scenarioId, turnId) });
-        replayText = review.reply;
-        boundControl.push(...decisionReviewChips(review));
+        // S-B (Codex r1 P2-3 on #2751): an unbound review replays the live press's typed "can't yet" and its working exit.
+        const pressed = review.bound ? null : decidePress({ id: DECISION_REVIEW_PRESS_ID }, actionFactsOf({ scenarioId, graph: state.graph,
+          graphHash: state.graphHash, analysisState: state.analysisState, analysisReady: state.analysisReady, analysisResult: state.analysisResult,
+          optionParticipation: state.optionParticipation, identityEvaluated: state.identityEvaluated }));
+        if (pressed?.kind === 'reply') {
+          replayText = pressed.reply.text;
+          boundControl.push(...actionExitChips(pressed.reply.exits));
+        } else {
+          replayText = review.reply;
+          boundControl.push(...decisionReviewChips(review));
+        }
       } else if (whatChangesReplay) {
         // This unbound question asks about today's result: retry/cold read reconstructs today's answer, never Run A's
         // words. The SAME owner as the live turn (`whatWouldChangeAnswer`): this turn's measured answer while its Run is
@@ -2880,6 +2914,61 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       };
     }
     /**
+     * ⭐ S-B — AN ACTION PRESS IS DISPATCHED BY THE REGISTRY, ON THE CURRENT STATE (`agent-lane/actions/`; ACTION-SYSTEM
+     * §C4/§D5/§E; github-a2 contract amendment 6). The press is re-derived on this turn's read, never trusted from the bar it
+     * came from: a press whose offer still holds runs its EXISTING typed path below; one whose precondition fails (or an
+     * `act:` id the registry does not hold) gets a typed "can't yet because X" and a working exit, with NO model call. A
+     * typed card already waiting for the same offer is re-offered, never prepared twice (offer_key = idempotency).
+     */
+    let actionPress: ActionPress | null = null;
+    let actionReply: ActionTypedReply | null = null;
+    let actionReplyChips: OfferedAction[] = [];
+    let actionFactsAtPress: ActionFacts | undefined;
+    if (result === undefined && approvedProposal === undefined) {
+      const decided = await (async () => {
+        const chip = body['chip'];
+        if (actionPressOf(chip) === null) return null;
+        const rb = await readBackState(readingDispatch, scenarioId);
+        const facts = actionFactsOf({ scenarioId, graph: rb.graph, graphHash: rb.graphHash, analysisState: rb.analysisState,
+          analysisReady: rb.analysisReady, analysisResult: rb.analysisResult, optionParticipation: rb.optionParticipation,
+          identityEvaluated: rb.identityEvaluated });
+        return { facts, decision: decidePress(chip, facts), graphHash: rb.graphHash };
+      })();
+      if (decided !== null && decided.decision.kind !== 'not_an_action') {
+        actionPress = decided.decision.press;
+        actionFactsAtPress = decided.facts;
+        const remembered = actionPress.offer_key === null ? undefined : actionOfferProposals.get(`${scenarioId}:${actionPress.offer_key}`);
+        // Still waiting = the store would execute the Agent proposal on this revision, or the product hold survives in the
+        // latest carrier under the product's own survival rule (Codex r1 P1-1 on #2751: widen's card is a `gmh_` hold).
+        let stillWaiting = false;
+        if (remembered !== undefined && remembered.proposalId.startsWith('prop_')) {
+          stillWaiting = executableWaitingProposal(scenarioId, userId, decided.graphHash) === remembered.proposalId;
+        } else if (remembered !== undefined && typeof store.readMostRecentPendingActions === 'function') {
+          try {
+            // A product hold's pending carries its own id as `chip_id` (the approve chip is built from it).
+            const holds = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }))
+              .filter((pa) => pa.chip_id === remembered.proposalId || pa.chip_id === approvalChipIdFor(remembered.proposalId));
+            stillWaiting = computeSurvivingPriorPendingsDetailed(holds, [], [], decided.graphHash, Date.now()).survivors.length > 0;
+          } catch { stillWaiting = false; }
+        }
+        if (remembered !== undefined && stillWaiting) {
+          actionReply = { text: 'That suggestion is already waiting for your yes. Approve it, or change something first.', reason: 'already_waiting', outcome: 'ran', exits: [] };
+          actionReplyChips = [...remembered.chips];
+        } else if (decided.decision.kind === 'reply') {
+          actionReply = decided.decision.reply;
+          actionReplyChips = actionExitChips(actionReply.exits);
+        }
+        if (actionReply !== null) {
+          fastPath = 'method';
+          const text = actionReply.text;
+          result = { assistant_text: text, items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
+            timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+        }
+        log.info({ event: 'agent_lane.action_press', scenario_id: scenarioId, action_id: actionPress.action, has_offer_key: actionPress.offer_key !== null,
+          decision: actionReply !== null ? 'typed_reply' : 'route', reason: actionReply?.reason ?? null }, 'agent-lane: action press dispatched');
+      }
+    }
+    /**
      * ⭐ M1 — "STRENGTHEN THE MODEL" OPENS ONE CARD, WITH NO MODEL CALL (strengthen-press.ts; PTL 5938801653 #1). On a
      * current Run: ONE held `propose_link_strengths` for the S1 link at its current band (Olumi's estimate), and RC's
      * fixed copy. Its approve / amend chips come from this call, as for any proposal. No current Run, no S1 link or a
@@ -3111,6 +3200,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     let briefReadingOpen = false;
     let levelAnswerTool: typeof CURRENT_LEVEL_TOOL | undefined;
+    /**
+     * ⭐ S-B (§D5): A RECOGNISED PRESS NEVER BECOMES AN ORDINARY AGENT TURN. Every typed path above has had its turn; a press
+     * none of them took (a chip with an unexpected `action_type`, a handler that declined) is answered here, typed.
+     */
+    if (actionPress !== null && result === undefined && fastPath === undefined && actionFactsAtPress !== undefined) {
+      actionReply = declinedReply(actionPress, actionFactsAtPress);
+      actionReplyChips = actionExitChips(actionReply.exits);
+      fastPath = 'method';
+      result = { assistant_text: actionReply.text, items: [], tool_calls: [], tool_results: [], mutated: false, hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+      log.warn({ event: 'agent_lane.action_press', scenario_id: scenarioId, action_id: actionPress.action, decision: 'declined', reason: actionReply.reason },
+        'agent-lane: an action press no typed path took was answered typed');
+    }
     /** RT-1: set only on the path that runs the Agent with the selection; absent ⇒ no `_grounded_selection`. */
     let selectionContext: AgentSelectionContext | null | undefined;
     if (result === undefined) try {
@@ -3645,7 +3747,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
-    const offeredSpecific: OfferedAction[] = fastPath === 'method' && tippingTurn !== null
+    const offeredSpecific: OfferedAction[] = fastPath === 'method' && actionReply !== null
+      // S-B, terminal: a typed "can't yet" offers its working exits (or the waiting card it re-offers), nothing else.
+      ? firstOfEachId(actionReplyChips)
+      : fastPath === 'method' && tippingTurn !== null
       ? [TALK_IT_THROUGH_CHIP]
       : fastPath === 'method' && methodTurn !== null
       // T3, terminal: the method's ONE card (its approval) and the method's own follow-ups (RC method_turn_rule), nothing else.
@@ -3764,6 +3869,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
     rememberResearchOffers(approveKey, offeredNow);
+    // S-B (amendment 6): the card an offered action prepared, with the chips offered beside it, is remembered by its offer,
+    // so the same offer pressed again re-offers it (an Agent proposal or a product hold alike). An S-D card re-offered for
+    // an EARLIER held proposal is never taken for the card this press prepared.
+    if (actionPress?.offer_key != null && actionReply === null) {
+      const reoffered = new Set(heldCardOffer.map((c) => c.id));
+      const prepared = offeredNow.filter((a) => !reoffered.has(a.id)).map((a) => typedApprovalOf({ chip: { id: a.id } })).find((id): id is string => id !== undefined);
+      if (prepared !== undefined) rememberActionOfferProposal(`${scenarioId}:${actionPress.offer_key}`, { proposalId: prepared, chips: offeredNow.map((a) => ({ ...a })) });
+    }
     const pendingCandidates = [
       ...retainedScopeIssues,
       ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
@@ -4298,6 +4411,31 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
 
+    /**
+     * ⭐ S-B: THE ACTION BAR THIS ANSWER CARRIES (`action_bar` v1; github-a2 contract amendments 1–11 + v1.1), on EVERY turn,
+     * from the SAME final readback and the guidance history the reload GET will read: when this answer row wrote guidance
+     * events, that history is re-read AFTER the row is written (the reload reads the newest rows, so overlaying this row's
+     * events on the start-of-turn history drifts once the window rolls over; Codex r1 P2-4 on #2751); otherwise the
+     * start-of-turn history is already the reload's. The reload GET derives the bar with the same function from the same
+     * persisted state (amendment 9), so an unchanged state reloads it byte for byte. Never stored: the answer row's SQL
+     * envelopes carry no bar (the recorded missing contract).
+     */
+    const actionBar = await (async () => {
+      try {
+        let history: GuidanceState | null = guidanceHistory;
+        if (answerGuidance !== undefined) {
+          history = { ...(guidanceHistory ?? {}), ...answerGuidance.entries };
+          if (durability === 'recorded' && typeof store.readGuidanceHistory === 'function') {
+            try { history = await store.readGuidanceHistory(scenarioId); } catch { /* keep the overlay: the read failed, not the bar */ }
+          }
+        }
+        return actionBarOf(actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady, analysisResult,
+          optionParticipation, identityEvaluated, guidance: history }));
+      } catch (err) {
+        log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: action bar could not be ranked; the turn carries none');
+        return undefined;
+      }
+    })();
     // A7: what of the brief the model does not carry — the final readback's own manifest, bound to its graph_hash.
     const notModelledCarrier = notModelledTurnCarrier(notModelled, graphHash);
     // Local carrier, AFTER finalisation and licence egress. If egress changed the prose, the worksheet is withheld.
@@ -4317,6 +4455,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     return reply.code(200).send({
       ...wireBody,
       ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),
+      /**
+       * ⭐ S-B: the action bar (a root key DGAI keeps in `__additive__`, as it does `guidance`), and on an action press its
+       * receipt `_action`: which action, on which revision, and whether it ran or answered "can't yet" (contract v1.1 item 5).
+       */
+      ...(actionBar !== undefined ? { action_bar: actionBar } : {}),
+      ...(actionPress !== null && actionFactsAtPress !== undefined ? { _action: actionReceiptOf(actionPress, actionFactsAtPress.revision,
+        actionReply === null || actionReply.outcome === 'ran' ? 'ran' : 'cant_yet', actionReply?.reason) } : {}),
       /**
        * ⭐ A7 (DL #70 5855437928; Canonical 5855435365): the graph read's `not_modelled`, exactly as read, beside the
        * `graph_hash` of that same read. Derived by the read route, never here; never on the answer row; absent when the
