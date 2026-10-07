@@ -1110,7 +1110,7 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
   return warnings.map((w) => (w as { code?: unknown } | null)?.code).filter((c): c is string => typeof c === 'string');
 }
 
-export type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
+export type GoalFigureCoHold = { readonly subjects?: readonly string[]; readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
 
 const DECLINES_LINK = /\b(?:not checking|not adding|won't add|don't add|leave (?:it|that|them) out|skip (?:it|that)|move on|not going to size|don't want to size|no need to size|not modelling)\b/i;
 /** A positive decline ("move on", "skip it", "leave it out") negated right before it is NOT a refusal ("let's not move on"). */
@@ -1166,11 +1166,13 @@ export function goalFigureCoHoldOf(blocks: unknown, graph: unknown, userText?: s
       return typeof link?.from === 'string' && typeof link.to === 'string'
         ? [{ from: link.from, to: link.to, from_label: label(link.from), to_label: label(link.to) }] : [];
     }) : legacyLinks.map(l => ({ ...l, from_label: label(l.from), to_label: label(l.to) })));
+  // Subjects come only from the gate's recorded cause/warning links, never legacy graph reconstruction or words.
+  const subjects = cause !== undefined || Array.isArray(warning.links) ? links.map(l => `${l.from}→${l.to}`) : [];
   // No-dead-end (#2623): the reply says the SAME ask as the warning (one source), only for a Run that recorded the cause
   // (never while a product gate withholds every option: no cause, no invitation).
   const words = userDeclinesLink(userText, links) ? unsizedLinkStatement(links)
     : (cause !== undefined ? placeholderAskWords(graph, links)?.message : undefined) ?? unsizedLinkSentence(links);
-  return words !== '' ? { why: words, say: words } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
+  return words !== '' ? { why: words, say: words, subjects } : { why: typeof warning.message === 'string' ? warning.message : 'A link on the way to your goal has no recorded strength.' };
 }
 
 /**
