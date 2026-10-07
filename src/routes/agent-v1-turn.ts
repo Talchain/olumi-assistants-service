@@ -126,7 +126,7 @@ import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim
 import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import {
-  isWidenPress, keptProposalOf, nextStepsWithWiden, settleWidenTurn, widenGate, widenNotAdded, widenOffered, widenPassingArgs, widenTurnForReadback,
+  isWidenPress, keptProposalOf, settleWidenTurn, widenGate, widenNotAdded, widenOffered, widenPassingArgs, widenTurnForReadback,
   WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
@@ -136,7 +136,8 @@ import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, struc
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { decisionReviewFor, DECISION_REVIEW_PRESS_ID, type DecisionReviewTurn, type DecisionReviewRead } from '../orchestrator-v5/agent-lane/decision-review-press.js';
-import { guidanceRequestOf, turnGuidanceFor, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
+import { guidanceRequestOf, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
+import { nextStepOffersForTurn, SUGGEST_RISKS_CHIP } from '../orchestrator-v5/agent-lane/next-steps-from-guidance.js';
 import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
@@ -698,7 +699,7 @@ function decisionReviewChips(turn: DecisionReviewTurn): OfferedAction[] {
   });
 }
 /** Every press that runs a reasoning method (the selector withholds its rows on one): the next steps and Widen. */
-const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID, DECISION_REVIEW_PRESS_ID]);
+const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID, DECISION_REVIEW_PRESS_ID, SUGGEST_RISKS_CHIP.id]);
 export { METHOD_PRESS_IDS };
 
 /**
@@ -3532,13 +3533,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return chip === null ? [] : [[chip.id, chip] as const];
       })).values()],
     ]);
-    // ⭐ Nothing specific to press, on a result that is current: the product's own next steps (NEXT_STEP_CHIPS). Never
-    // beside another control, and never while a proposal that would still execute waits for its yes (that is the step).
-    const offeredNow: OfferedAction[] = offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
-      && executableWaitingProposal(scenarioId, userId, graphHash) === undefined
-      // Widen takes the plain "What would change the result?" place when the selector's RC-WIDEN holds on options.
-      ? nextStepsWithWiden(NEXT_STEP_CHIPS, widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }))
-      : offeredSpecific;
+    let guidanceHistory: Awaited<ReturnType<NonNullable<typeof store.readGuidanceHistory>>> | null = null;
+    if (typeof store.readGuidanceHistory === 'function') {
+      try { guidanceHistory = await store.readGuidanceHistory(scenarioId); }
+      catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
+    }
+    // Select once from the same readback, before fixing the pills. Specific controls and waiting cards win.
+    const guidanceWaitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash);
+    const guidanceWaiting = guidanceWaitingIds.map((id) => ({ id: approvalChipIdFor(id) }));
+    const guidanceRunKey = fastPath === 'explain' && typeof explanationId === 'string'
+      ? explanationId.slice(RUN_EXPLANATION_PREFIX.length)
+      : runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult })?.id.slice(RUN_EXPLANATION_PREFIX.length);
+    const nextStepOffers = nextStepOffersForTurn(NEXT_STEP_CHIPS, {
+      request: guidanceRequestOf(fastPath, (body['chip'] as { id?: unknown } | null | undefined)?.id, METHOD_PRESS_IDS),
+      offeredSpecific: firstOfEachId([...offeredSpecific, ...guidanceWaiting]),
+      assistantText: text,
+      licence: leaderLicenceFromState(analysisState, analysisReady),
+      guidance: guidanceHistory,
+      ...(guidanceRunKey !== undefined ? { runKey: guidanceRunKey } : {}),
+      state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
+    }, offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
+      && executableWaitingProposal(scenarioId, userId, graphHash) === undefined,
+      widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }), offeredSpecific);
+    const offeredNow: OfferedAction[] = nextStepOffers.offered;
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
     rememberResearchOffers(approveKey, offeredNow);
@@ -3882,11 +3899,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE final egress so the fail-closed walk covers it. Only content-free events from the surviving row are
      * committed with the answer; a replay still carries no live row (PANEL restores from its transcript).
      */
-    let guidanceHistory: Awaited<ReturnType<NonNullable<typeof store.readGuidanceHistory>>> | null = null;
-    if (typeof store.readGuidanceHistory === 'function') {
-      try { guidanceHistory = await store.readGuidanceHistory(scenarioId); }
-      catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
-    }
     if (fastPath === 'method') {
       if (pressedChipId === WIDEN_PRESS_ID) handledGuidancePress = { policy_id: 'RC-WIDEN' };
       else if (isWhatChangesPress(pressedChipId)) handledGuidancePress = { policy_id: 'RC-WHAT-CHANGES' };
@@ -3895,16 +3907,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       // Any proposal that would still execute waits for its yes: that card is the step, re-offered or not (`offeredNow`).
       const waitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash);
-      const waiting = waitingIds.map((id) => ({ id: approvalChipIdFor(id) }));
-      const guidance = turnGuidanceFor({
-        request: guidanceRequestOf(fastPath, (body['chip'] as { id?: unknown } | null | undefined)?.id, METHOD_PRESS_IDS),
-        offeredSpecific: firstOfEachId([...offeredSpecific, ...waiting]),
-        assistantText: wireBody.assistant_text,
-        licence: leaderLicenceFromState(analysisState, analysisReady),
-        guidance: guidanceHistory,
-        ...(narrationKey !== undefined ? { runKey: narrationKey } : {}),
-        state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
-      });
+      const guidance = nextStepOffers.selection;
       if (guidance !== undefined) wireBody = { ...wireBody, guidance };
       // ⭐ THE SUGGESTION PREVIEW (DL 5941839936; `turn-context/proposal-preview.ts`): what a Yes on THIS turn's consent
       // chip would do, from the STORED proposal the chip names, only while it would still execute. Attached below, AFTER
