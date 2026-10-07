@@ -207,6 +207,7 @@ import { buildSeparabilityDisclosure } from '../../coaching/separability-disclos
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { sentGoalThresholdOf, withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { withIndexGoalWeightsNote } from '../../goal-target/index-goal-weights-note.js';
 import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
 import { scopeTargetNotTestableWithRanges } from '../../goal-target/scope-target-not-testable.js';
 import { perOptionTargetReasonsForRun } from '../../goal-target/target-testability-per-option.js';
@@ -2779,6 +2780,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Choose exactly one threshold field on the sent graph by agreement with every licensed option's percentiles/chance.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, earnedGoalChance,
       sentGoalThresholdOf(response, plotPayload.graph, snapshot.goal_node_id, earnedGoalChance));
+    response = withIndexGoalWeightsNote(response, graphForAnalysis, snapshot.goal_node_id);
     // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
     response = scopeTargetNotTestableWithRanges(response, graphForAnalysis);
 
