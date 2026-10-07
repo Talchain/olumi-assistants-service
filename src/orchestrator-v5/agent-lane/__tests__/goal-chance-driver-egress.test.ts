@@ -924,3 +924,55 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
     expect(cost(4000) / cost(1000)).toBeLessThan(8);
   });
 });
+
+/**
+ * Wave B5 (7 Oct 06:0x–06:1xZ, guest, CEE 5a260e3), keys untouched: the unseen b5-2 Challenge said "This run doesn’t
+ * establish what would change the chances most: the profit effects still need sizing." beside "‘Fourth Shop in Clifton’:
+ * between about 12% and 64% … It depends most on …". The S2e what-form had no modal; 7b 01a2b27 and cut 8 3fce64f both
+ * missed it (Render: no driver_absence event on b627d582). S2g: an optional modal (would / could / might / will / can).
+ */
+const B5_CH2 = JSON.parse(fixture('waveB5-unseen2-5a260e3-challenge-turn001.json')) as Json;
+
+describe('Wave B5, keys untouched: the modal "what would change the chances most" (S2g)', () => {
+  it('RED at base: the b5-2 Challenge loses only its denial and keeps its reason, capitalised', () => {
+    const lead = 'This run doesn’t establish what would change the chances most: the profit effects still need sizing.';
+    expect(B5_CH2.assistant_text.startsWith(lead)).toBe(true);
+    expect(screenNamesADriver(blockOf(B5_CH2), B5_CH2.draft_graph)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B5_CH2, opts(B5_CH2)) as Json;
+    expect(out.assistant_text).toBe(B5_CH2.assistant_text.replace(lead, 'The profit effects still need sizing.'));
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('CONTROL no range record: kept, by reference', () => {
+    const body = withoutRange(B5_CH2);
+    expect(withoutDriverAbsenceClaimsAtEgress(body, opts(body))).toBe(body);
+  });
+
+  it.each([
+    ['It can’t say what could move the result most.', ''],
+    ['The run does not show what will shift the comparison the most.', ''],
+  ])('MUST FIRE (paraphrase): %s', (text, edited) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+  });
+
+  it.each([
+    'What would change the chances most is the price rise.',
+    'Does this run not establish what would change the chances most?',
+    'The run doesn’t establish what would change your mind most.',
+    'It has not established what would change the deadline most.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  it.each([
+    ['"what would" + 20,000 spaces', `doesn't establish what would${' '.repeat(20000)}x`],
+    ['"what" + 20,000 spaces + modal', `doesn't establish what${' '.repeat(20000)}would change`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text);
+    removeDriverAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
