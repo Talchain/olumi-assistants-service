@@ -18,7 +18,7 @@
  * on time", "% likely"; must-not-fire "% of launch done", "% of customers", "churn %".
  */
 
-import { endsOfGraph, validatedDefinition } from './held-user-links.js';
+import { endsOfGraph, validatedDefinition, withHeldUserLinks } from './held-user-links.js';
 import { timeBetween } from './deadline-date.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { extraShareMoments, momentsOfTeam, type TeamShare } from './event-by-date-share.js';
@@ -141,10 +141,16 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
   const inbound = edges.filter(e => e.to === goal.id);
   if (inbound.length === 0 || new Set(inbound.map(e => e.from)).size !== inbound.length) return null;
   const endsOf = endsOfGraph(graph);
+  // Attest the same held projection sent by Run, by link identity. A stored
+  // spread may be replaced by the user's stated range on that projection.
+  const heldGraph = withHeldUserLinks(graph);
+  const heldEdges = Array.isArray(heldGraph.edges) ? heldGraph.edges.filter(isRec) : [];
   const teams: string[] = [];
   const options = nodes.filter(n => n.kind === 'option');
   if (options.length === 0) return null;
   for (const e of inbound) {
+    const held = heldEdges.find(l => l.from === e.from && l.to === e.to);
+    if (held === undefined || !isRec(held.strength)) return null;
     const source = nodes.find(n => n.id === e.from);
     if (source === undefined || source.kind !== 'factor' || typeof source.id !== 'string'
       || source.intercept !== undefined || source.nonlinear_identity !== undefined || e.edge_type === 'bidirected'
@@ -158,11 +164,14 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
     const team = statedTeamShareOf(source, deadline, unit);
     if (team !== null) {
       if (source.observed_state.unit !== unit || validatedDefinition(e, endsOf(e)) === undefined
-        || e.strength.mean !== 1 || edges.some(l => l.to === source.id)
+        || e.strength.mean !== 1 || held.strength.mean !== 1 || held.strength.std !== 0.01
+        || held.exists_probability !== 1 || edges.some(l => l.to === source.id)
         || options.some(o => isRec(o.interventions) && sourceId in o.interventions)) return null;
       const expected = momentsOfTeam(team);
       if (!finite(source.observed_state.value) || Math.abs(source.observed_state.value - expected.mean) > 0.0005
-        || (expected.sd > 0 && (!finite(source.observed_state.std) || Math.abs(source.observed_state.std - expected.sd) > 0.0005))) return null;
+        || (source.observed_state.std === undefined ? expected.sd > 0
+          : !finite(source.observed_state.std) || source.observed_state.std < 0
+            || Math.abs(source.observed_state.std - expected.sd) > 0.0005)) return null;
       teams.push(source.id);
       continue;
     }
@@ -185,7 +194,10 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
     if (D <= 0) return null;
     const expected = extraShareMoments(c.monthly_share / 100, D, c.lead_low, c.lead_high);
     if (!finite(e.strength.mean) || !finite(e.strength.std) || Math.abs(e.strength.mean - expected.mean) > 0.0005
-      || Math.abs(e.strength.std - expected.sd) > 0.0005) return null;
+      || Math.abs(e.strength.std - expected.sd) > 0.0005
+      || !finite(held.strength.mean) || !finite(held.strength.std) || held.exists_probability !== 1
+      || Math.abs(held.strength.mean - expected.mean) > 0.0005
+      || Math.abs(held.strength.std - expected.sd) > 0.0005) return null;
   }
   if (teams.length !== 1 || options.some(o => inbound.filter(e => {
     const settings = isRec(o.interventions) ? o.interventions : {};

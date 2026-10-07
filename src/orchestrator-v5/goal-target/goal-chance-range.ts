@@ -158,21 +158,29 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     if (decision?.form === 'point') continue;
     withheld.add(id);
     if (decision === null) continue; // unsupported parts: no manufactured range
+    const lowPct = Math.round(decision.low * 100), highPct = Math.round(decision.high * 100);
+    if (lowPct === highPct) continue; // a displayed point is not a readable range
     const g = graph as Rec;
     const nodes = g.nodes as Rec[];
     const team = nodes.find(n => n.id === share.team_part_id)!;
     const os = team.observed_state as Rec;
     const stated = os.stated_time as Rec;
-    ranges[id] = { low_pct: Math.round(decision.low * 100), high_pct: Math.round(decision.high * 100),
+    ranges[id] = { low_pct: lowPct, high_pct: highPct,
       low_rounding: 'whole', high_rounding: 'whole', kind: 'stated_time', basis: 'stated_time',
       quantity: stated.quantity as 'months_to_finish' | 'share_per_month', low: decision.low, high: decision.high,
       from: share.team_part_id, to: goalId as string, among: 'all' };
   }
   if (withheld.size === 0) return envelope;
-  let out = withholdOptionGoalFigures(envelope, withheld, {
-    code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [...withheld],
-    message: 'Not shown as a single figure. How long the work takes with today’s team is too uncertain for one figure here, so this chance is shown as a range.',
-  }, { keepOutcome: true, keepOrdering: true });
+  let out = envelope;
+  for (const shownAsRange of [false, true]) {
+    const ids = [...withheld].filter(id => Object.hasOwn(ranges, id) === shownAsRange);
+    if (ids.length === 0) continue;
+    out = withholdOptionGoalFigures(out, new Set(ids), {
+      code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ids,
+      message: 'Not shown as a single figure. How long the work takes with today’s team is too uncertain for one figure here, '
+        + (shownAsRange ? 'so this chance is shown as a range.' : 'so this chance is not shown.'),
+    }, { keepOutcome: true, keepOrdering: true });
+  }
   if (Object.keys(ranges).length > 0) out = appendInferenceWarning(out, {
     code: GOAL_CHANCE_RANGE, severity: 'info', option_ids: Object.keys(ranges), range_by_option: ranges,
     message: 'Each chance runs from the slow end of your time estimate to the fast end.',
