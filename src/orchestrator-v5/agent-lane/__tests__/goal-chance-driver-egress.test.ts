@@ -235,3 +235,21 @@ describe('S2 review r1 #5: the reviewer’s paraphrase misses fire; its near-mis
     expect(DRIVER_ABSENCE_CLAIM.test(sentence)).toBe(false);
   });
 });
+
+describe('the provisional view’s reasoning, shown beneath the reply, is held to the same rule', () => {
+  // SERVED, verbatim: acceptance-successor-20261005/final/g1-2644/draft-4/wire/turn-003-1791269318680.json
+  // (_agent.provisional_view.reasoning). 8 of 93 distinct served reasonings carry the claim (measured 7 Oct).
+  const SERVED_REASONING = 'Your brief already supplies 2 customers lost per 1% price rise and £300/month lost per customer, yet this run cannot use that relationship to test the target. Four values behind the comparison are Olumi’s assumptions, not your figures; the analysis has not established which assumption matters most.';
+  it('RED at e6327125: only the clause goes from the reasoning; the reply and every other field are unchanged', () => {
+    const body = clone(PROD);
+    body._agent.provisional_view.reasoning = SERVED_REASONING;
+    const out = withoutDriverAbsenceClaimsAtEgress(body, opts(body)) as Json;
+    expect(out._agent.provisional_view.reasoning).toBe(SERVED_REASONING.replace('; the analysis has not established which assumption matters most.', '.'));
+    expect(out._agent.provisional_view.view).toBe(body._agent.provisional_view.view);
+    expect(out.assistant_text).toBe(PROD.assistant_text.replace(PROD_CLAUSE, '.'));
+  });
+  it('CONTRAST: the prod view’s own reasoning ("do not establish when …") is a different claim and is untouched', () => {
+    const out = withoutDriverAbsenceClaimsAtEgress(PROD, opts(PROD)) as Json;
+    expect(out._agent).toBe(PROD._agent);
+  });
+});

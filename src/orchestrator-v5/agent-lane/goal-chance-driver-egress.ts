@@ -168,19 +168,37 @@ export interface DriverAbsenceEgressOpts {
   readonly turnId?: string;
 }
 
-/** Final-egress edit: the body by reference unless the Run shows a driver AND the reply denied one. Never throws. */
+/**
+ * Final-egress edit: the body by reference unless the Run shows a driver AND the reply (or the provisional view's
+ * reasoning shown beneath it) denied one. Never throws. Measured 7 Oct: 8 of 93 distinct served provisional-view
+ * reasonings carry the same claim, each with a clean clause boundary.
+ */
 export function withoutDriverAbsenceClaimsAtEgress<T extends { assistant_text?: unknown }>(body: T, opts: DriverAbsenceEgressOpts): T {
   try {
-    if (typeof body.assistant_text !== 'string' || body.assistant_text === '') return body;
+    const agent = (body as { _agent?: { provisional_view?: { reasoning?: unknown } } })._agent;
+    const reasoning = agent?.provisional_view?.reasoning;
+    const reply = typeof body.assistant_text === 'string' && body.assistant_text !== '' ? body.assistant_text : undefined;
+    const view = typeof reasoning === 'string' && reasoning !== '' ? reasoning : undefined;
+    if (reply === undefined && view === undefined) return body;
     if (Object.keys(goalChanceDriverDisplayForAgent(opts.analysisResult, opts.graph)).length === 0) return body;
     const nodes = (opts.graph as { nodes?: unknown } | null | undefined)?.nodes;
     const labels = (Array.isArray(nodes) ? nodes : []).flatMap((n) => {
       const node = n as { kind?: unknown; label?: unknown } | null;
       return node?.kind === 'option' && typeof node.label === 'string' && node.label.trim() !== '' ? [node.label.trim()] : [];
     });
-    const edit = removeDriverAbsenceClaims(body.assistant_text, labels);
-    // A reply that would be left empty is kept whole: nothing true would remain to send (logged, never silent).
-    const keptUnsafe = edit.keptUnsafe + (edit.removed > 0 && edit.text === '' ? edit.removed : 0);
+    let removed = 0;
+    let keptUnsafe = 0;
+    // A text that would be left empty is kept whole: nothing true would remain to send (logged, never silent).
+    const edited = (text: string | undefined): string | undefined => {
+      if (text === undefined) return undefined;
+      const edit = removeDriverAbsenceClaims(text, labels);
+      keptUnsafe += edit.keptUnsafe + (edit.removed > 0 && edit.text === '' ? edit.removed : 0);
+      if (edit.removed === 0 || edit.text === '') return undefined;
+      removed += edit.removed;
+      return edit.text;
+    };
+    const newReply = edited(reply);
+    const newView = edited(view);
     if (keptUnsafe > 0) {
       log.warn(
         { event: 'agent_lane.goal_chance_driver_absence_kept_unsafe', code: GOAL_CHANCE_DRIVER_ABSENCE_KEPT_UNSAFE, turn_id: opts.turnId ?? null,
@@ -188,13 +206,17 @@ export function withoutDriverAbsenceClaimsAtEgress<T extends { assistant_text?: 
         'agent-lane: a reply denied a goal-chance driver the screen shows, but no clean clause boundary exists; the sentence was kept',
       );
     }
-    if (edit.removed === 0 || edit.text === '') return body;
+    if (newReply === undefined && newView === undefined) return body;
     log.warn(
       { event: 'agent_lane.goal_chance_driver_absence_removed', code: GOAL_CHANCE_DRIVER_ABSENCE_REMOVED, turn_id: opts.turnId ?? null,
-        request_id: opts.requestId, exit_path: opts.exitPath, removed_count: edit.removed },
+        request_id: opts.requestId, exit_path: opts.exitPath, removed_count: removed },
       'agent-lane: the reply denied a goal-chance driver the screen shows; the clause was removed (prompt rule missed)',
     );
-    return { ...body, assistant_text: edit.text };
+    return {
+      ...body,
+      ...(newReply !== undefined ? { assistant_text: newReply } : {}),
+      ...(newView !== undefined ? { _agent: { ...agent, provisional_view: { ...agent!.provisional_view, reasoning: newView } } } : {}),
+    };
   } catch {
     return body;
   }
