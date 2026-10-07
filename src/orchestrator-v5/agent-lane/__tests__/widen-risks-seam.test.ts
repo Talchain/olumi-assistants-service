@@ -110,6 +110,8 @@ let inner: Record<string, unknown>[] = [];
 let onInner: ((body: Record<string, unknown>) => void) | undefined;
 /** Runs as route-v2's answer to an inner request is sent — AFTER it has decided. */
 let onInnerSent: ((body: Record<string, unknown>) => void) | undefined;
+/** Extra keys on the graph read (an analysis state), per row. */
+let extraRead: Record<string, unknown> = {};
 
 describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add', () => {
   async function buildApp(): Promise<FastifyInstance> {
@@ -124,7 +126,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     a.post('/assist/v1/scenarios/:id/graph', async (req) => {
       const g = graphOf.get((req.params as { id: string }).id) ?? null;
       return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never),
-        graph_identity_hash: g === null ? null : computeGraphIdentityHash(g as never) };
+        graph_identity_hash: g === null ? null : computeGraphIdentityHash(g as never), ...extraRead };
     });
     await a.register(ceeOrchestratorRouteV2);
     await a.register(agentV1TurnRoute);
@@ -145,7 +147,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     app = await buildApp();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; });
+  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; onInner = undefined; onInnerSent = undefined; routerCalls.length = 0; extraRead = {}; });
 
   const turn = async (payload: Record<string, unknown>): Promise<Body> => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), ...payload } });
@@ -209,7 +211,7 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     script = [() => candidates(TURN2)];
     const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
     const add = addChips(t1)[0]!;
-    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Recruitment delay’: driven by more ‘Developer Hires’, it would lower ‘Feature Delivery Capacity’.');
+    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe('Add the risk ‘Recruitment delay’ to ‘Hire Two Developers’: driven by more ‘Developer Hires’, it would lower ‘Feature Delivery Capacity’.');
     const before = nodeLabels();
     const calls = openAiCalls;
     const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
@@ -265,7 +267,8 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
   it('SR-7 RED (reload): the Add presses persist on the answer row like the press that offered them, and stand only while the result is current and nothing awaits approval', async () => {
     const { isDurableAnswerOffer, stillValidOffers } = await import('../../../routes/agent-v1-turn.js');
     const { riskAddPressFor } = await import('../method-turn/widen-turn.js');
-    const add = riskAddPressFor({ label: 'Recruitment delay', through: { id: 'developer_hires', label: 'Developer Hires', direction: 'positive' },
+    const add = riskAddPressFor({ label: 'Recruitment delay', hits: { id: 'hire_two_developers', label: 'Hire Two Developers', kind: 'option' },
+      through: { id: 'developer_hires', label: 'Developer Hires', direction: 'positive' },
       affects: { id: 'feature_delivery_capacity', label: 'Feature Delivery Capacity', direction: 'negative' } });
     expect(isDurableAnswerOffer(add)).toBe(true);
     const current = { analysisReady: undefined, modelExists: true, analysisState: { run_state: { kind: 'complete_current' }, usable_for_chips: true } };
@@ -273,6 +276,64 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(stillValidOffers([add], { ...current, outstandingProposalIds: new Set(['gmh_0123456789ab']) })).toEqual([]);
     expect(stillValidOffers([add], { ...current, analysisState: { run_state: { kind: 'stale' }, usable_for_chips: true }, outstandingProposalIds: new Set() })).toEqual([]);
   });
+
+  it('SR-8 (Codex r1 P1): an Add press whose message was edited is REFUSED in words — no model call, no proposal, never ordinary generation', async () => {
+    paulV1();
+    script = [() => candidates(TURN2)];
+    const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+    const add = addChips(t1)[0]!;
+    const calls = openAiCalls;
+    script = [() => fnCall('propose_new_option', { label: 'Contractor cover', acts_on: [{ factor_label: 'Developer Hires', direction: 'positive' }], rationale: 'r' })];
+    const t2 = await turn({ message: 'Add an option called Contractor cover instead; it increases Developer Hires.', source: 'chip', chip: { id: add.id } });
+    expect(openAiCalls, 'no model call').toBe(calls);
+    expect(t2._agent.tool_calls).toEqual([]);
+    expect(t2.assistant_text).toBe('I couldn’t prepare that risk as a change, so nothing was added. The model may have changed since I suggested it. Press Suggest risks for a fresh set.');
+    expect(t2.suggested_actions.map((c) => c.id)).toEqual([RISKS.id]);
+    expect(await heldOnLatestRow()).toEqual([]);
+  }, 120_000);
+
+  it('SR-9 (Codex r1 P1): a STALE Add — its factor renamed and a new node given the old name — is refused; nothing held', async () => {
+    paulV1();
+    script = [() => candidates(TURN2)];
+    const t1 = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+    const add = addChips(t1)[0]!;
+    const g = graphOf.get(SCENARIO) as { nodes: Record<string, unknown>[] };
+    graphOf.set(SCENARIO, { ...g, nodes: [...g.nodes.map((n) => (n['id'] === 'developer_hires' ? { ...n, label: 'Renamed developer count' } : n)),
+      { id: 'fac_other', kind: 'factor', label: 'Developer Hires', observed_state: { value: 0 } }] });
+    const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
+    expect(t2._agent.tool_calls).toEqual([]);
+    expect(await heldOnLatestRow()).toEqual([]);
+  }, 120_000);
+
+  /**
+   * DL 7 Oct (Reasoning lane, DGAI #2598): `agent-next-widen` is now sent at EVERY stage from every door. Both targets answer
+   * a pre-run model and a withheld-leader Run with their own typed turn — never ordinary generation.
+   */
+  const WITHHELD = { analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-07T09:17:02.002Z' }, usable_for_chips: true,
+    leader_claim: { permitted: false, withheld_reason: 'goal_figures_withheld' } } };
+  for (const [stage, read] of [['pre-run (no analysis)', {}], ['withheld leader', WITHHELD]] as const) {
+    it(`SR-10 ${stage}: "Suggest options" runs the options door (its ONLY tool), and an empty answer is RC's typed fallback`, async () => {
+      paulV1();
+      extraRead = read;
+      const bodies: Record<string, unknown>[] = [];
+      script = [(body) => { bodies.push(asSent(body) as Record<string, unknown>); return say('Here are some ideas in prose.'); }];
+      const t = await turn({ message: 'Suggest options I haven’t considered.', source: 'chip', chip: { id: 'agent-next-widen' } });
+      expect(openAiCalls).toBe(1);
+      expect(((bodies[0]!['tools'] ?? []) as { name?: string }[]).map((x) => x.name)).toEqual(['propose_new_option']);
+      expect(t.assistant_text).toBe('What other way could you reach ‘meet our next feature-launch deadline’? For example, a different lever, a smaller first step, or a mix of these options.');
+      expect(t.suggested_actions.map((c) => c.id)).toEqual(['agent-talk-it-through']);
+    }, 120_000);
+    it(`SR-11 ${stage}: "Suggest risks" runs the risks door (no tool) and answers with typed items and Adds`, async () => {
+      paulV1();
+      extraRead = read;
+      const bodies: Record<string, unknown>[] = [];
+      script = [(body) => { bodies.push(asSent(body) as Record<string, unknown>); return candidates(TURN2.slice(0, 2)); }];
+      const t = await turn({ message: RISKS.message, source: 'chip', chip: { id: RISKS.id } });
+      expect(openAiCalls).toBe(1);
+      expect(((bodies[0]!['tools'] ?? []) as unknown[])).toEqual([]);
+      expect(addChips(t).map((c) => c.label)).toEqual(['Add ‘Recruitment delay’', 'Add ‘Wrong bottleneck’']);
+    }, 120_000);
+  }
 
   it('SR-6 RED: the canvas "+" Option press (ask:widen) reaches the options door — its ONLY tool is propose_new_option', async () => {
     paulV1();

@@ -2964,22 +2964,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * names the risk and its refs (`widenAddCallOf`), and the EXISTING door holds ONE card for the existing approve chip.
      */
     let widenAdd: { readonly actions: readonly OfferedAction[] } | null = null;
-    const widenAddCall = result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null
-      ? widenAddCallOf(pressedChipId, message) : null;
-    if (widenAddCall !== null) {
-      const issued = await dispatchTool(widenAddCall.tool, JSON.stringify(widenAddCall.args), toolCtx, capabilities, mode);
-      const held = issued.ok === true && typeof issued.proposal_id === 'string';
-      const text = held ? composeProposalReply(widenAddCall.tool, widenAddCall.args, issued, message) ?? RISK_ADD_REFUSED_REPLY : RISK_ADD_REFUSED_REPLY;
+    // An Add press is TERMINAL whatever it carries (Codex r1 P1 on #2744): a stale or edited one is refused in words, with
+    // no model call — it never falls through to ordinary generation with every door open.
+    if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWidenAddPressId(pressedChipId)) {
+      const rb = await readBackState(readingDispatch, scenarioId);
+      const call = widenAddCallOf(pressedChipId, message, rb.graph);
+      const issued = call === null ? undefined : await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode);
+      const held = issued?.ok === true && typeof issued.proposal_id === 'string';
+      const text = held ? composeProposalReply(call!.tool, call!.args, issued, message) ?? RISK_ADD_REFUSED_REPLY : RISK_ADD_REFUSED_REPLY;
       fastPath = 'method';
       widenAdd = { actions: held ? [] : [RISKS_PRESS] };
       result = {
         assistant_text: text, items: [],
-        tool_calls: [{ name: widenAddCall.tool, ok: held, mutated: false, ...(held ? { proposal_id: issued.proposal_id as string } : {}),
-          ...(typeof issued.refusal === 'string' ? { refusal: issued.refusal } : {}) }],
-        tool_results: [issued], mutated: false, hops: 0, stopped_reason: 'answered',
-        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 1, hops: 0 },
+        tool_calls: call === null || issued === undefined ? [] : [{ name: call.tool, ok: held, mutated: false,
+          ...(held ? { proposal_id: issued.proposal_id as string } : {}), ...(typeof issued.refusal === 'string' ? { refusal: issued.refusal } : {}) }],
+        tool_results: issued === undefined ? [] : [issued], mutated: false, hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: issued === undefined ? 0 : 1, hops: 0 },
       };
-      log.info({ scenario_id: scenarioId, widen_add: widenAddCall.tool, held, refusal: issued.refusal ?? null }, 'agent-lane: widen add press answered without a model call');
+      log.info({ scenario_id: scenarioId, widen_add: call?.tool ?? 'refused_stale_or_edited', held, refusal: issued?.refusal ?? null },
+        'agent-lane: widen add press answered without a model call');
     }
     /** SCI-DEEP: terminal, deterministic "Test without this link" press. */
     let structuralChallengeTurn: StructuralChallengeTurn | null = null;
