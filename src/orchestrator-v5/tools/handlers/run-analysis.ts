@@ -206,6 +206,7 @@ import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThres
 import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
 import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
+import { scopeTargetNotTestableWithRanges } from '../../goal-target/scope-target-not-testable.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 import { withHeldUserLinks } from '../../goal-target/held-user-links.js';
@@ -2743,6 +2744,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // 0 or 1 counts only where this Run earned it.
     response = withGoalChanceLicence(response, graphForAnalysis, snapshot.goal_node_id, (optionId, p) =>
       goalCertainty.recorded && goalCertainty.decisions.some((d) => d.option_id === optionId && d.probability_of_goal === p && d.earned));
+    // S4b: range/point lines and the target's withheld sentence must describe disjoint option sets on this same Run.
+    response = scopeTargetNotTestableWithRanges(response, graphForAnalysis);
 
     const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
       snapshot.rawPersistedGraph,
