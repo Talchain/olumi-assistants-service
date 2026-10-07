@@ -38,7 +38,7 @@ const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
 ]);
 /** Every key `proposeNewRisk` returns on success (agent-capabilities.ts): every disclosure is typed in `risk`. */
 const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
-  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'note',
+  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'likelihood', 'note',
 ]);
 /**
  * Every key `proposeOptionInterventions` returns on a clean success. Its disclosures (`not_the_users_figure`,
@@ -155,7 +155,15 @@ function newRiskReply(r: Rec): string | null {
   const threatens = phrases(risk.threatens);
   const drivenBy = phrases(risk.driven_by ?? []);
   if (threatens === null || threatens.length === 0 || drivenBy === null || risk.how_strongly !== RISK_PLACEHOLDER_STRENGTH) return null;
+  // event_risk.v1 slice 2a: the door's grounded occurrence, distinct from placeholder impact.
+  const likelihood = recordOf(risk.likelihood);
+  if (risk.likelihood !== undefined && (likelihood === undefined || likelihood.basis !== 'user'
+    || typeof likelihood.p_low_pct !== 'number' || typeof likelihood.p_high_pct !== 'number'
+    || typeof likelihood.horizon_months !== 'number' || !nonEmpty(likelihood.quote))) return null;
+  const causeNote = "I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen.";
   return reply(subject, [
+    ...(likelihood !== undefined ? [`It may happen (about ${likelihood.p_low_pct}${likelihood.p_low_pct === likelihood.p_high_pct ? '' : `–${likelihood.p_high_pct}`}% within ${likelihood.horizon_months} months), as you said.`] : []),
+    ...(typeof r.note === 'string' && r.note.includes(causeNote) ? [causeNote] : []),
     `It threatens ${threatens.join(' and ')}.`,
     ...(drivenBy.length > 0 ? [`It is driven by ${drivenBy.join(' and ')}.`] : []),
     'How strongly it acts is not known yet: Olumi uses a placeholder strength for each link, not an estimate, for you to correct.',
@@ -381,8 +389,12 @@ export function composeProposalReply(tool: string, args: unknown, result: unknow
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
   if (recordOf(args)?.whole_request !== true) return null;
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
-  if (userFiguresTheCallLeaves(args, userMessage).length > 0) return null;
   const r = recordOf(result);
+  // event_risk.v1 slice 2a: this door deterministically carries these user words outside the LLM arguments.
+  const likelihood = tool === 'propose_new_risk' ? recordOf(recordOf(r?.risk)?.likelihood) : undefined;
+  const carried = likelihood?.basis === 'user' && nonEmpty(likelihood.quote)
+    ? { args, event_risk_statement: likelihood.quote } : args;
+  if (userFiguresTheCallLeaves(carried, userMessage).length > 0) return null;
   if (r === undefined || r.ok !== true || r.mutated !== false || !nonEmpty(r.proposal_id)) return null;
   const allowed = tool === 'propose_new_option' ? NEW_OPTION_KEYS : tool === 'propose_link_strength' ? LINK_KEYS
     : tool === 'propose_link_strengths' ? LINK_SET_KEYS : tool === 'propose_new_risk' ? NEW_RISK_KEYS : tool === 'propose_new_factor' ? NEW_FACTOR_KEYS : tool === 'propose_option_interventions' ? OPTION_LEVELS_KEYS
