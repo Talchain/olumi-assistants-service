@@ -103,12 +103,12 @@ const hasRegisteredTarget = (goal: PersistedGoalView): boolean => {
 /**
  * Compose the sentence. **No proposed value in the ask itself, ever** — the
  * request is always for an amount, and the figure (when quoted at all) appears
- * only as a separate statement of fact about the brief.
+ * only as a separate statement of fact about the brief. The standing gap action can ask without a candidate.
  *
  * ⚠ "mentions" is load-bearing and survives the hostile cases: it stays TRUE of
  * a brief that rejects the figure, where "Is £64k your target?" would be a lie.
  */
-export function composeGoalTargetQuestion(_candidate: GoalTargetCandidate): string {
+export function composeGoalTargetQuestion(_candidate?: GoalTargetCandidate): string {
   return 'What target should this goal be scored against? Reply with an amount.';
 }
 
