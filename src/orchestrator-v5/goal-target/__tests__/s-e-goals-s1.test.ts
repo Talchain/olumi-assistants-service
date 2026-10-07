@@ -28,7 +28,7 @@ import { executeOptionInterventionBatch } from '../../system-events/option-inter
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../goal-horizon-write.js';
 import { withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
-import { CHANCE_WORD, chanceGoalSentence, goalKindOf, UNIT_HEAD_CUT, unitNamesAChance } from '../goal-kind.js';
+import { CHANCE_WORD, chanceGoalSentence, goalKindOf, SCALE_NOTE, UNIT_HEAD_CUT, unitNamesAChance } from '../goal-kind.js';
 import { addMonths, DEADLINE_PATTERNS_FOR_TIMING, readStatedDeadline, sayDate, timeBetween, todayInLondon } from '../deadline-date.js';
 
 type Rec = Record<string, any>;
@@ -62,7 +62,7 @@ const servedPaths = (): Rec[] => (SERVED.served_placeholder_warning.option_ids a
 
 describe('§2 guard (Science ruling 7 Oct): a unit naming the chance of an event is never a goal quantity', () => {
   it.each(['% likelihood of on-time launch', 'chance of hitting the date', 'probability of launch on time', '% likely', 'Odds of shipping',
-    'on-time launch likelihood', 'probability (%)', 'Chances of shipping by Q2'])(
+    'on-time launch likelihood', 'probability (%)', 'Chances of shipping by Q2', 'probability (0-1)', 'likelihood (0–100%)', 'percentage chance'])(
     'must-fire: %s', (unit) => {
       expect(unitNamesAChance(unit)).toBe(true);
       expect(goalKindOf({ kind: 'goal', goal_threshold_unit: unit })).toBe('chance_of_event');
@@ -187,7 +187,7 @@ describe('run 3 (served 09:32:39Z): a chance goal’s figures are withheld for e
 });
 
 /** The real proposer, card, approval and commit door over a serialized SessionStore (link-effect-gauge-door's world). */
-function world(initial: Rec, now = new Date('2026-10-07T09:13:13Z')) {
+function world(initial: Rec, now = new Date('2026-10-07T09:13:13Z'), opts: { readonly unconfirmFirst?: boolean } = {}) {
   let graphJson = JSON.stringify(initial);
   const graph = () => JSON.parse(graphJson) as Rec;
   const proposals = new ProposalStore();
@@ -216,6 +216,7 @@ function world(initial: Rec, now = new Date('2026-10-07T09:13:13Z')) {
   const commits: CommitOptionLevelsInput[] = [];
   const commitOptionLevels = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> => {
     commits.push(input);
+    const unconfirm = opts.unconfirmFirst === true && commits.length === 1;
     const out = await executeOptionInterventionBatch({ scenarioId: input.scenario_id, turnId: input.turn_id,
       requestId: 'deadline-real-commit', requestHash: `deadline:${input.turn_id}`, stage: 'frame',
       freshness: 'fresh', hasExistingAnalysis: false, expectedGraphHash: input.base_graph_hash, targets: [],
@@ -225,6 +226,8 @@ function world(initial: Rec, now = new Date('2026-10-07T09:13:13Z')) {
     // The door's own mapping of a verified no-op (`commitOptionLevelsInProcess`: `verified_no_op` → already applied).
     if (out.kind === 'unchanged') return { status: 'committed', graph_hash: input.base_graph_hash, receipt: null, already_applied: true, committed_levels: [], links_resized: [] };
     if (out.kind !== 'committed') throw new Error(`Real commit did not verify: ${JSON.stringify(out)}`);
+    // The write LANDED, but this attempt cannot confirm it (a lost response).
+    if (unconfirm) return { status: 'unconfirmed' };
     return { status: 'committed', graph_hash: out.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
   };
   const dispatch: InternalDispatch = async (path) => {
@@ -305,6 +308,17 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     const typed = await w.caps.proposeGoalDeadline!(ctxSaying('The deadline is 6 months away.'), { deadline_words: '6 months', rationale: 'x' }) as Rec;
     expect(typed).toEqual(expect.objectContaining({ ok: true, public_label: 'Is your deadline 7 April 2027 (6 months from today)?' }));
   });
+  it('Codex r2: an approval whose write landed but came back unconfirmed is confirmed on the retry, never "nothing was recorded"', async () => {
+    const w = world(stored(), undefined, { unconfirmFirst: true });
+    const r = await w.caps.proposeGoalDeadline!(ctxSaying(PAUL_0913), { deadline_words: 'a deadline in 6 months', rationale: PAUL_0913 }) as Rec;
+    const yes = { ...ctxSaying('Yes, that is my deadline.'), typed_approval_of: String(r.proposal_id) };
+    const first = await w.caps.authoriseChange(yes, { proposal_id: String(r.proposal_id) }) as Rec;
+    expect(first).toEqual(expect.objectContaining({ applied: false, refusal: 'not_confirmed' }));
+    expect(goalOf(w.graph()).goal_horizon).toEqual({ deadline: '2027-04-07' });
+    const retry = await w.caps.authoriseChange(yes, { proposal_id: String(r.proposal_id) }) as Rec;
+    expect(retry, JSON.stringify(retry)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    expect(w.commits.map((c) => c.goal_horizon?.deadline)).toEqual(['2027-04-07', '2027-04-07']);
+  });
   it('Codex r1: a retry of a write that landed (same turn id) is a verified no-op, never "the deadline changed"', async () => {
     const w = world(stored());
     const input = { scenario_id: SCENARIO, base_graph_hash: computeAnalysisAffectingGraphHash(w.graph() as never), turn_id: 'deadline-retry',
@@ -354,11 +368,12 @@ describe('the one horizon writer (goal-horizon-write.ts): its own gates, without
 describe('timing (preamble rule): every new regex at 5k → 20k characters, 3 shapes, scaling < 8× (min of 5)', () => {
   // The public readers gate their input (80 / 200 characters), so each PATTERN is timed directly, unanchored inputs included.
   const time = (f: () => unknown): number => { let best = Infinity; for (let i = 0; i < 5; i += 1) { const t = performance.now(); f(); best = Math.min(best, performance.now() - t); } return best; };
-  const patterns: readonly RegExp[] = [CHANCE_WORD, UNIT_HEAD_CUT, ...DEADLINE_PATTERNS_FOR_TIMING];
+  const patterns: readonly RegExp[] = [CHANCE_WORD, UNIT_HEAD_CUT, new RegExp(SCALE_NOTE.source), ...DEADLINE_PATTERNS_FOR_TIMING];
   it.each([
     ['spaces', (n: number) => ' '.repeat(n)],
     ['counts and lead words', (n: number) => 'in 6 months by the end of q2 '.repeat(Math.ceil(n / 29)).slice(0, n)],
     ['chance words, no boundary', (n: number) => 'likelihoodchanceodds'.repeat(Math.ceil(n / 20)).slice(0, n)],
+    ['open brackets', (n: number) => '(['.repeat(Math.ceil(n / 2)).slice(0, n)],
   ])('%s', (_shape, make) => {
     const [small, big] = [make(5000), make(20000)];
     for (const re of patterns) {

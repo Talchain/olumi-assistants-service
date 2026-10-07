@@ -29,13 +29,17 @@ export type GoalKind = 'chance_of_event' | 'change' | 'level';
  * chances created per match" is a COUNT (its measure is "number"), never a chance. Brackets and "%" are not words.
  */
 export const UNIT_HEAD_CUT = /[ \t]{1,4}(?:of|per|for|on|in|by|to)(?:[ \t]{1,4}|$)/i;
+/** A bracketed scale note, bounded: "(0-1)", "(%)", "[0–100%]". */
+export const SCALE_NOTE = /\([^()]{0,40}\)|\[[^[\]]{0,40}\]/g;
 export const CHANCE_WORD = /^(?:likelihoods?|likeliness|chances?|probabilit(?:y|ies)|odds|likely)$/i;
 
 /** True when a goal unit names the chance of an event (Science ruling §2). Units over 200 characters are not read. */
 export function unitNamesAChance(unit: unknown): boolean {
   if (typeof unit !== 'string' || unit.length > 200) return false;
   const cut = UNIT_HEAD_CUT.exec(unit);
-  const measure = (cut === null ? unit : unit.slice(0, cut.index)).replace(/[()[\]%,.;:]/g, ' ').trim();
+  // Codex buddy r2 on #2742: a scale annotation in brackets ("probability (0-1)", "likelihood (0–100%)") is never the measure.
+  const measure = (cut === null ? unit : unit.slice(0, cut.index)).replace(SCALE_NOTE, ' ')
+    .replace(/[()[\]%,.;:]/g, ' ').trim();
   const words = measure.split(/[ \t]+/).filter((w) => w !== '');
   return words.length > 0 && CHANCE_WORD.test(words[words.length - 1]!);
 }

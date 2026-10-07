@@ -3022,8 +3022,11 @@ export function createAgentCapabilities(
     if (goal === undefined) {
       return notApplied('goal_not_found', 'The goal this deadline was for is no longer in the model, so nothing was recorded. Tell the user plainly.');
     }
-    // The date the goal holds NOW must still be the one the card was made against: another write moved it otherwise.
-    if ((goalDeadlineOf(goal) ?? null) !== v.expected_deadline) {
+    // The date the goal holds NOW must still be the one the card was made against: another write moved it otherwise. A goal
+    // that already holds THIS card's date is a retry of a write that landed (Codex buddy r2 on #2742: an "unconfirmed" first
+    // approval): it goes on to the writer, whose verified no-op and the read-back below confirm it.
+    const heldNow = goalDeadlineOf(goal) ?? null;
+    if (heldNow !== v.expected_deadline && heldNow !== v.deadline) {
       return notApplied('model_changed_since_approval', 'The goal\u2019s deadline changed after this was offered, so nothing was recorded. Read it again; offer the date afresh only if it still applies.');
     }
     if (opts.commitOptionLevels === undefined) {
