@@ -607,6 +607,9 @@ export function noDeadEndAsks(
   // tight. Only when even the question alone cannot fit the 400-character carrier do labels shorten, at word boundaries.
   let budget: number | null = null;
   const q = (id: string): string => `\u2018${budget === null ? labelOf(id) : compactWordLabel(labelOf(id), budget)}\u2019`;
+  /** A label inside a QUESTION: complete (D-04) unless the carrier cannot hold every sentence otherwise. */
+  let questionBudget: number | null = null;
+  const qq = (id: string): string => `\u2018${questionBudget === null ? labelOf(id) : compactWordLabel(labelOf(id), questionBudget)}\u2019`;
   const fit = (sentences: readonly string[]): string => {
     let out = '';
     for (const s of sentences) { const next = out === '' ? s : `${out} ${s}`; if (next.length > 400) break; out = next; }
@@ -616,20 +619,22 @@ export function noDeadEndAsks(
     budget = null;
     const full = build();
     if (full.length <= 400) return full;
-    // Explanations yield to the complete question.
-    if (standalone !== undefined) {
-      const alone = standalone();
-      if (alone.length <= 400) return alone;
-    } else {
-      const questionAt = full.indexOf(' Roughly how much');
-      if (questionAt >= 0 && full.length - questionAt - 1 <= 400) return full.slice(questionAt + 1);
+    // Every sentence is kept where it can be (the product reading "Olumi measures X in …; correct that if it's wrong" is
+    // provenance the user must see), and labels shorten at word boundaries, never mid-word (S-A label rule, D-04):
+    // first the explanation's labels only, so the question stays complete; then, if that cannot fit, the question's too.
+    for (const shortenQuestion of [false, true]) {
+      for (budget = 120; budget > 12; budget -= 12) {
+        questionBudget = shortenQuestion ? budget : null;
+        const out = build();
+        if (out.length <= 400) { budget = null; questionBudget = null; return out; }
+      }
     }
-    // The carrier still holds 400: labels shorten at word boundaries, never mid-word, and the question is kept.
-    const shortest = standalone ?? build;
-    let out = full;
-    for (budget = 120; budget > 12; budget -= 12) { out = shortest(); if (out.length <= 400) break; }
     budget = null;
-    return out;
+    questionBudget = null;
+    // Only then does the explanation yield to the complete question.
+    if (standalone !== undefined) return standalone();
+    const questionAt = full.indexOf(' Roughly how much');
+    return questionAt < 0 ? full : full.slice(questionAt + 1);
   };
   const goal = nodes.find((n) => n.kind === 'goal');
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
@@ -693,12 +698,12 @@ export function noDeadEndAsks(
         && typeof n.per_source_change_unit === 'string' && sameUnit(n.amount_unit as string, r.unit));
     const onTop = (): string => sameQuantity !== undefined
       ? `, on top of the ${sayFigure(sameQuantity.amount as number, sameQuantity.amount_unit as string)} per ${sayFigure(sameQuantity.per_source_change as number, sameQuantity.per_source_change_unit as string)} you already gave`
-      : given.length > 0 ? `, on top of its effect through ${q(String(given[0]!.to))} that you already gave` : '';
+      : given.length > 0 ? `, on top of its effect through ${qq(String(given[0]!.to))} that you already gave` : '';
     first ??= { kind: 'gauge', from: lever, through: String(m), to: String(r.child) };
     sentences.push(fitted(() => `This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which ${NOT_SIZED}.`
-      + ` Roughly how much would ${sourceChangeWords(q(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${q(r.child)} that way${onTop()}, in ${r.unit}?`
+      + ` Roughly how much would ${sourceChangeWords(qq(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${qq(r.child)} that way${onTop()}, in ${r.unit}?`
       + ' A best guess and a range is fine.',
-    () => `Roughly how much would ${sourceChangeWords(q(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${q(r.child)} through ${q(m)}${onTop()}, in ${r.unit}? A best guess and a range is fine.`));
+    () => `Roughly how much would ${sourceChangeWords(qq(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${qq(r.child)} through ${qq(m)}${onTop()}, in ${r.unit}? A best guess and a range is fine.`));
     for (const k of [key(lever, m), key(m, r.child)]) covered.add(k);
   }
   for (const l of links) {
@@ -723,7 +728,7 @@ export function noDeadEndAsks(
     const why = r.via === 'product' ? `as ${q(r.operands[0])} \u00d7 ${q(r.operands[1])}` : `from its own estimate of the link from ${q(r.parents[0]!)}`;
     sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which ${NOT_SIZED}.`
       + ` Olumi measures ${q(l.from)} in ${r.unit}, ${why}; correct that if it\u2019s wrong.`
-      + ` Roughly how much does ${sourceChangeWords(q(l.from), r.unit, isTwoStateSource(nodes, l.from, r.unit)).eachOf} change ${q(l.to)}, in ${childUnit}?`));
+      + ` Roughly how much does ${sourceChangeWords(qq(l.from), r.unit, isTwoStateSource(nodes, l.from, r.unit)).eachOf} change ${qq(l.to)}, in ${childUnit}?`));
     covered.add(key(l.from, l.to));
   }
   if (sentences.length === 0) return gaugeLinks.size > 0 ? { gaugeLinks } : undefined;

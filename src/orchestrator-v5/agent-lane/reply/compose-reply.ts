@@ -19,11 +19,15 @@
  *   · NEVER BY DELETING MEANING. Sentences are MOVED, never removed, rewritten or cut. A runtime invariant compares the
  *     sentence multiset of the input and of the derived text; any difference ships the input whole (fail closed).
  *   · MUST-FACE (DL ruling R1, 7 Oct): the headline, the ONE ask, the withheld reason ({@link FaceObligation}), and the
- *     line that states what the user is consenting to ({@link ReplyComposeInput.consentLabels}). Host disclosures,
+ *     line that states what the user is consenting to ({@link ReplyComposeInput.consentLabels}). Plus, flagged to the DL
+ *     as the same class as the withheld reason, the caveat that qualifies a NAMED finding (#2565's robustness caveat:
+ *     a licensed leader without "not yet robust" beside it reads as a recommendation). Host disclosures,
  *     receipts and status may move to detail. The ask is the last bullet; other questions go to detail (D-12). An
  *     obligation present in the text but not locatable as one unit keeps the reply whole (fail closed); so does a face
  *     that would need more than {@link REPLY_FACE_MAX_BULLETS} must-face bullets.
- *   · A reply with nothing to move to detail is ALREADY IN SHAPE: returned byte-identical, no sidecar.
+ *   · FACE BUDGET (AIE #87 6037293086 §5): ≤ {@link REPLY_FACE_WORD_BUDGET} words, one move, one ask. A reply that fits
+ *     it whole with at most one question is ALREADY IN SHAPE: returned byte-identical, no sidecar.
+ *   · NEVER DELETES A CHALLENGE (AIE §7): nothing is removed; a challenge the face cannot hold sits under More detail.
  *
  * Pure and deterministic: no model, no I/O. The route logs {@link ReplyComposition.measure} on every turn, so each
  * model's compliance with the prompt half ({@link REPLY_SHAPE_INSTRUCTION}) is a count, not an impression.
@@ -44,6 +48,12 @@ const BULLET_WORD_LOG_BAR = 25;
  * hides one short sentence costs a click and saves nothing; the 18 Sep defect was hiding SUBSTANCE, #1478.)
  */
 export const REPLY_DETAIL_MIN_WORDS = 15;
+/**
+ * ⭐ THE FACE BUDGET (AIE coaching quality target, #87 6037293086 §5: "1–3 short bullets, ≤~75 initial words"). A reply
+ * that fits it whole and asks at most one question is already in shape; otherwise the face fills to it. Must-face lines
+ * are never dropped to fit it (a must-face face over budget is counted, never cut).
+ */
+export const REPLY_FACE_WORD_BUDGET = 75;
 
 /**
  * ⭐ THE PRODUCER HALF: one sentence every chat-writing model is given (joined into `AGENT_INSTRUCTIONS`, and appended to
@@ -53,10 +63,11 @@ export const REPLY_DETAIL_MIN_WORDS = 15;
 export const REPLY_SHAPE_INSTRUCTION =
   'Shape: begin with one short sentence that answers. Then give at most three bullets, each on its own line starting '
   + 'with "- " and under 20 words: concise, action-oriented points grounded in this model (two bullets if you also ask a '
-  + 'question). Put any further explanation after the bullets, after a blank line: Olumi shows it under More detail, '
-  + 'so never repeat it in the bullets. If you ask a question, it stays your last sentence.';
+  + 'question). Keep that part under 75 words, with one reasoning move and at most one question or next action; no '
+  + 'generic advice. Put any further explanation after the bullets, after a blank line: Olumi shows it under More '
+  + 'detail, so never repeat it in the bullets. If you ask a question, it stays your last sentence.';
 
-export type FaceObligationRole = 'ask' | 'withheld_reason' | 'consent';
+export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'consent';
 /** A host line the user must see without opening "More detail", by its exact text. */
 export interface FaceObligation { readonly role: FaceObligationRole; readonly text: string }
 
@@ -76,6 +87,8 @@ export interface ReplyComposeInput {
 }
 
 export interface ReplyMeasure {
+  /** The RAW reply (AIE §7 scores raw and shown separately): its words and questions. */
+  readonly words_in: number;
   readonly units_in: number;
   readonly bullets_in: number;
   readonly questions_in: number;
@@ -86,6 +99,7 @@ export interface ReplyMeasure {
   readonly obligations_on_face: number;
   readonly consent_units: number;
   readonly face_over_cap: boolean;
+  readonly face_over_word_budget: boolean;
   readonly open_questions_segment: boolean;
 }
 
@@ -118,7 +132,7 @@ interface Unit {
 
 const BULLET_LINE = /^[ \t]{0,6}([-•*]|\d{1,2}[.)])[ \t]{1,4}(\S.*)$/;
 /** A terminator run, its closers, a gap, then the start of the next sentence (capital, digit, currency, opening quote). */
-const SENTENCE_BOUNDARY = /([.!?…]["'”’)\]]{0,3})([ \t]{1,8})(?=["'“‘(\[]?[A-Z0-9£$€])/g;
+const SENTENCE_BOUNDARY = /([.!?…]["'”’)\]]{0,3})([ \t]{1,8})(?=["'“‘([]?[A-Z0-9£$€])/g;
 const QUESTION_END = /\?["'”’)\]*]{0,4}$/;
 const HEADING_MAX = 60;
 
@@ -255,7 +269,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   if (units.length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty' };
 
   // Each obligation binds its LAST occurrence (the host appends); an earlier narrator copy is an ordinary unit.
-  for (const role of ['ask', 'withheld_reason'] as const) {
+  for (const role of ['ask', 'withheld_reason', 'caveat'] as const) {
     const tagged = units.filter((u) => u.obligation === role);
     for (const u of tagged.slice(0, -1)) {
       const sameText = tagged.at(-1)!.text === u.text;
@@ -298,13 +312,26 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const pool = faceRun !== undefined
     ? units.filter((u) => u.run === faceRun && u.obligation === undefined && u !== ask && !isQuestionUnit(u))
     : units.filter((u) => u.idx > headline.idx && u.kind === 'sentence' && u.obligation === undefined && u !== ask && !isQuestionUnit(u));
-  const faceSet = new Set<Unit>([headline, ...pool.slice(0, slots), ...mustFace]);
-  // Face bullets keep the reply's own order, except the ask, which closes the face.
-  const faceBullets = units.filter((u) => faceSet.has(u) && u !== headline && u !== ask);
+  // Fill the face in order up to the bullet cap AND the word budget; must-face lines are counted first and always kept.
+  let faceWords = wordCount(headline.text) + mustFace.reduce((n, u) => n + wordCount(u.text), 0);
+  const fromPool: Unit[] = [];
+  for (const u of pool) {
+    if (fromPool.length >= slots) break;
+    const w = wordCount(u.text);
+    if (fromPool.length > 0 && faceWords + w > REPLY_FACE_WORD_BUDGET) break;
+    fromPool.push(u);
+    faceWords += w;
+  }
+  const faceSet = new Set<Unit>([headline, ...fromPool, ...mustFace]);
+  // Face bullets keep the reply's own order, except: a caveat on the finding opens them (#2565: "the Explain robustness
+  // caveat goes on the face as bullet 1"), and the ask closes them.
+  const inOrder = units.filter((u) => faceSet.has(u) && u !== headline && u !== ask);
+  const faceBullets = [...inOrder.filter((u) => u.obligation === 'caveat'), ...inOrder.filter((u) => u.obligation !== 'caveat')];
   if (ask !== undefined && ask !== headline) faceBullets.push(ask);
   const detailUnits = units.filter((u) => !faceSet.has(u));
 
   const measure: ReplyMeasure = {
+    words_in: wordCount(text),
     units_in: units.length,
     bullets_in: units.filter((u) => u.kind === 'bullet').length,
     questions_in: questions.length,
@@ -315,9 +342,12 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     obligations_on_face: mustFace.length + (headline.obligation !== undefined ? 1 : 0),
     consent_units: units.filter((u) => u.obligation === 'consent').length,
     face_over_cap: faceBullets.length > REPLY_FACE_MAX_BULLETS,
+    face_over_word_budget: faceWords > REPLY_FACE_WORD_BUDGET,
     open_questions_segment: split !== null,
   };
-  // Nothing (or too little) to put behind "More detail": the reply is already in shape, and ships exactly as written.
+  // Already in shape, shipped exactly as written: the whole reply fits the face budget with at most one question, or
+  // too little would go behind "More detail" to be worth a click.
+  if (measure.words_in <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
   if (detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS) return { text, shape: null, outcome: 'already_in_shape', measure };
   // More obligations than the face holds: hiding one would break its rule, so the reply ships whole (counted).
   if (measure.face_over_cap) return { text, shape: null, outcome: 'kept_whole', reason: 'face_over_cap', measure };

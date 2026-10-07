@@ -3951,6 +3951,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
         ...[leaderGateClosing, coHold?.say, coHold?.why, ...AGENT_NO_LEADER_SENTENCES.filter((line) => reply.includes(line))]
           .filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'withheld_reason' as const, text })),
+        // #2565: a licensed Explain of a fragile Run names a finding; its robustness caveat qualifies it, on the face.
+        ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat }] : []),
       ];
       const proposedThisTurn = approvalCalls.filter((c) => c.ok && typeof c.proposal_id === 'string');
       const consentWithFigures = proposedThisTurn.some((c) => FIGURE_PROPOSERS.has(c.name));

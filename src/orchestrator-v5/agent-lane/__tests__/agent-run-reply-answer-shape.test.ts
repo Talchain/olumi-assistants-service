@@ -188,7 +188,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   };
   const carriesResult = (b: Body) => (b.blocks ?? []).some((x) => x.type === 'analysis_result');
 
-  it('1. RUN: a bulleted served reply → `_answer_shape`; the text IS its derivation; headline = first sentence; the first three points on the face; the caveat (R1: a disclosure) in detail, once; nothing lost', async () => {
+  it('1. RUN: a bulleted served reply → `_answer_shape`; the text IS its derivation; headline = first sentence; the robustness caveat opens the face (#2565), then the reply’s own points in order within the 75-word face budget; nothing lost', async () => {
     const { b, turnId } = await typedRun(FOUR_BULLETS.text);
     expect(carriesResult(b), 'the control: the response carries the readback’s analysis_result').toBe(true);
     const shape = b._answer_shape;
@@ -200,9 +200,11 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(bulletLines, 'the control: the served reply has four bullets').toHaveLength(4);
     expect(shape!.headline).toBe('The model cannot yet support a yes/no on the £59 increase because it could not test your **monthly churn under 4%** requirement.');
     expect(FOUR_BULLETS.text.startsWith(shape!.headline), 'the headline is the reply’s own first sentence').toBe(true);
-    expect(shape!.bullets).toEqual(bulletLines.slice(0, 3));
-    expect(shape!.detail.startsWith(`- ${bulletLines[3]!}`), 'the fourth bullet goes behind More detail, verbatim').toBe(true);
-    expect(shape!.detail, 'R1: the robustness caveat is a disclosure and may sit in detail').toContain(ROBUSTNESS_CAVEAT);
+    expect(shape!.bullets[0], 'the caveat on a named finding opens the face').toBe(ROBUSTNESS_CAVEAT);
+    const points = shape!.bullets.slice(1);
+    expect(points.length).toBeGreaterThan(0);
+    expect(points, 'the reply’s own points, in order').toEqual(bulletLines.slice(0, points.length));
+    expect(shape!.detail.startsWith(`- ${bulletLines[points.length]!}`), 'the next point goes behind More detail, verbatim').toBe(true);
     expect(b.assistant_text.split(ROBUSTNESS_CAVEAT), 'the caveat is said exactly once').toHaveLength(2);
     for (const line of lines) expect(b.assistant_text, `kept: ${line.slice(0, 60)}…`).toContain(unmarked(line));
     expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the SAME text').toBe(b.assistant_text);
@@ -260,8 +262,11 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(without._answer_shape, 'base shipped this whole (Run replies only)').toBeDefined();
     expect(deriveAnswerTextFromShape(without._answer_shape!)).toBe(without.assistant_text);
     expect(without._answer_shape!.headline).toBe('The comparison cannot yet answer whether to raise Pro to £59, because neither of your decision constraints was successfully checked.');
-    expect(without._answer_shape!.bullets).toHaveLength(3);
-    expect(without._answer_shape!.detail).toBe('The next reasoning step is to define the churn limit on a measurable model quantity and supply the current MRR baseline.');
+    // The narrator's points, in order, until the 75-word face budget (AIE §5); the rest sits in detail, verbatim.
+    const points = without._answer_shape!.bullets;
+    expect(points.length).toBeGreaterThan(0);
+    expect(CLEAN_BULLETS.text).toContain(`- ${points[0]!}`);
+    expect(without._answer_shape!.detail).toContain('The next reasoning step is to define the churn limit on a measurable model quantity and supply the current MRR baseline.');
 
     readbackCarriesResult = true;
     const withBlock = await askedTurn(CLEAN_BULLETS.text);
@@ -279,7 +284,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     } };
     const { b } = await typedRun(LONG_NO_BULLETS);
     expect(b._answer_shape).toBeDefined();
-    expect(b._answer_shape!.bullets).toHaveLength(3);
+    expect(b._answer_shape!.bullets.length).toBeGreaterThan(0);
+    expect(b._answer_shape!.bullets.length).toBeLessThanOrEqual(3);
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
     expect(b._answer_shape!.headline).toBe(synth!.headline);
   });

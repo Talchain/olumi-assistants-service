@@ -109,6 +109,34 @@ describe('controls: a reply already in shape ships exactly as written', () => {
   });
 });
 
+describe('the AIE face budget (#87 6037293086 §5–7): ≤75 initial words, one ask; a challenge is never deleted', () => {
+  const S = (i: number) => `Point ${i} names a different assumption in the hiring model that the deadline rests on.`;
+  it('a reply within 75 words and one question ships whole, byte-identical (raw = shown)', () => {
+    const text = `${S(1)} ${S(2)} ${S(3)} ${S(4)} Which do you trust least?`;
+    expect(text.split(/\s+/).length).toBeLessThanOrEqual(75);
+    expect(composeReplyShape({ text })).toMatchObject({ outcome: 'already_in_shape', text });
+  });
+  it('CONTRAST: the same words with a second question → one ask on the face, the other question in detail (nothing deleted)', () => {
+    const text = `${S(1)} Is that right? ${S(2)} ${S(3)} ${S(4)} ${S(5)} ${S(6)} Which do you trust least?`;
+    const c = composeReplyShape({ text });
+    expect(c.outcome).toBe('shaped');
+    expect(face(c).filter((x) => x.endsWith('?'))).toEqual(['Which do you trust least?']);
+    expect(c.shape!.detail).toContain('Is that right?');
+    everySentenceKept(text, c.text);
+  });
+  it('the face fills to ≤75 words: long points stop the fill before the cap; a challenge left over sits in detail, kept', () => {
+    const long = (i: number) => `Challenge ${i}: the model assumes two developers ramp up as fast as a tech lead, but onboarding a pair usually takes longer and costs the existing team more of its own delivery time than one senior hire does.`;
+    const text = `The comparison rests on ramp-up time. ${long(1)} ${long(2)} ${long(3)} What ramp-up do you expect?`;
+    const c = composeReplyShape({ text });
+    expect(c.outcome).toBe('shaped');
+    expect(c.measure!.face_words).toBeLessThanOrEqual(75);
+    expect(c.shape!.bullets).toEqual([long(1), 'What ramp-up do you expect?']);
+    expect(c.shape!.detail).toContain(long(2));
+    expect(c.shape!.detail).toContain(long(3));
+    everySentenceKept(text, c.text);
+  });
+});
+
 describe('obligations (DL ruling R1, 7 Oct): the headline, the ONE ask, the withheld reason and the consent line stay on the face', () => {
   const NARRATOR = 'Your options differ mainly in how fast they add capacity. Hiring two developers adds more hands but needs more onboarding. A tech lead adds less capacity at first but may lift the whole team. The freelance option covers the gap only if it starts quickly. Each of these rests on links Olumi has not sized.';
   const ASK = 'What figure should "meet our next feature-launch deadline" reach or stay under? I’ll propose it as your target.';
@@ -166,7 +194,8 @@ describe('obligations (DL ruling R1, 7 Oct): the headline, the ONE ask, the with
   });
 
   it('Codex r1 P2 (#2748): a short label ("AI") binds by whole word, and an introductory mention cannot hide the proposal sentence', () => {
-    const P = 'Plans differ. Check timing. Check capacity. Check candidates. Validate these assumptions against actual recruitment lead times and onboarding requirements before relying on this comparison for planning.';
+    // Long enough to exceed the 75-word face budget, so the composer shapes it (a shorter reply ships whole, untouched).
+    const P = 'Plans differ. Check timing. Check capacity. Check candidates. Validate these assumptions against actual recruitment lead times and onboarding requirements before relying on this comparison for planning. Each of these checks changes how much the comparison can tell you, because the model still carries Olumi’s placeholder strengths on the links that matter most to the deadline. None of them is sized yet, so no option can be put forward on the deadline today.';
     const short = composeReplyShape({ text: `${P} I can add AI as a risk linked to Revenue. Shall I add it?`, consentLabels: ['AI'] });
     expect(face(short)).toContain('I can add AI as a risk linked to Revenue.');
     // CONTROL: "AI" inside a longer word is not a mention.
@@ -212,7 +241,7 @@ describe('the model wrote a list: its lead-in becomes the headline, its first po
       '- Coordination drag: more people slow each other down.',
       '- Quality trade-off: speed now costs rework later, which eats the time you gained.',
       '',
-      'None has been added. Which feels most credible in your situation?',
+      'None has been added. Each is a possibility to test against your situation, not an established finding, and each would need its own link into the deadline before it could move any figure in the comparison. Which feels most credible in your situation?',
     ].join('\n');
     const c = composeReplyShape({ text });
     expect(c.shape!.headline).toBe('Consider these possible risks, not established facts:');
@@ -221,7 +250,7 @@ describe('the model wrote a list: its lead-in becomes the headline, its first po
       'Wrong bottleneck: capacity is not what limits delivery.',
       'Which feels most credible in your situation?',
     ]);
-    expect(c.shape!.detail).toBe('- Coordination drag: more people slow each other down.\n- Quality trade-off: speed now costs rework later, which eats the time you gained.\n\nNone has been added.');
+    expect(c.shape!.detail).toBe('- Coordination drag: more people slow each other down.\n- Quality trade-off: speed now costs rework later, which eats the time you gained.\n\nNone has been added. Each is a possibility to test against your situation, not an established finding, and each would need its own link into the deadline before it could move any figure in the comparison.');
     everySentenceKept(text, c.text);
   });
 });
@@ -295,7 +324,8 @@ describe('the producer half: one shape rule for every model', () => {
     expect(REPLY_SHAPE_INSTRUCTION).toContain('More detail');
     expect(REPLY_SHAPE_INSTRUCTION).toContain('If you ask a question, it stays your last sentence.');
     expect(REPLY_SHAPE_INSTRUCTION).not.toMatch(/[‒-―]/);
-    expect(REPLY_SHAPE_INSTRUCTION.match(/\d+/g)).toEqual(['20']);
+    expect(REPLY_SHAPE_INSTRUCTION).toContain('under 75 words, with one reasoning move and at most one question or next action');
+    expect(REPLY_SHAPE_INSTRUCTION.match(/\d+/g)).toEqual(['20', '75']);
   });
 });
 
