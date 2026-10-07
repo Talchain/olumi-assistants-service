@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { authoredBanAfterMasking, PremortemWorksheetV1Schema, premortemProducerDirective, premortemWorksheetDiagnosticsFor, premortemWorksheetFor } from '../premortem.js';
-import { diagnosticsCases, maskingCases, riskCases, riskStories } from './premortem-diagnostics-cases.js';
+import { boldCases, diagnosticsCases, maskingCases, riskCases, riskStories } from './premortem-diagnostics-cases.js';
+import { performance } from 'node:perf_hooks';
 
 describe('pre-mortem story completeness and coded diagnostics', () => {
-  it.each([...diagnosticsCases, ...maskingCases, ...riskCases])('$name', row => {
+  it.each([...diagnosticsCases, ...maskingCases, ...riskCases, ...boldCases])('$name', row => {
     const result = premortemWorksheetDiagnosticsFor(row.make());
     expect(result.worksheet !== undefined).toBe(row.emitted);
     expect(result.rows).toBe(row.rows);
@@ -75,3 +76,20 @@ describe('pre-mortem story completeness and coded diagnostics', () => {
     expect(JSON.stringify(result.dropped)).not.toContain('private');
   });
 });
+
+// DL (7 Oct): the story, story-parts and blindspot parsers took 0.35–3.1 s on 20k whitespace (pre-existing); now bounded / linear.
+describe('pre-mortem parsing stays linear on long whitespace', () => {
+  const base = diagnosticsCases[1].make();
+  it.each([
+    // Spaces INSIDE the story (a trailing run is trimmed away), plus a blindspot line so the parts parser is reached.
+    ['story with 20k spaces after Watch for:', '1. x Watch for:' + ' '.repeat(20_000) + 'y\nOutside the model: what could blindside this?'],
+    ['story with 20k newlines', '1. x' + '\n'.repeat(20_000)],
+    ['blindspot with 20k spaces', 'Outside the model:' + ' '.repeat(20_000) + 'x'],
+    ['20k newline-space pairs', '\n '.repeat(10_000)],
+  ])('%s parses in under 50 ms', (_name, reply) => {
+    const start = performance.now();
+    premortemWorksheetDiagnosticsFor({ ...base, reply });
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+});
+
