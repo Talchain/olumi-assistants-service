@@ -181,6 +181,11 @@ describe('S-C Add press: bound to its message AND the node ids; re-checked on th
     const unchanged = { ...v1, nodes: nodes.map((n) => (n.id === 'hire_two_developers'
       ? { ...n, interventions: { ...(n.interventions as Record<string, unknown>), developer_hires: { value: 0, raw_value: 0, unit: 'hires' } } } : n)) };
     expect(widenAddCallOf(r.press.id, r.press.message, unchanged)).toBeNull();
+    // Only the id binding catches this one: what it HURTS was renamed and a new outcome took the old name.
+    const outcome = { ...v1, nodes: [...nodes.map((n) => (n.id === 'feature_delivery_capacity' ? { ...n, label: 'Renamed capacity' } : n)),
+      { id: 'oc_other', kind: 'outcome', label: 'Feature Delivery Capacity' }],
+      edges: [...(v1.edges as Record<string, unknown>[]), { from: 'oc_other', to: 'meet_our_next_feature_launch_deadline', strength: { mean: 0.5, std: 0.1 } }] };
+    expect(widenAddCallOf(r.press.id, r.press.message, outcome)).toBeNull();
     expect(widenAddCallOf(r.press.id, r.press.message, v1), 'CONTROL: the model as offered').not.toBeNull();
   });
   it('AP-4: a shared risk\'s press names no option and is refused once an option starts changing its factor', () => {
