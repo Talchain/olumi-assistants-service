@@ -12,6 +12,7 @@ import { log } from '../../../utils/telemetry.js';
 import { goalChanceDriverDisplayForAgent } from '../../goal-target/goal-chance-range-agent.js';
 import {
   DRIVER_ABSENCE_CLAIM, GOAL_CHANCE_DRIVER_ABSENCE_REMOVED, removeDriverAbsenceClaims, withoutDriverAbsenceClaimsAtEgress,
+  SENSITIVITY_ABSENCE_CLAIM, SENSITIVITY_ABSENCE_REMOVED, SENSITIVITY_ABSENCE_KEPT_UNSAFE, removeSensitivityAbsenceClaims, robustnessComputed,
 } from '../goal-chance-driver-egress.js';
 
 type Json = Record<string, any>;
@@ -78,7 +79,18 @@ describe('prod cut-6 smoke, keys untouched: the screen names a driver, so the re
     const logged = JSON.stringify(warn.mock.calls);
     for (const prose of ['Six underlying', 'assumption matters', 'Starter tier', 'Raise prices']) expect(logged).not.toContain(prose);
     warn.mockClear();
-    const honest = { ...PROD, assistant_text: 'Sensitivity was not measured.' };
+    // Wave B (DL ruling 7 Oct): PROD's robustness check RAN, so "Sensitivity was not measured." is no longer the honest
+    // control there. As the WHOLE reply it is kept (never an empty reply) and logged by code; no driver line is logged.
+    const whole = { ...PROD, assistant_text: 'Sensitivity was not measured.' };
+    expect(robustnessComputed(blockOf(PROD))).toBe(true);
+    expect(withoutDriverAbsenceClaimsAtEgress(whole, opts(whole))).toBe(whole);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect((warn.mock.calls[0]! as [Json])[0]).toMatchObject({ code: SENSITIVITY_ABSENCE_KEPT_UNSAFE, kept_count: 1 });
+    warn.mockClear();
+    // The honest control: the same sentence on the same Run with NO robustness record.
+    const honest = clone({ ...PROD, assistant_text: 'Sensitivity was not measured.' });
+    delete blockOf(honest).enrichment.robustness;
+    expect(robustnessComputed(blockOf(honest))).toBe(false);
     expect(withoutDriverAbsenceClaimsAtEgress(honest, opts(honest))).toBe(honest);
     expect(warn).not.toHaveBeenCalled();
   });
@@ -281,5 +293,147 @@ describe('S2 review r2 (DL, exact fixes): each probe RED at de8a7f92 is kept + l
   });
   it('#3 CONTROL: the modal "may" is not a month (lower case)', () => {
     expect(removeDriverAbsenceClaims('Prices may rise; the run does not establish which assumption matters most.').text).toBe('Prices may rise.');
+  });
+});
+
+/**
+ * Wave B pilot (7 Oct 02:26Z, guest T1b, CEE 86ccaf3, UI d16ccc87): `waveB-pilot-t1b-86ccaf3-turn003.json` is the Run
+ * narration turn, keys untouched. It said "Sensitivity of the option comparison has not been measured." while its own
+ * robustness record held a CRITICAL fragile link (switch 0.86) and the screen showed "Tipping point: Existing-plan price
+ * rise". DL ruling: the claim is false whenever the Run's robustness was computed (fragile or not); kept when absent.
+ */
+const PILOT = JSON.parse(fixture('waveB-pilot-t1b-86ccaf3-turn003.json')) as Json;
+const PILOT_CLAIM = ' Sensitivity of the option comparison has not been measured.';
+
+describe('Wave B pilot, keys untouched: a Run whose robustness check ran never says sensitivity was not measured', () => {
+  it('RED at base: only the claim goes; figures, deadline line, Olumi-values sentence and every other key unchanged', () => {
+    expect(PILOT.assistant_text.endsWith(`not you.${PILOT_CLAIM}`)).toBe(true);
+    const r = blockOf(PILOT).enrichment.robustness;
+    expect(r.fragile_edges[0]).toMatchObject({ edge_id: 'existing_plan_price_rise->monthly_recurring_revenue', severity: 'critical' });
+    expect(robustnessComputed(blockOf(PILOT))).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(PILOT, opts(PILOT)) as Json;
+    expect(out.assistant_text).toBe(PILOT.assistant_text.replace(PILOT_CLAIM, ''));
+    for (const kept of ['about 51%', 'less than 1%', "This model doesn't yet say whether any option gets there within 9 months.",
+      'These results depend partly on six values supplied by Olumi, not you.']) expect(out.assistant_text).toContain(kept);
+    expect(SENSITIVITY_ABSENCE_CLAIM.test(out.assistant_text)).toBe(false);
+    expectWellFormed(out.assistant_text);
+    expect({ ...out, assistant_text: PILOT.assistant_text }).toEqual(PILOT);
+  });
+
+  it('computed with NO fragile link is still computed: the claim goes', () => {
+    const robust = clone(PILOT);
+    Object.assign(blockOf(robust).enrichment.robustness, { fragile_edges: [], is_robust: true, display_verdict: 'robust', level: 'high' });
+    expect(robustnessComputed(blockOf(robust))).toBe(true);
+    expect((withoutDriverAbsenceClaimsAtEgress(robust, opts(robust)) as Json).assistant_text).toBe(PILOT.assistant_text.replace(PILOT_CLAIM, ''));
+  });
+
+  it.each([
+    ['absent', (r: Json) => { delete r.robustness; }],
+    ['empty object', (r: Json) => { r.robustness = {}; }],
+    ['no fragile_edges array', (r: Json) => { delete r.robustness.fragile_edges; }],
+    ['an array but no verdict', (r: Json) => { r.robustness = { fragile_edges: [] }; }],
+  ])('CONTROL robustness %s: not computed, the sentence stays, by reference', (_name, strip) => {
+    const body = clone(PILOT);
+    strip(blockOf(body).enrichment);
+    expect(robustnessComputed(blockOf(body))).toBe(false);
+    expect(withoutDriverAbsenceClaimsAtEgress(body, opts(body))).toBe(body);
+  });
+
+  it('one log line by code and turn id, never prose', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined as never);
+    withoutDriverAbsenceClaimsAtEgress(PILOT, opts(PILOT));
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect((warn.mock.calls[0]! as [Json])[0]).toEqual({ event: 'agent_lane.sensitivity_absence_removed', code: SENSITIVITY_ABSENCE_REMOVED,
+      turn_id: 'turn-s2', request_id: 'req-s2', exit_path: 'agent_lane_v1_final', removed_count: 1 });
+    expect(JSON.stringify(warn.mock.calls)).not.toMatch(/Sensitivity of|six values|Raise prices/);
+  });
+
+  // DL ruling 2: every paraphrase form, each with its edited text (author-written paraphrases, labelled as such).
+  it.each([
+    ['Six values are Olumi’s, not yours. Sensitivity of the option comparison has not been measured.', 'Six values are Olumi’s, not yours.'],
+    ['The deadline was not tested, and sensitivity was not measured.', 'The deadline was not tested.'],
+    ['Sensitivity hasn’t been assessed, and the deadline was not tested.', 'The deadline was not tested.'],
+    ['Olumi did not run a sensitivity analysis, so treat this as a first pass.', 'Treat this as a first pass.'],
+    ['There was no sensitivity analysis; the deadline was not tested.', 'The deadline was not tested.'],
+    ['Robustness and sensitivity were not assessed, and seven values are Olumi’s.', 'Seven values are Olumi’s.'],
+    ['The run has not measured sensitivity, so read the figures as provisional.', 'Read the figures as provisional.'],
+    ['Sensitivity remains untested, but the figures are recorded.', 'The figures are recorded.'],
+    ['Figures are provisional; decision sensitivity was not measured.', 'Figures are provisional.'],
+    ['Figures are provisional.\n- Sensitivity not measured.\n- The deadline was not tested.', 'Figures are provisional.\n- The deadline was not tested.'],
+  ])('MUST FIRE (paraphrase): %s', (text, edited) => {
+    expect(SENSITIVITY_ABSENCE_CLAIM.test(text)).toBe(true);
+    const out = removeSensitivityAbsenceClaims(text);
+    expect(out).toEqual({ text: edited, removed: 1, keptUnsafe: 0 });
+    expectWellFormed(out.text);
+  });
+
+  it.each([
+    'We have not measured the starter tier’s revenue.',
+    'Customers’ price sensitivity has not been measured.',
+    'Price sensitivity was not measured in your data.',
+    'Sensitivity to the price rise has not been tested against your deadline.',
+    'The nine-month deadline was not tested.',
+    'Sensitivity was measured: the comparison turns on the price rise.',
+    'The robustness check flagged the price-rise link as sensitive.',
+    'We have not assessed the churn figure.',
+    'Demand sensitivity is unmeasured, so the figure is Olumi’s estimate.',
+    'Our price-sensitivity has not been measured.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(SENSITIVITY_ABSENCE_CLAIM.test(text)).toBe(false);
+    expect(removeSensitivityAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  // DL #2712 r1 BLOCKER: an unbounded run inside the clause-opening lookbehind was rescanned at every position
+  // (quadratic: "Sensitivity" + 20,000 spaces took 9.6 s). Every run is bounded; each input is linear time.
+  it.each([
+    ['"Sensitivity" + 2,000 spaces + "x"', `Sensitivity${' '.repeat(2000)}x`, 50],
+    ['newline + 2,000 spaces + "x"', `\n${' '.repeat(2000)}x`, 50],
+    ['"." + 2,000 spaces + "x"', `.${' '.repeat(2000)}x`, 50],
+    ['"and" + 2,000 spaces + "x"', `and${' '.repeat(2000)}x`, 50],
+    ['"Sensitivity" + 20,000 spaces + "x"', `Sensitivity${' '.repeat(20000)}x`, 200],
+    ['newline + 20,000 spaces + "x"', `\n${' '.repeat(20000)}x`, 200],
+  ])('LINEAR TIME: %s', (_name, text, ms) => {
+    const t0 = performance.now();
+    SENSITIVITY_ABSENCE_CLAIM.test(text);
+    removeSensitivityAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(ms);
+  });
+
+  it('kept-unsafe rules unchanged: a span holding the deadline is kept and counted', () => {
+    const text = 'Figures are provisional. Sensitivity has not been measured within the 9 months.';
+    expect(removeSensitivityAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 1 });
+  });
+
+  // DL ruling 3: S2's full served corpus replayed with BOTH gates on. Base = staging 86ccaf3f (driver class only).
+  // Exactly these 16 sentences change, each losing only its sensitivity/robustness-absence clause; 0 unintended diffs.
+  const CHANGED: ReadonlyArray<[string, string]> = [
+    ['Sensitivity was not measured, and no tipping point was evaluated.', 'No tipping point was evaluated.'],
+    ['This first pass cannot put an option forward: it rests on unvalidated Olumi assumptions, and sensitivity has not been measured.', 'This first pass cannot put an option forward: it rests on unvalidated Olumi assumptions.'],
+    ['The nine-month deadline remains untested.** Factor sensitivity was not measured, so this result does not establish which assumption deserves investigation first.', 'The nine-month deadline remains untested.**'],
+    ['Three underlying values are Olumi’s assumptions, not yours; sensitivity was not measured, so investigation priority is not established.', 'Three underlying values are Olumi’s assumptions, not yours.'],
+    ['Sensitivity has not been measured, and the nine-month deadline was not tested.', 'The nine-month deadline was not tested.'],
+    ['The nine-month deadline was not tested; sensitivity and robustness were not assessed.', 'The nine-month deadline was not tested.'],
+    ['The model also does not test the nine-month deadline, and sensitivity has not been measured.', 'The model also does not test the nine-month deadline.'],
+    ['Sensitivity was not measured, and the 9-month deadline was not tested.', 'The 9-month deadline was not tested.'],
+    ['Seven input values were supplied by Olumi, not you; sensitivity was not measured, so investigation priority is not established.', 'Seven input values were supplied by Olumi, not you.'],
+    ['Four underlying values were supplied by Olumi, not you; sensitivity was not measured, so this run does not establish which assumption matters most.', 'Four underlying values were supplied by Olumi, not you.'],
+    ['Eight underlying values were supplied by Olumi, not you; sensitivity was not measured, so investigation priority is not established.', 'Eight underlying values were supplied by Olumi, not you.'],
+    ['The run also does not test your nine-month deadline, and decision sensitivity was not measured.', 'The run also does not test your nine-month deadline.'],
+    ['But the run does not test your nine-month deadline, and sensitivity was not measured.', 'But the run does not test your nine-month deadline.'],
+    ['All three options were analysed, but the nine-month deadline was not tested, and sensitivity was not measured.', 'All three options were analysed, but the nine-month deadline was not tested.'],
+    ['Sensitivity and robustness were not assessed, and seven underlying values were supplied by Olumi rather than you.', 'Seven underlying values were supplied by Olumi rather than you.'],
+    ['Robustness and sensitivity were not assessed, and seven underlying values are Olumi’s assumptions, not yours.', 'Seven underlying values are Olumi’s assumptions, not yours.'],
+  ];
+  it('corpus replay: exactly the 16 listed sentences change, as listed; every other row is byte-identical to base', () => {
+    const changed = new Map(CHANGED);
+    let n = 0;
+    for (const row of CORPUS.rows) {
+      const base = removeDriverAbsenceClaims(row.sentence).text;
+      const sens = removeSensitivityAbsenceClaims(base);
+      const final = sens.removed > 0 && sens.text !== '' ? sens.text : base;
+      if (changed.has(row.sentence)) { n += 1; expect(final).toBe(changed.get(row.sentence)); expectWellFormed(final); }
+      else expect(final).toBe(base);
+    }
+    expect(n).toBe(16);
   });
 });
