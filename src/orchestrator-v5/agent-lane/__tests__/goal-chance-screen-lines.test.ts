@@ -56,7 +56,10 @@ describe('S4c: the lines are the SCREEN’s, word for word, in its order', () =>
     }] };
     const lines = goalChanceScreenLinesForAgent(result, graph, true);
     expect(lines).toHaveLength(1);
-    expect(whole(lines[0]!)).toBe(`‘Carry on as now’: between less than 1% and more than 99% chance of finishing launch by 7 April 2027, in this model, from the slow end of your ${quantity === 'months_to_finish' ? '6–10 months' : '10–16% of launch per month'} to the fast end.`);
+    // DL #2762 r3 (lens 1 P2s): the ruled "launching by", and a stated time read at its two ends ("if it takes …").
+    expect(whole(lines[0]!)).toBe(quantity === 'months_to_finish'
+      ? '‘Carry on as now’: less than 1% chance of launching by 7 April 2027 if it takes 10 months, and more than 99% if it takes 6 months, in this model.'
+      : '‘Carry on as now’: between less than 1% and more than 99% chance of launching by 7 April 2027, in this model, from the slow end of your 10–16% of launch per month to the fast end.');
     expect(lines[0]!.depends).toBe('');
     expect(whole(lines[0]!)).not.toMatch(/affects|assumed|best|leader/);
   });

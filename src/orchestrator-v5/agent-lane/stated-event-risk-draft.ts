@@ -67,6 +67,11 @@ export function eventRiskLikelihoodWords(block: EventRiskV1T): string {
   return `about ${likelihood} within ${horizon}`;
 }
 
+/** The approval card's likelihood line: one string for the card record AND the confirm chip the user sees. */
+export function eventRiskCardLine(block: EventRiskV1T): string {
+  return `It may happen: ${eventRiskLikelihoodWords(block)}, as you said.`;
+}
+
 /** The draft's disclosure for a held event risk, said back as the user's own. */
 export function heldEventRiskLine(label: string, block: EventRiskV1T): string {
   return `Held your stated likelihood for ${label}: it may happen (${eventRiskLikelihoodWords(block)}), as you wrote.`;

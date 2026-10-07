@@ -22,6 +22,7 @@ import { chipToBoundaryAction, toGraphView } from './add-option-dispatch.js';
 import { TYPED_TRANSACTION_ENVELOPE_CAP, type FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { buildAddRiskTransaction, type AddRiskSkipReason } from '../routing/add-risk-transaction.js';
+import { eventRiskCardLine } from '../agent-lane/stated-event-risk-draft.js';
 
 type StageIndicator = OlumiResponse['stage_indicator'];
 
@@ -96,16 +97,20 @@ export function dispatchAddRiskTransaction(input: AddRiskTransactionInput): AddR
     envelopeCap: TYPED_TRANSACTION_ENVELOPE_CAP,
   });
   // Only a HELD verdict with exactly one pending is a hold the user can confirm; anything else is refused whole.
-  const chip = decision.suggestedActions?.[0];
-  if (decision.governing !== 'held' || decision.pendingActions === null || decision.pendingActions.length !== 1 || chip === undefined) {
+  const heldChip = decision.suggestedActions?.[0];
+  if (decision.governing !== 'held' || decision.pendingActions === null || decision.pendingActions.length !== 1 || heldChip === undefined) {
     return { kind: 'refused', reason: 'not_held', governing: decision.governing };
   }
+  // The stated likelihood rides on the confirm chip the user reads, in the card record's own words (record.ts).
+  const likelihoodLine = userEventRisk === undefined ? undefined : eventRiskCardLine(userEventRisk.event_risk);
+  const chip: EditGmChip = likelihoodLine === undefined ? heldChip
+    : { ...heldChip, detail: heldChip.detail !== undefined ? `${heldChip.detail}\n${likelihoodLine}` : likelihoodLine };
   const blocks: OlumiResponse['blocks'] = decision.heldProposalBlock != null ? [decision.heldProposalBlock as HeldProposalBlock] : [];
   const response: OlumiResponse = {
     response_version: 2,
     assistant_text: decision.assistantText ?? '',
     blocks,
-    suggested_actions: (decision.suggestedActions ?? []).map(chipToBoundaryAction),
+    suggested_actions: (decision.suggestedActions ?? []).map((c, i) => chipToBoundaryAction(i === 0 ? chip : c)),
     insights: [],
     stage_indicator: input.stage,
   } as OlumiResponse;

@@ -33,6 +33,7 @@ export interface GoalChanceScreenLine {
   readonly figure: string;
   readonly chance: string;
   readonly depends: string;
+  readonly spread_note?: string;
 }
 
 type Rec = Record<string, unknown>;
@@ -50,17 +51,18 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
     .map((n) => [n.id as string, n.label as string]));
-  const line = (optionId: string, figure: string, depends: string): GoalChanceScreenLine[] => {
+  const line = (optionId: string, figure: string, depends: string, spreadNote?: string): GoalChanceScreenLine[] => {
     const label = labels.get(optionId);
     // An option the graph cannot name has no line (the screen drops it too); never an id.
     const estimates = shareOptionEstimateWords(graph, optionId);
     return label === undefined ? [] : [{ option_id: optionId, label, figure,
-      chance: `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}.`, depends }];
+      chance: `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}.` + (spreadNote === undefined ? '' : ` ${spreadNote}`), depends,
+      ...(spreadNote === undefined ? {} : { spread_note: spreadNote }) }];
   };
   const points = (facts.goal_chance_licence?.form === 'each' || facts.goal_chance_words !== undefined || share !== null) && facts.goal_chance_display !== undefined
     ? facts.goal_chance_licence!.option_ids.flatMap((id) => {
       const figure = facts.goal_chance_display![id];
-      return figure === undefined ? [] : line(id, figure, facts.goal_chance_driver_display?.[id] ?? '');
+      return figure === undefined ? [] : line(id, figure, facts.goal_chance_driver_display?.[id] ?? '', facts.goal_chance_licence?.spread_note_by_option?.[id]);
     }) : [];
   const ranges = Object.entries(facts.goal_chance_range_display ?? {}).flatMap(([id, d]) => {
     if (d.depends_on.kind === 'stated_time') {
@@ -93,6 +95,8 @@ function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
   if (sameWordsIn(text, l.chance)) return true;
   // The Agent's own phrasing ("Raise prices 10%: about 46%") gives the same figure: never said twice in two wordings.
   const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
+  if (l.spread_note !== undefined) return text.split('\n').some(row =>
+    plain(row).includes(plain(l.label)) && plain(row).includes(plain(l.figure)) && sameWordsIn(row, l.spread_note!));
   const p = plain(text);
   return p.includes(plain(l.label)) && p.includes(plain(l.figure));
 }
@@ -111,7 +115,35 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
   const owed: string[] = [];
   let added = 0;
   for (const l of lines) {
+    if (l.spread_note !== undefined && !alreadySaid(body, l)) {
+      const chanceOnly = l.chance.slice(0, l.chance.length - l.spread_note.length).trimEnd();
+      if (body.includes(chanceOnly)) {
+        body = body.split(l.spread_note).join('');
+        body = body.replace(chanceOnly, l.chance);
+        added += 1;
+      } else {
+        const rows = body.split('\n');
+        const rowAt = rows.findIndex(row => row.includes(l.label) && row.includes(l.figure));
+        if (rowAt >= 0) {
+          body = body.split(l.spread_note).join('');
+          const cleanRows = body.split('\n');
+          const row = cleanRows[rowAt]!;
+          const figureEnd = row.indexOf(l.figure) + l.figure.length;
+          const stop = row.indexOf('.', figureEnd);
+          const end = stop < 0 ? row.length : stop + 1;
+          cleanRows[rowAt] = `${row.slice(0, end)} ${l.spread_note}${row.slice(end)}`;
+          body = cleanRows.join('\n');
+          added += 1;
+        }
+      }
+    }
     if (alreadySaid(body, l)) continue;
+    // Move any existing note behind its own chance, including when the Agent gave only the figure.
+    if (l.spread_note !== undefined) {
+      body = body.split(l.spread_note).join('');
+      const chanceOnly = l.chance.slice(0, l.chance.length - l.spread_note.length).trimEnd();
+      body = body.split(chanceOnly).join('');
+    }
     owed.push(l.chance);
     added += 1;
     if (l.depends === '') continue;
@@ -124,7 +156,7 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
       added += 1;
     }
   }
-  if (owed.length === 0) return { text, added: 0 };
+  if (owed.length === 0) return { text: body, added };
   // What a move leaves behind: no doubled spaces, no blank paragraph.
   body = body.split('\n\n').map((p) => p.replace(/[ \t]{2,}/g, ' ').trim()).filter((p) => p !== '').join('\n\n');
   const said = owed.join(' ');

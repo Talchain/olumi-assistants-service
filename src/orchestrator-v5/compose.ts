@@ -103,6 +103,8 @@ function stripEdgeContinuityLabels<T>(snapshot: T): T {
   delete projected.to_label;
   // S5t-W: the refit's rescale record is S7's internal carrier (build-run-delta.ts `frameRefitMove`), never wire.
   delete projected.frame_refit;
+  // P48: the other links this write changed (the sized gauge), for `changed_since_run` only — never wire.
+  delete projected.also_changed_links;
   return projected as T;
 }
 
