@@ -126,6 +126,7 @@ import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
+import { premortemProducerDirective, readPremortemProduction, premortemWorksheetFor } from '../orchestrator-v5/agent-lane/runtime/reasoning-artefacts/premortem.js';
 import {
   isWidenPress, keptProposalOf, settleWidenTurn, widenGate, widenNotAdded, widenOffered, widenPassingArgs, widenTurnForReadback,
   WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
@@ -2841,6 +2842,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let methodTurn: MethodTurn | null = null;
     let tippingTurn: TippingPointCoaching | null = null;
     let methodGraph: unknown;
+    let premortemInitialRead: Awaited<ReturnType<typeof readBackState>> | undefined;
+    let premortemCandidates: unknown;
+    let premortemPassed = false;
+    let premortemReply: string | undefined;
     const pressedChipId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
     /**
      * ⭐ "WHAT WOULD CHANGE THIS?" — ONE CHIP, TWO GROUNDED ANSWERS, MEASURED FIRST, ONE OWNER (`whatWouldChangeAnswer`,
@@ -2894,6 +2899,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined && isMethodPress(pressedChipId)) {
       const rb = await readBackState(readingDispatch, scenarioId);
       methodGraph = rb.graph;
+      premortemInitialRead = rb;
       methodTurn = methodTurnForReadback(pressedChipId, rb);
       // ⭐ A RECOGNISED METHOD TURN IS TERMINAL (DL round 3 on #2480, 5940698000): what the method returns — the checked
       // text and its own cards — is the answer. Every downstream composer below (the identity re-offer, write narration,
@@ -3105,7 +3111,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ...(selectionContext.links !== undefined ? { grounded_links: selectionContext.links } : {}) } : {}) },
           history,
           message,
-          instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}`
+          instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}\n\n${premortemProducerDirective(methodTurn, methodGraph)}`
             : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}` : AGENT_INSTRUCTIONS,
           maxOutputTokens: budget.max_output_tokens,
           mode,
@@ -3179,7 +3185,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (never a repair, never a second call). Then ONE card on the story's target, through the existing door, exactly as
     // the identity card is issued below: `approvalChipsFor` offers its approve chip.
     if (methodTurn?.kind === 'run') {
+      const production = readPremortemProduction(text);
+      text = production.reply;
+      premortemCandidates = production.candidates;
       const settled = settleMethodTurn(methodTurn, result.stopped_reason === 'answered' ? text : '');
+      premortemPassed = settled.passed;
+      premortemReply = settled.reply;
       text = settled.reply;
       // Nothing the call produced survives: its record is rebuilt ONCE at its explicit boundary from the final wire text
       // (below), and an earlier turn is never touched (CODEX_CLI_OVERFLOW P1 #3).
@@ -3303,7 +3314,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (runStillCurrent !== undefined) dispatchLedger.push({ path: 'store:run-currentness', ms: Date.now() - runCheckStarted, status: runStillCurrent ? 200 : 409 });
     /** A successful bound narration check reuses its read; recomputed methods must see other writers after the wait. */
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
-      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested
+      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested || premortemInitialRead !== undefined
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
     const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
@@ -4082,8 +4093,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     // A7: what of the brief the model does not carry — the final readback's own manifest, bound to its graph_hash.
     const notModelledCarrier = notModelledTurnCarrier(notModelled, graphHash);
+    // Local carrier, AFTER finalisation and licence egress. If egress changed the prose, the worksheet is withheld.
+    const premortemWorksheet = premortemWorksheetFor({
+      scenarioId, turnId, turn: methodTurn?.kind === 'run' ? methodTurn : null,
+      passed: premortemPassed && premortemReply === wireBody.assistant_text,
+      reply: String(wireBody.assistant_text ?? ''), candidates: premortemCandidates,
+      initial: premortemInitialRead, final: composedRead,
+    });
     return reply.code(200).send({
       ...wireBody,
+      ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),
       /**
        * ⭐ A7 (DL #70 5855437928; Canonical 5855435365): the graph read's `not_modelled`, exactly as read, beside the
        * `graph_hash` of that same read. Derived by the read route, never here; never on the answer row; absent when the

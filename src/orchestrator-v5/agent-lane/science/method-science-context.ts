@@ -151,7 +151,7 @@ export interface MethodScienceContext {
   readonly dsk: DskCitation | null;
   readonly not_cited: NotCitedReason | null;
   /**
-   * The plan a pre-mortem stresses: the licensed leader, else the option the user explicitly chose, else none. A lone
+   * The plan a pre-mortem stresses: the option the user explicitly chose, else the licensed leader, else none. A lone
    * option is never named on its own: a plan label needs a licence or the user's choice (PTL 5933036532 #5).
    * Decision-level pre-mortems carry null here and use the union of own-option paths for grounding.
    */
@@ -204,19 +204,20 @@ function choosePlan(
   userSelected: string | null | undefined,
 ): MethodScienceContext['plan'] {
   const labels = s['model.option_labels'];
-  // The leader's identity is read ONLY behind its licence: an unlicensed leader is never read, so it cannot leak.
-  if (s['run.leader_licensed'] === true) {
-    const leader = s['run.leader_option_id'];
-    if (typeof leader === 'string' && typeof labels[leader] === 'string') {
-      return { option_id: leader, label: labels[leader], basis: 'licensed_leader' };
-    }
-  }
   if (
     typeof userSelected === 'string'
     && s['model.non_sq_option_ids'].includes(userSelected)
     && typeof labels[userSelected] === 'string'
   ) {
     return { option_id: userSelected, label: labels[userSelected], basis: 'user_selected' };
+  }
+  if (userSelected != null) return null;
+  // The leader's identity is read ONLY behind its licence: an unlicensed leader is never read, so it cannot leak.
+  if (s['run.leader_licensed'] === true) {
+    const leader = s['run.leader_option_id'];
+    if (typeof leader === 'string' && typeof labels[leader] === 'string') {
+      return { option_id: leader, label: labels[leader], basis: 'licensed_leader' };
+    }
   }
   return null;
 }

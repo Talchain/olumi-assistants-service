@@ -10,13 +10,14 @@ export function planOf(s: GuidanceSignals): string | undefined {
 }
 
 /**
- * The plan an asked pre-mortem METHOD stresses: the licensed leader, else the user's explicit pick. Never auto-named
+ * The plan an asked pre-mortem METHOD stresses: the user's explicit pick, else the licensed leader. Never auto-named
  * (PTL 5933036532 #5): with neither, a generic multi-option press stresses the decision; otherwise ask which option.
  */
 export function methodPlanOf(s: GuidanceSignals): string | undefined {
-  if (s['run.leader_licensed'] === true && s['run.leader_option_id']) return s['run.leader_option_id'];
   const pick = s['user.selected_option_id'];
-  return pick && (s['model.non_sq_option_ids'] ?? []).includes(pick) ? pick : undefined;
+  if (pick != null) return (s['model.non_sq_option_ids'] ?? []).includes(pick) ? pick : undefined;
+  if (s['run.leader_licensed'] === true && s['run.leader_option_id']) return s['run.leader_option_id'];
+  return undefined;
 }
 
 /** A generic press can stress the decision without selecting any of the user's own options. */

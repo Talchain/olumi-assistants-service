@@ -11,7 +11,7 @@
  *
  * PURE and TOTAL: no I/O, no model call, never throws. The route makes the call and the card (`routes/agent-v1-turn.ts`).
  *
- * ⛔ The plan is never chosen for the user (PTL 5933036532 #5): the licensed leader, else the user's own pick. Both
+ * ⛔ The plan is never chosen for the user (PTL 5933036532 #5): the user's own pick, else the licensed leader. Both
  * writers of the pick (a choose_plan button, and a pre-mortem row whose copy names the user's option) converge on ONE
  * carrier, the chip id `planPickChipId(option_id)`, and ONE reader, `methodPressOf`. The pick lives for its own press
  * only: nothing is stored. A generic press with multiple own options and no licensed leader stresses the decision.
@@ -76,7 +76,8 @@ export interface MethodPress {
 export function methodPressOf(chipId: unknown, nonSqOptionIds: readonly string[]): MethodPress | null {
   if (chipId === PREMORTEM_PRESS_ID) return { pick: null };
   if (typeof chipId !== 'string' || !chipId.startsWith(PLAN_PICK_PREFIX)) return null;
-  return { pick: nonSqOptionIds.find((id) => planPickChipId(id) === chipId) ?? null };
+  const matches = nonSqOptionIds.filter((id) => planPickChipId(id) === chipId);
+  return { pick: matches.length === 1 ? matches[0] : null };
 }
 
 type Rec = Record<string, unknown>;
@@ -224,6 +225,10 @@ export function methodTurnFromSignals(chipId: unknown, s: TurnSignals, graph: un
   if (press === null) return null;
   if (s['model.goal_present'] !== true) return unavailableTurn('no_goal');
   if (s['model.non_sq_option_ids'].length === 0) return unavailableTurn('no_own_option');
+  // An invalid explicit pick never falls through to a licensed plan; retain the existing choose-plan refusal.
+  if (chipId !== PREMORTEM_PRESS_ID && press.pick === null) {
+    return choosePlan(s['model.non_sq_option_ids'], s['model.option_labels']) ?? unavailableTurn('plan_unconfirmed');
+  }
   const selector = { ...selectorSignalsOf(s, press.pick), 'user.generic_method_press': chipId === PREMORTEM_PRESS_ID };
   const selection = selectGuidance(selector, selector.guidance ?? {});
   if (selection.runs_method !== METHOD) return unavailableTurn('plan_unconfirmed');
