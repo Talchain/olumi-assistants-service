@@ -3398,10 +3398,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let liveHolds: readonly PendingAction[] = [];
     let heldLapseLines: string[] = [];
     let heldRecords: ProposalRecord[] = [];
+    /** Every held proposal this turn read (at its start and at its end): the floor never re-adds one it settled itself. */
+    const heldSeenThisTurn = new Set<string>(heldAtStart.map((h) => h.chip_id));
     let liveScopeIssues: readonly PendingAction[] = [];
     if (typeof store.readMostRecentPendingActions === 'function') {
       try {
         const priorPendings = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
+        for (const p of priorPendings) if (isProductHold(p)) heldSeenThisTurn.add(p.chip_id);
         /*
          * ⭐ S-D: A HELD PROPOSAL IS HELD UNTIL IT IS APPROVED OR DECLINED (lane EDIT-PANEL; Paul 7 Oct; D-08). Supersedes
          * Canonical #70 5841421182 condition 2 ("the turn count runs down once per answer row"): that rule counted ROWS,
@@ -4190,8 +4193,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           source: 'agent_turn',
           baseGraphForInvariants: readbackGraph,
           withdrawnGoalScopeChipIds: [...scopeWithdrawals].filter((id): id is string => typeof id === 'string'),
-          // ⭐ S-D: a held proposal this answer carries is kept only while the latest row still holds it (never resurrected).
-          keepSuppliedOnlyIfStillLatest: isProductHold,
+          // ⭐ S-D: held proposals are reconciled again against the latest row just before the append: one another request
+          // declined meanwhile is never resurrected, and one another request minted meanwhile is never erased.
+          heldProposals: { isHeld: isProductHold, seenByThisRequest: heldSeenThisTurn },
           write: {
           scenario_id: scenarioId,
           // The ANSWER row, under the client's own turn_id (the claim `<turn_id>:claim` was taken before

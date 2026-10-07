@@ -433,7 +433,8 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     expect(stale._agent.tool_calls.filter((c) => c.name === 'authorise_change' && c.ok), JSON.stringify(stale._agent.tool_calls)).toEqual([]);
     expect(bytes(), 'the user sized a link they saw as "Price"; nothing is written under another name').toBe(before);
     expect((await heldOnLatestRow()).map((x) => x.chip_id), 'still held').toEqual([ref]);
-    expect(stale.assistant_text, stale.assistant_text).toMatch(/Nothing in the model changed/);
+    // Refused by the Agent's own confirm, before any door is pressed, and told to reopen the change (not a generic refusal).
+    expect(stale.assistant_text, stale.assistant_text).toContain('The model changed after these values were shown, so nothing was applied. Nothing in the model changed; open the change again to see its current values.');
     script = [() => say('What would you like to change?')];
     const fresh = shownOf(await turn(AMEND), ref);
     expect(fresh.fields.find((f) => f.field_id === `link_strength:fac_price::${riskId}`)?.from_label).toBe('Advertising spend');
@@ -470,16 +471,41 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     const approve = approveChipOf(await proposeRisk())!;
     const ref = approve.id.slice('agent-approve-proposal:'.length);
     expect((await heldOnLatestRow()).map((x) => x.chip_id)).toEqual([ref]);
-    // Another request's decline lands between this turn's reconcile and its append (its answer row holds nothing).
-    atFloorRead = async () => {
+    // Another request's decline lands between this turn's reconcile and its append (its answer row holds nothing). Armed
+    // from the model's own reply, so it fires at the ANSWER row's floor read, never at the claim row's (which goes first).
+    const staged = async () => {
       await store.append({ scenario_id: SCENARIO, turn_id: randomUUID(), request_hash: 'another-request-declined-it', userMessage: 'Not now.',
         assistantMessage: "Set aside: the risk 'Competitive response'. Nothing in the model changed.", pending_actions: [] });
     };
-    script = [() => say('It means competitors may answer a price rise with their own cuts.')];
-    await turn({ message: 'Tell me what this risk means.' });
+    script = [() => { atFloorRead = staged; return say('It means competitors may answer a price rise with their own cuts.'); }];
+    const t = await turn({ message: 'Tell me what this risk means.' });
+    expect(t.assistant_text, 'precondition: this turn reconciled the hold as still held (not already gone at its own read)').not.toMatch(/is no longer waiting/);
     expect(atFloorRead, 'precondition: the race was staged at the floor’s own read').toBeUndefined();
     expect(await heldOnLatestRow(), 'never resurrected').toEqual([]);
   }, 120_000);
+
+  it('RED (Codex r2 P1): a request that answered late never erases a held proposal another request put on the row meanwhile', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeRisk())!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const minted = (await store.readMostRecentPendingActions(SCENARIO)) as unknown[];
+    expect((await heldOnLatestRow()).map((x) => x.chip_id)).toEqual([ref]);
+    // The scenario starts this turn with nothing held (the latest row carries no pending item) ...
+    await store.append({ scenario_id: SCENARIO, turn_id: randomUUID(), request_hash: 'nothing-held', pending_actions: [] });
+    expect(await heldOnLatestRow(), 'precondition: nothing held when this turn starts').toEqual([]);
+    // ... and another request's proposal lands between this turn's reconcile and its append (its answer row holds it).
+    const staged = async () => {
+      await store.append({ scenario_id: SCENARIO, turn_id: randomUUID(), request_hash: 'another-request-proposed-it', userMessage: RISK_MSG,
+        assistantMessage: 'I would add the risk "Competitive response". Shall I add it?', pending_actions: minted });
+    };
+    script = [() => { atFloorRead = staged; return say('Price drives revenue through market share.'); }];
+    const t = await turn({ message: 'What drives revenue?' });
+    expect(atFloorRead, 'precondition: the race was staged at the answer row’s floor read').toBeUndefined();
+    expect(t.assistant_text, 'this turn never saw it, so it says nothing about it').not.toMatch(/held change/);
+    expect((await heldOnLatestRow()).map((x) => x.chip_id), 'never erased in silence').toEqual([ref]);
+    const ok = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(ok._agent.tool_calls[0], JSON.stringify(ok._agent.tool_calls)).toEqual(expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true }));
+  }, 180_000);
 
   it('RED (Codex r1 P1): three held proposals and a new approval this turn offers → the offered approval is on the row; a held one that cannot fit is SAID set aside, never dropped in silence', async () => {
     graphOf.set(SCENARIO, seedGraph());
