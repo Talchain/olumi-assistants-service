@@ -36,6 +36,7 @@
  */
 
 import type { PendingAction } from '../session/pending-action.js';
+import { GM_HELD_HANDLER_ID, GM_HELD_UNTIL_DECIDED_KEY } from '../handlers/edit-graph-referee-gate.js';
 import {
   CONFIRMATION_EXPECTING_ACTION_TYPES,
   isPendingActionExpired,
@@ -485,9 +486,29 @@ export function scopePendingsToChipClickIntent(
   return pendings.filter((pa) => pa.action.kind === 'what_would_flip');
 }
 
+/**
+ * ⭐ S-D (lane EDIT-PANEL): DURABLE RETENTION IS NOT BARE-CONFIRM ELIGIBILITY (Codex P1 on the design). The Agent lane
+ * keeps a held product proposal until it is approved or declined (`agent-lane/proposal-object/lifecycle.ts`) and marks it
+ * (`GM_HELD_UNTIL_DECIDED_KEY`), so its stored lifetime runs past the default offer window. A bare "yes" here may bind a
+ * marked hold ONLY inside that original window from when it was offered. Its exact card words still resolve it through
+ * the label pick (`turn-executor.ts` `tryProposalOrdinalSelect`), which is how the Agent lane and the held card confirm
+ * it. An unmarked pending is untouched.
+ */
+function bareConfirmEligible(pa: PendingAction, nowMs: number): boolean {
+  if (pa.action.kind !== 'apply_proposed_change') return true;
+  const patch = pa.action.inline_patch as Record<string, unknown> | undefined;
+  if (patch?.['handler_id'] !== GM_HELD_HANDLER_ID || patch[GM_HELD_UNTIL_DECIDED_KEY] !== true) return true;
+  const emitted = Date.parse(pa.emitted_at_iso);
+  return Number.isFinite(emitted) && nowMs - emitted <= PENDING_ACTION_DEFAULT_WALL_TTL_MS;
+}
+
 export function tryShortConfirmResume(
-  input: TryShortConfirmResumeInput,
+  rawInput: TryShortConfirmResumeInput,
 ): ShortConfirmDispatch {
+  const input: TryShortConfirmResumeInput = {
+    ...rawInput,
+    pendingActions: rawInput.pendingActions.filter((pa) => bareConfirmEligible(pa, rawInput.nowMs)),
+  };
   // Pre-compute live apply_proposed_change candidates once. They unlock
   // two pre-route branches: (1) PROPOSAL_CONFIRM_PATTERN bypasses the
   // edit-verb gate for proposal-targeted phrases ("add that", "make

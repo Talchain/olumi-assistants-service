@@ -528,8 +528,12 @@ export async function runAgentTurn(
           ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
           // ⛔ Only a change THIS turn proposed and still offers can be withdrawn: one an earlier turn showed the user
           // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`).
+          // ⭐ S-D (Paul 7 Oct): a HELD proposal now stays held until it is approved or declined, so the user's own typed
+          // decline ("No, leave that risk out") must be able to set an earlier turn's held proposal aside. Only a held
+          // product proposal (`gmh_`), only on a turn the user TYPED, and the route always says what was set aside.
           : String(call.name) === WITHDRAW_PROPOSAL && !(proposalIdArg(call.arguments) ?? '').startsWith('goal-scope:')
             && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
+            && !(/^gmh_[0-9a-f]{12}$/.test(proposalIdArg(call.arguments) ?? '') && (input.ctx.user_turn_text ?? '').trim() !== '')
             ? {
                 ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
                 detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '

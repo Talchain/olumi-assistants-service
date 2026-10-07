@@ -304,6 +304,11 @@ import {
   readGmHeldResume,
   type GmHeldResumeRead,
 } from './handlers/gm-held-execute.js';
+import { appendLapseNotice, threadHoldsThroughMutatingCommit } from './handlers/hold-thread-through.js';
+import type { EditPatchOperationLike } from './graph-management/adapters/edit-graph-producer.js';
+import { PatchOperationsArraySchema } from '../orchestrator/patch-validation.js';
+import { productHoldRecord } from './agent-lane/proposal-object/record.js';
+import { amendHeldOperations, parseProposalEdits } from './agent-lane/proposal-object/amend.js';
 import {
   buildReadinessRepairOffer,
   withReadinessApplyControl,
@@ -4627,8 +4632,29 @@ export async function runTurnExecutor(
         ) {
           return commitProposedChangeRecovery('superseded', 'gm_held_execute_superseded');
         }
+        /**
+         * ⭐ S-D APPROVE-WITH-EDITS (lane EDIT-PANEL; design §6). The user's values for THIS stored revision ride the
+         * confirm (`chip.parameters.proposal_edits`) and are applied HERE, in the same execution as the confirm, to the
+         * hold this turn read under its pin — so the batch that lands is exactly the stored hold plus this request's
+         * edits, never another panel's (Codex P0). Anything that does not bind applies nothing.
+         */
+        const proposalEdits = parseProposalEdits((payload.chip?.parameters as Record<string, unknown> | undefined)?.['proposal_edits']);
+        let heldOperations = read.operations;
+        if (proposalEdits !== undefined) {
+          if (proposalEdits === null || proposalEdits.proposal_id !== heldPending.chip_id) {
+            return commitProposedChangeRecovery('invalid', 'gm_held_edits_malformed');
+          }
+          if (proposalEdits.revision !== heldPending.id || proposalEdits.graph_hash !== pinnedHash) {
+            return commitProposedChangeRecovery('superseded', 'gm_held_edits_superseded');
+          }
+          const editRecord = productHoldRecord(heldPending, gmBaseGraph);
+          const amended = editRecord === undefined ? undefined : amendHeldOperations(editRecord, proposalEdits.fields);
+          const reparsed = amended?.ok === true ? PatchOperationsArraySchema.safeParse(amended.operations) : undefined;
+          if (reparsed === undefined || !reparsed.success) return commitProposedChangeRecovery('invalid', 'gm_held_edits_refused');
+          heldOperations = reparsed.data;
+        }
         const outcome = executeGmHeldResume({
-          operations: read.operations,
+          operations: heldOperations,
           ...(read.envelopeCap !== undefined ? { envelopeCap: read.envelopeCap } : {}),
           // A new switch's today-0 lands in this same apply (Canonical #70 5854919806 item 1).
           ...(read.switchFactorIds !== undefined ? { switchFactorIds: read.switchFactorIds } : {}),
@@ -4696,13 +4722,33 @@ export async function runTurnExecutor(
         // route) rather than offering nothing.
         const gmReadiness = buildCanonicalAnalysisReadyFromGraph(outcome.appliedGraph);
         const gmAppliedSubject = describeHeldOperationsSubject(read.operations, gmBaseGraph, { switchFactorIds: read.switchFactorIds });
+        /**
+         * ⭐ S-D: THE OTHER HELD PROPOSALS THREAD THROUGH THIS CONFIRM (HOLD-WIPE's rule, now on the one writer that
+         * lacked it). D-08: approving the freelance option moved the model, and the carry-forward's hash rule dropped
+         * the held recruitment risk without a word. Each other hold is re-refereed against the applied model: still
+         * sound → re-pinned and carried; not → its lapse is said in this receipt (stored == wire).
+         */
+        const confirmHashAfter = ((): string | null => {
+          try { return computeAnalysisAffectingGraphHash(outcome.mutatedGraph as GraphStateIngress | null | undefined); } catch { return null; }
+        })();
+        const otherHolds = threadHoldsThroughMutatingCommit({
+          priorPendingActions: (context.most_recent_pending_actions ?? []).filter((pa) => pa.chip_id !== heldPending.chip_id),
+          graphAfterCommit: outcome.mutatedGraph,
+          graphHashAfterCommit: confirmHashAfter,
+          appliedOperations: heldOperations as unknown as EditPatchOperationLike[],
+          nowMs: Date.now(),
+          scenarioId: context.session_id,
+          turnId: context.request_id,
+          requestId,
+        });
+        const gmReceipt = buildGmHeldAppliedReceipt(
+          gmAppliedSubject !== null ? [gmAppliedSubject] : [],
+          deriveUnconfiguredOptionLabels(gmReadiness),
+          deriveBlockedConfiguredOptions(gmReadiness),
+        );
         const appliedResponse = composeAnswer({
           answerKind: 'functional',
-          assistant_text: buildGmHeldAppliedReceipt(
-            gmAppliedSubject !== null ? [gmAppliedSubject] : [],
-            deriveUnconfiguredOptionLabels(gmReadiness),
-            deriveBlockedConfiguredOptions(gmReadiness),
-          ),
+          assistant_text: otherHolds.notice === null ? gmReceipt : appendLapseNotice(gmReceipt, otherHolds.notice),
           stage: context.stage,
           suggested_actions: buildGmHeldAppliedChips(gmReadiness),
         });
@@ -4740,6 +4786,8 @@ export async function runTurnExecutor(
             duration_ms: Date.now() - startedAt,
             handler_facts: [outcome.fact],
             graph: outcome.mutatedGraph,
+            // ⭐ S-D: every other hold, threaded through this mutation (re-pinned or honestly lapsed above).
+            priorPendingActions: [...otherHolds.threaded],
             // Consumed proposal never carries forward (zombie-chip guard).
             consumedPendingRefs: [heldPending.chip_id],
           });
