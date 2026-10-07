@@ -63,6 +63,19 @@ describe('buildTurnContext — a degraded restore-invalidation read must not abo
     // PRECONDITION (trap 13b): the harness really did run a turn, so the
     // assertion above is about a completed turn rather than a vacuous object.
     expect(ctx.prior_turns).toBeDefined();
+
+    // ⭐ THE VALUE, NOT JUST SURVIVAL. Review caught that asserting only
+    // "the turn completed" leaves the degraded VALUE unpinned: a catch handler
+    // returning `new Date().toISOString()` would satisfy everything above,
+    // make `invalidatedAtMs` finite in `freshness.ts` and fire the stale
+    // branch — a FALSE `stale` on EVERY degraded read, which is precisely the
+    // harm the fix exists to prevent and the worse direction of the two.
+    //
+    // `null` is load-bearing because `freshness.ts` tests
+    // `opts?.analysisInvalidatedAt == null`, and its stale branch requires
+    // `invalidatedAtMs !== null`. So `null` takes the identical branch to an
+    // absent read. ARM 3 pins that equivalence behaviourally.
+    expect(ctx.analysis_invalidated_at).toBeNull();
   });
 
   it('ARM 2 CONTROL: a store LACKING the method still completes (unchanged behaviour)', async () => {
@@ -72,5 +85,29 @@ describe('buildTurnContext — a degraded restore-invalidation read must not abo
     });
     expect(ctx).toBeDefined();
     expect(ctx.prior_turns).toBeDefined();
+    expect(ctx.analysis_invalidated_at).toBeNull();
+  });
+
+  it('ARM 3 EQUIVALENCE: a degraded read is INDISTINGUISHABLE from an absent one', async () => {
+    // The claim the fix rests on, stated as a comparison rather than a
+    // constant: "a read that fails degrades to exactly today". If the two ever
+    // diverge, some consumer can tell them apart — and the first consumer that
+    // can is `freshness.ts`, which would report a restored-model staleness that
+    // never happened.
+    const throwing = {
+      ...createNoopSessionStore({}),
+      readAnalysisInvalidatedAt: async () => {
+        throw new SessionReadError('DB offline', { code: '57P03' });
+      },
+    };
+    const absent = { ...createNoopSessionStore({}) };
+
+    const degradedCtx = await buildTurnContext(BASE, 'req-equiv-degraded', { sessionStore: throwing });
+    const absentCtx = await buildTurnContext(BASE, 'req-equiv-absent', { sessionStore: absent });
+
+    expect(degradedCtx.analysis_invalidated_at).toEqual(absentCtx.analysis_invalidated_at);
+    // PRECONDITION: both really are the `== null` branch, so the equality above
+    // is not two identical non-null timestamps agreeing by accident.
+    expect(absentCtx.analysis_invalidated_at ?? null).toBeNull();
   });
 });
