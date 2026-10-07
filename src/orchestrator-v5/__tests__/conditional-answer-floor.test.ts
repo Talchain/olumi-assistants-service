@@ -9,7 +9,8 @@ const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const held = (chip: string): PendingAction => ({ id: chip, scenario_id: SCENARIO, chip_id: chip,
   action: { kind: 'run_analysis' }, preconditions: {}, expires_at_turn_count: 12,
   emitted_at_iso: '2026-10-07T00:00:00Z', expires_at_iso: '2026-10-08T00:00:00Z' });
-const hold = held('hold-a'), arrival = held('hold-b');
+// The arrival was minted after the hold (S-D slice 2 orders held items oldest first within the row).
+const hold = held('hold-a'), arrival: PendingAction = { ...held('hold-b'), emitted_at_iso: '2026-10-07T00:00:01Z' };
 const scope: PendingAction = { ...held('scope'), action: { kind: 'reconcile_goal_scope', goal_id: 'g', goal_label: 'MRR',
   expected: 'scope', question: 'Which scope?', operands: [], derivations: [] } };
 const answer = (pending: readonly PendingAction[]): SessionTurnWrite => ({ scenario_id: SCENARIO, turn_id: 'answer',
