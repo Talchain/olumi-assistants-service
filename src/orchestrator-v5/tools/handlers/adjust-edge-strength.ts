@@ -20,6 +20,7 @@
  * surfaced explicitly.
  */
 
+import { drawnLinkAdoptionFor } from '../../agent-lane/drawn-link-adoption-context.js';
 import { sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
 import { z } from 'zod';
 
@@ -416,7 +417,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // EdgeStrengthV3 requires std > 0 (positive). A band or an explicit std states the spread. An exact figure states
       // none, so the spread stays OLUMI'S — carried to the new mean as Olumi's relative spread, never the stale absolute
       // std sized for Olumi's mean (A6f, AIQ N1 on #2096) — and is flagged as Olumi's below (`std_defaulted`).
-      const statedStd = bandStd ?? newStd;
+      // Only a newly added drawn link's exact structural postimage may replace its temporary user stamp.
+      const drawn = drawnLinkAdoptionFor(invocation.context.session_id, parsed.from, parsed.to, Math.abs(newMean), targetEdge);
+      const statedStd = drawn !== undefined ? edgeBandStd(drawn.band) : bandStd ?? newStd;
       // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): a NO-CHANGE confirm is byte-equal for every author,
       // through every door — chat words, chip, a restored proposal, the canvas pill's typed band. Naming the band a link
       // already sits in states nothing new about its uncertainty, so its spread is KEPT (it once became the band's own
@@ -441,7 +444,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           },
         );
       }
-      const keepsStrength = !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction && newStd === undefined;
+      const keepsStrength = drawn === undefined && !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction && newStd === undefined;
       const finalStd = keepsStrength
         ? targetEdge.strength.std
         : statedStd ??
@@ -458,7 +461,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         effect_direction: newDirection,
       };
       // R11: the strength the user would author is unchanged (mean and direction as stored), so this write is a review.
-      const reviewOnly = !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction;
+      const reviewOnly = drawn === undefined && !replacesHeldFigure && newMean === beforeMean && newDirection === targetEdge.effect_direction;
       // ⭐ F1 (#87 6006627551; DL lease c6; d5 6006667946): a write that MOVES the strength of a link holding the user's
       // own figure would drop that figure (below: the magnitude contract strips `natural_effect` + `magnitude`). Refused
       // for every caller, nothing written, the figure quoted — unless the approval carried the user's explicit replace
@@ -548,9 +551,11 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           const reviewed: Record<string, unknown> = {
             // L4: the same rule as the review branch above — an adopted band on a placeholder sizes it.
             ...sizedByApproval(keptProvenance, edge),
+            ...(drawn !== undefined ? { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } : {}),
             reviewed_by_user: { intent: 'confirm', at: new Date().toISOString(), band: adopted.band },
           };
           edge.provenance = reviewed as typeof edge.provenance;
+          if (drawn !== undefined) edge.provenance_display = 'ai_inferred';
         } else {
           const {
             natural_effect: _naturalEffect,

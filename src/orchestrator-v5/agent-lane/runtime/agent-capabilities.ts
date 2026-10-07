@@ -17,6 +17,8 @@ import { draftedTeamPartOf } from '../../goal-target/event-by-date-model.js';
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
+import { withDrawnLinkAdoption } from '../drawn-link-adoption-context.js';
+import { parseDrawnLinkPress } from '../drawn-link-press.js';
 import { readStatedEventRisk, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
@@ -175,7 +177,7 @@ import { statusQuoOptionId, structuralFacts } from '../structural-facts.js';
 import { readinessViewOf, withoutCantRunOpening } from '../readiness-view.js';
 import { pickGoalThresholdTrio } from '../../../utils/goal-threshold-trio.js';
 import { type InfluenceBand } from '../../format/influence-bands.js';
-import { CANVAS_BAND_WORD, edgeBandFromMagnitude, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude, edgeBandStd, EDGE_STRENGTH_MIDPOINTS } from '../../format/edge-strength-bands.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
@@ -4476,6 +4478,16 @@ export function createAgentCapabilities(
       if (g.edges.some((e) => e.from === from.id && e.to === to.id)) {
         return { ok: false, mutated: false, refusal: 'already_present', detail: 'That link is already in the model.' };
       }
+      const bound = ctx.drawn_link;
+      const parsed = parseDrawnLinkPress(bound?.press_id);
+      const drawn = bound !== undefined && parsed !== null && parsed.from === bound.from && parsed.to === bound.to
+        && bound.from === from.id && bound.to === to.id;
+      if (bound !== undefined && !drawn) return { ok: false, mutated: false, refusal: 'drawn_pair_mismatch' };
+      const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
+      if ((drawn || args.reason !== undefined) && (reason.length === 0 || reason.length > 140 || /[\p{N}\r\n<>*_`{}\u005b\u005d\u2014]/u.test(args.reason ?? ''))) {
+        return { ok: false, mutated: false, refusal: 'invalid_reason' };
+      }
+      if (args.direction !== 'positive' && args.direction !== 'negative') return { ok: false, mutated: false, refusal: 'invalid_direction' };
       /**
        * ⛔ A NEW LINK CARRIES ONLY THE BAND THE USER TYPED THIS TURN (Delivery Lead #70 5845493088, agreed by Canonical
        * 5845487856: "The Agent proposes a link only with the band the user typed THIS turn … With no band it asks 'how
@@ -4491,7 +4503,9 @@ export function createAgentCapabilities(
       const band = isInfluenceBand(args?.strength) ? args.strength : undefined;
       // …or the user described it in their own words, and approves Olumi's reading of them (`bandGrounding`, slice C3).
       const grounding = band === undefined ? null : bandGrounding(band, args?.from_words, ctx.user_turn_text);
-      if (band === undefined || grounding === null) {
+      // The host-bound drawn pair is the sole exception: Olumi's band is approved as its own estimate,
+      // then authored model_proposed through the level door. Every ordinary turn still needs the user's words.
+      if (band === undefined || (!drawn && grounding === null)) {
         const ask = 'ask them "how strong is that effect: slight, moderate, strong or very strong?" and never offer a band as theirs.';
         return { ok: false, mutated: false, refusal: 'strength_not_stated',
           detail: band === undefined
@@ -4501,9 +4515,9 @@ export function createAgentCapabilities(
               + `it would be recorded as their estimate. Instead, ${ask}` };
       }
       const magnitude = bandMidpoint(band);
-      const interpretation = grounding.kind === 'reading' ? grounding.interpretation : undefined;
+      const interpretation = !drawn && grounding?.kind === 'reading' ? grounding.interpretation : undefined;
       const operations: ProposalOperation[] = [
-        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction, magnitude } },
+        { op: 'add_edge', path: `${from.id}::${to.id}`, value: { effect_direction: args.direction, magnitude, ...(drawn ? { band, author: 'model_proposed', reason, press_id: bound!.press_id } : {}) } },
       ];
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -4512,7 +4526,7 @@ export function createAgentCapabilities(
         operations,
         provenance: { authored_by: 'model_proposed', basis: args.rationale },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${linkBandWord(band)}${interpretation === undefined ? '' : `, Olumi\u2019s reading of your "${interpretation.from_words}"`}, your own estimate`,
+        public_label: drawn ? `Olumi’s estimate: ‘${from.label}’ ${args.direction === 'positive' ? 'helps' : 'hurts'} ‘${to.label}’, ${CANVAS_BAND_WORD[band]}. ${reason}` : `Connect "${from.label}" to "${to.label}" (${args.direction}) as ${linkBandWord(band)}${interpretation === undefined ? '' : `, Olumi\u2019s reading of your "${interpretation.from_words}"`}, your own estimate`,
         ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
@@ -4523,7 +4537,7 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         link: { from: from.label, to: to.label, direction: args.direction, band },
         ...(interpretation === undefined ? {} : { interpretation }),
-        note: `${interpretation === undefined ? '' : readingNote(interpretation)}Nothing has changed. Tell the user the link will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and ask them to approve it before calling authorise_change. ${BAND_WORDS_ONLY}`,
+        note: drawn ? 'Nothing has changed. Show the estimate and its reason, then ask the user to approve, change or decline it.' : `${interpretation === undefined ? '' : readingNote(interpretation)}Nothing has changed. Tell the user the link will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and ask them to approve it before calling authorise_change. ${BAND_WORDS_ONLY}`,
       };
     },
 
@@ -7010,6 +7024,10 @@ export function createAgentCapabilities(
        * reached. What this change does is make that boundary MEASURABLE rather
        * than masked by an identity that never repeats.
        */
+      const drawnValue = op.value as { band?: unknown; author?: unknown; press_id?: unknown };
+      const drawnBand = drawnValue.author === 'model_proposed' && isInfluenceBand(drawnValue.band)
+        && parseDrawnLinkPress(drawnValue.press_id)?.from === fromId && parseDrawnLinkPress(drawnValue.press_id)?.to === toId ? drawnValue.band : undefined;
+      if (drawnBand !== undefined && opts.commitOptionLevels === undefined) return { ok: false, mutated: false, applied: false, refusal: 'not_applied', detail: 'Olumi could not record the accepted estimate. Nothing changed.' };
       const operationId = authorisationTurnId(decision.proposal.proposal_id);
       const res = await dispatch('/orchestrate/v2/turn', {
         kind: 'system_event',
@@ -7067,6 +7085,40 @@ export function createAgentCapabilities(
       }
       const edgeReceipt = receiptSummaryOf(res.json);
       const edgeReceipts = edgeReceipt.summary !== null ? [edgeReceipt.summary] : [];
+      if (drawnBand !== undefined) {
+        const added = after!.edges.find(e => e.from === fromId && e.to === toId);
+        let estimate: CommitOptionLevelsResult;
+        try {
+          estimate = await withDrawnLinkAdoption({ scenarioId: ctx.scenario_id, from: fromId!, to: toId!,
+            magnitude: usersStrength!, band: drawnBand, edge: added }, () => opts.commitOptionLevels!({
+            scenario_id: ctx.scenario_id, base_graph_hash: after!.graph_hash,
+            turn_id: authorisationTurnId(`${decision.proposal.proposal_id}#drawn-strength`), links: [], levels: [],
+            link_strengths: [{ from: fromId!, to: toId!, magnitude: usersStrength!, intent: 'set',
+              expected: { mean: direction === 'negative' ? -usersStrength! : usersStrength!, effect_direction: direction, reviewed_at: null },
+              band: drawnBand, author: 'model_proposed' }],
+          }));
+        } catch {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id, receipts: edgeReceipts,
+            detail: 'The link was added, but recording its accepted Olumi estimate could not be confirmed. Check the saved model before continuing.' };
+        }
+        const checked = await readGraph(ctx.scenario_id);
+        const edge = checked?.edges.find(e => e.from === fromId && e.to === toId);
+        const strength = edge?.strength as { mean?: unknown; std?: unknown } | undefined;
+        const provenance = edge?.provenance as { source?: unknown; magnitude?: unknown; reviewed_by_user?: { intent?: unknown; band?: unknown; at?: unknown } } | undefined;
+        const verified = estimate.status === 'committed' && strength?.mean === (direction === 'negative' ? -usersStrength! : usersStrength)
+          && strength?.std === edgeBandStd(drawnBand) && edge?.effect_direction === direction
+          && provenance?.source === 'cee_hypothesis' && provenance.magnitude === 'olumi_estimate'
+          && provenance.reviewed_by_user?.intent === 'confirm' && provenance.reviewed_by_user.band === drawnBand
+          && typeof provenance.reviewed_by_user.at === 'string' && Number.isFinite(Date.parse(provenance.reviewed_by_user.at));
+        if (!verified) return { ok: false, mutated: true, applied: false, refusal: checked === null ? 'not_confirmed' : 'not_verified',
+          proposal_id: decision.proposal.proposal_id, receipts: edgeReceipts,
+          detail: 'The link was added, but Olumi could not confirm its strength as the accepted Olumi estimate. Check the saved model before continuing.' };
+        if (estimate.status === 'committed' && estimate.receipt !== null) edgeReceipts.push({ ...estimate.receipt, source_turn_id: estimate.receipt.source_turn_id ?? '' });
+        proposals.markApplied(decision.proposal.proposal_id, edgeReceipts);
+        return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, receipts: edgeReceipts,
+          revision_before: before.graph_hash, revision_after: checked!.graph_hash,
+          follow_up: `${decision.proposal.public_label} Recorded as Olumi’s estimate, accepted.` };
+      }
       proposals.markApplied(decision.proposal.proposal_id, edgeReceipts);
       return {
         ok: true, mutated: true, applied: true,

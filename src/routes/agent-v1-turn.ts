@@ -63,6 +63,7 @@ import { log } from '../utils/telemetry.js';
 import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../orchestrator/context/constraint-feasibility.js';
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
+import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
@@ -97,7 +98,7 @@ import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { noDirectLinkFigureReply } from '../orchestrator-v5/agent-lane/no-direct-link.js';
 import { linkSentenceFirstCall } from '../orchestrator-v5/agent-lane/link-sentence-route.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
-import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
+import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
@@ -2515,6 +2516,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** CEE's own words for a Run that did not run (the Run button), a typed host part for the composer. */
     let runOutcomeText: string | undefined;
     let result: AgentTurnResult | undefined;
+    if (isDrawnLinkPress((body['chip'] as { id?: unknown } | undefined)?.id)) {
+      result = await drawnLinkPress(
+        (body['chip'] as { id: string }).id, { ctx: toolCtx, history, message, instructions: AGENT_INSTRUCTIONS, maxOutputTokens: budget.max_output_tokens, mode },
+        (await readBackState(readingDispatch, scenarioId)).graph, capabilities, callModelFor(budget));
+      fastPath = 'method';
+    }
     /** S-D: this turn's approve-with-edits applied nothing (its own sentence says so; no generic "Not saved" line). */
     let editsRefusedThisTurn = false;
     const keptProposal = keptProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
@@ -4281,6 +4288,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
       const composedReply = composeReplyShape({
         text: reply,
+        detailLines: stateFacts.current_state_unknown === true ? [] : eventRiskDisclosuresFor(result.tool_results),
         obligations,
         graph: readbackGraph,
         profile,
@@ -4288,8 +4296,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           : narratorModel === null ? { keepWhole: 'host_composed' as const } : {}),
       });
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
-      wireBody = (composedReply.shape !== null
-        ? { ...unshaped, assistant_text: composedReply.text, _answer_shape: composedReply.shape }
+      // Written only when the composer shaped the reply or placed owed detail lines: an unshaped, unchanged reply (or a
+      // body with no `assistant_text` at all) ships byte-identical, as before.
+      wireBody = (composedReply.shape !== null || composedReply.text !== reply
+        ? { ...unshaped, assistant_text: composedReply.text,
+          ...(composedReply.shape !== null ? { _answer_shape: composedReply.shape } : {}) }
         : unshaped) as OlumiResponse & Record<string, unknown>;
       log.info({
         event: 'agent_lane.reply_shaped', request_id: String(req.id), ...(turnId !== undefined ? { turn_id: turnId } : {}),

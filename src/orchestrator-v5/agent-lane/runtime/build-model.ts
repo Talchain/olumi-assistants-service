@@ -2283,6 +2283,11 @@ export async function buildModelFromBrief(
     ...(admitted.sum_identities !== undefined ? { sum_identities: admitted.sum_identities } : {}),
     // ⛔ Olumi's sizes NO edge carries, typed (AIQ 5914222384): never among the model's inputs, and said as set aside.
     ...(setAside.length > 0 ? { set_aside_estimates: setAside.map(({ from, to, estimate }) => ({ from, to, estimate, status: 'set_aside_not_in_model' as const })) } : {}),
+    // A typed subset of the loss ledger, carried to the deterministic reply composer.
+    // Other not_represented entries retain their existing narration path.
+    ...(admitted.loss.some((l) => /\.event_risk$/.test(l.field_path)) ? {
+      event_risk_disclosures: admitted.loss.filter((l) => /\.event_risk$/.test(l.field_path)).map((l) => l.reason),
+    } : {}),
     not_represented: [
       // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as

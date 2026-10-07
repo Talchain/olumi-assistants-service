@@ -94,6 +94,8 @@ export interface AgentToolContext {
   readonly request_id: string;
   /** RT-1 selection, resolved from the REQUEST against canonical state, never tool args or model output. */
   readonly grounded_selection?: { readonly element_ids: readonly string[]; readonly unresolved: 'none' | 'not_in_model' | 'could_not_check' };
+  /** The drawn tuple resolved by the host press, never model output. */
+  readonly drawn_link?: { readonly press_id: string; readonly from: string; readonly to: string };
   readonly grounded_links?: readonly { readonly from: string; readonly to: string }[];
   /**
    * The user's own words in this conversation (its user messages, this turn's last), bound by the route — never
@@ -191,7 +193,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'Propose ONE change to the model. This does NOT change anything: it records an exact ' +
       'proposal and returns its id, which you keep for authorise_change: show the user what it changes, never the id, before asking them to approve. ' +
       'Use the labels exactly as get_canonical_state returned them. ' +
-      'The link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
+      'On a host-bound drawn_link press ONLY, propose your own band, direction and one-line reason for that exact pair, shown as Olumi\u2019s estimate. For every other turn, the link is recorded with `strength` as the user\u2019s own estimate, so give ONLY the band the user named for it in this message; ' +
       'if they described it in their own words ("very high"), give your reading in `strength` and their exact phrase in `from_words`, and show it; ' +
       'if they named none, ask how strong the effect is first \u2014 a band they did not say is refused.' + SLIGHT_IS_WEAK,
     parameters: obj({
@@ -200,8 +202,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       direction: { type: 'string', enum: ['positive', 'negative'] },
       strength: {
         type: 'string', enum: ['weak', 'moderate', 'strong', 'very strong'],
-        description: 'The band the user said for this link in THIS message, in their own words \u2014 or your reading of their own words, given with `from_words`. Never your own guess.',
+        description: 'The band the user said for this link in THIS message, in their own words \u2014 or your reading of their own words, given with `from_words`. Only for the host-bound drawn_link pair, your own Olumi estimate is allowed.',
       },
+      reason: { type: 'string', maxLength: 140, description: 'For a host-bound drawn link: one short plain line explaining your estimate, with no figures.' },
       from_words: FROM_WORDS,
       rationale: { type: 'string', description: 'Why this link matters, in the user’s terms.' },
     }, ['from_label', 'to_label', 'direction', 'rationale']),
@@ -856,6 +859,7 @@ export interface AgentCapabilities {
     strength?: 'weak' | 'moderate' | 'strong' | 'very strong';
     /** The user's own phrase THIS turn when `strength` is Olumi's reading of it (slice C3). */
     from_words?: string;
+    reason?: string;
   }): Promise<ToolResult>;
   authoriseChange(ctx: AgentToolContext, args: { proposal_id: string }): Promise<ToolResult>;
   /** Optional: a change THIS turn proposed, withdrawn before the reply (`approval-chips.ts` WITHDRAW_PROPOSAL). */
