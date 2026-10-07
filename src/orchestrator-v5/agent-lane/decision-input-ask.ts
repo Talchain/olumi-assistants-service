@@ -255,6 +255,7 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
 
 /** The host's framing or target ask, recognised by every selector and replay reader. */
 export function isDecisionInputAsk(line: string): boolean {
+  if (line === 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?') return true;
   if (line.startsWith('How long would ') && line.endsWith(' take with the team you have now?')) return true;
   return line.endsWith('as your target.') || line.endsWith(DEADLINE_ASK_ENDING) || line.endsWith('What should this model help you explore?');
 }

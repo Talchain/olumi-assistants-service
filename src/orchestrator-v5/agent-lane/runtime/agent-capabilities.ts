@@ -1,6 +1,6 @@
 import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
-import { readTeamTime, teamTimeCard, teamObservedState, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
-import { draftedTeamPartOf } from '../../goal-target/event-by-date-model.js';
+import { readTeamTime, teamTimeArgumentsMatch, teamTimeCard, teamTimeIsHeld, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
+import { draftedTeamPartOf, isEventShareForecast } from '../../goal-target/event-by-date-model.js';
 /**
  * Agent lane — the capabilities, each delegating to an existing Olumi path.
  *
@@ -1276,7 +1276,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
-      ...(goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
+      ...(isEventShareForecast(g.raw) ? { measured_as: 'the forecast share finished by the deadline; give the current team’s time range, never a level today or a chance' }
+        : goalKindOf(n) === 'chance_of_event' ? { measured_as: 'a chance of an event, which Olumi works out: never a quantity, a level or a target' } : {}),
       ...(deadline === undefined ? {} : { deadline: sayDate(deadline) }),
       ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
@@ -3011,12 +3012,7 @@ export function createAgentCapabilities(
     };
   };
 
-  /**
-   * ⭐ S-E GOALS: the approved deadline card writes ONLY the goal's `goal_horizon.deadline`, through the atomic level door's
-   * `goal_horizon` member (ONE commit, alone). The date is outside the analysis hash, so the stale gate is the date the goal
-   * held when the card was made (`expected_deadline`), plus the analysis revision read at approval (no write in between).
-   * Applied only on the writer's committed outcome AND a read-back holding exactly that date.
-   */
+  /** The approved current-team duration goes through the single atomic team-time writer. */
   const applyTeamTime = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0], parent: StructuredProposal, approvedRead: GraphRead,
   ): Promise<ToolResult> => {
@@ -3031,7 +3027,7 @@ export function createAgentCapabilities(
     if (res.status === 'unconfirmed') {
       const reread = await readGraph(ctx.scenario_id), held = draftedTeamPartOf(reread?.raw);
       if (reread !== null && held !== null
-        && isDeepStrictEqual(held.team.observed_state, teamObservedState(a, String(part.goal.goal_threshold_unit)))
+        && teamTimeIsHeld(held.team, a, String(part.goal.goal_threshold_unit), reread.raw)
         && teamSharePostimageIsScoped(approvedRead.raw, reread.raw, a.team_id)) {
         proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [a.team_id], receipts: [] });
       }
@@ -3040,15 +3036,22 @@ export function createAgentCapabilities(
     if (res.status !== 'committed') return { ok: false, mutated: false, applied: false, refusal: res.status };
     const check = await readGraph(ctx.scenario_id);
     const held = draftedTeamPartOf(check?.raw);
-    if (held === null || !isDeepStrictEqual(held.team.observed_state, teamObservedState(a, String(part.goal.goal_threshold_unit)))) {
+    if (held === null || !teamTimeIsHeld(held.team, a, String(part.goal.goal_threshold_unit), check?.raw)) {
       return { ok: false, mutated: true, applied: false, refusal: 'not_verified' };
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     proposals.markApplied(parent.proposal_id, receipts);
     return { ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
-      observed_state: held.team.observed_state };
+      observed_state: held.team.observed_state,
+      ...(a.low_months === a.high_months ? { follow_up: 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?' } : {}) };
   };
 
+  /**
+   * ⭐ S-E GOALS: the approved deadline card writes ONLY the goal's `goal_horizon.deadline`, through the atomic level door's
+   * `goal_horizon` member (ONE commit, alone). The date is outside the analysis hash, so the stale gate is the date the goal
+   * held when the card was made (`expected_deadline`), plus the analysis revision read at approval (no write in between).
+   * Applied only on the writer's committed outcome AND a read-back holding exactly that date.
+   */
   const applyGoalDeadline = async (
     ctx: Parameters<AgentCapabilities['authoriseChange']>[0],
     parent: StructuredProposal,
@@ -3087,7 +3090,7 @@ export function createAgentCapabilities(
         ...(draftedTeamPartOf(approvedRead.raw) !== null ? { reference_date: (op.value as { reference?: string }).reference } : {}) },
     });
     // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
-    if (res.status === 'committed' || res.status === 'unconfirmed') {
+    if ((res.status === 'committed' || res.status === 'unconfirmed') && draftedTeamPartOf(approvedRead.raw) !== null) {
       const expected = applyGoalHorizonEdit(approvedRead.raw, { goal_id: op.path, deadline: v.deadline,
         expected_deadline: v.expected_deadline as string | null, reference_date: (op.value as { reference?: string }).reference });
       const postimage = expected.kind === 'mutated' ? expected.mutatedGraph : expected.kind === 'unchanged' ? approvedRead.raw : undefined;
@@ -3099,7 +3102,7 @@ export function createAgentCapabilities(
       const reread = await readGraph(ctx.scenario_id);
       if (reread !== null && goalDeadlineOf(reread.nodes.find(n => n.id === op.path)) === v.deadline
         && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference)) {
-        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], expected_postimage: reread.raw });
+        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], ...(draftedTeamPartOf(approvedRead.raw) !== null ? { expected_postimage: reread.raw } : {}) });
       }
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
         detail: 'This deadline was sent, but Olumi could not read the model back to confirm it. Say exactly that; never say it was recorded or not recorded.' };
@@ -3120,7 +3123,7 @@ export function createAgentCapabilities(
     proposals.markApplied(parent.proposal_id, receipts);
     return {
       ok: true, mutated: !res.already_applied, applied: true, proposal_id: parent.proposal_id, receipts,
-      follow_up: `Your deadline for "${String(goal.label)}" is now ${date}.`,
+      follow_up: `Your deadline for "${String(check?.nodes.find(n => n.id === op.path)?.label ?? goal.label)}" is now ${date}.`,
     };
   };
 
@@ -4223,6 +4226,10 @@ export function createAgentCapabilities(
       const goal = goals[0]!;
       // ⛔ S-E GOALS (Science ruling 7 Oct §2): a goal measured as a CHANCE of an event never takes a target figure: that
       // chance is what Olumi works out ("reach or stay under" a likelihood was Paul's turn 7).
+      if (isEventShareForecast(g.raw)) {
+        return { ok: false, mutated: false, refusal: 'goal_measures_a_forecast',
+          detail: 'This goal measures the forecast share finished by its deadline. Its full-deliverable target stays held. Type the soonest and latest times with your current team, for example "6–10 months".' };
+      }
       if (goalKindOf(goal) === 'chance_of_event') {
         return { ok: false, mutated: false, refusal: 'goal_measures_a_chance',
           detail: `The goal "${goal.label}" is measured as a chance of an event, which Olumi works out, so it takes no target figure. Nothing was prepared. `
@@ -4350,6 +4357,41 @@ export function createAgentCapabilities(
       };
     },
 
+    /** Parse and propose this turn's current-team duration; a singleton is only the most likely time. */
+    async proposeTeamTime(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const stated = readTeamTime(ctx.user_turn_text);
+      if (stated === null || !teamTimeArgumentsMatch(ctx.user_turn_text, args, stated)) {
+        return { ok: false, mutated: false, refusal: 'team_time_not_stated',
+          detail: 'Type how long it would take with your current team, for example "6–10 months" or "about 8 months". A single time is kept as your most likely estimate; the chance needs the soonest and latest times.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineOf(part.goal);
+      if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held',
+        detail: 'First type and confirm the deadline, for example "7 April 2027". Then type the soonest and latest times with your current team, for example "6–10 months".' };
+      const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
+        reference_date: todayInLondon((opts.now ?? (() => new Date()))()) };
+      if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed',
+        detail: 'That deadline has passed. Type a future deadline and confirm it, then give the soonest and latest times with your current team.' };
+      if (teamTimeIsHeld(part.team, a, String(part.goal.goal_threshold_unit), g.raw)) {
+        return { ok: false, mutated: false, refusal: 'already_held',
+          detail: a.low_months === a.high_months ? 'Your most likely time is already held. Type the soonest and latest times with your current team, for example "6–10 months".'
+            : 'That team-time range is already held. To change it, type the new soonest and latest times, for example "6–9 months".' };
+      }
+      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
+        base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
+        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
+      for (const pending of proposals.outstanding(ctx.scenario_id, ctx.authenticated_user_id)) {
+        if (proposals.get(pending.proposal_id)?.operations.some(o => o.op === 'set_team_time')) proposals.discard(pending.proposal_id);
+      }
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label,
+        base_revision: g.graph_hash, team_time: a };
+    },
+
     /**
      * ⭐ S-E GOALS — THE USER'S DEADLINE, AS A DATE, PROPOSED IN THE TURN THEY STATE IT (Science ruling 7 Oct §3; Paul's prod
      * test item 6: "the six-month deadline isn't encoded in the goal yet", and nothing was proposed). The Agent quotes the
@@ -4357,32 +4399,6 @@ export function createAgentCapabilities(
      * computes a date. The card asks "Is your deadline 7 April 2027 (6 months from today)?"; the Yes writes ONLY the goal's
      * `goal_horizon.deadline`, through the atomic level door, stale-gated on the date the goal held when the card was made.
      */
-    async proposeTeamTime(ctx, args): Promise<ToolResult> {
-      if (readOnly) return refuseReadOnly();
-      const stated = readTeamTime(ctx.user_turn_text);
-      if (stated === null || args.low_months !== stated.low_months || args.high_months !== stated.high_months) {
-        return { ok: false, mutated: false, refusal: 'team_time_not_stated' };
-      }
-      const g = await readGraph(ctx.scenario_id);
-      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const part = draftedTeamPartOf(g.raw), deadline = part === null ? undefined : goalDeadlineOf(part.goal);
-      if (part === null || deadline === undefined) return { ok: false, mutated: false, refusal: 'deadline_not_held' };
-      const a: ApprovedTeamTime = { goal_id: String(part.goal.id), team_id: String(part.team.id), ...stated, deadline,
-        reference_date: todayInLondon((opts.now ?? (() => new Date()))()) };
-      if (a.reference_date >= deadline) return { ok: false, mutated: false, refusal: 'deadline_passed' };
-      if (isDeepStrictEqual(part.team.observed_state, teamObservedState(a, String(part.goal.goal_threshold_unit)))) {
-        return { ok: false, mutated: false, refusal: 'already_held' };
-      }
-      const proposal = createProposal({ scenario_id: ctx.scenario_id, user_id: ctx.authenticated_user_id,
-        base_graph_identity_hash: g.graph_hash, operations: [{ op: 'set_team_time', path: a.team_id, value: a }],
-        provenance: { authored_by: 'user_stated', basis: ctx.user_turn_text ?? '' },
-        validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: teamTimeCard(a, String(part.goal.goal_threshold_unit), part.deliverable) });
-      proposals.put(proposal);
-      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label,
-        base_revision: g.graph_hash, team_time: a };
-    },
-
     async proposeGoalDeadline(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const words = typeof args?.deadline_words === 'string' ? args.deadline_words.trim() : '';

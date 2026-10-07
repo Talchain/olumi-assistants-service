@@ -44,11 +44,6 @@ const USER_OVERRIDE_LITERAL = "user_override";
  * 2.714 revert.
  */
 const REVIEWED: Readonly<Record<string, string>> = {
-  // S-E GOALS S2b: stamps the team part's observed_state only through the approved `set_team_time` proposal, whose
-  // low/high months are figures the user wrote in THAT turn (readTeamTime / propose_team_time authorship check). The
-  // stamp is TRUE here: the value reaches it by a user-consented operation, never by reading the brief.
-  "orchestrator-v5/goal-target/team-share-write.ts":
-    "stamps the team part via the approved set_team_time proposal; months are user-written in that turn (user-consented)",
   // Declares USER_EDIT_SOURCE and stamps it onto `update_node` ops that carry
   // an `observed_state.value` — i.e. a value the user wrote through a
   // structured patch operation they consented to. The stamp is TRUE here.

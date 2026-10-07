@@ -10,15 +10,17 @@ const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Ar
 
 /** Brief-owned event/deadline scope; drafter flags never attest it. Bounded linear scans. */
 export const EVENT_WORDS = /\b(?:launch(?:ed|ing)?|deliver(?:ed|y|ing)?|ship(?:ped|ping)?|finish(?:ed|ing)?|complet(?:e|ed|ion|ing)|go(?:es)?[ \t]{1,4}live|releas(?:e|ed|ing))\b/i;
-export const EVENT_DEADLINE = /\b(?:deadlines?|on[ \t]{1,4}time|by[ \t]{1,4}(?:\d{1,4}\b|Q[1-4]\b|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|next|the|year|month|week)|within[ \t]{1,4}\d{1,3}[ \t]{1,4}(?:days?|weeks?|months?))\b/i;
+export const EVENT_DEADLINE = /\b(?:deadlines?|on[ \t-]{1,4}time|by[ \t]{1,4}(?:\d{1,4}(?:st|nd|rd|th)?\b|Q[1-4]\b|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|next|the|year|month|week)|within[ \t]{1,4}\d{1,3}[ \t]{1,4}(?:days?|weeks?|months?))\b/i;
 export const QUANTITY_TARGET = /[£$€][ \t]{0,4}\d|\b\d[\d,.]{0,20}[ \t]{0,4}(?:%|(?!(?:days?|weeks?|months?|years?|developers?|people|leads?|January|February|March|April|May|June|July|August|September|October|November|December)\b)[a-z][a-z-]{0,40}\b)/i;
+/** Date numbers are dates, not quantity targets; every run is bounded. */
+const CALENDAR_NUMBERS = /\b(?:\d{1,2}(?:st|nd|rd|th)?[ \t]{1,4})?(?:January|February|March|April|May|June|July|August|September|October|November|December)(?:[ \t]{1,4}\d{4})?\b/gi;
 export function briefAttestsEventByDate(brief: unknown, goal?: CandidateModel['goal']): boolean {
   if (typeof brief !== 'string' || brief.length > 20000) return false;
   if (goal && (QUANTITY_TARGET.test(goal.metric)
     || (goal.value !== null && goal.value !== undefined))) return false;
   const words = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w && !['a', 'an', 'the'].includes(w));
   return brief.split(/[.!?;\n]/).some(sentence => {
-    if (!EVENT_WORDS.test(sentence) || !EVENT_DEADLINE.test(sentence) || QUANTITY_TARGET.test(sentence)) return false;
+    if (!EVENT_WORDS.test(sentence) || !EVENT_DEADLINE.test(sentence) || QUANTITY_TARGET.test(sentence.replace(CALENDAR_NUMBERS, 'date'))) return false;
     if (!goal) return true;
     const held = new Set(words(sentence)), deliverable = words(goal.deliverable ?? ''), metric = words(goal.metric);
     return deliverable.length > 0 && metric.length > 0 && [...deliverable, ...metric].every(w => held.has(w));
@@ -38,9 +40,28 @@ export function isEventShareForecast(graph: unknown): boolean {
   return !!goal && (eventShareCarrierOf(graph) !== null || (goal.threshold_source === 'definitional'
     && typeof goal.goal_threshold_unit === 'string' && goal.goal_threshold_unit.startsWith('% of ')));
 }
+export function unresolvedEventOptionIds(graph: unknown): string[] {
+  const carrier = eventShareCarrierOf(graph)?.provenance?.share_by_date;
+  if (!carrier || !rec(graph) || !Array.isArray(graph.nodes)) return [];
+  const ids = Array.isArray(carrier.unresolved_option_ids) ? carrier.unresolved_option_ids.filter((id: unknown): id is string => typeof id === 'string') : [];
+  const known = Array.isArray(carrier.option_ids) ? carrier.option_ids : [];
+  const added = graph.nodes.filter((n: Rec) => n.kind === 'option' && n.is_baseline !== true && typeof n.id === 'string'
+    && !known.includes(n.id)
+    && !Object.entries(n.interventions ?? {}).some(([target, v]) => rec(v) && v.value === 1
+      && graph.nodes.some((factor: Rec) => factor.id === target && factor.observed_state?.extra_share_by_date)));
+  return [...new Set([...ids, ...added.map((n: Rec) => n.id as string)])];
+}
 export function missingEventCapacityOptionIds(graph: unknown): string[] {
-  const ids = eventShareCarrierOf(graph)?.provenance?.share_by_date?.unresolved_option_ids;
-  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+  const carrier = eventShareCarrierOf(graph)?.provenance?.share_by_date;
+  if (!carrier || !rec(graph) || !Array.isArray(graph.nodes)) return [];
+  const capacityIds = Array.isArray(carrier.capacity_option_ids) ? carrier.capacity_option_ids : [];
+  return unresolvedEventOptionIds(graph).filter(id => capacityIds.includes(id)
+    || optionAddsCapacity(graph.nodes.find((n: Rec) => n.id === id)?.label));
+}
+/** No start-time question for a scope-only alternative. A drafter capacity attests itself. */
+export function optionAddsCapacity(label: unknown): boolean {
+  return typeof label === 'string' && label.length <= 200
+    && /\b(?:hir(?:e|ing)|recruit(?:ing|ment)?|staff(?:ing)?|developers?|contractors?|engineers?|capacity|headcount)\b/i.test(label);
 }
 export const EVENT_START_GAP = "This doesn't yet model when new people start contributing, which decides a deadline. When would they start?";
 
@@ -62,14 +83,18 @@ export function draftedTeamPartOf(graph: unknown): { goal: Rec; team: Rec; deliv
 
 export function teamTimeAsk(graph: unknown): string | null {
   const part = draftedTeamPartOf(graph);
-  return part !== null && goalDeadlineOf(part.goal) !== undefined && part.team.observed_state?.value === undefined
-    ? `How long would ${part.deliverable} take with the team you have now?` : null;
+  if (part === null || goalDeadlineOf(part.goal) === undefined || part.team.observed_state?.value !== undefined) return null;
+  return Number.isFinite(eventShareCarrierOf(graph)?.provenance?.share_by_date?.stated_time?.most_likely)
+    ? 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?'
+    : `How long would ${part.deliverable} take with the team you have now?`;
 }
 
 export function admitEventByDate(candidate: CandidateModel): AdmittedModel {
   const deliverable = candidate.goal.deliverable?.trim();
   if (!deliverable || deliverable.length > 100) throw new Error('event_deliverable_required');
   const unit = `% of ${deliverable}`;
+  const loss: Rec[] = [];
+  const unresolved: string[] = [];
   const nodes: Rec[] = [
     { id: 'event_goal', kind: 'goal', label: `Share of ${deliverable} done by the deadline`, provenance: 'ai_inferred',
       threshold_source: 'definitional', goal_threshold: 1, goal_threshold_raw: 100, goal_threshold_cap: 100,
@@ -81,8 +106,10 @@ export function admitEventByDate(candidate: CandidateModel): AdmittedModel {
   ];
   const edges: Rec[] = [{ from: 'event_team', to: 'event_goal', exists_probability: 1,
     strength: { mean: 1, std: 0.01 }, effect_direction: 'positive', provenance: { source: 'cee_hypothesis', definitional: true,
-      share_by_date: { role: 'team', team_id: 'event_team', goal_id: 'event_goal', deliverable, unresolved_option_ids: candidate.options.flatMap((o, i) =>
-        o.is_status_quo !== true && !o.added_capacity ? [`event_option_${i + 1}`] : []) },
+      share_by_date: { role: 'team', team_id: 'event_team', goal_id: 'event_goal', deliverable,
+        option_ids: candidate.options.map((_, i) => `event_option_${i + 1}`),
+        capacity_option_ids: candidate.options.flatMap((o, i) => o.is_status_quo !== true && (o.added_capacity || optionAddsCapacity(o.label)) ? [`event_option_${i + 1}`] : []),
+        unresolved_option_ids: unresolved },
       natural_effect: { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit,
         strength_mean: 1, strength_mean_frame: 'edge_strength' } } }];
   const switches: string[] = [];
@@ -91,10 +118,18 @@ export function admitEventByDate(candidate: CandidateModel): AdmittedModel {
     nodes.push({ id, kind: 'option', label: o.label, provenance: o.provenance === 'explicit' ? 'from_brief' : 'ai_inferred',
       ...(o.is_status_quo === true ? { is_baseline: true } : {}), interventions: {} });
     edges.push({ from: 'event_decision', to: id, exists_probability: 1, strength: { mean: 1, std: 0.01 }, effect_direction: 'positive' });
-    if (o.is_status_quo === true || !capacity) return;
+    if (o.is_status_quo === true) return;
+    if (!capacity) { unresolved.push(id); return; }
     const { monthly_share_pct, lead_months_low, lead_months_high } = capacity;
     if (![monthly_share_pct, lead_months_low, lead_months_high].every(Number.isFinite)
-      || monthly_share_pct < 0 || lead_months_low < 0 || lead_months_high < lead_months_low) throw new Error('invalid_capacity_estimate');
+      || monthly_share_pct < 0 || monthly_share_pct > 100 || lead_months_low < 0 || lead_months_high < lead_months_low) {
+      unresolved.push(id);
+      const reason = !Number.isFinite(monthly_share_pct) || monthly_share_pct < 0 || monthly_share_pct > 100
+        ? `Olumi's added-capacity pace for "${o.label}" is not used. Enter a pace between 0% and 100% of ${deliverable} a month.`
+        : `Olumi's lead time for "${o.label}" is not used. Enter the soonest and latest start times in months, with the soonest first.`;
+      loss.push({ field_path: `nodes[${id}].added_capacity`, before: capacity, after: null, reason, severity: 'warn' });
+      return;
+    }
     const sw = `event_capacity_${i + 1}`;
     switches.push(sw);
     nodes.push({ id: sw, kind: 'factor', category: 'controllable', label: `${o.label} adds capacity`, provenance: 'ai_inferred',
@@ -111,7 +146,7 @@ export function admitEventByDate(candidate: CandidateModel): AdmittedModel {
     o.interventions[sw] ??= { value: 0 };
     edges.push({ from: o.id, to: sw, exists_probability: 1, strength: { mean: 1, std: 0.01 }, effect_direction: 'positive' });
   }
-  const model = { nodes, edges, goal_constraints: [], loss: [], withheld: [],
+  const model = { nodes, edges, goal_constraints: [], loss, withheld: [],
     inference_classes: Object.fromEntries(nodes.map(n => [n.id, n.provenance === 'from_brief' ? 'brief_stated' : 'builder_inferred'])) };
   // forbidden-exempt: deterministic admission builds the canonical share-by-date shape as plain records; every field is pinned by s-e-goals-s2b rows and S2a recognition
   return model as unknown as AdmittedModel;
@@ -125,11 +160,16 @@ export function withEventShareDate(graph: unknown, deadline: string, reference: 
   const out = structuredClone(graph) as Rec;
   const goal = out.nodes.find((n: Rec) => n.id === part.goal.id), team = out.nodes.find((n: Rec) => n.id === part.team.id);
   const unit = goal.goal_threshold_unit;
+  const previous = goalDeadlineOf(goal);
+  const defaultGoal = `Share of ${part.deliverable} done by ${previous === undefined ? 'the deadline' : sayDate(previous)}`;
+  const defaultTeam = `Share today's team finishes by ${previous === undefined ? 'the deadline' : sayDate(previous)}`;
   goal.goal_horizon = { deadline };
-  goal.label = `Share of ${part.deliverable} done by ${sayDate(deadline)}`;
-  team.label = `Share today's team finishes by ${sayDate(deadline)}`;
+  if (goal.label === defaultGoal) goal.label = `Share of ${part.deliverable} done by ${sayDate(deadline)}`;
+  if (team.label === defaultTeam) team.label = `Share today's team finishes by ${sayDate(deadline)}`;
+  const mostLikely = eventShareCarrierOf(out)?.provenance?.share_by_date?.stated_time;
+  if (mostLikely?.quantity === 'months_to_finish') mostLikely.deadline = deadline;
   const stated = team.observed_state?.stated_time;
-  if (stated?.quantity === 'months_to_finish') {
+  if (stated?.quantity === 'months_to_finish' && Number.isFinite(stated.low) && Number.isFinite(stated.high)) {
     const estimateReference = stated.reference_date;
     const m = teamShareMoments(timeBetween(estimateReference, deadline, 'months'), stated.low, stated.high);
     Object.assign(team.observed_state, { value: m.mean, std: m.sd, raw_value: m.mean * 100,

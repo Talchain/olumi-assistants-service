@@ -8,9 +8,8 @@ import {
   GOAL_FIGURES_SHARE_APPROXIMATION, readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
 import { withholdOptionGoalFigures } from '../../orchestrator/context/constraint-feasibility.js';
-import { isEventShareForecast, missingEventCapacityOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
-import { shareByDateGoalOf } from './goal-kind.js';
-import { shareGateForOption } from './share-by-date-run.js';
+import { isEventShareForecast, missingEventCapacityOptionIds, unresolvedEventOptionIds, EVENT_START_GAP } from './event-by-date-model.js';
+import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption, sharePartsForOption } from './share-by-date-run.js';
 import { targetTestabilityOf } from '../admission/target-testability.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { GOAL_HORIZON_NOT_TESTED } from '../agent-lane/decision-input-ask.js';
@@ -144,8 +143,14 @@ export function withGoalChanceRange<E>(envelope: E, graph: unknown, inputs: Goal
  * the exact stated-time bounds from ISL's unsized-link conditional groups.
  */
 export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId: unknown): E {
-  const share = shareByDateGoalOf(graph);
+  const share = shareByDateGoalForChanceOf(graph);
   if (!isRec(envelope)) return envelope;
+  const failedInput = shareChanceInputFailure(graph);
+  if (failedInput !== null) return withholdOptionGoalFigures(envelope,
+    new Set((readOptionResultSources(envelope).find(s => s.length > 0) ?? []).flatMap(r => {
+      const id = r.option_id ?? r.id; return typeof id === 'string' ? [id] : [];
+    })), { code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', message: failedInput },
+    { keepOutcome: true, keepOrdering: true });
   if (share === null) return isEventShareForecast(graph)
     ? withholdOptionGoalFigures(envelope, new Set((readOptionResultSources(envelope).find(s => s.length > 0) ?? []).flatMap(r => {
       const id = r.option_id ?? r.id; return typeof id === 'string' ? [id] : []; })), { code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning',
@@ -153,13 +158,28 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     : envelope;
   if (share.goal.id !== goalId) return envelope;
   const missing = missingEventCapacityOptionIds(graph);
-  const scopedEnvelope = missing.length > 0 ? withholdOptionGoalFigures(envelope, new Set(missing), {
+  const capacityScopedEnvelope = missing.length > 0 ? withholdOptionGoalFigures(envelope, new Set(missing), {
     code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: missing, message: EVENT_START_GAP,
   }, { keepOutcome: true, keepOrdering: true }) : envelope;
-  const records = readOptionResultSources(scopedEnvelope).find(s => s.length > 0) ?? [];
-  const warnings = Array.isArray(scopedEnvelope.inference_warnings) ? scopedEnvelope.inference_warnings.filter(isRec) : [];
+  const unsupported = unresolvedEventOptionIds(graph).filter(id => !missing.includes(id));
+  const scopedEnvelope = unsupported.length > 0 ? withholdOptionGoalFigures(capacityScopedEnvelope, new Set(unsupported), {
+    code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: unsupported,
+    message: "This option's effect on the deadline is not yet modelled. Say what it changes.",
+  }, { keepOutcome: true, keepOrdering: true }) : capacityScopedEnvelope;
+  let inputScopedEnvelope = scopedEnvelope;
+  for (const row of readOptionResultSources(scopedEnvelope).find(s => s.length > 0) ?? []) {
+    const id = row.option_id ?? row.id;
+    if (typeof id !== 'string') continue;
+    const failure = shareChanceInputFailure(graph, id);
+    if (failure !== null) inputScopedEnvelope = withholdOptionGoalFigures(inputScopedEnvelope, new Set([id]), {
+      code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: [id], message: failure,
+    }, { keepOutcome: true, keepOrdering: true });
+  }
+  const records = readOptionResultSources(inputScopedEnvelope).find(s => s.length > 0) ?? [];
+  const warnings = Array.isArray(inputScopedEnvelope.inference_warnings) ? inputScopedEnvelope.inference_warnings.filter(isRec) : [];
   const ranges: Record<string, GoalChanceRange> = {};
   const withheld = new Set<string>();
+  const addedCapacity = new Set<string>();
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || withheld.has(id) || !chance(r.probability_of_goal)) continue;
@@ -169,6 +189,7 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     const decision = shareGateForOption(graph, id);
     if (decision?.form === 'point') continue;
     withheld.add(id);
+    if (sharePartsForOption(graph, id)?.extra !== undefined) addedCapacity.add(id);
     if (decision === null) continue; // unsupported parts: no manufactured range
     const lowPct = Math.round(decision.low * 100), highPct = Math.round(decision.high * 100);
     if (lowPct === highPct) continue; // a displayed point is not a readable range
@@ -183,14 +204,17 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
       quantity: stated.quantity as 'months_to_finish' | 'share_per_month', low: decision.low, high: decision.high,
       from: share.team_part_id, to: goalId as string, among: 'all' };
   }
-  if (withheld.size === 0) return scopedEnvelope;
-  let out = scopedEnvelope;
-  for (const shownAsRange of [false, true]) {
-    const ids = [...withheld].filter(id => Object.hasOwn(ranges, id) === shownAsRange);
+  if (withheld.size === 0) return inputScopedEnvelope;
+  let out = inputScopedEnvelope;
+  for (const shownAsRange of [false, true]) for (const usesAddedCapacity of [false, true]) {
+    const ids = [...withheld].filter(id => Object.hasOwn(ranges, id) === shownAsRange && addedCapacity.has(id) === usesAddedCapacity);
     if (ids.length === 0) continue;
     out = withholdOptionGoalFigures(out, new Set(ids), {
       code: GOAL_FIGURES_SHARE_APPROXIMATION, severity: 'warning', option_ids: ids,
-      message: 'Not shown as a single figure. How long the work takes with today’s team is too uncertain for one figure here, '
+      message: 'Not shown as a single figure. The approximation of '
+        + (usesAddedCapacity ? "your team's time together with Olumi's hiring-time range and pace estimate"
+          : "your team's stated time or pace range")
+        + ' does not support one figure here, '
         + (shownAsRange ? 'so this chance is shown as a range.' : 'so this chance is not shown.'),
     }, { keepOutcome: true, keepOrdering: true });
   }

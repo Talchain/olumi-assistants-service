@@ -38,6 +38,8 @@ export interface GoalChanceRangeDisplay {
     readonly by_date?: string;
     readonly deliverable?: string;
     readonly chance_words?: string;
+    readonly slow_time?: string;
+    readonly fast_time?: string;
   };
   readonly depends_on: {
     readonly kind: 'link_strength' | 'link_existence' | 'stated_time';
@@ -84,6 +86,7 @@ export function goalChanceRangeDisplayForAgent(result: unknown, graph: unknown):
       range: `between ${rangeEnd(v.low_pct)} and ${rangeEnd(v.high_pct).replace(/^about /, '')}`,
       depends_on: { kind: v.kind, from_label: fromLabel, to_label: toLabel, among: v.among },
       ...(v.kind === 'stated_time' ? { stated_time: { estimate,
+        ...(time && hasEstimate ? { slow_time: `${stated.high} months`, fast_time: `${stated.low} months` } : {}),
         ...(typeof target?.unit === 'string' && SHARE_BY_DATE_UNIT.test(target.unit)
           ? { deliverable: target.unit.replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''),
             ...(isShareCalendarDate(target.by_date) ? { chance_words: shareGoalChanceWords(

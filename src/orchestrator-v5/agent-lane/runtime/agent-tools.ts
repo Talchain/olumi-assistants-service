@@ -491,7 +491,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function', name: 'propose_team_time',
-    description: 'Propose the time today’s team would take to finish the event deliverable, after its deadline is held. Use numeric months from THIS user message only, as low_months and high_months (about 8 months means both 8). Never use recruitment time, a historical duration or an earlier message. This prepares a card; authorise_change writes it only after approval.',
+    description: 'Propose the time today’s team would take to finish the event deliverable, after its deadline is held. Read the duration from THIS user message only and express it as low_months and high_months; convert weeks or years to months (weeks may be rounded to two decimals here; the server keeps the exact conversion). A single time (about 8 months means both 8) is kept only as the most likely time; the chance remains withheld until the user gives a range. Never use recruitment time, a historical duration or an earlier message. This prepares a card; authorise_change writes it only after approval.',
     parameters: obj({ low_months: { type: 'number', exclusiveMinimum: 0 }, high_months: { type: 'number', exclusiveMinimum: 0 } }, ['low_months', 'high_months']),
   },
   {
@@ -890,10 +890,11 @@ export interface AgentCapabilities {
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
   }): Promise<ToolResult>;
-  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
-  /** S-E GOALS: the user's stated deadline as a date on the goal (`goal_horizon.deadline`), proposed for approval. */
+  /** S-E GOALS: the user's current-team duration, proposed for approval. */
   proposeTeamTime?(ctx: AgentToolContext, args: { low_months: number; high_months: number }): Promise<ToolResult>;
+  /** S-E GOALS: the user's stated deadline as a date on the goal, proposed for approval. */
   proposeGoalDeadline?(ctx: AgentToolContext, args: { deadline_words: string; rationale: string }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
   proposeOptionStatus?(ctx: AgentToolContext, args: {
     option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
   }): Promise<ToolResult>;

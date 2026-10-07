@@ -1,6 +1,7 @@
 import { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
 export { shareGoalChanceWords } from '../goal-target/share-goal-chance-words.js';
 import { shareByDateGoalOf } from '../goal-target/goal-kind.js';
+import { shareOptionEstimateWords } from '../goal-target/share-by-date-run.js';
 /**
  * ⭐ S4c (Wave B4/B5, 7 Oct): THE SCREEN'S CHANCE LINES ARE SAID BY OLUMI.
  *
@@ -42,8 +43,9 @@ const CHANCE_LABEL = 'chance of meeting your goal, in this model';
 export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, current: boolean): GoalChanceScreenLine[] {
   const facts = goalChanceFactsForAgent(result, graph, current);
   const share = shareByDateGoalOf(graph);
-  const chanceWords = share === null ? CHANCE_LABEL
-    : `${shareGoalChanceWords(String(share.goal.goal_threshold_unit).slice(5), share.deadline)}, in this model`;
+  const chanceWords = facts.goal_chance_words !== undefined ? `${facts.goal_chance_words}, in this model`
+    : share === null ? CHANCE_LABEL
+      : `${shareGoalChanceWords(String(share.goal.goal_threshold_unit).replace(/^(?:%|percent)[ \t]{1,4}of[ \t]{1,4}/i, ''), share.deadline)}, in this model`;
   const nodes = rec(graph)?.nodes;
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
@@ -51,10 +53,12 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   const line = (optionId: string, figure: string, depends: string): GoalChanceScreenLine[] => {
     const label = labels.get(optionId);
     // An option the graph cannot name has no line (the screen drops it too); never an id.
-    return label === undefined ? [] : [{ option_id: optionId, label, figure, chance: `‘${label}’: ${figure} ${chanceWords}.`, depends }];
+    const estimates = shareOptionEstimateWords(graph, optionId);
+    return label === undefined ? [] : [{ option_id: optionId, label, figure,
+      chance: `‘${label}’: ${figure} ${chanceWords}${estimates === '' ? '' : `, ${estimates}`}.`, depends }];
   };
-  const points = facts.goal_chance_licence?.form === 'each' && facts.goal_chance_display !== undefined
-    ? facts.goal_chance_licence.option_ids.flatMap((id) => {
+  const points = (facts.goal_chance_licence?.form === 'each' || facts.goal_chance_words !== undefined || share !== null) && facts.goal_chance_display !== undefined
+    ? facts.goal_chance_licence!.option_ids.flatMap((id) => {
       const figure = facts.goal_chance_display![id];
       return figure === undefined ? [] : line(id, figure, facts.goal_chance_driver_display?.[id] ?? '');
     }) : [];
@@ -65,8 +69,14 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
       const words = stated.deliverable !== undefined && stated.by_date !== undefined
         ? shareGoalChanceWords(stated.deliverable, stated.by_date)
         : `chance of meeting your goal${stated.by_date === undefined ? '' : ` by ${sayDate(stated.by_date)}`}`;
+      const estimates = shareOptionEstimateWords(graph, id);
+      const tail = `in this model${estimates === '' ? '' : `, ${estimates}`}`;
+      const extremeEndpoints = d.range === 'between less than 1% and more than 99%'
+        && stated.slow_time !== undefined && stated.fast_time !== undefined;
       return [{ option_id: id, label, figure: d.range,
-        chance: `‘${label}’: ${d.range} ${words}, in this model, from the slow end of your ${stated.estimate} to the fast end.`,
+        chance: extremeEndpoints
+          ? `‘${label}’: less than 1% ${words} if it takes ${stated.slow_time}, and more than 99% if it takes ${stated.fast_time}, ${tail}.`
+          : `‘${label}’: ${d.range} ${words}, ${tail}, from the slow end of your ${stated.estimate} to the fast end.`,
         depends: '' }];
     }
     const lead = d.depends_on.among === 'unsized_links' ? 'Of the links not sized yet, it depends most on' : 'It depends most on';

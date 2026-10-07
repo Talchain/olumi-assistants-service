@@ -260,7 +260,7 @@ export function approvalChipsFor(
     const card = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === source.proposal.proposal_id
       && source.result.public_label === source.proposal.public_label ? source.proposal.public_label : undefined;
     return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
-      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'Change' } : DEADLINE_CHANGE_CHIP];
+      tool === 'propose_team_time' ? { id: 'agent-team-time-change', label: 'Change', message: 'I want to change the time estimate for my current team.' } : DEADLINE_CHANGE_CHIP];
   }
   const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);

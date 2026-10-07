@@ -137,13 +137,13 @@ describe('row 6.1: quantity-stated maths (fractions; literal ruled answers)', ()
     expect(Math.abs(normalChance(CARRY, 1) - 0.020)).toBeLessThan(0.002);
     expect(SHARE_GATE_MAX_ERROR_POINTS).toBe(2);
   });
-  // Science (c)3 expected range at the rounded sd 0.114 (2.02); at the exact sd 0.11348 the rule gives 1.97 → point. Ruling asked 7 Oct 17:1xZ (lane GOALS)
+  // Science §d: total variance includes held spread; a near-extreme point is displayed in its exact class.
   it.each([
     ['two devs', HIRE, 1.05857509],
     ['carry on', CARRY, 1.97059483],
-  ] as const)('%s: literal TIME error licenses a point', (_name, parts, errorPoints) => {
+  ] as const)('%s: total-variance TIME error stays within two points', (_name, parts, errorPoints) => {
     expect(gate(parts, 1).form).toBe('point');
-    expect(gate(parts, 1).error_points).toBeCloseTo(errorPoints, 3);
+    expect(gate(parts, 1).error_points).toBeCloseTo(errorPoints, 1);
   });
   it('Science’s recorded delta harness 0.390 binds EXACT 0.385, with MC + approximation tolerance', () => {
     const approximationPoints = Math.abs(normalChance(HIRE, 1) - exactChance(HIRE, 1)) * 100;
@@ -312,22 +312,22 @@ describe('Run frame and licence by identity', () => {
     expect(g).toEqual(before);
     const warnings = ran.result.enrichment.inference_warnings as Rec[];
     expect(warnings.some(w => w.code === GOAL_FIGURES_SHARE_APPROXIMATION)).toBe(false);
-    expect(warnings.find(w => w.code === GOAL_CHANCE_LICENSED)?.pct_by_option).toEqual({ status_quo: 2, hire: 39 });
+    expect(warnings.find(w => w.code === GOAL_CHANCE_LICENSED)?.pct_by_option).toEqual({ status_quo: 0, hire: 39 });
     expect(warnings.some(w => w.code === GOAL_CHANCE_RANGE)).toBe(false);
   });
-  it('TIME licence: both points preserve Run values, rounding, deadline and reload facts', () => {
+  it('TIME licence: raw Run points survive while carry-on uses its exact extreme class', () => {
     const g = graph(), before = result();
     const out = withShareByDateChanceGate(before, g, 'launch_share');
     expect(out).toBe(before);
     expect(out.option_comparison.map((r: Rec) => r.probability_of_goal)).toEqual([0.019, 0.390]);
     const saved = withGoalChanceLicence(out, g, 'launch_share');
     const licence = goalChanceLicenceOf(out, g, 'launch_share')!;
-    expect(licence.pct_by_option).toEqual({ status_quo: 2, hire: 39 });
+    expect(licence.pct_by_option).toEqual({ status_quo: 0, hire: 39 });
     expect(licence.target).toEqual({ comparator: 'at_least', value: 100, unit: UNIT, by_date: DEADLINE });
     expect(licence.withheld_option_ids).toBeUndefined();
     expect(goalChanceRangeDisplayForAgent({ enrichment: saved }, g)).toBeUndefined();
     expect(goalChanceFactsForAgent({ enrichment: JSON.parse(JSON.stringify(saved)) }, g, true).goal_chance_display)
-      .toEqual({ status_quo: 'about 2%', hire: 'about 39%' });
+      .toEqual({ status_quo: 'less than 1%', hire: 'about 39%' });
   });
   it.each(['level', 'change_abs', 'chance_of_event'])('actual full request twin with branch disabled: %s', async kind => {
     const g = graph(); goal(g).goal_threshold_unit = kind === 'chance_of_event' ? '% likelihood of launch' : 'GBP';

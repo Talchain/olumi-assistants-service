@@ -183,7 +183,7 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
     const c = source.observed_state.extra_share_by_date;
     const ne = isRec(e.provenance) && isRec(e.provenance.natural_effect) ? e.provenance.natural_effect : undefined;
     if (!isRec(c) || c.deadline !== deadline || !isShareCalendarDate(c.reference_date)
-      || c.unit !== `${unit} per month` || !finite(c.monthly_share) || c.monthly_share < 0
+      || c.unit !== `${unit} per month` || !finite(c.monthly_share) || c.monthly_share < 0 || c.monthly_share > 100
       || !finite(c.lead_low) || c.lead_low < 0 || !finite(c.lead_high) || c.lead_high < c.lead_low
       || source.observed_state.value !== 0 || source.observed_state.std !== undefined
       || ne?.amount_unit !== unit || ne.per_source_change !== 1 || ne.strength_mean !== e.strength.mean

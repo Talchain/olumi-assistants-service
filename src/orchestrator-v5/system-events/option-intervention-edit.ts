@@ -1,4 +1,5 @@
 import { applyTeamShareEdit, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../goal-target/team-share-write.js';
+import { withApprovedShareByDateWrite } from '../goal-target/share-by-date-carrier.js';
 import { drawnLinkAdoptionFor } from '../agent-lane/drawn-link-adoption-context.js';
 import { CANONICAL_ID_REGEX } from '../../cee/utils/id-normalizer.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -1186,13 +1187,17 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     blocks: [], suggested_actions: [], insights: [], stage_indicator: input.stage };
   let committed: Awaited<ReturnType<typeof commitDirectAnswer>>;
   try {
-    committed = await commitDirectAnswer(response, {
+    const commit = () => commitDirectAnswer(response, {
       scenario_id: input.scenarioId, turn_id: input.turnId, request_hash: input.requestHash,
       turn_class: 'direct_answer', handler_id: null, llm_calls_used: 0, duration_ms: 0,
       handler_facts: plan.handlerFacts as never, graph: plan.graph, contentGraph: plan.graph,
       baseGraphForInvariants: before, ...computeExpectedGraphCasHashes(before),
       graph_hash: plan.analysisGraphHash, priorPendingActions: holds.threaded,
     }, store);
+    // Scope was verified at the specialised write door above; the generic invariant
+    // guard still compares the real CAS base and final projection exactly.
+    committed = await (teamTime !== undefined || goalHorizon !== undefined
+      ? withApprovedShareByDateWrite(before, plan.graph, commit) : commit());
   } catch (err) {
     // The fence refuses BEFORE the write (nothing saved): the in-process door's wrapper names the verdict.
     if (input.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;

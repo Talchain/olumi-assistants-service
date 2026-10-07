@@ -1,12 +1,13 @@
 /** Paul's served 6582edbc brief; drafter output is stubbed. No LLM, network or DB. */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { GraphV3Schema } from '@talchain/schemas';
 import { Graph } from '../../../schemas/graph.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { withShareByDateChanceGate } from '../goal-chance-range.js';
-import { goalChanceLicenceOf } from '../goal-chance-licence.js';
+import { goalChanceLicenceOf, withGoalChanceLicence } from '../goal-chance-licence.js';
 import { goalChanceScreenLinesForAgent } from '../../agent-lane/goal-chance-screen-lines.js';
-import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
+import { loadPersistedGraphStrict, loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { narrateWriteOutcome } from '../../agent-lane/write-outcome.js';
 import { shareGoalChanceWords } from '../../agent-lane/goal-chance-screen-lines.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
@@ -25,19 +26,21 @@ import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/ut
 import type { SessionTurnWrite } from '../../session/store.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
-import { draftedTeamPartOf, withEventShareDate, briefAttestsEventByDate, EVENT_WORDS, EVENT_DEADLINE, QUANTITY_TARGET } from '../event-by-date-model.js';
+import { draftedTeamPartOf, eventShareCarrierOf, withEventShareDate, briefAttestsEventByDate, EVENT_WORDS, EVENT_DEADLINE, QUANTITY_TARGET } from '../event-by-date-model.js';
 import { shareByDateGoalOf, goalKindOf } from '../goal-kind.js';
+import * as shareMath from '../event-by-date-share.js';
 import { teamShareMoments, extraShareMoments } from '../event-by-date-share.js';
 import { withShareByDateFrame } from '../share-by-date-run.js';
 import { decisionInputLines, decisionInputAsk } from '../../agent-lane/decision-input-ask.js';
 import { noDeadEndAsks } from '../../agent-lane/goal-certainty.js';
-import { readTeamTime, TEAM_TIME, applyTeamShareEdit, type ApprovedTeamTime } from '../team-share-write.js';
+import { readTeamTime, TEAM_TIME, teamTimeCard, applyTeamShareEdit, type ApprovedTeamTime } from '../team-share-write.js';
 import { goalChanceRangeRecordOf } from '../goal-chance-range-record.js';
 import { validatedDefinition, endsOfGraph } from '../held-user-links.js';
 import { applyAndValidateMutation, mergeMutatedGraphForPersistence } from '../../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { composeDirectAnswerResponse } from '../../compose.js';
-import { withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
+import { createRunAnalysisHandler, withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -215,7 +218,7 @@ describe('S2b team-time door', () => {
     const result = await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: r.proposal_id } as never, { proposal_id: r.proposal_id }) as Rec;
     expect(result).toMatchObject({ ok: true, applied: true });
     const m = teamShareMoments(6, 6, 10), held = part(w.graph()).team.observed_state;
-    expect(held).toEqual({ value: m.mean, std: m.sd, raw_value: m.mean * 100, unit: UNIT, cap: 100, source: 'user_override',
+    expect(held).toEqual({ value: m.mean, std: m.sd, raw_value: m.mean * 100, unit: UNIT, cap: 100, source: 'cee_inference',
       stated_time: { quantity: 'months_to_finish', low: 6, high: 10, unit: 'months', deadline: DATE, reference_date: REF } });
     expect(result.observed_state).toEqual(held); expect(w.rows).toHaveLength(1);
     const retry = await w.commit(w.commits[0]!); expect(retry.status).toBe('committed');
@@ -267,13 +270,15 @@ describe('R2 identity-bound regression rows', () => {
   it.each(['Deliver 100 tickets by March', 'Ship 12 reports by March', 'Reach 500 accounts by March for the launch', 'Launch by March; goal: reach 100 contracts'])('P1-1 arbitrary quantity-unit goal twin: %s', brief => {
     const c = candidate(); c.goal.metric = brief;
     const control = structuredClone(c); delete control.goal.kind;
-    expect(admitCandidateModel(c, {}, brief)).toEqual(admitCandidateModel(control, {}, brief));
+    expect(() => admitCandidateModel(c, {}, brief)).toThrow('event_goal_needs_redraft');
+    expect(admitCandidateModel(control, {}, brief).nodes).toBeDefined();
   });
   it('P1-1 an event elsewhere in the brief does not attest a productivity goal', () => {
     const c = candidate(); c.goal.metric = 'productivity';
     const control = structuredClone(c); delete control.goal.kind;
     const brief = 'Our goal is to increase productivity. We have a feature launch deadline.';
-    expect(admitCandidateModel(c, {}, brief)).toEqual(admitCandidateModel(control, {}, brief));
+    expect(() => admitCandidateModel(c, {}, brief)).toThrow('event_goal_needs_redraft');
+    expect(admitCandidateModel(control, {}, brief).nodes).toBeDefined();
   });
   it('P1-1 admission regex near-miss 5k -> 20k timing rows <8x', () => {
     for (const regex of [EVENT_WORDS, EVENT_DEADLINE, QUANTITY_TARGET]) {
@@ -288,7 +293,8 @@ describe('R2 identity-bound regression rows', () => {
   it.each(['£150k MRR by March', 'increase productivity', 'Launch by March; goal: £150k MRR by March', 'Reach 500 customers by March'])('P1-1 flagged quantity/non-event uses normal admission: %s', brief => {
     const c = candidate(); c.goal.metric = brief;
     const control = structuredClone(c); delete control.goal.kind;
-    expect(admitCandidateModel(c, {}, brief)).toEqual(admitCandidateModel(control, {}, brief));
+    expect(() => admitCandidateModel(c, {}, brief)).toThrow('event_goal_needs_redraft');
+    expect(admitCandidateModel(control, {}, brief).nodes).toBeDefined();
   });
   it('P1-2 missing capacity keeps option-scoped start gap and withholds only that chance', () => {
     const c = candidate(); c.options[0]!.added_capacity = null;
@@ -315,8 +321,8 @@ describe('R2 identity-bound regression rows', () => {
   it.each(['about 8 months', 'around 8 months', 'roughly 8 months'])('P1-3 whole approximation: %s', words => {
     expect(readTeamTime(words)).toEqual({ low_months: 8, high_months: 8 });
   });
-  it.each(['between six and 10 months', '6 / 10 months', '6 or 10 months', '6 months to 10 months', '6—10 months ago',
-    'between 6 and 10 months away', 'about eight months', 'around 8 months ago', 'roughly 8 months away', '6 - 10 months notice',
+  it.each(['6 / 10 months', '6 or 10 months', '6 months to 10 months', '6—10 months ago',
+    'between 6 and 10 months away', 'around 8 months ago', 'roughly 8 months away', '6 - 10 months notice',
     'between 6 and 10 months onboarding', '6 to 10 months recruitment'])('P1-3 must not suffix: %s', words => {
     expect(readTeamTime(words)).toBeNull();
   });
@@ -373,7 +379,7 @@ describe('R2 identity-bound regression rows', () => {
     expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, applied: true, mutated: false });
     expect(w.rows).toHaveLength(1); expect(w.commits).toHaveLength(2);
   });
-  it('P2-7 keeps drafter unknowns and disclosures behind the displayed date ask', async () => {
+  it('P2-7 shows Olumi estimates on added-capacity chance lines, absent on carry-on', async () => {
     const c = { ...candidate(), unknowns: ['What evidence supports the productivity assumption?', 'Lead time is an Olumi estimate.'] };
     const r = await build(c, true);
     expect(r.open_questions).toContain('What evidence supports the productivity assumption?');
@@ -382,7 +388,17 @@ describe('R2 identity-bound regression rows', () => {
     const narration = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [r as never]).status!;
     expect(narration).toContain('What is the deadline');
     expect(narration).not.toContain('What evidence supports');
-    expect(narration).not.toContain('Lead time is an Olumi estimate.');
+    const g = dated(), write = applyTeamShareEdit(g, approved(g), computeAnalysisAffectingGraphHash(g as never)!);
+    if (write.kind !== 'mutated') throw new Error('No team range');
+    const raw = withShareByDateChanceGate({ option_comparison: [
+      { option_id: 'event_option_1', probability_of_goal: 0.25 },
+      { option_id: 'event_option_2', probability_of_goal: 0.390 },
+      { option_id: 'event_option_3', probability_of_goal: 0.0199 },
+    ] }, write.mutatedGraph, 'event_goal');
+    const lines = goalChanceScreenLinesForAgent({ enrichment: withGoalChanceLicence(raw, write.mutatedGraph, 'event_goal') }, write.mutatedGraph, true);
+    expect(lines.find(l => l.option_id === 'event_option_2')?.chance).toContain("using Olumi's estimates of hiring time (3–5 months) and the new team's pace (10% of the feature launch a month)");
+    expect(lines.find(l => l.option_id === 'event_option_1')?.chance).toContain("Olumi's estimates");
+    expect(lines.find(l => l.option_id === 'event_option_3')?.chance).not.toContain("Olumi's estimates");
   });
   it('WORDS share range names the deliverable and date in screen and chat', () => {
     const graph = { nodes: [{ id: 'o', kind: 'option', label: 'Carry on as now' },
@@ -391,25 +407,46 @@ describe('R2 identity-bound regression rows', () => {
     const result = { inference_warnings: [{ code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Stated time.', option_ids: ['o'],
       target: { comparator: 'at_least', value: 100, unit: UNIT, by_date: DATE }, range_by_option: { o: { kind: 'stated_time', basis: 'stated_time',
         quantity: 'months_to_finish', stated_estimate: { low: 6, high: 10, unit: 'months' }, low: 0.2, high: 0.8, low_pct: 20, high_pct: 80, low_rounding: 'whole', high_rounding: 'whole', from: 'team', to: 'goal', among: 'all' } } }] };
-    expect(shareGoalChanceWords('the feature launch', DATE)).toBe('chance of finishing the feature launch by 7 April 2027');
+    expect(shareGoalChanceWords('the feature launch', DATE)).toBe('chance of launching by 7 April 2027');
     expect(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display?.o.stated_time?.chance_words).toBe(shareGoalChanceWords('the feature launch', DATE));
-    expect(goalChanceScreenLinesForAgent(result, graph, true)[0]!.chance).toBe('‘Carry on as now’: between about 20% and 80% chance of finishing the feature launch by 7 April 2027, in this model, from the slow end of your 6–10 months to the fast end.');
+    expect(goalChanceScreenLinesForAgent(result, graph, true)[0]!.chance).toBe('‘Carry on as now’: between about 20% and 80% chance of launching by 7 April 2027, in this model, from the slow end of your 6–10 months to the fast end.');
   });
 });
 
 // R3 base identity: dl/goals-s2b-share-drafter @ 62603856286bcfb3ac37f88da18f8f0dafce7e56 (PR #2762).
 describe('R3 identity-bound RED rows', () => {
+  const withCausalContext = (c: CandidateModel): CandidateModel => ({ ...c,
+    factors: [{ label: 'Team size', role: 'controllable', baseline_known: false, baseline_value: 5,
+      unit: 'people', plausible_max: 10, provenance: 'ai_proposed' }],
+    links: [{ from: 'Team size', to: c.goal.metric, direction: 'positive', provenance: 'ai_proposed' }],
+    options: c.options.map((o, i) => ({ ...o, ...(o.is_status_quo ? {} : {
+      interventions: [{ factor_label: 'Team size', value: 6 + i, unit: 'people', provenance: 'ai_proposed' }],
+    }) })),
+  });
   it('P1-A deadline alone is normal admission; feature-launch deadline is an event', () => {
-    const c = candidate(); c.goal.metric = 'Improve productivity by the next deadline'; c.goal.deliverable = 'productivity';
+    const empty = candidate(); empty.goal.metric = 'Improve productivity by the next deadline'; empty.goal.deliverable = 'productivity';
+    // An unattested event skeleton must redraft (Lens 3 P1-3); normal admission needs its causal model.
+    expect(() => admitCandidateModel(empty, {}, empty.goal.metric)).toThrow('event_goal_needs_redraft');
+    const c = withCausalContext(empty);
     const normal = structuredClone(c); delete normal.goal.kind;
-    expect(admitCandidateModel(c, {}, c.goal.metric)).toEqual(admitCandidateModel(normal, {}, c.goal.metric));
+    const a = admitCandidateModel(c, {}, c.goal.metric);
+    expect(a).toEqual(admitCandidateModel(normal, {}, c.goal.metric));
+    const factor = a.nodes.find(n => n.kind === 'factor' && n.label === 'Team size')!;
+    const goal = a.nodes.find(n => n.kind === 'goal')!;
+    expect(factor).toBeDefined(); expect(a.edges).toContainEqual(expect.objectContaining({ from: factor.id, to: goal.id }));
     expect(admitCandidateModel(candidate(), {}, BRIEF).nodes.find(n => n.kind === 'goal')).toMatchObject({ threshold_source: 'definitional' });
   });
   it('P2-B ship the app on time attests deliverable words in its event sentence', () => {
     const c = candidate(); c.goal.metric = 'the app'; c.goal.deliverable = 'the app';
     expect(admitCandidateModel(c, {}, 'ship the app on time').nodes.find(n => n.kind === 'goal')).toMatchObject({ threshold_source: 'definitional', goal_threshold_unit: '% of the app' });
-    const normal = structuredClone(c); delete normal.goal.kind;
-    expect(admitCandidateModel(c, {}, 'Ship the report on time. The app is useful.')).toEqual(admitCandidateModel(normal, {}, 'Ship the report on time. The app is useful.'));
+    const unrelated = 'Ship the report on time. The app is useful.';
+    expect(() => admitCandidateModel(c, {}, unrelated)).toThrow('event_goal_needs_redraft');
+    const causal = withCausalContext(c), normal = structuredClone(causal); delete normal.goal.kind;
+    const a = admitCandidateModel(causal, {}, unrelated);
+    expect(a).toEqual(admitCandidateModel(normal, {}, unrelated));
+    const factor = a.nodes.find(n => n.kind === 'factor' && n.label === 'Team size')!;
+    const goal = a.nodes.find(n => n.kind === 'goal')!;
+    expect(factor).toBeDefined(); expect(a.edges).toContainEqual(expect.objectContaining({ from: factor.id, to: goal.id }));
   });
   const heldMissing = () => {
     const c = candidate(); c.options[0]!.added_capacity = null;
@@ -553,4 +590,166 @@ it('R3 event-span tokenisation 5k -> 20k timing row <8x', () => {
   const small = elapsed(5000), large = elapsed(20000);
   process.stdout.write(`event-span tokenisation ms ${JSON.stringify({ small, large, growth: large / small })}\n`);
   expect(large / small).toBeLessThan(8);
+});
+
+
+describe('DL accepted root rows and controls', () => {
+  it.each([[4, 8, 93], [3, 9, 91]])('S3-card-and-confirmation-capped %s–%s -> %s with uncapped control', (low, high, pct) => {
+    const g = dated(), a = { ...approved(g), low_months: low, high_months: high };
+    expect(teamTimeCard(a, UNIT, part(g).deliverable)).toContain(`about ${pct}%`);
+    const out = applyTeamShareEdit(g, a, computeAnalysisAffectingGraphHash(g as never)!);
+    expect(out.kind).toBe('mutated');
+    if (out.kind !== 'mutated') throw new Error('No write');
+    expect(out.confirmation).toContain(`about ${pct}%`);
+    expect(part(out.mutatedGraph).team.observed_state.value).toBeCloseTo(teamShareMoments(6, low, high).mean, 12);
+    const modelBeforeCard = JSON.stringify(out.mutatedGraph);
+    const pog = JSON.stringify(withShareByDateChanceGate({ option_comparison: [{ option_id: 'event_option_2', probability_of_goal: 0.390 }] }, out.mutatedGraph, 'event_goal'));
+    teamTimeCard(a, UNIT, part(g).deliverable);
+    expect(JSON.stringify(out.mutatedGraph)).toBe(modelBeforeCard);
+    expect(JSON.stringify(withShareByDateChanceGate({ option_comparison: [{ option_id: 'event_option_2', probability_of_goal: 0.390 }] }, out.mutatedGraph, 'event_goal'))).toBe(pog);
+    const uncappedDisplay = vi.spyOn(shareMath, 'cappedTeamShareMean').mockImplementation((D, a, b) => teamShareMoments(D, a, b).mean);
+    try {
+      const uncapped = applyTeamShareEdit(g, a, computeAnalysisAffectingGraphHash(g as never)!);
+      if (uncapped.kind !== 'mutated') throw new Error('No control write');
+      expect(JSON.stringify(uncapped.mutatedGraph)).toBe(modelBeforeCard);
+      expect(JSON.stringify(withShareByDateChanceGate({ option_comparison: [{ option_id: 'event_option_2', probability_of_goal: 0.390 }] }, uncapped.mutatedGraph, 'event_goal'))).toBe(pog);
+    } finally { uncappedDisplay.mockRestore(); }
+  });
+  it('S1-single-most-likely-range-pending with range control', async () => {
+    const w = world(), r = await w.caps.proposeTeamTime!(ctx('about 6 months') as never, { low_months: 6, high_months: 6 }) as Rec;
+    const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
+    const saved = await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id }) as Rec;
+    expect(saved.ok).toBe(true);
+    expect(eventShareCarrierOf(w.graph())!.provenance.share_by_date.stated_time).toMatchObject({ most_likely: 6, quantity: 'months_to_finish' });
+    expect(part(w.graph()).team.observed_state).toBeUndefined();
+    const parsed = GraphV3.parse(w.graph());
+    expect(eventShareCarrierOf(parsed)!.provenance.share_by_date.stated_time).toMatchObject({ most_likely: 6 });
+    const store = createMockSessionStore({ loadGraph: async () => w.graph(), loadGraphAndBriefText: async () => ({ graph: w.graph(), briefText: null }) });
+    // Persistence reload must retain the estimate; a Run snapshot must remain refused until the range arrives.
+    const reloaded = GraphV3.parse(await loadPersistedGraphStrict(SCENARIO, store));
+    expect(eventShareCarrierOf(reloaded)!.provenance.share_by_date.stated_time).toMatchObject({ most_likely: 6 });
+    const run = vi.fn(), handler = createRunAnalysisHandler({ plotClient: { run } as never,
+      scenarioReader: (id: string) => loadScenarioSnapshotForRunAnalysis(id, 'single-run', store) });
+    await expect(handler({ context: { session_id: SCENARIO },
+      payload: makeMessagePayload({ scenario_id: SCENARIO, message: 'Run analysis.', turn_class: 'decide', stage: 'analyse' }),
+      requestId: 'single-run', signal: new AbortController().signal } as never)).rejects.toMatchObject({
+      cause_kind: 'analysis_not_ready', details: { reason_code: 'team_time_range_required',
+        next_step: 'Not shown. Add the soonest and latest times with the team you have now; your most likely time is not a range.' },
+    });
+    expect(run).not.toHaveBeenCalled();
+    const ask = 'Roughly how long could it take at the soonest, and at the latest, with the team you have now?';
+    expect(saved.follow_up).toBe(ask);
+    expect(decisionInputAsk(w.graph(), askContext)).toBe(ask);
+    expect(decisionInputAsk(w.graph(), { ...askContext, recentReplies: [ask] })).toBeNull();
+    const held = await w.caps.proposeTeamTime!(ctx('about 6 months') as never, { low_months: 6, high_months: 6 }) as Rec;
+    expect(held.refusal).toBe('already_held'); expect(held.detail).toContain('soonest and latest');
+    const range = await w.caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
+    expect((await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: range.proposal_id } as never, { proposal_id: range.proposal_id }) as Rec).ok).toBe(true);
+    expect(part(w.graph()).team.observed_state.stated_time).toMatchObject({ low: 6, high: 10 });
+    expect(eventShareCarrierOf(w.graph())!.provenance.share_by_date.stated_time).toBeUndefined();
+    expect(decisionInputAsk(w.graph(), askContext)).toBeNull();
+    const rangeSnapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'range-reload', store);
+    expect(part(rangeSnapshot.rawPersistedGraph as Rec).team.observed_state.stated_time).toMatchObject({ low: 6, high: 10 });
+  });
+  it('P1-B-refusal-recovery-words with accepted control', async () => {
+    const notStated = await world().caps.proposeTeamTime!(ctx('soon') as never, { low_months: 6, high_months: 10 }) as Rec;
+    const noDate = await world(admitted()).caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
+    const passed = await world(dated(), false, '2028-01-01').caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
+    for (const r of [notStated, noDate, passed]) { expect(r.ok).toBe(false); expect(r.detail).toMatch(/Type|type/); }
+    expect((await world().caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec).ok).toBe(true);
+  });
+  it('P2-one-team-proposal-and-change-words with separate deadline control', async () => {
+    const w = world();
+    const a = await w.caps.proposeTeamTime!(ctx('6–10 months') as never, { low_months: 6, high_months: 10 }) as Rec;
+    const b = await w.caps.proposeTeamTime!(ctx('6–9 months') as never, { low_months: 6, high_months: 9 }) as Rec;
+    expect(w.proposals.outstanding(SCENARIO, null).map(p => p.proposal_id)).toEqual([b.proposal_id]);
+    expect(w.proposals.get(a.proposal_id)).toBeUndefined();
+    const chips = approvalChipsFor([{ name: 'propose_team_time', ok: true, mutated: false, proposal_id: b.proposal_id }], id => ({ proposal: w.proposals.get(id)!, result: b as never }));
+    expect(chips[1]!.message).toBe('I want to change the time estimate for my current team.');
+    const d = await w.caps.proposeGoalDeadline!(ctx('by 8 April 2027') as never, { deadline_words: '8 April 2027', rationale: '' }) as Rec;
+    expect(w.proposals.outstanding(SCENARIO, null)).toHaveLength(2); expect(d.ok).toBe(true);
+  });
+  it('P2-forecast-readers-refuse-level-and-target with ordinary level control', async () => {
+    const w = world(), label = part(w.graph()).goal.label;
+    const level = await w.caps.proposeGoalCurrentLevel!(ctx("we’re 30% done") as never, { goal_label: label, value: 30, unit: '%', user_stated: true } as never) as Rec;
+    expect(level.refusal).toBe('goal_measures_a_forecast'); expect(level.detail).toContain('soonest and latest');
+    const target = await w.caps.proposeGoalTarget!(ctx('at least 30%') as never, { constraint_type: 'at_least', value: 30, unit: '%', rationale: '' }) as Rec;
+    expect(target.refusal).toBe('goal_measures_a_forecast'); expect(part(w.graph()).goal.threshold_source).toBe('definitional');
+    const canonical = await w.caps.getCanonicalState(ctx('show model') as never) as Rec;
+    expect(JSON.stringify(canonical)).toContain('forecast share');
+    expect(w.rows).toHaveLength(0);
+    const plain = { nodes: [{ id: 'g', kind: 'goal', label: 'Monthly revenue', goal_threshold_raw: 100, goal_threshold_cap: 100, goal_threshold_unit: 'GBP', goal_threshold_frame: 'level' }], edges: [] };
+    expect(goalKindOf(plain.nodes[0])).toBe('level');
+    const ordinary = world(plain);
+    const levelControl = await ordinary.caps.proposeGoalCurrentLevel!(ctx('Our monthly revenue is £30 today.') as never, { goal_label: 'Monthly revenue', value: 30, unit: 'GBP', user_stated: true } as never) as Rec;
+    expect(levelControl.ok, JSON.stringify(levelControl)).toBe(true);
+    const targetControl = await ordinary.caps.proposeGoalTarget!(ctx('at least £150') as never, { constraint_type: 'at_least', value: 150, unit: 'GBP', rationale: '' }) as Rec;
+    expect(targetControl.ok, JSON.stringify(targetControl)).toBe(true);
+  });
+  it('P2-deadline-confirmation-current-label with unchanged-label control', async () => {
+    for (const rename of [false, true]) {
+      const w = world(admitted()), r = await w.caps.proposeGoalDeadline!(ctx('deadline in 6 months') as never, { deadline_words: '6 months', rationale: '' }) as Rec;
+      if (rename) { const g = w.graph(); part(g).goal.label = 'Our renamed launch'; w.replace(g); }
+      const saved = await w.caps.authoriseChange({ ...ctx('Yes'), typed_approval_of: r.proposal_id } as never, { proposal_id: r.proposal_id }) as Rec;
+      expect(saved.ok).toBe(true); expect(saved.follow_up).toContain(part(w.graph()).goal.label);
+    }
+  });
+});
+
+
+describe('ordinary deadline retry control', () => {
+  it('L3-P2-ordinary-deadline-retry-no-new-superseded with event strict control retained', async () => {
+    // Use an ordinary quantity goal; changing an event unit invalidates draftedTeamPartOf mid-fixture.
+    const g = { nodes: [{ id: 'g', kind: 'goal', label: 'Monthly revenue', goal_threshold_raw: 100,
+      goal_threshold_cap: 100, goal_threshold_unit: 'GBP', goal_threshold_frame: 'level', threshold_source: 'user' }], edges: [] };
+    expect(goalKindOf(g.nodes[0])).toBe('level');
+    const w = world(g); w.failNextPostWriteRead();
+    const r = await w.caps.proposeGoalDeadline!(ctx('deadline in 6 months') as never, { deadline_words: '6 months', rationale: '' }) as Rec;
+    const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
+    expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ applied: false, refusal: 'not_confirmed' });
+    const renamed = w.graph(); renamed.nodes.find((n: Rec) => n.kind === 'goal').label = 'Our updated goal'; w.replace(renamed);
+    expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, applied: true, mutated: false });
+    expect(w.rows).toHaveLength(1);
+  });
+});
+
+
+describe('week conversion at the real proposal door', () => {
+  it('L1-WEEKS-DOOR: rounded tool rendering stores exact server months with mismatch control', async () => {
+    const w = world();
+    const r = await w.caps.proposeTeamTime!(ctx('4–8 weeks with the current team') as never, { low_months: 0.92, high_months: 1.84 }) as Rec;
+    expect(r.ok).toBe(true);
+    expect(r.team_time.low_months).toBe(4 * 7 * 12 / 365.25);
+    expect(r.team_time.high_months).toBe(8 * 7 * 12 / 365.25);
+    expect((await w.caps.proposeTeamTime!(ctx('4–8 weeks with the current team') as never, { low_months: 0.9, high_months: 1.8 }) as Rec).refusal).toBe('team_time_not_stated');
+  });
+});
+
+
+describe('singleton recovery at the atomic door', () => {
+  it('S1-single-unconfirmed-retry-noop with range retry control above', async () => {
+    const w = world(dated(), true), r = await w.caps.proposeTeamTime!(ctx('about 8 months') as never, { low_months: 8, high_months: 8 }) as Rec;
+    const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
+    expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ applied: false, refusal: 'not_confirmed' });
+    expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, applied: true, mutated: false });
+    expect(w.rows).toHaveLength(1); expect(eventShareCarrierOf(w.graph())!.provenance.share_by_date.stated_time.most_likely).toBe(8);
+    expect(await w.commit(w.commits[0]!)).toMatchObject({ status: 'committed', already_applied: true });
+    expect(w.rows).toHaveLength(1);
+  });
+});
+
+
+describe('documentation boundaries', () => {
+  it('P2-doc-comments-at-own-functions with deadline and option controls', () => {
+    const caps = readFileSync(new URL('../../agent-lane/runtime/agent-capabilities.ts', import.meta.url), 'utf8');
+    const doc = (source: string, marker: string): string => { const at = source.indexOf(marker); return source.slice(source.lastIndexOf('/**', at), at); };
+    expect(doc(caps, '    async proposeTeamTime')).toContain('current-team duration');
+    expect(doc(caps, '  const applyTeamTime')).toContain('current-team duration');
+    expect(doc(caps, '    async proposeGoalDeadline')).toContain('THE USER');
+    expect(doc(caps, '  const applyGoalDeadline')).toContain('approved deadline card');
+    const tools = readFileSync(new URL('../../agent-lane/runtime/agent-tools.ts', import.meta.url), 'utf8');
+    expect(doc(tools, '  proposeTeamTime?')).toContain('current-team duration');
+    expect(doc(tools, '  proposeGoalDeadline?')).toContain('stated deadline');
+    expect(doc(tools, '  proposeOptionStatus?')).toContain('MG F1 T6');
+  });
 });

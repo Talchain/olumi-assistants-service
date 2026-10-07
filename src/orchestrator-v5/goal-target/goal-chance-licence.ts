@@ -32,8 +32,7 @@ import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { isEventShareForecast } from './event-by-date-model.js';
-import { shareByDateGoalOf } from './goal-kind.js';
-import { shareGateForOption } from './share-by-date-run.js';
+import { shareByDateGoalForChanceOf, shareChanceInputFailure, shareGateForOption } from './share-by-date-run.js';
 import { endsOfGraph, heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import {
   displayedPctAt, displayRoundingFor, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
@@ -117,7 +116,8 @@ export function goalChanceLicenceOf(
   if (!isRec(envelope) || goalChanceTargetCause(graph, goalId) !== null) return null;
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const goal = nodes.find((n) => n.id === goalId && n.kind === 'goal');
-  const share = shareByDateGoalOf(graph);
+  const share = shareByDateGoalForChanceOf(graph);
+  if (shareChanceInputFailure(graph) !== null) return null;
   if (share === null && isEventShareForecast(graph)) return null;
   const target = goal === undefined ? null : statedGoalTargetOf(graph as Rec, goal);
   // A LEVEL target only: a target stated as a change ("cut by 20%") has no ruled sentence yet.
@@ -134,14 +134,15 @@ export function goalChanceLicenceOf(
   const recordOf = new Map<string, Rec>();
   const precisionOf = new Map<string, GoalChancePrecision>();
   const rounding: Record<string, GoalChanceDisplayRounding> = {};
+  const exactExtreme = new Map<string, 'less_than_1' | 'more_than_99'>();
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
     const p = r.probability_of_goal;
     option_ids.push(id);
-    if (share !== null && share.goal.id === goalId && shareGateForOption(graph, id)?.form !== 'point') {
-      withheld.push(id); continue;
-    }
+    const shareGate = share !== null && share.goal.id === goalId ? shareGateForOption(graph, id) : undefined;
+    if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
+    if (shareGate?.form === 'point' && shareGate.exact_extreme !== undefined) exactExtreme.set(id, shareGate.exact_extreme);
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
     if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) { withheld.push(id); continue; }
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
@@ -154,7 +155,8 @@ export function goalChanceLicenceOf(
       precisionOf.set(id, precision);
       rounding[id] = displayRoundingFor(precisionHalfWidthPoints(precision));
     }
-    pct[id] = displayedPctAt(p, rounding[id] ?? 'whole');
+    pct[id] = exactExtreme.get(id) === 'less_than_1' ? 0 : exactExtreme.get(id) === 'more_than_99' ? 100
+      : displayedPctAt(p, rounding[id] ?? 'whole');
   }
   if (option_ids.length < 2 || licensed.length === 0) return null;
 
@@ -188,6 +190,7 @@ export function goalChanceLicenceOf(
   const noDrivers: Record<string, GoalChanceNoDriverReason> = {};
   if (licensed.some((id) => recordOf.get(id)!.probability_of_goal_drivers !== undefined)) {
     for (const id of licensed) {
+      if (exactExtreme.has(id)) continue; // At the ruled extreme its drivers are moot.
       const claim = goalChanceDriverOf(recordOf.get(id)!, id, graph, envelope);
       if ('driver' in claim) drivers[id] = claim.driver;
       else noDrivers[id] = claim.no_driver;

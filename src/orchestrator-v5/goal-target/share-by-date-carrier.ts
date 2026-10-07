@@ -1,7 +1,39 @@
 /** Admission owns this durable carrier; generic writers must preserve its exact bytes and endpoints. */
 import { isDeepStrictEqual } from 'node:util';
+import { AsyncLocalStorage } from 'node:async_hooks';
 type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+interface ApprovedShareWrite { readonly before: unknown; readonly after: unknown; readonly lifetime: { active: boolean } }
+const approvedShareWrites = new AsyncLocalStorage<Readonly<ApprovedShareWrite>>();
+function frozenSnapshot(value: unknown): unknown {
+  const snapshot: unknown = structuredClone(value);
+  const freeze = (v: unknown): void => {
+    if (v === null || typeof v !== 'object' || Object.isFrozen(v)) return;
+    Object.freeze(v);
+    for (const child of Object.values(v)) freeze(child);
+  };
+  freeze(snapshot);
+  return snapshot;
+}
+
+/**
+ * The atomic team-time/deadline door has already verified its exact mutation scope.
+ * Bind that one commit's invariant checks to immutable real before/after bytes;
+ * no permission survives the async operation or applies to another postimage.
+ */
+export function withApprovedShareByDateWrite<T>(before: unknown, after: unknown, operation: () => T): T {
+  const lifetime = { active: true };
+  const approved = Object.freeze({ before: frozenSnapshot(before), after: frozenSnapshot(after), lifetime });
+  return approvedShareWrites.run(approved, () => {
+    try {
+      const result = operation();
+      if (result instanceof Promise) return result.finally(() => { lifetime.active = false; }) as T;
+      lifetime.active = false;
+      return result;
+    } catch (err) { lifetime.active = false; throw err; }
+  });
+}
 
 export class ShareByDateOwnershipError extends Error {
   constructor() { super('share_by_date_server_owned'); }
@@ -21,7 +53,11 @@ export function assertShareByDatePreserved(before: unknown, after: unknown): voi
     return;
   }
   if (before === null) return; // First admission has no previous carrier.
-  if (!isDeepStrictEqual(carriers(before), carriers(after))) throw new ShareByDateOwnershipError();
+  if (!isDeepStrictEqual(carriers(before), carriers(after))) {
+    const approved = approvedShareWrites.getStore();
+    if (approved?.lifetime.active === true && isDeepStrictEqual(before, approved.before) && isDeepStrictEqual(after, approved.after)) return;
+    throw new ShareByDateOwnershipError();
+  }
 }
 
 /** IDs minted at admission must resolve to actual graph nodes of the right kinds. */

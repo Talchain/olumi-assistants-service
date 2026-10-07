@@ -896,11 +896,12 @@ export default async function route(app: FastifyInstance) {
       // server read as the CAS base above.
       let graphToRegister: typeof parsed.data;
       try {
-        assertShareByDatePreserved(baseGraphForInvariants, parsed.data);
         graphToRegister = withStoredOptionGapsWhenUnstated(withStoredEdgeFactsWhenUnstated(
           withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
           baseGraphForInvariants,
         ), baseGraphForInvariants);
+        // The canvas omits edge provenance; verify the postimage after restoring unchanged held facts.
+        assertShareByDatePreserved(baseGraphForInvariants, graphToRegister);
       } catch (err) {
         if (err instanceof ShareByDateOwnershipError) return reply.code(409).send(buildErrorV1('BAD_INPUT',
           'The share_by_date carrier is server-owned. Nothing was written.', { code: 'SHARE_BY_DATE_SERVER_OWNED' }, requestId));

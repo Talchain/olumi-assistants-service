@@ -31,6 +31,16 @@ export function teamShareMoments(D: number, a: number, b: number): Moments {
   return { mean, sd: Math.sqrt(Math.max(0, D * D / (a * b) - mean * mean)) };
 }
 
+/** E[min(1,D/T0)] for the card only. Forecast parts retain uncapped moments. */
+export function cappedTeamShareMean(D: number, a: number, b: number): number {
+  bounds(a, b); duration(D);
+  if (a <= 0) throw new RangeError('Time to finish must be positive');
+  if (a === b) return Math.min(1, D / a);
+  if (D >= b) return 1;
+  if (D <= a) return D * Math.log1p((b - a) / a) / (b - a);
+  return ((D - a) + D * Math.log(b / D)) / (b - a);
+}
+
 export function paceShareMoments(D: number, p1: number, p2: number): Moments {
   bounds(p1, p2); duration(D);
   if (p1 < 0) throw new RangeError('Pace must be non-negative');
@@ -93,16 +103,28 @@ export function normalChance(parts: ShareParts, threshold: number): number {
   const team = momentsOfTeam(parts.team);
   const extra = parts.extra === undefined ? { mean: 0, sd: 0 } : extraShareMoments(
     parts.extra.monthlyShare, parts.extra.D, parts.extra.leadLow, parts.extra.leadHigh);
-  const mean = team.mean + extra.mean, sd = Math.hypot(team.sd, extra.sd);
+  // ISL draws both the team part and its held +1 coefficient independently.
+  // Var(C*T) = Var(T) + Var(C) * E[T²], for E[C]=1 and held sd(C)=0.01.
+  const heldCoefficientVariance = 0.01 ** 2 * (team.mean ** 2 + team.sd ** 2);
+  const mean = team.mean + extra.mean, sd = Math.sqrt(team.sd ** 2 + extra.sd ** 2 + heldCoefficientVariance);
   return sd === 0 ? (mean >= threshold ? 1 : 0) : normalTail((threshold - mean) / sd);
 }
 
-export type ShareGate = { readonly form: 'point'; readonly error_points: number }
+export type ShareGate = { readonly form: 'point'; readonly error_points: number; readonly exact_extreme?: 'less_than_1' | 'more_than_99' }
   | { readonly form: 'range'; readonly low: number; readonly high: number; readonly error_points: number };
 export const SHARE_GATE_MAX_ERROR_POINTS = 2;
 export function gate(parts: ShareParts, threshold: number): ShareGate {
-  const error = Math.abs(normalChance(parts, threshold) - exactChance(parts, threshold)) * 100;
-  if (error <= SHARE_GATE_MAX_ERROR_POINTS) return { form: 'point', error_points: error };
+  const normal = normalChance(parts, threshold), exact = exactChance(parts, threshold);
+  const error = Math.abs(normal - exact) * 100;
+  const displayClass = (p: number): 'less_than_1' | 'interior' | 'more_than_99' =>
+    p < 0.01 ? 'less_than_1' : p > 0.99 ? 'more_than_99' : 'interior';
+  if (error <= SHARE_GATE_MAX_ERROR_POINTS) {
+    const exactClass = displayClass(exact);
+    if (displayClass(normal) !== exactClass && exactClass !== 'interior') {
+      return { form: 'point', error_points: error, exact_extreme: exactClass };
+    }
+    if (displayClass(normal) === exactClass) return { form: 'point', error_points: error };
+  }
   const t = parts.team;
   const at = (v: number): number => exactChance({ ...parts, team: { ...t, low: v, high: v } }, threshold);
   return { form: 'range', low: at(t.quantity === 'months_to_finish' ? t.high : t.low),
