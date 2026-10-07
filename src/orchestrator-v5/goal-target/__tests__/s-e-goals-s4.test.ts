@@ -164,6 +164,8 @@ describe('D-07: one approved limit on the quantity the user names', () => {
   it.each([
     ['Our monthly budget is £200k', '£', 200000, false],
     ['Our annual budget is £20k', '£/month', 20000, false],
+    ['Our monthly budget is £20k a year', '£/year', 20000, false],
+    ['Our monthly or yearly budget is £20k', '£/month', 20000, false],
     ['Our monthly budget is £20k', '£/month', 20000, true],
   ])('r2 P1-1 a period word before the figure is the stated period: %s on %s', async (text, unit, value, admitted) => {
     const g = model(); g.nodes[2].observed_state.unit = unit;
