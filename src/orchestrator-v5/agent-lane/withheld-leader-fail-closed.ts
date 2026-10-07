@@ -954,22 +954,24 @@ function measureBeforeFigure(between: string, labels: RankingLabelContext): bool
 const POSITION_WORD = /\b(?:trails?|trailing|trailed|lags?|lagging|lagged|follows?\s+(?:at|on|with)|runner[-\s]up|(?:comes?|came|finish(?:es|ed)?|sits?|ranks?|ranked|is|was)\s+(?:in\s+)?(?:second|third|fourth|last)(?:\s+place)?|in\s+(?:second|third|fourth|last)\s+place|at\s+the\s+bottom)\b/i;
 
 /**
- * c6 (D-a): the STAFFING noun ("First, appoint one lead for the route merge") is not a ranking word. Only the tight form
- * the wire carries is exempt: an appointing verb IMMEDIATELY followed by a/an/one/single/each, at most one modifier that
- * is not a margin word, then "lead(s)" not followed by an option or margin word. No "the", no words in between, no
- * have/get/put/make/find: "would have the lead", "put Manchester in the lead", "make Manchester the lead option",
- * "choose a lead option" and "a narrow lead" all still fire (DL r0 probe: the wider form leaked 10 of 13 paraphrases).
+ * c6 (D-a): the STAFFING noun ("First, appoint one lead for the route merge") is not a ranking word. Exempt ONLY the
+ * appointing form (review r1, DL ruling): a staffing verb + a/an/one/single/each + at most one ROLE word from an allowlist
+ * + "lead(s)" + a STAFFING COMPLEMENT (sentence end, for/per/to/who, or a possessive). appoint/assign/nominate/hire/
+ * designate/name may sit anywhere; pick/choose/select/need only when they open the sentence. Everything else still fires:
+ * "If you had to choose a lead today, it would be…", "Pick one lead: keeping…", "would need a bigger lead",
+ * "Name one lead and it is hiring", "Choose a lead-option now" (r0 probe + r1 review: 26 must-fire rows).
  */
-const STAFFING_VERB = String.raw`(?:appoint|name|assign|nominate|hire|designate|pick|choose|select|need)`;
-const STAFFING_NOT_MODIFIER = String.raw`(?:and|or|but|while|whereas|lead|leads|clear|slight|narrow|big|strong|comfortable|small|large|commanding|decisive|early|overall|outright|firm|solid|real|definite)`;
-const STAFFING_MODIFIER = String.raw`(?!${STAFFING_NOT_MODIFIER}\b)[\p{L}\p{N}']+(?:-[\p{L}\p{N}']+)*`;
-const STAFFING_NOT_AFTER = String.raw`(?![ \t]+(?:options?|choices?|candidates?|alternatives?|routes?|positions?|paths?|plans?|scenarios?|of|over|by)\b)`;
-const STAFFING_LEAD = new RegExp(String.raw`\b${STAFFING_VERB}[ \t]+(?:a|an|one|single|each)[ \t]+(?:${STAFFING_MODIFIER}[ \t]+)?leads?\b${STAFFING_NOT_AFTER}`, 'giu');
+const STAFFING_ROLE = String.raw`(?:project|operations|ops|delivery|site|depot|team|programme|program|product|technical|tech|engineering|sales|marketing|finance|pilot|implementation|change|integration|workstream|launch|migration|account|customer|clinical|design|data|commercial|regional|store|shift|route|named|dedicated|senior|interim|overall|single)`;
+const STAFFING_NOUN = String.raw`(?:a|an|one|single|each)[ \t]+(?:${STAFFING_ROLE}[ \t]+)?leads?\b(?=[ \t]*[.!]?[ \t]*(?:$|\n)|[ \t]+(?:for|per|to|who)\b|['’]s\b)`;
+const STAFFING_LEAD = new RegExp(String.raw`\b(?:appoint|assign|nominate|hire|designate|name)[ \t]+${STAFFING_NOUN}|^[ \t*_]*(?:(?:first|then|next|now)[ \t]*,?[ \t]+)?(?:pick|choose|select|need)[ \t]+${STAFFING_NOUN}`, 'giu');
 
 /** Blank only the appointed role noun; any other ranking words in the sentence still fire. */
 function blankStaffingLead(text: string, labels: RankingLabelContext): string {
   if ((labels.optionLabels ?? []).some(label => optionLabelPattern(classificationCopy(label)).test(text))) return text;
-  return text.replace(STAFFING_LEAD, role => role.replace(/\bleads?\b/i, BLANK));
+  const blanked = text.replace(STAFFING_LEAD, role => role.replace(/\bleads?\b/i, BLANK));
+  // r1 review: any OTHER lead-family word left in the sentence refuses the exemption ("Appoint one lead for the merge, as
+  // keeping the current team leads": "team leads" is a blanked idiom downstream, so the appointed noun must still fire).
+  return blanked !== text && /\b(?:lead|leads|leading|led|leaders?)\b/i.test(blanked) ? text : blanked;
 }
 
 /** Which ranking patterns a sentence trips, after idioms and ranking-shaped labels are blanked. */
@@ -1110,11 +1112,26 @@ export function limitCauseCodesOf(blocks: unknown): readonly string[] {
 export type GoalFigureCoHold = { readonly why: string; readonly action?: string; readonly say?: string; readonly ask?: string };
 
 const DECLINES_LINK = /\b(?:not checking|not adding|won't add|don't add|leave (?:it|that|them) out|skip (?:it|that)|move on|not going to size|don't want to size|no need to size|not modelling)\b/i;
+/** A positive decline ("move on", "skip it", "leave it out") negated right before it is NOT a refusal ("let's not move on"). */
+const NEGATED_BEFORE = /(?:\bnot|n't|\bnever|\bno)[ \t]*$/i;
+/** Clause ends: sentence punctuation, ";", a spaced dash, or ", but/and/so". A "?" marks its clause as a question. */
+const CLAUSE_SPLIT = /(?<=[.!?;])|[ \t][-–—][ \t]|,[ \t]*(?:but|and|so)\b/i;
 
+/**
+ * c6 (D-b), review r1 #4: a refusal of a co-held link is a decline phrase and that link's label in the SAME clause, in a
+ * clause that is not a question, with the decline not negated. "Why are we not adding return rate?", "Let's not move on
+ * yet; I want to size return rate", "Don't skip it - return rate matters" keep the invitation.
+ */
 function userDeclinesLink(userText: string | undefined, links: readonly UnsizedPathLink[]): boolean {
-  if (userText === undefined || !DECLINES_LINK.test(classificationCopy(userText))) return false;
-  return links.some(link => [link.from_label, link.to_label].some(label => label.trim() !== ''
-    && new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(classificationCopy(label).trim())}s?(?![\\p{L}\\p{N}_])`, 'iu').test(classificationCopy(userText))));
+  if (userText === undefined) return false;
+  const labels = links.flatMap(link => [link.from_label, link.to_label]).filter(label => label.trim() !== '')
+    .map(label => new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(classificationCopy(label).trim())}s?(?![\\p{L}\\p{N}_])`, 'iu'));
+  return classificationCopy(userText).split(CLAUSE_SPLIT).some(clause => {
+    if (clause.includes('?')) return false;
+    const m = DECLINES_LINK.exec(clause);
+    if (m === null || NEGATED_BEFORE.test(clause.slice(0, m.index))) return false;
+    return labels.some(label => label.test(clause));
+  });
 }
 
 /** The run's own goal-figure warning, kept separate from decision-brief limit warnings. */
