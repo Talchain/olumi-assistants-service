@@ -5,6 +5,7 @@ import { scopeTargetNotTestableWithRanges } from '../scope-target-not-testable.j
 import { GOAL_CHANCE_RANGE } from '../goal-chance-range.js';
 import { goalChanceFactsForAgent } from '../goal-chance-range-agent.js';
 import { decisionReviewFor } from '../../agent-lane/decision-review-press.js';
+import { targetTestabilityOf, untestableTargetTail } from '../../admission/target-testability.js';
 import { GOAL_CHANCE_LICENSED } from '../goal-chance-licence.js';
 import { GOAL_FIGURES_TARGET_NOT_TESTABLE as TARGET } from '../../../orchestrator/context/option-result-source.js';
 import { goalChanceLineOwed, goalChanceWithheldForAgent } from '../../agent-lane/goal-chance-withheld.js';
@@ -29,7 +30,9 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
   const remaining = optionIds(envelope).filter(id => !rangeIds.includes(id));
   const labels = labelsOf(graph);
   const oldSay: string = warning(envelope)!.say;
-  const named = remaining.map(id => `‘${labels.get(id)}’`).join(' or ');
+  const linkedIds = remaining.filter(id => Object.keys(graph.nodes.find((n: Rec) => n.id === id)?.interventions ?? {}).length > 0);
+  const baselineId = remaining.find(id => !linkedIds.includes(id))!;
+  const named = linkedIds.map(id => `‘${labels.get(id)}’`).join(' or ');
   const needs = name === 'unseen-1'
     ? 'a size for the links from Loyalty-app gross-profit uplift to monthly profit, from Loyalty-app operating cost to monthly profit and from Loyalty-app incremental sales to Loyalty-app gross-profit uplift'
     : 'a size for the link from Loyalty app active to Incremental monthly profit from loyalty app';
@@ -45,19 +48,38 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     expect(wire.assistant_text.includes('how likely any option is to')).toBeTruthy();
   });
 
-  it(`${name}: target ids exclude ranges and name every option without a line (RED at base)`, () => {
+  it(`${name}: target ids exclude ranges and retain every withheld option (RED at base)`, () => {
     expect(warning(scoped())!.option_ids).toEqual(remaining);
     expect(warning(scoped())!.option_ids.every((id: string) => !rangeIds.includes(id))).toBeTruthy();
   });
 
-  it(`${name}: say names only remaining labels, keeping only W’s links and the question (RED at base)`, () => {
+  it(`${name}: say names only W’s options with a failing link, keeping their links and ask (RED at base)`, () => {
     const say: string = warning(scoped())!.say;
     expect(say).toBe(expectedSay);
     expect(!say.includes('any option')).toBeTruthy();
     expect(!say.includes('—')).toBeTruthy();
     for (const id of rangeIds) expect(!say.includes(`‘${labels.get(id)}’`)).toBeTruthy();
+    expect(say).not.toContain(`‘${labels.get(baselineId)}’`);
     expect(say.endsWith(question)).toBeTruthy();
-    expect(warning(scoped())!.message).toBe(`Not shown. ${expectedSay}`);
+  });
+
+  it(`${name}: panel message stays byte-identical to the base producer`, () => {
+    expect(warning(scoped())!.message).toBe(warning(envelope)!.message);
+    const missingLabel = { ...graph, nodes: graph.nodes.map((n: Rec) => n.id === linkedIds[0] ? { ...n, label: undefined } : n) };
+    const out = scopeTargetNotTestableWithRanges(envelope, missingLabel);
+    expect(warning(out)!.message).toBe(warning(envelope)!.message);
+    expect(warning(out)!.say).toBe('');
+  });
+
+  it(`${name}: served Challenge with the capture's analysis_ready retains the range opening`, () => {
+    const resultBlock = { ...block, enrichment: scoped() };
+    const review = decisionReviewFor('s4b-review', { graph, analysisResult: resultBlock, analysisReady: wire.analysis_ready,
+      analysisState: wire.analysis_state, graphHash: block.computed_against_hash });
+    expect(review.bound).toBe(true);
+    expect(review.reply).toContain('This run shows some options’ chances only as a range.');
+    expect(review.reply).not.toContain('each option');
+    expect(review.reply).not.toContain('any option');
+    expect(warning(envelope, GOAL_CHANCE_RANGE)!.message).toBe(warning(resultBlock.enrichment, GOAL_CHANCE_RANGE)!.message);
   });
 
   it(`${name}: narration and actual wire leader gate keep scoped say (RED at base)`, () => {
@@ -111,7 +133,8 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     }] };
     const out = scopeTargetNotTestableWithRanges(points, graph);
     expect(warning(out)!.option_ids).toEqual([remaining[1]]);
-    expect(warning(out)!.say.includes(`how likely ‘${labels.get(remaining[1]!)}’ is to`)).toBeTruthy();
+    if (remaining[1] === baselineId) expect(warning(out)!.say).toBe('');
+    else expect(warning(out)!.say.includes(`how likely ‘${labels.get(remaining[1]!)}’ is to`)).toBeTruthy();
     expect(!warning(out)!.say.includes(`‘${labels.get(remaining[0]!)}’`)).toBeTruthy();
     const allPoints = { ...points, inference_warnings: warnings(points).map(w => w.code === GOAL_CHANCE_LICENSED ? {
       ...w, pct_by_option: Object.fromEntries(remaining.map(id => [id, 45])), withheld_option_ids: undefined,
@@ -143,14 +166,44 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
 
   it(`${name}: W uses the warning’s own ids, never widens to other scored options`, () => {
     const narrow = { ...envelope, inference_warnings: warnings(envelope).map(w => w.code === TARGET
-      ? { ...w, option_ids: [remaining[0]] } : w) };
+      ? { ...w, option_ids: [linkedIds[0]] } : w) };
     const out = scopeTargetNotTestableWithRanges(narrow, graph);
-    expect(warning(out)!.option_ids).toEqual([remaining[0]]);
-    expect(warning(out)!.say).toContain(`how likely ‘${labels.get(remaining[0]!)}’ is to`);
-    expect(warning(out)!.say).not.toContain(`‘${labels.get(remaining[1]!)}’`);
+    expect(warning(out)!.option_ids).toEqual([linkedIds[0]]);
+    expect(warning(out)!.say).toContain(`how likely ‘${labels.get(linkedIds[0]!)}’ is to`);
+    expect(warning(out)!.say).not.toContain(`‘${labels.get(baselineId)}’`);
     const empty = { ...envelope, inference_warnings: warnings(envelope).map(w => w.code === TARGET
       ? { ...w, option_ids: rangeIds } : w) };
     expect(warning(scopeTargetNotTestableWithRanges(empty, graph))).toBeUndefined();
+  });
+
+  it(`${name}: status-quo-only W has no failing link and no withheld sentence; ranges remain`, () => {
+    expect(baselineId).toBe('carry_on_as_now');
+    const onlyBaseline = { ...envelope, inference_warnings: warnings(envelope).map(w => w.code === TARGET
+      ? { ...w, option_ids: [baselineId] } : w) };
+    const out = scopeTargetNotTestableWithRanges(onlyBaseline, graph);
+    expect(warning(out)!.option_ids).toEqual([baselineId]);
+    expect(warning(out)!.say).toBe('');
+    expect(warning(out)!.first_ask).toBeUndefined();
+    expect(warning(out)!.message).toBe(warning(envelope)!.message);
+    expect(goalChanceWithheldForAgent({ enrichment: out }, graph)?.say ?? '').not.toContain("I can't yet say how likely");
+    const targetAlone = { ...out, inference_warnings: warnings(out).filter(w => w.code !== 'GOAL_FIGURES_PLACEHOLDER_PATH') };
+    expect(goalChanceWithheldForAgent({ enrichment: targetAlone }, graph)).toBeUndefined();
+    expect(goalChanceFactsForAgent(targetAlone, graph, true).goal_chance_range_display)
+      .toEqual(goalChanceFactsForAgent(envelope, graph, true).goal_chance_range_display);
+  });
+
+  it(`${name}: two W options with failing links each keep their own reason and ask`, () => {
+    const range = warning(envelope, GOAL_CHANCE_RANGE)!;
+    const otherLink = range.range_by_option[rangeIds[0]!];
+    const movedGraph = { ...graph, nodes: graph.nodes.map((n: Rec) => n.id === baselineId
+      ? { ...n, interventions: { [otherLink.from]: 1 } } : n) };
+    const out = scopeTargetNotTestableWithRanges(envelope, movedGraph);
+    const say: string = warning(out)!.say;
+    expect(say).toContain(expectedSay);
+    expect(say).toContain(`how likely ‘${labels.get(baselineId)}’ is to`);
+    expect(say).toContain(movedGraph.nodes.find((n: Rec) => n.id === otherLink.from).label);
+    expect(say.split("I can't yet say how likely").length).toBe(3);
+    expect(say.split('?').length).toBe(3);
   });
 
   it(`${name}: a shared failing link stays on W’s path and the ask follows the first retained link`, () => {
@@ -173,6 +226,28 @@ describe.each(captures)('$name: captured Run', ({ name, wire, graph, block, enve
     expect(warnings(out).filter(w => w.code !== TARGET)).toEqual(warnings(envelope).filter(w => w.code !== TARGET));
     expect(scopeTargetNotTestableWithRanges(out, graph)).toEqual(out);
   });
+});
+
+it.each([
+  { labels: ['A'], named: '‘A’' },
+  { labels: ['A', 'B'], named: '‘A’ or ‘B’' },
+  { labels: ['A', 'B', 'C'], named: '‘A’, ‘B’ or ‘C’' },
+  { labels: ['A', 'B', 'C', 'D'], named: '‘A’, ‘B’, ‘C’ or ‘D’' },
+])('scoped list grammar: $named', ({ labels, named }) => {
+  const { graph, envelope } = captures[0]!;
+  const verdict = targetTestabilityOf(graph, envelope.identity_evaluations);
+  expect(untestableTargetTail(graph, verdict, labels)).toContain(`how likely ${named} is to`);
+});
+
+it('a scoped tail without a reason or an ask is silent; the unscoped control keeps its words', () => {
+  const { graph, envelope } = captures[0]!;
+  const verdict = targetTestabilityOf(graph, envelope.identity_evaluations);
+  expect(verdict.kind).toBe('not_testable');
+  if (verdict.kind !== 'not_testable') throw new Error('Capture must have target failures');
+  expect(untestableTargetTail(graph, { ...verdict, failures: [] }, ['Carry on as now'])).toBe(null);
+  const noAsk = { ...verdict, failures: [{ precondition: 'P3' as const, case: 'b' as const, code: 'comparator_unscorable' as const }] };
+  expect(untestableTargetTail(graph, noAsk, ['Carry on as now'])).toBe(null);
+  expect(untestableTargetTail(graph, noAsk)).toContain("I can't yet say how likely any option is to");
 });
 
 it('producer wiring scopes after point licence and before Run storage', () => {

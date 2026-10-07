@@ -466,11 +466,16 @@ export function targetWarningSentence(graph: unknown, verdict: TargetTestability
 export function untestableTargetTail(graph: unknown, verdict: TargetTestability, optionLabels?: readonly string[]): string | null {
   const parts = untestableTargetParts(graph, verdict);
   if (parts === null || parts.tailTarget === null) return null;
+  // Science R3: a scoped spoken sentence must retain a reason and an ask; the panel keeps the original reason.
+  if (optionLabels !== undefined && (parts.needs.length === 0 || parts.question === null)) return null;
   const { needs, untestableComparator } = parts;
-  const opening = `I can't yet say how likely ${optionLabels === undefined ? 'any option' : optionLabels.map(label => `‘${label}’`).join(' or ')} is to keep ${parts.name} ${parts.tailTarget}:`;
+  const names = optionLabels?.map(label => `‘${label}’`);
+  const named = names === undefined ? 'any option' : names.length < 3 ? names.join(' or ')
+    : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+  const opening = `I can't yet say how likely ${named} is to keep ${parts.name} ${parts.tailTarget}:`;
   const question = parts.question !== null ? ` ${parts.question}` : '';
   if (needs.length === 0) {
-    return untestableComparator === null ? (optionLabels === undefined ? null : `${opening.slice(0, -1)}.`) : `${opening} Olumi can't yet test a ${untestableComparator} target.`;
+    return untestableComparator === null ? null : `${opening} Olumi can't yet test a ${untestableComparator} target.`;
   }
   const need = needs.length === 1 ? needs[0] : `${needs.slice(0, -1).join(', ')}, and ${needs[needs.length - 1]}`;
   const gap = untestableComparator === null ? '' : ` Olumi also can't yet test a ${untestableComparator} target.`;

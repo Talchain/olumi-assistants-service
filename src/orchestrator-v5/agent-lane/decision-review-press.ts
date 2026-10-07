@@ -32,6 +32,7 @@ import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
 import { placeholderZeroFactorIds } from '../coaching/unvalued-driver-card.js';
 import { goalChanceWithheldForAgent, withoutAskedQuestion } from './goal-chance-withheld.js';
+import { GOAL_CHANCE_RANGE } from '../goal-target/goal-chance-range.js';
 import { runExplanationChip, RUN_EXPLANATION_UNAVAILABLE_TEXT, type RunExplanationRead } from './run-explanation.js';
 import { survivesReplyEditors, treatedAsZeroReplyLine, TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany } from './root-line.js';
 import { agentNoLeaderSentence } from './withheld-leader-fail-closed.js';
@@ -143,11 +144,11 @@ function unnamedZeroCount(line: string | null): number {
 }
 const unnamedZeroLine = (n: number): string => (n === 1 ? TREATED_AS_ZERO_UNNAMED_ONE : treatedAsZeroUnnamedMany(n));
 
-/** The same block with every warning's words removed: the typed reader's own fail-closed reading (the opening alone). */
+/** Remove withhold words for the fail-closed opening; ranges are not withhold reasons and keep their display licence. */
 function withoutWarningWords(result: unknown): unknown {
   const block = recordOf(result);
   if (block === undefined) return result;
-  const wordless = (w: unknown): unknown => (Array.isArray(w) ? w.map((x) => (recordOf(x) ? { ...recordOf(x), message: '' } : x)) : w);
+  const wordless = (w: unknown): unknown => (Array.isArray(w) ? w.map((x) => (recordOf(x) && recordOf(x)?.code !== GOAL_CHANCE_RANGE ? { ...recordOf(x), message: '' } : x)) : w);
   const enrichment = recordOf(block.enrichment);
   return { ...block, inference_warnings: wordless(block.inference_warnings),
     ...(enrichment !== undefined ? { enrichment: { ...enrichment, inference_warnings: wordless(enrichment.inference_warnings) } } : {}) };

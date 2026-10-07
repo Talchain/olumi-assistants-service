@@ -28,30 +28,40 @@ export function scopeTargetNotTestableWithRanges<E>(envelope: E, graph: unknown)
     // W belongs to this warning, not to every scored option on the Run.
     const remaining = [...new Set(w.option_ids.filter((id): id is string => typeof id === 'string' && !shown.has(id)))];
     if (remaining.length === 0) return [];
-    const labels = remaining.map(labelOf);
-    const { say: _say, message: _message, first_ask: _ask, ...rest } = w;
-    if (verdict.kind !== 'not_testable' || labels.some(label => label === undefined)) {
-      return [{ ...rest, option_ids: remaining, message: 'Not shown.' }];
+    const { say: _say, first_ask: _ask, ...rest } = w;
+    if (verdict.kind !== 'not_testable') {
+      return [{ ...rest, option_ids: remaining, say: '' }];
     }
     // Keep the original target failures; cut only links outside W's paths, using the admission walk and Run identities.
     const { paths } = reachedGoalPaths(analysed, remaining, new Map(remaining.map(id => {
       const option = nodes.find(n => n.kind === 'option' && n.id === id);
       return [id, isRec(option?.interventions) ? Object.keys(option.interventions) : []];
     })), evaluations);
-    const onPath = new Set(paths.flatMap(p => p.links.map(l => JSON.stringify([l.from, l.to]))));
-    const failures = verdict.failures.flatMap(f => {
-      if (f.case !== 'c' || f.links === undefined) return [f];
-      const links = f.links.filter(l => onPath.has(JSON.stringify([l.from, l.to])));
-      if (links.length === 0) return [];
-      const link = links[0]!;
-      return [{ ...f, links, link, lever: labelOf(link.from), link_to: labelOf(link.to) }];
+    // Science R3: each named option needs its own failing link, reason and ask. A baseline has no moved path.
+    const spoken = paths.flatMap(path => {
+      const label = labelOf(path.option_id);
+      if (label === undefined) return [];
+      const onPath = new Set(path.links.map(l => JSON.stringify([l.from, l.to])));
+      const failures = verdict.failures.flatMap(f => {
+        if (f.case !== 'c') return [f];
+        const links = (f.links ?? (f.link === undefined ? [] : [f.link])).filter(l => onPath.has(JSON.stringify([l.from, l.to])));
+        if (links.length === 0) return [];
+        const link = links[0]!;
+        return [{ ...f, links, link, lever: labelOf(link.from), link_to: labelOf(link.to) }];
+      });
+      if (!failures.some(f => f.case === 'c')) return [];
+      const scopedVerdict = { ...verdict, failures };
+      const say = untestableTargetTail(graph, scopedVerdict, [label]);
+      if (say === null) return [];
+      // Reuse the writer-compatible ask guard for the newly first link, including its units.
+      const ask = targetNotTestableWarning(graph, scopedVerdict, [path.option_id], GOAL_FIGURES_TARGET_NOT_TESTABLE)?.first_ask;
+      return [{ say, ask }];
     });
-    const scopedVerdict = { ...verdict, failures };
-    const say = untestableTargetTail(graph, scopedVerdict, labels as string[]);
-    // Reuse the writer-compatible ask guard for the newly first link, including its units.
-    const ask = targetNotTestableWarning(graph, scopedVerdict, remaining, GOAL_FIGURES_TARGET_NOT_TESTABLE)?.first_ask;
-    return [{ ...rest, option_ids: remaining, message: say === null ? 'Not shown.' : `Not shown. ${say}`,
-      ...(say !== null ? { say } : {}), ...(ask !== undefined ? { first_ask: ask } : {}) }];
+    const say = spoken.map(s => s.say).join(' ');
+    const ask = spoken[0]?.ask;
+    // The per-option panel owns the producer's original message; only the spoken tail is scoped here.
+    return [{ ...rest, option_ids: remaining,
+      say, ...(ask !== undefined ? { first_ask: ask } : {}) }];
   });
   return { ...envelope, inference_warnings: scopedWarnings } as E;
 }

@@ -126,13 +126,15 @@ const recordOf = (v: unknown): Record<string, unknown> | undefined =>
 export function goalChanceWithheldForAgent(result: unknown, graph?: unknown): GoalChanceWithheld | undefined {
   const block = recordOf(result);
   if (block === undefined) return undefined;
+  const opening = Object.keys(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display ?? {}).length > 0
+    ? RANGE_OPENING : OPENING;
   const warnings = [recordOf(block.enrichment)?.inference_warnings, block.inference_warnings]
     .flatMap((w) => (Array.isArray(w) ? w : []))
     .map(recordOf)
-    .filter((w): w is Record<string, unknown> => w !== undefined && typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
+    .filter((w): w is Record<string, unknown> => w !== undefined && typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code))
+    // Science R3: an explicitly empty scoped say leaves this target reason on the panel, with no chat sentence.
+    .filter(w => !(opening === RANGE_OPENING && w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE && w.say === ''));
   if (warnings.length === 0) return undefined;
-  const opening = Object.keys(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display ?? {}).length > 0
-    ? RANGE_OPENING : OPENING;
   // Gate 1 v2 (Codex #2574 P1): identical options keep their own reason and scope, alone or beside any other withhold.
   const identical = warnings.filter((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL);
   const others = warnings.filter((w) => w.code !== GOAL_FIGURES_OPTIONS_IDENTICAL);
