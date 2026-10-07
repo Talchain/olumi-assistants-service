@@ -1,0 +1,130 @@
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:12: * Mutant (quoted in the PR): the per-limit fold restored in `collectLimitLevelOwners` → the price rows go RED.
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:25:  collectLimitLevelOwners,
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:30:import { placeholderMovedOptions } from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:41:  collectLimitLevelOwners(graph, readRatifiedConstraints(graph.goal_constraints ?? REP1.goal_constraints), options).placeholderMovedOptionIds;
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:92:    expect(Object.fromEntries(placeholderMovedOptions(CHURN, graphOf().nodes, graphOf().edges, REP1.options))).toEqual({
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:122:    const owners = collectLimitLevelOwners(g, ratified, REP1.options);
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:136:    const owners = collectLimitLevelOwners(g, ratified, REP1.options);
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:163:  const byLimit = collectLimitLevelOwners(A_MINE, readRatifiedConstraints(A_MINE), optionsOfA).placeholderMovedOptionIds;
+src/orchestrator/context/__tests__/placeholder-parts-per-option-a3.test.ts:166:    const served = collectLimitLevelOwners(A, readRatifiedConstraints(A), optionsOfA).placeholderMovedOptionIds;
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:3: * (`placeholderPartsFinding`, #2268). Both read the sizer's own unit words (`targetUnitWords` / `naturalAmountUnitOf`),
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:10:import { OLUMI_GUESS_LIMIT_REASON, PLACEHOLDER_PARTS_REASON, placeholderPartsFinding } from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:44:    expect(placeholderPartsFinding('subs', nodesOf(g), edgesOf(g), OPTIONS)?.reason).toBe(PLACEHOLDER_PARTS_REASON);
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:53:    expect(placeholderPartsFinding('subs', nodesOf(g), edgesOf(g), OPTIONS)).toEqual({ reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' });
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:55:    expect(placeholderPartsFinding('subs', nodesOf(theirs), edgesOf(theirs), OPTIONS)).toBeNull();
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:60:    expect(placeholderPartsFinding('churn', nodesOf(before), edgesOf(before), OPTIONS)?.reason, 'CONTROL').toBe(PLACEHOLDER_PARTS_REASON);
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:65:    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)).toBeNull();
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:75:    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)).toEqual({ reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' });
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:77:    expect(placeholderPartsFinding('churn', nodesOf(his), edgesOf(his), OPTIONS)).toBeNull();
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:81:    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)?.reason).toBe(PLACEHOLDER_PARTS_REASON);
+src/orchestrator/context/__tests__/placeholder-parts-user-stated-seam.test.ts:88:    expect(placeholderPartsFinding('churn', nodesOf(g2), edgesOf(g2), [{ interventions: { retain: 1 } }])?.reason).toBe(PLACEHOLDER_PARTS_REASON);
+src/orchestrator/context/__tests__/placeholder-parts-limit-unit.test.ts:17:import { collectLimitLevelOwners, readRatifiedConstraints } from '../constraint-feasibility.js';
+src/orchestrator/context/__tests__/placeholder-parts-limit-unit.test.ts:18:import { limitUnitsOf, placeholderMovedOptions, PLACEHOLDER_PARTS_REASON, OLUMI_GUESS_LIMIT_REASON } from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/placeholder-parts-limit-unit.test.ts:30:const reasonFor = (g: Rec) => collectLimitLevelOwners(g, readRatifiedConstraints(g), movers(g)).placeholderPartsReasons.get(limitId(g));
+src/orchestrator/context/__tests__/placeholder-parts-limit-unit.test.ts:50:  it('RED: the limit verdict (`collectLimitLevelOwners`, the run\'s reader) no longer calls Olumi\'s estimates "placeholders"', () => {
+src/orchestrator/context/__tests__/placeholder-parts-limit-unit.test.ts:78:    const moved = placeholderMovedOptions(LIMIT_NODE, g.nodes, g.edges, optionsOf(g), limitUnitsOf(g.goal_constraints));
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:7: * Olumi's guess: false certainty. The rule, in the ONE per-option limit predicate (`placeholderPartsFinding`, read by
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:19:  placeholderMovedOptions,
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:21:import { collectLimitLevelOwners, readRatifiedConstraints, withholdOptionLimitScores } from '../constraint-feasibility.js';
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:38:const moved = (g: Json): Map<string, string> => placeholderMovedOptions(TARGET, g.nodes, g.edges, wireOptions(g));
+src/orchestrator/context/__tests__/limit-rests-on-olumi-guess.test.ts:40:  const byLimit = collectLimitLevelOwners(g, readRatifiedConstraints(g), wireOptions(g)).placeholderMovedOptionIds;
+src/orchestrator/context/__tests__/constraint-verdict-per-limit.test.ts:27:  collectLimitLevelOwners,
+src/orchestrator/context/__tests__/constraint-verdict-per-limit.test.ts:58:  return deriveConstraintVerdict(envelope, ratified, leader, undefined, leaderEstimated, collectLimitLevelOwners(graph, ratified));
+src/orchestrator/context/__tests__/constraint-verdict-per-limit.test.ts:535:  it('the stored frame is read off the persisted row by id (collectLimitLevelOwners), never guessed', () => {
+src/orchestrator/context/__tests__/constraint-verdict-per-limit.test.ts:538:    expect([...collectLimitLevelOwners(graph, ratified).relativeChangeIds]).toEqual([]);
+src/orchestrator/context/__tests__/constraint-verdict-per-limit.test.ts:540:    expect([...collectLimitLevelOwners(graph, ratified).relativeChangeIds]).toEqual([CHURN]);
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:29:  collectLimitLevelOwners,
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:33:import { placeholderMovedOptions, targetMovedOnlyThroughPlaceholderParts, sizedLinkTest } from '../placeholder-parts.js';
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:54:    expect(sizedLinkTest(nodes)(edge)).toBe(true);
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:119:    collectLimitLevelOwners(graph, ratified, options),
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:191:    const owners = collectLimitLevelOwners(graph, readRatifiedConstraints(graph), options);
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:227:    expect(collectLimitLevelOwners(graph, ratified).placeholderPartsReasons.size).toBe(0);
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:235:    const owners = collectLimitLevelOwners(graph, readRatifiedConstraints(graph), options);
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:248:    const owners = collectLimitLevelOwners(graph, readRatifiedConstraints(graph), options);
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:277:  const withheld = (g: Json) => [...(collectLimitLevelOwners(g, readRatifiedConstraints(g), optionsOf(g)).placeholderMovedOptionIds.get(CHURN_LIMIT) ?? [])].sort();
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:279:  const why = (g: Json) => Object.fromEntries(placeholderMovedOptions(churnId(), g.nodes, g.edges, optionsOf(g)));
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:316:      collectLimitLevelOwners(A, ratified, options));
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:326:      collectLimitLevelOwners(g, ratified, options));
+src/orchestrator/context/__tests__/placeholder-parts-withhold.test.ts:335:      collectLimitLevelOwners(g, ratified, options));
+src/orchestrator/context/__tests__/olumi-guess-one-predicate.test.ts:4: * (`target-testability.ts`) and B6 (`placeholderPartsFinding`) read `olumiGuessedLink` over `asAnalysed`'s graph, so the
+src/orchestrator/context/__tests__/olumi-guess-one-predicate.test.ts:17:  placeholderMovedOptions,
+src/orchestrator/context/__tests__/olumi-guess-one-predicate.test.ts:83:  const moved = (g: Json): Map<string, string> => placeholderMovedOptions(TARGET, g.nodes, g.edges, wireOptions(g));
+src/orchestrator-v5/agent-lane/__tests__/link-strength-refuses-definitional-link.test.ts:48:      ...(last.evaluated !== undefined ? { analysis_identity_evaluated_node_ids: last.evaluated } : {}),
+src/orchestrator-v5/admission/__tests__/t1b-two-bands-size-the-path.test.ts:108:  // unit" there on the base code too, so only the wrong unit asks; certainty's `sizedLinkTest` also reads the mean.
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-budget-limit-baseline.test.ts:37:import { collectLimitLevelOwners, readRatifiedConstraints } from '../../../../orchestrator/context/constraint-feasibility.js';
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-budget-limit-baseline.test.ts:259:    const withheld = collectLimitLevelOwners(graph, readRatifiedConstraints(graph), body.options as Json[]).placeholderMovedOptionIds;
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-budget-limit-baseline.test.ts:286:    const moved = (os: Json[]) => [...(collectLimitLevelOwners(graph, readRatifiedConstraints(graph), os).placeholderMovedOptionIds.get(BUDGET_LIMIT) ?? [])];
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-budget-limit-baseline.test.ts:444:      const moved = collectLimitLevelOwners(SERVED[k], readRatifiedConstraints(SERVED[k]), optionsOf(SERVED[k])).placeholderMovedOptionIds.get(CHURN_LIMIT);
+src/orchestrator-v5/tools/handlers/__tests__/run-analysis-budget-limit-baseline.test.ts:457:      const moved = collectLimitLevelOwners(served, readRatifiedConstraints(served), optionsOf(served)).placeholderMovedOptionIds.get(CHURN_LIMIT);
+src/orchestrator-v5/agent-lane/__tests__/saved-run-context-facts.shared-data.test.ts:139:    expect(facts.limit_checks.limits.map((row: Rec) => [row.constraint_id, row.state])).toEqual([['agent-lane:monthly_churn:<=', 'estimate_only']]);
+src/orchestrator-v5/agent-lane/__tests__/saved-run-context-facts.shared-data.test.ts:154:    expect(project()).not.toHaveProperty('limit_checks');
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:9: * The rule: `run_analysis` carries `limit_checks`, one fixed sentence per limit from the run's own per-limit rows on the
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:61:    const checks = r.limit_checks as { limits: { limit: string; state: string; say: string }[]; note: string } | undefined;
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:101:  it('CONTROL: no per-limit rows on the read → no limit_checks (nothing invented); a row whose limit has no label is left out', async () => {
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-in-the-run-result.test.ts:103:    expect(r).not.toHaveProperty('limit_checks');
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-near-tie-path.test.ts:16:  analysis_identity_evaluated_node_ids?: string[];
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-near-tie-path.test.ts:24:  ...(c.analysis_identity_evaluated_node_ids !== undefined
+src/orchestrator-v5/agent-lane/method-turn/__tests__/premortem-near-tie-path.test.ts:25:    ? { identityEvaluated: new Set(c.analysis_identity_evaluated_node_ids) } : {}),
+src/orchestrator-v5/agent-lane/__tests__/goal-certainty-earned.test.ts:21:type Run = { graph: Json; option_comparison: Json[]; analysis_identity_evaluated_node_ids: string[]; identity_evaluations: Json[] };
+src/orchestrator-v5/agent-lane/__tests__/goal-certainty-earned.test.ts:136:    expect(FX.paul.analysis_identity_evaluated_node_ids).toEqual(['mrr']);
+src/orchestrator-v5/agent-lane/__tests__/goal-certainty-earned.test.ts:240:    const keepList = { analysis_identity_evaluated_node_ids: FX.paul.analysis_identity_evaluated_node_ids, option_comparison: FX.paul.option_comparison };
+src/orchestrator-v5/agent-lane/__tests__/construction-limited-quantity-level.test.ts:26:  collectLeaderEstimatedTargetIds, collectLimitLevelOwners, deriveConstraintVerdict, readRatifiedConstraints,
+src/orchestrator-v5/agent-lane/__tests__/construction-limited-quantity-level.test.ts:199:    return { id, v: deriveConstraintVerdict(env, ratified, leader, undefined, collectLeaderEstimatedTargetIds(g, ratified, leader), collectLimitLevelOwners(g, ratified)) };
+src/orchestrator-v5/agent-lane/__tests__/link-size-ask.test.ts:13:import { sizedLinkTest } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/__tests__/link-size-ask.test.ts:35:    const sized = sizedLinkTest(FX.graph.nodes);
+src/orchestrator-v5/agent-lane/__tests__/link-size-ask.test.ts:59:    expect(sizedLinkTest(sized.nodes)(sized.edges.find(isAngel)!)).toBe(true);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-r3-review.test.ts:22:  it('P2-2a: the real two-child mediator requires edges at the certainty sizedLinkTest call', () => {
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-r3-review.test.ts:28:  it('P2-2b: actual saved/Explain route passes analysis_identity_evaluated_node_ids into limit_checks at agent-v1-turn.ts:2635', () => {
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:3:import { sizedLinkTest, limitUnitsOf, userStatedLinkUnitsOf } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:7:import { exactIdentityOperandLinks } from '../../admission/identity-evaluations.js';
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:25:    expect(savedFacts(s).limit_checks.limits).toEqual(checks(s));
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:26:    expect(JSON.stringify(savedFacts(s).limit_checks)).not.toContain('couldn’t be checked');
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:27:    expect(JSON.stringify(savedFacts(s).limit_checks)).not.toContain('Olumi hasn’t sized');
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:33:    const sized = sizedLinkTest(s.graph.nodes, limitUnitsOf(s.graph.goal_constraints), s.graph.edges);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:157:    expect((await runCarrier(s)).limit_checks.limits).toEqual(checks(s));
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:158:    expect((await runCarrier(s, false)).limit_checks.limits[0].withheld_for).toEqual(['Launch Starter Tier']);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:165:    expect(savedFacts(s).limit_checks.limits[0].say).toBe(checkedSentence);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:166:    expect(savedFacts(s, false).limit_checks.limits[0].withheld_for).toEqual(['Launch Starter Tier']);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:170:    expect(exactIdentityOperandLinks(s.graph.nodes, s.graph.edges, [{ node_id: 'starter_tier_mrr', evaluated: true, operation: 'sum' }]).size).toBe(0);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-t1b2-stop.test.ts:171:    expect(exactIdentityOperandLinks(s.graph.nodes, s.graph.edges, [{ node_id: 'starter_tier_mrr', evaluated: true, factor_ids: ['starter_tier_monthly_price', 'starter_tier_monthly_price'] }]).size).toBe(0);
+src/orchestrator-v5/agent-lane/__tests__/c46-reload-reason-handoff.test.ts:716: * `analysis_identity_evaluated_node_ids` — same fact, same gates as `analysis_result` — and the Agent reads that.
+src/orchestrator-v5/agent-lane/__tests__/c46-reload-reason-handoff.test.ts:745:    expect(read.analysis_identity_evaluated_node_ids).toEqual(['mrr']);
+src/orchestrator-v5/agent-lane/__tests__/c46-reload-reason-handoff.test.ts:748:    const view = withNonlinearIdentity(permissions, graph, readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)) as Record<string, unknown>;
+src/orchestrator-v5/agent-lane/__tests__/c46-reload-reason-handoff.test.ts:756:    const evaluated = readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids);
+src/orchestrator-v5/agent-lane/__tests__/c46-reload-reason-handoff.test.ts:767:    expect('analysis_identity_evaluated_node_ids' in before).toBe(false);
+src/orchestrator-v5/agent-lane/__tests__/c46-reload-reason-handoff.test.ts:768:    const none = readEvaluatedIdentityNodeIds(before.analysis_identity_evaluated_node_ids);
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.throws.test.ts:36:      placeholderPartsFinding: () => { throw new Error('boom'); },
+src/orchestrator-v5/agent-lane/__tests__/construction-option-set-limit-ask.test.ts:12: * The verdict is `scored` only on the user's OWN level of the quantity (`collectLimitLevelOwners`) AND the leader's own
+src/orchestrator-v5/agent-lane/__tests__/construction-option-set-limit-ask.test.ts:20:  collectLeaderEstimatedTargetIds, collectLimitLevelOwners, readRatifiedConstraints,
+src/orchestrator-v5/agent-lane/__tests__/construction-option-set-limit-ask.test.ts:82:    expect(collectLimitLevelOwners(SERVED.c10, ratified).userBaselineIds.has(LIMIT)).toBe(false);
+src/orchestrator-v5/agent-lane/__tests__/construction-option-set-limit-ask.test.ts:88:    expect(collectLimitLevelOwners(g, ratified).userBaselineIds.has(LIMIT)).toBe(true);
+src/orchestrator-v5/agent-lane/__tests__/construction-option-set-limit-ask.test.ts:95:    expect(collectLimitLevelOwners(g, ratified).userBaselineIds.has(LIMIT)).toBe(false);
+src/orchestrator-v5/agent-lane/__tests__/run-result-says-unearned-certainty.test.ts:20:) as { paul: { graph: Json; option_comparison: Json[]; analysis_identity_evaluated_node_ids: string[]; identity_evaluations: Json[] } };
+src/orchestrator-v5/agent-lane/__tests__/run-result-says-unearned-certainty.test.ts:57:        analysis_identity_evaluated_node_ids: FX.paul.analysis_identity_evaluated_node_ids,
+src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts:5: * Agent for the same Run (`goal_certainty`, `goal_chance`, `limit_checks`, the C46 `nonlinear_identity` cause), so an
+src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts:121:const GUARDS = ['claim_permissions', 'goal_certainty', 'goal_chance', 'limit_checks'] as const;
+src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts:772:    delete read.analysis_identity_evaluated_node_ids;
+src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts:779:    expect((ctx.limit_checks?.limits ?? []).map((l: Json) => [l.constraint_id, l.state])).toEqual([[CHURN, 'estimate_only']]);
+src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts:787:    expect(read.analysis_identity_evaluated_node_ids).toEqual(['mrr']);
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:14:import { PARTS_IDENTITY_UNMODELLED_REASON, placeholderPartsFinding, sizedLinkTest } from '../../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:87:    for (const o of options) expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, g.edges, [o])).toBeNull();
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:92:    expect(placeholderPartsFinding(DRAFT_TOTAL, nodes, g.edges, [optionsOf(g)[0]])).toMatchObject({ reason: PARTS_IDENTITY_UNMODELLED_REASON });
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:98:    expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, edges, [optionsOf(g)[0]])).toMatchObject({ reason: PARTS_IDENTITY_UNMODELLED_REASON });
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:121:    for (const o of optionsOf(g)) expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, g.edges, [o])).toBeNull();
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:122:    const sized = sizedLinkTest(g.nodes);
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:129:    const sized = sizedLinkTest(g.nodes);
+src/orchestrator-v5/agent-lane/__tests__/sum-tally-unit-relabel.test.ts:131:    expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, edges, [optionsOf(g)[0]])).not.toBeNull();
+src/orchestrator-v5/agent-lane/__tests__/break-even-route.test.ts:31:  /** The graph read's `analysis_identity_evaluated_node_ids` and the leader's withheld reason (C46 × R3-4 row). */
+src/orchestrator-v5/agent-lane/__tests__/break-even-route.test.ts:48:      ...(evaluatedIds !== undefined ? { analysis_identity_evaluated_node_ids: evaluatedIds } : {}),
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.test.ts:5: * The run result's `limit_checks` says HOW each limit was checked (`limit-checks.ts`). What the user could give so it is
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.test.ts:80:  it('RED at the capability: the run result’s limit_checks rows carry the ask', async () => {
+src/orchestrator-v5/agent-lane/__tests__/limit-checks-carry-the-ask.test.ts:92:    const checks = (r as { limit_checks?: { limits: { constraint_id: string; ask?: string }[] } }).limit_checks;
+src/orchestrator-v5/agent-lane/__tests__/admit-constraint-pp-level.test.ts:27:import { collectLimitLevelOwners, readRatifiedConstraints } from '../../../orchestrator/context/constraint-feasibility.js';
+src/orchestrator-v5/agent-lane/__tests__/admit-constraint-pp-level.test.ts:99:    const withheld = collectLimitLevelOwners(RUN2.graph, readRatifiedConstraints([c]), options).placeholderMovedOptionIds.get(c.constraint_id as string);
+src/orchestrator-v5/agent-lane/__tests__/construction-limited-outcome-gets-a-level.test.ts:30:  collectLeaderEstimatedTargetIds, collectLimitLevelOwners, deriveConstraintVerdict, readRatifiedConstraints,
+src/orchestrator-v5/agent-lane/__tests__/construction-limited-outcome-gets-a-level.test.ts:139:    const v = deriveConstraintVerdict(env, ratified, leader, undefined, collectLeaderEstimatedTargetIds(g, ratified, leader), collectLimitLevelOwners(g, ratified));
+src/routes/__tests__/assist.v1.scenario-graph.analysis-read.test.ts:749:describe("the reload carries the selected run's evaluated identities (`analysis_identity_evaluated_node_ids`)", () => {
+src/routes/__tests__/assist.v1.scenario-graph.analysis-read.test.ts:768:    expect(body.analysis_identity_evaluated_node_ids).toEqual(["mrr"]);
+src/routes/__tests__/assist.v1.scenario-graph.analysis-read.test.ts:776:    expect(body).not.toHaveProperty("analysis_identity_evaluated_node_ids");
+src/routes/__tests__/assist.v1.scenario-graph.analysis-read.test.ts:785:    expect(body).not.toHaveProperty("analysis_identity_evaluated_node_ids");
+src/routes/__tests__/assist.v1.scenario-graph.analysis-read.test.ts:803:    expect(body).not.toHaveProperty("analysis_identity_evaluated_node_ids");

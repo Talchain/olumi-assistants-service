@@ -24,3 +24,19 @@ export function evaluatedIdentityCarriers(nodes: readonly Rec[], identityEvaluat
         && said.every((f) => declared.includes(f)) && declared.every((f) => said.includes(f))));
   }).map((e) => e.node_id));
 }
+
+/** The shared goal-walk rule: only a declared operand into a stated or Run-evaluated identity is exact. */
+export function exactIdentityOperandLinks(
+  nodes: readonly Rec[], edges: readonly Rec[], identityEvaluations?: readonly unknown[],
+  /** Limits require this Run's attestation; the existing goal-walk caller retains its declared-identity rule. */
+  mode: 'stated_or_evaluated' | 'evaluated_only' = 'stated_or_evaluated',
+): Set<Rec> {
+  const byId = new Map(nodes.map(n => [n.id, n] as const));
+  const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
+  return new Set(edges.filter(e => {
+    const to = byId.get(e.to);
+    const identity = isRec(to?.nonlinear_identity) ? to.nonlinear_identity : undefined;
+    return identity !== undefined && ((mode === 'stated_or_evaluated' && identity.stated_in_brief !== false) || evaluated.has(to?.id))
+      && Array.isArray(identity.factor_ids) && identity.factor_ids.includes(e.from);
+  }));
+}

@@ -264,7 +264,9 @@ it('R8-2 AST: only the leader licence reads mean_projected in production; writer
       visit(source);
     }
   }
-  scan('src'); expect([...new Set(found)]).toEqual(['src/orchestrator-v5/agent-lane/goal-certainty.ts']);
+  // DL 7 Oct (L1, Science 393023 ruling (b)): the absent-mediator-unit reader reads the flag ONLY to EXCLUDE a projected
+  // mean from unit authority (fail-closed: an estimate never establishes a unit). The licence stays the one 'unsized' reader.
+  scan('src'); expect([...new Set(found)].sort()).toEqual(['src/orchestrator-v5/agent-lane/goal-certainty.ts', 'src/orchestrator/context/placeholder-parts.ts'].sort());
 });
 
 it('R8 wording budget keeps exact singular/plural grammar and truncates only endpoint labels', () => {

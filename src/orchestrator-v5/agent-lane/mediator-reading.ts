@@ -37,7 +37,7 @@ import { carrierCompatible, readUnitParts, sameUnit, singular, words, type UnitP
 import { licenceUnsizedLink } from './goal-certainty.js';
 import { currentDefinitionalCarrier } from '../goal-target/held-user-links.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
-import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { limitUnitsOf, sizedLinkTest, userStatedLinkUnitsOf } from '../../orchestrator/context/placeholder-parts.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { unitsCompose } from './reconciling-product.js';
 
@@ -53,6 +53,8 @@ export type MediatorReading =
     /** brief3's fallback: the lever whose Olumi-sized link into M the answer replaces. */
     readonly replaces?: string;
   }
+  /** L1 r2: the user's own current figures on every touching link agree on this absent unit. */
+  | { readonly via: 'user_sized_links'; readonly unit: string; readonly child: string }
   /** FA1 (Science d5, 6 Oct): M is a definitional part of its one child, so it is measured in that total's unit. */
   | { readonly via: 'definitional_part'; readonly unit: string; readonly child: string }
   /** FA1-3 (DL, 6 Oct): M is the product of its two identity operands (ids, rate first), measured in their composed unit. */
@@ -123,7 +125,7 @@ export function userSizedLevelLessLinks(graph: unknown): ReadonlySet<string> {
   const byId = new Map(nodes.map(n => [n.id, n] as const));
   const setByOption = new Set(nodes.filter(n => n.kind === 'option').flatMap(o => Object.keys(mergeInterventionSourceObjects(o))));
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
-  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints));
+  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints), graph.edges.filter(isRec));
   const figureOn = (e: Rec): boolean => isRec(e.provenance) && (isRec(e.provenance.natural_effect) || e.provenance.magnitude === 'user_stated');
   for (const m of nodes) {
     if (typeof m.id !== 'string' || !['factor', 'risk', 'outcome'].includes(String(m.kind))) continue;
@@ -179,6 +181,7 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     for (const e of edges) if (reaches.has(e.to) && !reaches.has(e.from) && walkable(e.from)) { reaches.add(e.from); grew = true; }
   }
   const view = magnitudeNodes(nodes, percentLevelIds(graph));
+  const statedUnits = userStatedLinkUnitsOf(nodes, graph.edges.filter(isRec));
   for (const m of nodes) {
     const id = m.id;
     if (typeof id !== 'string' || id === goal.id || !['factor', 'risk', 'outcome'].includes(String(m.kind)) || !reaches.has(id)) continue;
@@ -187,6 +190,11 @@ export function mediatorReadings(graph: unknown): Map<string, MediatorReading> {
     const kids = edges.filter(e => e.from === id && reaches.has(e.to));
     if (kids.length !== 1 || typeof kids[0]!.to !== 'string') continue;
     const childId = kids[0]!.to as string;
+    const statedUnit = statedUnits.get(id);
+    if (statedUnit !== undefined) {
+      out.set(id, { via: 'user_sized_links', unit: statedUnit, child: childId });
+      continue;
+    }
     const cv = view.get(childId);
     const childUnit = cv === undefined ? undefined : unitOf(cv);
     const childFrame = cv === undefined ? undefined : resolveMagnitudeFrame(cv);

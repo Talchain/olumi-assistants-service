@@ -1,0 +1,34 @@
+src/orchestrator-v5/admission/identity-evaluations.ts:29:export function exactIdentityOperandLinks(
+src/orchestrator-v5/admission/target-testability.ts:2:import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from './identity-evaluations.js';
+src/orchestrator-v5/admission/target-testability.ts:165:  const operands = exactIdentityOperandLinks(nodes, edges, identityEvaluations);
+src/orchestrator-v5/agent-lane/saved-run-context-facts.ts:6:import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from './limit-checks.js';
+src/orchestrator-v5/agent-lane/saved-run-context-facts.ts:37:    ? limitChecksForAgent(read.raw, read.limit_verdicts, read.identity_evaluated) : undefined;
+src/orchestrator-v5/agent-lane/goal-certainty.ts:9: * (`sizedLinkTest`: magnitude absent or `olumi_placeholder`, a natural effect in another unit, or written for another
+src/orchestrator-v5/agent-lane/goal-certainty.ts:28:import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/goal-certainty.ts:154:  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints), edges);
+src/orchestrator-v5/agent-lane/mediator-reading.ts:40:import { limitUnitsOf, sizedLinkTest, userStatedLinkUnitsOf } from '../../orchestrator/context/placeholder-parts.js';
+src/orchestrator-v5/agent-lane/mediator-reading.ts:57:  | { readonly via: 'user_sized_links'; readonly unit: string; readonly child: string }
+src/orchestrator-v5/agent-lane/mediator-reading.ts:128:  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints), graph.edges.filter(isRec));
+src/orchestrator-v5/agent-lane/mediator-reading.ts:143:    // Codex r2 on #2648: a FIGURE counts only while it is a valid, current size (`sizedLinkTest`: its mean and unit), the
+src/orchestrator-v5/agent-lane/mediator-reading.ts:184:  const statedUnits = userStatedLinkUnitsOf(nodes, graph.edges.filter(isRec));
+src/orchestrator-v5/agent-lane/mediator-reading.ts:195:      out.set(id, { via: 'user_sized_links', unit: statedUnit, child: childId });
+src/orchestrator-v5/agent-lane/limit-checks.ts:20:  placeholderPartsFinding,
+src/orchestrator-v5/agent-lane/limit-checks.ts:101: * predicate the run withheld them by (`placeholderPartsFinding`, per option), so the words and the numbers cannot
+src/orchestrator-v5/agent-lane/limit-checks.ts:122:    const finding = placeholderPartsFinding(targetId, recs, links, [o], limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints),
+src/orchestrator-v5/agent-lane/limit-checks.ts:211:export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdicts | null | undefined, identityEvaluated?: ReadonlySet<string>): LimitCheck[] | undefined {
+src/orchestrator/context/placeholder-parts.ts:33:import { exactIdentityOperandLinks } from '../../orchestrator-v5/admission/identity-evaluations.js';
+src/orchestrator/context/placeholder-parts.ts:188:export function userStatedLinkUnitsOf(nodes: readonly Rec[], edges: readonly Rec[]): ReadonlyMap<unknown, string> {
+src/orchestrator/context/placeholder-parts.ts:234:const sizerUnitsOf = (nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS, edges: readonly Rec[] = []): Map<unknown, string | undefined> => {
+src/orchestrator/context/placeholder-parts.ts:236:  const stated = userStatedLinkUnitsOf(nodes, edges);
+src/orchestrator/context/placeholder-parts.ts:260: * should reflect — so for R-c it counts as authored. Only R-c reads this; the goal-certainty rule keeps `sizedLinkTest`.
+src/orchestrator/context/placeholder-parts.ts:273:export function sizedLinkTest(nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS, edges: readonly Rec[] = []): (edge: Rec) => boolean {
+src/orchestrator/context/placeholder-parts.ts:274:  const unitById = sizerUnitsOf(nodes, limitUnits, edges);
+src/orchestrator/context/placeholder-parts.ts:297:  return placeholderPartsFinding(targetId, nodes, edges, options, limitUnits)?.reason ?? null;
+src/orchestrator/context/placeholder-parts.ts:323:    const finding = placeholderPartsFinding(targetId, nodes, edges, [o], limitUnits);
+src/orchestrator/context/placeholder-parts.ts:342:export function placeholderPartsFinding(
+src/orchestrator/context/placeholder-parts.ts:384:    const unitById = sizerUnitsOf(nodes, limitUnits, edges);
+src/orchestrator/context/placeholder-parts.ts:385:    const exactOperands = exactIdentityOperandLinks(nodes, edges, identityEvaluations);
+src/routes/agent-v1-turn.ts:2635:        identity_evaluated: st.identityEvaluated, limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:208:import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:8354:      let limitChecks: ReturnType<typeof limitChecksForAgent>;
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:8363:          limitChecks = limitChecksForAgent(read?.raw, read?.limit_verdicts, read?.identity_evaluated);

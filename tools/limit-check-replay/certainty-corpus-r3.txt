@@ -1,0 +1,1 @@
+Reconstructed certainty-edges ablation over reviewer all-head item keys: 101 changed items, 23 unique graphs. Copied first capture into certainty-two-children.json. Original full replay script unavailable; this is a bounded certainty probe, not the full 1211-item multi-reader replay.
