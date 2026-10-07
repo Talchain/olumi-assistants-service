@@ -310,8 +310,8 @@ function withIdentityCard(hint: { readonly available: true; readonly note: strin
   return hint === undefined ? {} : { identity_card: hint };
 }
 
-function withGoalChance(result: unknown): { goal_chance?: GoalChanceWithheld } {
-  const withheld = goalChanceWithheldForAgent(result);
+function withGoalChance(result: unknown, graph?: unknown): { goal_chance?: GoalChanceWithheld } {
+  const withheld = goalChanceWithheldForAgent(result, graph);
   return withheld !== undefined ? { goal_chance: withheld } : {};
 }
 
@@ -1644,7 +1644,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   const rec = (value: unknown): Record<string, unknown> | undefined =>
     value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
   const current = rec(rec(g.analysis_state)?.run_state)?.kind === 'complete_current';
-  const goalChance = current ? withGoalChance(g.analysis_result).goal_chance : undefined;
+  const goalChance = current ? withGoalChance(g.analysis_result, g.raw).goal_chance : undefined;
   // Leader permission governs comparison only. Each current option reads its own stored goal-chance entitlement.
   const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true });
   const selectedPermissions = current && g.analysis_result !== undefined && permissions.leader_may_be_named !== true
@@ -6941,7 +6941,7 @@ export function createAgentCapabilities(
           const certainty = goalCertaintyForAgent(executed ?? read.analysis_result,
             { scenario_id: ctx.scenario_id, analysis_state: outcome.ran ? outcome.analysisState : undefined }, certaintyReadOf(read));
           firstAnalysis = { ...firstAnalysis, claim_permissions: withNonlinearIdentity(firstAnalysis.claim_permissions, after.raw,
-            readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result),
+            readEvaluatedIdentityNodeIds(read.analysis_identity_evaluated_node_ids)), ...withGoalChance(read.analysis_result, read.graph),
           ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
           // The read route's own model and revision (the same read as the permission): `graph` / `graph_hash`.
           ...withIdentityCard(identityCardFor(ctx, { raw: read.graph, graph_hash: read.graph_hash })) };
@@ -8414,7 +8414,7 @@ export function createAgentCapabilities(
         claim_permissions: graphForProduct === undefined ? permissions : withNonlinearIdentity(permissions, graphForProduct, evaluatedForProduct),
         ...(limitChecks !== undefined ? { limit_checks: { limits: limitChecks, note: LIMIT_CHECKS_NOTE } } : {}),
         // ⛔ PLoT #416: the goal's chance withheld on every option — the sentence to say and the rule (`../goal-chance-withheld.ts`).
-        ...withGoalChance(result),
+        ...withGoalChance(result, graphForProduct ?? postRunRead?.raw),
         // ⭐ MC D1 (c): #416's ONE ask, from the graph this Run analysed (the read above), said after its reason by the route.
         ...(() => {
           const say = result !== undefined && postRunRead ? identityAskLineFor(result, postRunRead.raw) : null;
