@@ -66,12 +66,13 @@ describe('served paul-1: the held-fixed fact stays at rest, short; its ask moves
 
   it('RED: at rest the line reads "Held fixed (no option changes them): <labels>." — before the marker, no dash, no ask', () => {
     expect(split, 'the UI split still works').not.toBeNull();
-    expect(split!.lead.endsWith('The model was saved. Held fixed (no option changes them): Cold emails to investment firms; Warm connections to investment….')).toBe(true);
+    expect(split!.lead.endsWith('Held fixed (no option changes them): Cold emails to investment firms; Warm connections to investment….')).toBe(true);
+    expect(split!.atRest).not.toMatch(/\bsaved\b/i);
     expect(split!.after, 'nothing after the questions is left at rest').toBe('');
     expect(split!.atRest).not.toContain('—');
     expect(split!.atRest).not.toMatch(/\?/);
-    // The host's own words at rest: "The model was saved." + the held-fixed line — 19, was 4 + 34 = 38.
-    expect(words(split!.atRest) - words("The model's own words.")).toBe(19);
+    // P50: only the held-fixed line remains at rest — 15 words.
+    expect(words(split!.atRest) - words("The model's own words.")).toBe(15);
   });
 
   it('RED: the ask is not lost — it is the last item of the toggle list (wire `_agent.open_questions`) and of the text', () => {
