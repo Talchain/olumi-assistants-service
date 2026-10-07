@@ -1,4 +1,5 @@
 /** S2b: deterministic admission and date refresh for the forecast sum. No level on the goal. */
+import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import type { CandidateModel, AdmittedModel } from '../agent-lane/admit-model.js';
 import { goalDeadlineOf, isShareCalendarDate, soleGoalOf } from './goal-kind.js';
 import { sayDate, timeBetween } from './deadline-date.js';
@@ -8,22 +9,28 @@ type Rec = Record<string, any>;
 const rec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /** Brief-owned event/deadline scope; drafter flags never attest it. Bounded linear scans. */
-export const EVENT_WORDS = /\b(?:deadlines?|launch(?:ing)?|deliver(?:y|ing)?|ship(?:ping)?|on[ \t]{1,4}time|go[ \t]{1,4}live|release)\b/i;
+export const EVENT_WORDS = /\b(?:launch(?:ed|ing)?|deliver(?:ed|y|ing)?|ship(?:ped|ping)?|finish(?:ed|ing)?|complet(?:e|ed|ion|ing)|go(?:es)?[ \t]{1,4}live|releas(?:e|ed|ing))\b/i;
 export const EVENT_DEADLINE = /\b(?:deadlines?|on[ \t]{1,4}time|by[ \t]{1,4}(?:\d{1,4}\b|Q[1-4]\b|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|next|the|year|month|week)|within[ \t]{1,4}\d{1,3}[ \t]{1,4}(?:days?|weeks?|months?))\b/i;
 export const QUANTITY_TARGET = /[£$€][ \t]{0,4}\d|\b\d[\d,.]{0,20}[ \t]{0,4}(?:%|(?!(?:days?|weeks?|months?|years?|developers?|people|leads?|January|February|March|April|May|June|July|August|September|October|November|December)\b)[a-z][a-z-]{0,40}\b)/i;
 export function briefAttestsEventByDate(brief: unknown, goal?: CandidateModel['goal']): boolean {
   if (typeof brief !== 'string' || brief.length > 20000) return false;
-  if (goal && (!EVENT_WORDS.test(goal.metric) || QUANTITY_TARGET.test(goal.metric)
+  if (goal && (QUANTITY_TARGET.test(goal.metric)
     || (goal.value !== null && goal.value !== undefined))) return false;
-  return brief.split(/[.!?;\n]/).some(sentence => EVENT_WORDS.test(sentence)
-    && EVENT_DEADLINE.test(sentence) && !QUANTITY_TARGET.test(sentence));
+  const words = (text: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w && !['a', 'an', 'the'].includes(w));
+  return brief.split(/[.!?;\n]/).some(sentence => {
+    if (!EVENT_WORDS.test(sentence) || !EVENT_DEADLINE.test(sentence) || QUANTITY_TARGET.test(sentence)) return false;
+    if (!goal) return true;
+    const held = new Set(words(sentence)), deliverable = words(goal.deliverable ?? ''), metric = words(goal.metric);
+    return deliverable.length > 0 && metric.length > 0 && [...deliverable, ...metric].every(w => held.has(w));
+  });
 }
 
 /** Persisted provenance is passthrough at every graph boundary, unlike node labels. */
 export function eventShareCarrierOf(graph: unknown): Rec | null {
   const goal = soleGoalOf(graph);
   if (!rec(graph) || !goal || !Array.isArray(graph.edges)) return null;
-  const carriers = graph.edges.filter((e: Rec) => e.to === goal.id && e.provenance?.share_by_date?.role === 'team');
+  const carriers = graph.edges.filter((e: Rec) => e.to === goal.id && eventShareEndpointMatches(e,
+    graph.nodes?.find((n: Rec) => n.id === e.from), goal));
   return carriers.length === 1 ? carriers[0] : null;
 }
 export function isEventShareForecast(graph: unknown): boolean {
@@ -74,7 +81,7 @@ export function admitEventByDate(candidate: CandidateModel): AdmittedModel {
   ];
   const edges: Rec[] = [{ from: 'event_team', to: 'event_goal', exists_probability: 1,
     strength: { mean: 1, std: 0.01 }, effect_direction: 'positive', provenance: { source: 'cee_hypothesis', definitional: true,
-      share_by_date: { role: 'team', deliverable, unresolved_option_ids: candidate.options.flatMap((o, i) =>
+      share_by_date: { role: 'team', team_id: 'event_team', goal_id: 'event_goal', deliverable, unresolved_option_ids: candidate.options.flatMap((o, i) =>
         o.is_status_quo !== true && !o.added_capacity ? [`event_option_${i + 1}`] : []) },
       natural_effect: { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit,
         strength_mean: 1, strength_mean_frame: 'edge_strength' } } }];

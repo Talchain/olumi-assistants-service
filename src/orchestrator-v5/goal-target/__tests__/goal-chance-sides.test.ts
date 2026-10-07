@@ -31,7 +31,7 @@ describe('goalChanceSideOf — each Run’s own stored display licence', () => {
     ['rounding disagrees', { high: 0.8 }, 'withheld'],
   ] as const)('P2-e/P2-f: stated-time reader parity — %s', (_name, change, expected) => {
     const warning = { ...range, range_by_option: { 'opt-a': { ...range.range_by_option['opt-a'],
-      kind: 'stated_time', basis: 'stated_time', quantity: 'months_to_finish', low: 0.25, high: 0.61, ...change } } };
+      kind: 'stated_time', basis: 'stated_time', quantity: 'months_to_finish', stated_estimate: { low: 6, high: 10, unit: 'months' }, low: 0.25, high: 0.61, ...change } } };
     const graph = { nodes: [{ id: 'factor', label: 'Team' }, { id: 'goal', label: 'Launch' }] };
     for (const location of ['enrichment', 'result'] as const) {
       const result = stored([warning], location);

@@ -32,6 +32,7 @@ export interface GoalChanceRange {
   readonly kind: 'link_strength' | 'link_existence' | 'stated_time';
   /** S2a endpoints hold the user's original time/pace at each end, not a link. */
   readonly basis?: 'stated_time';
+  readonly stated_estimate?: { readonly low: number; readonly high: number; readonly unit: string };
   readonly quantity?: 'months_to_finish' | 'share_per_month';
   readonly low?: number;
   readonly high?: number;
@@ -178,6 +179,7 @@ export function withShareByDateChanceGate<E>(envelope: E, graph: unknown, goalId
     const stated = os.stated_time as Rec;
     ranges[id] = { low_pct: lowPct, high_pct: highPct,
       low_rounding: 'whole', high_rounding: 'whole', kind: 'stated_time', basis: 'stated_time',
+      stated_estimate: { low: stated.low as number, high: stated.high as number, unit: stated.unit as string },
       quantity: stated.quantity as 'months_to_finish' | 'share_per_month', low: decision.low, high: decision.high,
       from: share.team_part_id, to: goalId as string, among: 'all' };
   }

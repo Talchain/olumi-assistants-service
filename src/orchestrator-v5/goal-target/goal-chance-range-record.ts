@@ -15,7 +15,13 @@ function validRange(v: unknown): v is GoalChanceRange {
     || (r.low_rounding === 'nearest_5' && r.low_pct % 5 !== 0) || (r.high_rounding === 'nearest_5' && r.high_pct % 5 !== 0)
     || (r.kind !== 'link_strength' && r.kind !== 'link_existence' && r.kind !== 'stated_time')
     || !id(r.from) || !id(r.to) || r.from === r.to || (r.among !== 'all' && r.among !== 'unsized_links')) return false;
-  return r.kind !== 'stated_time' || (r.basis === 'stated_time'
+  const estimate = rec(r.stated_estimate);
+  const validEstimate = estimate !== undefined && typeof estimate.low === 'number' && Number.isFinite(estimate.low)
+    && typeof estimate.high === 'number' && Number.isFinite(estimate.high) && estimate.low >= 0 && estimate.high >= estimate.low
+    && (r.quantity === 'months_to_finish' ? estimate.low > 0 && estimate.unit === 'months'
+      : typeof estimate.unit === 'string' && estimate.unit.startsWith('% of ')
+        && estimate.unit.endsWith(' per month') && estimate.unit.length > '% of  per month'.length);
+  return r.kind !== 'stated_time' || (validEstimate && r.basis === 'stated_time'
     && (r.quantity === 'months_to_finish' || r.quantity === 'share_per_month')
     && typeof r.low === 'number' && typeof r.high === 'number' && Number.isFinite(r.low) && Number.isFinite(r.high)
     && r.low >= 0 && r.high <= 1 && r.low <= r.high

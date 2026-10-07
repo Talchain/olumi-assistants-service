@@ -421,6 +421,7 @@ function projectEdge(raw: unknown, hold: EdgeHold): EdgeProjection {
       const ne = pickDefined((p.natural_effect as Record<string, unknown>), VOCABULARY.edge.provenance_natural_effect_fields);
       if (Object.keys(ne).length > 0) provenance.natural_effect = ne;
     }
+    if (Object.hasOwn(p, 'share_by_date')) provenance.share_by_date = p.share_by_date;
     if (Object.keys(provenance).length > 0) out.provenance = provenance;
   }
 

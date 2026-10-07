@@ -1,4 +1,4 @@
-import { goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
+import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../../goal-target/goal-horizon-write.js';
 import { readTeamTime, teamTimeCard, teamObservedState, teamSharePostimageIsScoped, type ApprovedTeamTime } from '../../goal-target/team-share-write.js';
 import { draftedTeamPartOf } from '../../goal-target/event-by-date-model.js';
 /**
@@ -3110,11 +3110,20 @@ export function createAgentCapabilities(
       goal_horizon: { goal_id: op.path, deadline: v.deadline, expected_deadline: v.expected_deadline as string | null,
         ...(draftedTeamPartOf(approvedRead.raw) !== null ? { reference_date: (op.value as { reference?: string }).reference } : {}) },
     });
+    // Retain the proposal's expected bytes BEFORE attempting a read that may fail after the write landed.
+    if (res.status === 'committed' || res.status === 'unconfirmed') {
+      const expected = applyGoalHorizonEdit(approvedRead.raw, { goal_id: op.path, deadline: v.deadline,
+        expected_deadline: v.expected_deadline as string | null, reference_date: (op.value as { reference?: string }).reference });
+      const postimage = expected.kind === 'mutated' ? expected.mutatedGraph : expected.kind === 'unchanged' ? approvedRead.raw : undefined;
+      if (postimage !== undefined) proposals.markPartial(parent.proposal_id, {
+        revision: computeAnalysisAffectingGraphHash(postimage as never)!, landed: [op.path], receipts: [], expected_postimage: postimage,
+      });
+    }
     if (res.status === 'unconfirmed') {
       const reread = await readGraph(ctx.scenario_id);
       if (reread !== null && goalDeadlineOf(reread.nodes.find(n => n.id === op.path)) === v.deadline
         && goalHorizonPostimageIsScoped(approvedRead.raw, reread.raw, op.path, (op.value as { reference?: string }).reference)) {
-        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [] });
+        proposals.markPartial(parent.proposal_id, { revision: reread.graph_hash, landed: [op.path], receipts: [], expected_postimage: reread.raw });
       }
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: 'not_confirmed', receipts: [],
         detail: 'This deadline was sent, but Olumi could not read the model back to confirm it. Say exactly that; never say it was recorded or not recorded.' };
@@ -5472,6 +5481,10 @@ export function createAgentCapabilities(
       }
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const recovery = proposals.partialProgressOf(args.proposal_id);
+      if (recovery?.expected_postimage !== undefined && !isDeepStrictEqual(recovery.expected_postimage, before.raw)) {
+        return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: args.proposal_id };
+      }
       const decision = proposals.authorise({
         proposal_id: args.proposal_id,
         scenario_id: ctx.scenario_id,

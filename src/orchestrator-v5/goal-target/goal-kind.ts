@@ -18,6 +18,7 @@
  * on time", "% likely"; must-not-fire "% of launch done", "% of customers", "churn %".
  */
 
+import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { endsOfGraph, validatedDefinition, withHeldUserLinks } from './held-user-links.js';
 import { timeBetween } from './deadline-date.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
@@ -139,6 +140,8 @@ export function shareByDateGoalOf(graph: unknown): ShareByDateGoal | null {
   if (new Set(nodes.map(n => n.id)).size !== nodes.length) return null;
   const edges = Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const inbound = edges.filter(e => e.to === goal.id);
+  // S2b's definitional goal must retain its admission-owned carrier; label coincidence cannot replace it.
+  if (goal.threshold_source === 'definitional' && !inbound.some(e => eventShareEndpointMatches(e, nodes.find(n => n.id === e.from), goal))) return null;
   if (inbound.length === 0 || new Set(inbound.map(e => e.from)).size !== inbound.length) return null;
   const endsOf = endsOfGraph(graph);
   // Attest the same held projection sent by Run, by link identity. A stored

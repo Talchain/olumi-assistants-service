@@ -231,6 +231,8 @@ export interface ReceiptSummary {
 export interface PartialProgress {
   /** The canonical revision this proposal's own partial write left. */
   readonly revision: string;
+  /** Expected bytes retained before read-back; retry must verify them before the revision gate. */
+  readonly expected_postimage?: unknown;
   /** The operation paths confirmed landed from readback. */
   readonly landed: readonly string[];
   readonly receipts: readonly ReceiptSummary[];
@@ -299,6 +301,8 @@ export class ProposalStore {
     this.applied.set(id, receipts);
     this.partial.delete(id);
   }
+
+  partialProgressOf(id: string): PartialProgress | undefined { return this.partial.get(id); }
 
   /** Record what THIS proposal's own write landed, and the canonical revision that left. */
   markPartial(id: string, progress: PartialProgress): void {

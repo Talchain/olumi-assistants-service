@@ -49,6 +49,8 @@ describe('S4c: the lines are the SCREEN’s, word for word, in its order', () =>
     const result = { inference_warnings: [{ code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Stated time.',
       option_ids: ['status_quo'], target: { comparator: 'at_least', value: 100, unit: '% of launch', by_date: '2027-04-07' },
       range_by_option: { status_quo: { kind: 'stated_time', basis: 'stated_time', quantity,
+        stated_estimate: { low: quantity === 'months_to_finish' ? 6 : 10, high: quantity === 'months_to_finish' ? 10 : 16,
+          unit: quantity === 'months_to_finish' ? 'months' : '% of launch per month' },
         low: 0, high: 1, low_pct: 0, high_pct: 100, low_rounding: 'whole', high_rounding: 'whole',
         from: 'team_share', to: 'launch_share', among: 'all' } },
     }] };

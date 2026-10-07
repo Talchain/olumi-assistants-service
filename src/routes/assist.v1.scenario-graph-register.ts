@@ -1,3 +1,4 @@
+import { assertShareByDatePreserved, ShareByDateOwnershipError } from '../orchestrator-v5/goal-target/share-by-date-carrier.js';
 import { keepMeanProjectionWhenSizeUnchanged } from '../cee/magnitude/link-sizing.js';
 import { isDeepStrictEqual } from 'node:util';
 import { GoalScopeIdentityConflict, assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, scopeIssuesAfterWrite, scopeOf } from '../orchestrator-v5/agent-lane/goal-scope.js';
@@ -895,11 +896,14 @@ export default async function route(app: FastifyInstance) {
       // server read as the CAS base above.
       let graphToRegister: typeof parsed.data;
       try {
+        assertShareByDatePreserved(baseGraphForInvariants, parsed.data);
         graphToRegister = withStoredOptionGapsWhenUnstated(withStoredEdgeFactsWhenUnstated(
           withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
           baseGraphForInvariants,
         ), baseGraphForInvariants);
       } catch (err) {
+        if (err instanceof ShareByDateOwnershipError) return reply.code(409).send(buildErrorV1('BAD_INPUT',
+          'The share_by_date carrier is server-owned. Nothing was written.', { code: 'SHARE_BY_DATE_SERVER_OWNED' }, requestId));
         if (!(err instanceof OptionGapApprovalRequiredError)) throw err;
         return reply.code(409).send(buildErrorV1('BAD_INPUT',
           'Changes to the listed model gaps and questions need approval on their change card. Nothing was written.',

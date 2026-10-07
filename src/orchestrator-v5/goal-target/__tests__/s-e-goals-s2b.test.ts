@@ -25,13 +25,18 @@ import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/ut
 import type { SessionTurnWrite } from '../../session/store.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
-import { draftedTeamPartOf, withEventShareDate, EVENT_WORDS, EVENT_DEADLINE, QUANTITY_TARGET } from '../event-by-date-model.js';
+import { draftedTeamPartOf, withEventShareDate, briefAttestsEventByDate, EVENT_WORDS, EVENT_DEADLINE, QUANTITY_TARGET } from '../event-by-date-model.js';
 import { shareByDateGoalOf, goalKindOf } from '../goal-kind.js';
 import { teamShareMoments, extraShareMoments } from '../event-by-date-share.js';
 import { withShareByDateFrame } from '../share-by-date-run.js';
 import { decisionInputLines, decisionInputAsk } from '../../agent-lane/decision-input-ask.js';
 import { noDeadEndAsks } from '../../agent-lane/goal-certainty.js';
 import { readTeamTime, TEAM_TIME, applyTeamShareEdit, teamObservedState, type ApprovedTeamTime } from '../team-share-write.js';
+import { goalChanceRangeRecordOf } from '../goal-chance-range-record.js';
+import { validatedDefinition, endsOfGraph } from '../held-user-links.js';
+import { applyAndValidateMutation, mergeMutatedGraphForPersistence } from '../../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { commitDirectAnswer } from '../../commit.js';
+import { composeDirectAnswerResponse } from '../../compose.js';
 import { withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 
 type Rec = Record<string, any>;
@@ -80,6 +85,7 @@ function world(initial = dated(), unconfirmFirst = false, now = '2026-10-07T09:1
   const graph = (): Rec => JSON.parse(json);
   const rows: { id: string; write: SessionTurnWrite }[] = [];
   const proposals = new ProposalStore();
+  let failedReadbacks = 0, failAfterCommit = false;
   const store = createMockSessionStore({
     loadGraph: async () => graph(), loadGraphAndBriefText: async () => ({ graph: graph(), briefText: null }),
     readExistingScenario: async () => ({ userId: null, graph: graph(), briefText: null, analysisInvalidatedAt: null }),
@@ -105,14 +111,16 @@ function world(initial = dated(), unconfirmFirst = false, now = '2026-10-07T09:1
       receipt: null, already_applied: true, committed_levels: [], links_resized: [] };
     expect(out.kind, JSON.stringify(out)).toBe('committed');
     if (out.kind !== 'committed') throw new Error('unverified');
+    if (failAfterCommit && commits.length === 1) failedReadbacks = 1;
     if (unconfirmFirst && commits.length === 1) return { status: 'unconfirmed' };
     return { status: 'committed', graph_hash: out.analysisGraphHash, receipt: null, already_applied: false, committed_levels: [], links_resized: [] };
   };
   const dispatch: InternalDispatch = async path => {
+    if (failedReadbacks > 0) { failedReadbacks--; return { status: 503, json: {} }; }
     if (!path.endsWith('/graph')) throw new Error(`Unexpected dispatch ${path}`);
     return { status: 200, json: { graph: graph(), graph_hash: computeAnalysisAffectingGraphHash(graph() as never) } };
   };
-  return { graph, replace: (g: Rec) => { json = JSON.stringify(g); }, rows, commits, proposals, commit,
+  return { graph, failNextPostWriteRead: () => { failAfterCommit = true; }, replace: (g: Rec) => { json = JSON.stringify(g); }, rows, commits, proposals, commit,
     caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { commitOptionLevels: commit,
       now: () => new Date(now) }) };
 }
@@ -382,9 +390,167 @@ describe('R2 identity-bound regression rows', () => {
       { id: 'goal', label: 'Feature launch' }] };
     const result = { inference_warnings: [{ code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Stated time.', option_ids: ['o'],
       target: { comparator: 'at_least', value: 100, unit: UNIT, by_date: DATE }, range_by_option: { o: { kind: 'stated_time', basis: 'stated_time',
-        quantity: 'months_to_finish', low: 0.2, high: 0.8, low_pct: 20, high_pct: 80, low_rounding: 'whole', high_rounding: 'whole', from: 'team', to: 'goal', among: 'all' } } }] };
+        quantity: 'months_to_finish', stated_estimate: { low: 6, high: 10, unit: 'months' }, low: 0.2, high: 0.8, low_pct: 20, high_pct: 80, low_rounding: 'whole', high_rounding: 'whole', from: 'team', to: 'goal', among: 'all' } } }] };
     expect(shareGoalChanceWords('the feature launch', DATE)).toBe('chance of finishing the feature launch by 7 April 2027');
     expect(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display?.o.stated_time?.chance_words).toBe(shareGoalChanceWords('the feature launch', DATE));
     expect(goalChanceScreenLinesForAgent(result, graph, true)[0]!.chance).toBe('‘Carry on as now’: between about 20% and 80% chance of finishing the feature launch by 7 April 2027, in this model, from the slow end of your 6–10 months to the fast end.');
   });
+});
+
+// R3 base identity: dl/goals-s2b-share-drafter @ 62603856286bcfb3ac37f88da18f8f0dafce7e56 (PR #2762).
+describe('R3 identity-bound RED rows', () => {
+  it('P1-A deadline alone is normal admission; feature-launch deadline is an event', () => {
+    const c = candidate(); c.goal.metric = 'Improve productivity by the next deadline'; c.goal.deliverable = 'productivity';
+    const normal = structuredClone(c); delete normal.goal.kind;
+    expect(admitCandidateModel(c, {}, c.goal.metric)).toEqual(admitCandidateModel(normal, {}, c.goal.metric));
+    expect(admitCandidateModel(candidate(), {}, BRIEF).nodes.find(n => n.kind === 'goal')).toMatchObject({ threshold_source: 'definitional' });
+  });
+  it('P2-B ship the app on time attests deliverable words in its event sentence', () => {
+    const c = candidate(); c.goal.metric = 'the app'; c.goal.deliverable = 'the app';
+    expect(admitCandidateModel(c, {}, 'ship the app on time').nodes.find(n => n.kind === 'goal')).toMatchObject({ threshold_source: 'definitional', goal_threshold_unit: '% of the app' });
+    const normal = structuredClone(c); delete normal.goal.kind;
+    expect(admitCandidateModel(c, {}, 'Ship the report on time. The app is useful.')).toEqual(admitCandidateModel(normal, {}, 'Ship the report on time. The app is useful.'));
+  });
+  const heldMissing = () => {
+    const c = candidate(); c.options[0]!.added_capacity = null;
+    const a = admitCandidateModel(c, {}, BRIEF);
+    const g = plainGraph(withEventShareDate({ nodes: a.nodes, edges: a.edges }, DATE, REF));
+    const write = applyTeamShareEdit(g, approved(g), computeAnalysisAffectingGraphHash(g as never)!);
+    if (write.kind !== 'mutated') throw new Error('refused');
+    return write.mutatedGraph;
+  };
+  const teamEdge = (g: Rec) => g.edges.find((e: Rec) => e.from === 'event_team' && e.to === 'event_goal');
+  it('P1-C forge unresolved [] moves analysis hash and generic mutation refuses it', () => {
+    const g = heldMissing(), forged = structuredClone(g);
+    teamEdge(forged).provenance.share_by_date.unresolved_option_ids = [];
+    expect(computeAnalysisAffectingGraphHash(forged as never)).not.toBe(computeAnalysisAffectingGraphHash(g as never));
+    expect(() => applyAndValidateMutation(g, clone => { teamEdge(clone).provenance.share_by_date.unresolved_option_ids = []; return { before: null, after: null }; })).toThrow(/share_by_date/);
+  });
+  it('P1-C dropped carrier with matching quantity labels is withheld, never level', () => {
+    const g = heldMissing(); delete teamEdge(g).provenance.share_by_date;
+    g.nodes.find((n: Rec) => n.id === 'event_team').label = 'Share of the feature launch';
+    g.nodes.find((n: Rec) => n.id === 'event_goal').label = 'Share of the feature launch';
+    expect(shareByDateGoalOf(g)).toBeNull();
+    const raw = { option_comparison: [{ option_id: 'event_option_1', probability_of_goal: 0.3 }] };
+    expect((withShareByDateChanceGate(raw, g, 'event_goal') as Rec).option_comparison[0].probability_of_goal).toBeUndefined();
+    expect(goalChanceLicenceOf(raw, g, 'event_goal')).toBeNull();
+  });
+  it('P1-C minted endpoint mismatch and missing actual node are not recognised', () => {
+    const g = heldMissing(), e = teamEdge(g);
+    e.provenance.share_by_date.team_id = 'event_capacity_2';
+    expect(draftedTeamPartOf(g)).toBeNull(); expect(shareByDateGoalOf(g)).toBeNull();
+    expect(validatedDefinition(e, endsOfGraph(g)(e))).toBeUndefined();
+    e.provenance.share_by_date.team_id = e.from;
+    g.nodes = g.nodes.filter((n: Rec) => n.id !== e.from);
+    expect(validatedDefinition(e, endsOfGraph(g)(e))).toBeUndefined();
+  });
+  it.each(['forge', 'drop'])('P1-C generic mutation refuses %s carrier independently of hash', mode => {
+    const g = heldMissing();
+    expect(() => applyAndValidateMutation(g, clone => {
+      if (mode === 'forge') teamEdge(clone).provenance.share_by_date.unresolved_option_ids = [];
+      else delete teamEdge(clone).provenance.share_by_date;
+      return { before: null, after: null };
+    })).toThrow(/share_by_date/);
+  });
+  it.each(['forge', 'drop', 'new', 'remove edge'])('P1-C generic D1 persisted merge refuses %s carrier', mode => {
+    const base = heldMissing(), next = structuredClone(base);
+    if (mode === 'forge') teamEdge(next).provenance.share_by_date.unresolved_option_ids = [];
+    if (mode === 'drop') delete teamEdge(next).provenance.share_by_date;
+    if (mode === 'new') next.edges.find((e: Rec) => e.from === 'event_capacity_2' && e.to === 'event_goal').provenance.share_by_date = teamEdge(base).provenance.share_by_date;
+    if (mode === 'remove edge') next.edges = next.edges.filter((e: Rec) => e !== teamEdge(next));
+    expect(() => mergeMutatedGraphForPersistence({ mutatedGraph: next, persistedBase: base, requestId: 'r3', scenarioId: SCENARIO })).toThrow(/share_by_date/);
+  });
+  it.each(['forge', 'drop'])('P1-C generic commit refuses %s carrier before append', async mode => {
+    const base = heldMissing(), next = structuredClone(base), append = vi.fn(async () => ({ id: 'bad' }));
+    if (mode === 'forge') teamEdge(next).provenance.share_by_date.unresolved_option_ids = [];
+    else delete teamEdge(next).provenance.share_by_date;
+    const store = createMockSessionStore({ loadGraph: async () => base, append, readMostRecentPendingActions: async () => [] });
+    await expect(commitDirectAnswer(composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'Changed', stage: 'frame' }), {
+      scenario_id: SCENARIO, turn_id: 'r3-commit', turn_class: 'direct_answer', handler_id: null, request_hash: 'r3', llm_calls_used: 0, duration_ms: 0, handler_facts: [], graph: next,
+    }, store)).rejects.toThrow(/share_by_date/);
+    expect(append).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('P1-D deadline lands then read-back fails; unconfirmed=%s retry succeeds once', async unconfirmed => {
+    const w = world(admitted(), unconfirmed); w.failNextPostWriteRead();
+    const r = await w.caps.proposeGoalDeadline!(ctx('The deadline is 6 months away.') as never, { deadline_words: '6 months', rationale: '' }) as Rec;
+    const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
+    expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ applied: false, refusal: 'not_confirmed' });
+    expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, applied: true, mutated: false });
+    expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: true, already_applied: true });
+    expect(w.rows).toHaveLength(1);
+  });
+  it.each(['months_to_finish', 'share_per_month'])('DGAI stated_time record requires original stated_estimate: %s', quantity => {
+    const g = heldMissing(), team = g.nodes.find((n: Rec) => n.id === 'event_team');
+    if (quantity === 'months_to_finish') {
+      const m = teamShareMoments(6, 4, 10);
+      team.observed_state = { ...team.observed_state, value: m.mean, std: m.sd, raw_value: m.mean * 100,
+        stated_time: { ...team.observed_state.stated_time, low: 4, high: 10 } };
+    } else {
+      const low = 8, high = 20, mean = 6 * (low + high) / 200, sd = 6 * (high - low) / 100 / Math.sqrt(12);
+      team.observed_state = { ...team.observed_state, value: mean, std: sd, raw_value: mean * 100,
+        stated_time: { quantity, low, high, unit: `${UNIT} per month`, deadline: DATE, reference_date: REF } };
+    }
+    const out = withShareByDateChanceGate({ option_comparison: [{ option_id: 'event_option_3', probability_of_goal: 0.4 }] }, g, 'event_goal') as Rec;
+    const record = out.inference_warnings.find((w: Rec) => w.code === 'GOAL_CHANCE_RANGE');
+    const stated = team.observed_state.stated_time;
+    expect(record.range_by_option.event_option_3.stated_estimate).toEqual({ low: stated.low, high: stated.high, unit: stated.unit });
+    expect(goalChanceRangeRecordOf(record)).toBeDefined();
+    const broken = structuredClone(record); delete broken.range_by_option.event_option_3.stated_estimate;
+    expect(goalChanceRangeRecordOf(broken)).toBeUndefined();
+    for (const estimate of [{ low: 10, high: 6, unit: 'months' }, { low: 6, high: 10, unit: '%' }, { low: -1, high: 10, unit: stated.unit }]) {
+      broken.range_by_option.event_option_3.stated_estimate = estimate;
+      expect(goalChanceRangeRecordOf(broken)).toBeUndefined();
+    }
+  });
+});
+
+describe('R3 carrier ownership and licence recovery controls', () => {
+  // Scoped (lane review of r3): an unreadable base refuses only a write that CARRIES a carrier (it could be forged).
+  // A write with none lands as before (commit-assigns-refs-without-a-base CONTROL, unchanged); a carrier it dropped
+  // leaves the forecast unrecognisable, which S2a withholds (row "dropped carrier … is withheld, never level").
+  it.each([
+    ['carries a carrier', false, true],
+    ['carries none (the carrier was dropped)', true, false],
+  ] as const)('P1-C unavailable server read: a write that %s', async (_case, drop, refused) => {
+    const next = dated(); if (drop) delete next.edges.find((e: Rec) => e.from === 'event_team').provenance.share_by_date;
+    const append = vi.fn(async () => ({ id: 'ok' }));
+    const store = createMockSessionStore({ loadGraph: async () => { throw new Error('unavailable'); }, append, readMostRecentPendingActions: async () => [] });
+    const write = commitDirectAnswer(composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'Changed', stage: 'frame' }), {
+      scenario_id: SCENARIO, turn_id: 'r3-read-failure', turn_class: 'direct_answer', handler_id: null, request_hash: 'r3', llm_calls_used: 0, duration_ms: 0, handler_facts: [], graph: next,
+    }, store);
+    if (refused) { await expect(write).rejects.toThrow(/share_by_date/); expect(append).not.toHaveBeenCalled(); return; }
+    await write.catch(() => undefined);
+    expect(shareByDateGoalOf(next)).toBeNull();
+  });
+  it('DGAI shared validator rejects missing stated_estimate independently of producer', () => {
+    const entry = { kind: 'stated_time', basis: 'stated_time', quantity: 'months_to_finish', low: 0.2, high: 0.8,
+      low_pct: 20, high_pct: 80, low_rounding: 'whole', high_rounding: 'whole', from: 'event_team', to: 'event_goal', among: 'all' };
+    const record = { code: 'GOAL_CHANCE_RANGE', severity: 'info', message: 'Stated time.', option_ids: ['event_option_3'], range_by_option: { event_option_3: entry } };
+    expect(goalChanceRangeRecordOf(record)).toBeUndefined();
+  });
+  it.each(['same hash label', 'analysis change'])('P1-D recovery never accepts an unrelated %s', async change => {
+    const w = world(admitted()); w.failNextPostWriteRead();
+    const r = await w.caps.proposeGoalDeadline!(ctx('The deadline is 6 months away.') as never, { deadline_words: '6 months', rationale: '' }) as Rec;
+    const yes = { ...ctx('Yes'), typed_approval_of: r.proposal_id };
+    await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id });
+    const other = w.graph();
+    if (change === 'same hash label') other.nodes.find((n: Rec) => n.id === 'event_option_1').label = 'Another choice';
+    else other.edges.find((e: Rec) => e.from === 'event_capacity_1' && e.to === 'event_goal').strength.mean = 0.4;
+    w.replace(other);
+    expect(await w.caps.authoriseChange(yes as never, { proposal_id: r.proposal_id })).toMatchObject({ ok: false, applied: false, refusal: 'superseded' });
+    expect(w.rows).toHaveLength(1); expect(w.commits).toHaveLength(1);
+  });
+});
+
+it('R3 event-span tokenisation 5k -> 20k timing row <8x', () => {
+  const c = candidate(); c.goal.metric = 'the app'; c.goal.deliverable = 'the app';
+  const elapsed = (n: number) => {
+    const prefix = 'ship the app on time ', input = prefix + 'x'.repeat(n - prefix.length), start = performance.now();
+    for (let i = 0; i < 1000; i++) briefAttestsEventByDate(input, c.goal);
+    return performance.now() - start;
+  };
+  elapsed(5000); elapsed(20000);
+  const small = elapsed(5000), large = elapsed(20000);
+  process.stdout.write(`event-span tokenisation ms ${JSON.stringify({ small, large, growth: large / small })}\n`);
+  expect(large / small).toBeLessThan(8);
 });

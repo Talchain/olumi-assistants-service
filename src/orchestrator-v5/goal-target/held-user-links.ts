@@ -11,6 +11,7 @@
  * ⭐ A VALIDATED DEFINITION holds too, whoever drew it (Science d5 #87 6011224941; DL): "Starter-tier MRR" → "MRR" at +£1
  * per £1 is an accounting identity, not a 20% chance that Starter revenue isn't revenue. `validatedDefinition` below.
  */
+import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { sameUnit } from '../agent-lane/same-unit.js';
@@ -57,6 +58,8 @@ export function currentDefinitionalCarrier(e: unknown): string | undefined {
 export interface LinkEnds {
   readonly fromLabel: string | undefined;
   readonly fromId?: string;
+  readonly fromKind?: string;
+  readonly toKind?: string;
   readonly toId?: string;
   readonly toLabel: string | undefined;
   readonly fromUnit: string | undefined;
@@ -72,7 +75,7 @@ export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
   const unitOf = nodeUnitOf(nodes);
   return (e) => (isRec(e)
-    ? { fromId: text(e.from), toId: text(e.to), fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label), fromUnit: unitOf(e.from), toUnit: unitOf(e.to) }
+    ? { fromId: text(byId.get(e.from)?.id), toId: text(byId.get(e.to)?.id), fromKind: text(byId.get(e.from)?.kind), toKind: text(byId.get(e.to)?.kind), fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label), fromUnit: unitOf(e.from), toUnit: unitOf(e.to) }
     : UNVALIDATED_ENDS);
 }
 
@@ -112,8 +115,8 @@ export function validatedDefinition(e: unknown, ends: LinkEnds): string | undefi
   if (ends.toUnit === undefined || !sameUnit(ends.toUnit, u) || (ends.fromUnit !== undefined && !sameUnit(ends.fromUnit, u))) return undefined;
   // Admission's durable, endpoint-bound team definition survives renaming.
   const carrier = isRec(e) && isRec(e.provenance) ? e.provenance.share_by_date : undefined;
-  if (isRec(carrier) && carrier.role === 'team' && u === `% of ${carrier.deliverable}`
-    && ends.fromId === (e as Rec).from && ends.toId === (e as Rec).to) return u;
+  if (carrier !== undefined) return isRec(carrier) && u === `% of ${carrier.deliverable}`
+    && eventShareEndpointMatches(e, { id: ends.fromId, kind: ends.fromKind }, { id: ends.toId, kind: ends.toKind }) ? u : undefined;
   return ends.fromLabel !== undefined && ends.toLabel !== undefined && labelHoldsQuantity(ends.fromLabel, ends.toLabel) ? u : undefined;
 }
 
