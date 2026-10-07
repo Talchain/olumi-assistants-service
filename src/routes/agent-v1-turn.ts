@@ -3838,7 +3838,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const r = proposalRecord(approvalCarrier, readbackGraph);
       if (r !== undefined) heldRecords.push(r);
     }
-    const offeredRecord = heldRecords.find(r => r.approve_action.id === offeredApprove?.id);
+    /**
+     * ⛔ A NEWER AGENT OFFER FOR THE SAME THING REPLACES THE OLDER ONE (PR Review @ fe509477, `link-effect-card-route`): an
+     * older held Agent proposal whose every target this answer's offer also sets is not held beside it. Its press would
+     * write the figure the user has just corrected, and the newer card on screen is that same change, restated. Only
+     * OLDER holds are replaced, so re-offering an old card never drops a newer one.
+     */
+    const offeredAgent = approvalCarrier !== undefined ? agentProposalOf(approvalCarrier) : undefined;
+    if (offeredAgent !== undefined && approvalCarrier !== undefined) {
+      const targets = new Set(offeredAgent.operations.map((o) => o.path));
+      const replaced = liveHolds.filter((h) => {
+        const older = agentProposalOf(h);
+        return h.chip_id !== approvalCarrier.chip_id && older !== undefined && older.operations.length > 0
+          && h.emitted_at_iso < approvalCarrier.emitted_at_iso && older.operations.every((o) => targets.has(o.path));
+      });
+      for (const h of replaced) proposals.discard(heldProposalId(h));
+      liveHolds = liveHolds.filter((h) => !replaced.includes(h));
+      heldRecords = heldRecords.filter((r) => !replaced.some((h) => heldProposalId(h) === r.proposal_id));
+    }
+    const offeredRecord =heldRecords.find(r => r.approve_action.id === offeredApprove?.id);
     // ⭐ S-D (DL 7 Oct, Canvas's served capture #2614): the PROPOSING turn offers "Not now" too, so a held proposal can be
     // declined from the first moment, not only from the next reply (the record's own `decline_action`).
     if (offeredRecord !== undefined && !offeredNow.some(a => a.id === offeredRecord.decline_action.id)) {
