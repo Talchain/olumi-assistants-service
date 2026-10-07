@@ -1,0 +1,24 @@
+{
+ "step": "D1-3",
+ "status": 200,
+ "cee_build": "2bdd441",
+ "ui": "adceb67c",
+ "request_body": {
+  "kind": "system_event",
+  "turn_id": "8ea5a7a1-c2ea-486f-907b-c7971c2ed2ac",
+  "scenario_id": "475968c0-5398-4668-876c-8ea13c45e587",
+  "stage": "analyse",
+  "event": {
+   "kind": "edge_strength_edit",
+   "from": "price_rise",
+   "to": "monthly_recurring_revenue",
+   "magnitude": 0.1,
+   "direction_intent": "preserve",
+   "expected": {
+    "mean": 0.7619047619047619,
+    "effect_direction": "positive"
+   },
+   "intent": "set"
+  }
+ }
+}
