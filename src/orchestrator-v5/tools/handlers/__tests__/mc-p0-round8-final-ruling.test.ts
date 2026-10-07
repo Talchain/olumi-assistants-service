@@ -56,7 +56,7 @@ const hash = (g: R) => computeAnalysisAffectingGraphHash(g as never);
 const link = (g: R) => g.edges.find((e: R) => e.from === 'x' && e.to === 'g');
 // RE-PINNED (no-dead-end (A), MC 21 + Science d5, #2623): this fixture's goal has no frame, so the link into it cannot be
 // sized yet; the statement asks today's level first (the served P5 question), and the existing card records it.
-const withholdWords = 'This comparison turns on the link from ‘Capacity’ to ‘Revenue’, whose strength nobody has set yet. To size it, I first need today’s level of ‘Revenue’. What is it?';
+const withholdWords = 'This comparison turns on the link from ‘Capacity’ to ‘Revenue’, whose strength isn\'t sized in the model yet. To size it, I first need today’s level of ‘Revenue’. What is it?';
 
 async function saveAndReload(g: R, facts: R[] = []): Promise<{ graph: R; facts: R[] }> {
   let row: R = {};
@@ -153,7 +153,7 @@ it('R8-6: three withholding links on two actual-move paths, duplicate endpoint, 
   expect(w.node_ids).toEqual(['x', 'y', 'g']); // unchanged raw walk order, back-compat
   // RE-PINNED (no-dead-end (A), MC 21 + Science d5, #2623): this fixture's goal has no frame, so no link into it can be
   // sized yet; the statement now asks today's level first (the served P5 question), and the existing card records it.
-  expect(w.message).toBe('This comparison turns on the links from ‘Quality’ to ‘Revenue’, from ‘Capacity’ to ‘Revenue’ and from ‘Capacity’ to ‘Quality’, whose strengths nobody has set yet. To size them, I first need today’s level of ‘Revenue’. What is it?');
+  expect(w.message).toBe('This comparison turns on the links from ‘Quality’ to ‘Revenue’, from ‘Capacity’ to ‘Revenue’ and from ‘Capacity’ to ‘Quality’, whose strengths aren\'t sized in the model yet. To size them, I first need today’s level of ‘Revenue’. What is it?');
   const cause = readUnsizedPathLeaderCause(r)!;
   expect(cause.links).toEqual(expected.map(l => ({ ...l,
     from_label: g.nodes.find((n: R) => n.id === l.from).label, to_label: g.nodes.find((n: R) => n.id === l.to).label })));
@@ -272,7 +272,7 @@ it('R8-2 AST: only the leader licence reads mean_projected in production; writer
 it('R8 wording budget keeps exact singular/plural grammar and truncates only endpoint labels', () => {
   const links = Array.from({ length: 3 }, (_, i) => ({ from: `x${i}`, to: 'g', from_label: 'Capacity '.repeat(100), to_label: 'Revenue '.repeat(100) }));
   expect(unsizedLinkSentence(links).length).toBeLessThanOrEqual(400);
-  expect(unsizedLinkSentence(links)).toContain('and 2 more, whose strengths nobody has set yet. Set them to see how much they matter.');
+  expect(unsizedLinkSentence(links)).toContain('and 2 more, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
 });
 
 
@@ -323,11 +323,11 @@ it('RD-1/RD-2 fa027 stored shape: licence permitted, all legacy names immediatel
 
 it('R8 plural list caps at three names, then N more; 400-char fallback uses fewer names and keeps complete count', () => {
   const links = Array.from({ length: 5 }, (_, i) => ({ from: `x${i}`, to: 'g', from_label: `Capacity ${i}`, to_label: 'Revenue' }));
-  expect(unsizedLinkSentence(links)).toBe('This comparison turns on the links from ‘Capacity 0’ to ‘Revenue’, from ‘Capacity 1’ to ‘Revenue’ and from ‘Capacity 2’ to ‘Revenue’ and 2 more, whose strengths nobody has set yet. Set them to see how much they matter.');
+  expect(unsizedLinkSentence(links)).toBe('This comparison turns on the links from ‘Capacity 0’ to ‘Revenue’, from ‘Capacity 1’ to ‘Revenue’ and from ‘Capacity 2’ to ‘Revenue’ and 2 more, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
   const long = links.map(l => ({ ...l, from_label: l.from_label.repeat(12), to_label: l.to_label.repeat(12) }));
   const said = unsizedLinkSentence(long);
   expect(said.length).toBeLessThanOrEqual(400);
-  expect(said).toContain(' and 4 more, whose strengths nobody has set yet.');
+  expect(said).toContain(' and 4 more, whose strengths aren\'t sized in the model yet.');
 });
 
 
@@ -368,7 +368,7 @@ it('R7-3 (#2613 CR b, DL 0df0e1 + e8): unread whole-product gate AND projected-m
   // Gate 5 withholds every option, so sizing the link could not lift it: no unsized-path cause is stated for this Run.
   expect(readUnsizedPathLeaderCause(r)).toBeUndefined();
   // Buddy r4 P1: the Run's own warning keeps its code and links (the licence guard reads them) but asks and offers nothing.
-  expect(placeholder.message).toContain('nobody has set yet.');
+  expect(placeholder.message).toContain('sized in the model yet.');
   expect(placeholder.message).not.toMatch(/to see how much|Set (?:it|them|your own)/);
   expect(placeholder).not.toHaveProperty('acceptable_links');
   expect(codes).not.toContain('GOAL_FIGURES_OLUMI_SUPPLIED_LINK');
@@ -383,7 +383,7 @@ it('R7-3 (#2613 CR b, DL 0df0e1 + e8): unread whole-product gate AND projected-m
       blocks: [{ type: 'analysis_result', ...r }] } as never,
       { requestId: 'r8-both-gates', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: reason, graph: g } as never);
     expect(wire.response.assistant_text, String(reason)).toContain('Olumi has not read your goal as the product of your own figures');
-    expect(wire.response.assistant_text, String(reason)).not.toMatch(/nobody has set yet|Set (?:it|them) to see/);
+    expect(wire.response.assistant_text, String(reason)).not.toMatch(/(?:isn't|aren't) sized in the model yet|Set (?:it|them) to see/);
   }
 });
 

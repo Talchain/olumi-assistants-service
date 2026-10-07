@@ -364,8 +364,11 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     const b = r.json() as Body;
     expect(callModelOutputs).toEqual([]);
     expect(b._agent.tool_calls.find((c) => c.name === 'give_provisional_view')).toMatchObject({ ok: false, refusal: 'not_withheld' });
-    expect(b.assistant_text.replace(/^• /gm, '- ')).toBe(`${REPLY.text}\n\nThe sources of this comparison’s factor starting values are unavailable.`);
-    expect('_answer_shape' in b, 'the host disclosure stays visible').toBe(false);
+    // Re-pinned for S-A (DL ruling R1, 7 Oct): the basis is a host disclosure; it is kept exactly once and MAY sit under
+    // "More detail". The reply passes the ONE composer (its text is the shape's derivation when shaped).
+    const BASIS = 'The sources of this comparison’s factor starting values are unavailable.';
+    expect(b.assistant_text.split(BASIS)).toHaveLength(2);
+    for (const line of REPLY.text.split('\n').filter((l) => l.trim() !== '')) expect(b.assistant_text).toContain(line.replace(/^\s*[-•*]\s+/, '').trim());
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });
 });

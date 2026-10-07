@@ -90,7 +90,7 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, isDecisionInputAsk, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, isDecisionInputAsk, openQuestionsSegment, textAtRest, withB3LinesAtRest, withDecisionInputAskDisplay, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
@@ -116,7 +116,8 @@ import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/ag
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
-import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
+import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
+import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -158,7 +159,7 @@ import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
-import { breakEvenFor, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { breakEvenFor, breakEvenLine, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import {
   leaderStandingOf,
@@ -179,7 +180,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { ANSWER_SHAPE_MAX_BULLETS, AnswerShapeSchema, deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure, withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
+import { withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /**
@@ -649,7 +650,7 @@ export const GOAL_CHANCE_RANKING_INSTRUCTION =
 
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}',
-  [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' '),
+  [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' '),
 );
 
 /**
@@ -892,87 +893,6 @@ export function leavesProposalAwaitingApproval(
       const { proposal_id: _hidden, ...rest } = d;
       return rest;
     })).length > 0);
-}
-
-/**
- * ⭐ AN ANALYSIS REPLY ARRIVES HEADLINE FIRST (UI contract UI-SEM-090; agreed design #69 5831886008).
- * A Run reply on this route is a finding, a few bullets and often a closing line, and with no sidecar
- * the UI renders it whole as free text. The product's own `_answer_shape` sidecar makes it headline + at
- * most three bullets, with the rest behind "Show more" — the SAME synthesiser and derivation route-v2's
- * egress uses (`routing/answer-shape.ts`), never a second one.
- *
- * ⛔ THE TIE HOLDS BY IDENTITY: `assistant_text` is SET to `deriveAnswerTextFromShape(shape)` in the same
- * object that carries the shape, so the text and its sidecar cannot describe different answers.
- *
- * SCOPE: only a response that carries an `analysis_result` block — the explicit Run, the automatic first
- * pass on a build turn, and any turn answered over a current result. A response with no result block
- * (a blocked Run, a turn on a model with no current result) is returned by reference, byte-identical. So
- * is one that already carries a shape, one the synthesiser declines (a single sentence, or nothing after
- * the bullets to put behind the toggle), and one below the floor with no bullet.
- *
- * ⚠ A DELIBERATE DIFFERENCE FROM ROUTE-V2'S GATE. Route-v2 shapes only above the collapse floor
- * (`warrantsProgressiveDisclosure`), because below it a shape could turn "the user reads all of it"
- * into "the user reads one sentence". Here a reply below the floor is shaped too, but ONLY when the shape
- * keeps at least one bullet on the face, so what shows is headline + bullets, never a lone sentence.
- * Above the floor it is shaped exactly as route-v2 would shape it.
- *
- * ⛔ CALL IT ON THE FINAL PROSE — after the withheld-leader gate and every other rewrite of
- * `assistant_text` on this route — so a headline or bullet can never carry a sentence a gate removed.
- *
- * ⛔ CONSENT BEFORE BREVITY: A TURN THAT ASKS FOR AN APPROVAL IS NEVER SHAPED. The build turn's first pass
- * with a four-figure starting point, or a proposal made over a current result, would put figure four behind
- * "Show more" beside the chip that approves all four. So a response whose `suggested_actions` carry the
- * approve chip (`offersApproval`), or a turn the route says left a proposal awaiting a yes whether or not a
- * chip names it (`turn.proposalAwaitingApproval`, from `approvalChipsFor`'s own rule), is returned by
- * reference, byte-identical.
- *
- * ⛔ OLUMI'S OWN LINES STAY ON THE FACE (DL item 3, 2 Oct; CODEX r2 P1 on #2509). The host appends its disclosures and asks
- * AFTER the narrator's words: K3's "left out of this analysis", A7, D1's target ask, a withheld figure's sentence. The UI
- * renders `_answer_shape` INSTEAD of the text (headline + ≤3 bullets, the rest behind "Show more"), so a shape built over
- * the whole reply folds exactly those lines away whenever the narrator writes bullets. There is no face slot for them in
- * the shape except for ONE typed exception: the Explain robustness caveat goes on the face as bullet 1. All other
- * host lines keep the reply whole. `turn.hostLinesInText` compares against the narrator plus exactly that caveat;
- * other host additions or edits — disclosures, asks, status, break-even arithmetic, a rerun's code line — ship whole,
- * as a leader-gate edit does.
- */
-export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
-  body: T,
-  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean; hostLinesInText?: boolean; faceCaveat?: string; narratorWords?: string } = {},
-): T {
-  if ('_answer_shape' in body) return body;
-  if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
-  // ⛔ The leader gate rewrote this text: its no-leader sentence and next action close the reply, and a
-  // shape would put them behind "Show more" (independent review of #1914, 5832549611). Ship it whole, as
-  // route-v2 does when its gate edits the text.
-  if (turn.leaderGateEditedText === true) return body;
-  if (turn.hostLinesInText === true) return body;
-  const blocks = body.blocks;
-  const carriesResult = Array.isArray(blocks)
-    && blocks.some((b) => b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'analysis_result');
-  if (!carriesResult) return body;
-  const text = body.assistant_text;
-  if (typeof text !== 'string' || text.trim().length === 0) return body;
-  // The caveat must not manufacture eligibility: remove narrator copies before synthesis and the floor.
-  const narratorWords = turn.narratorWords ?? text;
-  const caveat = turn.faceCaveat;
-  const wordsWithoutCaveat = caveat === undefined ? narratorWords : withoutSentenceCopies(narratorWords, caveat);
-  let shape = synthesiseAnswerShapeFromText(wordsWithoutCaveat);
-  if (shape === null) return body;
-  const derived = deriveAnswerTextFromShape(shape);
-  if (!warrantsProgressiveDisclosure(derived) && shape.bullets.length === 0) return body;
-  if (turn.faceCaveat !== undefined) {
-    const sentence = turn.faceCaveat;
-    // Exact narrator copies were removed before synthesis; insert the sole copy on the face.
-    const bullets = [sentence, ...shape.bullets];
-    const overflow = bullets.length > ANSWER_SHAPE_MAX_BULLETS ? bullets.pop()! : '';
-    const parsed = AnswerShapeSchema.safeParse({
-      headline: shape.headline, bullets,
-      detail: [overflow, shape.detail].filter(Boolean).join('\n\n'),
-    });
-    if (!parsed.success) return body;
-    shape = parsed.data;
-  }
-  return { ...body, assistant_text: deriveAnswerTextFromShape(shape), _answer_shape: shape };
 }
 
 /** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
@@ -2579,24 +2499,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let explanationRead: Awaited<ReturnType<typeof readBackState>> | undefined;
     /**
      * The NARRATOR's own words on this turn, exactly as the model wrote them (the explanation's raw answer, or the Agent
-     * loop's reply), or null when the reply is Olumi's own text. The answer shape is built ONLY when the final text is
-     * still exactly these words, plus the typed robustness caveat if owed: other host additions ship whole.
+     * loop's reply), or null when the reply is Olumi's own text. Read for the Explain robustness caveat; the reply's shape
+     * is the composer's (`reply/compose-reply.ts`), over the final text.
      */
     let narratorWords: string | null = null;
     let explainRobustnessCaveat: string | null = null;
     let explainFallbackText: string | undefined;
-    /**
-     * The host COMPOSED this reply (CODEX r2 on #2517): it can strip a narrator sentence and restore an identical host line
-     * (the save receipt, a rerun's code line), so equal final text does not prove the narrator's words stand alone. Set where
-     * the host composes, never inferred from the bytes.
-     */
-    let hostComposed = false;
     let explanationBriefText: string | null = null;
     /** A Run with no result: its typed outcome's own chips (the identity ask's "Check the figures", a retry), `run-outcome.ts`. */
     let runOutcomeChips: OfferedAction[] = [];
     let runOutcomeSaid = false;
     /** Which typed outcome this turn's Run was said as (`run-outcome.ts`), on either path; `undefined` when none. */
     let runOutcomeKind: RunOutcome['kind'] | undefined;
+    /** CEE's own words for a Run that did not run (the Run button), a typed host part for the composer. */
+    let runOutcomeText: string | undefined;
     let result: AgentTurnResult | undefined;
     /** S-D: this turn's approve-with-edits applied nothing (its own sentence says so; no generic "Not saved" line). */
     let editsRefusedThisTurn = false;
@@ -2824,7 +2740,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           narratorWords = answer;
           // M2: Olumi's code line first, then the model's sentences that pass RC's checker (a hit drops that sentence only).
           const composed = rerunPlan !== null ? composeRerunExplanation(answer, rerunPlan) : null;
-          if (composed !== null) hostComposed = true;
           if (composed !== null && composed.dropped.length > 0) log.info({ scenario_id: scenarioId, failed: composed.failed, dropped: composed.dropped.length }, 'agent-lane: rerun explanation sentences failed RC checks — dropped');
           const said = composed?.text ?? answer;
           interpreted = typed !== null || composed !== null
@@ -2864,6 +2779,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ];
       const outcome = (ran as { run_outcome?: RunOutcome }).run_outcome;
       if (outcome !== undefined) { runOutcomeChips = outcome.chips.map((c) => ({ ...c })); runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
+      if (ran.ran !== true && outcome !== undefined) runOutcomeText = outcome.text;
       const text = ran.ran === true ? RUN_RESULT_READY_TEXT
         : outcome !== undefined ? outcome.text : interpretationUnavailableText(ran);
       fastPath = 'run';
@@ -3494,6 +3410,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * time; the control beside it (next step, or Run) is added to the chips below.
      */
     const firstAnalysisSaid = firstAnalysis !== undefined ? firstAnalysisSentence(firstAnalysis.outcome) : null;
+    /** The withheld goal chance's reason as owed this turn (pure; the same value as its owed line below), typed for the composer. */
+    const goalChanceOwed = goalChanceLineOwed(result.tool_results, text);
     const owed = stateFacts.current_state_unknown === true
       ? [...valueChangeDisclosures(stateFacts)]
       : [
@@ -4090,7 +4008,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       || fa !== undefined
       || result.tool_calls.some((c) => c.name === 'run_analysis');
     let leaderClaimEnforced = false;
-    let leaderGateEditedText = false;
+    /** The paragraph the leader gate appended (its withheld reason): a must-face obligation for the reply composer. */
+    let leaderGateClosing: string | null = null;
     if (analysisBearing) {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       const enforced = enforceAgentLaneLeaderClaimsAtWire(wireBody, {
@@ -4116,10 +4035,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       });
       if (enforced.changed) {
         leaderClaimEnforced = true;
-        leaderGateEditedText = enforced.editedFields.includes('assistant_text');
+        const beforeGate = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
         // A shape sidecar describes the text it was built from; it goes with an edit to that text.
         const { _answer_shape: _dropped, ...withoutShape } = enforced.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (enforced.editedFields.includes('assistant_text') ? withoutShape : enforced.response) as OlumiResponse & Record<string, unknown>;
+        // The gate appends its closing as the last paragraph (`withheld-leader-fail-closed.ts`): by identity, the
+        // paragraph the gated text ends with that the text before the gate did not hold.
+        const afterGate = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
+        const cut = afterGate.lastIndexOf('\n\n');
+        const closing = (cut === -1 ? afterGate : afterGate.slice(cut + 2)).trim();
+        if (closing !== '' && !beforeGate.includes(closing)) leaderGateClosing = closing;
       }
     }
     /**
@@ -4136,7 +4061,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const breakEven = ranAnalysisThisTurn
       && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && retainedScopeIssues.length === 0 ? breakEvenFor(readbackGraph, identityEvaluated) : null;
+    let breakEvenSaid: string | null = null;
     if (breakEven !== null && typeof wireBody.assistant_text === 'string') {
+      breakEvenSaid = breakEvenLine(breakEven, { afterIdentityAsk: runOutcomeKind === 'identity_ask' });
       // After "The figures don't add up … Which is right?", the arithmetic is one side of the conflict: it opens on its
       // condition, "If MRR is …", with no lead-in that reads as an answer (AIQ #72 5868909577).
       wireBody = { ...wireBody, assistant_text: withBreakEvenAnswer(wireBody.assistant_text, breakEven, { afterIdentityAsk: runOutcomeKind === 'identity_ask' }) };
@@ -4151,9 +4078,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * nothing under it) was the Explain turn, which "ran an analysis" never covered. Never on a stale explanation.
      */
     const explainsCurrentRun = fastPath === 'explain' && narrationStatus !== 'stale';
+    /** The screen's chance lines this turn owes (required evidence: the reply composer keeps them on the face). */
+    let screenLines: ReturnType<typeof goalChanceScreenLinesForAgent> = [];
     if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       const rangeCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
-      const ranged = withScreenLinesOwed(wireBody.assistant_text, goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, rangeCurrent));
+      screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, rangeCurrent);
+      const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines);
       if (ranged.added > 0) {
         wireBody = { ...wireBody, assistant_text: ranged.text };
         log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
@@ -4194,14 +4124,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(turnId !== undefined ? { turnId } : {}),
       })._agent.provisional_view;
     })();
-    /**
-     * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:
-     * this is after the last rewrite of `assistant_text` on this route (write-claim removal, disclosures,
-     * proposal-id scrub, the leader gate above), so the shape is built from the prose the user receives,
-     * and before the answer row is written, so a replay returns the same words. Never on a turn that asks
-     * for an approval: the route's own offer, or a proposal the chip rule left without a chip. Never on
-     * a turn whose text the leader gate rewrote: its disclosure stays on the face.
-     */
     // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
     // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
     // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
@@ -4209,18 +4131,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
     }
-    const finalText = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
-    const narratorWithCaveat = narratorWords === null ? null
-      : explainRobustnessCaveat === null ? narratorWords
-        : placeExplainCaveat(narratorWords, explainRobustnessCaveat);
-    if (fastPath !== 'method') wireBody = withAnalysisAnswerShape(wireBody, {
-      proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
-      leaderGateEditedText,
-      // Only the typed robustness caveat is allowed beside narrator words; every other host obligation stays whole.
-      ...(explainRobustnessCaveat !== null ? { faceCaveat: explainRobustnessCaveat, narratorWords: narratorWords! } : {}),
-      hostLinesInText: narratorWithCaveat === null || finalText.trim() !== narratorWithCaveat.trim() || hostComposed
-        || (statusText ?? '').trim() !== '' || owed.length > 0 || basis !== null || decisionLines.length > 0,
-    });
     let pendingPreview: ProposalPreview | undefined;
     /**
      * ⭐ T2 — THE GUIDANCE ROW (M1; `turn-context/guidance-wire.ts`): at most one coaching row (+ one edits row) from this
@@ -4296,6 +4206,84 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (freshScopeQuestion !== null && !leaderFreeEnvelope) {
       const resting = textAtRest(String(wireBody.assistant_text ?? ''));
       wireBody = { ...wireBody, assistant_text: resting.includes(freshScopeQuestion) ? resting : `${resting} ${freshScopeQuestion}`.trim() };
+    }
+    /**
+     * ⭐⭐ S-A REPLY SHAPE v1 — THE ONE LAST WRITER OF THE REPLY'S SHAPE (lane COPY-SHAPE, DL 0fd71f, 7 Oct; Paul: "It was a
+     * better length before with the three bullets as a construct"; `agent-lane/reply/compose-reply.ts`). HERE, after every
+     * prose gate and the scope question, before history, the durable row and the response, so what is stored, replayed and
+     * shown is one text: a headline, at most three bullets, and the rest under "More detail" (`_answer_shape`, rendered by
+     * DGAI `AnswerBody`). It replaces `withAnalysisAnswerShape` (Run replies only): every Agent-lane reply passes here.
+     * Sentences are moved, never removed or cut; the composer's own invariant ships the text whole on any difference.
+     * TYPED RESPONSE PROFILES by turn kind (DL, AIE line review 6037446159 item 5): coaching (≤3 bullets, ≤75 face words),
+     * method_step (one structured prompt, never reshaped: R3, the worksheet is the chat verbatim), proposal (typed card +
+     * this reply as its disclosure, never reshaped: R2, consent before brevity). Must-face on coaching, by identity: the
+     * turn's asks, the leader gate's closing and every no-leader sentence, the Explain caveat, and required evidence (screen
+     * chance lines, basis, a root treated as zero) and the withheld goal chance's reason (S-E GOALS #2742). Every other host
+     * line (owed disclosures, the status/receipt, CEE's run words, the arithmetic) is ONE typed part, never split, that may
+     * go to detail (R1). The leader-free envelope, and a turn no model wrote words for (`host_composed`), ship whole.
+     * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
+     */
+    {
+      const reply = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
+      const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
+      // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
+      // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
+      // this same final body, plus the paragraph the gate appended and every fixed no-leader sentence present.
+      const coHold = goalFigureCoHoldOf((wireBody as { blocks?: unknown }).blocks, readbackGraph ?? null, typedNow ?? undefined);
+      const obligations: FaceObligation[] = [
+        ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
+        ...[leaderGateClosing, coHold?.say, coHold?.why, ...AGENT_NO_LEADER_SENTENCES.filter((line) => reply.includes(line))]
+          .filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'withheld_reason' as const, text })),
+        // #2565: a licensed Explain of a fragile Run names a finding; its robustness caveat qualifies it, on the face.
+        ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat }] : []),
+        // Required evidence, never hidden (AIE line review): the screen's chance lines, the comparison's basis, a root
+        // the Run treated as zero. A chance and what it depends on are ONE finding: the joined line (as
+        // `withScreenLinesOwed` writes it) binds as one unit when present, else each sentence binds where it stands.
+        ...[...screenLines.flatMap((l) => [l.depends === '' ? null : `${l.chance} ${l.depends}`, l.chance, l.depends]), basis, rootLine]
+          .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text) => ({ role: 'evidence' as const, text })),
+        // The withheld goal chance's reason (S-E GOALS #2742: the chance-goal sentence speaks alone) is a withheld reason:
+        // the whole owed line when it stands, else each of its sentences where it stands (a re-ask may have dropped one).
+        ...(goalChanceOwed !== null ? [goalChanceOwed, ...sentencesOf(goalChanceOwed)] : [])
+          .map((text) => ({ role: 'withheld_reason' as const, text })),
+        // Every other host line is ONE typed part, never split (S-A: host lines inserted by identity): the owed
+        // disclosures and value changes, the status/receipt, CEE's own run words, and the arithmetic. A line that asks is
+        // the ask; the rest may sit under More detail (R1).
+        // A host line that carries the open-questions segment is typed up to it: the segment has its own place (detail,
+        // DGAI's questions toggle), and a part spanning it could not be located as one unit.
+        ...[...owed.filter((l) => l !== goalChanceOwed), narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
+          .map((l) => (typeof l === 'string' ? (openQuestionsSegment(l)?.lead ?? l).trim() : l))
+          .filter((l): l is string => typeof l === 'string' && l !== '')
+          .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),
+      ];
+      // THE TYPED RESPONSE PROFILE, by the turn's kind (DL, AIE line review 6037446159 item 5): a method press is one
+      // structured prompt; a turn that made a proposal is its typed card plus this reply as the disclosure; every other
+      // reply is coaching. Never chosen by reading the words.
+      const madeProposal = approvalCalls.some((c) => c.ok && typeof c.proposal_id === 'string' && c.name !== 'authorise_change' && c.name !== WITHDRAW_PROPOSAL);
+      const profile: ReplyProfile = fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
+      // No model wrote words this turn (a card press, an uninterpreted Run, the action bar's typed reply: S-B #2751's
+      // can't-yet / already-waiting words): every line is the host's, shipped as composed. The bar's sidecars (`_action`)
+      // are attached after this block and never pass the composer.
+      const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
+        : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model;
+      const composedReply = composeReplyShape({
+        text: reply,
+        obligations,
+        profile,
+        ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
+          : narratorModel === null ? { keepWhole: 'host_composed' as const } : {}),
+      });
+      const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
+      wireBody = (composedReply.shape !== null
+        ? { ...unshaped, assistant_text: composedReply.text, _answer_shape: composedReply.shape }
+        : unshaped) as OlumiResponse & Record<string, unknown>;
+      log.info({
+        event: 'agent_lane.reply_shaped', request_id: String(req.id), ...(turnId !== undefined ? { turn_id: turnId } : {}),
+        outcome: composedReply.outcome, ...(composedReply.reason !== undefined ? { reason: composedReply.reason } : {}),
+        fast_path: fastPath ?? 'agent', profile,
+        narrator_model: narratorModel,
+        obligations: obligations.length,
+        ...(composedReply.measure ?? {}),
+      }, 'agent-lane: the reply passed the one composer');
     }
     // History and the durable answer row below remember the same FINAL SENT text, after every gate.
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.

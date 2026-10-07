@@ -77,14 +77,20 @@ describe('THE ASK on the served FA1-3 graph', () => {
     expect(paths(fx.graph).flatMap((p) => p.links)).toEqual(fx.placeholder_warning.links);
     expect(mediatorReadings(noReading()).get(PRODUCT)).toBeUndefined();
     const served = warn(noReading());
-    expect(served.message).toBe(fx.placeholder_warning.message);
+    // The captured fixture predates S-A's vocabulary (D-05, 7 Oct): the served words, byte for byte, with the one
+    // phrase the vocabulary owner changed. The fixture itself stays as captured.
+    expect(served.message).toBe(fx.placeholder_warning.message.replace('nobody has set yet', "isn't sized in the model yet"));
     expect(served).not.toHaveProperty('first_ask');
   });
   it('AS SERVED with the reading: (C) asks the link out of the product in £/month, says the reading, and types `first_ask`', () => {
     const w = warn(fx.graph);
     expect(w.first_ask).toEqual({ kind: 'link', from: PRODUCT, to: RISK });
     expect(w.message).toMatch(/Olumi measures ‘Monthly starter support[^’]*’ in £\/month, as ‘Support cost per starter[^’]*’ × ‘Starter subscribers’; correct that if it’s wrong\./u);
-    expect(w.message).toMatch(/Roughly how much does each £1 \/ month of ‘Monthly starter support[^’]*’ change ‘MRR lost to starter sup[^’]*’, in £\/month\?/u);
+    // S-A label rule (D-04): a label shortens at a WORD boundary ("MRR lost to starter…"), never mid-word ("…starter sup…").
+    expect(w.message).toMatch(/Roughly how much does each £1 \/ month of ‘Monthly starter support[^’]*’ change ‘MRR lost to starter[^’]*’, in £\/month\?/u);
+    for (const [, shown] of w.message.matchAll(/‘([^’]*)…’/gu)) {
+      expect(['Monthly starter support cost', 'MRR lost to starter support churn'].some((l) => l.startsWith(shown!) && l.charAt(shown!.length) === ' '), shown).toBe(true);
+    }
     expect(w.message).not.toContain('Set it to see how much it matters.');
   });
 });
