@@ -33,6 +33,11 @@ const ABSENT = R`(?:\s*(?:not|n[’']t)\s*(?:yet\s+)?(?:been\s+)?(?:established|
 const WHICH_ITEM = R`${WHICH}\s+(?:of\s+(?:the|these|those|your)\s+)?${ITEM}`;
 const MOST_ADJ = R`most[-\s](?:sensitive|important|influential|consequential|decisive)`;
 
+/** S2d: 1–6 plain words, none a person who would own a preference (bounded: no `.*`, linear time). */
+const GEN_GAP = R`(?:\s+(?!(?:you|we|they|i|team|users?|people|customers?)\b)[\w’'-]+){1,6}?`;
+/** The clause ends here: , ; : . ! ) or the end, never "?" and never a closing quote straight after. */
+const CLAUSE_END = R`(?=[ \t]{0,4}(?:[.,;:!)](?![”"’'])|$))`;
+
 /** The ONE claim class: "no assumption/factor is established as mattering most". Every form is a row in the tests. */
 export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // "this run does not establish which assumption matters most" · "sensitivity has not established which …"
@@ -51,6 +56,12 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   R`\bno\s+(?:single\s+)?${MOST_ADJ}\s+${ITEM}\s+(?:was|is|has\s+been|could\s+be|were|are)\s+(?:established|measurable|measured|identified|found|determined)`,
   // "no assumption has been identified as the most important"
   R`\bno\s+(?:single\s+)?${ITEM}\s+(?:has\s+been|was|is|could\s+be)\s+(?:identified|established|shown|found|singled\s+out)\s+as\s+(?:the\s+)?(?:most\s+(?:important|influential|sensitive)|(?:main|key|biggest)\s+driver)`,
+  // ⭐ Wave B2 (7 Oct 03:3xZ, CEE 044faef): paraphrases keep coming ("…has not established which assumption deserves
+  // investigation priority", "…does not establish which assumption would change these chances most"). ONE general,
+  // bounded limb: a DENIAL (NEG + VERB) of "which assumption/factor/input/driver", at most 6 words, then "most",
+  // "priority" or "most sensitive to" ENDING the clause. Never a question ("?"), never inside a quote (no closing quote
+  // after the end), never a person's preference ("which assumption you/we/they/the team … most").
+  R`${NEG}${VERB}\s+${WHICH_ITEM}${GEN_GAP}\s+(?:the\s+)?(?:most(?:\s+(?:sensitive\s+to|weight))?|priority)${CLAUSE_END}`,
   // Wave B (7 Oct, unseen-2 provisional view): "it has not established an investigation priority"
   R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:clear\s+)?investigation\s+priorit(?:y|ies)\b`,
   // "there is no investigation priority yet"
