@@ -3625,10 +3625,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
-      // ⭐ S-D CARD CONTINUITY: a held proposal is approvable only by its card, so while one is held and this turn offers
-      // no other approval, the oldest one's card is offered again — its own words, exactly what the door checks.
-      ...(approvals.length === 0 && carriedApproval.length === 0 && heldRecords.length > 0
-        ? [heldRecords[0]!.approve_action as OfferedAction, AMEND_CHIP] : []),
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
       ...runOutcomeChips,
@@ -3670,7 +3666,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }, offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash) === undefined,
       widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }), offeredSpecific);
-    const offeredNow: OfferedAction[] = nextStepOffers.offered;
+    /**
+     * ⭐ S-D CARD CONTINUITY: a held proposal is approvable only by its card, so while one is held and this turn offers no
+     * other approval, the oldest one's card is offered again — its own words, exactly what the door checks — BESIDE the
+     * turn's own next steps (a proposal held until decided must not take the user's other actions away while it waits).
+     * Never on a method's terminal turn, whose controls are the method's own.
+     */
+    const heldCardOffer: OfferedAction[] = approvals.length === 0 && carriedApproval.length === 0 && heldRecords.length > 0
+      && fastPath !== 'method' && !decisionReviewRequested ? [heldRecords[0]!.approve_action as OfferedAction, AMEND_CHIP] : [];
+    const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
     rememberResearchOffers(approveKey, offeredNow);

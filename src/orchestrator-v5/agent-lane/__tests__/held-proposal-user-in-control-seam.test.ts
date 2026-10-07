@@ -356,6 +356,30 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     }
   }, 180_000);
 
+  it('RED (Codex P0): THE DOOR ITSELF applies edits only to the stored revision they name — a press naming another revision writes nothing; the same press naming this one lands the user\u2019s value', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const approve = approveChipOf(await proposeRisk())!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const held = (await heldOnLatestRow())[0]!;
+    const riskId = held.action.inline_patch!.operations![0]!.path;
+    const before = bytes();
+    // Straight at the product's confirm (route-v2), bypassing the Agent's own pre-check: the door must bind on its own.
+    const press = (revision: string) => app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, turn_id: randomUUID(), stage: 'frame', turn_class: 'frame', source: 'chip',
+      message: approve.message, chip: { id: ref, parameters: { proposal_edits: { proposal_id: ref, revision, graph_hash: hashBefore,
+        fields: [{ field_id: `link_strength:${riskId}::goal_x`, band: 'slight' }] } } },
+    } });
+    const hashBefore = await hashNow();
+    const other = await press('00000000-0000-4000-8000-000000000000');
+    expect(other.statusCode, other.body.slice(0, 300)).toBe(200);
+    expect(bytes(), 'another revision writes nothing').toBe(before);
+    const own = await press(revisionOf(held));
+    expect(own.statusCode, own.body.slice(0, 300)).toBe(200);
+    const e = edgeOf(riskId, 'goal_x')!;
+    expect(e.provenance?.source, JSON.stringify(e)).toBe('user_specified');
+    expect(e.strength?.mean).toBeCloseTo(-0.1, 10);
+  }, 120_000);
+
   it('RED: the typed decline sets the held proposal aside — gone from the row, nothing written, said in words', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const approve = approveChipOf(await proposeRisk())!;
