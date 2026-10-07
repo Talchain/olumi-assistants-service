@@ -81,7 +81,13 @@ export const REPLY_SHAPE_INSTRUCTION =
 export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence' | 'host' | 'detail';
 /** Overlapping obligations are one unit carrying the strongest role among them. */
 const ROLE_RANK: Record<FaceObligationRole, number> = { ask: 5, withheld_reason: 4, caveat: 3, evidence: 2, host: 1, detail: 0 };
-export interface FaceObligation { readonly role: FaceObligationRole; readonly text: string; readonly subjects?: readonly string[] }
+export interface FaceObligation {
+  readonly role: FaceObligationRole;
+  readonly text: string;
+  readonly subjects?: readonly string[];
+  /** B15: a typed screen goal-chance finding leads when present; its evidence rank is unchanged. */
+  readonly lead?: true;
+}
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
 /** The typed response profile, chosen by the turn kind (never by reading the words). */
@@ -328,7 +334,10 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   // Evidence/withheld/ask ranks below remain unchanged. No recognition by wording.
   const hostHeadline = units.every((u) => u.obligation !== undefined) && units[0]!.obligation === 'host'
     ? units[0] : undefined;
-  const headline = hostHeadline ?? leadIn
+  // B15 (DL, 7 Oct): the first PRESENT screen goal-chance finding in text order leads, by identity alone.
+  // `present` retains the marker even when overlapping obligations bind as one larger atomic unit.
+  const goalChanceHeadline = units.find((u) => present.some((o) => o.lead === true && u.text.includes(o.text)));
+  const headline = goalChanceHeadline ?? hostHeadline ?? leadIn
     ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u))
     ?? units.find((u) => u.kind === 'heading' && eligible(u))
     ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host') : undefined)
@@ -375,8 +384,8 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   };
   // Already in shape, shipped exactly as written: the whole reply fits the face budget with at most one question, or
   // too little would go behind "More detail" to be worth a click.
-  if (detailLines.length === 0 && restatements.size === 0 && measure.words_in <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
-  if (detailLines.length === 0 && restatements.size === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS) return { text, shape: null, outcome: 'already_in_shape', measure };
+  if (goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && measure.words_in <= REPLY_FACE_WORD_BUDGET && questions.length <= 1) return { text, shape: null, outcome: 'already_in_shape', measure };
+  if (goalChanceHeadline === undefined && detailLines.length === 0 && restatements.size === 0 && detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS) return { text, shape: null, outcome: 'already_in_shape', measure };
   // More obligations than the face holds: hiding one would break its rule, so the reply ships whole (counted).
   if (measure.face_over_cap) return { text, shape: null, outcome: 'kept_whole', reason: 'face_over_cap', measure };
   // ⛔ A lead-in stays with what it introduces ("…, on current information:" before the screen's chance lines): a face
@@ -387,8 +396,8 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   }
 
   const detail = [renderDetail(detailUnits), split?.segment ?? ''].filter((p) => p.length > 0).join('\n\n');
-  // A typed host part can contain several sentences; narrator headlines retain the single-sentence contract.
-  const schema = hostHeadline === undefined ? AnswerShapeSchema
+  // A typed host or goal-chance part can contain several sentences; narrator headlines keep the single-sentence contract.
+  const schema = goalChanceHeadline === undefined && hostHeadline === undefined ? AnswerShapeSchema
     : AnswerShapeSchema.extend({ headline: z.string().trim().min(1) });
   const parsed = schema.safeParse({ headline: headline.text, bullets: faceBullets.map((u) => u.text), detail });
   if (!parsed.success) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline', measure };

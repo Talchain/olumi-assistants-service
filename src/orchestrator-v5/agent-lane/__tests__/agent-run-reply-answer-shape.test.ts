@@ -219,7 +219,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     ] } };
   };
 
-  it('2b-0 RED on base (P05 W-1): uninterpreted Run composes the whole ready host part, two screen findings on the face and disclosure in More detail', async () => {
+  it('B15 / 2b-0: uninterpreted Run leads with the first screen finding; ready and disclosure in More detail', async () => {
     hostRunFixture();
     const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
     expect(screen, 'positive control: two typed screen findings').toHaveLength(2);
@@ -228,7 +228,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(carriesResult(b)).toBe(true);
     expect(fetch, 'the Run has no interpreter output').not.toHaveBeenCalled();
     expect(b._answer_shape, 'base keeps host_composed whole').toBeDefined();
-    expect(b._answer_shape!.headline).toBe(RUN_RESULT_READY_TEXT);
+    expect(b._answer_shape!.headline).toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
+    expect(b._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
     expect(b._answer_shape!.bullets.length).toBeLessThanOrEqual(3);
     expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
     expect(b._answer_shape!.detail).toContain(RUN_DISCLOSURE);
@@ -244,19 +245,43 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
 
+  it('B15 route: interpreted Run with share-first narrator → first typed screen chance headline', async () => {
+    hostRunFixture();
+    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
+    expect(screen, 'positive control: two current licensed screen findings').toHaveLength(2);
+    const share = 'In this model, 71% of runs supported ‘Raise Pro to £59 at release’.';
+    const narrated = [share, ...screen.map(l => [l.chance, l.depends].filter(Boolean).join(' '))].join('\n\n');
+    const { b, turnId } = await typedRun(narrated);
+    expect(b._diagnostic_trace.fast_path).toBe('explain');
+    expect(carriesResult(b)).toBe(true);
+    expect(fetch, 'positive control: the interpreter was called').toHaveBeenCalled();
+    expect(b._answer_shape).toBeDefined();
+    expect(b._answer_shape!.headline).toBe([screen[0]!.chance, screen[0]!.depends].filter(Boolean).join(' '));
+    expect([...b._answer_shape!.bullets, b._answer_shape!.detail].join('\n')).toContain(share);
+    for (const line of screen) expect(faceOf(b._answer_shape!)).toContain(line.chance);
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    for (const sentence of sentenceMultiset(narrated)) {
+      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence)).toHaveLength(1);
+    }
+    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
+  });
+
   it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {
     hostRunFixture();
     const { b: first, turnId } = await runOnly();
     expect(first._answer_shape).toBeDefined();
     expect(rows.get(turnId)?.assistant_message).toBe(deriveAnswerTextFromShape(first._answer_shape!));
-    expect(rows.get(turnId)?.assistant_message!.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    expect(rows.get(turnId)?.assistant_message!.startsWith(first._answer_shape!.headline)).toBe(true);
+    expect(first._answer_shape!.detail).toContain(RUN_RESULT_READY_TEXT);
     const { b: replay } = await runOnly(turnId);
     expect(replay._agent.replayed).toBe(true);
     expect(runRequests, 'the replay did not run again').toBe(1);
     expect(replay.narration).toEqual(first.narration);
     expect(replay.narration!.status).toBe('pending');
     expect(carriesResult(replay)).toBe(true);
-    expect(replay.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    // DL (reload = same): the replay re-applies the same composer to the same typed parts — same bytes, same shape.
+    expect(replay.assistant_text).toBe(first.assistant_text);
+    expect(replay._answer_shape).toEqual(first._answer_shape);
     expect(fetch).not.toHaveBeenCalled();
   });
 
