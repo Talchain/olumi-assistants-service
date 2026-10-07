@@ -976,3 +976,72 @@ describe('Wave B5, keys untouched: the modal "what would change the chances most
     expect(performance.now() - t0).toBeLessThan(50);
   });
 });
+
+/**
+ * Wave B6 (7 Oct 06:5xZ, guest, CEE 4ce3583), keys untouched, unseen b6-2, beside three range lines and "Tipping point:
+ * Fourth shop active": the Explain turn said "No most-sensitive assumption or tipping point was established." (a
+ * coordinated noun) and the Challenge "No recorded sensitivity result establishes which matters most across options." (a
+ * no-result subject, bare "which matters most"). Both missed at cut 8 3fce64f and with S2g. S2h adds both forms.
+ */
+const B6_EXPLAIN = JSON.parse(fixture('waveB6-unseen2-4ce3583-explain-turn003.json')) as Json;
+const B6_CH = JSON.parse(fixture('waveB6-unseen2-4ce3583-challenge-turn001.json')) as Json;
+
+describe('Wave B6, keys untouched: "…or tipping point was established" and "no … result establishes which matters most" (S2h)', () => {
+  it('RED at base: the b6-2 Explain turn loses only "No most-sensitive assumption or tipping point was established."', () => {
+    const claim = 'No most-sensitive assumption or tipping point was established.';
+    expect(B6_EXPLAIN.assistant_text).toContain(claim);
+    expect(screenNamesADriver(blockOf(B6_EXPLAIN), B6_EXPLAIN.draft_graph)).toBe(true);
+    const out = withoutDriverAbsenceClaimsAtEgress(B6_EXPLAIN, opts(B6_EXPLAIN)) as Json;
+    expect(out.assistant_text).not.toContain(claim);
+    expect(out.assistant_text).toContain('small assumption changes could change which option is most supported.');
+    expect(out.assistant_text.replace(/\s+/g, ' ')).toBe(B6_EXPLAIN.assistant_text.replace(` ${claim}`, '').replace(/\s+/g, ' '));
+  });
+
+  it('RED at base: the b6-2 Challenge loses only "No recorded sensitivity result establishes which matters most across options."', () => {
+    const claim = 'No recorded sensitivity result establishes which matters most across options.';
+    expect(B6_CH.assistant_text).toContain(claim);
+    const out = withoutDriverAbsenceClaimsAtEgress(B6_CH, opts(B6_CH)) as Json;
+    expect(out.assistant_text).not.toContain(claim);
+    expect(out.assistant_text).toContain('The recorded drivers of these chance ranges are');
+    expectWellFormed(out.assistant_text);
+  });
+
+  it('CONTROL no range record: both turns kept, by reference', () => {
+    for (const body of [withoutRange(B6_EXPLAIN), withoutRange(B6_CH)]) {
+      const r: Json = { ...body, blocks: body.blocks.map((b: Json) => (b.type === 'analysis_result' ? { ...b, enrichment: { ...b.enrichment, robustness: undefined } } : b)) };
+      expect(withoutDriverAbsenceClaimsAtEgress(r, opts(r))).toBe(r);
+    }
+  });
+
+  it.each([
+    'No sensitivity analysis shows which factor matters most.',
+    'No result identifies which of the assumptions matters most.',
+  ])('MUST FIRE (paraphrase): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text: '', removed: 1, keptUnsafe: 0 });
+  });
+
+  it.each([
+    'No most-sensitive assumption, but a tipping point was established.',
+    'No most-sensitive assumption or tipping point was missed.',
+    'No recorded sensitivity result was computed.',
+    'No result shows which option leads.',
+    'Our analysis shows which matters most: churn.',
+    'No evidence shows which matters most to you.',
+  ])('MUST NOT FIRE (twin): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(false);
+    expect(removeDriverAbsenceClaims(text)).toEqual({ text, removed: 0, keptUnsafe: 0 });
+  });
+
+  it.each([
+    ['"…assumption or" + 20,000 spaces', `no most-sensitive assumption or${' '.repeat(20000)}x`],
+    ['"…assumption or" + one 20,000-character word', `no most-sensitive assumption or ${'x'.repeat(20000)}`],
+    ['"no recorded" + 20,000 spaces', `no recorded${' '.repeat(20000)}x`],
+    ['"no result establishes which" + 20,000 spaces', `no result establishes which${' '.repeat(20000)}x`],
+  ])('LINEAR TIME: %s', (_name, text) => {
+    const t0 = performance.now();
+    DRIVER_ABSENCE_CLAIM.test(text);
+    removeDriverAbsenceClaims(text);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
