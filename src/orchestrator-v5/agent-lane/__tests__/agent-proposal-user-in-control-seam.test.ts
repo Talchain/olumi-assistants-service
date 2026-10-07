@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 
 let n = 0;
@@ -124,6 +125,7 @@ const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: '
 
 describe('S-D slice 2 Agent proposals', () => {
   let app: FastifyInstance;
+  let proposalsForApp: import('../proposal.js').ProposalStore;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: string }) => {
       if (!String(url).includes('openai')) throw new Error(`non-OpenAI network call: ${String(url)}`);
@@ -135,6 +137,7 @@ describe('S-D slice 2 Agent proposals', () => {
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
     vi.resetModules();
+    proposalsForApp = (await import('../held-approval-offers.js')).agentProposals;
     const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
@@ -433,15 +436,17 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(b.suggested_actions).toContainEqual(p.decline_action);
     expect(bytes(), 'opening the card changes nothing').toBe(before);
   }, 120_000);
-  it('CHECK ESTIMATES edit RED: the user\'s figure lands through the existing door; the untouched estimate stays', async () => {
+  it('R-keep-edit: edited keep has one receipt, no starting values, and accepted untouched Cost', async () => {
     seed(true);
     const b = await checkEstimates(['fac_hours', 'fac_cost']);
     const r = await submit(b, [{ field_id: 'factor_value:fac_hours', value: 12 }]);
     expect(r._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
     expect(os('fac_hours')).toMatchObject({ raw_value: 12, source: 'user_override' });
-    expect(os('fac_cost')).toMatchObject({ raw_value: 200 });
+    expect(os('fac_cost')).toMatchObject({ raw_value: 200, source: 'user_assumption', reviewed_by_user: expect.objectContaining({ intent: 'confirm' }) });
     expect(graphWrites.get(SCENARIO)).toBe(1);
     expect(r.assistant_text).toContain('You set "Hours" to 12 hours; Olumi\'s estimate was 10 hours.');
+    expect(r.assistant_text).not.toMatch(/starting value/i);
+    expect(r.assistant_text).not.toMatch(/Recorded that you accept Olumi/);
     // ACTION-BAR's rule: a figure the user did not edit is never recorded or said as theirs.
     expect(os('fac_cost')['source']).not.toBe('user_override');
     expect(r.assistant_text).toContain('Left as Olumi\'s estimate: "Cost" (£200).');
@@ -455,6 +460,167 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(os('fac_hours')).toMatchObject({ raw_value: 10, source: 'user_assumption', reviewed_by_user: expect.objectContaining({ intent: 'confirm' }) });
     expect(os('fac_cost')).toMatchObject({ raw_value: 200, source: 'cee_inference' });
     expect(r.assistant_text).toContain('Recorded that you accept Olumi\u2019s estimate');
+  }, 120_000);
+
+  it('R-band: choosing the current canonical band reviews Hours without changing its magnitude or source', async () => {
+    seed(); const b = await links();
+    const { edgeBandFromMagnitude, strengthBandFromEdgeBand } = await import('../../format/edge-strength-bands.js');
+    const before = graphNow().edges.find(e => e.from === 'fac_hours' && e.to === 'goal_x')!;
+    const strength = before.strength as { mean: number; std: number };
+    const source = (before.provenance as { source: string }).source;
+    const band = strengthBandFromEdgeBand(edgeBandFromMagnitude(Math.abs(strength.mean)));
+    expect(band).toBe('strong');
+    const r = await submit(b, [{ field_id: 'link_strength:fac_hours::goal_x', band }]);
+    const after = graphNow().edges.find(e => e.from === 'fac_hours' && e.to === 'goal_x')!;
+    expect(after.strength).toEqual(strength);
+    expect(after.provenance).toMatchObject({ source, reviewed_by_user: { intent: 'confirm' } });
+    expect((after.provenance as { source: string }).source).not.toBe('user_specified');
+    expect(r.assistant_text).not.toContain('You set how strongly "Hours"');
+    expect(r._agent.tool_calls).toContainEqual(expect.objectContaining({ ok: true, mutated: true }));
+    // CONTROL: a band differing from both the current and proposed bands is the user's at its midpoint.
+    nextScenario(); seed(); const control = await links();
+    await submit(control, [{ field_id: 'link_strength:fac_hours::goal_x', band: 'very_strong' }]);
+    const moved = graphNow().edges.find(e => e.from === 'fac_hours' && e.to === 'goal_x')!;
+    const { EDGE_STRENGTH_MIDPOINTS } = await import('../../format/edge-strength-bands.js');
+    expect((moved.strength as { mean: number }).mean).toBe(EDGE_STRENGTH_MIDPOINTS['very strong']);
+    expect(moved.provenance).toMatchObject({ source: 'user_specified' });
+  }, 120_000);
+
+  it('R-equal-value: equal Hours and changed Cost store Hours exactly as plain A1 approval', async () => {
+    seed(); const plain = await assumptions(); await turn(press(shown(plain)));
+    const plainHours = structuredClone(os('fac_hours'));
+    // The acceptance timestamp belongs to each press; every other stored byte must match.
+    plainHours['reviewed_by_user'] = { ...(plainHours['reviewed_by_user'] as object), at: expect.any(String) };
+    nextScenario(); seed(); const b = await assumptions();
+    const r = await submit(b, [{ field_id: 'factor_value:fac_hours', value: 10 }, { field_id: 'factor_value:fac_cost', value: 220 }]);
+    expect(os('fac_hours')).toEqual(plainHours);
+    expect(os('fac_cost')).toMatchObject({ raw_value: 220, source: 'user_override' });
+    expect(r.assistant_text).not.toContain('You set "Hours"');
+    expect(r.assistant_text).toContain('Left as Olumi\'s estimate: "Hours" (10 hours).');
+  }, 120_000);
+
+  it('R-equal-all: all equal fields authorise the original proposal without an edited_from proposal', async () => {
+    seed(); const b = await assumptions(); const p = shown(b);
+    const agentProposals = proposalsForApp;
+    const authorise = vi.spyOn(agentProposals, 'authorise');
+    const put = vi.spyOn(agentProposals, 'put');
+    try {
+      const r = await submit(b, [{ field_id: 'factor_value:fac_hours', value: 10 }, { field_id: 'factor_value:fac_cost', value: 200 }]);
+      expect(r._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', proposal_id: p.proposal_id, ok: true, mutated: true }));
+      expect(authorise.mock.calls.some(([req]) => req.proposal_id === p.proposal_id)).toBe(true);
+      expect(authorise.mock.calls.every(([req]) => req.proposal_id === p.proposal_id)).toBe(true);
+      expect(put.mock.calls.filter(([proposal]) => proposal.provenance.basis?.startsWith('edited_from:'))).toEqual([]);
+      expect(r.assistant_text).not.toContain('You set');
+      expect(os('fac_hours')).toMatchObject({ raw_value: 10, source: 'user_assumption' });
+    } finally { authorise.mockRestore(); put.mockRestore(); }
+  }, 120_000);
+
+  it('R-refused: stale Agent Submit re-offers its exact approve, Change and Not now controls without writing', async () => {
+    seed(); const b = await assumptions(); const p = shown(b); const before = bytes();
+    const r = await submit(b, [{ field_id: 'factor_value:fac_hours', value: 12 }], { digest: 'stale' });
+    expect(r._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', proposal_id: p.proposal_id, ok: false, mutated: false }));
+    expect(bytes()).toBe(before); expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
+    expect(r.suggested_actions).toContainEqual(p.approve_action);
+    expect(r.suggested_actions).toContainEqual(p.decline_action);
+    expect(r.suggested_actions).toContainEqual(expect.objectContaining({ id: 'agent-amend-proposal', label: 'Change something first' }));
+  }, 120_000);
+
+  it('R-reviewed-link-field: a user-stated confirm_current Hours link stays an editable estimate', async () => {
+    seed(); const words = 'I think Hours has a strong effect on Revenue.';
+    script = [() => fnCall('propose_link_strengths', { links: [{ from_label: 'Hours', to_label: 'Revenue', strength: 'strong', from_words: words }] }), () => say('Review this link.')];
+    const b = await turn({ message: words }); const p = shown(b);
+    const agentProposals = proposalsForApp;
+    expect(agentProposals.get(p.proposal_id)!.operations[0]!.value).toMatchObject({ author: 'user_stated', intent: 'confirm_current' });
+    expect(p.fields).toEqual([expect.objectContaining({ field_id: 'link_strength:fac_hours::goal_x', current: { band: 'strong', source: 'estimate' }, editable: true })]);
+  }, 120_000);
+
+  it('R-decline-rehydrate: Not now restores FIFO-evicted A, declines its label, and never carries A again', async () => {
+    seed(); const a = shown(await assumptions()); const b = shown(await links());
+    const agentProposals = proposalsForApp;
+    const { createProposal, MAX_PROPOSALS } = await import('../proposal.js');
+    const original = agentProposals.get(a.proposal_id)!; const other = agentProposals.get(b.proposal_id)!;
+    for (let i = 0; i < MAX_PROPOSALS; i++) agentProposals.put(createProposal({ ...original, scenario_id: '550e8400-e29b-41d4-a716-446655440099', public_label: `Eviction control ${i}` }));
+    agentProposals.put(other);
+    expect(agentProposals.get(a.proposal_id)).toBeUndefined();
+    expect(agentProposals.outstanding(SCENARIO, null).map(p => p.proposal_id)).toEqual([b.proposal_id]);
+    const before = bytes();
+    const r = await turn({ source: 'chip', chip: { id: a.decline_action.id }, message: a.decline_action.message });
+    expect(r.assistant_text).toContain(`Set aside: ${original.public_label}. Nothing in the model changed.`);
+    expect(bytes()).toBe(before);
+    expect((await pending()).map(p => p.chip_id)).not.toContain(a.approve_action.id);
+    const next = await turn({ message: 'Explain what is waiting.' });
+    expect(next._proposal_fields?.proposals.map(p => p.proposal_id)).not.toContain(a.proposal_id);
+    expect((await pending()).map(p => p.chip_id)).not.toContain(a.approve_action.id);
+  }, 120_000);
+
+  it('R-lapse-words: a held removal lapses with its quoted public label and no to add', async () => {
+    seed();
+    script = [() => fnCall('propose_option_status', { option_label: 'Keep £49', status: 'removed' }), () => say('Take this option out?')];
+    const a = shown(await turn({ message: 'Take Keep £49 out of the comparison.' }));
+    const agentProposals = proposalsForApp;
+    const label = agentProposals.get(a.proposal_id)!.public_label.replace(/\.$/, '');
+    graphNow().nodes.find(n => n.id === 'goal_x')!.goal_threshold = 0.9;
+    const r = await turn({ message: 'Explain what is waiting.' });
+    expect(r.assistant_text).toContain(`The held change "${label}" no longer fits the model as it now stands, so it has lapsed; say the word if you still want it.`);
+    expect(r.assistant_text).not.toContain('The held change to add');
+  }, 120_000);
+
+  it('R-multi-held-words: pressing identity A after status B binds A card words and writes A', async () => {
+    graphOf.set(SCENARIO, JSON.parse(readFileSync(new URL('./fixtures/served-identity-draft-950177e-20260930.json', import.meta.url), 'utf8')).graph);
+    script = [() => fnCall('propose_identity', {}), () => say('Confirm this reading.')];
+    const a = shown(await turn({ message: 'Confirm the reading of MRR.' }));
+    const agentProposals = proposalsForApp;
+    expect(agentProposals.get(a.proposal_id)!.operations[0]!.op).toBe('confirm_identity');
+    script = [() => fnCall('propose_option_status', { option_label: 'Raise to £59', status: 'removed' }), () => say('Take this option out?')];
+    const held = await turn({ message: 'Take Raise to £59 out of the comparison.' }); const b = shown(held);
+    expect(b.proposal_id).not.toBe(a.proposal_id);
+    expect(approveChipOf(held)?.id).toBe(b.approve_action.id);
+    expect(held._proposal_fields!.proposals.map(p => p.proposal_id)).toContain(a.proposal_id);
+    const r = await turn(press(a));
+    expect(r._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', proposal_id: a.proposal_id, ok: true, mutated: true }));
+    expect(r._agent.tool_calls.map(c => c.refusal)).not.toContain('reading_not_confirmed');
+  }, 120_000);
+
+  it('R-replay-review: decision review retries never add the held Agent card controls', async () => {
+    seed(); const a = shown(await assumptions()); const tid = randomUUID();
+    const { DECISION_REVIEW_PRESS_ID } = await import('../decision-review-press.js');
+    const payload = { turn_id: tid, source: 'chip_click', chip: { id: DECISION_REVIEW_PRESS_ID }, message: 'Review this decision' };
+    const live = await turn(payload);
+    const excluded = [a.approve_action.id, 'agent-amend-proposal', a.decline_action.id];
+    expect(live.suggested_actions.map(c => c.id).filter(id => excluded.includes(id))).toEqual([]);
+    for (const retry of [payload, { turn_id: tid, source: 'retry', message: payload.message }]) {
+      const replay = await turn(retry);
+      expect(replay.suggested_actions.map(c => c.id).filter(id => excluded.includes(id))).toEqual([]);
+    }
+  }, 120_000);
+
+  it('R-check-ids: duplicate-label factors open one Check estimates card with both node fields', async () => {
+    seed(true); graphNow().nodes.find(n => n.id === 'fac_cost')!.label = 'Hours';
+    const b = await checkEstimates(['fac_hours', 'fac_cost']);
+    expect(b._proposal_fields!.proposals).toHaveLength(1);
+    expect(shown(b).fields.map(f => f.field_id).sort()).toEqual(['factor_value:fac_cost', 'factor_value:fac_hours']);
+  }, 120_000);
+
+  it('R-once: an edited A6 states the Hours band only in the S-D receipt', async () => {
+    seed(); const b = await links();
+    const r = await submit(b, [{ field_id: 'link_strength:fac_hours::goal_x', band: 'very_strong' }]);
+    const sentence = 'You set how strongly "Hours" affects "Revenue": very strong; Olumi\'s estimate was moderate.';
+    expect(r.assistant_text.split(sentence)).toHaveLength(2);
+    expect(r.assistant_text.match(/very strong/g)).toHaveLength(1);
+    expect(r.assistant_text).not.toContain('Recorded these 2 link strengths:');
+  }, 120_000);
+
+  it('R-replay-method: What would change retries never add the held Agent card controls', async () => {
+    seed(); const a = shown(await assumptions()); const tid = randomUUID();
+    const { TIPPING_POINT_PRESS_ID } = await import('../tipping-point-coaching.js');
+    const payload = { turn_id: tid, source: 'chip_click', chip: { id: TIPPING_POINT_PRESS_ID }, message: 'What would change this?' };
+    const live = await turn(payload);
+    const excluded = [a.approve_action.id, 'agent-amend-proposal', a.decline_action.id];
+    expect(live.suggested_actions.map(c => c.id).filter(id => excluded.includes(id))).toEqual([]);
+    for (const retry of [payload, { turn_id: tid, source: 'retry', message: payload.message }]) {
+      const replay = await turn(retry);
+      expect(replay.suggested_actions.map(c => c.id).filter(id => excluded.includes(id))).toEqual([]);
+    }
   }, 120_000);
 
 });

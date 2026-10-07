@@ -37,7 +37,7 @@ export type HeldLapseReason = 'model_changed' | 'idle' | 'over_cap' | 'gone';
 
 /** A held change that could not be kept is SAID, once, on the turn it goes (never a silent drop, D-08). */
 export function heldLapseSentence(name: string | undefined, reason: HeldLapseReason): string {
-  const what = name !== undefined ? `The held change to add ${name}` : 'A held change';
+  const what = name ?? 'A held change';
   switch (reason) {
     case 'model_changed':
       return `${what} no longer fits the model as it now stands, so it has lapsed; say the word if you still want it.`;

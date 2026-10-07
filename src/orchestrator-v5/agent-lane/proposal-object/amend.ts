@@ -5,8 +5,8 @@
  * Only the named fields change; every other byte of the held batch is kept. A link the user sets gets the middle of
  * the band they chose (`EDGE_STRENGTH_MIDPOINTS`, `edgeBandStd` — the canonical link writer's band arithmetic), signed by
  * the held direction, `provenance.source: 'user_specified'` (what `whoSized`, readiness `link-sizing.ts` and the
- * analysis hash read as the user's), and no `defaulted`. Re-choosing the band the link already sits in keeps its
- * strength and makes it the user's (they stated it), so no figure moves without a reason the user can see.
+ * analysis hash read as the user's), and no `defaulted`. Re-choosing an Agent link's current band keeps its
+ * strength and records a review; the figure and its provenance source stay unchanged.
  *
  * What Olumi held for each edited field is recorded on the hold (`user_edits`), so the reply can say what the user set
  * against what Olumi had — the AI value is retained, never overwritten into silence.
@@ -14,9 +14,11 @@
 import { createHash } from 'node:crypto';
 import { createProposal, type StructuredProposal } from '../proposal.js';
 
+import { isKeepProposal, KEEP_PROPOSAL_BASIS } from '../approval-chips.js';
+
 import type { StrengthBand } from '@talchain/schemas/boundary';
 
-import { EDGE_STRENGTH_MIDPOINTS, edgeBandFromStrengthBand, edgeBandStd } from '../../format/edge-strength-bands.js';
+import { EDGE_STRENGTH_MIDPOINTS, edgeBandFromMagnitude, strengthBandFromEdgeBand, edgeBandFromStrengthBand, edgeBandStd } from '../../format/edge-strength-bands.js';
 import { STRENGTH_BANDS, type HeldOp, type LinkStrengthField, type ProposalRecord, type ValueSource } from './record.js';
 
 /** The hold's own record of what the user set and what Olumi held (`inline_patch.user_edits`). */
@@ -180,15 +182,20 @@ export function factorValueAllowed(field: import('./record.js').FactorValueField
 export function amendAgentProposal(record: ProposalRecord, original: StructuredProposal, edits: ProposalEditsRequest['fields']):
   { ok: true; proposal: StructuredProposal; userEdits: readonly UserEdit[] } | { ok: false; reason: AmendRefusal } {
   const wanted = new Map<string, ProposalFieldEdit>();
+  const submitted = new Set<string>();
   for (const e of edits) {
-    if (wanted.has(e.field_id)) return { ok: false, reason: 'duplicate_field' };
+    if (submitted.has(e.field_id)) return { ok: false, reason: 'duplicate_field' };
+    submitted.add(e.field_id);
     const f = record.fields.find(f => f.field_id === e.field_id);
     if (!f) return { ok: false, reason: 'unknown_field' };
+    if (f.kind === 'factor_value' ? e.value === f.current.value : e.band === f.current.band) continue;
     if (!f.editable) return { ok: false, reason: 'not_editable' };
     if (f.kind === 'factor_value' ? e.value === undefined || !factorValueAllowed(f, e.value)
       : e.band === undefined || !f.allowed_bands.includes(e.band)) return { ok: false, reason: f.kind === 'factor_value' ? 'value_not_allowed' : 'band_not_allowed' };
     wanted.set(e.field_id, e);
   }
+  if (wanted.size === 0) return { ok: true, proposal: original, userEdits: [] };
+  const reviewed = new Set<string>();
   const operations = original.operations.map(o => {
     const key = o.op === 'set_factor_value' ? `factor_value:${o.path}` : o.op === 'set_link_strength' ? `link_strength:${o.path}` : '';
     const e = wanted.get(key);
@@ -196,17 +203,19 @@ export function amendAgentProposal(record: ProposalRecord, original: StructuredP
     if (e.value !== undefined) return { ...o, value: { ...o.value, value: e.value, authored_by: 'user_stated' } };
     const f = record.fields.find(f => f.field_id === key);
     if (!f || f.kind !== 'link_strength') return o;
-    const magnitude = e.band === f.current.band ? o.value['magnitude'] : EDGE_STRENGTH_MIDPOINTS[edgeBandFromStrengthBand(e.band!)];
     const expected = isRec(o.value['expected']) ? o.value['expected'] : {};
-    // The canonical writer calls a value equal to the held figure a review.
-    const keeps = magnitude === Math.abs(Number(expected['mean']));
+    const currentMagnitude = Math.abs(Number(expected['mean']));
+    // A review only against a figure the link really holds: a missing mean is never read as 'weak'.
+    const keeps = Number.isFinite(currentMagnitude) && e.band === strengthBandFromEdgeBand(edgeBandFromMagnitude(currentMagnitude));
+    const magnitude = keeps ? currentMagnitude : EDGE_STRENGTH_MIDPOINTS[edgeBandFromStrengthBand(e.band!)];
+    if (keeps) reviewed.add(key);
     return { ...o, value: { ...o.value, magnitude, band: edgeBandFromStrengthBand(e.band!), intent: keeps ? 'confirm_current' : 'set', author: 'user_stated' } };
   });
   const userEdits: UserEdit[] = record.fields.map(f => {
     const e = wanted.get(f.field_id);
     return f.kind === 'factor_value'
       ? { kind: 'factor_value', field_id: f.field_id, label: f.label, unit: f.unit, olumi: { value: f.current.value, source: f.current.source }, user: e?.value !== undefined ? { value: e.value } : null }
-      : { field_id: f.field_id, from_label: f.from_label, to_label: f.to_label, olumi: f.current, user: e?.band !== undefined ? { band: e.band } : null };
+      : { field_id: f.field_id, from_label: f.from_label, to_label: f.to_label, olumi: f.current, user: e?.band !== undefined && !reviewed.has(f.field_id) ? { band: e.band } : null };
   });
-  return { ok: true, proposal: createProposal({ ...original, operations, provenance: { authored_by: 'user_stated', basis: `edited_from:${original.proposal_id}` } }), userEdits };
+  return { ok: true, proposal: createProposal({ ...original, operations, provenance: { authored_by: 'user_stated', basis: `edited_from:${original.proposal_id}`, ...(isKeepProposal(original) ? { original_basis: KEEP_PROPOSAL_BASIS } : {}) } }), userEdits };
 }

@@ -911,7 +911,7 @@ export interface AgentCapabilities {
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean; keep?: boolean }[];
+    assumptions: readonly { factor_id?: string; factor_label: string; value: number; unit: string; basis: string; revise?: boolean; keep?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label?: string; acts_on?: NewOptionActsOn[]; rationale: string;

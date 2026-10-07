@@ -135,7 +135,7 @@ export interface StructuredProposal {
   readonly base_graph_identity_hash: string;
   readonly operations: readonly ProposalOperation[];
   /** Who authored the change being proposed — never the user, for an AI proposal. */
-  readonly provenance: { readonly authored_by: 'model_proposed' | 'user_stated'; readonly basis?: string };
+  readonly provenance: { readonly authored_by: 'model_proposed' | 'user_stated'; readonly basis?: string; readonly original_basis?: string };
   readonly validation: ProposalValidation;
   /** What the user was actually shown. Stored so the receipt can quote it. */
   readonly public_label: string;
@@ -190,7 +190,7 @@ export function computeProposalId(c: ProposalContent): string {
     c.user_id,
     c.base_graph_identity_hash,
     c.operations.map((o) => [o.op, o.path, o.value === undefined ? null : o.value]),
-    [c.provenance.authored_by, c.provenance.basis ?? null],
+    [c.provenance.authored_by, c.provenance.basis ?? null, ...(c.provenance.original_basis === undefined ? [] : [c.provenance.original_basis])],
     [c.validation.admitted, c.validation.loss_count, [...c.validation.refusals].sort()],
     c.public_label,
     // Appended only when present, so every proposal without a reading keeps the id it always had.

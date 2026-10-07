@@ -112,7 +112,7 @@ describe('the ONE proposal object (record.ts)', () => {
   });
 
   it('names the change in the user’s words, and reads only the typed decline press', () => {
-    expect(heldChangeName(hold())).toBe("the risk 'Competitive response'");
+    expect(heldChangeName(hold())).toBe("The held change to add the risk 'Competitive response'");
     expect(declinedProposalOf('agent-decline-proposal:gmh_aaaaaaaaaaaa')).toBe('gmh_aaaaaaaaaaaa');
     expect(declinedProposalOf('agent-decline-proposal:prop_1234')).toBeUndefined();
     expect(declinedProposalOf('Not now.')).toBeUndefined();
@@ -237,7 +237,7 @@ describe('the words (reply.ts) and the conventional bare-confirm window', () => 
       + 'You set how strongly "Price" affects "Demand": slight; Olumi\'s estimate was moderate. '
       + 'Left as Olumi\'s placeholder: "Price" → "Competitive response".');
     for (const t of [text, heldDeclineSentence("the risk 'X'"), editsRefusedSentence('stale'), editsRefusedSentence('refused'),
-      ...(['model_changed', 'idle', 'over_cap', 'gone'] as const).map((r) => heldLapseSentence("the risk 'X'", r))]) {
+      ...(['model_changed', 'idle', 'over_cap', 'gone'] as const).map((r) => heldLapseSentence("The held change to add the risk 'X'", r))]) {
       expect(findForbiddenPhraseHit(t), t).toBeNull();
       expect(t, t).not.toMatch(/—|\b(best|winner|recommend|leader|ahead|beats)\b/i);
     }
@@ -362,6 +362,19 @@ describe('S-D slice 2 Agent envelope and typed amendment', () => {
     expect(factorValueAllowed({ ...f, declared_scale: { min: -40, max: 40 } }, -12)).toBe(true);
     expect(factorValueAllowed({ ...f, cap: undefined, declared_scale: undefined }, -12)).toBe(true);
     expect(factorValueAllowed({ ...f, declared_scale: { min: -40, max: 40 } }, -41)).toBe(false);
+  });
+
+  it('R-keep-marker: an amended keep retains its keep predicate and hashes the original basis', async () => {
+    const { p, record } = await fixture();
+    const { createProposal, computeProposalId } = await import('../../proposal.js');
+    const { KEEP_PROPOSAL_BASIS, isKeepProposal } = await import('../../approval-chips.js');
+    const { amendAgentProposal } = await import('../amend.js');
+    const keep = createProposal({ ...p, provenance: { authored_by: 'model_proposed', basis: KEEP_PROPOSAL_BASIS } });
+    const edited = amendAgentProposal(record, keep, [{ field_id: 'factor_value:fac_hours', value: 12 }]);
+    expect(edited.ok).toBe(true); if (!edited.ok) return;
+    expect(edited.proposal.provenance).toMatchObject({ original_basis: KEEP_PROPOSAL_BASIS });
+    expect(isKeepProposal(edited.proposal)).toBe(true);
+    expect(computeProposalId({ ...edited.proposal, provenance: { ...edited.proposal.provenance, original_basis: 'changed' } })).not.toBe(edited.proposal.proposal_id);
   });
 
 });

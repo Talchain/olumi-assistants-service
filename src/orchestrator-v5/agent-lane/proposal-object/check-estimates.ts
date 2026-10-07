@@ -15,7 +15,7 @@ export const CHECK_ESTIMATES_BASIS = 'Olumi’s current estimate, for you to che
 
 export type CheckEstimatesCall = {
   readonly name: 'propose_assumptions';
-  readonly args: { readonly assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; keep: true }[] };
+  readonly args: { readonly assumptions: readonly { factor_id: string; factor_label: string; value: number; unit: string; basis: string; keep: true }[] };
 };
 
 export function checkEstimatesCall(graph: unknown, factorIds: readonly string[]): CheckEstimatesCall | undefined {
@@ -29,7 +29,7 @@ export function checkEstimatesCall(graph: unknown, factorIds: readonly string[])
     if (node === undefined || typeof node['label'] !== 'string' || typeof os?.['value'] !== 'number') return undefined;
     // The figure in the user's units where one is stored; the keep itself always takes the STORED figure, never this.
     const value = typeof os['raw_value'] === 'number' ? os['raw_value'] : os['value'];
-    assumptions.push({ factor_label: node['label'], value, unit: typeof os['unit'] === 'string' ? os['unit'] : '',
+    assumptions.push({ factor_id: id, factor_label: node['label'], value, unit: typeof os['unit'] === 'string' ? os['unit'] : '',
       basis: CHECK_ESTIMATES_BASIS, keep: true });
   }
   return { name: 'propose_assumptions', args: { assumptions } };

@@ -291,6 +291,9 @@ function directionChoiceFor(tool: string, source: ApprovalLabelSource | undefine
 
 /** The stored basis of a keep proposal (`proposeAssumptions` `keep: true`) — the authority the keep button binds to. */
 export const KEEP_PROPOSAL_BASIS = 'Olumi\u2019s current estimates, unchanged, for the user to accept';
+export const isKeepProposal = (proposal: StructuredProposal): boolean =>
+  proposal.provenance.basis === KEEP_PROPOSAL_BASIS || proposal.provenance.original_basis === KEEP_PROPOSAL_BASIS;
+
 
 /**
  * The keep button, ONLY when the STORED proposal is a keep (its basis) and the proposer's own result for that same id
@@ -300,7 +303,7 @@ function keepCardFor(tool: string, source: ApprovalLabelSource | undefined): { l
   const proposal = source?.proposal;
   const result = source?.result;
   if (tool !== 'propose_assumptions' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
-  if (proposal.provenance.basis !== KEEP_PROPOSAL_BASIS || typeof proposal.public_label !== 'string' || result.public_label !== proposal.public_label) return undefined;
+  if (!isKeepProposal(proposal) || typeof proposal.public_label !== 'string' || result.public_label !== proposal.public_label) return undefined;
   const n = proposal.operations.length;
   return n === 1
     ? { label: 'Keep Olumi\u2019s estimate', message: 'Yes, keep Olumi\u2019s estimate.', detail: proposal.public_label }

@@ -552,4 +552,27 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
     expect(await heldOnLatestRow()).toEqual([]);
     expect(bytes()).toBe(before);
   }, 120_000);
+  it('R-refused-gmh: stale Submit re-offers the exact held risk approve, Change and Not now controls', async () => {
+    graphOf.set(SCENARIO, seedGraph()); const b = await proposeRisk(); const approve = approveChipOf(b)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length); const shown = shownOf(b, ref);
+    const before = bytes();
+    const r = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id },
+      proposal_edits: { proposal_id: ref, revision: shown.revision, digest: 'stale', graph_hash: await hashNow(),
+        fields: [{ field_id: shown.fields[0]!.field_id, band: 'very_strong' }] } });
+    expect(bytes()).toBe(before);
+    expect(r._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false, mutated: false }));
+    expect(r.suggested_actions).toContainEqual(shown.approve_action);
+    expect(r.suggested_actions).toContainEqual(shown.decline_action);
+    expect(r.suggested_actions).toContainEqual(expect.objectContaining({ id: 'agent-amend-proposal', label: 'Change something first' }));
+  }, 120_000);
+
+  it('R-lapse-gmh-control: the held risk model-change lapse sentence stays byte-identical', async () => {
+    graphOf.set(SCENARIO, seedGraph()); await proposeRisk();
+    const held = (await heldOnLatestRow())[0]!;
+    const node = held.action.inline_patch!.operations!.find(o => o.op === 'add_node')!.value as { label: string };
+    const g = graphNow(); graphOf.set(SCENARIO, { ...g, nodes: g.nodes.filter(n => n.id !== 'goal_x'), edges: g.edges.filter(e => e.to !== 'goal_x') });
+    const r = await turn({ message: 'Explain what is waiting.' });
+    expect(r.assistant_text).toContain(`The held change to add the risk '${node.label}' no longer fits the model as it now stands, so it has lapsed; say the word if you still want it.`);
+  }, 120_000);
+
 });

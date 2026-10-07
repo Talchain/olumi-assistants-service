@@ -190,7 +190,7 @@ import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectFigureNotAChange, linkEffectQuoteContextMiss, linkEffectTheUserStated, ownUnitsOf, quoteOfFigure, quoteSpansIn, sameWord, saysNoChange, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
-import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
+import { KEEP_PROPOSAL_BASIS, isKeepProposal, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from '../../tools/handlers/d1-shared/normalise-factor-value.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
@@ -2741,7 +2741,7 @@ export function createAgentCapabilities(
       // A keep (its stored basis) records the user's acceptance of Olumi's unchanged figure: the receipt says that, never
       // "starting values" (served 5a2290c, guest 02440e60: "Saved 1 of 1 starting values.").
       ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length,
-        ...(parent.provenance.basis === KEEP_PROPOSAL_BASIS ? { kept: true } : {}),
+        ...(isKeepProposal(parent) ? { kept: true } : {}),
         ...(valuesLanded ? {} : { ...(stopReason !== undefined ? { reason: stopReason } : {}), not_saved: valuesNotSaved(valueOps, parent, readAfterRefusal, labelOf) }) }] : []),
       ...(linkOps.length > 0 ? [{ part: 'links', ok: linksAdded.length === linkOps.length, recorded_count: linksAdded.length, requested_count: linkOps.length }] : []),
       ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),
@@ -4559,7 +4559,10 @@ export function createAgentCapabilities(
       for (const given of input) {
         let a = given;
         const requested = String(a?.factor_label ?? '');
-        const res = resolveNamed(g, requested, writable);
+        const identified = a?.factor_id !== undefined ? g.nodes.find(n => n.id === a.factor_id) : undefined;
+        const res = a?.factor_id === undefined ? resolveNamed(g, requested, writable)
+          : identified === undefined ? { kind: 'none' as const }
+            : { kind: writable(identified) ? 'one' as const : 'other' as const, node: identified };
         if (res.kind === 'none') { unresolved.push(requested); continue; }
         // ⛔ Two writable factors answer to this name: no op for it, and the Agent asks.
         if (res.kind === 'ambiguous') {

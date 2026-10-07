@@ -332,10 +332,11 @@ export function agentProposalRecord(pa: PendingAction, graph: unknown, nowMs = D
       const [from, to] = o.path.split('::');
       if (!from || !to) continue;
       const expected = isRec(v['expected']) ? v['expected'] : {};
+      const yours = v['author'] === 'user_stated' && v['intent'] !== 'confirm_current';
       fields.push({ field_id: linkFieldId(o.path), kind: 'link_strength', from_id: from, to_id: to,
         from_label: labelOf(from), to_label: labelOf(to), direction: expected['effect_direction'] === 'negative' ? 'negative' : 'positive',
-        current: { band: strengthBandFromEdgeBand(v['band'] as InfluenceBand), source: v['author'] === 'user_stated' ? 'yours' : 'estimate' },
-        allowed_bands: STRENGTH_BANDS, editable: v['author'] !== 'user_stated' });
+        current: { band: strengthBandFromEdgeBand(v['band'] as InfluenceBand), source: yours ? 'yours' : 'estimate' },
+        allowed_bands: STRENGTH_BANDS, editable: !yours });
     }
   }
   const decline: CardAction = { id: declineChipIdFor(p.proposal_id), label: 'Not now', message: 'Not now.' };
@@ -349,7 +350,7 @@ export function proposalRecord(pa: PendingAction, graph: unknown, nowMs = Date.n
 }
 
 /** What the change is, in the user's words: "the risk 'X'", "the option 'X'", "the factors 'X' and 'Y'". */
-export function heldChangeName(pa: PendingAction): string | undefined {
+export function heldChangeLabel(pa: PendingAction): string | undefined {
   const agent = agentProposalOf(pa);
   if (agent !== undefined) return agent.public_label;
   const nodes = heldOperationsOf(pa).filter((o) => o.op === 'add_node' && isRec(o.value))
@@ -361,6 +362,13 @@ export function heldChangeName(pa: PendingAction): string | undefined {
   const kindWord = lead.kind === 'option' || lead.kind === 'risk' || lead.kind === 'factor' ? lead.kind : 'item';
   if (sameKind.length === 1) return `the ${kindWord} '${lead.label}'`;
   return `the ${kindWord}s ${sameKind.map((v) => `'${v.label}'`).slice(0, -1).join(', ')} and '${sameKind.at(-1)!.label}'`;
+}
+
+/** The whole subject of a lapse sentence, for either held dialect. */
+export function heldChangeName(pa: PendingAction): string | undefined {
+  const name = heldChangeLabel(pa);
+  if (name === undefined) return undefined;
+  return agentProposalOf(pa) !== undefined ? `The held change "${name.replace(/\.$/, '')}"` : `The held change to add ${name}`;
 }
 
 /** ⭐ THE WIRE (design §4): `_proposal_fields` on a turn, `proposal_fields` on the graph read. Absent when none is held. */

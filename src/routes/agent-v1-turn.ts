@@ -75,7 +75,7 @@ import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js'
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declinedProposalOf, heldChangeName, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { declinedProposalOf, heldChangeName, heldChangeLabel, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
@@ -2181,7 +2181,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         });
       const replayCard = replayRecords[0];
       const replayActions = firstOfEachId([...stillValid, ...boundControl]);
-      if (replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
+      const methodTerminalReplay = approvedProposal === undefined && (whatChangesReplay || isMethodPress(explanationId)
+        || widenTargetOf(explanationId, message) !== null || isWidenAddPressId(explanationId) || pressedChipIsStructural
+        || actionPressOf(body['chip']) !== null
+        || (chiplessRetry && (prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)
+          || [...METHOD_PRESS_IDS].some(id => prior.request_hash === withChipOperation(requestHash, chipOperationOf({ chip: { id } }))))));
+      if (!decisionReviewReplay && !methodTerminalReplay && replayCard !== undefined && !replayActions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)) replayActions.unshift(replayCard.approve_action as OfferedAction, AMEND_CHIP, replayCard.decline_action as OfferedAction);
       for (const r of replayRecords) if (replayActions.some(a => a.id === r.approve_action.id)) replayActions.push(AMEND_CHIP, r.decline_action as OfferedAction);
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: withoutProposalIds(replayText),
@@ -2233,7 +2238,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * written, or the latest row would be that claim, which carries nothing. A failed read degrades to today's behaviour.
      */
     const approveKey = `${scenarioId}:${userId ?? ''}`;
+    const declinedProposal = declinedProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
     if ((approvedProposal !== undefined && proposals.get(approvedProposal) === undefined)
+      || (declinedProposal !== undefined && proposals.get(declinedProposal) === undefined)
       || proposals.outstanding(scenarioId, userId).length === 0) {
       if (typeof store.readMostRecentPendingActions === 'function') {
         try {
@@ -2483,16 +2490,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // (this process's last offer, or the durable carrier after a restart); `applyLinkEffect` then requires them to be
     // exactly that card's reading. PR Review on #2275 @ fe509477: a right-looking id + reading for a proposal whose card
     // is not on offer carries no words, so it writes nothing.
-    const offeredCard = approvedProposal === undefined ? undefined : [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
-      .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
-    // A product hold is its own durable card; confirmHeld checks these words against that exact live hold.
-    const pressedApproval = approvedProposal !== undefined
-      ? { typed_approval_of: approvedProposal,
-        ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
-        ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
-    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
-    if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
-
     // Snapshot before any inner tool row: the outer answer carries/decrements this ask once,
     // even when Run or Explain bypasses the Agent loop. Claim rows are excluded by the store.
     /**
@@ -2508,6 +2505,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: held proposals unreadable at turn start — the latest row rules');
       }
     }
+    const offeredCard = approvedProposal === undefined ? undefined : [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip,
+      ...heldAtStart.map(h => proposalRecord(h, undefined)?.approve_action)]
+      .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
+    // A product hold is its own durable card; confirmHeld checks these words against that exact live hold.
+    const pressedApproval = approvedProposal !== undefined
+      ? { typed_approval_of: approvedProposal,
+        ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}),
+        ...(editsForThisCard !== undefined ? { proposal_edits: editsForThisCard } : {}) } : {};
+    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
+
     let levelAsk: ReturnType<typeof latestCurrentLevelAsk> = null;
     if (mode === 'full' && typeof store.readMostRecentPendingActions === 'function') {
       try {
@@ -2580,7 +2588,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const started = Date.now();
       const named = heldAtStart.find((p) => heldProposalId(p) === declinedHold);
       const withdrawn = await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: declinedHold }), toolCtx, capabilities, mode);
-      const said = withdrawn.ok === true ? heldDeclineSentence(named !== undefined ? heldChangeName(named) : undefined)
+      const said = withdrawn.ok === true ? heldDeclineSentence(named !== undefined ? heldChangeLabel(named) : undefined)
         : 'That change is no longer waiting, so there was nothing to set aside. Nothing in the model changed.';
       const ms = Date.now() - started;
       result = {
@@ -2627,7 +2635,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           if (editsForThisCard.fields.length > 0) {
             edited = amendAgentProposal(record, original, editsForThisCard.fields);
             if (!edited.ok) editsFailure = 'refused';
-            else { proposals.put(edited.proposal); proposals.discard(approvedProposal); }
+            else if (edited.proposal.proposal_id !== approvedProposal) { proposals.put(edited.proposal); proposals.discard(approvedProposal); }
+            else edited = undefined;
           }
         }
       }
@@ -2673,7 +2682,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ S-D: what the user set vs what Olumi held, server-authored from the hold's own record, only once it landed.
         const editsApplied = applied.ok === true && applied.mutated === true ? readUserEdits(applied.user_edits) : undefined;
         editsRefusedThisTurn = editsForThisCard !== undefined && applied.ok !== true && applied.mutated !== true;
-        const followUp = [guarded.text.trim(), editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
+        const editedLinks = editsApplied !== undefined && original !== undefined && original.operations.length > 0 && original.operations.every(o => o.op === 'set_link_strength');
+        const followUp = [editedLinks ? '' : guarded.text.trim(), editsApplied !== undefined ? userEditsReceipt(editsApplied) : '',
           editsRefusedThisTurn ? editsRefusedSentence(applied.refusal === 'edits_superseded' ? 'stale' : applied.refusal === 'unknown_proposal' ? 'not_held' : 'refused') : '']
           .filter((x) => x !== '').join(' ');
         // Refused edits are said in Olumi's own sentence above; the generic "Not saved" narrator line would say it twice.
@@ -3558,7 +3568,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // An earlier turn's held proposal the Agent set aside on the user's typed decline is SAID (the press says its own).
         if (declinedHold === undefined) {
           const setAside = heldAtStart.filter((h) => withdrawn.has(heldProposalId(h)));
-          heldLapseLines = [...setAside.map((h) => heldDeclineSentence(heldChangeName(h))), ...heldLapseLines];
+          heldLapseLines = [...setAside.map((h) => heldDeclineSentence(heldChangeLabel(h))), ...heldLapseLines];
         }
         heldRecords = liveHolds.flatMap((h) => { const r = proposalRecord(h, readbackGraph); return r === undefined ? [] : [r]; });
       } catch (err) {
@@ -3805,11 +3815,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * turn's own next steps (a proposal held until decided must not take the user's other actions away while it waits).
      * Never on a method's terminal turn, whose controls are the method's own.
      */
+    const heldCard = heldRecords.find(r => r.proposal_id === approvedProposal) ?? heldRecords[0];
     const heldCardOffer: OfferedAction[] = approvals.length === 0 && heldRecords.length > 0
       && fastPath !== 'method' && !decisionReviewRequested
-      && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated)))
+      && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated))
+        || heldRecords.some(r => r.proposal_id === approvedProposal))
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
-      ? [heldRecords[0]!.approve_action as OfferedAction, AMEND_CHIP, heldRecords[0]!.decline_action as OfferedAction] : [];
+      ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
     // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
     // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
@@ -4451,11 +4463,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                   : declined !== undefined ? heldRecords.some(r => r.proposal_id === declined)
                     : a.id !== AMEND_CHIP.id || heldRecords.length > 0;
               });
-              const oldest = heldRecords[0];
+              const oldest = heldRecords.find(r => r.proposal_id === approvedProposal) ?? heldRecords[0];
               if (oldest !== undefined && !actions.some(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
                 && !offeredNow.some(a => a.id === oldest.approve_action.id)
                 && fastPath !== 'method' && !decisionReviewRequested
-                && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated)))) actions.unshift(oldest.approve_action as OfferedAction, AMEND_CHIP, oldest.decline_action as OfferedAction);
+                && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated))
+                  || heldRecords.some(r => r.proposal_id === approvedProposal))) actions.unshift(oldest.approve_action as OfferedAction, AMEND_CHIP, oldest.decline_action as OfferedAction);
               wireBody = { ...wireBeforeFloor, suggested_actions: firstOfEachId(actions) };
               return { ...write,
                 pending_actions: (write.pending_actions ?? []).map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
