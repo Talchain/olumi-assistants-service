@@ -2063,7 +2063,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // unavailable reply). The SAME owner as the live turn, never a model call.
         const review = decisionReviewFor(scenarioId, { ...state,
           factorEnrichments: await persistedFactorReviewFor(scenarioId, state, String(req.id)), recentReplies: await repliesToCheckAsks(
-          [goalChanceWithheldForAgent(state.analysisResult)?.say], store, scenarioId, turnId) });
+          [goalChanceWithheldForAgent(state.analysisResult, state.graph)?.say], store, scenarioId, turnId) });
         replayText = review.reply;
         boundControl.push(...decisionReviewChips(review));
       } else if (whatChangesReplay) {
@@ -2105,7 +2105,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
-          const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
+          const say = goalChanceWithheldForAgent(state.analysisResult, state.graph)?.say;
           const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
           // MC D1 (c): the same #416 ask the live Run turn said, from the same readback.
           const askNow = identityAskLineFor(state.analysisResult, state.graph);
@@ -2635,7 +2635,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
       }, selectedPermissions);
       // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
-      const goalChanceRead = goalChanceWithheldForAgent(st.analysisResult);
+      const goalChanceRead = goalChanceWithheldForAgent(st.analysisResult, st.graph);
       const goalChanceAskedOnce = goalChanceRead === undefined ? ''
         : withoutAskedQuestion(goalChanceRead.say, await repliesToCheckAsks([goalChanceRead.say], store, scenarioId, undefined));
       const goalChanceNow = goalChanceRead === undefined || goalChanceAskedOnce === '' ? goalChanceRead : { ...goalChanceRead, say: goalChanceAskedOnce };
@@ -3351,7 +3351,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (decisionReviewRequested) {
       decisionReviewTurn = decisionReviewFor(scenarioId, { ...composedRead,
         factorEnrichments: await persistedFactorReviewFor(scenarioId, composedRead, String(req.id)), recentReplies: await repliesToCheckAsks(
-        [goalChanceWithheldForAgent(composedRead.analysisResult)?.say], store, scenarioId, undefined) });
+        [goalChanceWithheldForAgent(composedRead.analysisResult, composedRead.graph)?.say], store, scenarioId, undefined) });
       text = decisionReviewTurn.reply;
       result = { ...result, assistant_text: text };
     }
