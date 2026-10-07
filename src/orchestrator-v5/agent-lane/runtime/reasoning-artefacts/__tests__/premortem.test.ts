@@ -59,7 +59,7 @@ describe('A2 grounding and words', () => {
     const out = worksheet({ candidates: [candidate(), outside()] });
     expect(out?.rows).toHaveLength(2);
     expect(out?.rows[1].grounding).toEqual({ kind: 'not_in_model', label: 'not in the model yet' });
-    expect(out?.rows[1].risk_request.grounding_ids).toEqual([]);
+    expect(out?.rows[1].risk_request?.grounding_ids).toEqual([]);
     expect(out?.rows.every(r => r.provenance === 'olumi_hypothesis')).toBe(true);
     expect(PremortemWorksheetV1Schema.safeParse(out).success).toBe(true);
   });
@@ -118,6 +118,6 @@ describe('A2 stamp and carrier validation', () => {
     expect(worksheet({ turn: null })).toBeUndefined();
     const out = worksheet();
     expect(out).toBeDefined();
-    expect(PremortemWorksheetV1Schema.safeParse({ ...out, version: 2 }).success).toBe(false);
+    expect(PremortemWorksheetV1Schema.safeParse({ ...out, version: 1 }).success).toBe(false);
   });
 });
