@@ -349,7 +349,7 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(graphWrites.get(SCENARIO)).toBe(1);
     expect(os('fac_hours')).toMatchObject({ raw_value: 10, source: 'user_assumption' });
   }, 120_000);
-  it('floor cap RED: a concurrent arrival and this new approval keep room; the displaced hold is said and re-projected', async () => {
+  it('floor cap RED: a concurrent arrival and this new approval keep room; the displaced hold is re-projected, and said at the start of the next reply', async () => {
     seed(); const first = await assumptions(); const second = await links(); const two = await pending();
     const incoming = await assumptions(true); const incomingRow = await pending();
     await store.append({ scenario_id: SCENARIO, turn_id: randomUUID(), request_hash: 'restore-two', pending_actions: two });
@@ -365,10 +365,18 @@ describe('S-D slice 2 Agent proposals', () => {
     expect(offeredApproveChipOnRow(held, { scenario_id: SCENARIO, user_id: null })?.id).toBe(ownId);
     expect(held.map(p => p.chip_id)).toContain(shown(first).approve_action.id);
     expect(held.map(p => p.chip_id)).not.toContain(shown(second).approve_action.id);
-    expect(own.assistant_text).toContain('only three changes can wait at once');
+    // The composer is the ONE last writer of a reply (#2748): this reply is not changed after it was composed ...
+    expect(own.assistant_text).not.toContain('only three changes can wait at once');
     expect(latestRow(SCENARIO)!.assistant_message).toBe(own.assistant_text);
     expect(own._proposal_fields!.proposals.map(p => p.approve_action.id)).toEqual(held.map(p => p.chip_id));
     expect(graphWrites.get(SCENARIO) ?? 0).toBe(0);
+    // ... so the set-aside proposal is said at the start of the NEXT reply, once, never in silence (D-08).
+    script = [() => say('Three changes are waiting for you.')];
+    const next = await turn({ message: 'What is still waiting?' });
+    expect(next.assistant_text, next.assistant_text).toContain('only three changes can wait at once');
+    script = [() => say('Noted.')];
+    const after = await turn({ message: 'Thanks.' });
+    expect(after.assistant_text, 'said once').not.toContain('only three changes can wait at once');
   }, 120_000);
 
   it('cold replay RED: a newer approval retains its own offered card beside both held envelopes', async () => {

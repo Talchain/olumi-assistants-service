@@ -330,6 +330,29 @@ type OfferedAction = SuggestedAction;
  */
 const OFFERED_ACTIONS_MAX = 500;
 const offeredActions = new Map<string, readonly OfferedAction[]>();
+/**
+ * ⭐ S-D: a held proposal set aside by the persistence floor (a concurrent arrival filled the row AFTER the reply was
+ * composed) is said at the start of the scenario's NEXT reply: the composer is the one last writer (#2748). In-process
+ * and bounded; a restart in between loses only that one sentence (the proposal itself is already gone from the row).
+ */
+const owedHeldLapses = new Map<string, string[]>();
+const OWED_HELD_LAPSES_MAX = 500;
+function oweHeldLapses(scenarioId: string, said: readonly string[]): void {
+  if (said.length === 0) return;
+  const owed = [...(owedHeldLapses.get(scenarioId) ?? []), ...said];
+  owedHeldLapses.delete(scenarioId);
+  if (owedHeldLapses.size >= OWED_HELD_LAPSES_MAX) {
+    const oldest = owedHeldLapses.keys().next().value;
+    if (oldest !== undefined) owedHeldLapses.delete(oldest);
+  }
+  owedHeldLapses.set(scenarioId, owed);
+}
+function takeOwedHeldLapses(scenarioId: string): string[] {
+  const owed = owedHeldLapses.get(scenarioId) ?? [];
+  owedHeldLapses.delete(scenarioId);
+  return owed;
+}
+
 function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
   offeredActions.delete(key);
   if (offeredActions.size >= OFFERED_ACTIONS_MAX) {
@@ -3529,7 +3552,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           declined: withdrawn, graph: readbackGraph, graphHash, scenarioId, requestId: String(req.id), nowMs: Date.now() });
         liveHolds = reconciled.carried;
         for (const l of reconciled.lapsed) if (agentProposalOf(l.hold) !== undefined) proposals.discard(heldProposalId(l.hold));
-        heldLapseLines = reconciled.lapsed.map((l) => heldLapseSentence(heldChangeName(l.hold), l.reason));
+        heldLapseLines = [...takeOwedHeldLapses(scenarioId), ...reconciled.lapsed.map((l) => heldLapseSentence(heldChangeName(l.hold), l.reason))];
         // An earlier turn's held proposal the Agent set aside on the user's typed decline is SAID (the press says its own).
         if (declinedHold === undefined) {
           const setAside = heldAtStart.filter((h) => withdrawn.has(heldProposalId(h)));
@@ -4398,6 +4421,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // from the reply as composed BEFORE the floor, and a proposal that did not fit is set aside only after the append.
         const wireBeforeFloor = wireBody;
         let overCapAtAppend: readonly PendingAction[] = [];
+        let overCapSaid: readonly string[] = [];
         const outcome = await appendCheckedGraphWrite({
           store,
           writesGraph: false,
@@ -4413,7 +4437,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                 const r = proposalRecord(p, readbackGraph); return r && r.base_graph_hash === graphHash ? [r] : [];
               });
               overCapAtAppend = overCap;
-              const said = overCap.map(h => heldLapseSentence(heldChangeName(h), 'over_cap'));
+              // ⛔ The reply composer is the ONE last writer of the reply (#2748): a lapse found HERE, after composing, is
+              // said at the start of this scenario's next reply (`owedHeldLapses`), never appended to this one.
+              overCapSaid = overCap.map(h => heldLapseSentence(heldChangeName(h), 'over_cap'));
               const actions = (wireBeforeFloor.suggested_actions as OfferedAction[] | undefined ?? []).filter(a => {
                 const approved = typedApprovalOf({ chip: { id: a.id } }); const declined = declinedProposalOf(a.id);
                 return approved !== undefined ? heldRecords.some(r => r.proposal_id === approved)
@@ -4425,10 +4451,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                 && !offeredNow.some(a => a.id === oldest.approve_action.id)
                 && fastPath !== 'method' && !decisionReviewRequested
                 && (fastPath !== 'approve' || result.tool_calls.some(c => c.name === 'authorise_change' && (c.ok || c.mutated)))) actions.unshift(oldest.approve_action as OfferedAction, AMEND_CHIP, oldest.decline_action as OfferedAction);
-              const currentText = String(wireBeforeFloor.assistant_text ?? text);
-              wireBody = { ...wireBeforeFloor, assistant_text: said.length > 0 ? `${currentText}\n\n${said.join('\n')}` : currentText,
-                suggested_actions: firstOfEachId(actions) };
-              return { ...write, assistantMessage: String(wireBody.assistant_text),
+              wireBody = { ...wireBeforeFloor, suggested_actions: firstOfEachId(actions) };
+              return { ...write,
                 pending_actions: (write.pending_actions ?? []).map(p => withApprovalOfferedOnRow(p, actions.some(a => a.id === p.chip_id))),
                 suggested_actions: firstOfEachId(actions).filter(isDurableAnswerOffer).map(({ id, label, message }) => ({ id, label, message })) };
             } },
@@ -4462,6 +4486,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           },
         });
         for (const h of overCapAtAppend) if (agentProposalOf(h) !== undefined) proposals.discard(heldProposalId(h));
+        oweHeldLapses(scenarioId, overCapSaid);
         if (outcome.priorTurnConflict === true) {
           // A concurrent request with the SAME id and a DIFFERENT message won the
           // row. This answer is not the recorded one; say so rather than return it.
