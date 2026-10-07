@@ -232,6 +232,8 @@ function partsLine(r: ToolResult): string | null {
     const versions = versionPhrase(versionsOf(p));
     // A keep changes no figure: what was saved is the user's acceptance of Olumi's estimate (#2436).
     if (p.ok === true && p.part === 'values' && p.kept === true) {
+      // A mixed keep's S-D receipt already states each edited and accepted figure.
+      if (Array.isArray(r.user_edits) && r.user_edits.length > 0) return '';
       return rec === 1 ? `Recorded that you accept Olumi\u2019s estimate${versions}.` : `Recorded that you accept Olumi\u2019s ${rec ?? ''} estimates${versions}.`.replace('  ', ' ');
     }
     if (p.ok === true) return `Saved ${rec !== null && req !== null ? `${rec} of ${req} ` : ''}${many}${versions}.`;
@@ -254,7 +256,7 @@ function partsLine(r: ToolResult): string | null {
   if (r.ok !== true && r.refusal === 'partially_applied' && parts.every((p) => p.part !== 'option_levels') && parts.some((p) => p.part === 'values')) {
     bits.push('Not saved: option levels (stopped before they were written).');
   }
-  return bits.join(' ');
+  return bits.filter((b) => b !== '').join(' ');
 }
 
 /**

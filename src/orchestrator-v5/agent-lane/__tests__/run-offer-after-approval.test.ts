@@ -316,7 +316,8 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       expect(chip, 'the control: a proposal was offered').toBeDefined();
       const again = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.', turn_id: T });
       expect(again._agent.replayed).toBe(true);
-      expect(again.suggested_actions.map((c) => c.id)).toEqual([chip.id, 'agent-amend-proposal']);
+      // S-D, DL 7 Oct, Canvas capture #2614: Not now follows Change something first.
+      expect(again.suggested_actions.map((c) => c.id)).toEqual([chip.id, 'agent-amend-proposal', `agent-decline-proposal:${chip.id.slice('agent-approve-proposal:'.length)}`]);
       await replay({ kind: 'message', scenario_id: SCENARIO, message: chip.message, source: 'chip', chip: { id: chip.id } });
       const afterApply = await replay({ kind: 'message', scenario_id: SCENARIO, message: 'Team size strongly drives velocity, so connect them.', turn_id: T });
       expect(afterApply._agent.replayed).toBe(true);
