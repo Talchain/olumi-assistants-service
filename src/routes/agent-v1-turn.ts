@@ -112,7 +112,7 @@ import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/ag
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
-import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
+import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { composeReplyShape, consentLabelsOf, REPLY_SHAPE_INSTRUCTION, type FaceObligation } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
@@ -3943,10 +3943,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     {
       const reply = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
+      // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
+      // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
+      // this same final body, plus the paragraph the gate appended and every fixed no-leader sentence present.
+      const coHold = goalFigureCoHoldOf((wireBody as { blocks?: unknown }).blocks, readbackGraph ?? null, typedNow ?? undefined);
       const obligations: FaceObligation[] = [
-        ...asks.map((text) => ({ role: 'ask' as const, text })),
-        ...[leaderGateClosing, ...AGENT_NO_LEADER_SENTENCES.filter((line) => reply.includes(line))]
-          .filter((l): l is string => l !== null).map((text) => ({ role: 'withheld_reason' as const, text })),
+        ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
+        ...[leaderGateClosing, coHold?.say, coHold?.why, ...AGENT_NO_LEADER_SENTENCES.filter((line) => reply.includes(line))]
+          .filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'withheld_reason' as const, text })),
       ];
       const proposedThisTurn = approvalCalls.filter((c) => c.ok && typeof c.proposal_id === 'string');
       const consentWithFigures = proposedThisTurn.some((c) => FIGURE_PROPOSERS.has(c.name));

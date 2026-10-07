@@ -68,8 +68,8 @@ export interface ReplyComposeInput {
   readonly text: string;
   readonly obligations?: readonly FaceObligation[];
   /**
-   * The labels of what a proposal made THIS turn would add (by the stored proposal's identity). The first sentence that
-   * names each one states what the user is consenting to, and stays on the face (R1's exception).
+   * The labels of what a proposal made THIS turn would add (by the proposal's identity). Every sentence that names one
+   * (a whole-word mention) states or frames what the user is consenting to, and stays on the face (R1's exception).
    */
   readonly consentLabels?: readonly string[];
   readonly keepWhole?: KeepWholeReason;
@@ -209,6 +209,18 @@ function sentenceMultiset(text: string): string[] {
   return out.sort();
 }
 
+/** A whole-word mention of a label (any length): never a fragment of a longer word ("AI" is not in "said"). */
+function namesLabel(text: string, label: string): boolean {
+  const lower = text.toLocaleLowerCase();
+  const want = label.toLocaleLowerCase();
+  for (let at = lower.indexOf(want); at !== -1; at = lower.indexOf(want, at + 1)) {
+    const before = lower.slice(0, at).slice(-1);
+    const after = lower.slice(at + want.length, at + want.length + 1);
+    if (!/[\p{L}\p{N}]/u.test(before) && !/[\p{L}\p{N}]/u.test(after)) return true;
+  }
+  return false;
+}
+
 const wordCount = (s: string): number => s.split(/[ \t\n]{1,16}/).filter(Boolean).length;
 const isQuestionUnit = (u: Unit): boolean => QUESTION_END.test(u.text.trim());
 
@@ -254,23 +266,22 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated' };
   }
 
-  // R1's exception: the FIRST sentence naming each proposed item states the change being consented to.
-  for (const label of (input.consentLabels ?? []).map((l) => l.trim()).filter((l) => l.length >= 3)) {
-    const first = units.find((u) => u.obligation === undefined && u.kind !== 'heading' && u.text.includes(label));
-    if (first !== undefined) first.obligation = 'consent';
+  // R1's exception: EVERY sentence naming a proposed item (a whole-word mention of its label) states or frames the
+  // change being consented to, so none is hidden; more than the face holds keeps the reply whole (Codex r1 P2 on #2748:
+  // binding only the first mention hid the proposal sentence behind an earlier, introductory one).
+  for (const label of (input.consentLabels ?? []).map((l) => l.trim()).filter((l) => l.length > 0)) {
+    for (const u of units) if (u.obligation === undefined && u.kind !== 'heading' && namesLabel(u.text, label)) u.obligation = 'consent';
   }
 
   const questions = units.filter(isQuestionUnit);
   const hostAsks = units.filter((u) => u.obligation === 'ask');
   const runs = [...new Set(units.filter((u) => u.kind === 'bullet').map((u) => u.run!))];
-  // THE ONE ASK: the host's typed ask; else a question that closes the reply's first list (where the face puts it, so a
-  // composed reply composes to itself); else the reply's last question. Every other question goes to detail (D-12).
-  const firstRunLast = runs.length === 0 ? undefined : units.filter((u) => u.run === runs[0]).at(-1);
-  const ask = hostAsks.at(-1) ?? (firstRunLast !== undefined && isQuestionUnit(firstRunLast) ? firstRunLast : questions.at(-1));
+  // THE ONE ASK: the host's typed ask, else the reply's last question. Every other question goes to detail (D-12).
+  const ask = hostAsks.at(-1) ?? questions.at(-1);
   const otherObligations = units.filter((u) => u.obligation !== undefined && u.obligation !== 'ask' && u !== ask);
 
   // The face's list: the first bullet run with a point that is not an obligation; its lead-in becomes the headline.
-  const faceRun = runs.find((r) => units.some((u) => u.run === r && u.obligation === undefined && u !== ask));
+  const faceRun = runs.find((r) => units.some((u) => u.run === r && u.obligation === undefined && u !== ask && !isQuestionUnit(u)));
   const firstOfRun = faceRun === undefined ? undefined : units.find((u) => u.run === faceRun)!;
   const beforeRun = firstOfRun === undefined ? undefined : units[firstOfRun.idx - 1];
   const leadIn = beforeRun !== undefined && beforeRun.obligation === undefined && beforeRun !== ask
@@ -285,7 +296,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const mustFace = [...otherObligations.filter((u) => u !== headline), ...(ask !== undefined && ask !== headline ? [ask] : [])];
   const slots = Math.max(0, REPLY_FACE_MAX_BULLETS - mustFace.length);
   const pool = faceRun !== undefined
-    ? units.filter((u) => u.run === faceRun && u.obligation === undefined && u !== ask)
+    ? units.filter((u) => u.run === faceRun && u.obligation === undefined && u !== ask && !isQuestionUnit(u))
     : units.filter((u) => u.idx > headline.idx && u.kind === 'sentence' && u.obligation === undefined && u !== ask && !isQuestionUnit(u));
   const faceSet = new Set<Unit>([headline, ...pool.slice(0, slots), ...mustFace]);
   // Face bullets keep the reply's own order, except the ask, which closes the face.

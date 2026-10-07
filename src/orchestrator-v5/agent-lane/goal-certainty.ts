@@ -644,19 +644,22 @@ export function noDeadEndAsks(
     const ask = askOf();
     const statement = unsizedLinkStatement(links.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), 400 - ask.length - 1);
     let message = statement === '' ? ask : `${statement} ${ask}`;
-    // Only when the cause cannot be stated beside the complete question do the labels shorten, at word boundaries, the
-    // statement and the question together (R10 Science: the message accounts for every link; the ask always survives).
-    if (statement === '' || message.length > 400) {
+    let question = ask;
+    // The complete question is kept whenever it fits the 400 carrier on its own (D-04). Only a question that cannot
+    // fit alone shortens its labels, at word boundaries, with the statement (R10 Science: every link accounted for);
+    // `first.question` is then the question actually said, so the current-level ask still binds (Codex r1 P1, #2748).
+    if (ask.length > 400) {
       for (budget = 120; budget > 12; budget -= 12) {
         const shortAsk = askOf();
         const b = budget;
         const shortStatement = unsizedLinkStatement(links.map(l => ({ ...l, from_label: compactWordLabel(labelOf(l.from), b), to_label: compactWordLabel(labelOf(l.to), b) })), 400 - shortAsk.length - 1);
         message = shortStatement === '' ? shortAsk : `${shortStatement} ${shortAsk}`;
+        question = shortAsk;
         if (shortStatement !== '' && message.length <= 400) break;
       }
       budget = null;
     }
-    return { message, gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id), question: ask } };
+    return { message, gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id), question } };
   }
   const readings = mediatorReadings(graph);
   const unitOfNode = (id: unknown): string | undefined => { const v = view.get(id as string); return v === undefined ? undefined : unitOf(v); };

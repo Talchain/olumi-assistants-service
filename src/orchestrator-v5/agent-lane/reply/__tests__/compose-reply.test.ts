@@ -151,18 +151,35 @@ describe('obligations (DL ruling R1, 7 Oct): the headline, the ONE ask, the with
     expect(c.shape!.detail).toContain('Which option feels closest to your plan?');
   });
 
-  it('CONSENT (R1 exception): the first sentence naming what this turn’s proposal adds stays on the face; a later mention does not', () => {
+  it('CONSENT (R1 exception): every sentence naming what this turn’s proposal adds stays on the face', () => {
     const LABEL = 'Recruitment process taking a long time';
     const text = `This is a time-to-value risk for the deadline. Hiring may take longer than the six months you have. Its link to the deadline is not sized yet, so it moves no figure until you size it. Competitive recruitment is not modelled either. I can add the risk ‘${LABEL}’ to the model, linked to the deadline. ‘${LABEL}’ would sit beside the onboarding risk. Shall I add it?`;
     const c = composeReplyShape({ text, consentLabels: [LABEL] });
     expect(c.outcome).toBe('shaped');
     expect(face(c)).toContain(`I can add the risk ‘${LABEL}’ to the model, linked to the deadline.`);
     expect(c.shape!.bullets.at(-1)).toBe('Shall I add it?');
-    expect(c.shape!.detail).toContain(`‘${LABEL}’ would sit beside the onboarding risk.`);
-    expect(c.measure!.consent_units).toBe(1);
+    expect(face(c), 'every mention of the proposed item is a consent line (Codex r1 P2)').toContain(`‘${LABEL}’ would sit beside the onboarding risk.`);
+    expect(c.measure!.consent_units).toBe(2);
     // CONTRAST: with no consent label, that sentence is not on the face (only position puts lines there).
     expect(face(composeReplyShape({ text }))).not.toContain(`I can add the risk ‘${LABEL}’ to the model, linked to the deadline.`);
     everySentenceKept(text, c.text);
+  });
+
+  it('Codex r1 P2 (#2748): a short label ("AI") binds by whole word, and an introductory mention cannot hide the proposal sentence', () => {
+    const P = 'Plans differ. Check timing. Check capacity. Check candidates. Validate these assumptions against actual recruitment lead times and onboarding requirements before relying on this comparison for planning.';
+    const short = composeReplyShape({ text: `${P} I can add AI as a risk linked to Revenue. Shall I add it?`, consentLabels: ['AI'] });
+    expect(face(short)).toContain('I can add AI as a risk linked to Revenue.');
+    // CONTROL: "AI" inside a longer word is not a mention.
+    expect(composeReplyShape({ text: `${P} I said a risk is linked to Revenue. Shall I add it?`, consentLabels: ['AI'] }).measure!.consent_units).toBe(0);
+    const intro = composeReplyShape({ text: `Recruitment delay is a concern. ${P} I can add the risk Recruitment delay, linked to Revenue. Shall I add it?`, consentLabels: ['Recruitment delay'] });
+    expect(face(intro)).toContain('I can add the risk Recruitment delay, linked to Revenue.');
+  });
+
+  it('Codex r1 P2 (#2748): an earlier question in a bullet does not displace the reply’s last question', () => {
+    const text = 'Recruitment remains uncertain.\n- Check lead times.\n- Shall I add a risk?\n\nWe should test this assumption against actual recruitment lead times before relying on this comparison in planning. What is today’s delivery capacity?';
+    const c = composeReplyShape({ text });
+    expect(c.shape!.bullets.at(-1)).toBe('What is today’s delivery capacity?');
+    expect(c.shape!.detail).toContain('Shall I add a risk?');
   });
 
   it('more must-face lines than three bullets → the reply ships whole (an obligation is never hidden)', () => {
@@ -260,11 +277,12 @@ describe('the served corpus', () => {
     expect(all.filter((r) => composeReplyShape({ text: r.text }).reason === 'invariant_failed').map((r) => r.source)).toEqual([]);
   });
 
-  it('idempotent: composing a composed reply changes nothing', () => {
+  it('a composed reply composed again still keeps every sentence and at most three face bullets (stable contract)', () => {
     for (const r of all) {
       const once = composeReplyShape({ text: r.text });
       const twice = composeReplyShape({ text: once.text });
-      expect(twice.text, r.source).toBe(once.text);
+      if (twice.shape !== null) expect(twice.shape.bullets.length, r.source).toBeLessThanOrEqual(REPLY_FACE_MAX_BULLETS);
+      everySentenceKept(r.text, twice.text);
     }
   });
 });
