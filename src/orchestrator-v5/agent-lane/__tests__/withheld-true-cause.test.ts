@@ -237,7 +237,7 @@ describe('(f) a placeholder path beside an untestable target: the chat discloses
 
   it('CONTROL: a target-only withhold that kept the shares keeps its own tail (no placeholder words appear)', () => {
     const target = (D1.analysis_result.enrichment.inference_warnings as Rec[]).filter((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE');
-    expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: target } })!.say).not.toContain('nobody has set yet');
+    expect(goalChanceWithheldForAgent({ enrichment: { inference_warnings: target } })!.say).not.toContain('sized in the model yet');
   });
 });
 

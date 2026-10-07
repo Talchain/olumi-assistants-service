@@ -39,7 +39,7 @@ it.each([12, 100])('R10 science: five-link Run shortening accounts for all five 
   expect(w.links).toHaveLength(5);
   const links = w.links.map((l: R) => ({ ...l, from_label: g.nodes.find((n: R) => n.id === l.from).label,
     to_label: g.nodes.find((n: R) => n.id === l.to).label }));
-  expect(`This comparison turns on the ${linkList(links)}, whose strengths nobody has set yet. Set them to see how much they matter.`.length).toBeGreaterThan(400);
+  expect(`This comparison turns on the ${linkList(links)}, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.`.length).toBeGreaterThan(400);
   expect(w.message.length).toBeLessThanOrEqual(400);
   // Every candidate in the shortening sequence retains the original total.
   for (const count of [3, 2, 1]) accounting(linkList(links, count), links);
