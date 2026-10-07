@@ -158,42 +158,7 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     for (const line of SCREEN_T1B) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
   });
 
-  it('B19 r1 RED: an 80-word completed reply with Agent chance phrasing keeps spread and shortfall on the face', async () => {
-    const line = shortfallScreenLine();
-    const phrased = 'Raise prices 10%: about 55%.';
-    const reply = `Analysis is ready. Review the evidence. Check the assumptions. ${phrased} Keep unresolved disagreements visible in the model for the team’s next review and keep the conversation grounded in evidence.`;
-    const completed = withScreenLinesOwed(reply, [line]);
-    expect(completed.added, 'the control: the route owes the two missing notes').toBe(1);
-    expect(completed.text.trim().split(/\s+/), 'the reproduced composer boundary').toHaveLength(80);
-    expect(completed.text).not.toContain(line.chance);
-    const b = await turn(run(reply), 'Run it');
-    expect(b._agent.tool_calls.map((c) => c.name)).toContain('run_analysis');
-    expect(callModelOutputs, 'the control: the scripted Agent phrasing was consumed').toEqual([]);
-    expect(b._answer_shape, 'the control: the reply really passes the face/detail split').toBeDefined();
-    const face = [b._answer_shape!.headline, ...b._answer_shape!.bullets].join(' ');
-    for (const note of [line.spread_note!, line.shortfall_note!]) {
-      expect(count(b.assistant_text, note), b.assistant_text).toBe(1);
-      expect(face, 'each licensed note is evidence on the face').toContain(note);
-      expect(b._answer_shape!.detail).not.toContain(note);
-    }
-    expect(b.assistant_text).toContain(phrased);
-    expect(b.assistant_text).not.toContain(line.chance);
-  });
 
-  it('B19 r1 CONTROL: a canonical chance already carrying spread and shortfall keeps both notes on the face once', async () => {
-    const line = shortfallScreenLine();
-    const reply = `Analysis is ready. Review the evidence. Check the assumptions. ${line.chance} Keep unresolved disagreements visible in the model for the team’s next review and keep the conversation grounded in evidence.`;
-    expect(withScreenLinesOwed(reply, [line]), 'the positive control: the complete unit is already present').toEqual({ text: reply, added: 0 });
-    const b = await turn(run(reply), 'Run it');
-    expect(callModelOutputs, 'the control: the scripted canonical chance was consumed').toEqual([]);
-    expect(b._answer_shape).toBeDefined();
-    const face = [b._answer_shape!.headline, ...b._answer_shape!.bullets].join(' ');
-    expect(face).toContain(line.chance);
-    for (const note of [line.spread_note!, line.shortfall_note!]) {
-      expect(count(b.assistant_text, note), b.assistant_text).toBe(1);
-      expect(b._answer_shape!.detail).not.toContain(note);
-    }
-  });
 
   it('CONTROL: a turn that ran nothing adds nothing', async () => {
     const b = await turn([say('Happy to help with the next step.')], 'Thanks');

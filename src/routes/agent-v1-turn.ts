@@ -4256,8 +4256,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // Required evidence, never hidden (AIE line review): the screen's chance lines, the comparison's basis, a root
         // the Run treated as zero. A chance and what it depends on are ONE finding: the joined line (as
         // `withScreenLinesOwed` writes it) binds as one unit when present, else each sentence binds where it stands.
-        // Agent-written chance phrasing still owes each licensed note on the face, without the canonical chance text.
-        ...[...screenLines.flatMap((l) => [l.depends === '' ? null : `${l.chance} ${l.depends}`, l.chance, l.depends, l.spread_note, l.shortfall_note]), basis, rootLine]
+        ...[...screenLines.flatMap((l) => [l.depends === '' ? null : `${l.chance} ${l.depends}`, l.chance, l.depends]), basis, rootLine]
           .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text) => ({ role: 'evidence' as const, text })),
         // The withheld goal chance's reason (S-E GOALS #2742: the chance-goal sentence speaks alone) is a withheld reason:
         // the whole owed line when it stands, else each of its sentences where it stands (a re-ask may have dropped one).
