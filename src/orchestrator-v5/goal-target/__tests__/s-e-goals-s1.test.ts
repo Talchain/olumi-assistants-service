@@ -25,6 +25,7 @@ import { assignEntityRefs } from '../../graph/entity-refs.js';
 import type { SessionTurnWrite } from '../../session/store.js';
 import type { CommitOptionLevelsInput, CommitOptionLevelsResult } from '../../system-events/dispatch.js';
 import { executeOptionInterventionBatch } from '../../system-events/option-intervention-edit.js';
+import { applyGoalHorizonEdit, goalHorizonPostimageIsScoped } from '../goal-horizon-write.js';
 import { withholdGoalFiguresForChanceGoal } from '../../tools/handlers/run-analysis.js';
 import { GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLACEHOLDER_PATH, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { CHANCE_WORD, chanceGoalSentence, goalKindOf, unitNamesAChance } from '../goal-kind.js';
@@ -285,6 +286,28 @@ describe('turn 5 (Paul 09:13Z): the stated deadline is proposed as a date in the
     const l = await w.caps.proposeGoalCurrentLevel!(ctxSaying('It is about 40% today.'),
       { goal_label: 'meet our next feature-launch deadline', value: 40, unit: '%', user_stated: true }) as Rec;
     expect(l).toEqual(expect.objectContaining({ ok: false, refusal: 'goal_measures_a_chance' }));
+  });
+});
+
+describe('the one horizon writer (goal-horizon-write.ts): its own gates, without the capability in front of it', () => {
+  it('a date that moved since the card was made is refused, by name, and nothing is mutated', () => {
+    const g = stored();
+    goalOf(g).goal_horizon = { deadline: '2027-05-01' };
+    const before = JSON.stringify(g);
+    expect(applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null })).toEqual({ kind: 'refused', reason: 'deadline_changed' });
+    expect(JSON.stringify(g)).toBe(before);
+  });
+  it('only a goal, only a real calendar date; the postimage differs in goal_horizon alone', () => {
+    const g = stored();
+    expect(applyGoalHorizonEdit(g, { goal_id: 'feature_delivery_capacity', deadline: '2027-04-07', expected_deadline: null })).toEqual({ kind: 'refused', reason: 'not_a_goal' });
+    expect(applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-02-30', expected_deadline: null })).toEqual({ kind: 'refused', reason: 'date_invalid' });
+    const ok = applyGoalHorizonEdit(g, { goal_id: GOAL_ID, deadline: '2027-04-07', expected_deadline: null });
+    expect(ok.kind).toBe('mutated');
+    const after = (ok as { mutatedGraph: Rec }).mutatedGraph;
+    expect(goalHorizonPostimageIsScoped(g, after, GOAL_ID)).toBe(true);
+    const widened = structuredClone(after);
+    widened.nodes.find((n: Rec) => n.id === 'feature_delivery_capacity').label = 'changed';
+    expect(goalHorizonPostimageIsScoped(g, widened, GOAL_ID)).toBe(false);
   });
 });
 
