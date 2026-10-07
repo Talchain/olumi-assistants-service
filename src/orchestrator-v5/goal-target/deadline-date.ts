@@ -227,3 +227,8 @@ export function sayTimeFromToday(d: StatedDeadline, unit: 'months' | 'weeks' | '
   const shown = Number.isInteger(n) ? String(n) : n.toFixed(1);
   return `${about}${shown} ${n === 1 ? one : unit} from today`;
 }
+
+/** The card's "(6 months from today)": in the unit the user counted in, else months. */
+export function sayDeadlineFromToday(d: StatedDeadline): string {
+  return sayTimeFromToday(d, d.stated_count?.unit ?? 'months');
+}

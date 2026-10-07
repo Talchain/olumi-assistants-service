@@ -196,7 +196,7 @@ import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } f
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { goalDeadlineOf, goalKindOf } from '../../goal-target/goal-kind.js';
-import { readStatedDeadline, sayDate, sayTimeFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
+import { readStatedDeadline, sayDate, sayDeadlineFromToday, todayInLondon } from '../../goal-target/deadline-date.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { nearestFiveGoalChancesForAgent } from '../../goal-target/goal-chance-licence.js';
 import { goalChanceFactsForAgent, goalChanceNeedsGraphLabels, runHasGoalChanceLicenceRecord } from '../../goal-target/goal-chance-range-agent.js';
@@ -4337,8 +4337,8 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'already_held',
           detail: `The goal "${goal.label}" already holds ${date} as its deadline, so nothing was prepared. Tell the user it is already recorded.` };
       }
-      const countUnit = stated.stated_count?.unit === 'weeks' || stated.stated_count?.unit === 'days' ? stated.stated_count.unit : 'months';
-      const question = `Is your deadline ${date} (${sayTimeFromToday(stated, countUnit)})?`;
+      const fromToday = sayDeadlineFromToday(stated);
+      const question = `Is your deadline ${date} (${fromToday})?`;
       const replaces = held === undefined ? '' : ` This replaces ${sayDate(held)}.`;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
@@ -4356,7 +4356,7 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        deadline: { goal: goal.label, date, words: stated.words, from_today: sayTimeFromToday(stated, countUnit) },
+        deadline: { goal: goal.label, date, words: stated.words, from_today: fromToday },
         note: `Nothing has changed yet. Ask the user exactly: "${question}"${replaces === '' ? '' : ` and say it replaces ${sayDate(held!)}`} — never the id, `
           + 'never a date of your own — and call authorise_change with this proposal_id once they say yes. If they give another date, '
           + 'call propose_goal_deadline again with their new words.',
