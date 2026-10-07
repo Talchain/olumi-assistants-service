@@ -272,7 +272,9 @@ function optionRowsForAgent(
  */
 function warningsForAgent(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
-  return value.map((w) => {
+  // ⛔ S1 review r1 #4: the GOAL_CHANCE_RANGE record's figures never reach the model raw (ruling 1 §6: no comparison of
+  // ranges); the Agent reads only its ruled display (`goalChanceRangeDisplayForAgent`, PR-S2).
+  return value.filter((w) => recordOf(w)?.code !== 'GOAL_CHANCE_RANGE').map((w) => {
     const r = recordOf(w);
     if (r === undefined || !GOAL_CHANCE_DRIVER_RECORD_KEYS.some((k) => k in r)) return w;
     const kept: Record<string, unknown> = { ...r };

@@ -29,6 +29,7 @@
 import { readOptionResultSources } from '../../orchestrator/context/option-result-source.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
+import { goalChanceHorizonOf } from './goal-chance-range.js';
 import { heldLinkOf, isUserStatedLink } from './held-user-links.js';
 import {
   displayedPctAt, displayRoundingFor, goalChanceDriverOf, goalChancePrecisionOf, intervalsDistinct, precisionHalfWidthPoints,
@@ -284,7 +285,7 @@ export function withGoalChanceLicence<E>(
   const licence = goalChanceLicenceOf(envelope, graph, goalId, earned);
   if (licence === null || !isRec(envelope)) return envelope;
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
-  return { ...envelope, inference_warnings: [...warnings, licence] } as E;
+  return { ...envelope, inference_warnings: [...warnings, { ...licence, ...goalChanceHorizonOf(envelope) }] } as E;
 }
 
 /**

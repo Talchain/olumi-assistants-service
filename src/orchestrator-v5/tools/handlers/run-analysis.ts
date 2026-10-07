@@ -205,6 +205,7 @@ import { buildSeparabilityDisclosure } from '../../coaching/separability-disclos
 import { heldGoalPointsUp, readGoalLabel, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
 import { withholdUnusableGoalChances } from '../../goal-target/goal-chance-gate.js';
 import { withGoalChanceLicence } from '../../goal-target/goal-chance-licence.js';
+import { withGoalChanceRange, type GoalChanceRangeInputs } from '../../goal-target/goal-chance-range.js';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 import { withHeldUserLinks } from '../../goal-target/held-user-links.js';
@@ -1976,6 +1977,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // through a link nobody sized has its goal figures withheld HERE (R4 shared P5 walk), before any reader, and every win share and the
     // leader with them (`withholdOptionGoalFigures`). A run PLoT already withheld (#416 / #422) says its own reason.
     const envelope = response as Record<string, unknown>;
+    // ⭐ PR-S1 (#87 6027634829): retain only the option's own driver block BEFORE either CEE arm strips it.
+    const rangeDrivers = new Map<string, unknown>();
+    for (const r of readOptionResultSources(envelope).flat()) {
+      const id = typeof r.option_id === 'string' ? r.option_id : r.id;
+      if (typeof id === 'string' && id !== '' && !rangeDrivers.has(id)) rangeDrivers.set(id, r.probability_of_goal_drivers);
+    }
+    let rangeInputs: GoalChanceRangeInputs = { driversByOption: rangeDrivers, goalPaths: [], plotWithheld: runWithheldGoalFigures(envelope), goalId: snapshot.goal_node_id };
     let withheldBecauseUnsizedPath: UnsizedPathLeaderCause | undefined;
     let legacyFiguresDisclosure = '';
     let legacyFiguresLinks: Array<{ from: string; to: string }> = [];
@@ -1985,6 +1993,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       const evaluations = Array.isArray(envelope.identity_evaluations) ? envelope.identity_evaluations : undefined;
       const scoredInterventions = new Map(finalWireOptions.map(o => [optionIdOf(o as Record<string, unknown>) ?? '', o.interventions as Record<string, unknown>]));
       const goalPaths = unsizedLeaderGoalPaths(graphForAnalysis, scoredIds, evaluations, scoredInterventions);
+      rangeInputs = { ...rangeInputs, goalPaths };
       // ⛔ GATE 5 (DL #75 5904272507): the user's own levels make the goal rate × count within 5%, and this run did not
       // evaluate that product, so its goal figures come from a walk those figures contradict. Every option, the leader too.
       const unread = unreadGoalProduct(graphForAnalysis);
@@ -2104,6 +2113,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // ⭐ A7 AS A TYPED FACT (DL 0df0e1, beat 2): a held deadline no duration limit scores is untested, and the Run says so
     // on the carrier a consumer reads, in A7's own sentence (`decision-input-ask.ts`, the one rule the chat line uses too).
     response = withUntestedHorizonWarning(response, graphForAnalysis);
+    response = withGoalChanceRange(response, graphForAnalysis, rangeInputs);
 
     const analysisStatus = readAnalysisStatus(response);
     const resultRecords = readResultRecords(response);
