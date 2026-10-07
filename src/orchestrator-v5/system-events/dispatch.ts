@@ -58,6 +58,7 @@ import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
+import type { ApprovedGoalHorizon } from '../goal-target/goal-horizon-write.js';
 import { runWithApprovedLevelAdoptions } from '../agent-lane/approved-adoption-context.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -2918,13 +2919,16 @@ export async function dispatchOptionLevelsBatch(
     readonly linkEffects?: readonly ApprovedLinkEffect[];
     /** ⭐ One approved product confirmation (DL #72 5887510885; Canonical 5887564539): ONE commit, alone. */
     readonly identityConfirm?: ApprovedIdentityConfirm;
+    /** ⭐ S-E GOALS: one approved deadline card (the goal's `goal_horizon` only): ONE commit, alone. */
+    readonly goalHorizon?: ApprovedGoalHorizon;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
     readonly fenceRefusalReachesCaller?: boolean;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
   const linkStrengths = batch.linkStrengths ?? [];
-  const eventKind = batch.identityConfirm !== undefined ? 'identity_confirm_edit'
+  const eventKind = batch.goalHorizon !== undefined ? 'goal_horizon_edit'
+    : batch.identityConfirm !== undefined ? 'identity_confirm_edit'
     : batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0 ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
   let analysisInputs: WriteReplyAnalysisInputs;
@@ -2984,7 +2988,7 @@ export async function dispatchOptionLevelsBatch(
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
     && (batch.linkEffects?.length ?? 0) === 0
-    && batch.identityConfirm === undefined && (batch.optionGaps?.length ?? 0) === 0
+    && batch.identityConfirm === undefined && batch.goalHorizon === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
@@ -2997,7 +3001,8 @@ export async function dispatchOptionLevelsBatch(
       ...(linkStrengths.length > 0 ? { linkStrengths, lastRunIdentityUse } : {}),
       ...(batch.linkEffect !== undefined ? { linkEffect: batch.linkEffect, lastRunIdentityUse } : {}),
       ...(batch.linkEffects !== undefined && batch.linkEffects.length > 0 ? { linkEffects: batch.linkEffects, lastRunIdentityUse } : {}),
-      ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}) }, getSessionStore());
+      ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}),
+      ...(batch.goalHorizon !== undefined ? { goalHorizon: batch.goalHorizon } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
     // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
@@ -3311,6 +3316,13 @@ export type CommitOptionLevelsInput = {
     /** `identityConfirmReadingToken({outcome_id, factor_ids, words})` of the reading the approval card SHOWED. */
     readonly reading_token: string;
   };
+  /**
+   * ⭐ S-E GOALS: ONE approved deadline card — the goal's `goal_horizon.deadline` written by `applyGoalHorizonEdit`, in ONE
+   * commit, alone. `expected_deadline` is the date the goal held when the card was made (`null` for none): the field is
+   * outside the analysis hash, so it is the writer's own stale gate. A refusal comes back as `refused` with
+   * `reason: 'deadline_<reason>'`; nothing is written.
+   */
+  readonly goal_horizon?: { readonly goal_id: string; readonly deadline: string; readonly expected_deadline: string | null };
 };
 export type CommitOptionLevelsResult =
   | { readonly status: 'committed'; readonly graph_hash: string;
@@ -3368,6 +3380,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.link_effect !== undefined ? { link_effect: input.link_effect } : {}),
       ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { link_effects: input.link_effects } : {}),
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
+      ...(input.goal_horizon !== undefined ? { goal_horizon: input.goal_horizon } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
@@ -3398,6 +3411,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
       reading_token: input.identity_confirm.reading_token } } : {}),
+    ...(input.goal_horizon !== undefined ? { goalHorizon: { goal_id: input.goal_horizon.goal_id, deadline: input.goal_horizon.deadline,
+      expected_deadline: input.goal_horizon.expected_deadline } } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) return { status: 'stale' };
   if (r.commitSkippedReason === 'refused_no_write') {
