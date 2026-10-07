@@ -331,8 +331,8 @@ function openQuestionsLine(r: ToolResult): string {
   const shown = (next === null ? qs.slice(0, shownCount) : [next]).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
   const rest = qs.length - shownCount;
   // DL #70 5851835121: no promise the Agent does not keep ("Ask me for the other N" — asked, it summarised). The count
-  // alone is true on every surface: the UI's disclosure lists all of them (`_agent.open_questions`); raw text says how many.
-  const more = rest > 0 ? ` (${shownCount} of ${qs.length} shown.)` : '';
+  // names the omitted items even if an earlier sentence is dropped; the disclosure lists all (`_agent.open_questions`).
+  const more = rest > 0 ? ` ${rest} more question${rest === 1 ? ' remains' : 's remain'} unresolved.` : '';
   return ` Questions this model does not answer yet: ${shown}${more}`;
 }
 

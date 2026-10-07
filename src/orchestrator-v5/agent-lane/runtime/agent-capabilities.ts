@@ -17,6 +17,8 @@ import { draftedTeamPartOf } from '../../goal-target/event-by-date-model.js';
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
+import { readStatedEventRisk, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
+import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
@@ -1361,7 +1363,10 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
    */
   const structuralFrom = new Set(g.nodes.filter((n) => n.kind === 'decision' || n.kind === 'option').map((n) => n.id));
   const unitOfNode = nodeUnitOf(g.nodes);
+  // Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
+  const endsOf = endsOfGraph(g.raw);
   const links = g.edges.map((e) => {
+    const countedOnce = heldLinkOf(e, endsOf(e))?.reason === 'route_once';
     const source = (e.provenance !== null && typeof e.provenance === 'object') ? (e.provenance as { source?: unknown }).source : e.provenance;
     const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;
     const fixed = (st === undefined || (st.mean === 1 && (st.std === undefined || st.std === 0.01)))
@@ -1382,7 +1387,8 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // bands from its own priors — served e13eda8 called a 0.5 link (the canvas's "Strong") "moderate". The lowest is
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
       ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
-      ...(num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
+      ...(countedOnce ? { exists_probability: 1, counted_once: true }
+        : num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
       /**
        * ⭐ WHO SIZED IT, by F1b's ONE rule (`linkSizing`; AI HARNESS, DL 5936996041 on R3 DEFECT 2 5936673643). `defaulted`
        * is NOT a sizing mark: construction sets it on Olumi's estimates too (a projected spread or existence), and the
@@ -8133,6 +8139,9 @@ export function createAgentCapabilities(
           detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const riskId = built.proposal.riskId;
+      // event_risk.v1 slice 2a: whole_request is a boolean; only trusted turn words author a figure.
+      const stated = readStatedEventRisk(ctx.user_turn_text ?? ctx.user_text ?? '');
+      const eventRisk = causedBy.length === 0 ? stated : undefined;
       const res = await opts.holdAddRisk({
         scenario_id: ctx.scenario_id,
         // A fresh row per offer (see `HoldAddRiskInput.turn_id`): a lapsed hold never blocks offering the same risk again.
@@ -8140,6 +8149,7 @@ export function createAgentCapabilities(
         base_graph_hash: g.graph_hash,
         risk: { id: riskId, label },
         links,
+        ...(eventRisk !== undefined ? { user_event_risk: eventRisk } : {}),
       });
       if (res.status === 'stale') {
         return { ok: false, mutated: false, refusal: 'model_changed',
@@ -8151,7 +8161,8 @@ export function createAgentCapabilities(
         try {
           const hold = await liveHeldHold(ctx.scenario_id, ref);
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
-          heldOk = ops.some((o) => o.op === 'add_node' && o.path === riskId)
+          heldOk = (eventRisk === undefined || (hold !== undefined && isDeepStrictEqual((hold.action as { inline_patch?: Record<string, unknown> }).inline_patch?.[GM_HELD_USER_EVENT_RISK_KEY], { risk_id: riskId, ...eventRisk })))
+            && ops.some((o) => o.op === 'add_node' && o.path === riskId)
             && built.proposal.links.every((l) => ops.some((o) => o.op === 'add_edge' && o.path === `${l.from}::${l.to}`));
         } catch {
           heldOk = false;
@@ -8174,12 +8185,14 @@ export function createAgentCapabilities(
         base_revision: g.graph_hash,
         risk: {
           label,
+          ...(eventRisk !== undefined ? { likelihood: { p_low_pct: eventRisk.event_risk.occurrence.p_low * 100, p_high_pct: eventRisk.event_risk.occurrence.p_high * 100, horizon_months: eventRisk.event_risk.horizon.months, basis: 'user', quote: eventRisk.quote } } : {}),
           threatens: built.proposal.links.filter((l) => l.from === riskId).map((l) => `${labelOfId(l.to)} (${effect(l.effect_direction)})`),
           driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
           how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
         },
         note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
-          + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
+          + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
+          + (stated !== undefined && causedBy.length > 0 ? " I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen." : ''),
       };
     },
 

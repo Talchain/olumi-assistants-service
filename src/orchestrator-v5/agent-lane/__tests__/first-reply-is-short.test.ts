@@ -37,7 +37,7 @@ describe('AX2 (c): the build turn shows the two priority questions and offers th
 
   it('RED (served 01): the first two questions are shown whole, the third is not, and the count is said — no promise', () => {
     const line = statusOf(SERVED_QUESTIONS);
-    expect(line).toContain(`Questions this model does not answer yet: ${SERVED_QUESTIONS[0]} ${SERVED_QUESTIONS[1]} (2 of 8 shown.)`);
+    expect(line).toContain(`Questions this model does not answer yet: ${SERVED_QUESTIONS[0]} ${SERVED_QUESTIONS[1]} 6 more questions remain unresolved.`);
     // DL 5851835121: never a promise the Agent does not keep.
     expect(line).not.toContain('Ask me for');
     expect(line).not.toContain(SERVED_QUESTIONS[2]!);
@@ -46,7 +46,7 @@ describe('AX2 (c): the build turn shows the two priority questions and offers th
   });
 
   it('RED: one question over the two is counted, not promised', () => {
-    expect(statusOf(SERVED_QUESTIONS.slice(0, 3))).toContain('(2 of 3 shown.)');
+    expect(statusOf(SERVED_QUESTIONS.slice(0, 3))).toContain('1 more question remains unresolved.');
   });
 
   it('CONTRAST: two questions or fewer read exactly as before', () => {

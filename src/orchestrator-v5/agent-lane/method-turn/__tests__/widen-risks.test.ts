@@ -164,6 +164,7 @@ describe('S-C Add press: bound to its message AND the node ids; re-checked on th
       label: 'Recruitment delay', rationale: 'Olumi suggested this risk (assumption-based planning); the user chose to add it.',
       affects: [{ target_label: 'Feature Delivery Capacity', direction: 'negative' }],
       caused_by: [{ factor_label: 'Developer Hires', direction: 'positive' }],
+      whole_request: true,
     } });
   });
   it('AP-2: an edited message, another press\'s id, or an unbounded message is not this press', () => {

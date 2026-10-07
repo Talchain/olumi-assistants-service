@@ -78,7 +78,7 @@ describe('served paul-1: the held-fixed fact stays at rest, short; its ask moves
     const list = openQuestionsForReply(built() as never);
     expect(list.slice(0, FX.open_questions.length)).toEqual(FX.open_questions);
     expect(list.at(-1)).toBe('Should one of the options change Cold emails to investment firms or Warm connections to investment…?');
-    expect(status).toContain(`(2 of ${FX.open_questions.length + 1} shown.)`);
+    expect(status).toContain(`${FX.open_questions.length - 1} more questions remain unresolved.`);
   });
 
   it('CONTROL: no held-fixed factor → the toggle list is the build\'s own, unchanged, and no held-fixed line', () => {

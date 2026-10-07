@@ -49,10 +49,10 @@ const marked = () => {
 const UNMARKED_HASH_UNDER_V3 = '362137a00c45afb4';
 
 describe('0.64.0 — `proposed_by` enters the analysis revision (projection v4)', () => {
-  it('PRECONDITION: the vendored vocabulary is v5 (v4 + intervention `range`, hashed by CEE via the published list), whose node fields still end with `proposed_by`', () => {
-    expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(5);
+  it('PRECONDITION: the vendored vocabulary is v6 (0.82.0: v5 + node `event_risk` appended), whose node fields still carry `proposed_by` immediately before `event_risk`', () => {
+    expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(6);
     const fields: readonly string[] = CANONICAL_GRAPH_HASH_NESTED_PROJECTION.node.fields;
-    expect(fields[fields.length - 1]).toBe('proposed_by');
+    expect(fields.slice(-2)).toEqual(['proposed_by', 'event_risk']);
   });
 
   it('CONTROL (no mass stale): a graph with NO marker hashes exactly as it did under v3', () => {
@@ -93,8 +93,13 @@ const SERVED_C96_HASH_UNDER_V4 = 'e47035a047b57bc1';
 const servedC96 = (): Rec => (JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/served-c96fc4bb-registered-graph-77afc7b.json', import.meta.url), 'utf8')) as { graph: Rec }).graph;
 
 describe('0.68.0 vendor — a served graph hashes exactly as it did under 0.64.0 (no mass stale)', () => {
-  it('CONTROL: the served c96fc4bb graph keeps its v4 hash', () => {
-    expect(hashOf(servedC96())).toBe(SERVED_C96_HASH_UNDER_V4);
+  it('CONTROL: the served c96fc4bb graph keeps its v4 hash (as history, beside rule R)', () => {
+    // Rule R (Science 393023, route-once) changes what this graph's Run is SENT — a later Olumi link on a doubted route
+    // runs at existence 1 — so its CURRENT hash moves, as for any analysis-input change (its saved Runs read out of date).
+    // The vendor projection itself is unchanged: with today's holds before rule R, the graph still hashes to its v4 value,
+    // which is how a Run or version recorded then still validates as history (`pre_route_once`).
+    expect(computeAnalysisAffectingGraphHash(servedC96() as never, 'pre_route_once')).toBe(SERVED_C96_HASH_UNDER_V4);
+    expect(hashOf(servedC96())).not.toBe(SERVED_C96_HASH_UNDER_V4);
   });
 
   it('POSITIVE: the same graph with one option\'s stated £59 moved to £60 hashes differently (the probe sees a hashed intervention field)', () => {
@@ -103,6 +108,9 @@ describe('0.68.0 vendor — a served graph hashes exactly as it did under 0.64.0
     const iv = (option.interventions as Rec).pro_plan_price as Rec;
     expect(iv.raw_value).toBe(59);
     (option.interventions as Rec).pro_plan_price = { ...iv, raw_value: 60 };
-    expect(hashOf(g)).not.toBe(SERVED_C96_HASH_UNDER_V4);
+    // Against the unmoved graph under the SAME projection (rule R moved the current hash of both, so the v4 constant alone
+    // would pass vacuously), and against the v4 constant under the history projection.
+    expect(hashOf(g)).not.toBe(hashOf(servedC96()));
+    expect(computeAnalysisAffectingGraphHash(g as never, 'pre_route_once')).not.toBe(SERVED_C96_HASH_UNDER_V4);
   });
 });

@@ -1,5 +1,7 @@
 import { draftedTeamPartOf } from '../goal-target/event-by-date-model.js';
 import { unsizedLinkSentence, unsizedLinkStatement, legacyLinkSentence } from './unsized-path-cause.js';
+import { NOT_SIZED } from './reply/words.js';
+import { compactWordLabel } from './reply/labels.js';
 /**
  * ⭐ IS A GOAL CERTAINTY EARNED? — ONE typed decision the reply and every goal-probability display read (AI Quality
  * 5882366427 + R3 5882389030, ACKed 5882498938; the DL assigns the producer to MG, 5882387398).
@@ -503,7 +505,8 @@ export type PlaceholderFirstAsk =
 
 /**
  * The ONE typed warning for (S) (`GOAL_FIGURES_PLACEHOLDER_PATH`): which options, which links, and the words, in the
- * UI's "Not shown." register (≤ 400 characters). The ask names the links to size: the writer is `propose_link_effect`
+ * UI's "Not shown." register (400-character explanation budget; complete question labels take precedence).
+ * The ask names the links to size: the writer is `propose_link_effect`
  * (AIQ 5902548598). A placeholder INTO an identity the goal declares but this run did not evaluate is sized by the
  * user's Yes on the confirm card, so it gets no link-size ask of its own: one route, not two (AIQ 5902606752).
  */
@@ -591,7 +594,7 @@ export function placeholderAskWords(graph: unknown, links: ReadonlyArray<{ from:
  *       records it, and the next Run asks the links.
  *   (B) a gauge mediator: ONE end-to-end question (6006425419), never its two links apart; both leave the one-click offer.
  *   (C) a mediator measured in its sized parent's unit: asked in that unit, the estimate named (6006548763).
- * The message keeps the 400-character carrier: whole sentences are dropped from the end, never cut.
+ * Explanations fit the 400-character carrier; if a question alone exceeds it, full labels take precedence.
  */
 export function noDeadEndAsks(
   graph: unknown,
@@ -605,19 +608,38 @@ export function noDeadEndAsks(
   if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || links.length === 0) return undefined;
   const nodes = graph.nodes.filter(isRec);
   const edges = graph.edges.filter(isRec);
-  // Labels compact (whole sentences kept, never cut) until a sentence fits the 400-character carrier (Codex r1 P2: long
-  // labels dropped the whole gauge question and left the withhold with no words).
-  let budget = 120;
-  const compact = (v: string): string => v.length <= budget ? v : `${v.slice(0, budget - 1).trimEnd()}\u2026`;
-  const q = (id: string): string => `\u2018${compact(labelOf(id))}\u2019`;
+  // S-A label rule (`reply/labels.ts`): question labels stay complete and explanations yield first when the carrier is
+  // tight. Only when even the question alone cannot fit the 400-character carrier do labels shorten, at word boundaries.
+  let budget: number | null = null;
+  const q = (id: string): string => `\u2018${budget === null ? labelOf(id) : compactWordLabel(labelOf(id), budget)}\u2019`;
+  /** A label inside a QUESTION: complete (D-04) unless the carrier cannot hold every sentence otherwise. */
+  let questionBudget: number | null = null;
+  const qq = (id: string): string => `\u2018${questionBudget === null ? labelOf(id) : compactWordLabel(labelOf(id), questionBudget)}\u2019`;
   const fit = (sentences: readonly string[]): string => {
     let out = '';
     for (const s of sentences) { const next = out === '' ? s : `${out} ${s}`; if (next.length > 400) break; out = next; }
     return out;
   };
-  const fitted = (build: () => string): string => {
-    for (budget = 120; budget > 12; budget -= 12) { const s = build(); if (s.length <= 400) return s; }
-    return build();
+  const fitted = (build: () => string, standalone?: () => string): string => {
+    budget = null;
+    const full = build();
+    if (full.length <= 400) return full;
+    // Every sentence is kept where it can be (the product reading "Olumi measures X in …; correct that if it's wrong" is
+    // provenance the user must see), and labels shorten at word boundaries, never mid-word (S-A label rule, D-04):
+    // first the explanation's labels only, so the question stays complete; then, if that cannot fit, the question's too.
+    for (const shortenQuestion of [false, true]) {
+      for (budget = 120; budget > 12; budget -= 12) {
+        questionBudget = shortenQuestion ? budget : null;
+        const out = build();
+        if (out.length <= 400) { budget = null; questionBudget = null; return out; }
+      }
+    }
+    budget = null;
+    questionBudget = null;
+    // Only then does the explanation yield to the complete question.
+    if (standalone !== undefined) return standalone();
+    const questionAt = full.indexOf(' Roughly how much');
+    return questionAt < 0 ? full : full.slice(questionAt + 1);
   };
   const goal = nodes.find((n) => n.kind === 'goal');
   // ⛔ S-E GOALS (Science ruling 7 Oct §2, P0; D-06): a goal measured as the CHANCE of an event is never asked its level
@@ -633,15 +655,31 @@ export function noDeadEndAsks(
   const goalView = typeof goal?.id === 'string' ? view.get(goal.id) : undefined;
   if (goal !== undefined && goalView !== undefined && resolveMagnitudeFrame(goalView) === undefined) {
     const unit = unitOf(goalView);
-    const statementOf = (): string => unsizedLinkStatement(links.map((l) => ({ ...l, from_label: compact(labelOf(l.from)), to_label: compact(labelOf(l.to)) })));
     // Science d5 #87 6007354826: the bridge says WHY the level comes first (the link question needs the goal's unit).
     const askOf = (): string => `To size ${links.length > 1 ? 'them' : 'it'}, I first need today\u2019s level of ${q(String(goal.id))}.`
       + ` What is it${unit !== undefined ? `, in ${unit}` : ''}?`;
     // ⛔ THE ASK ALWAYS SURVIVES (Codex r1 #2635 P1): `first` names it, so the statement compacts WITH it and is dropped
     // only when even compacted it leaves no room. Long labels used to keep the statement and drop the question.
-    const both = fitted(() => `${statementOf()} ${askOf()}`);
-    const message = both.length <= 400 ? both : fitted(askOf);
-    return { message, gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id), question: askOf() } };
+    const ask = askOf();
+    const statement = unsizedLinkStatement(links.map(l => ({ ...l, from_label: labelOf(l.from), to_label: labelOf(l.to) })), 400 - ask.length - 1);
+    let message = statement === '' ? ask : `${statement} ${ask}`;
+    let question = ask;
+    // The complete question is kept whenever the cause still fits beside it in the 400 carrier (D-04). Otherwise the
+    // labels shorten, at word boundaries, in the statement AND the question together, so the reason is never lost
+    // (R10 Science: every link accounted for; Codex r2 P1 on #2748: a 308-character question left no room for the
+    // cause). `first.question` is the question actually said, so the current-level ask still binds (Codex r1 P1).
+    if (statement === '' || ask.length > 400) {
+      for (budget = 120; budget > 12; budget -= 12) {
+        const shortAsk = askOf();
+        const b = budget;
+        const shortStatement = unsizedLinkStatement(links.map(l => ({ ...l, from_label: compactWordLabel(labelOf(l.from), b), to_label: compactWordLabel(labelOf(l.to), b) })), 400 - shortAsk.length - 1);
+        message = shortStatement === '' ? shortAsk : `${shortStatement} ${shortAsk}`;
+        question = shortAsk;
+        if (shortStatement !== '' && message.length <= 400) break;
+      }
+      budget = null;
+    }
+    return { message, gaugeLinks: new Set(), first: { kind: 'goal_level', node_id: String(goal.id), question } };
   }
   const readings = mediatorReadings(graph);
   const unitOfNode = (id: unknown): string | undefined => { const v = view.get(id as string); return v === undefined ? undefined : unitOf(v); };
@@ -674,11 +712,12 @@ export function noDeadEndAsks(
         && typeof n.per_source_change_unit === 'string' && sameUnit(n.amount_unit as string, r.unit));
     const onTop = (): string => sameQuantity !== undefined
       ? `, on top of the ${sayFigure(sameQuantity.amount as number, sameQuantity.amount_unit as string)} per ${sayFigure(sameQuantity.per_source_change as number, sameQuantity.per_source_change_unit as string)} you already gave`
-      : given.length > 0 ? `, on top of its effect through ${q(String(given[0]!.to))} that you already gave` : '';
+      : given.length > 0 ? `, on top of its effect through ${qq(String(given[0]!.to))} that you already gave` : '';
     first ??= { kind: 'gauge', from: lever, through: String(m), to: String(r.child) };
-    sentences.push(fitted(() => `This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which nobody has set yet.`
-      + ` Roughly how much would ${sourceChangeWords(q(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${q(r.child)} that way${onTop()}, in ${r.unit}?`
-      + ' A best guess and a range is fine.'));
+    sentences.push(fitted(() => `This comparison turns on how much ${q(lever)} changes ${q(r.child)} through ${q(m)}, which ${NOT_SIZED}.`
+      + ` Roughly how much would ${sourceChangeWords(qq(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${qq(r.child)} that way${onTop()}, in ${r.unit}?`
+      + ' A best guess and a range is fine.',
+    () => `Roughly how much would ${sourceChangeWords(qq(lever), leverUnit, isTwoStateSource(nodes, lever, leverUnit)).aRiseIn} change ${qq(r.child)} through ${qq(m)}${onTop()}, in ${r.unit}? A best guess and a range is fine.`));
     for (const k of [key(lever, m), key(m, r.child)]) covered.add(k);
   }
   for (const l of links) {
@@ -694,16 +733,16 @@ export function noDeadEndAsks(
     // X2 (served re-draw 2, N1): a percent borrowed from Olumi's incoming estimate is not this unitless
     // source's own measure. Use the link's existing qualitative writer instead of inventing a per-1% ask.
     if (r.via === 'sized_parents' && unitOfNode(l.from) === undefined && readUnitParts(r.unit)?.kind === 'percent') {
-      sentences.push(fitted(() => `This comparison turns on how strongly ${q(l.from)} affects ${q(l.to)}, which nobody has set yet.`
+      sentences.push(fitted(() => `This comparison turns on how strongly ${q(l.from)} affects ${q(l.to)}, which ${NOT_SIZED}.`
         + ` On the canvas, click the link from ${q(l.from)} to ${q(l.to)}; under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong.`
         + ' That records your judgement of the link\u2019s strength.'));
       covered.add(key(l.from, l.to));
       continue;
     }
     const why = r.via === 'product' ? `as ${q(r.operands[0])} \u00d7 ${q(r.operands[1])}` : `from its own estimate of the link from ${q(r.parents[0]!)}`;
-    sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which nobody has set yet.`
+    sentences.push(fitted(() => `This comparison turns on how much ${q(l.from)} changes ${q(l.to)}, which ${NOT_SIZED}.`
       + ` Olumi measures ${q(l.from)} in ${r.unit}, ${why}; correct that if it\u2019s wrong.`
-      + ` Roughly how much does ${sourceChangeWords(q(l.from), r.unit, isTwoStateSource(nodes, l.from, r.unit)).eachOf} change ${q(l.to)}, in ${childUnit}?`));
+      + ` Roughly how much does ${sourceChangeWords(qq(l.from), r.unit, isTwoStateSource(nodes, l.from, r.unit)).eachOf} change ${qq(l.to)}, in ${childUnit}?`));
     covered.add(key(l.from, l.to));
   }
   if (sentences.length === 0) return gaugeLinks.size > 0 ? { gaugeLinks } : undefined;

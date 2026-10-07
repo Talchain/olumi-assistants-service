@@ -23,7 +23,7 @@ import { projectOptionForCanonicalBuilder } from '../../orchestrator/tools/analy
 import { computeAnalysisReadyStatusWithReason } from '../../cee/transforms/option-status.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION as VOCABULARY } from '@talchain/schemas/boundary';
-import { endsOfGraph, heldLinkBeforeValidatedDefinition, heldLinkOf } from '../goal-target/held-user-links.js';
+import { endsOfGraph, heldLinkBeforeRouteOnce, heldLinkBeforeValidatedDefinition, heldLinkOf, type LinkHold } from '../goal-target/held-user-links.js';
 import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 
 /** Length of the returned hex prefix. 16 gives collision odds ~1 in 2^64. */
@@ -69,9 +69,10 @@ export function computeDeterministicGraphHash(
 /**
  * Which analysis-affecting projection to hash. 'current' is the only one freshness ever reads. The others identify HISTORY
  * only (`graph-identity.ts`): 'legacy' (frozen), 'pre_hold' (before hold-at-1.0, Codex r2 #2643) and 'pre_definition'
- * (the user-only hold, before a validated definition held whoever drew it; Science d5 #87 6011224941).
+ * (the user-only hold, before a validated definition held whoever drew it; Science d5 #87 6011224941), and 'pre_route_once'.
+ * Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
  */
-export type AnalysisHashProjection = 'current' | 'legacy' | 'pre_hold' | 'pre_definition';
+export type AnalysisHashProjection = 'current' | 'legacy' | 'pre_hold' | 'pre_definition' | 'pre_route_once';
 
 /**
  * Compute a deterministic 16-char hex hash of all graph fields that AFFECT
@@ -176,7 +177,8 @@ export function computeAnalysisAffectingGraphHashSha256(
   const endsOf = endsOfGraph(graph);
   const hold: EdgeHold = projection === 'pre_hold' ? () => null
     : projection === 'pre_definition' ? heldLinkBeforeValidatedDefinition
-      : (edge) => heldLinkOf(edge, endsOf(edge));
+      : projection === 'pre_route_once' ? (edge) => heldLinkBeforeRouteOnce(edge, endsOf(edge))
+        : (edge) => heldLinkOf(edge, endsOf(edge));
   const mirroredOptions = Array.isArray(options)
     ? options.map((option) => projectOptionForCanonicalBuilder(option, factorIds))
         .filter((option) => option !== null)
@@ -391,7 +393,7 @@ interface EdgeProjection {
  * projection's is the hold of its day: none for 'pre_hold' (Codex r2 #2643), the user-only hold for 'pre_definition'
  * (d5 #87 6011224941), so a model version or Run recorded then still validates as IMMUTABLE history. Never freshness.
  */
-type EdgeHold = (edge: unknown) => { readonly std: number } | null;
+type EdgeHold = (edge: unknown) => LinkHold | { readonly reason?: undefined; readonly std: number } | null;
 
 function projectEdge(raw: unknown, hold: EdgeHold): EdgeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -431,7 +433,7 @@ function projectEdge(raw: unknown, hold: EdgeHold): EdgeProjection {
   const held = hold(r);
   if (held !== null) {
     out.exists_probability = 1;
-    out.strength = { ...(out.strength as Record<string, unknown> | undefined), std: held.std };
+    if (held.reason !== 'route_once') out.strength = { ...(out.strength as Record<string, unknown> | undefined), std: held.std };
   }
 
   return out;

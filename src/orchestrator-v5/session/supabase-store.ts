@@ -47,6 +47,8 @@ import {
   type AtomicCommittedModelVersionReceipt,
   type AnswerOffersRead,
   type CommittedTurnRecord,
+  type ConditionalAppendOptions,
+  type ConditionalSessionAppendOutcome,
   type GraphWriteFailureDisclosure,
   type PendingActionReadOptions,
   type SessionAppendOutcome,
@@ -259,6 +261,12 @@ function identityHashPrefix(hash: string | null | undefined): string | null {
 export const TURN_CLAIM_SUFFIX = ':claim';
 const NOT_A_CLAIM_PATTERN = `%${TURN_CLAIM_SUFFIX}`;
 
+// Same feature detection as the offers wrapper. Probe each request so applying
+// the migration (or rolling it back) takes effect without a process restart.
+const isMissingAppendFunction = (error: unknown): boolean =>
+  errCode(error) === 'PGRST202' || errCode(error) === '42883';
+let conditionalAppendMissingLogged = false;
+
 export class SupabaseSessionStore implements SessionStore {
   /**
    * 2.174 fix c — set once when `append_turn_atomic_v4` answers PGRST202
@@ -304,9 +312,15 @@ export class SupabaseSessionStore implements SessionStore {
   async append(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
     const prior = write.graph == null ? 'new' : await this.classifyPriorTurn(write);
     const outcome = await this.appendThroughRpc(write);
+    if ('status' in outcome) throw new StateCommitFailedError('an unconditional append returned a conditional outcome');
     if (prior === 'replay') return { ...outcome, replayedPriorTurn: true };
     if (prior === 'conflict') return { ...outcome, priorTurnConflict: true };
     return outcome;
+  }
+
+  /** S-D.1b: see `SessionStore.appendIfLatest`. Only a final non-graph Agent answer (checked in `appendThroughRpc`). */
+  async appendIfLatest(write: SessionTurnWrite, options: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
+    return this.appendThroughRpc(write, options);
   }
 
   /**
@@ -372,7 +386,12 @@ export class SupabaseSessionStore implements SessionStore {
     return 'new';
   }
 
-  private async appendThroughRpc(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
+  private async appendThroughRpc(write: SessionTurnWrite, options?: ConditionalAppendOptions): Promise<ConditionalSessionAppendOutcome> {
+    if (options !== undefined && (write.graph != null || write.modelVersion !== undefined || write.briefText != null
+      || write.coaching_state != null || write.turn_class !== 'direct_answer' || write.handler_id !== null
+      || !write.response_emitted || write.turn_id.endsWith(TURN_CLAIM_SUFFIX) || !isAgentAnswerRow(write))) {
+      throw new StateCommitFailedError('Conditional append requires a final Agent answer without a graph write');
+    }
     if (Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0
       && (write.graph != null || write.modelVersion !== undefined || write.briefText != null
         || write.coaching_state != null || write.turn_class !== 'direct_answer' || write.handler_id !== null
@@ -473,6 +492,10 @@ export class SupabaseSessionStore implements SessionStore {
     const rpcMode: GraphCasRpcMode = this.options.graphCasRpc ?? 'off';
     // (`useV3` is derived where it is used — inside dispatchCheckedAppend.)
 
+    if (options !== undefined) {
+      return this.appendAgentAnswerIfLatest(write, baseRpcArgs, rpcMode, options);
+    }
+
     // ── V5 TURN FENCE — the last thing before the write ────────────────────
     // Placed HERE, after every argument is built and with nothing between it
     // and the RPC dispatch below. 2.174 fix c: for a CLAIMED turn with
@@ -501,6 +524,59 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     return await this.dispatchCheckedAppend(write, baseRpcArgs, rpcMode);
+  }
+
+  private async appendAgentAnswerIfLatest(
+    write: SessionTurnWrite,
+    baseRpcArgs: Record<string, unknown>,
+    rpcMode: GraphCasRpcMode,
+    options: ConditionalAppendOptions,
+  ): Promise<ConditionalSessionAppendOutcome> {
+    const rpcName = 'append_agent_answer_if_latest';
+    const withOffers = Array.isArray(write.suggested_actions) && write.suggested_actions.length > 0;
+    const { data, error } = await this.client.rpc(rpcName, {
+      p_expected_latest_row_id: options.expectedLatestRowId,
+      ...baseRpcArgs,
+      p_agent_guidance: write.agent_guidance ?? null,
+      p_suggested_actions: withOffers ? write.suggested_actions : null,
+      p_suggested_actions_run_key: withOffers ? write.suggested_actions_run_key ?? null : null,
+    });
+    if (error) {
+      if (isMissingAppendFunction(error)) {
+        if (!conditionalAppendMissingLogged) {
+          conditionalAppendMissingLogged = true;
+          log.warn({ event: 'v5.agent_answer.conditional_rpc_missing', rpc_code: errCode(error) },
+            'Conditional answer RPC is unavailable; using the existing append path until migration 20261007090000 is applied');
+        }
+        return this.dispatchCheckedAppend(write, baseRpcArgs, rpcMode);
+      }
+      throw new StateCommitFailedError(`${rpcName} RPC failed: ${errMsg(error)}`,
+        { cause: error, rpc_code: errCode(error) });
+    }
+    if (data !== null && typeof data === 'object' && !Array.isArray(data) && data.status === 'latest_moved') {
+      return { status: 'latest_moved' };
+    }
+    // JSONB preserves the delegate's receipt object, or its UUID string on v2.
+    const outcome = this.decodeAnswerAppendResult(data, rpcName, withOffers || write.agent_guidance !== undefined);
+    this.cache.invalidateAll(write.scenario_id);
+    return outcome;
+  }
+
+  private decodeAnswerAppendResult(data: unknown, rpcName: string, receipt: boolean): SessionAppendOutcome {
+    if (receipt) {
+      if (data === null || typeof data !== 'object' || Array.isArray(data) || !('id' in data) || typeof data.id !== 'string'
+        || !('replayed_prior_turn' in data) || typeof data.replayed_prior_turn !== 'boolean'
+        || !('prior_turn_conflict' in data) || typeof data.prior_turn_conflict !== 'boolean'
+        || (data.replayed_prior_turn && data.prior_turn_conflict)) {
+        throw new StateCommitFailedError(`${rpcName} returned malformed answer receipt`);
+      }
+      return { id: data.id, ...(data.replayed_prior_turn ? { replayedPriorTurn: true } : {}),
+        ...(data.prior_turn_conflict ? { priorTurnConflict: true } : {}) };
+    }
+    if (typeof data !== 'string') {
+      throw new StateCommitFailedError(`${rpcName} returned non-string id: ${JSON.stringify(data)}`);
+    }
+    return { id: data };
   }
 
   /**
@@ -546,7 +622,7 @@ export class SupabaseSessionStore implements SessionStore {
         });
 
     if (error) {
-      if (withOffers && (errCode(error) === 'PGRST202' || errCode(error) === '42883')) {
+      if (withOffers && isMissingAppendFunction(error)) {
         log.warn({ scenario_id: write.scenario_id, rpc_code: errCode(error) },
           'Answer offers RPC is unavailable; recording the answer through its existing delegate');
         const { suggested_actions: _offers, suggested_actions_run_key: _runKey, ...withoutOffers } = write;
@@ -576,14 +652,9 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
     if (withOffers || write.agent_guidance !== undefined) {
-      if (data === null || typeof data !== 'object' || Array.isArray(data) || typeof data.id !== 'string'
-        || typeof data.replayed_prior_turn !== 'boolean' || typeof data.prior_turn_conflict !== 'boolean'
-        || (data.replayed_prior_turn && data.prior_turn_conflict)) {
-        throw new StateCommitFailedError(`${rpcName} returned malformed answer receipt`);
-      }
+      const outcome = this.decodeAnswerAppendResult(data, rpcName, true);
       this.cache.invalidateAll(write.scenario_id);
-      return { id: data.id, ...(data.replayed_prior_turn ? { replayedPriorTurn: true } : {}),
-        ...(data.prior_turn_conflict ? { priorTurnConflict: true } : {}) };
+      return outcome;
     }
     if (typeof data !== 'string') {
       throw new StateCommitFailedError(
@@ -2643,6 +2714,7 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
     const rows = (data ?? []) as Array<{ id: string; pending_actions: unknown }>;
+    options.onLatestRowId?.(rows[0]?.id ?? null);
     if (rows.length === 0) return [];
     const raw = rows[0]!.pending_actions;
     if (!Array.isArray(raw)) {

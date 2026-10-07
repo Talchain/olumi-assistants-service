@@ -10,11 +10,24 @@
  *
  * ⭐ A VALIDATED DEFINITION holds too, whoever drew it (Science d5 #87 6011224941; DL): "Starter-tier MRR" → "MRR" at +£1
  * per £1 is an accounting identity, not a 20% chance that Starter revenue isn't revenue. `validatedDefinition` below.
+ *
+ * ⭐ RULE R, ROUTE-ONCE (Science 393023; DESIGN science-mechanism-doubt-DESIGN.md §2/§6; DL 0fd71f, 7 Oct). Olumi's own
+ * existence doubt (a blanket 0.8 on every drafted causal link) is counted ONCE per route, so an option's chance reflects
+ * what the team believes about each route, not how many boxes Olumi drew (R5: freelance 0.636 → 0.792 beside hire 0.801).
+ * A link that is Olumi's DEFAULT doubt (`defaultExistence`) whose SOURCE is covered (every route into it already carries
+ * one) holds at existence 1.0 on the Run's input; its strength is untouched. The route's FIRST default link is never held,
+ * so every route that carried Olumi's doubt still carries exactly one (I1). Relational, so `endsOfGraph` computes it once
+ * per graph (`LinkEnds.routeOnce`) and every reader of `heldLinkOf` sees it. `reason` says WHICH hold: only `user_range`
+ * is the user's; `route_once` is Olumi's bookkeeping. Fail-closed: a cycle anywhere holds nothing by this rule; a link
+ * ISL FIXES rather than draws (an identity operand, an event risk's mitigation) is never default, so it never gives cover;
+ * a bidirected link, or one touching a node kept out of the calculation, is not in the route structure at all. An event
+ * risk's OCCURRENCE is never a route's doubt for this rule (occurrence is not existence): only drawn link existence covers.
  */
 import { eventShareEndpointMatches } from './share-by-date-carrier.js';
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
 import { sameUnit } from '../agent-lane/same-unit.js';
+import { isRetainedExcluded } from '../tools/handlers/run-analysis-participation-guard.js';
 
 type Rec = Record<string, any>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -64,19 +77,84 @@ export interface LinkEnds {
   readonly toLabel: string | undefined;
   readonly fromUnit: string | undefined;
   readonly toUnit: string | undefined;
+  readonly routeOnce: boolean;
+  /**
+   * ISL FIXES this link, never draws it (Science 393023): an IDENTITY operand (the target's `nonlinear_identity` lists the
+   * source) or an event risk's MITIGATION (the target's `event_risk.mitigations` names the source; ISL applies −p̄·m at
+   * existence 1). Neither is a doubt ISL draws, so it is never default and never gives cover.
+   */
+  readonly fixedByIsl?: boolean;
 }
 
 /** Ends with no labels and no units: nothing validates against them (a non-record edge). */
-const UNVALIDATED_ENDS: LinkEnds = Object.freeze({ fromLabel: undefined, toLabel: undefined, fromUnit: undefined, toUnit: undefined });
+const UNVALIDATED_ENDS: LinkEnds = Object.freeze({ fromLabel: undefined, toLabel: undefined, fromUnit: undefined, toUnit: undefined, routeOnce: false });
+
+/**
+ * Science 393023 rule R (route-once), DESIGN science-mechanism-doubt-DESIGN.md §2/§6.
+ * Pure O(V+E) coverage: every incoming route must already carry default existence doubt.
+ * Kahn's order detects any directed cycle; a cycle withholds coverage throughout the graph.
+ * Callers supply structural links only (snapshot links already represent sent structure).
+ */
+export function routeOnceCoveredSources(links: readonly { from: string; to: string; isDefault: boolean }[]): ReadonlySet<string> {
+  const incoming = new Map<string, number>();
+  const outgoing = new Map<string, (typeof links)[number][]>();
+  for (const link of links) {
+    if (!incoming.has(link.from)) incoming.set(link.from, 0);
+    incoming.set(link.to, (incoming.get(link.to) ?? 0) + 1);
+    const out = outgoing.get(link.from);
+    if (out === undefined) outgoing.set(link.from, [link]);
+    else out.push(link);
+  }
+  const remaining = new Map(incoming);
+  const uncovered = new Set<string>();
+  const covered = new Set<string>();
+  const queue = [...incoming].filter(([, count]) => count === 0).map(([id]) => id);
+  for (let i = 0; i < queue.length; i++) {
+    const source = queue[i]!;
+    if (incoming.get(source)! > 0 && !uncovered.has(source)) covered.add(source);
+    for (const link of outgoing.get(source) ?? []) {
+      if (!link.isDefault && !covered.has(source)) uncovered.add(link.to);
+      const count = remaining.get(link.to)! - 1;
+      remaining.set(link.to, count);
+      if (count === 0) queue.push(link.to);
+    }
+  }
+  return queue.length === incoming.size ? covered : new Set<string>();
+}
 
 export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
+  // Per target node, the sources ISL FIXES rather than draws: identity operands, and an event risk's mitigations (read
+  // loosely, fail-closed: any `factor_id` named there is excluded, whether or not the block would pass the write door).
+  const fixedSources = new Map(nodes.map((n) => [n.id, new Set<unknown>([
+    ...(isRec(n.nonlinear_identity) && Array.isArray(n.nonlinear_identity.factor_ids) ? n.nonlinear_identity.factor_ids : []),
+    ...(isRec(n.event_risk) && Array.isArray(n.event_risk.mitigations)
+      ? n.event_risk.mitigations.filter(isRec).map((m) => m.factor_id) : []),
+  ])] as const));
   const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
   const unitOf = nodeUnitOf(nodes);
-  return (e) => (isRec(e)
-    ? { fromId: text(byId.get(e.from)?.id), toId: text(byId.get(e.to)?.id), fromKind: text(byId.get(e.from)?.kind), toKind: text(byId.get(e.to)?.kind), fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label), fromUnit: unitOf(e.from), toUnit: unitOf(e.to) }
-    : UNVALIDATED_ENDS);
+  // The route structure is the graph the Run is SENT (Codex buddy r1 P1): `guardAnalysisParticipation` withholds a node the
+  // user kept out of the calculation, and every link touching it, before the hold. So such a node never covers, is never
+  // covered, and its links are never held — on the Run, the hash, the Agent and the LLM context alike.
+  const participating = new Set(nodes.filter((n) => !isRetainedExcluded(n)).map((n) => n.id));
+  // A BIDIRECTED link is not a route at all (Codex buddy r2 P1): PLoT sends ISL directed links only
+  // (`translator-v3.ts` "ISL operates on directed edges only"), so it neither covers its target nor is ever held.
+  const structural = (e: Rec): boolean => typeof e.from === 'string' && typeof e.to === 'string'
+    && participating.has(e.from) && participating.has(e.to) && e.edge_type !== 'bidirected';
+  const baseEnds = (e: Rec): LinkEnds => ({
+    // S-E GOALS S2b: the actual endpoint ids and kinds, so a minted share_by_date carrier binds to real nodes.
+    fromId: text(byId.get(e.from)?.id), toId: text(byId.get(e.to)?.id),
+    fromKind: text(byId.get(e.from)?.kind), toKind: text(byId.get(e.to)?.kind),
+    fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label),
+    fromUnit: unitOf(e.from), toUnit: unitOf(e.to), routeOnce: false,
+    ...(fixedSources.get(e.to)?.has(e.from) ? { fixedByIsl: true } : {}),
+  });
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const covered = routeOnceCoveredSources(edges.filter(structural).map((e) => ({
+    from: e.from, to: e.to, isDefault: defaultExistence(e, baseEnds(e)),
+  })));
+  return (e) => isRec(e) ? { ...baseEnds(e), routeOnce: structural(e) && covered.has(e.from) } : UNVALIDATED_ENDS;
 }
 
 const QUANTITY_STOP = new Set(['a', 'an', 'the', 'of', 'to', 'from', 'for', 'in', 'on', 'per', 'by', 'and', 'or', 'with', 'at', 'into', 'its', 'their']);
@@ -145,10 +223,29 @@ export function isUserStatedLink(e: unknown): boolean {
  *     flag that fails validation is not a definition, whoever flagged it (Codex r1 #2665 P1): an Olumi link keeps 0.8; a
  *     user's link is an ordinary user link (held only by its own range, below).
  *   - A link the USER stated whose own range excludes zero (#2643).
+ *   - Rule R: default existence doubt whose source is covered on every route; its strength stays untouched.
  */
-export function heldLinkOf(e: unknown, ends: LinkEnds): { readonly std: number } | null {
-  if (validatedDefinition(e, ends) !== undefined) return { std: DEFINITIONAL_STD };
-  return isUserStatedLink(e) ? rangeHold(e as Rec) : null;
+export type HoldReason = 'definition' | 'user_range' | 'route_once';
+type BaseHold = { readonly reason: 'definition' | 'user_range'; readonly std: number };
+export type LinkHold = BaseHold | { readonly reason: 'route_once'; readonly std: number | undefined };
+
+/** The validated definition, then user range hold, before rule R (history only). */
+export function heldLinkBeforeRouteOnce(e: unknown, ends: LinkEnds): BaseHold | null {
+  if (validatedDefinition(e, ends) !== undefined) return { reason: 'definition', std: DEFINITIONAL_STD };
+  const range = isUserStatedLink(e) ? rangeHold(e as Rec) : null;
+  return range === null ? null : { reason: 'user_range', std: range.std };
+}
+
+function defaultExistence(e: Rec, ends: LinkEnds): boolean {
+  return finite(e.exists_probability) && e.exists_probability > 0 && e.exists_probability < 1
+    && ends.fixedByIsl !== true && heldLinkBeforeRouteOnce(e, ends) === null;
+}
+
+export function heldLinkOf(e: unknown, ends: LinkEnds): LinkHold | null {
+  const base = heldLinkBeforeRouteOnce(e, ends);
+  if (base !== null) return base;
+  if (!isRec(e) || !ends.routeOnce || !defaultExistence(e, ends)) return null;
+  return { reason: 'route_once', std: isRec(e.strength) && finite(e.strength.std) ? e.strength.std : undefined };
 }
 
 /**
@@ -183,21 +280,24 @@ function rangeHold(e: Rec): { readonly std: number } | null {
 }
 
 /**
- * The Run-input graph with every held link at exists_probability 1.0 and its range's spread. The SAME object when nothing
+ * The Run-input graph with every held link at exists_probability 1.0. Only base holds change spread; rule R retains
+ * the exact strength object. The SAME object when nothing
  * is held; otherwise a copy (the persisted graph is never written). Runs after `withStatedStrengths`, which rescales a
  * restored clamp's std: the held std is already on the stated β's own frame.
  */
 export function withHeldUserLinks<G>(graph: G): G {
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges : [];
   const endsOf = endsOfGraph(graph);
-  if (!edges.some((e: unknown) => heldLinkOf(e, endsOf(e)) !== null)) return graph;
+  const holds = edges.map((e: unknown) => heldLinkOf(e, endsOf(e)));
+  if (holds.every((held: LinkHold | null) => held === null)) return graph;
   const g = structuredClone(graph) as Rec;
-  for (const e of g.edges as unknown[]) {
-    const held = heldLinkOf(e, endsOf(e));
-    if (held === null) continue;
-    const edge = e as Rec;
-    edge.exists_probability = 1;
-    edge.strength = { ...(isRec(edge.strength) ? edge.strength : {}), std: held.std };
-  }
+  g.edges = (g.edges as Rec[]).map((copy, i) => {
+    const held = holds[i] as LinkHold | null;
+    if (held === null) return copy;
+    // Rule R changes only existence: the copy's strength (mean, std, absent or not) is the persisted one, byte for byte.
+    // Built from the CLONE, never the persisted edge, so no nested object of the persisted graph is shared with the Run's.
+    if (held.reason === 'route_once') return { ...copy, exists_probability: 1 };
+    return { ...copy, exists_probability: 1, strength: { ...(isRec(copy.strength) ? copy.strength : {}), std: held.std } };
+  });
   return g as G;
 }

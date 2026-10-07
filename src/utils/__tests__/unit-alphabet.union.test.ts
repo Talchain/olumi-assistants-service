@@ -36,6 +36,10 @@ const UNCLASSIFIED = "KNOWN at b02a3cc1, not yet classified by U-GRAMMAR: pinned
 /** Every file over the threshold, its pinned quoted set, and why it is allowed. */
 const KNOWN: Readonly<Record<string, { readonly quoted: readonly string[]; readonly why: string }>> = {
   "utils/unit-alphabet.ts": { quoted: [], why: "THE leaf: every spelling lives here (its set is the leaf itself, not pinned)" },
+  "orchestrator-v5/routing/stated-event-risk.ts": {
+    quoted: ["%", "percent", "week", "year"],
+    why: "event_risk.v1 slice 2a: '%' / 'percent' are parseNumericValue's input normaliser and its unit tag; 'week' / 'year' tag the horizon noun its bounded regex captured (months?|years?|weeks?) for the months conversion. A 3-noun duration reader, not a period table",
+  },
   "orchestrator-v5/agent-lane/same-unit.ts": {
     quoted: ["%", "month", "percent", "year"],
     why: "C1's month/year view is DERIVED from the leaf; these quotes are its Period type tags ('month' | 'year') and kind tags ('%', 'percent')",

@@ -67,6 +67,7 @@ import { clampForPersist, refitFramesForStatedEffects } from '../refit-frames.js
 import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
 import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, statedCountInterventionRange, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { heldEventRiskLine, holdStatedEventRisks, refusedEventRiskLine } from '../stated-event-risk-draft.js';
 import { sameUnit } from '../same-unit.js';
 import { admitInterventionRange } from '../../intervention-range.js';
 import { budgetFor } from '../model-budgets.js';
@@ -1902,7 +1903,27 @@ export async function buildModelFromBrief(
       } as AdmittedModel['loss'][number]])],
     };
   }
-  const heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+  let heldGoal = holdStatedGoalAttributes(withdrawUnstatedBaselineStamps(admitted.nodes, brief), candidate.goal, brief);
+  // event_risk.v1 slice 2c: only the brief supplies occurrence; a cause keeps the risk ordinary.
+  const heldEventRisks = holdStatedEventRisks(heldGoal.nodes, admitted.edges, brief);
+  if (heldEventRisks.held.length > 0 || heldEventRisks.refused.length > 0) {
+    heldGoal = { ...heldGoal, nodes: [...heldEventRisks.nodes] };
+    const riskById = new Map(heldEventRisks.nodes.map((n) => [n.id, n]));
+    admitted = {
+      // Nodes travel on `heldGoal` (the graph's node source below); `admitted.nodes` keeps its own reading for scope.
+      ...admitted, edges: [...heldEventRisks.edges],
+      loss: [...admitted.loss, ...heldEventRisks.held.map(({ risk_id }) => {
+        const risk = riskById.get(risk_id)!;
+        return {
+          field_path: `nodes[${risk_id}].event_risk`, before: null, after: risk.event_risk!,
+          reason: heldEventRiskLine(String(risk.label), risk.event_risk!), severity: 'info',
+        } as AdmittedModel['loss'][number];
+      }), ...heldEventRisks.refused.map(({ risk_id }) => ({
+        field_path: `nodes[${risk_id}].event_risk`, before: null, after: null,
+        reason: refusedEventRiskLine(String(riskById.get(risk_id)!.label)), severity: 'info',
+      }) as AdmittedModel['loss'][number])],
+    };
+  }
   if (heldGoal.held.horizon || heldGoal.held.direction) {
     admitted = {
       ...admitted,
@@ -2322,7 +2343,7 @@ export async function buildModelFromBrief(
         // other way from it (Desk 6b #2644 Q3, `stated-size-binding.ts`): said, with what to check.
         // `stated_sign`: the user's sentence not recorded on a link drawn the other way from it (DL #2644 pilot): said.
         // `link_set_aside`: a link an option could hold, set aside beside its renamed namesake and asked (DL, dental).
-        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(event_risk|horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual|created_part_zero|pass_through_sign|stated_sign|link_set_aside|mechanism_not_modelled|cost_not_revenue)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

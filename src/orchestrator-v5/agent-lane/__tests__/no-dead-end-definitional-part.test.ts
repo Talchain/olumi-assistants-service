@@ -114,24 +114,30 @@ describe('SERVED FA1 (e7, guest T1b draft 46d37fb7, CEE d619668a)', () => {
   const FROM = 'monthly_starter_support_cost';
   const TO = 'mrr_lost_to_starter_support_strain';
   const paths = () => unsizedLeaderGoalPaths(fx.graph, ['raise_prices_10', 'launch_starter_tier', 'keep_pricing_as_it_is']);
+  // The captured fixture predates S-A's vocabulary (D-05, 7 Oct): the served words, byte for byte, with the one phrase the
+  // vocabulary owner (`reply/words.ts`) changed. The fixture itself stays as captured.
+  const SERVED_WORDS = fx.placeholder_warning.message.replace('nobody has set yet', "isn't sized in the model yet") as string;
   it('PRECONDITION: the served paths, and with the part not definitional the served words byte for byte', () => {
     expect(paths().flatMap((p) => p.links)).toEqual(fx.placeholder_warning.links);
     const served = placeholderGoalWarning(notDefinitional(fx.graph, TO, 'monthly_recurring_revenue'), paths(), CODE);
-    expect(served.message).toBe(fx.placeholder_warning.message);
+    expect(SERVED_WORDS).not.toBe(fx.placeholder_warning.message);
+    expect(served.message).toBe(SERVED_WORDS);
     expect(served).not.toHaveProperty('first_ask');
   });
   it('⛔ BAND-EDITED twin of the served link (flag kept, size moved) → no part reading, the served words stand', () => {
     const g = structuredClone(fx.graph);
     edge(g, TO, 'monthly_recurring_revenue').strength = { mean: -0.3, std: 0.075 };
     expect(mediatorReadings(g).get(TO)).toBeUndefined();
-    expect(placeholderGoalWarning(g, paths(), CODE).message).toBe(fx.placeholder_warning.message);
+    expect(placeholderGoalWarning(g, paths(), CODE).message).toBe(SERVED_WORDS);
   });
   it('AS SERVED: the risk reads £/month off its definitional link into MRR → (C) words + `first_ask` on the served link', () => {
     expect(mediatorReadings(fx.graph).get(TO)).toEqual({ via: 'definitional_part', unit: '£/month', child: 'monthly_recurring_revenue' });
     const w = placeholderGoalWarning(fx.graph, paths(), CODE);
     expect(w.first_ask).toEqual({ kind: 'link', from: FROM, to: TO });
-    // The (C) grammar compacts long labels to keep the 400-character carrier (whole sentences kept, never cut).
-    expect(w.message).toContain('Roughly how much does each £1 / month of ‘Monthly starter support…’ change ‘MRR lost to starter sup…’, in £/month?');
+    // The (C) grammar compacts long labels to keep the 400-character carrier (whole sentences kept, never cut), and the ONE
+    // label rule (`reply/labels.ts`) compacts at a word boundary: ‘MRR lost to starter…’, never ‘…starter sup…’.
+    expect(w.message).toContain('Roughly how much does each £1 / month of ‘Monthly starter support…’ change ‘MRR lost to starter…’, in £/month?');
+    expect(w.message).not.toContain('sup…');
     expect(w.message).not.toContain('Set it to see how much it matters.');
   });
   it('⛔ Codex r1 P1: the served graph with the risk\'s frame removed asks nothing it cannot write (served words, no first_ask)', () => {
@@ -139,7 +145,7 @@ describe('SERVED FA1 (e7, guest T1b draft 46d37fb7, CEE d619668a)', () => {
     delete g.nodes.find((n: Rec) => n.id === TO).scale_frame;
     const w = placeholderGoalWarning(g, unsizedLeaderGoalPaths(g, ['raise_prices_10', 'launch_starter_tier', 'keep_pricing_as_it_is']), CODE);
     expect(w).not.toHaveProperty('first_ask');
-    expect(w.message).toBe(fx.placeholder_warning.message);
+    expect(w.message).toBe(SERVED_WORDS);
   });
   it('the answer the ask invites is WRITTEN on the served graph (it was refused unit_mismatch)', () => {
     const r = write(fx.graph, FROM, TO, ANSWER, 'every £1,000 a month of starter support cost loses about £300 a month of MRR');

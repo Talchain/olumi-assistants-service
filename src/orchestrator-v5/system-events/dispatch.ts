@@ -1,4 +1,5 @@
 import type { ApprovedTeamTime } from '../goal-target/team-share-write.js';
+import type { EventRiskV1T } from '../../schemas/event-risk.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
 
@@ -3473,6 +3474,8 @@ export type HoldAddRiskInput = {
   /** The analysis-space hash of the model the proposal was built against. */
   readonly base_graph_hash: string;
   readonly risk: { readonly id?: string; readonly label: string };
+  /** event_risk.v1 slice 2a: CEE-held user words, outside producer operations. */
+  readonly user_event_risk?: { readonly event_risk: EventRiskV1T; readonly quote: string };
   /** Each link names ONE end: `from_id` (a factor driving the risk) or `to_id` (the goal or an outcome it threatens). */
   readonly links: readonly { readonly from_id?: string; readonly to_id?: string; readonly effect_direction: 'positive' | 'negative' }[];
 };
@@ -3526,6 +3529,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
 
   const outcome = dispatchAddRiskTransaction({
     params: { risk: input.risk, links: input.links },
+    ...(input.user_event_risk !== undefined ? { userEventRisk: input.user_event_risk } : {}),
     currentGraph: persistedGraph,
     currentGraphHash: currentHash,
     freshness,
@@ -3545,7 +3549,8 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
     ? outcome.response
     : { ...outcome.response, assistant_text: appendLapseNotice(outcome.response.assistant_text, notice) };
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
-    kind: 'agent_add_risk', risk: input.risk, links: input.links, base_graph_hash: input.base_graph_hash })).digest('hex').slice(0, 32)}`;
+    kind: 'agent_add_risk', risk: input.risk, links: input.links, base_graph_hash: input.base_graph_hash,
+    ...(input.user_event_risk !== undefined ? { user_event_risk: input.user_event_risk } : {}) })).digest('hex').slice(0, 32)}`;
   try {
     await commitDirectAnswer(response, {
       scenario_id: input.scenario_id,
