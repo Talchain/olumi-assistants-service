@@ -97,17 +97,6 @@
       "enabled": true,
       "why_now": "See what your brief has and what it is missing.",
       "offer_key": "524f6501fd806533"
-    },
-    {
-      "action_id": "bias_anchoring",
-      "label": "Anchoring",
-      "icon": "Anchor",
-      "group": "method",
-      "press_id": "act:bias_anchoring",
-      "user_line": "Walk me through where a first number could be pulling my estimates.",
-      "enabled": true,
-      "why_now": "Test Olumi’s figures against your own evidence.",
-      "offer_key": "665d59f6b8824852"
     }
   ]
 }
