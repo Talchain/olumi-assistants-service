@@ -5,7 +5,19 @@
     "graph_hash": "ac171f2efd1ba664",
     "run_key": "d75a23626c88c51b"
   },
-  "priority": [],
+  "priority": [
+    {
+      "action_id": "set_goal",
+      "label": "Set target",
+      "icon": "Target",
+      "group": "gap",
+      "press_id": "act:set_goal",
+      "user_line": "Help me set a target for my goal.",
+      "enabled": true,
+      "why_now": "Your goal has no target yet, so no chance of meeting it can be worked out.",
+      "offer_key": "a0b47ec6899d62fb"
+    }
+  ],
   "standard": [
     {
       "action_id": "review",
@@ -54,6 +66,17 @@
   ],
   "more": [
     {
+      "action_id": "more_risks",
+      "label": "More risks",
+      "icon": "ShieldAlert",
+      "group": "gap",
+      "press_id": "agent-next-suggest-risks",
+      "user_line": "Suggest risks I haven't considered.",
+      "enabled": true,
+      "why_now": "Your model has at most one risk.",
+      "offer_key": "c2936967abacf2a5"
+    },
+    {
       "action_id": "more_options",
       "label": "More options",
       "icon": "GitFork",
@@ -63,6 +86,39 @@
       "enabled": true,
       "why_now": "Find options you haven’t considered yet.",
       "offer_key": "9889f0f24bab6388"
+    },
+    {
+      "action_id": "frame_brief",
+      "label": "Frame brief",
+      "icon": "FileText",
+      "group": "gap",
+      "press_id": "act:frame_brief",
+      "user_line": "Help me frame my brief: what is missing from it?",
+      "enabled": true,
+      "why_now": "See what your brief has and what it is missing.",
+      "offer_key": "524f6501fd806533"
+    },
+    {
+      "action_id": "bias_anchoring",
+      "label": "Anchoring",
+      "icon": "Anchor",
+      "group": "method",
+      "press_id": "act:bias_anchoring",
+      "user_line": "Walk me through where a first number could be pulling my estimates.",
+      "enabled": true,
+      "why_now": "Test Olumi’s figures against your own evidence.",
+      "offer_key": "a7161271d00a3ec5"
+    },
+    {
+      "action_id": "check_estimates",
+      "label": "Check estimates",
+      "icon": "BadgeCheck",
+      "group": "review",
+      "press_id": "act:check_estimates",
+      "user_line": "Show me Olumi's estimates that this result rests on.",
+      "enabled": true,
+      "why_now": "See the Olumi estimates feeding this result.",
+      "offer_key": "cbeea79decf31897"
     }
   ]
 }

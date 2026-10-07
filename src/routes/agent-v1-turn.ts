@@ -126,7 +126,7 @@ import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js'
 import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
 import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
-import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../orchestrator-v5/compose/analysis-state-v1.js';
+import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED, WITHHELD_GOAL_PATH_UNSIZED, WITHHELD_SEPARATION_UNAVAILABLE, WITHHELD_LEADER_CAUSE_UNRECORDED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
@@ -1073,7 +1073,7 @@ export function typedRunOf(body: Record<string, unknown>): boolean {
   // A "Test without this link" press is terminal SCI-DEEP whatever else the chip carries: never an ordinary Run.
   if (typeof chip?.id === 'string' && chip.id.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) return false;
   // ⭐ S-B (Codex r1 P1-2 on #2751): an action press is dispatched by its id whatever else the chip carries: never a Run.
-  if (actionPressOf(chip) !== null) return false;
+  if (actionPressOf(chip, body['message']) !== null) return false;
   // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
   return (body['kind'] === undefined || body['kind'] === 'message') && (chip?.action_type === 'run_analysis' || chip?.id === RUN_OFFER_CHIP.id);
 }
@@ -2843,12 +2843,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined) {
       const decided = await (async () => {
         const chip = body['chip'];
-        if (actionPressOf(chip) === null) return null;
+        if (actionPressOf(chip, body['message']) === null) return null;
         const rb = await readBackState(readingDispatch, scenarioId);
         const facts = actionFactsOf({ scenarioId, graph: rb.graph, graphHash: rb.graphHash, analysisState: rb.analysisState,
           analysisReady: rb.analysisReady, analysisResult: rb.analysisResult, optionParticipation: rb.optionParticipation,
           identityEvaluated: rb.identityEvaluated });
-        return { facts, decision: decidePress(chip, facts), graphHash: rb.graphHash };
+        return { facts, decision: decidePress(chip, facts, undefined, body['message']), graphHash: rb.graphHash };
       })();
       if (decided !== null && decided.decision.kind !== 'not_an_action') {
         actionPress = decided.decision.press;
@@ -3416,7 +3416,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const owed = stateFacts.current_state_unknown === true
       ? [...valueChangeDisclosures(stateFacts)]
       : [
-        ...disclosuresFor(result.tool_results),
+        ...disclosuresFor(result.tool_results, text),
         ...valueChangeDisclosures(stateFacts),
         ...(firstAnalysisSaid !== null ? [firstAnalysisSaid] : []),
         // ⛔ A withheld goal chance's reason is said as written, unless the Agent already said it (AIQ 5887805333 (3)).
@@ -3729,7 +3729,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       guidance: guidanceHistory,
       ...(guidanceRunKey !== undefined ? { runKey: guidanceRunKey } : {}),
       state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
-    }, offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
+      // S-B typed replies own their exits, including an intentional empty list (Science's estimate questions).
+    }, actionReply === null && offeredSpecific.length === 0 && !decisionReviewRequested && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash) === undefined,
       widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }), offeredSpecific);
     /**
@@ -4231,10 +4232,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // a reply that already carried the closing verbatim lost its obligation): the gate's own co-hold words, read from
       // this same final body, plus the paragraph the gate appended and every fixed no-leader sentence present.
       const coHold = goalFigureCoHoldOf((wireBody as { blocks?: unknown }).blocks, readbackGraph ?? null, typedNow ?? undefined);
+      // The gate's typed cause precedence: a different claim reason does not name the co-held links.
+      const closingReason = claimPermissionsFrom(analysisState, analysisReady).withheld_reason;
+      const closingSubjects = closingReason === undefined || closingReason === WITHHELD_GOAL_PATH_UNSIZED
+        || closingReason === WITHHELD_SEPARATION_UNAVAILABLE || closingReason === WITHHELD_LEADER_CAUSE_UNRECORDED
+        ? coHold?.subjects : undefined;
       const obligations: FaceObligation[] = [
         ...[...asks, coHold?.ask].filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'ask' as const, text })),
-        ...[leaderGateClosing, coHold?.say, coHold?.why, ...AGENT_NO_LEADER_SENTENCES.filter((line) => reply.includes(line))]
-          .filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'withheld_reason' as const, text })),
+        ...(leaderGateClosing !== null ? [{ role: 'withheld_reason' as const, text: leaderGateClosing, subjects: closingSubjects }] : []),
+        ...[coHold?.say, coHold?.why].filter((l): l is string => typeof l === 'string')
+          .map((text) => ({ role: 'withheld_reason' as const, text, subjects: coHold?.subjects })),
+        ...AGENT_NO_LEADER_SENTENCES.filter((text) => reply.includes(text))
+          .map((text) => ({ role: 'withheld_reason' as const, text })),
         // #2565: a licensed Explain of a fragile Run names a finding; its robustness caveat qualifies it, on the face.
         ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat }] : []),
         // Required evidence, never hidden (AIE line review): the screen's chance lines, the comparison's basis, a root
@@ -4272,6 +4281,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const composedReply = composeReplyShape({
         text: reply,
         obligations,
+        graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
           : narratorModel === null ? { keepWhole: 'host_composed' as const } : {}),
@@ -4421,8 +4431,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             try { history = await store.readGuidanceHistory(scenarioId); } catch { /* keep the overlay: the read failed, not the bar */ }
           }
         }
+        // The approval carrier the reload reads: the latest PERSISTED pending row, after the persistence floor's held-proposal
+        // reconcile (Codex r1 P1-1 on #2766). This turn's own carrier only when that read is unavailable.
+        let pending: readonly PendingAction[] = durablePending;
+        if (typeof store.readMostRecentPendingActions === 'function') {
+          try { pending = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }); } catch { /* keep this turn's carrier */ }
+        }
         return actionBarOf(actionFactsOf({ scenarioId, graph: readbackGraph, graphHash, analysisState, analysisReady, analysisResult,
-          optionParticipation, identityEvaluated, guidance: history }));
+          optionParticipation, identityEvaluated, guidance: history, pending }));
       } catch (err) {
         log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: action bar could not be ranked; the turn carries none');
         return undefined;
@@ -4453,7 +4469,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       ...(actionBar !== undefined ? { action_bar: actionBar } : {}),
       ...(actionPress !== null && actionFactsAtPress !== undefined ? { _action: actionReceiptOf(actionPress, actionFactsAtPress.revision,
-        actionReply === null || actionReply.outcome === 'ran' ? 'ran' : 'cant_yet', actionReply?.reason) } : {}),
+        actionReply === null || actionReply.outcome === 'ran' ? 'ran' : 'cant_yet', actionReply?.reason, actionReply?.science) } : {}),
       /**
        * ⭐ A7 (DL #70 5855437928; Canonical 5855435365): the graph read's `not_modelled`, exactly as read, beside the
        * `graph_hash` of that same read. Derived by the read route, never here; never on the answer row; absent when the
