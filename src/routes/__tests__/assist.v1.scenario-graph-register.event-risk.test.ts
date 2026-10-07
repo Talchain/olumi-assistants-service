@@ -61,6 +61,7 @@ const EVENT_RISK = {
   horizon: { months: 12 },
   mitigations: [{ factor_id: 'fac_dual_source', occurrence_reduction: 0.7 }],
 };
+const m = EVENT_RISK.mitigations[0];
 const graphWith = (eventRisk?: unknown, onKind = 'risk') => ({
   goal_node_id: 'gross_profit',
   nodes: [
@@ -147,6 +148,8 @@ describe('event_risk.v1 — the write door refuses what it cannot carry (422 EVE
     ['version 2', { ...EVENT_RISK, version: 2 }, 'risk', 'event_risk.version'],
     ['no horizon', { ...EVENT_RISK, horizon: undefined }, 'risk', 'event_risk.horizon'],
     ['a reduction above 1', { ...EVENT_RISK, mitigations: [{ factor_id: 'fac_dual_source', occurrence_reduction: 1.5 }] }, 'risk', 'event_risk.mitigations.0.occurrence_reduction'],
+    ['a factor named twice', { ...EVENT_RISK, mitigations: [m, m] }, 'risk', 'event_risk.mitigations'],
+    ['a malformed factor id', { ...EVENT_RISK, mitigations: [{ factor_id: 'Dual Source', occurrence_reduction: 0.7 }] }, 'risk', 'event_risk.mitigations.0.factor_id'],
     ['on a factor node', EVENT_RISK, 'factor', 'event_risk'],
   ])('%s', async (_label, block, kind, path) => {
     const issues = eventRiskIngressIssues(graphWith(block, kind).nodes as Rec[]);

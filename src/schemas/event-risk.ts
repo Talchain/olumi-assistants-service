@@ -28,6 +28,7 @@
  * (`likelihood` → event_risk) and the add-risk door are slice 2.
  */
 import { z } from "zod";
+import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 
 /** P(the event happens at least once within the horizon), as a stated range. */
 export const EventRiskOccurrenceV1 = z
@@ -56,7 +57,7 @@ export const EventRiskV1 = z
       .array(
         z
           .object({
-            factor_id: z.string().min(1),
+            factor_id: z.string().min(1).max(100).regex(CANONICAL_ID_REGEX),
             occurrence_reduction: z.number().min(0).max(1),
           })
           .strict(),
@@ -65,7 +66,14 @@ export const EventRiskV1 = z
       .max(8)
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (risk) => !risk.mitigations || new Set(risk.mitigations.map((m) => m.factor_id)).size === risk.mitigations.length,
+    {
+      message: "event_risk.mitigations must name each factor at most once",
+      path: ["mitigations"],
+    },
+  );
 export type EventRiskV1T = z.infer<typeof EventRiskV1>;
 
 export interface EventRiskIssue {
