@@ -1135,13 +1135,37 @@ function enclosingSentences(userText: string, quote: string): string[] {
   });
 }
 /**
+ * ⭐ A CORRECTION "X, not Y" STATES X (DL ruling, 7 Oct: a figure the user types for that link this turn is the user's
+ * statement). Served on staging CEE 13149d8 (Canvas D1 witness, draw 3): "Each 1% price rise adds £600 a month to monthly
+ * recurring revenue, not £1,200." was read as a DENIAL because of its trailing "not", so the user could not correct their
+ * own figure from the link they had just opened.
+ *
+ * ONE trailing clause, after a comma, that negates exactly ONE figure ("not £1,200", "not £1,200 a month", "rather than
+ * 20") names the figure being replaced. It is set aside before the negation and figure readings: the rest is what the user
+ * states, and the figure in the tail is never a stated figure. Nothing else is set aside: a tail with no figure ("not a
+ * guess") or two, a tail with another negator, and a sentence whose remaining words still negate ("We don't think it's
+ * £600, not £1,200.", "Not £600 a month, not £1,200 either.") all read exactly as before.
+ */
+const CORRECTED_FIGURE_TAIL = /,\s*(?:not|rather\s+than|instead\s+of)\s+(?:about\s+|around\s+|roughly\s+)?[£$€]?\d[\d,]*(?:\.\d+)?\s*%?(?:\s+[\p{L}/]+){0,3}\s*[.!]?\s*$/u;
+const CORRECTION_HEAD = /^,\s*(?:not|rather\s+than|instead\s+of)/i;
+export function withoutCorrectedFigureTail(sentence: string): string {
+  const m = CORRECTED_FIGURE_TAIL.exec(sentence);
+  if (m === null) return sentence;
+  const kept = sentence.slice(0, m.index);
+  const tail = m[0];
+  if (findLinkEffectAmounts(tail).length !== 1) return sentence;
+  if (NEGATOR.test(tail.replace(CORRECTION_HEAD, ' ')) || NEGATOR.test(kept)) return sentence;
+  return `${kept}${/[.!]\s*$/.test(tail) ? tail.trim().slice(-1) : ''}`;
+}
+/**
  * A quoted fragment cannot omit the question or denial surrounding it in the user's actual sentence. The WHOLE sentence
- * counts: "I do not believe this claim: Each 1 point …" denies what follows its colon (Codex buddy r1 HIGH).
+ * counts: "I do not believe this claim: Each 1 point …" denies what follows its colon (Codex buddy r1 HIGH). A trailing
+ * corrected figure is not that denial (`withoutCorrectedFigureTail`).
  */
 export function linkEffectQuoteContextMiss(quote: string, userText: string): 'question' | 'denied' | null {
   const enclosing = enclosingSentences(userText, quote);
   const misses = enclosing.map(sentence => sentence.includes('?') || (AUXILIARY_FIRST.test(sentence) && !REQUEST_FORM.test(sentence))
-    ? 'question' as const : NEGATOR.test(sentence) ? 'denied' as const : null);
+    ? 'question' as const : NEGATOR.test(withoutCorrectedFigureTail(sentence)) ? 'denied' as const : null);
   return misses.includes(null) || misses.length === 0 ? null : misses[0]!;
 }
 /**
@@ -1194,8 +1218,9 @@ export function linkEffectTheUserStated(
 ): LinkEffectStatementMiss | null {
   const q = quote.trim();
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
-  if (negatedOutsideEnds(q, ends)) return 'denied';
-  const sentences = sentencesOf(q);
+  // The figure a correction replaces is neither a denial nor a stated figure (`withoutCorrectedFigureTail`).
+  const sentences = sentencesOf(q).map(withoutCorrectedFigureTail);
+  if (negatedOutsideEnds(sentences.join(' '), ends)) return 'denied';
   const misses = sentences.map(sentence => linkEffectInOneSentence(sentence, effect, ends, scope));
   if (misses.some(m => m === null)) return null;
   return sentences.length === 1 ? misses[0]! : 'not_one_statement';
@@ -1209,7 +1234,8 @@ export function statingSentenceOf(
   scope: LinkEffectScope,
 ): string | null {
   if (linkEffectTheUserStated(quote, effect, ends, scope) !== null) return null;
-  return sentencesOf(quote.trim()).find(sentence => linkEffectInOneSentence(sentence, effect, ends, scope) === null) ?? null;
+  // The user's own sentence, verbatim (a correction's tail included), read as `linkEffectTheUserStated` reads it.
+  return sentencesOf(quote.trim()).find(sentence => linkEffectInOneSentence(withoutCorrectedFigureTail(sentence), effect, ends, scope) === null) ?? null;
 }
 
 /** Words that may stand between a distributive word and the source it counts ("each EXTRA conversation", "one MORE hire"). */

@@ -41,11 +41,11 @@ const DENIALS = [
   ['"no effect at all" (Codex r2 on #2664: an affirmative no-change, said another way)', 'It has no effect at all.', 'It has no effect at all'],
 ] as const;
 /**
- * Codex r1 + r2 on #2664 P1: a denial that is not "it doesn't change at all" — a corrected figure or direction, a denied
- * figure, a size — closes nothing: it keeps its ask, exactly as before FU-1. PRECONDITION on each: the binder reads a denial.
+ * Codex r1 + r2 on #2664 P1: a denial that is not "it doesn't change at all" — a corrected direction, a denied figure, a
+ * size — closes nothing: it keeps its ask, exactly as before FU-1. PRECONDITION on each: the binder reads a denial. (A
+ * corrected FIGURE, "X, not Y", is no denial since 7 Oct: see RE-PINNED above.)
  */
 const FIGURED_DENIALS = [
-  ['a corrected figure', 'Every £1 on the Pro price loses us 50 paying subscribers, not 20.', 'Every £1 on the Pro price loses us 50 paying subscribers, not 20'],
   ['a denied figure (PR Review\'s row)', 'Every £1 on the Pro price does not lose us 50 paying subscribers.', 'Every £1 on the Pro price does not lose us 50 paying subscribers'],
   ['figure-free words quoted out of a correction', 'It doesn’t change by 50, more like 20.', 'It doesn’t change'],
   ['a corrected direction, no figure (Codex r2 on #2664 P1)', 'It doesn’t fall; it rises.', 'It doesn’t fall; it rises'],
@@ -69,6 +69,29 @@ describe('FU-1: a denial ends the ask — nothing recorded, nothing asked, the l
     expect(r.refusal).toBe('not_the_users_statement');
     expect(r.detail).toBe(STAYS);
     expect(String(r.detail)).not.toContain('?');
+  });
+});
+
+/**
+ * ⭐ RE-PINNED (DL ruling, 7 Oct 02:0xZ: "a figure the user types for that link this turn is the user's statement"; Canvas D1
+ * served witness draw 3). This row sat in FIGURED_DENIALS ("still asked"); a correction "X, not Y" now STATES X: its tail is
+ * set aside (`withoutCorrectedFigureTail`) and the card holds the user's words verbatim for approval. Nothing is written
+ * before Approve. The other figured denials below keep their asks.
+ */
+describe('RE-PINNED: a corrected figure is the user\'s statement, held for approval', () => {
+  const SAID = 'Every £1 on the Pro price loses us 50 paying subscribers, not 20.';
+  const QUOTE = 'Every £1 on the Pro price loses us 50 paying subscribers, not 20';
+  it('single link → a card in their words, nothing written', async () => {
+    const r = await single(SAID, QUOTE);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.mutated).toBe(false);
+    expect(r.link?.your_words).toBe(QUOTE);
+  });
+  it('links: [one] → a card in their words, nothing written', async () => {
+    const r = await grouped(SAID, QUOTE);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.mutated).toBe(false);
+    expect(r.links?.[0]?.your_words).toBe(QUOTE);
   });
 });
 
