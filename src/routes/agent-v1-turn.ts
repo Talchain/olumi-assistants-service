@@ -339,18 +339,19 @@ const owedHeldLapses = new Map<string, string[]>();
 const OWED_HELD_LAPSES_MAX = 500;
 function oweHeldLapses(scenarioId: string, said: readonly string[]): void {
   if (said.length === 0) return;
-  const owed = [...(owedHeldLapses.get(scenarioId) ?? []), ...said];
+  // (deliberately not named after the route's disclosure list, which a source scanner finds by its declaration)
+  const lines = [...(owedHeldLapses.get(scenarioId) ?? []), ...said];
   owedHeldLapses.delete(scenarioId);
   if (owedHeldLapses.size >= OWED_HELD_LAPSES_MAX) {
     const oldest = owedHeldLapses.keys().next().value;
     if (oldest !== undefined) owedHeldLapses.delete(oldest);
   }
-  owedHeldLapses.set(scenarioId, owed);
+  owedHeldLapses.set(scenarioId, lines);
 }
 function takeOwedHeldLapses(scenarioId: string): string[] {
-  const owed = owedHeldLapses.get(scenarioId) ?? [];
+  const lines = owedHeldLapses.get(scenarioId) ?? [];
   owedHeldLapses.delete(scenarioId);
-  return owed;
+  return lines;
 }
 
 function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
