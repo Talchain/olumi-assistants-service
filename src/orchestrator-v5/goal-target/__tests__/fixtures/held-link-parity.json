@@ -1120,7 +1120,7 @@
    "held": false
   },
   {
-   "name": "held: QUOTED definitional, no range (d5)",
+   "name": "held: QUOTED definitional that validates, no range (d5 6011224941)",
    "edge": {
     "from": "part",
     "to": "total",
@@ -1144,10 +1144,15 @@
      }
     }
    },
+   "ends": {
+    "fromLabel": "Starter-tier MRR",
+    "toLabel": "monthly recurring revenue",
+    "toUnit": "£/month"
+   },
    "held": true
   },
   {
-   "name": "held: USER-STATED definitional, no range (d5)",
+   "name": "held: USER-STATED definitional that validates, no range (d5 6011224941)",
    "edge": {
     "from": "part",
     "to": "total",
@@ -1170,10 +1175,15 @@
      }
     }
    },
+   "ends": {
+    "fromLabel": "Starter-tier MRR",
+    "toLabel": "monthly recurring revenue",
+    "toUnit": "£/month"
+   },
    "held": true
   },
   {
-   "name": "not: DRAFTER-ONLY definitional flag (Olumi)",
+   "name": "not: DRAFTER-ONLY definitional flag with no ends to validate it",
    "edge": {
     "from": "part",
     "to": "total",
@@ -1274,6 +1284,285 @@
      "source": "user_specified",
      "magnitude": "user_stated"
     }
+   },
+   "held": false
+  },
+  {
+   "name": "held: DRAFTER-ONLY definition that validates (d5 6011224941: whoever flagged it)",
+   "edge": {
+    "from": "part",
+    "to": "total",
+    "strength": {
+     "mean": 1,
+     "std": 0.5
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "definitional": true,
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "£/month",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "ends": {
+    "fromLabel": "Starter-tier MRR",
+    "toLabel": "monthly recurring revenue",
+    "toUnit": "£/month"
+   },
+   "held": true
+  },
+  {
+   "name": "held: DRAFTER-ONLY, the total in the same unit spelled GBP/month (sameUnit)",
+   "edge": {
+    "from": "part",
+    "to": "total",
+    "strength": {
+     "mean": 1,
+     "std": 0.5
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "definitional": true,
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "£/month",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "ends": {
+    "fromLabel": "Starter-tier MRR",
+    "toLabel": "monthly recurring revenue",
+    "toUnit": "GBP/month"
+   },
+   "held": true
+  },
+  {
+   "name": "held: DRAFTER-ONLY, full words \"Starter-tier monthly recurring revenue\"",
+   "edge": {
+    "from": "part",
+    "to": "total",
+    "strength": {
+     "mean": 1,
+     "std": 0.5
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "definitional": true,
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "£/month",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "ends": {
+    "fromLabel": "Starter-tier monthly recurring revenue",
+    "toLabel": "monthly recurring revenue",
+    "toUnit": "£/month"
+   },
+   "held": true
+  },
+  {
+   "name": "not: DRAFTER-ONLY, labels fail (\"Pipeline value\" -> \"revenue\")",
+   "edge": {
+    "from": "part",
+    "to": "total",
+    "strength": {
+     "mean": 1,
+     "std": 0.5
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "definitional": true,
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "£/month",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "ends": {
+    "fromLabel": "Pipeline value",
+    "toLabel": "revenue",
+    "toUnit": "£/month"
+   },
+   "held": false
+  },
+  {
+   "name": "not: DRAFTER-ONLY, the total read in another unit (£/week)",
+   "edge": {
+    "from": "part",
+    "to": "total",
+    "strength": {
+     "mean": 1,
+     "std": 0.5
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "definitional": true,
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "£/month",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "ends": {
+    "fromLabel": "Starter-tier MRR",
+    "toLabel": "monthly recurring revenue",
+    "toUnit": "£/week"
+   },
+   "held": false
+  },
+  {
+   "name": "not: DRAFTER-ONLY, the total has no unit",
+   "edge": {
+    "from": "part",
+    "to": "total",
+    "strength": {
+     "mean": 1,
+     "std": 0.5
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "definitional": true,
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "£/month",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "ends": {
+    "fromLabel": "Starter-tier MRR",
+    "toLabel": "monthly recurring revenue"
+   },
+   "held": false
+  },
+  {
+   "name": "not: DRAFTER-ONLY, the part read in another unit (subscribers)",
+   "edge": {
+    "from": "part",
+    "to": "total",
+    "strength": {
+     "mean": 1,
+     "std": 0.5
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "definitional": true,
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "£/month",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "ends": {
+    "fromLabel": "Starter-tier MRR",
+    "toLabel": "monthly recurring revenue",
+    "toUnit": "£/month",
+    "fromUnit": "subscribers"
+   },
+   "held": false
+  },
+  {
+   "name": "not: USER-STATED definitional whose labels fail (Codex r1 #2665)",
+   "edge": {
+    "from": "part",
+    "to": "total",
+    "strength": {
+     "mean": 1,
+     "std": 0.5
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "definitional": true,
+     "source": "user_specified",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "£/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "£/month",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "ends": {
+    "fromLabel": "Pipeline value",
+    "toLabel": "Revenue",
+    "toUnit": "£/month"
+   },
+   "held": false
+  },
+  {
+   "name": "not: DRAFTER-ONLY validated ends but not ±1 per 1",
+   "edge": {
+    "from": "part",
+    "to": "total",
+    "strength": {
+     "mean": 1,
+     "std": 0.5
+    },
+    "exists_probability": 0.8,
+    "provenance": {
+     "definitional": true,
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 2,
+      "amount_unit": "£/month",
+      "per_source_change": 1,
+      "per_source_change_unit": "£/month",
+      "strength_mean": 1,
+      "strength_mean_frame": "edge_strength"
+     }
+    }
+   },
+   "ends": {
+    "fromLabel": "Starter-tier MRR",
+    "toLabel": "monthly recurring revenue",
+    "toUnit": "£/month"
    },
    "held": false
   }
