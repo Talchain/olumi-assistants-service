@@ -338,14 +338,14 @@
         "W2Z": "No options on the table yet. What could you do?"
       },
       "why_now": {
-        "W1": "The analysis checked your limit and no option clears it.",
-        "W2": "There is one option besides carrying on as now.",
-        "W3": "Most of the options change the same factors.",
-        "W4": "There is no 'carry on as now' option to compare with.",
-        "W5": "The analysis could not separate the options.",
-        "W6": "The model has at most one risk.",
-        "W7": "Two or fewer factors lead to the goal.",
-        "W2Z": "The model has a goal but no option besides carrying on as now."
+        "W1": "Finding another route could give you a way to reach the goal within your limit.",
+        "W2": "Alternatives expose trade-offs that a single proposed route leaves untested.",
+        "W3": "A different mechanism can reveal possibilities that variations on one lever miss.",
+        "W4": "A baseline separates the effect of changing course from what would happen anyway.",
+        "W5": "Combining complementary strengths may offer a useful route when the comparison is close.",
+        "W6": "Risks drive how far each option could fall short; one risk leaves most of that unexamined.",
+        "W7": "Missing drivers can hide dependencies that change how your routes affect the goal.",
+        "W2Z": "Concrete routes let you test how different actions could move the goal."
       },
       "primary_action": {
         "label": {

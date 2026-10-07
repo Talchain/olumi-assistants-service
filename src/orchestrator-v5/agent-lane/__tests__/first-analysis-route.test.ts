@@ -563,7 +563,11 @@ describe('the Agent route runs the first analysis itself, once', () => {
    * is still the narrator's, but the reply is no longer ONLY the narrator's words, so it ships whole with every host line
    * on the face. CONTROL: `agent-run-reply-answer-shape.test.ts` rows 8/11 (the narrator's words alone are still shaped).
    */
-  it('a build turn whose first analysis ran → its narration PLUS the host\'s own build lines → NOT shaped; every host line on the face', async () => {
+  // Re-pinned for S-A (lane COPY-SHAPE, DL ruling R1, 7 Oct): a receipt such as the build line MAY sit under "More detail";
+  // the ONE composer shapes this reply like any other, and the line is kept exactly once.
+  const deriveAnswerTextFromShapeOf = (shape: { headline: string; bullets: string[]; detail: string }): string =>
+    [shape.headline.trim(), shape.bullets.map((b) => `• ${b.trim()}`).join('\n'), shape.detail.trim()].filter((p) => p.length > 0).join('\n\n');
+  it('a build turn whose first analysis ran → its narration PLUS the host\'s own build lines → shaped by the one composer; the build line kept once (R1)', async () => {
     const { readFileSync } = await import('node:fs');
     const corpus = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as { replies: { id: string; text: string }[] };
     const prose = corpus.replies.find((r) => r.id === 'stack-1854-714677d5/pricing-run-complete.W.V2.rep1')!.text;
@@ -571,9 +575,11 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const b = await turn(app, { message: BRIEF }) as Body & { _answer_shape?: { headline: string; bullets: string[]; detail: string } };
     expect(b._diagnostic_trace.first_analysis, 'the control: the first pass ran').toMatchObject({ ran: true });
     expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'the control: an analysis-bearing turn').toBe(true);
-    expect(b.assistant_text.startsWith(prose), 'the control: the narrator\'s words lead, untouched').toBe(true);
-    expect(b.assistant_text, 'the control: the host appended its own build line').toContain('The model was saved as version 1.');
-    expect(b._answer_shape, 'not the narrator\'s words alone → not shaped').toBeUndefined();
+    expect(b.assistant_text.split('The model was saved as version 1.'), 'the host’s own build line, once').toHaveLength(2);
+    expect(b._answer_shape, 'shaped').toBeDefined();
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShapeOf(b._answer_shape!));
+    expect(prose.startsWith(b._answer_shape!.headline), 'the narrator’s first sentence leads').toBe(true);
+    for (const line of prose.split('\n').filter((l) => l.trim() !== '')) expect(b.assistant_text).toContain(line.replace(/^\s*-\s+/, '').trim());
   });
 
   /**

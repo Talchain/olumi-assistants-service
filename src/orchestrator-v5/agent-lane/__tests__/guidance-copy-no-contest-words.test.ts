@@ -42,7 +42,7 @@ describe('guidance copy: no contest words in any served line', () => {
   it('the scan sees the served copy (magnitude: every row, every variant)', () => {
     expect(lines.length).toBeGreaterThanOrEqual(20);
     // CONTRAST — causal "lead to" is not a contest, and the scan reads it.
-    expect(lines.some((l) => l.text === 'Two or fewer factors lead to the goal.')).toBe(true);
+    expect(lines.some((l) => l.text === 'Missing drivers can hide dependencies that change how your routes affect the goal.')).toBe(true);
   });
 
   it.each(servedLines().map((l) => [l.at, l.text] as const))('%s names no contest', (_at, text) => {

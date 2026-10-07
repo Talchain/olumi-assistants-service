@@ -93,8 +93,13 @@ const SERVED_C96_HASH_UNDER_V4 = 'e47035a047b57bc1';
 const servedC96 = (): Rec => (JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/served-c96fc4bb-registered-graph-77afc7b.json', import.meta.url), 'utf8')) as { graph: Rec }).graph;
 
 describe('0.68.0 vendor — a served graph hashes exactly as it did under 0.64.0 (no mass stale)', () => {
-  it('CONTROL: the served c96fc4bb graph keeps its v4 hash', () => {
-    expect(hashOf(servedC96())).toBe(SERVED_C96_HASH_UNDER_V4);
+  it('CONTROL: the served c96fc4bb graph keeps its v4 hash (as history, beside rule R)', () => {
+    // Rule R (Science 393023, route-once) changes what this graph's Run is SENT — a later Olumi link on a doubted route
+    // runs at existence 1 — so its CURRENT hash moves, as for any analysis-input change (its saved Runs read out of date).
+    // The vendor projection itself is unchanged: with today's holds before rule R, the graph still hashes to its v4 value,
+    // which is how a Run or version recorded then still validates as history (`pre_route_once`).
+    expect(computeAnalysisAffectingGraphHash(servedC96() as never, 'pre_route_once')).toBe(SERVED_C96_HASH_UNDER_V4);
+    expect(hashOf(servedC96())).not.toBe(SERVED_C96_HASH_UNDER_V4);
   });
 
   it('POSITIVE: the same graph with one option\'s stated £59 moved to £60 hashes differently (the probe sees a hashed intervention field)', () => {
@@ -103,6 +108,9 @@ describe('0.68.0 vendor — a served graph hashes exactly as it did under 0.64.0
     const iv = (option.interventions as Rec).pro_plan_price as Rec;
     expect(iv.raw_value).toBe(59);
     (option.interventions as Rec).pro_plan_price = { ...iv, raw_value: 60 };
-    expect(hashOf(g)).not.toBe(SERVED_C96_HASH_UNDER_V4);
+    // Against the unmoved graph under the SAME projection (rule R moved the current hash of both, so the v4 constant alone
+    // would pass vacuously), and against the v4 constant under the history projection.
+    expect(hashOf(g)).not.toBe(hashOf(servedC96()));
+    expect(computeAnalysisAffectingGraphHash(g as never, 'pre_route_once')).not.toBe(SERVED_C96_HASH_UNDER_V4);
   });
 });

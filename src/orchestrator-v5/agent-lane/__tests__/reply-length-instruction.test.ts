@@ -30,7 +30,9 @@ describe('the reply-length sentence', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     // The naming rule (WORDING BATCH, 5 Oct) is appended AFTER this sentence; the reply-length sentence still follows the host contract.
     // Re-pinned for D3 step 2 (DL 0df0e1 ruling C, 6 Oct): GOAL_CHANCE_RANKING_INSTRUCTION joins the same list.
-    expect(src).toContain("[MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')");
+    // Re-pinned for S-A (lane COPY-SHAPE, 7 Oct; Paul: "the three bullets as a construct"): the ONE reply-shape sentence
+    // follows the length sentence, so every chat-writing call (converse, interpret, method, widen) carries it.
+    expect(src).toContain("[MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION, REPLY_SHAPE_INSTRUCTION, MODEL_RELATIVE_NAMING_INSTRUCTION, GOAL_CHANCE_RANKING_INSTRUCTION].join(' ')");
     // The slot is filled once; nothing else in the template or the contract mentions the budget.
     expect(SELECTED_COACH_V02_TEMPLATE.split('{{MODE_AND_AUTHORITY}}')).toHaveLength(2);
     expect(HOST_TOOL_CONTRACT).not.toContain(REPLY_LENGTH_INSTRUCTION);

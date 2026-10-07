@@ -154,7 +154,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     const g = clone(F.graph);
     delete (g.nodes as Json[]).find((n) => n.id === 'migration_downtime')!.observed_state;
     const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths nobody has set yet. Set them to see how much they matter.');
+    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
     expect(w.message).not.toContain('Give a figure');
   });
 
@@ -162,7 +162,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     const g = clone(F.graph);
     g.goal_constraints = [];
     const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths nobody has set yet. Set them to see how much they matter.');
+    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
     expect(w.message).not.toContain('only guessed');
   });
 
@@ -173,7 +173,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
       { id: 'costs', kind: 'goal', label: 'Costs' },
     ], goal_constraints: [] };
     const w = placeholderGoalWarning(graph, [{ option_id: 'switch', links: [{ from: 'saving', to: 'costs' }] }], GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(w.message).toBe('This comparison turns on the link from ‘Expected saving’ to ‘Costs’, whose strength nobody has set yet. Set it to see how much it matters.');
+    expect(w.message).toBe('This comparison turns on the link from ‘Expected saving’ to ‘Costs’, whose strength isn\'t sized in the model yet. Set it to see how much it matters.');
     expect(w.message).not.toContain('Give a figure for that link');
     expect(w.message.length).toBeLessThanOrEqual(400);
   });
@@ -200,7 +200,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     edges.splice(edges.indexOf(out), 1, { ...clone(out), to: 'downtime_cost' }, { ...clone(out), from: 'downtime_cost' });
     const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
     expect(w.node_ids).toContain('downtime_cost');
-    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’, from ‘Downtime cost’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Downtime cost’, whose strengths nobody has set yet. Set them to see how much they matter.');
+    expect(w.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’, from ‘Downtime cost’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Downtime cost’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
     expect(w.message).toContain('Set them to see how much they matter.');
     expect(w.message).not.toContain('only guessed');
   });
@@ -219,7 +219,7 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     expect(w[0]!.option_ids.sort()).toEqual([PHASE, SWITCH]);
     expect(w[0]!.message.startsWith('This comparison turns on the links from ')).toBe(true);
     expect(w[0]!.message.length).toBeLessThanOrEqual(400);
-    expect(w[0]!.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths nobody has set yet. Set them to see how much they matter.');
+    expect(w[0]!.message).toBe('This comparison turns on the links from ‘Monthly GCP cost saving’ to ‘Monthly cloud spend’ and from ‘Migration downtime’ to ‘Monthly cloud spend’, whose strengths aren\'t sized in the model yet. Set them to see how much they matter.');
     // The saving holds no level, so its size alone would add to EVERY option ("Stay on AWS" too): named, not asked.
     // ⛔ AIQ 5903604206 / 5903627210 (supersedes this row's earlier "Give a figure for how 'Migration downtime' moves …"):
     // downtime is the node the user's "≤ 2 weeks" limit watches, and its link into spend is Olumi's guess. It is said as a

@@ -10,6 +10,7 @@
  * Harness copied from `agent-turn-carries-authoritative-state.test.ts`.
  */
 import { readFileSync } from 'node:fs';
+import { sentenceMultiset } from '../reply/compose-reply.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
@@ -113,7 +114,9 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     expect(callModelOutputs, 'the control: both scripted model outputs were consumed').toEqual([]);
     expect((r.json().analysis_state as { leader_claim?: { permitted?: boolean } }).leader_claim?.permitted).toBe(false);
     const text = r.json().assistant_text as string;
-    expect(text).toBe(`${REPLY.text.replace(RANKING_SENTENCE, '')}\n\n${noLeaderSentence}`);
+    // S-A (#2748): the ONE composer may then move sentences under More detail; it never adds, drops or rewrites one.
+    expect(sentenceMultiset(text)).toEqual(sentenceMultiset(`${REPLY.text.replace(RANKING_SENTENCE, '')}\n\n${noLeaderSentence}`));
+    expect(text.split(noLeaderSentence)).toHaveLength(2);
     expect(text).not.toContain(REPLY.leak_phrases[0]!);
     expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the GATED text').toBe(text);
   });
@@ -124,8 +127,9 @@ describe('the Agent route gates a ranking reply on a withheld turn, and only the
     expect(r.statusCode).toBe(200);
     expect(callModelOutputs, 'the control: both scripted model outputs were consumed').toEqual([]);
     expect((r.json().analysis_state as { leader_claim?: { permitted?: boolean } }).leader_claim?.permitted).toBe(true);
-    expect(r.json().assistant_text).toBe(REPLY.text);
-    expect(rows.get(turnId)?.assistant_message).toBe(REPLY.text);
+    // S-A (#2748): the same sentences, none dropped or added (the composer may move some under More detail).
+    expect(sentenceMultiset(r.json().assistant_text)).toEqual(sentenceMultiset(REPLY.text));
+    expect(rows.get(turnId)?.assistant_message).toBe(r.json().assistant_text);
   });
 
   it('c6 wiring: the live analysis-bearing route passes this turn’s typed refusal to the wire gate', async () => {

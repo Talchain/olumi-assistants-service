@@ -8,6 +8,7 @@
  *   · CONTROL: a clean model sentence is sent after the code line;
  *   · the typed provisional view (C5b) with a movement claim is not shown; CONTROL: a clean view is (Codex pre-review P1).
  */
+import { sentencesOf } from '../reply/compose-reply.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -126,13 +127,19 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
    * line, rebuilding the narrator's text byte for byte. An equality-only guard then shaped the reply, putting the code
    * line's own caveats behind "Show more". The host composed it, so it ships whole.
    */
-  it('IDENTICAL RECONSTRUCTION: the narrator repeats Olumi\'s code line, the host restores it → the reply is NOT shaped', async () => {
+  // Re-pinned for S-A (lane COPY-SHAPE, 7 Oct): the ONE composer shapes over the FINAL text, so "the host composed it" no
+  // longer decides the shape; the code line still leads and every line is kept once.
+  it('IDENTICAL RECONSTRUCTION: the narrator repeats Olumi\'s code line, the host restores it → one composer: the code line leads, every line kept once', async () => {
     modelText = `${FALLBACK}\n\n${WHY}\n- Both options are compared on the same goal.\n- The comparison is provisional.\nAsk me what would change it.`;
     const first = (await runTurn(randomUUID())).json() as Body;
     const explained = (await explainTurn(randomUUID(), first)).json() as Body & { _answer_shape?: unknown; blocks?: { type?: string }[] };
-    expect(explained.assistant_text.trim(), 'the control: the host rebuilt the narrator\'s exact text').toBe(modelText.trim());
+    expect(explained.assistant_text, 'the control: the host rebuilt the narrator\'s text (now through the one composer)').toContain(WHY);
     expect((explained.blocks ?? []).some((b) => b.type === 'analysis_result'), 'the control: an analysis-bearing reply').toBe(true);
-    expect(explained._answer_shape, 'the host composed it → shipped whole').toBeUndefined();
+    const shape = explained._answer_shape as { headline: string; bullets: string[]; detail: string } | undefined;
+    if (shape !== undefined) expect(FALLBACK.startsWith(shape.headline), 'the code line leads the face').toBe(true);
+    for (const line of modelText.split('\n').filter((l) => l.trim() !== '')) {
+      for (const sentence of sentencesOf(line.replace(/^\s*-\s+/, '').trim())) expect(explained.assistant_text.split(sentence).length, sentence).toBe(2);
+    }
   });
 
   it.each([

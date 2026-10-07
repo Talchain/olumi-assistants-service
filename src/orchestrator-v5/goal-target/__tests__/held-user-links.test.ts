@@ -19,13 +19,13 @@ const userLink = (from: string, to: string, ne: Rec | undefined, exists = 0.8): 
   provenance: { source: 'user_specified', magnitude: 'user_stated', ...(ne !== undefined ? { natural_effect: ne } : {}) },
 });
 /** A causal link's rows need no ends: only a definition reads the labels and each end's unit. */
-const NO_ENDS: LinkEnds = { fromLabel: undefined, toLabel: undefined, fromUnit: undefined, toUnit: undefined };
+const NO_ENDS: LinkEnds = { routeOnce: false, fromLabel: undefined, toLabel: undefined, fromUnit: undefined, toUnit: undefined };
 const sdOf = (low: number, high: number): number => Math.abs(0.3 * (high / 20) - 0.3 * (low / 20)) / 3.29;
 
 describe('hold-at-1.0: a user link whose own range excludes zero holds on the Run input', () => {
   it('HELD: user-sized, range 20 to 40 → exists 1.0, sd_β = |β(40) − β(20)| / 3.29, the mean stays the stated β', () => {
     const e = userLink('price', 'subs', ranged(20, 40));
-    expect(heldLinkOf(e, NO_ENDS)).toEqual({ std: sdOf(20, 40) });
+    expect(heldLinkOf(e, NO_ENDS)).toEqual({ reason: 'user_range', std: sdOf(20, 40) });
     const g = withHeldUserLinks({ nodes: [], edges: [e] });
     expect(g.edges[0].exists_probability).toBe(1);
     expect(g.edges[0].strength.std).toBeCloseTo(sdOf(20, 40), 12);
@@ -33,7 +33,7 @@ describe('hold-at-1.0: a user link whose own range excludes zero holds on the Ru
     expect(g.edges[0].strength.mean).toBe(0.3);
   });
   it('a NEGATIVE range (−40 to −20) excludes zero too → held', () => {
-    expect(heldLinkOf(userLink('price', 'churn', ranged(-40, -20, -40)), NO_ENDS)).toEqual({ std: sdOf(-40, -20) });
+    expect(heldLinkOf(userLink('price', 'churn', ranged(-40, -20, -40)), NO_ENDS)).toEqual({ reason: 'user_range', std: sdOf(-40, -20) });
   });
   it('CONTRAST: a range that STRADDLES zero (−5 to 10) → not held, the edge is byte-identical', () => {
     const e = userLink('price', 'subs', ranged(-5, 10, 10));
@@ -54,7 +54,7 @@ describe('hold-at-1.0: a user link whose own range excludes zero holds on the Ru
     const olumi = { ...userLink('price', 'subs', ranged(20, 40)), provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: ranged(20, 40) } };
     expect(heldLinkOf(olumi, NO_ENDS)).toBeNull();
     const brief = { ...userLink('price', 'subs', ranged(20, 40)), provenance: { source: 'brief_extraction', source_quote: 'each £1 brings 20 to 40 subscribers', natural_effect: ranged(20, 40) } };
-    expect(heldLinkOf(brief, NO_ENDS)).toEqual({ std: sdOf(20, 40) });
+    expect(heldLinkOf(brief, NO_ENDS)).toEqual({ reason: 'user_range', std: sdOf(20, 40) });
     expect(heldLinkOf({ ...brief, provenance: { ...brief.provenance, source_quote: '  ' } }, NO_ENDS)).toBeNull();
   });
   it('the PERSISTED graph is never written: the input is not mutated and a held graph is a new object', () => {
@@ -95,9 +95,9 @@ describe('the licence reads the SAME hold: a held link never counts as Olumi\'s 
     expect(userStatedLinksBelowOne(graph(edges), 'mrr', ['a', 'b'])).toEqual([]);
     expect(goalChanceLicenceOf(env, graph(edges), 'mrr')?.user_link_existence).toBeUndefined();
   });
-  it('CONTRAST: the same links with no range → both counted, 1-in-5', () => {
+  it('CONTRAST: the same links with no range → first doubt counted, downstream route-once-held', () => {
     const edges = [userLink('price', 'subs', undefined), userLink('subs', 'mrr', undefined)];
-    expect(goalChanceLicenceOf(env, graph(edges), 'mrr')?.user_link_existence).toEqual({ links: 2, one_in: 5 });
+    expect(goalChanceLicenceOf(env, graph(edges), 'mrr')?.user_link_existence).toEqual({ links: 1, one_in: 5 });
   });
   it('one held, one not → the count is the unheld one only', () => {
     const edges = [userLink('price', 'subs', ranged(20, 40)), userLink('subs', 'mrr', undefined)];
@@ -207,7 +207,7 @@ describe('held-link parity fixture (shared with DGAI)', () => {
     const { rows } = await load();
     expect(rows.filter((r) => r.held).length).toBeGreaterThan(0);
     expect(rows.filter((r) => !r.held).length).toBeGreaterThan(0);
-    for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge, r.ends ?? NO_ENDS) !== null }).toEqual({ name: r.name, held: r.held });
+    for (const r of rows) expect({ name: r.name, held: heldLinkOf(r.edge, r.ends === undefined ? NO_ENDS : { ...r.ends, routeOnce: false }) !== null }).toEqual({ name: r.name, held: r.held });
   });
 });
 
@@ -285,15 +285,15 @@ describe('definitional hold: the user\'s own definitional link holds when it VAL
   const definitional = (provenance: Rec): Rec => ({ from: 'part', to: 'total', strength: { mean: 1, std: 0.5 }, exists_probability: 0.8,
     provenance: { definitional: true, natural_effect: { ...DEF_NE }, ...provenance } });
   /** The ends of a definition that validates: the part's label holds the total's quantity; the total is read in £/month. */
-  const VALID: LinkEnds = { fromLabel: 'Starter-tier MRR', toLabel: 'monthly recurring revenue', fromUnit: undefined, toUnit: '£/month' };
+  const VALID: LinkEnds = { routeOnce: false, fromLabel: 'Starter-tier MRR', toLabel: 'monthly recurring revenue', fromUnit: undefined, toUnit: '£/month' };
   it('QUOTED definitional (brief, with its quote) that validates → held at 1.0 with std 0.01', () => {
     const e = definitional({ source: 'brief_extraction', magnitude: 'olumi_estimate', source_quote: '<quote>' });
-    expect(heldLinkOf(e, VALID)).toEqual({ std: 0.01 });
+    expect(heldLinkOf(e, VALID)).toEqual({ reason: 'definition', std: 0.01 });
     const g = { nodes: [{ id: 'part', label: VALID.fromLabel }, { id: 'total', label: VALID.toLabel, observed_state: { unit: '£/month' } }], edges: [e] };
     expect(withHeldUserLinks(g).edges[0]).toMatchObject({ exists_probability: 1, strength: { mean: 1, std: 0.01 } });
   });
   it('USER-STATED definitional that validates → held at 1.0 with std 0.01', () => {
-    expect(heldLinkOf(definitional({ source: 'user_specified', magnitude: 'user_stated' }), VALID)).toEqual({ std: 0.01 });
+    expect(heldLinkOf(definitional({ source: 'user_specified', magnitude: 'user_stated' }), VALID)).toEqual({ reason: 'definition', std: 0.01 });
   });
   it('⛔ Codex r1 #2665 P1: a USER-STATED flag that FAILS validation (‘Pipeline value’ → ‘Revenue’) is not a definition → not held', () => {
     const e = definitional({ source: 'user_specified', magnitude: 'user_stated' });
@@ -378,7 +378,7 @@ describe('a VALIDATED drafter-only definition holds at 1.0 / 0.01 (the predicate
     const g = await servedGraph(key);
     const e = edgeOf(g, from, GOAL);
     expect(validatedDefinition(e, endsOfGraph(g)(e))).toBe(unit);
-    expect(heldLinkOf(e, endsOfGraph(g)(e))).toEqual({ std: 0.01 });
+    expect(heldLinkOf(e, endsOfGraph(g)(e))).toEqual({ reason: 'definition', std: 0.01 });
   });
   it('`sameUnit` at both ends: the total read in the definition\'s unit is REQUIRED; a total with no unit fails (fails safe)', async () => {
     const g = await servedGraph('fa1');
@@ -396,18 +396,21 @@ describe('a VALIDATED drafter-only definition holds at 1.0 / 0.01 (the predicate
     // The arithmetic parts upstream (subscribers × price) carry no flag: they stay beliefs, drawn at the prior.
     expect(heldLinkOf(edgeOf(g, 'starter_subscribers', 'starter_tier_monthly_recurring_revenue'), endsOf(edgeOf(g, 'starter_subscribers', 'starter_tier_monthly_recurring_revenue')))).toBeNull();
   });
-  it('CONTROL: no CAUSAL link on the served drafts holds (Olumi\'s and the brief\'s point links keep their prior)', async () => {
+  it('CONTROL: no CAUSAL link on the served drafts has a base hold (route-once is separate)', async () => {
     for (const key of ['fa1', 'ts2'] as const) {
       const g = await servedGraph(key);
       const endsOf = endsOfGraph(g);
-      const held = (g.edges as Rec[]).filter((e) => heldLinkOf(e, endsOf(e)) !== null).map((e) => `${e.from}->${e.to}`);
+      const held = (g.edges as Rec[]).filter((e) => {
+        const hold = heldLinkOf(e, endsOf(e));
+        return hold !== null && hold.reason !== 'route_once';
+      }).map((e) => `${e.from}->${e.to}`);
       const definitions = (g.edges as Rec[]).filter((e) => e.provenance?.definitional === true).map((e) => `${e.from}->${e.to}`);
       expect(held).toEqual(definitions);
     }
   });
 });
 
-describe('the Run sends PLoT the validated definition at 1.0 / 0.01; causal links and failed flags keep 0.8 (served T1b)', () => {
+describe('the Run sends validated definitions at 1.0 / 0.01; route-once changes existence only (served T1b)', () => {
   /** The REAL `run_analysis` handler over the served draft (PLoT faked at the transport): the graph PLoT receives. */
   const plotGraphFor = async (graph: Rec): Promise<{ wire: Rec; persisted: Rec }> => {
     const { readFileSync } = await import('node:fs');
@@ -451,12 +454,12 @@ describe('the Run sends PLoT the validated definition at 1.0 / 0.01; causal link
     expect(part).toMatchObject({ exists_probability: 0.8, strength: { std: 0.125 } });
     expect(edgeOf(wire, 'starter_subscribers', 'starter_tier_monthly_recurring_revenue')).toMatchObject({ exists_probability: 0.8, strength: { std: 0.125 } });
   });
-  it('CONTROL: the CAUSAL Olumi links into and around the part keep 0.8 and their own spread (the doubt stays upstream)', async () => {
+  it('CONTROL: first CAUSAL Olumi links keep 0.8; covered downstream link holds existence only', async () => {
     const g = await servedGraph('fa1');
     const { wire } = await plotGraphFor(g);
     for (const [from, to] of [['starter_tier_monthly_price', 'starter_tier_mrr'], ['starter_tier_subscribers', 'starter_tier_mrr'],
       ['monthly_starter_support_cost', 'mrr_lost_to_starter_support_strain']] as const) {
-      expect(edgeOf(wire, from, to), `${from} -> ${to}`).toMatchObject({ exists_probability: 0.8, strength: { std: edgeOf(g, from, to).strength.std } });
+      expect(edgeOf(wire, from, to), `${from} -> ${to}`).toMatchObject({ exists_probability: from === 'monthly_starter_support_cost' ? 1 : 0.8, strength: { std: edgeOf(g, from, to).strength.std } });
     }
   });
   it('⛔ Codex r2 #2665 P1: a validated definition stored as a CLAMP (mean 1, clamped_from 2) holds on the saved link AND the wire', async () => {
@@ -466,43 +469,58 @@ describe('the Run sends PLoT the validated definition at 1.0 / 0.01; causal link
     e.provenance.clamped_from = 2;
     e.provenance.natural_effect.strength_mean = 2;
     // The saved link (every reader of the persisted graph) and the licence: held, no longer Olumi's existence doubt.
-    expect(heldLinkOf(e, endsOfGraph(g)(e))).toEqual({ std: 0.01 });
+    expect(heldLinkOf(e, endsOfGraph(g)(e))).toEqual({ reason: 'definition', std: 0.01 });
     // The Run restores the full β first, then holds it.
     const { wire } = await plotGraphFor(g);
     expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 1, strength: { mean: 2, std: 0.01 } });
   });
-  it('TWIN (label): the same flag on ‘Pipeline value’ → MRR fails validation → sent at 0.8 with its own spread', async () => {
+  it('TWIN (label): the same flag on ‘Pipeline value’ → MRR fails validation → route-once-held at 1 with its own spread', async () => {
     const g = await servedGraph('fa1');
     nodeOf(g, 'starter_tier_mrr').label = 'Pipeline value';
+    const link = edgeOf(g, 'starter_tier_mrr', GOAL);
+    expect(validatedDefinition(link, endsOfGraph(g)(link))).toBeUndefined();
+    expect(heldLinkOf(link, endsOfGraph(g)(link))).toEqual({ reason: 'route_once', std: link.strength.std });
     const { wire } = await plotGraphFor(g);
-    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 0.8, strength: { std: edgeOf(g, 'starter_tier_mrr', GOAL).strength.std } });
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 1, strength: { std: edgeOf(g, 'starter_tier_mrr', GOAL).strength.std } });
   });
-  it('TWIN (label, the USER\'s flag; Codex r1 #2665 P1): ‘Pipeline value’ → MRR typed user-stated still fails → 0.8', async () => {
+  it('TWIN (label, the USER\'s flag; Codex r1 #2665 P1): ‘Pipeline value’ → MRR typed user-stated still fails → route-once only', async () => {
     const g = await servedGraph('fa1');
     nodeOf(g, 'starter_tier_mrr').label = 'Pipeline value';
     Object.assign(edgeOf(g, 'starter_tier_mrr', GOAL).provenance, { source: 'user_specified', magnitude: 'user_stated' });
+    const link = edgeOf(g, 'starter_tier_mrr', GOAL);
+    expect(validatedDefinition(link, endsOfGraph(g)(link))).toBeUndefined();
+    expect(heldLinkOf(link, endsOfGraph(g)(link))).toEqual({ reason: 'route_once', std: link.strength.std });
     const { wire } = await plotGraphFor(g);
-    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 0.8, strength: { std: edgeOf(g, 'starter_tier_mrr', GOAL).strength.std } });
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 1, strength: { std: edgeOf(g, 'starter_tier_mrr', GOAL).strength.std } });
   });
-  it('TWIN (unit at the total): the size in £/week into a total in £/month fails validation → 0.8', async () => {
+  it('TWIN (unit at the total): the size in £/week into a total in £/month fails validation → route-once only', async () => {
     const g = await servedGraph('fa1');
     const ne = edgeOf(g, 'starter_tier_mrr', GOAL).provenance.natural_effect;
     ne.amount_unit = '£/week';
     ne.per_source_change_unit = '£/week';
+    const link = edgeOf(g, 'starter_tier_mrr', GOAL);
+    expect(validatedDefinition(link, endsOfGraph(g)(link))).toBeUndefined();
+    expect(heldLinkOf(link, endsOfGraph(g)(link))).toEqual({ reason: 'route_once', std: link.strength.std });
     const { wire } = await plotGraphFor(g);
-    expect(edgeOf(wire, 'starter_tier_mrr', GOAL).exists_probability).toBe(0.8);
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 1, strength: { std: link.strength.std } });
   });
-  it('TWIN (unit at the part): a part measured in its own other unit (subscribers) fails validation → 0.8', async () => {
+  it('TWIN (unit at the part): a part measured in its own other unit (subscribers) fails validation → route-once only', async () => {
     const g = await servedGraph('fa1');
     nodeOf(g, 'starter_tier_mrr').observed_state = { value: 0, raw_value: 0, unit: 'subscribers' };
+    const link = edgeOf(g, 'starter_tier_mrr', GOAL);
+    expect(validatedDefinition(link, endsOfGraph(g)(link))).toBeUndefined();
+    expect(heldLinkOf(link, endsOfGraph(g)(link))).toEqual({ reason: 'route_once', std: link.strength.std });
     const { wire } = await plotGraphFor(g);
-    expect(edgeOf(wire, 'starter_tier_mrr', GOAL).exists_probability).toBe(0.8);
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 1, strength: { std: link.strength.std } });
   });
-  it('TWIN (not ±1 per 1): the flag on +2 per 1 is not a definition → 0.8', async () => {
+  it('TWIN (not ±1 per 1): the flag on +2 per 1 is not a definition → route-once only', async () => {
     const g = await servedGraph('fa1');
     edgeOf(g, 'starter_tier_mrr', GOAL).provenance.natural_effect.amount = 2;
+    const link = edgeOf(g, 'starter_tier_mrr', GOAL);
+    expect(validatedDefinition(link, endsOfGraph(g)(link))).toBeUndefined();
+    expect(heldLinkOf(link, endsOfGraph(g)(link))).toEqual({ reason: 'route_once', std: link.strength.std });
     const { wire } = await plotGraphFor(g);
-    expect(edgeOf(wire, 'starter_tier_mrr', GOAL).exists_probability).toBe(0.8);
+    expect(edgeOf(wire, 'starter_tier_mrr', GOAL)).toMatchObject({ exists_probability: 1, strength: { std: link.strength.std } });
   });
 });
 
@@ -578,10 +596,10 @@ describe('analysis identity: a validated definition is an input change; history 
     expect(recordedUnderUserHold).not.toBe(computeAnalysisAffectingGraphHashSha256(g as never));
     expect(matchesHistoricalAnalysisIdentity(g as never, recordedUnderUserHold)).toBe(true);
   });
-  it('CONTRAST (no churn): a graph with no validated definition hashes the same under both projections', async () => {
+  it('CONTRAST (base hold): no validated definition hashes the same before definition and route-once', async () => {
     const { computeAnalysisAffectingGraphHashSha256 } = await import('../../context/graph-hash.js');
     const g = await servedGraph('fa1');
     for (const e of g.edges as Rec[]) if (e.provenance?.definitional === true) delete e.provenance.definitional;
-    expect(computeAnalysisAffectingGraphHashSha256(g as never, 'pre_definition')).toBe(computeAnalysisAffectingGraphHashSha256(g as never));
+    expect(computeAnalysisAffectingGraphHashSha256(g as never, 'pre_definition')).toBe(computeAnalysisAffectingGraphHashSha256(g as never, 'pre_route_once'));
   });
 });

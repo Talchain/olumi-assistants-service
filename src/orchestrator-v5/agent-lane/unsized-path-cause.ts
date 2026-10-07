@@ -1,5 +1,7 @@
 import { GOAL_FIGURES_PLACEHOLDER_PATH, goalFiguresLeaderWithheld, goalFiguresWithheldWarnings } from '../../orchestrator/context/option-result-source.js';
 import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
+import { compactWordLabel } from './reply/labels.js';
+import { strengthNotSized } from './reply/words.js';
 
 /** The Run caller records its licence fact; readers never walk the graph again. */
 export interface UnsizedPathLink {
@@ -73,24 +75,24 @@ export function linkList(links: readonly UnsizedPathLink[], count = Math.min(3, 
 }
 
 /** R8 Science copy: fewer names, then compact labels, only when needed for the 400 character carrier. */
-function linkSentence(links: readonly UnsizedPathLink[], legacy: boolean, invite = true): string {
+function linkSentence(links: readonly UnsizedPathLink[], legacy: boolean, invite = true, maxLength = 400): string {
   if (links.length === 0) return '';
   const plural = links.length > 1;
   const render = (named: readonly UnsizedPathLink[], count: number): string => legacy
     ? `Olumi supplied the figures for the ${linkList(named, count)}. Set your own to see how much ${plural ? 'they matter' : 'it matters'}.`
-    : `This comparison turns on the ${linkList(named, count)}, whose ${plural ? 'strengths' : 'strength'} nobody has set yet.${invite
+    : `This comparison turns on the ${linkList(named, count)}, whose ${strengthNotSized(plural)}.${invite
       ? ` Set ${plural ? 'them' : 'it'} to see how much ${plural ? 'they matter' : 'it matters'}.` : ''}`;
   for (let count = Math.min(3, links.length); count > 0; count--) {
     const full = render(links, count);
-    if (full.length <= 400) return full;
+    if (full.length <= maxLength) return full;
   }
-  const compact = (v: string, limit: number): string => v.length <= limit ? v : `${v.slice(0, limit - 1).trimEnd()}…`;
   const blank = links.map(l => ({ ...l, from_label: '', to_label: '' }));
-  const budget = Math.max(1, Math.floor((400 - render(blank, 1).length) / 2));
-  return render(links.map(l => ({ ...l, from_label: compact(l.from_label, budget), to_label: compact(l.to_label, budget) })), 1);
+  const budget = Math.max(1, Math.floor((maxLength - render(blank, 1).length) / 2));
+  const compacted = render(links.map(l => ({ ...l, from_label: compactWordLabel(l.from_label, budget), to_label: compactWordLabel(l.to_label, budget) })), 1);
+  return compacted.length <= maxLength ? compacted : '';
 }
 
 export const unsizedLinkSentence = (links: readonly UnsizedPathLink[]): string => linkSentence(links, false);
 /** #2613 CR (b): the same statement with no invitation, for a Run whose goal product (Gate 5) still blocks every option. */
-export const unsizedLinkStatement = (links: readonly UnsizedPathLink[]): string => linkSentence(links, false, false);
+export const unsizedLinkStatement = (links: readonly UnsizedPathLink[], maxLength = 400): string => linkSentence(links, false, false, maxLength);
 export const legacyLinkSentence = (links: readonly UnsizedPathLink[]): string => linkSentence(links, true);

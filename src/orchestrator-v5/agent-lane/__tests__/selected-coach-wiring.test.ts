@@ -35,8 +35,11 @@ const HOST_SHA = '0732df33cd12e02033edebb64ebc4e733ce7a6ce0ec87071d8a25df08a7d35
 //   bytes (+1 space +745 = exactly the rule's bytes); Codex r2 widened it to every probability_of_goal and to the result being
 //   reported: 29,212 → 30,154 (+1 +941, exactly the rule). Template and host shas unchanged. Derived from the SENT body.
 // + W3 headline + goal-chance display (6 Oct evening): 30,246 → 31,346 bytes. Derived from the SENT body.
-const RENDERED_SHA = '985bcc8e56f428a9173e4c994a3260d22a70aa745a85e7d173a94c1358b88718';
-const RENDERED_BYTES = 33_758;
+// + S-A REPLY_SHAPE_INSTRUCTION joined after the reply-length sentence (lane COPY-SHAPE, 7 Oct; Paul: "the three bullets
+//   as a construct"; AIE #87 6037293086 §5: under 75 words, one move, one ask): 33,758 → 34,302 bytes (+1 space +543 =
+//   exactly the sentence's bytes). Derived from the SENT body.
+const RENDERED_SHA = '8c743f05bcbcc0207f6ab8a5dbe855dc33e4cb0d27bbce06227b560887d008b3';
+const RENDERED_BYTES = 34_302;
 /** The model-relative naming rule's sentence form (`MODEL_RELATIVE_NAMING_INSTRUCTION`), matched as SENT bytes. */
 const NAMING_RULE_FORM = 'name it only as \u201cIn this model, N% of runs supported \u2018X\u2019\u201d';
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
