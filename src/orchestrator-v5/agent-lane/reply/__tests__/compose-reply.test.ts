@@ -19,6 +19,7 @@ import { chanceGoalDeadlineAsk, chanceGoalSentence } from '../../../goal-target/
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
+import { scalingRatio } from '../../../../../tests/helpers/scaling-ratio.js';
 import {
   composeReplyShape, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
   type ReplyComposition, type FaceObligation,
@@ -402,19 +403,8 @@ describe('the producer half: one shape rule for every model', () => {
 });
 
 describe('timing: every regex on the path scales linearly (20k -> 80k, min of 7 batches, ratio < 8x)', () => {
-  // The batch size is calibrated so the LARGE sample runs >= ~60 ms: a 6.6 ms sample read 8.84x on a CI runner
-  // (7 Oct, #2761). Linear ~ 4x, quadratic ~ 16x; the bar stays < 8x. Measured 20k -> 80k -> 320k: ~4x each step.
-  const batchMs = (f: () => void, calls: number): number => {
-    const t0 = performance.now();
-    for (let j = 0; j < calls; j += 1) f();
-    return performance.now() - t0;
-  };
-  const minBatchMs = (f: () => void, calls: number): number => {
-    batchMs(f, calls); // warm-up
-    let best = Infinity;
-    for (let i = 0; i < 7; i += 1) best = Math.min(best, batchMs(f, calls));
-    return best;
-  };
+  // P51's calibrated helper (min of 7 batches, LARGE sample >= ~60 ms). Linear ~ 4x, quadratic ~ 16x; the bar stays < 8x.
+  // Measured locally 8 Oct: terminators 20k 0.19 ms -> 80k 0.69 ms -> 320k 2.74 ms per call (linear); CI read 8.32x once.
   const shapes: [string, (n: number) => string][] = [
     ['whitespace', (n) => `Lead.${' '.repeat(n)}Next. ${'\t'.repeat(n)}`],
     ['terminators', (n) => `${'.'.repeat(n)} A${'?'.repeat(n)}`],
@@ -426,11 +416,8 @@ describe('timing: every regex on the path scales linearly (20k -> 80k, min of 7 
     expect(large.length).toBeGreaterThanOrEqual(small.length * 3);
     const runLarge = (): void => { composeReplyShape({ text: large }); };
     const runSmall = (): void => { composeReplyShape({ text: small }); };
-    const oneCall = Math.max(Math.min(batchMs(runLarge, 1), batchMs(runLarge, 1), batchMs(runLarge, 1)), 0.001);
-    const calls = Math.min(Math.max(Math.ceil(60 / oneCall), 1), 50_000);
-    const tLarge = minBatchMs(runLarge, calls);
-    const tSmall = Math.max(minBatchMs(runSmall, calls), 0.05);
-    expect(tLarge / tSmall, `20k ${tSmall.toFixed(2)} ms -> 80k ${tLarge.toFixed(2)} ms (x${calls})`).toBeLessThan(8);
+    const growth = scalingRatio(runSmall, runLarge);
+    expect(growth.ratio, growth.detail).toBeLessThan(8);
   });
 });
 
