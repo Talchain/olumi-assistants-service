@@ -55,7 +55,8 @@ const SC24_OMITTED: readonly string[] = ['endpoints', 'input_changes', 'input_co
  * which waits for RC/AIQ wording and the Agent-context owner's review (the SC-24 precedent above).
  */
 const V070_OMITTED: readonly string[] = ['win_probabilities_unavailable'];
-const OMITTED = new Set([DELIBERATELY_OMITTED, ...SC24_OMITTED, ...V070_OMITTED]);
+// Compare-chance v1: not given to the AI (claim-safety review pending)
+const OMITTED = new Set([DELIBERATELY_OMITTED, ...SC24_OMITTED, ...V070_OMITTED, 'goal_chances']);
 
 /**
  * `RunDeltaSchema` is a `ZodEffects` (it carries `refineRunDelta`), so it has no
