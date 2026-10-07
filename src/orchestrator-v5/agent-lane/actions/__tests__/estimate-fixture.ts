@@ -1,5 +1,7 @@
 /** Identity-bound model and licence used by the pure and real-route S2b rows. */
-export const estimateGraph = () => ({ nodes: [
+type FixtureNode = { id: string; kind: string; label: string; observed_state?: Record<string, unknown>; scale_frame?: number; [key: string]: unknown };
+/** Loosely typed on purpose: rows mutate a node's observed_state to other shapes. */
+export const estimateGraph = (): { nodes: FixtureNode[]; edges: { from: string; to: string }[] } => ({ nodes: [
   { id: 'goal', kind: 'goal', label: 'Launch on time', observed_state: { unit: '% likelihood of on-time launch' }, goal_horizon: { deadline: '2027-04-07' } },
   { id: 'a', kind: 'option', label: 'Hire', interventions: { far: 0.5, user: 0.5, unknown: 0.5, znear: 0.5 } },
   { id: 'b', kind: 'option', label: 'Train', interventions: { far: 0.75 } },
