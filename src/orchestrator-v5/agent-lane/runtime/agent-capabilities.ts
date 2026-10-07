@@ -1672,14 +1672,12 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     const chancePermitted = legacyRun
       ? current && goalChance === undefined && permissions.leader_may_be_named === true
       : goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id);
-    const whole = chancePermitted && goalChanceDisplay !== undefined && Object.hasOwn(goalChanceDisplay, id)
-      ? /^about (\d+)%$/.exec(goalChanceDisplay[id]!) : null;
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
       ...(optionNames.get(id)?.raw === label ? { display_label: optionNames.get(id)!.display } : {}),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
       ...(chancePermitted && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
-        ? { probability_of_goal: whole !== null ? Number(whole[1]) / 100 : shownChance.get(id) ?? row.probability_of_goal } : {}),
+        ? { probability_of_goal: shownChance.get(id) ?? row.probability_of_goal } : {}),
       ...(decision !== undefined && !Object.hasOwn(goalFacts.goal_chance_range_display ?? {}, id) ? { goal_certainty: decision } : {}),
     }];
   }) : [];

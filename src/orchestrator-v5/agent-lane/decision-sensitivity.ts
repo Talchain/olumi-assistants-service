@@ -265,8 +265,7 @@ function optionRowsForAgent(
       next = others;
     }
     if (chancePermitted && id !== undefined && typeof next.probability_of_goal === 'number') {
-      const whole = Object.hasOwn(displays, id) ? /^about (\d+)%$/.exec(displays[id]!) : null;
-      next = { ...next, probability_of_goal: whole !== null ? Number(whole[1]) / 100 : shown.get(id) ?? next.probability_of_goal };
+      next = { ...next, probability_of_goal: shown.get(id) ?? next.probability_of_goal };
     }
     // ⛔ G4/G5 PHASE 2 (design-g4g6 Q3): the goal chance's precision and drivers NEVER reach the Agent, withheld or not —
     // no ruled Agent sentence exists, and free prose about a "main driver" passes no guard. It reads the licence record only.

@@ -103,10 +103,13 @@ describe('W3 witnessed wire contradictions are reconciled by separate typed auth
     expect(selected().goal_chance_driver_availability).toEqual(AVAILABILITY);
     const state = await canonical(read());
     expect(state.analysis.goal_chance_driver_availability).toEqual(AVAILABILITY);
-    // The standing saved-context leader guard still drops numeric chances and their display licence.
-    expect(state.analysis.saved_run_options.some((o: Json) => 'probability_of_goal' in o)).toBe(false);
-    expect(state.analysis).not.toHaveProperty('goal_chance_display');
-    expect(state.analysis).not.toHaveProperty('goal_chance_licence');
+    // C1 (Science 393023, PR-S2) supersedes W3's leader guard on a LICENSED Run: a withheld leader keeps each licensed
+    // chance and its display licence, as the screen shows them. An exact 0 still travels only through goal_certainty.
+    const chances = Object.fromEntries(state.analysis.saved_run_options
+      .filter((o: Json) => 'probability_of_goal' in o).map((o: Json) => [o.option_id, o.probability_of_goal]));
+    expect(chances).toEqual({ [RAISE]: 0.4643, [STARTER]: 0.5192 });
+    expect(state.analysis.goal_chance_display).toEqual(DISPLAY);
+    expect(state.analysis.goal_chance_licence).toEqual(out.result.goal_chance_licence);
   });
 
   it('permitted saved-context control: the same selected licence supplies display text beside its admitted facts', async () => {
