@@ -29,5 +29,7 @@ describe('L1 R3 independent-review regressions, with captured graph bytes', () =
     const result = execFileSync(process.execPath, ['--import', 'tsx', 'tools/limit-check-replay/route-r3.ts'], { encoding: 'utf8', timeout: 30_000 });
     expect(result).toContain('Explain route evaluated GREEN');
     expect(result).toContain('Explain route declaration-only GREEN');
-  });
+    // The child imports the whole route under tsx: 1.6–2.4 s locally, over vitest's 5 s default on a CI runner (S4c #2729
+    // Required 3/5, 7 Oct). Bounded by the child's own 30 s timeout instead.
+  }, 35_000);
 });
