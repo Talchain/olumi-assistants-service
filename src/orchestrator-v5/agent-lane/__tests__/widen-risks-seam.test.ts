@@ -220,6 +220,10 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
     expect(openAiCalls, 'the Add press makes no model call').toBe(calls);
     expect(t2._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_risk', true]]);
+    // Served sc-plus-1 (7 Oct 16:58Z): the card was held, yet the words said it was not. A held card is never a refusal.
+    expect(t2.assistant_text).not.toContain('I couldn’t prepare that risk');
+    expect(t2.assistant_text).toContain('I’ve prepared this change');
+    expect(t2.assistant_text).toContain('Recruitment delay');
     const approve = approveChipOf(t2);
     expect(approve?.id, JSON.stringify(t2.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
     const held = await heldOnLatestRow();
@@ -361,6 +365,55 @@ describe('S-C WIDEN risks on the live route: suggestions, then ONE card per Add'
     expect(gapOf(t1)?.kind).toBe('goal_target_missing');
     expect(t1.assistant_text.trim().split('\n').at(-1)).toBe('One gap: ‘meet our next feature-launch deadline’ has no target or deadline yet. What would count as meeting it, and by when?');
     expect(t1.assistant_text).not.toContain(S1_ASK);
+  }, 120_000);
+
+  /**
+   * Served canvas witness sc-plus-1 (UI a36315d4, CEE 666dad1, 7 Oct 16:58:44Z): the "+" → Risk press offered three Adds; the
+   * first Add's message, VERBATIM, held its card (`widen_add: propose_new_risk, held: true`) and the reply said "I couldn't
+   * prepare that risk". The model here carries the served labels only (the stored graph was not read: guest, key-gated).
+   */
+  const STARTER = {
+    nodes: [
+      { id: 'dec_pricing', kind: 'decision', label: 'How should we price the starter tier?' },
+      { id: 'goal_mrr', kind: 'goal', label: 'Total MRR', goal_threshold_unit: '£', goal_threshold_raw: 50000 },
+      { id: 'out_starter_mrr', kind: 'outcome', label: 'Starter-plan MRR' },
+      { id: 'fac_subs', kind: 'factor', label: 'Starter-plan paying subscribers', observed_state: { value: 0.2, raw_value: 200, unit: 'subscribers', cap: 1000 } },
+      { id: 'opt_launch', kind: 'option', label: 'Launch cheaper starter plan', interventions: { fac_subs: { value: 0.5, raw_value: 500, unit: 'subscribers' } } },
+      { id: 'opt_keep', kind: 'option', label: 'Keep current pricing', is_baseline: true, interventions: {} },
+    ],
+    edges: [
+      { from: 'dec_pricing', to: 'opt_launch', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'dec_pricing', to: 'opt_keep', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'opt_launch', to: 'fac_subs', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'opt_keep', to: 'fac_subs', strength: { mean: 1, std: 0.1 }, exists_probability: 1, effect_direction: 'positive', origin: 'repair' },
+      { from: 'fac_subs', to: 'out_starter_mrr', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'out_starter_mrr', to: 'goal_mrr', strength: { mean: 0.7, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+    ],
+    goal_node_id: 'goal_mrr',
+    goal_constraints: [],
+  };
+  const SERVED_ADD_MESSAGE = 'Add the risk ‘Weak starter demand’ to ‘Launch cheaper starter plan’: driven by less ‘Starter-plan paying subscribers’, it would lower ‘Starter-plan MRR’.';
+  it('SR-14 RED (served sc-plus-1): canvas "+" Risk → Add with the served message VERBATIM → ONE held card AND the words say it is prepared, never "I couldn’t prepare"', async () => {
+    graphOf.set(SCENARIO, structuredClone(STARTER));
+    script = [() => candidates([{ label: 'Weak starter demand', category: 'external', hits_id: 'opt_launch', through_id: 'fac_subs', through_direction: 'negative',
+      affects_id: 'out_starter_mrr', direction: 'negative', relies_on: 'attracting new paying subscribers with a cheaper plan', watch_for: 'interest fails to convert into paid subscriptions' }])];
+    const t1 = await turn({ message: 'What could go wrong, or unexpectedly well, that this model doesn’t have yet?', source: 'chip', chip: { id: 'ask:risks' } });
+    const add = addChips(t1)[0]!;
+    expect(add?.message, JSON.stringify(t1.suggested_actions)).toBe(SERVED_ADD_MESSAGE);
+    const calls = openAiCalls;
+    const t2 = await turn({ message: add.message, source: 'chip', chip: { id: add.id } });
+    expect(openAiCalls).toBe(calls);
+    expect(t2._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_risk', true]]);
+    expect(approveChipOf(t2)?.id).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
+    expect(t2.assistant_text).not.toContain('I couldn’t prepare that risk');
+    expect(t2.assistant_text).toContain('I’ve prepared this change');
+    expect(t2.assistant_text).toContain('Weak starter demand');
+    // The door's OWN typed reply (`newRiskReply`), not the fallback: the press is the whole request.
+    expect(t2.assistant_text).toContain('It threatens Starter-plan MRR (lowers it).');
+    expect(t2.assistant_text).toContain('It is driven by Starter-plan paying subscribers (more of it makes the risk less likely).');
+    const held = await heldOnLatestRow();
+    expect(held[0]!.action.inline_patch!.operations!.map((o) => `${o.op} ${o.path}`))
+      .toEqual(['add_node risk_weak_starter_demand', 'add_edge risk_weak_starter_demand::out_starter_mrr', 'add_edge fac_subs::risk_weak_starter_demand']);
   }, 120_000);
 
   it('SR-6 RED: the canvas "+" Option press (ask:widen) reaches the options door — its ONLY tool is propose_new_option', async () => {
