@@ -122,8 +122,10 @@ export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   // user kept out of the calculation, and every link touching it, before the hold. So such a node never covers, is never
   // covered, and its links are never held — on the Run, the hash, the Agent and the LLM context alike.
   const participating = new Set(nodes.filter((n) => !isRetainedExcluded(n)).map((n) => n.id));
+  // A BIDIRECTED link is not a route at all (Codex buddy r2 P1): PLoT sends ISL directed links only
+  // (`translator-v3.ts` "ISL operates on directed edges only"), so it neither covers its target nor is ever held.
   const structural = (e: Rec): boolean => typeof e.from === 'string' && typeof e.to === 'string'
-    && participating.has(e.from) && participating.has(e.to);
+    && participating.has(e.from) && participating.has(e.to) && e.edge_type !== 'bidirected';
   const baseEnds = (e: Rec): LinkEnds => ({
     fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label),
     fromUnit: unitOf(e.from), toUnit: unitOf(e.to), routeOnce: false,
@@ -213,7 +215,7 @@ export function heldLinkBeforeRouteOnce(e: unknown, ends: LinkEnds): BaseHold | 
 
 function defaultExistence(e: Rec, ends: LinkEnds): boolean {
   return finite(e.exists_probability) && e.exists_probability > 0 && e.exists_probability < 1
-    && e.edge_type !== 'bidirected' && ends.identityOperand !== true && heldLinkBeforeRouteOnce(e, ends) === null;
+    && ends.identityOperand !== true && heldLinkBeforeRouteOnce(e, ends) === null;
 }
 
 export function heldLinkOf(e: unknown, ends: LinkEnds): LinkHold | null {

@@ -24,7 +24,7 @@ type Rec = Record<string, any>;
 type Edge = Rec & { from: string; to: string; exists_probability?: number; strength?: { mean: number; std?: number } };
 type Graph = { nodes: Rec[]; edges: Edge[] };
 type Fixture = { name: string; graph: Graph; held: string[] };
-const PARITY_SHA256 = '3fe10b78ec4d7ba7bfba42b35d9c137ebd9485f92b3d93593def140cbe2aec02';
+const PARITY_SHA256 = '7c050df497ef7ead9d145d8d38b14c92eb216d67a7b186fb57322b73d2d1ec51';
 const bytes = readFileSync(new URL('./fixtures/route-once-parity.json', import.meta.url));
 const parity = JSON.parse(bytes.toString('utf8')) as Fixture[];
 const graphOf = (name: string): Graph => structuredClone(parity.find((row) => row.name === name)!.graph);
@@ -41,9 +41,10 @@ const heldIds = (graph: Graph, routeOnly = false): string[] => {
     return routeOnly ? held?.reason === 'route_once' : held !== null;
   }).map(id).sort();
 };
+// The routes ISL actually draws: participating nodes only, directed links only (PLoT drops bidirected before ISL).
 const structural = (graph: Graph): Edge[] => {
-  const ids = new Set(graph.nodes.map((n) => n.id));
-  return graph.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
+  const ids = new Set(graph.nodes.filter((n) => n.analysis_participation !== 'retained_excluded').map((n) => n.id));
+  return graph.edges.filter((e) => ids.has(e.from) && ids.has(e.to) && e.edge_type !== 'bidirected');
 };
 // Independent path oracle: coverage is tested against enumerated root routes, not just the Kahn result.
 const defaultIds = (graph: Graph): Set<string> => {
@@ -179,11 +180,15 @@ describe('rule R route-once', () => {
       expect(endsOfGraph(graph)(edgeOf(graph, 'M->Y')).routeOnce, name).toBe(false);
       expect(heldLinkOf(edgeOf(graph, 'M->Y'), endsOfGraph(graph)(edgeOf(graph, 'M->Y'))), name).toBeNull();
     }
-    for (const name of ['Identity operand covered source', 'Bidirected covered source']) {
-      const graph = graphOf(name);
-      expect(endsOfGraph(graph)(edgeOf(graph, 'A->M')).routeOnce).toBe(true);
-      expect(heldIds(graph, true), name).toEqual(['M->Y']);
-    }
+    // An identity operand is in ISL's graph (fixed, not drawn): it passes its source's cover on.
+    const identity = graphOf('Identity operand covered source');
+    expect(endsOfGraph(identity)(edgeOf(identity, 'A->M')).routeOnce).toBe(true);
+    expect(heldIds(identity, true)).toEqual(['M->Y']);
+    // ⛔ Codex buddy r2 P1: a BIDIRECTED link is not in ISL's graph at all, so M is a root and M->Y is its route's only doubt.
+    const bidirected = graphOf('Bidirected covered source');
+    expect(endsOfGraph(bidirected)(edgeOf(bidirected, 'A->M')).routeOnce).toBe(false);
+    expect(heldIds(bidirected, true)).toEqual([]);
+    expect(withHeldUserLinks(bidirected)).toBe(bidirected);
     const graph = graphOf('R4');
     for (const value of [NaN, Infinity, -1, 1.1]) {
       edgeOf(graph, 'hire->capacity').exists_probability = value;
