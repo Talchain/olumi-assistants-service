@@ -237,6 +237,9 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     expect(route).toContain('await dispatchTool(card.tool, JSON.stringify(card.args), toolCtx, capabilities, mode)');
     expect(route).toContain('await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: keptProposal }), toolCtx, capabilities, mode)');
     expect(route).toContain('await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: declinedHold }), toolCtx, capabilities, mode)');
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eight dispatch sites and the state read').toBe(10);
+    // S-D slice 2: the approve site names it twice: an approve-with-edits of an Agent proposal binds the user's own
+    // Submit to the EDITED proposal's id (same context, `typed_approval_of` re-bound by the server).
+    expect(route).toContain('edited?.ok ? { ...toolCtx, typed_approval_of: target, proposal_edits: undefined } : toolCtx, capabilities, mode);');
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eight dispatch sites (the approve site twice) and the state read').toBe(11);
   });
 });

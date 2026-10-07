@@ -846,9 +846,19 @@ function valuesNotSaved(
   });
 }
 
+/** S-D: snapshot the existing declared domain on the typed op, never invent a scale at Submit. */
+function storedFactorDomain(raw: unknown): { cap?: number; declared_scale?: unknown } {
+  if (!raw || typeof raw !== 'object') return {};
+  const os = raw as { cap?: unknown; declared_scale?: unknown };
+  return { ...(typeof os.cap === 'number' ? { cap: os.cap } : {}), ...(os.declared_scale !== undefined ? { declared_scale: os.declared_scale } : {}) };
+}
 function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
-  if (proposal.provenance.authored_by === 'user_stated') return 'user_stated';
   const own = ((op.value ?? {}) as { authored_by?: unknown }).authored_by;
+  // ⭐ S-D slice 2: an approve-with-edits proposal (`basis: 'edited_from:<id>'`, `amend.ts`) keeps EACH value's own
+  // author: only the values the user edited are theirs; every value they left stays Olumi's estimate. Every other
+  // proposal keeps the original precedence unchanged (a proposal the user authored whole claims all its values).
+  if ((proposal.provenance.basis ?? '').startsWith('edited_from:') && (own === 'user_stated' || own === 'model_proposed')) return own;
+  if (proposal.provenance.authored_by === 'user_stated') return 'user_stated';
   return own === 'user_stated' ? 'user_stated' : 'model_proposed';
 }
 
@@ -4716,7 +4726,8 @@ export function createAgentCapabilities(
       const operations: ProposalOperation[] = ordered.map((a) => ({
         op: 'set_factor_value',
         path: a.id,
-        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: usersOwn(a) ? 'user_stated' : 'model_proposed' },
+        value: { value: a.value, unit: a.unit, basis: a.basis, authored_by: usersOwn(a) ? 'user_stated' : 'model_proposed',
+          ...storedFactorDomain(g.nodes.find(n => n.id === a.id)?.observed_state) },
       }));
       /**
        * ⛔ THE APPROVAL MUST SAY WHAT IT REPLACES.

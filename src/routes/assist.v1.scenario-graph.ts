@@ -217,7 +217,7 @@ import {
 } from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
-import { productHoldRecord, proposalFieldsWire } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
+import { proposalRecord, proposalFieldsWire } from "../orchestrator-v5/agent-lane/proposal-object/record.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
@@ -731,7 +731,7 @@ export default async function route(app: FastifyInstance) {
        * Agent's own internal reads stay byte-identical.
        */
       const proposalFields = conversationRequested && graphPresent
-        ? proposalFieldsWire(latestPending.flatMap((pa) => { const r = productHoldRecord(pa, graph); return r === undefined ? [] : [r]; }),
+        ? proposalFieldsWire(latestPending.flatMap((pa) => { const r = proposalRecord(pa, graph); return r === undefined ? [] : [r]; }),
           computeAnalysisAffectingGraphHash(graph as GraphStateIngress) ?? undefined)
         : undefined;
 

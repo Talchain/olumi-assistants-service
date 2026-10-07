@@ -88,7 +88,8 @@ describe('the ONE proposal object (record.ts)', () => {
 
   it('every op either dialect holds is classified (a new op is a compile error until it is)', () => {
     expect(FIELD_CLASS_BY_OP.add_edge).toBe('link_strength');
-    expect(Object.values(FIELD_CLASS_BY_OP).filter((v) => v === 'link_strength')).toHaveLength(1);
+    // S2 also classifies the Agent's set_link_strength while keeping the original add_edge check.
+    expect(Object.values(FIELD_CLASS_BY_OP).filter((v) => v === 'link_strength')).toHaveLength(2);
   });
 
   it('RED (Codex r1 P1 on #2743): the digest binds what the panel SHOWS: a rename under the same analysis hash changes it; the same model and hold keep it', () => {
@@ -257,4 +258,97 @@ describe('the words (reply.ts) and the conventional bare-confirm window', () => 
     const legacy = tryShortConfirmResume({ message: 'yes', pendingActions: [unmarked], currentTurnIndex: 3, nowMs: now });
     expect(legacy.matched && legacy.dispatch === 'pending_action' ? legacy.pending.chip_id : undefined).toBe('gmh_aaaaaaaaaaaa');
   });
+});
+
+
+describe('S-D slice 2 Agent envelope and typed amendment', () => {
+  const fixture = async () => {
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    const { agentProposalRecord } = await import('../record.js');
+    const p = createProposal({ scenario_id: SID, user_id: null, base_graph_identity_hash: 'pin',
+      operations: [
+        { op: 'set_factor_value', path: 'fac_hours', value: { value: 10, unit: 'hours', cap: 40, declared_scale: 'unit_interval', basis: 'assumption', authored_by: 'model_proposed' } },
+        { op: 'set_factor_value', path: 'fac_cost', value: { value: 200, unit: 'GBP', cap: 1000, authored_by: 'model_proposed', extra: { retained: true } } },
+        { op: 'set_factor_value', path: 'fac_own', value: { value: 3, unit: '%', authored_by: 'user_stated' } },
+      ], provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: 'Starting assumptions' });
+    const carrier = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: p.public_label, message: 'Use these assumptions.' },
+      { scenario_id: SID, emitted_at_iso: new Date().toISOString() });
+    const g = { nodes: [{ id: 'fac_hours', label: 'Hours' }, { id: 'fac_cost', label: 'Cost' }, { id: 'fac_own', label: 'Own', observed_state: { value: 3 } }], edges: [] };
+    return { p, carrier, g, record: agentProposalRecord(carrier, g)! };
+  };
+  it('RED classifier assigns Agent factor and link kinds exhaustively', () => {
+    expect(FIELD_CLASS_BY_OP.set_factor_value).toBe('factor_value');
+    expect(FIELD_CLASS_BY_OP.set_link_strength).toBe('link_strength');
+  });
+  it('RED Agent record reads native figures, units, caps, scale, missing flag and per-value provenance', async () => {
+    const { p, carrier, record } = await fixture();
+    expect(record).toMatchObject({ proposal_id: p.proposal_id, revision: carrier.id, dialect: 'agent',
+      decline_action: { id: `agent-decline-proposal:${p.proposal_id}`, label: 'Not now', message: 'Not now.' } });
+    expect(record.operations).toBe((carrier.action as unknown as { inline_patch: { agent_proposal: { operations: unknown } } }).inline_patch.agent_proposal.operations);
+    expect(record.fields[0]).toMatchObject({ current: { value: 10, unit: 'hours', source: 'estimate' }, cap: 40, declared_scale: 'unit_interval', filled_missing: true, editable: true });
+    expect(record.fields[2]).toMatchObject({ current: { source: 'yours' }, editable: false, filled_missing: false });
+  });
+  it('RED amendment changes one typed op and leaves the other byte for byte with its own author', async () => {
+    const { amendAgentProposal } = await import('../amend.js'); const { p, record } = await fixture();
+    const r = amendAgentProposal(record, p, [{ field_id: 'factor_value:fac_hours', value: 12 }]);
+    expect(r.ok).toBe(true); if (!r.ok) return;
+    expect(r.proposal.proposal_id).not.toBe(p.proposal_id);
+    expect(r.proposal.provenance.basis).toBe(`edited_from:${p.proposal_id}`);
+    expect(r.proposal.operations[0]).toEqual({ ...p.operations[0], value: { ...(p.operations[0]!.value as object), value: 12, authored_by: 'user_stated' } });
+    expect(r.proposal.operations[1]).toBe(p.operations[1]); expect(JSON.stringify(r.proposal.operations[1])).toBe(JSON.stringify(p.operations[1]));
+    expect(readUserEdits(r.userEdits)).toEqual(r.userEdits);
+    const receipt = userEditsReceipt(r.userEdits);
+    expect(receipt).toContain('You set "Hours" to 12 hours; Olumi\'s estimate was 10 hours.');
+    expect(receipt).toContain('Left as Olumi\'s estimate: "Cost" (£200).');
+    expect(findForbiddenPhraseHit(receipt)).toBeNull(); expect(receipt).not.toContain('\u2014');
+  });
+  it('RED digest covers a label, figure, units and approve words', async () => {
+    const { agentProposalRecord } = await import('../record.js'); const { p, carrier, g, record } = await fixture();
+    const { createProposal } = await import('../../proposal.js');
+    const { proposalPendingAction } = await import('../../durable-proposal.js');
+    expect(agentProposalRecord(carrier, { ...g, nodes: [{ id: 'fac_hours', label: 'Renamed' }, ...g.nodes.slice(1)] })!.digest).not.toBe(record.digest);
+    const c = { ...carrier, action: { ...carrier.action, public_message: 'Other approve words.' } } as PendingAction;
+    expect(agentProposalRecord(c, g)!.digest).not.toBe(record.digest);
+    for (const patch of [{ value: 11 }, { unit: 'days' }]) {
+      const changed = createProposal({ ...p, operations: p.operations.map((o, i) => i === 0 ? { ...o, value: { ...(o.value as object), ...patch } } : o) });
+      const changedCarrier = { ...proposalPendingAction(changed, { ...record.approve_action, id: `agent-approve-proposal:${changed.proposal_id}` },
+        { scenario_id: SID, emitted_at_iso: carrier.emitted_at_iso }), id: carrier.id };
+      const projected = agentProposalRecord(changedCarrier, g)!;
+      expect(projected.proposal_id).toBe(changed.proposal_id);
+      expect(projected.revision).toBe(record.revision);
+      expect(projected.fields[0]!.current).toMatchObject(patch);
+      expect(projected.digest).not.toBe(record.digest);
+    }
+  });
+  it.each([-1, 41, NaN, Infinity])('RED native value bounds refuse %s before any amendment', async value => {
+    const { amendAgentProposal } = await import('../amend.js'); const { p, record } = await fixture();
+    expect(amendAgentProposal(record, p, [{ field_id: 'factor_value:fac_hours', value }])).toEqual({ ok: false, reason: 'value_not_allowed' });
+  });
+  it('RED validated prop decline ids and bounded whitespace regex timing', async () => {
+    const { p } = await fixture(); expect(declinedProposalOf(`agent-decline-proposal:${p.proposal_id}`)).toBe(p.proposal_id);
+    expect(declinedProposalOf('agent-decline-proposal:prop_bad')).toBeUndefined();
+    const start = performance.now(); declinedProposalOf(`agent-decline-proposal:${' '.repeat(20_000)}`);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+  it('RED Agent lifecycle never re-pins, says model and idle lapses, and refreshes each live item', async () => {
+    const { carrier, g } = await fixture(); const nowMs = Date.now();
+    const base = { atStart: [carrier], latest: [carrier], approved: new Set<string>(), declined: new Set<string>(), graph: g,
+      graphHash: 'pin', scenarioId: SID, requestId: 'request', nowMs };
+    const kept = reconcileHeldProposals(base); expect(kept.carried).toHaveLength(1);
+    expect(Date.parse(kept.carried[0]!.expires_at_iso)).toBe(nowMs + PROPOSAL_IDLE_TTL_MS);
+    const moved = reconcileHeldProposals({ ...base, graphHash: 'new pin' });
+    expect(moved.carried).toEqual([]); expect(moved.lapsed).toEqual([{ hold: carrier, reason: 'model_changed' }]);
+    const idle = { ...carrier, expires_at_iso: new Date(nowMs - 1).toISOString() };
+    expect(reconcileHeldProposals({ ...base, latest: [idle] }).lapsed[0]?.reason).toBe('idle');
+  });
+
+  it('RED bounds preserve a declared signed domain and do not invent a lower bound for unscaled figures', async () => {
+    const { factorValueAllowed } = await import('../amend.js'); const { record } = await fixture();
+    const f = record.fields[0]!; if (f.kind !== 'factor_value') throw new Error('Expected a factor field');
+    expect(factorValueAllowed({ ...f, declared_scale: { min: -40, max: 40 } }, -12)).toBe(true);
+    expect(factorValueAllowed({ ...f, cap: undefined, declared_scale: undefined }, -12)).toBe(true);
+    expect(factorValueAllowed({ ...f, declared_scale: { min: -40, max: 40 } }, -41)).toBe(false);
+  });
+
 });

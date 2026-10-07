@@ -536,4 +536,20 @@ describe('S-D slice 1 — a held proposal stays held, shows its assumptions, and
       expect(t.assistant_text, t.assistant_text).toContain(`The held change to add the risk '${label}' was set aside because only three changes can wait at once`);
     }
   }, 240_000);
+
+  it('RED (DL 7 Oct, Canvas capture #2614): the PROPOSING turn already offers "Not now" beside approve and "Change something first"; pressing it there sets the proposal aside', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeRisk();
+    const approve = approveChipOf(t1)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const ids = t1.suggested_actions.map((c) => c.id);
+    expect(ids.slice(ids.indexOf(approve.id), ids.indexOf(approve.id) + 3), JSON.stringify(ids))
+      .toEqual([approve.id, 'agent-amend-proposal', `agent-decline-proposal:${ref}`]);
+    expect(t1.suggested_actions.find((c) => c.id === `agent-decline-proposal:${ref}`)).toEqual(expect.objectContaining({ label: 'Not now', message: 'Not now.' }));
+    const before = bytes();
+    const t2 = await turn({ message: 'Not now.', source: 'chip', chip: { id: `agent-decline-proposal:${ref}` } });
+    expect(t2.assistant_text, t2.assistant_text).toContain("Set aside: the risk 'Competitive response'. Nothing in the model changed.");
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(bytes()).toBe(before);
+  }, 120_000);
 });

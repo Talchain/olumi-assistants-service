@@ -4,7 +4,8 @@
  */
 import type { StrengthBand } from '@talchain/schemas/boundary';
 
-import type { UserEdit } from './amend.js';
+import type { UserEdit, LinkUserEdit } from './amend.js';
+import { sayFigureAsWritten } from '../say-figure.js';
 
 const BAND_WORD: Readonly<Record<StrengthBand, string>> = { slight: 'slight', moderate: 'moderate', strong: 'strong', very_strong: 'very strong' };
 
@@ -12,6 +13,11 @@ const BAND_WORD: Readonly<Record<StrengthBand, string>> = { slight: 'slight', mo
 export function userEditsReceipt(edits: readonly UserEdit[]): string {
   const lines: string[] = [];
   for (const e of edits) {
+    if (e.kind === 'factor_value') {
+      if (e.user !== null) lines.push(`You set "${e.label}" to ${sayFigureAsWritten(e.user.value, e.unit)}; Olumi's estimate was ${sayFigureAsWritten(e.olumi.value, e.unit)}.`);
+      else if (e.olumi.source === 'estimate') lines.push(`Left as Olumi's estimate: "${e.label}" (${sayFigureAsWritten(e.olumi.value, e.unit)}).`);
+      continue;
+    }
     if (e.user === null) continue;
     const said = `You set how strongly "${e.from_label}" affects "${e.to_label}": ${BAND_WORD[e.user.band]}`;
     lines.push(e.olumi.source === 'placeholder' ? `${said}. Olumi had only a placeholder there, not an estimate.`
@@ -19,7 +25,7 @@ export function userEditsReceipt(edits: readonly UserEdit[]): string {
         : `${said}.`);
   }
   const left = (source: 'placeholder' | 'estimate'): string[] =>
-    edits.filter((e) => e.user === null && e.olumi.source === source).map((e) => `"${e.from_label}" → "${e.to_label}"`);
+    edits.filter((e): e is LinkUserEdit => e.kind !== 'factor_value' && e.user === null && e.olumi.source === source).map((e) => `"${e.from_label}" → "${e.to_label}"`);
   const placeholders = left('placeholder');
   const estimates = left('estimate');
   if (placeholders.length > 0) lines.push(`Left as Olumi's placeholder: ${placeholders.join(', ')}.`);

@@ -12,11 +12,12 @@
  * against what Olumi had — the AI value is retained, never overwritten into silence.
  */
 import { createHash } from 'node:crypto';
+import { createProposal, type StructuredProposal } from '../proposal.js';
 
 import type { StrengthBand } from '@talchain/schemas/boundary';
 
 import { EDGE_STRENGTH_MIDPOINTS, edgeBandFromStrengthBand, edgeBandStd } from '../../format/edge-strength-bands.js';
-import { STRENGTH_BANDS, type HeldOp, type ProposalRecord, type ValueSource } from './record.js';
+import { STRENGTH_BANDS, type HeldOp, type LinkStrengthField, type ProposalRecord, type ValueSource } from './record.js';
 
 /** The hold's own record of what the user set and what Olumi held (`inline_patch.user_edits`). */
 export const PROPOSAL_USER_EDITS_KEY = 'user_edits';
@@ -28,10 +29,22 @@ export interface ProposalEditsRequest {
   /** What the panel showed (`ProposalRecord.digest`): the door applies the edits only while it is still exactly that. */
   readonly digest: string;
   readonly graph_hash: string;
-  readonly fields: readonly { readonly field_id: string; readonly band: StrengthBand }[];
+  readonly fields: readonly ProposalFieldEdit[];
 }
 
-export interface UserEdit {
+export type ProposalFieldEdit = { readonly field_id: string; readonly band: StrengthBand; readonly value?: never }
+  | { readonly field_id: string; readonly value: number; readonly band?: never };
+export interface FactorUserEdit {
+  readonly kind: 'factor_value';
+  readonly field_id: string;
+  readonly label: string;
+  readonly unit: string;
+  readonly olumi: { readonly value: number; readonly source: 'estimate' | 'yours' | 'from_brief' };
+  readonly user: { readonly value: number } | null;
+}
+export type UserEdit = LinkUserEdit | FactorUserEdit;
+export interface LinkUserEdit {
+  readonly kind?: 'link_strength';
   readonly field_id: string;
   readonly from_label: string;
   readonly to_label: string;
@@ -57,10 +70,12 @@ export function parseProposalEdits(raw: unknown): ProposalEditsRequest | null | 
   if (typeof id !== 'string' || id === '' || typeof revision !== 'string' || revision === '' || typeof digest !== 'string' || digest === ''
     || typeof hash !== 'string' || hash === ''
     || !Array.isArray(fields) || fields.length > MAX_EDITED_FIELDS) return null;
-  const out: { field_id: string; band: StrengthBand }[] = [];
+  const out: ProposalFieldEdit[] = [];
   for (const f of fields) {
-    if (!isRec(f) || typeof f['field_id'] !== 'string' || f['field_id'] === '' || typeof f['band'] !== 'string') return null;
-    out.push({ field_id: f['field_id'], band: f['band'] as StrengthBand });
+    if (!isRec(f) || typeof f['field_id'] !== 'string' || f['field_id'] === '' || Object.keys(f).some(k => k !== 'field_id' && k !== 'band' && k !== 'value')) return null;
+    if (typeof f['band'] === 'string' && !Object.hasOwn(f, 'value')) out.push({ field_id: f['field_id'], band: f['band'] as StrengthBand });
+    else if (typeof f['value'] === 'number' && Number.isFinite(f['value']) && !Object.hasOwn(f, 'band')) out.push({ field_id: f['field_id'], value: f['value'] });
+    else return null;
   }
   return { proposal_id: id, revision, digest, graph_hash: hash, fields: out };
 }
@@ -71,17 +86,17 @@ export function parseProposalEdits(raw: unknown): ProposalEditsRequest | null | 
  */
 export function proposalEditsDigest(edits: ProposalEditsRequest): string {
   const canonical = JSON.stringify({ p: edits.proposal_id, r: edits.revision, d: edits.digest, g: edits.graph_hash,
-    f: [...edits.fields].sort((a, b) => (a.field_id < b.field_id ? -1 : a.field_id > b.field_id ? 1 : 0)).map((f) => [f.field_id, f.band]) });
+    f: [...edits.fields].sort((a, b) => (a.field_id < b.field_id ? -1 : a.field_id > b.field_id ? 1 : 0)).map((f) => [f.field_id, f.band ?? f.value]) });
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
-export type AmendRefusal = 'unknown_field' | 'not_editable' | 'band_not_allowed' | 'duplicate_field';
+export type AmendRefusal = 'unknown_field' | 'not_editable' | 'band_not_allowed' | 'duplicate_field' | 'value_not_allowed';
 export type AmendResult =
   | { readonly ok: true; readonly operations: readonly HeldOp[]; readonly userEdits: readonly UserEdit[] }
   | { readonly ok: false; readonly reason: AmendRefusal };
 
 /** The held batch with the user's values in it, or the reason it cannot be — never a partial amendment. */
-export function amendHeldOperations(record: ProposalRecord, edits: ProposalEditsRequest['fields']): AmendResult {
+export function amendHeldOperations(record: ProposalRecord<LinkStrengthField>, edits: ProposalEditsRequest['fields']): AmendResult {
   const byId = new Map(record.fields.map((f) => [f.field_id, f] as const));
   const wanted = new Map<string, StrengthBand>();
   for (const e of edits) {
@@ -89,7 +104,7 @@ export function amendHeldOperations(record: ProposalRecord, edits: ProposalEdits
     const field = byId.get(e.field_id);
     if (field === undefined) return { ok: false, reason: 'unknown_field' };
     if (!field.editable) return { ok: false, reason: 'not_editable' };
-    if (!BANDS.has(e.band) || !field.allowed_bands.includes(e.band)) return { ok: false, reason: 'band_not_allowed' };
+    if (e.band === undefined || !BANDS.has(e.band) || !field.allowed_bands.includes(e.band)) return { ok: false, reason: 'band_not_allowed' };
     wanted.set(e.field_id, e.band);
   }
   const operations = record.operations.map((o): HeldOp => {
@@ -123,6 +138,17 @@ export function readUserEdits(raw: unknown): readonly UserEdit[] | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
   const out: UserEdit[] = [];
   for (const x of raw) {
+    if (isRec(x) && x['kind'] === 'factor_value') {
+      const olumi = x['olumi']; const user = x['user'];
+      if (typeof x['field_id'] !== 'string' || typeof x['label'] !== 'string' || typeof x['unit'] !== 'string' || !isRec(olumi)
+        || typeof olumi['value'] !== 'number' || !Number.isFinite(olumi['value'])
+        || !['estimate', 'yours', 'from_brief'].includes(String(olumi['source']))
+        || (user !== null && (!isRec(user) || typeof user['value'] !== 'number' || !Number.isFinite(user['value'])))) return undefined;
+      const source = olumi['source'] as FactorUserEdit['olumi']['source'];
+      out.push({ kind: 'factor_value', field_id: x['field_id'], label: x['label'], unit: x['unit'],
+        olumi: { value: olumi['value'] as number, source }, user: user === null ? null : { value: (user as Rec)['value'] as number } });
+      continue;
+    }
     if (!isRec(x) || typeof x['field_id'] !== 'string' || typeof x['from_label'] !== 'string' || typeof x['to_label'] !== 'string') return undefined;
     const olumi = x['olumi'];
     const user = x['user'];
@@ -134,4 +160,53 @@ export function readUserEdits(raw: unknown): readonly UserEdit[] | undefined {
       olumi: { band: olumi['band'] as StrengthBand, source }, user: user === null ? null : { band: (user as Rec)['band'] as StrengthBand } });
   }
   return out;
+}
+
+/** Native domain, as stored on this op. No unit change or model-selected conversion is accepted. */
+export function factorValueAllowed(field: import('./record.js').FactorValueField, value: number): boolean {
+  if (!Number.isFinite(value)) return false;
+  if (field.cap !== undefined && value > field.cap) return false;
+  const scale = field.declared_scale;
+  if (scale === 'unit_interval' && value < 0) return false;
+  if (isRec(scale)) {
+    const min = scale['min']; const max = scale['max'];
+    if (typeof min === 'number' && value < min) return false;
+    if (typeof max === 'number' && value > max) return false;
+  }
+  return true;
+}
+
+/** New content identity. Only edited ops change, and all untouched keys and ops survive verbatim. */
+export function amendAgentProposal(record: ProposalRecord, original: StructuredProposal, edits: ProposalEditsRequest['fields']):
+  { ok: true; proposal: StructuredProposal; userEdits: readonly UserEdit[] } | { ok: false; reason: AmendRefusal } {
+  const wanted = new Map<string, ProposalFieldEdit>();
+  for (const e of edits) {
+    if (wanted.has(e.field_id)) return { ok: false, reason: 'duplicate_field' };
+    const f = record.fields.find(f => f.field_id === e.field_id);
+    if (!f) return { ok: false, reason: 'unknown_field' };
+    if (!f.editable) return { ok: false, reason: 'not_editable' };
+    if (f.kind === 'factor_value' ? e.value === undefined || !factorValueAllowed(f, e.value)
+      : e.band === undefined || !f.allowed_bands.includes(e.band)) return { ok: false, reason: f.kind === 'factor_value' ? 'value_not_allowed' : 'band_not_allowed' };
+    wanted.set(e.field_id, e);
+  }
+  const operations = original.operations.map(o => {
+    const key = o.op === 'set_factor_value' ? `factor_value:${o.path}` : o.op === 'set_link_strength' ? `link_strength:${o.path}` : '';
+    const e = wanted.get(key);
+    if (!e || !isRec(o.value)) return o;
+    if (e.value !== undefined) return { ...o, value: { ...o.value, value: e.value, authored_by: 'user_stated' } };
+    const f = record.fields.find(f => f.field_id === key);
+    if (!f || f.kind !== 'link_strength') return o;
+    const magnitude = e.band === f.current.band ? o.value['magnitude'] : EDGE_STRENGTH_MIDPOINTS[edgeBandFromStrengthBand(e.band!)];
+    const expected = isRec(o.value['expected']) ? o.value['expected'] : {};
+    // The canonical writer calls a value equal to the held figure a review.
+    const keeps = magnitude === Math.abs(Number(expected['mean']));
+    return { ...o, value: { ...o.value, magnitude, band: edgeBandFromStrengthBand(e.band!), intent: keeps ? 'confirm_current' : 'set', author: 'user_stated' } };
+  });
+  const userEdits: UserEdit[] = record.fields.map(f => {
+    const e = wanted.get(f.field_id);
+    return f.kind === 'factor_value'
+      ? { kind: 'factor_value', field_id: f.field_id, label: f.label, unit: f.unit, olumi: { value: f.current.value, source: f.current.source }, user: e?.value !== undefined ? { value: e.value } : null }
+      : { field_id: f.field_id, from_label: f.from_label, to_label: f.to_label, olumi: f.current, user: e?.band !== undefined ? { band: e.band } : null };
+  });
+  return { ok: true, proposal: createProposal({ ...original, operations, provenance: { authored_by: 'user_stated', basis: `edited_from:${original.proposal_id}` } }), userEdits };
 }

@@ -134,6 +134,12 @@ export function proposalPendingAction(
   };
 }
 
+/** S-D multi-carrier rows preserve each revision and distinguish this answer's card from carried approvals. */
+export function withApprovalOfferedOnRow(carrier: PendingAction, offered: boolean): PendingAction {
+  if (carrier.action.kind !== 'apply_proposed_change' || carrier.action.inline_patch['agent_proposal'] === undefined) return carrier;
+  return { ...carrier, action: { ...carrier.action, inline_patch: { ...carrier.action.inline_patch, [OFFERED_ON_THIS_ROW]: offered } } };
+}
+
 /**
  * The carrier this process last put on an answer row for one scenario and subject: which proposal, the
  * chip that offered it (so a carried copy says exactly what the offer said), and when that copy lapses.
