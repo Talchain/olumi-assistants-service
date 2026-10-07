@@ -70,7 +70,10 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks(); resetSessionStoreForTests();
-  for (const [key, value] of savedEnv) value === undefined ? delete process.env[key] : process.env[key] = value;
+  for (const [key, value] of savedEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   savedEnv.clear(); _resetConfigCache();
 });
 
