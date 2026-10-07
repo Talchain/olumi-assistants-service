@@ -113,7 +113,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigureCoHoldOf } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { composeReplyShape, consentLabelsOf, REPLY_SHAPE_INSTRUCTION, type FaceObligation } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
+import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, type FaceObligation, type ReplyProfile } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -853,17 +853,6 @@ export function offersApproval(body: { suggested_actions?: unknown }): boolean {
  * pending it offers none and the Agent asks in words. So it is asked about each proposal ALONE — every other
  * proposal's id hidden, every call kept in place so order and mutation still count — and never re-derived.
  */
-/**
- * ⭐ S-A: the proposing tools whose consent is about FIGURES (a value, a band, a level, a target, a limit). A reply that
- * makes one of these proposals ships whole (consent before brevity, #1914), until S-D's proposal panel carries the
- * figures. Structural proposals (a new option, risk or factor, an option's status, an identity) are shaped: their chip
- * and held card name the item. By the tool's identity, never by reading the words.
- */
-export const FIGURE_PROPOSERS: ReadonlySet<string> = new Set([
-  'propose_model_change', 'propose_assumptions', 'propose_starting_point', 'propose_link_effect', 'propose_link_strength',
-  'propose_link_strengths', 'propose_goal_target', 'propose_goal_current_level', 'propose_limit_change', 'propose_option_interventions',
-]);
-
 export function leavesProposalAwaitingApproval(
   calls: readonly { name: string; ok: boolean; mutated: boolean; proposal_id?: string }[],
 ): boolean {
@@ -3804,9 +3793,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * nothing under it) was the Explain turn, which "ran an analysis" never covered. Never on a stale explanation.
      */
     const explainsCurrentRun = fastPath === 'explain' && narrationStatus !== 'stale';
+    /** The screen's chance lines this turn owes (required evidence: the reply composer keeps them on the face). */
+    let screenLines: ReturnType<typeof goalChanceScreenLinesForAgent> = [];
     if ((ranAnalysisThisTurn || explainsCurrentRun) && typeof wireBody.assistant_text === 'string') {
       const rangeCurrent = (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
-      const ranged = withScreenLinesOwed(wireBody.assistant_text, goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, rangeCurrent));
+      screenLines = goalChanceScreenLinesForAgent(analysisResult, readbackGraph ?? null, rangeCurrent);
+      const ranged = withScreenLinesOwed(wireBody.assistant_text, screenLines);
       if (ranged.added > 0) {
         wireBody = { ...wireBody, assistant_text: ranged.text };
         log.info({ event: 'agent_lane.goal_chance_screen_lines_owed', code: GOAL_CHANCE_SCREEN_LINES_OWED, request_id: String(req.id),
@@ -3933,11 +3925,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * shown is one text: a headline, at most three bullets, and the rest under "More detail" (`_answer_shape`, rendered by
      * DGAI `AnswerBody`). It replaces `withAnalysisAnswerShape` (Run replies only): every Agent-lane reply passes here.
      * Sentences are moved, never removed or cut; the composer's own invariant ships the text whole on any difference.
-     * Must-face (DL ruling R1, 7 Oct 10:4xZ), by identity: the turn's asks, the leader gate's closing and every no-leader
-     * sentence, and the first sentence naming what a proposal made this turn would add (what the user consents to). Host
-     * disclosures, receipts and status may go to detail. Kept whole, by the turn's identity: a method turn (R3: the
-     * pre-mortem worksheet is the chat verbatim), the leader-free envelope, and a proposal made this turn that sets FIGURES
-     * (R2: consent before brevity, #1914, until S-D's proposal panel shows them).
+     * TYPED RESPONSE PROFILES by turn kind (DL, AIE line review 6037446159 item 5): coaching (≤3 bullets, ≤75 face words),
+     * method_step (one structured prompt, never reshaped: R3, the worksheet is the chat verbatim), proposal (typed card +
+     * this reply as its disclosure, never reshaped: R2, consent before brevity). Must-face on coaching, by identity: the
+     * turn's asks, the leader gate's closing and every no-leader sentence, the Explain caveat, and required evidence (screen
+     * chance lines, basis, a root treated as zero). Receipts and status may go to detail (R1). The leader-free envelope
+     * ships whole.
      * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
      */
     {
@@ -3953,21 +3946,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           .filter((l): l is string => typeof l === 'string').map((text) => ({ role: 'withheld_reason' as const, text })),
         // #2565: a licensed Explain of a fragile Run names a finding; its robustness caveat qualifies it, on the face.
         ...(explainRobustnessCaveat !== null ? [{ role: 'caveat' as const, text: explainRobustnessCaveat }] : []),
+        // Required evidence, never hidden (AIE line review): the screen's chance lines, the comparison's basis, a root
+        // the Run treated as zero. A chance and what it depends on are ONE finding: the joined line (as
+        // `withScreenLinesOwed` writes it) binds as one unit when present, else each sentence binds where it stands.
+        ...[...screenLines.flatMap((l) => [l.depends === '' ? null : `${l.chance} ${l.depends}`, l.chance, l.depends]), basis, rootLine]
+          .filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((text) => ({ role: 'evidence' as const, text })),
       ];
-      const proposedThisTurn = approvalCalls.filter((c) => c.ok && typeof c.proposal_id === 'string');
-      const consentWithFigures = proposedThisTurn.some((c) => FIGURE_PROPOSERS.has(c.name));
-      // What a structural proposal would add, by its own typed result and stored operations (never read from the words).
-      const consentLabels = consentLabelsOf(proposedThisTurn.map((c) => ({
-        result: result.tool_results.find((r) => (r as { proposal_id?: unknown }).proposal_id === c.proposal_id),
-        operations: proposals.get(c.proposal_id!)?.operations,
-      })));
+      // THE TYPED RESPONSE PROFILE, by the turn's kind (DL, AIE line review 6037446159 item 5): a method press is one
+      // structured prompt; a turn that made a proposal is its typed card plus this reply as the disclosure; every other
+      // reply is coaching. Never chosen by reading the words.
+      const madeProposal = approvalCalls.some((c) => c.ok && typeof c.proposal_id === 'string' && c.name !== 'authorise_change' && c.name !== WITHDRAW_PROPOSAL);
+      const profile: ReplyProfile = fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
       const composedReply = composeReplyShape({
         text: reply,
         obligations,
-        consentLabels,
-        ...(fastPath === 'method' ? { keepWhole: 'method_turn' as const }
-          : leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
-            : consentWithFigures ? { keepWhole: 'consent_with_figures' as const } : {}),
+        profile,
+        ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const } : {}),
       });
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
       wireBody = (composedReply.shape !== null
@@ -3976,10 +3970,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       log.info({
         event: 'agent_lane.reply_shaped', request_id: String(req.id), ...(turnId !== undefined ? { turn_id: turnId } : {}),
         outcome: composedReply.outcome, ...(composedReply.reason !== undefined ? { reason: composedReply.reason } : {}),
-        fast_path: fastPath ?? 'agent',
+        fast_path: fastPath ?? 'agent', profile,
         narrator_model: fastPath === 'approve' || fastPath === 'strengthen' ? null
           : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? interpretBudget().model : null) : budget.model,
-        obligations: obligations.length, consent_labels: consentLabels.length,
+        obligations: obligations.length,
         ...(composedReply.measure ?? {}),
       }, 'agent-lane: the reply passed the one composer');
     }

@@ -18,13 +18,17 @@
  *     identity tie). No schemas change: the sidecar already rides the additive extensions (DGAI `answerShape.ts`).
  *   · NEVER BY DELETING MEANING. Sentences are MOVED, never removed, rewritten or cut. A runtime invariant compares the
  *     sentence multiset of the input and of the derived text; any difference ships the input whole (fail closed).
- *   · MUST-FACE (DL ruling R1, 7 Oct): the headline, the ONE ask, the withheld reason ({@link FaceObligation}), and the
- *     line that states what the user is consenting to ({@link ReplyComposeInput.consentLabels}). Plus, flagged to the DL
- *     as the same class as the withheld reason, the caveat that qualifies a NAMED finding (#2565's robustness caveat:
- *     a licensed leader without "not yet robust" beside it reads as a recommendation). Host disclosures,
- *     receipts and status may move to detail. The ask is the last bullet; other questions go to detail (D-12). An
- *     obligation present in the text but not locatable as one unit keeps the reply whole (fail closed); so does a face
- *     that would need more than {@link REPLY_FACE_MAX_BULLETS} must-face bullets.
+ *   · TYPED RESPONSE PROFILES (DL, AIE line review 6037446159 item 5), chosen deterministically by the TURN KIND:
+ *       - `coaching` (an ordinary converse / Explain / Run / research reply): the face construct below;
+ *       - `method_step` (a method press: pre-mortem): ONE structured prompt under the RC method contract; never reshaped
+ *         (its worksheet is the chat verbatim, R3);
+ *       - `proposal` (a turn that made a proposal): the typed card (approve chip, held card, preview) + the reply as its
+ *         disclosure, never reshaped, so consent is never hidden (R2; S-D's proposal panel will carry the change).
+ *   · MUST-FACE on a coaching reply (DL R1 + AIE): the headline, the ONE ask, the withheld reason, a caveat on a named
+ *     finding, and required evidence (the screen's chance lines, the comparison's basis, a root treated as zero). Each is
+ *     a {@link FaceObligation} by its exact text. Receipts and status may move to detail. The ask is the last bullet;
+ *     other questions go to detail (D-12). Required evidence, caveats and consent are NEVER hidden: an obligation that is
+ *     present but not locatable as one unit, or more obligations than the face holds, keeps the reply whole.
  *   · FACE BUDGET (AIE #87 6037293086 §5): ≤ {@link REPLY_FACE_WORD_BUDGET} words, one move, one ask. A reply that fits
  *     it whole with at most one question is ALREADY IN SHAPE: returned byte-identical, no sidecar.
  *   · NEVER DELETES A CHALLENGE (AIE §7): nothing is removed; a challenge the face cannot hold sits under More detail.
@@ -67,22 +71,22 @@ export const REPLY_SHAPE_INSTRUCTION =
   + 'generic advice. Put any further explanation after the bullets, after a blank line: Olumi shows it under More '
   + 'detail, so never repeat it in the bullets. If you ask a question, it stays your last sentence.';
 
-export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'consent';
+export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence';
 /** A host line the user must see without opening "More detail", by its exact text. */
 export interface FaceObligation { readonly role: FaceObligationRole; readonly text: string }
 
 /** Turns the route ships whole, by identity of the turn (never by reading the words). */
-export type KeepWholeReason = 'method_turn' | 'leader_free_envelope' | 'consent_with_figures';
+/** The typed response profile, chosen by the turn kind (never by reading the words). */
+export type ReplyProfile = 'coaching' | 'method_step' | 'proposal';
+/** Why a reply ships whole by the turn's identity: its profile is not `coaching`, or the egress replaced the body. */
+export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope';
 
 export interface ReplyComposeInput {
   /** The final prose, after every gate: exactly what would ship without the composer. */
   readonly text: string;
   readonly obligations?: readonly FaceObligation[];
-  /**
-   * The labels of what a proposal made THIS turn would add (by the proposal's identity). Every sentence that names one
-   * (a whole-word mention) states or frames what the user is consenting to, and stays on the face (R1's exception).
-   */
-  readonly consentLabels?: readonly string[];
+  /** The typed response profile for this turn kind (default `coaching`). */
+  readonly profile?: ReplyProfile;
   readonly keepWhole?: KeepWholeReason;
 }
 
@@ -97,7 +101,6 @@ export interface ReplyMeasure {
   readonly face_words: number;
   readonly face_bullets_over_word_bar: number;
   readonly obligations_on_face: number;
-  readonly consent_units: number;
   readonly face_over_cap: boolean;
   readonly face_over_word_budget: boolean;
   readonly open_questions_segment: boolean;
@@ -108,7 +111,7 @@ export interface ReplyComposition {
   readonly text: string;
   readonly shape: AnswerShape | null;
   readonly outcome: 'already_in_shape' | 'shaped' | 'kept_whole';
-  readonly reason?: KeepWholeReason | 'empty' | 'no_headline' | 'obligation_unlocated' | 'face_over_cap' | 'invariant_failed';
+  readonly reason?: KeepWholeReason | 'empty' | 'no_headline' | 'obligation_unlocated' | 'face_over_cap' | 'lead_in_split' | 'invariant_failed';
   readonly measure?: ReplyMeasure;
 }
 
@@ -223,18 +226,6 @@ function sentenceMultiset(text: string): string[] {
   return out.sort();
 }
 
-/** A whole-word mention of a label (any length): never a fragment of a longer word ("AI" is not in "said"). */
-function namesLabel(text: string, label: string): boolean {
-  const lower = text.toLocaleLowerCase();
-  const want = label.toLocaleLowerCase();
-  for (let at = lower.indexOf(want); at !== -1; at = lower.indexOf(want, at + 1)) {
-    const before = lower.slice(0, at).slice(-1);
-    const after = lower.slice(at + want.length, at + want.length + 1);
-    if (!/[\p{L}\p{N}]/u.test(before) && !/[\p{L}\p{N}]/u.test(after)) return true;
-  }
-  return false;
-}
-
 const wordCount = (s: string): number => s.split(/[ \t\n]{1,16}/).filter(Boolean).length;
 const isQuestionUnit = (u: Unit): boolean => QUESTION_END.test(u.text.trim());
 
@@ -246,6 +237,7 @@ const isQuestionUnit = (u: Unit): boolean => QUESTION_END.test(u.text.trim());
 export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const text = input.text;
   if (input.keepWhole !== undefined) return { text, shape: null, outcome: 'kept_whole', reason: input.keepWhole };
+  if (input.profile === 'method_step' || input.profile === 'proposal') return { text, shape: null, outcome: 'kept_whole', reason: input.profile };
   if (text.trim().length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty' };
 
   // Obligations still present in the final text (a later gate may have removed one: then it is no longer owed).
@@ -269,7 +261,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   if (units.length === 0) return { text, shape: null, outcome: 'kept_whole', reason: 'empty' };
 
   // Each obligation binds its LAST occurrence (the host appends); an earlier narrator copy is an ordinary unit.
-  for (const role of ['ask', 'withheld_reason', 'caveat'] as const) {
+  for (const role of ['ask', 'withheld_reason', 'caveat', 'evidence'] as const) {
     const tagged = units.filter((u) => u.obligation === role);
     for (const u of tagged.slice(0, -1)) {
       const sameText = tagged.at(-1)!.text === u.text;
@@ -280,18 +272,13 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     return { text, shape: null, outcome: 'kept_whole', reason: 'obligation_unlocated' };
   }
 
-  // R1's exception: EVERY sentence naming a proposed item (a whole-word mention of its label) states or frames the
-  // change being consented to, so none is hidden; more than the face holds keeps the reply whole (Codex r1 P2 on #2748:
-  // binding only the first mention hid the proposal sentence behind an earlier, introductory one).
-  for (const label of (input.consentLabels ?? []).map((l) => l.trim()).filter((l) => l.length > 0)) {
-    for (const u of units) if (u.obligation === undefined && u.kind !== 'heading' && namesLabel(u.text, label)) u.obligation = 'consent';
-  }
-
   const questions = units.filter(isQuestionUnit);
   const hostAsks = units.filter((u) => u.obligation === 'ask');
   const runs = [...new Set(units.filter((u) => u.kind === 'bullet').map((u) => u.run!))];
-  // THE ONE ASK: the host's typed ask, else the reply's last question. Every other question goes to detail (D-12).
-  const ask = hostAsks.at(-1) ?? questions.at(-1);
+  // THE ONE ASK: the host's typed ask, else the reply's last question that is not itself another obligation (a screen
+  // line that ends on its own question is evidence, kept in its place, never moved to close the face). Every other
+  // question goes to detail (D-12).
+  const ask = hostAsks.at(-1) ?? questions.filter((u) => u.obligation === undefined).at(-1);
   const otherObligations = units.filter((u) => u.obligation !== undefined && u.obligation !== 'ask' && u !== ask);
 
   // The face's list: the first bullet run with a point that is not an obligation; its lead-in becomes the headline.
@@ -302,7 +289,7 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     && (beforeRun.kind === 'heading' || /:["'”’)\]*]{0,4}$/.test(beforeRun.text)) ? beforeRun : undefined;
 
   const headline = leadIn
-    ?? units.find((u) => u.kind === 'sentence' && (u.obligation === undefined || u.obligation === 'consent') && u !== ask && !isQuestionUnit(u))
+    ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && u !== ask && !isQuestionUnit(u))
     ?? units.find((u) => u.kind === 'heading')
     ?? (units.length === 1 ? units[0] : undefined);
   if (headline === undefined) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline' };
@@ -340,7 +327,6 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     face_words: wordCount(headline.text) + faceBullets.reduce((n, u) => n + wordCount(u.text), 0),
     face_bullets_over_word_bar: faceBullets.filter((u) => wordCount(u.text) > BULLET_WORD_LOG_BAR).length,
     obligations_on_face: mustFace.length + (headline.obligation !== undefined ? 1 : 0),
-    consent_units: units.filter((u) => u.obligation === 'consent').length,
     face_over_cap: faceBullets.length > REPLY_FACE_MAX_BULLETS,
     face_over_word_budget: faceWords > REPLY_FACE_WORD_BUDGET,
     open_questions_segment: split !== null,
@@ -351,6 +337,12 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   if (detailUnits.reduce((n, u) => n + wordCount(u.text), 0) < REPLY_DETAIL_MIN_WORDS) return { text, shape: null, outcome: 'already_in_shape', measure };
   // More obligations than the face holds: hiding one would break its rule, so the reply ships whole (counted).
   if (measure.face_over_cap) return { text, shape: null, outcome: 'kept_whole', reason: 'face_over_cap', measure };
+  // ⛔ A lead-in stays with what it introduces ("…, on current information:" before the screen's chance lines): a face
+  // line whose lead-in would go to detail ships the reply whole (counted), never a finding stripped of its frame.
+  if (units.some((u) => faceSet.has(u) && u !== headline && u.idx > 0 && !faceSet.has(units[u.idx - 1]!)
+    && units[u.idx - 1]!.kind === 'sentence' && /:["'”’)\]*]{0,4}$/.test(units[u.idx - 1]!.text))) {
+    return { text, shape: null, outcome: 'kept_whole', reason: 'lead_in_split', measure };
+  }
 
   const detail = [renderDetail(detailUnits), split?.segment ?? ''].filter((p) => p.length > 0).join('\n\n');
   const parsed = AnswerShapeSchema.safeParse({ headline: headline.text, bullets: faceBullets.map((u) => u.text), detail });
@@ -378,23 +370,4 @@ function renderDetail(units: readonly Unit[]): string {
     prev = u;
   }
   return paras.map((p) => p.join('\n')).join('\n\n');
-}
-
-/**
- * ⭐ S-A, DL ruling R1's exception (7 Oct): the labels of what a proposal made THIS turn would add — the risk, option or
- * factors its typed result names (`propose_new_risk` `risk.label`, `propose_new_option` `option.label`,
- * `propose_new_factor` `factors[].label`), and any `add_node` label in its stored operations. The composer keeps the first
- * sentence naming each on the face: what the user consents to. Identity of the proposal, never a reading of the reply.
- */
-export function consentLabelsOf(proposed: readonly { result?: unknown; operations?: readonly { op: string; value?: unknown }[] }[]): string[] {
-  const labels: string[] = [];
-  const add = (l: unknown): void => { if (typeof l === 'string' && l.trim() !== '' && !labels.includes(l.trim())) labels.push(l.trim()); };
-  for (const p of proposed) {
-    const r = (p.result ?? {}) as { risk?: { label?: unknown }; option?: { label?: unknown }; factors?: unknown };
-    add(r.risk?.label);
-    add(r.option?.label);
-    if (Array.isArray(r.factors)) for (const f of r.factors) add((f as { label?: unknown } | null)?.label);
-    for (const o of p.operations ?? []) if (o.op === 'add_node') add((o.value as { label?: unknown } | null | undefined)?.label);
-  }
-  return labels;
 }

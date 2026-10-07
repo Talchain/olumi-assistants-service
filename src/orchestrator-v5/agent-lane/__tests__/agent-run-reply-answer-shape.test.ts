@@ -4,11 +4,11 @@
  * detail" — through the real route, the ONE composer (`agent-lane/reply/compose-reply.ts`) at the end of
  * `routes/agent-v1-turn.ts`. It replaced `withAnalysisAnswerShape` (Run replies only, UI-SEM-090 / #69 5831886008).
  *
- * RE-PINNED ROWS, each against a DL ruling of 7 Oct 10:4xZ (lane-copy-shape-DESIGN.md §8), never against the failure mode:
- *   · R1 must-face = {headline, the ONE ask, the withheld reason} + the line stating what is consented to. Host disclosures
- *     (the Explain robustness caveat, the comparison's basis), receipts and status MAY move to detail. This supersedes
- *     "Olumi's own lines stay on the face" (DL item 3, 2 Oct; #2509), the face caveat of #2565 and B3-8's "cannot fold
- *     away": rows 1, 3, 10, 12, B3-8 assert the new rule, and every one still asserts the line is kept, exactly once.
+ * RE-PINNED ROWS, each against a DL ruling of 7 Oct (lane-copy-shape-DESIGN.md §8), never against the failure mode:
+ *   · TYPED RESPONSE PROFILES by turn kind (AIE line review 6037446159 item 5): coaching (≤3 bullets, ≤75 face words),
+ *     method_step and proposal (never reshaped: rows 7a, 9 unchanged).
+ *   · Must-face on coaching: the ONE ask, the withheld reason, the Explain caveat (#2565, bullet 1) and required evidence
+ *     (the basis: B3-8). Receipts and status MAY move to detail (R1: rows 3, 12); every line is still kept exactly once.
  *   · A gate-edited reply (row 2), a reply with no result block (row 4) and a Run beside an earlier proposal's chip
  *     (row 7b) are shaped: the composer runs after every gate, so the "shape describes a stale text" reason is gone.
  *   · R2 a proposal that sets figures ships whole (rows 7a, 9: unchanged).
@@ -348,12 +348,11 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
   });
 
-  it('B3-8 (R1): the unavailable basis is a host disclosure: kept exactly once, and it may sit under More detail', async () => {
+  it('B3-8 (AIE line review: required evidence is never hidden): the unavailable basis stays on the face, exactly once', async () => {
     readbackReady = FX.state.analysis_ready;
     const { b, turnId } = await typedRun(CLEAN_BULLETS.text);
     expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
-    expect(b._answer_shape, 'shaped').toBeDefined();
-    expect(b._answer_shape!.detail).toContain(BASIS_UNAVAILABLE);
+    if (b._answer_shape !== undefined) expect(faceOf(b._answer_shape), 'on the face').toContain(BASIS_UNAVAILABLE);
     expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
   });
 

@@ -18,7 +18,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
-  composeReplyShape, consentLabelsOf, sentencesOf, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
+  composeReplyShape, sentencesOf, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
   type ReplyComposition,
 } from '../compose-reply.js';
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
@@ -103,9 +103,24 @@ describe('controls: a reply already in shape ships exactly as written', () => {
     expect(c.text).toBe(text);
   });
 
-  it.each(['method_turn', 'leader_free_envelope', 'consent_with_figures'] as const)('keepWhole %s → byte-identical, no sidecar (identity of the turn, never the words)', (reason) => {
-    const c = composeReplyShape({ text: T5, keepWhole: reason });
-    expect(c).toMatchObject({ outcome: 'kept_whole', reason, shape: null, text: T5 });
+  it('keepWhole leader_free_envelope → byte-identical, no sidecar (identity of the turn, never the words)', () => {
+    expect(composeReplyShape({ text: T1, keepWhole: 'leader_free_envelope' })).toMatchObject({ outcome: 'kept_whole', reason: 'leader_free_envelope', shape: null, text: T1 });
+  });
+
+});
+
+describe('TYPED RESPONSE PROFILES (DL, AIE line review 6037446159 item 5): chosen by turn kind, rows per profile', () => {
+  it('coaching: the long reply is shaped (≤3 bullets, ≤75 face words)', () => {
+    const c = composeReplyShape({ text: T1, profile: 'coaching' });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.bullets.length).toBeLessThanOrEqual(3);
+    expect(c.measure!.face_words).toBeLessThanOrEqual(75);
+  });
+  it.each(['method_step', 'proposal'] as const)('%s: the SAME long reply ships whole, byte-identical, no sidecar (one structured prompt / card + disclosure)', (profile) => {
+    expect(composeReplyShape({ text: T1, profile })).toMatchObject({ outcome: 'kept_whole', reason: profile, shape: null, text: T1 });
+  });
+  it('CONTROL: no profile behaves exactly as coaching', () => {
+    expect(composeReplyShape({ text: T1 }).text).toBe(composeReplyShape({ text: T1, profile: 'coaching' }).text);
   });
 });
 
@@ -137,7 +152,7 @@ describe('the AIE face budget (#87 6037293086 §5–7): ≤75 initial words, one
   });
 });
 
-describe('obligations (DL ruling R1, 7 Oct): the headline, the ONE ask, the withheld reason and the consent line stay on the face', () => {
+describe('obligations on a coaching reply (DL R1 + AIE): the headline, the ONE ask, the withheld reason, caveats and required evidence stay on the face', () => {
   const NARRATOR = 'Your options differ mainly in how fast they add capacity. Hiring two developers adds more hands but needs more onboarding. A tech lead adds less capacity at first but may lift the whole team. The freelance option covers the gap only if it starts quickly. Each of these rests on links Olumi has not sized.';
   const ASK = 'What figure should "meet our next feature-launch deadline" reach or stay under? I’ll propose it as your target.';
   const WITHHELD = 'No single option can be put forward yet, because a link on the way to your goal has no recorded strength.';
@@ -179,31 +194,6 @@ describe('obligations (DL ruling R1, 7 Oct): the headline, the ONE ask, the with
     expect(c.shape!.detail).toContain('Which option feels closest to your plan?');
   });
 
-  it('CONSENT (R1 exception): every sentence naming what this turn’s proposal adds stays on the face', () => {
-    const LABEL = 'Recruitment process taking a long time';
-    const text = `This is a time-to-value risk for the deadline. Hiring may take longer than the six months you have. Its link to the deadline is not sized yet, so it moves no figure until you size it. Competitive recruitment is not modelled either. I can add the risk ‘${LABEL}’ to the model, linked to the deadline. ‘${LABEL}’ would sit beside the onboarding risk. Shall I add it?`;
-    const c = composeReplyShape({ text, consentLabels: [LABEL] });
-    expect(c.outcome).toBe('shaped');
-    expect(face(c)).toContain(`I can add the risk ‘${LABEL}’ to the model, linked to the deadline.`);
-    expect(c.shape!.bullets.at(-1)).toBe('Shall I add it?');
-    expect(face(c), 'every mention of the proposed item is a consent line (Codex r1 P2)').toContain(`‘${LABEL}’ would sit beside the onboarding risk.`);
-    expect(c.measure!.consent_units).toBe(2);
-    // CONTRAST: with no consent label, that sentence is not on the face (only position puts lines there).
-    expect(face(composeReplyShape({ text }))).not.toContain(`I can add the risk ‘${LABEL}’ to the model, linked to the deadline.`);
-    everySentenceKept(text, c.text);
-  });
-
-  it('Codex r1 P2 (#2748): a short label ("AI") binds by whole word, and an introductory mention cannot hide the proposal sentence', () => {
-    // Long enough to exceed the 75-word face budget, so the composer shapes it (a shorter reply ships whole, untouched).
-    const P = 'Plans differ. Check timing. Check capacity. Check candidates. Validate these assumptions against actual recruitment lead times and onboarding requirements before relying on this comparison for planning. Each of these checks changes how much the comparison can tell you, because the model still carries Olumi’s placeholder strengths on the links that matter most to the deadline. None of them is sized yet, so no option can be put forward on the deadline today.';
-    const short = composeReplyShape({ text: `${P} I can add AI as a risk linked to Revenue. Shall I add it?`, consentLabels: ['AI'] });
-    expect(face(short)).toContain('I can add AI as a risk linked to Revenue.');
-    // CONTROL: "AI" inside a longer word is not a mention.
-    expect(composeReplyShape({ text: `${P} I said a risk is linked to Revenue. Shall I add it?`, consentLabels: ['AI'] }).measure!.consent_units).toBe(0);
-    const intro = composeReplyShape({ text: `Recruitment delay is a concern. ${P} I can add the risk Recruitment delay, linked to Revenue. Shall I add it?`, consentLabels: ['Recruitment delay'] });
-    expect(face(intro)).toContain('I can add the risk Recruitment delay, linked to Revenue.');
-  });
-
   it('Codex r1 P2 (#2748): an earlier question in a bullet does not displace the reply’s last question', () => {
     const text = 'Recruitment remains uncertain.\n- Check lead times.\n- Shall I add a risk?\n\nWe should test this assumption against actual recruitment lead times before relying on this comparison in planning. What is today’s delivery capacity?';
     const c = composeReplyShape({ text });
@@ -211,11 +201,33 @@ describe('obligations (DL ruling R1, 7 Oct): the headline, the ONE ask, the with
     expect(c.shape!.detail).toContain('Shall I add a risk?');
   });
 
-  it('more must-face lines than three bullets → the reply ships whole (an obligation is never hidden)', () => {
+  it('more must-face lines than three bullets → the reply ships whole (required evidence is never hidden)', () => {
     const W2 = 'No single option can be put forward on this result yet.';
-    const text = `${NARRATOR}\n\n${WITHHELD}\n\n${W2}\n\nI can add the risk ‘Overlapping costs’ to the model.\n\n${ASK}`;
-    const c = composeReplyShape({ text, consentLabels: ['Overlapping costs'], obligations: [{ role: 'withheld_reason', text: WITHHELD }, { role: 'withheld_reason', text: W2 }, { role: 'ask', text: ASK }] });
+    const E1 = '‘Hire a Tech Lead’: about 40% chance of meeting your goal, in this model.';
+    const text = `${NARRATOR}\n\n${WITHHELD}\n\n${W2}\n\n${E1}\n\n${ASK}`;
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: WITHHELD }, { role: 'withheld_reason', text: W2 }, { role: 'evidence', text: E1 }, { role: 'ask', text: ASK }] });
     expect(c).toMatchObject({ outcome: 'kept_whole', reason: 'face_over_cap', text });
+  });
+
+  // Served shape (S4c B5 T1b readback, waveB-screen-chance-lines-20261007.json): three screen chance lines after a lead-in,
+  // two of them ending on their own question.
+  const LEAD = 'For reaching at least £126,000 monthly recurring revenue, on current information:';
+  const EQ = '‘Raise prices 10%’: about 47% chance of meeting your goal, in this model. It rests most on how strongly ‘Price rise’ affects ‘monthly recurring revenue’, at the size you set. How sure are you of that size?';
+  const EL = '‘Launch £49 starter tier’: about 34% chance of meeting your goal, in this model. It rests most on how strongly ‘Starter tier monthly price’ affects ‘New starter subscribers’, at the size you set. How sure are you of that size?';
+  const EK = '‘Keep pricing as it is’: less than 1% chance of meeting your goal, in this model.';
+  const TAIL = 'This model doesn’t yet say whether any option gets there within nine months, because the deadline is not encoded in the goal.';
+  const TAIL2 = 'Sizing the price link first would show how much the chances move when that one assumption changes.';
+  const evidence = [EQ, EL, EK].map((t) => ({ role: 'evidence' as const, text: t }));
+  it('⛔ a lead-in stays with what it introduces: three chance lines after "…, on current information:" fill the face, so → whole', () => {
+    const text = `No single option can be put forward: the comparison is a near tie.\n\n${LEAD}\n\n${EQ} ${EL} ${EK}\n\n${TAIL} ${TAIL2}`;
+    expect(composeReplyShape({ text, obligations: evidence })).toMatchObject({ outcome: 'kept_whole', reason: 'lead_in_split', text });
+  });
+  it('CONTROL: the same lines with no lead-in are shaped, in the reply’s order (a line ending on its own question is evidence, never moved to close the face)', () => {
+    const text = `No single option can be put forward: the comparison is a near tie.\n\n${EQ} ${EL} ${EK}\n\n${TAIL} ${TAIL2}`;
+    const c = composeReplyShape({ text, obligations: evidence });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.bullets).toEqual([EQ, EL, EK]);
+    everySentenceKept(text, c.text);
   });
 
   it('an obligation a gate already removed is no longer owed: the reply is shaped without it', () => {
@@ -347,18 +359,6 @@ describe('timing: every regex on the path scales linearly (5k → 20k, min of 5,
     const tSmall = Math.max(minMs(() => composeReplyShape({ text: small })), 0.05);
     const tLarge = minMs(() => composeReplyShape({ text: large }));
     expect(tLarge / tSmall, `5k ${tSmall.toFixed(2)} ms → 20k ${tLarge.toFixed(2)} ms`).toBeLessThan(8);
-  });
-});
-
-describe('consent labels come from the proposal’s identity (R1 exception): `consentLabelsOf`', () => {
-  it('reads the typed results of the three structural doors and stored add_node labels; nothing else', () => {
-    expect(consentLabelsOf([
-      { result: { risk: { label: 'Overlapping costs', threatens: ['Budget (lowers it)'] } } },
-      { result: { option: { label: 'Bring in a freelance resource' } } },
-      { result: { factors: [{ label: 'Senior salary' }, { label: 'Junior salary' }] } },
-      { operations: [{ op: 'add_node', value: { kind: 'factor', label: 'Notice period' } }, { op: 'add_edge', value: { label: 'not a node' } }] },
-      { result: { public_label: 'Add the risk "Ignored"' } },
-    ])).toEqual(['Overlapping costs', 'Bring in a freelance resource', 'Senior salary', 'Junior salary', 'Notice period']);
   });
 });
 
