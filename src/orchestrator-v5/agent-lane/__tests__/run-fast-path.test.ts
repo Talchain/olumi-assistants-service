@@ -169,11 +169,11 @@ describe('fast path 3: a typed Run returns before its separate interpreting call
   it('the ONE call carries Interpreter v0.2 verbatim (appended) and the canonical claim permissions', async () => {
     const { INTERPRETER_V02_BANKED } = await import('../../../routes/agent-v1-turn.js');
     const { createHash } = await import('node:crypto');
-    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (programme-docs blob 344896ef + the S2i clause)').toBe('c9b83da55529600a');
-    // S2i (DL GO): one clause differs from blob 344896ef ("say investigation priority is not established" → "make no claim
-    // about investigation priority"); every other byte is the banked text (base hash 3d979e8406693be4 with that clause back).
-    expect(INTERPRETER_V02_BANKED).toContain('are absent, make no claim about investigation priority.');
-    expect(INTERPRETER_V02_BANKED).not.toContain('investigation priority is not established');
+    expect(createHash('sha256').update(INTERPRETER_V02_BANKED, 'utf8').digest('hex').slice(0, 16), 'the banked text, byte for byte (programme-docs blob 344896ef + the S2i clause)').toBe('d13dd401219ddcb7');
+    // S2i (DL P6, 7 Oct): one clause differs from blob 344896ef ("say investigation priority is not established" → the DL's
+    // words below); every other byte is the banked text (base hash 3d979e8406693be4 with that clause back).
+    expect(INTERPRETER_V02_BANKED).toContain("are absent, make no claim about investigation priority beyond the screen's own driver lines; if the screen shows no driver and no range, say it is not established yet.");
+    expect(INTERPRETER_V02_BANKED).not.toContain('say investigation priority is not established.');
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
     } });
