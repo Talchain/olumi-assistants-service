@@ -11,7 +11,7 @@
  * THE CLASSES (read off the stored provenance, nothing inferred):
  *   · `user`           — the user sized it: `source: 'user_specified'`, or a size construction credits to the user
  *                        (`magnitude: 'user_stated'`).
- *   · `placeholder`    — nobody sized it: Olumi's default strength (`magnitude: 'olumi_placeholder'`).
+ *   · `placeholder`    — nobody sized it: tagged, mean-projected or untagged door default (Science 393023 LICENCE (a)/(b), 7 Oct).
  *   · `olumi_accepted` — Olumi's estimate the user approved (`olumi_*` + `reviewed_by_user` confirm). Still Olumi's figure:
  *                        it earns no authorship credit (`earnsAuthorshipCredit` reads authorship, not this).
  *   · `olumi_estimate` — Olumi's estimate, not yet reviewed.
@@ -24,6 +24,8 @@
  *        strength ({@link isSizedOnlyByOlumi}, the parts rule, unchanged).
  * Pure.
  */
+import { STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
+
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -39,11 +41,19 @@ function reviewedByUser(p: Rec): boolean {
   return isRec(r) && r.intent === 'confirm';
 }
 
+function isUntaggedProducerDefault(edge: unknown, p: Rec | undefined): boolean {
+  return (p?.magnitude === undefined && p?.natural_effect === undefined)
+    && (p?.mean_projected === true || (isRec(edge) && edge.defaulted === true && isRec(edge.strength)
+      && typeof edge.strength.mean === 'number' && Math.abs(edge.strength.mean) === STRENGTH_DEFAULT_SIGNATURE.mean
+      && edge.strength.std === STRENGTH_DEFAULT_SIGNATURE.std));
+}
+
 export function linkSizing(edge: unknown): LinkSizing {
   const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
   if (p?.source === 'user_specified' || p?.magnitude === 'user_stated') return 'user';
   if (p?.magnitude === PLACEHOLDER_MAGNITUDE) return 'placeholder';
   if (typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) return reviewedByUser(p) ? 'olumi_accepted' : 'olumi_estimate';
+  if (isUntaggedProducerDefault(edge, p)) return 'placeholder';
   return 'unmarked';
 }
 

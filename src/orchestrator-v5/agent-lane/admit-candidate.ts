@@ -402,7 +402,7 @@ export function admitCandidateLinks(
         : DEFAULT_EXISTS_PROBABILITY,
       effect_direction: link.direction,
       provenance: { source: link.provenance_source ?? provenanceSourceFor(link.provenance),
-        ...(!authored ? { mean_projected: true as const } : { magnitude: 'olumi_estimate' as const }),
+        ...(!authored ? { mean_projected: true as const, magnitude: 'olumi_placeholder' as const } : { magnitude: 'olumi_estimate' as const }),
       },
     };
 

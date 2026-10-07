@@ -378,23 +378,19 @@ function actualMoveSeeds(graph: unknown, optionIds: readonly string[], scoredInt
 }
 
 /**
- * The leader licence's ONE "nobody sized it" predicate for a link (P5; R8-2: only the licence reads `mean_projected`): an
- * Olumi placeholder or a mean the producer projected, never the user's. The no-dead-end reader asks THIS, never the field.
+ * Delegates the leader licence's "nobody sized it" reading to the ONE predicate, `isPlaceholderLink` in link-sizing.ts.
+ * The no-dead-end reader asks this wrapper, never the provenance field.
  */
 export function licenceUnsizedLink(edge: unknown): boolean {
-  const p = isRec(edge) && isRec(edge.provenance) ? edge.provenance : undefined;
-  return linkSizing(edge) !== 'user' && (p?.magnitude === 'olumi_placeholder' || p?.mean_projected === true);
+  return isPlaceholderLink(edge);
 }
 
 export function unsizedLeaderGoalPaths(graph: unknown, optionIds: readonly string[], identityEvaluations?: readonly unknown[], scoredInterventions?: ReadonlyMap<string, Record<string, unknown>>): PlaceholderGoalPath[] {
   const seeds = actualMoveSeeds(graph, optionIds, scoredInterventions);
   const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, seeds, identityEvaluations);
   return paths.flatMap(path => {
-    const links = path.links.filter(e => {
-      if (exactLinks.has(e) || linkSizing(e) === 'user') return false;
-      const p = isRec(e.provenance) ? e.provenance : undefined;
-      return p?.magnitude === 'olumi_placeholder' || p?.mean_projected === true;
-    }).flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []);
+    const links = path.links.filter(e => !exactLinks.has(e) && isPlaceholderLink(e))
+      .flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : []);
     return links.length > 0 ? [{ option_id: path.option_id, links }] : [];
   });
 }
@@ -404,7 +400,7 @@ export function legacyLeaderGoalLinks(graph: unknown, optionIds: readonly string
   const { paths, exactLinks } = reachedGoalPaths(graph, optionIds, actualMoveSeeds(graph, optionIds, scoredInterventions), identityEvaluations);
   return goalOrderedLinks(graph, paths.flatMap(path => path.links.filter(e => {
     const p = isRec(e.provenance) ? e.provenance : undefined;
-    return !exactLinks.has(e) && linkSizing(e) !== 'user' && p?.mean_projected !== true
+    return !exactLinks.has(e) && linkSizing(e) === 'unmarked'
       && p?.magnitude === undefined && e.defaulted === true;
   }).flatMap(e => typeof e.from === 'string' && typeof e.to === 'string' ? [{ from: e.from, to: e.to }] : [])));
 }

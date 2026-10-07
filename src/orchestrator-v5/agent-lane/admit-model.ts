@@ -4639,7 +4639,7 @@ function admitOnce(
         exists_probability: DEFAULT_EXISTS_PROBABILITY,
         // The same structured provenance every other machine-authored edge
         // carries — a repaired link is a hypothesis, and must read as one.
-        provenance: { source: 'cee_hypothesis', mean_projected: true },
+        provenance: { source: 'cee_hypothesis', mean_projected: true, magnitude: 'olumi_placeholder' },
         defaulted: true,
       } as AdmittedEdge);
       loss.push({

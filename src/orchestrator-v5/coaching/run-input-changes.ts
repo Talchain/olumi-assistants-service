@@ -367,7 +367,12 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     const bandMoved = !sameNaturalEffect && pl.band !== undefined && cl.band !== undefined && pl.band !== cl.band;
     if (bandMoved) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
     if (pl.sizing !== undefined && cl.sizing !== undefined) {
-      if (pl.sizing !== cl.sizing) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
+      // Science 393023 LICENCE (a)/(b), 7 Oct: the same stored link can change class under the new reader.
+      const readerReclassified = ((pl.sizing === 'unmarked' && cl.sizing === 'placeholder')
+        || (pl.sizing === 'placeholder' && cl.sizing === 'unmarked'))
+        && pl.authorship_digest !== undefined && cl.authorship_digest !== undefined
+        && pl.authorship_digest === cl.authorship_digest;
+      if (pl.sizing !== cl.sizing && !readerReclassified) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
     } else if (pl.sizing !== cl.sizing) {
       complete = false;
     }

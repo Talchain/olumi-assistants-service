@@ -150,6 +150,7 @@ export function frameDefaultedLinks<G>(graph: G, factorId: string): FramedLinks<
     }
     // Nothing to size against any more (no level held, or no frame): back to today's default, exactly as admission writes it.
     if (provenance.magnitude !== 'olumi_placeholder') return edge;
+    if (provenance.natural_effect === undefined && strength.mean === sizing.mean && strength.std === sizing.std) return edge;
     sized.push(`${String(edge.from)}::${String(edge.to)}`);
     const { magnitude: _m, natural_effect: _n, ...rest } = provenance;
     return { ...edge, strength: { ...strength, mean: sizing.mean, std: sizing.std }, provenance: { ...rest, mean_projected: true }, defaulted: true };
