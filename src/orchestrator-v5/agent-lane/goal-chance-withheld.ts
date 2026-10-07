@@ -39,7 +39,7 @@ export interface GoalChanceWithheld {
 
 // AIQ 5887096626: the one register ("reaches the target in N% of model runs", 5885116642).
 const OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
-const RANGE_OPENING = 'This run shows some options’ chances only as a range.';
+export const RANGE_OPENING = 'This run shows some options’ chances only as a range.';
 /** PLoT's words open "Not shown." — right beside a missing figure, not in a reply; the reason after it is kept verbatim. */
 const UI_OPENING = /^Not shown\.\s*/;
 

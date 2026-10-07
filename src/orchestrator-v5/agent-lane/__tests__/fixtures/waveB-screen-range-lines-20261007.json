@@ -1,0 +1,22 @@
+[
+ {
+  "line": "‘Fourth shop in Clifton’: between about 5% and 50% chance of meeting your goal, in this model. Of the links not sized yet, it depends most on how strongly ‘Fourth shop operating’ affects ‘Fourth-shop monthly operating profit’, which isn’t sized in the model yet.",
+  "source": "acceptance-pd/output/waveB-s4-20261007/unseen-b3-2/STATE.json"
+ },
+ {
+  "line": "‘Fourth Shop in Clifton’: between about 9% and 58% chance of meeting your goal, in this model. Of the links not sized yet, it depends most on how strongly ‘Fourth shop active’ affects ‘Fourth-shop operating profit’, which isn’t sized in the model yet.",
+  "source": "acceptance-pd/output/waveB-s4-20261007/unseen-b4-2/STATE.json"
+ },
+ {
+  "line": "‘Wholesale to Offices’: between about 1% and 37% chance of meeting your goal, in this model. Of the links not sized yet, it depends most on how strongly ‘Wholesale sales active’ affects ‘Wholesale gross profit’, which isn’t sized in the model yet.",
+  "source": "acceptance-pd/output/waveB-s4-20261007/unseen-b4-2/STATE.json"
+ },
+ {
+  "line": "‘Fourth Shop in Clifton’: between about 4% and 55% chance of meeting your goal, in this model. It depends most on how strongly ‘Fourth shop operating status’ affects ‘Fourth shop monthly profit contribution’, which isn’t sized in the model yet.",
+  "source": "acceptance-pd/output/waveB-s4-20261007/unseen-b4-1/STATE.json"
+ },
+ {
+  "line": "‘Wholesale to Offices’: between less than 1% and 5% chance of meeting your goal, in this model. Of the links not sized yet, it depends most on how strongly ‘Wholesale sales effort’ affects ‘Wholesale incremental monthly gross profit’, which isn’t sized in the model yet.",
+  "source": "acceptance-pd/output/waveB-s4-20261007/unseen-b4-1/STATE.json"
+ }
+]
