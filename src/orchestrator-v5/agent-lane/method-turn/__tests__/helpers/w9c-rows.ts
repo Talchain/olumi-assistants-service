@@ -138,7 +138,9 @@ rows['class guard: leaders, rankings and withheld figures remain rejected; user-
   for (const claim of ['Raise prices 10% is the leader.', 'Launch starter tier is leading.', 'The ranking favours the starter tier.',
     'Raise prices 10% wins.', 'Raise prices 10% is best.', 'The outcome was £126,000.', 'The chance was 52%.', 'It scored 0.5071333333333334.']) {
     const settled = settleMethodTurn(out, `${claim}\n${draftFor('w9b-2')}`);
-    assert.equal(settled.passed, false, claim);
+    // P02: the refused sentence never reaches the wire; the passing stories are sent in the server's frame.
+    assert.ok(!settled.reply.includes(claim), claim);
+    assert.notEqual(settled.reply, `${claim}\n${draftFor('w9b-2')}`, claim);
     assert.ok(settled.failed.includes(claim.includes('£') || claim.includes('scored') ? 'PM-NO-FIGURES'
       : claim.includes('chance') ? 'PM-NO-PROB' : 'PM-NO-WINNER'), `${claim}: ${settled.failed}`);
   }
@@ -153,6 +155,8 @@ rows['timing: existing number parser on three 20k-whitespace shapes stays below 
     const settled = settleMethodTurn(out, draft);
     const elapsed = performance.now() - start;
     assert.ok(elapsed < 50, `${elapsed} ms`);
-    assert.equal(settled.passed, draft === drafts[0]);
+    // P02: the drafts with a figure in their opening are sent without it, never as written.
+    assert.equal(settled.passed, true);
+    assert.equal(settled.reply === draft, draft === drafts[0]);
   }
 };
