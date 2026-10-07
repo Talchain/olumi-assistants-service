@@ -170,8 +170,8 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     expect(modelCalls).toBe(1);
     expect(b.assistant_text.trim()).not.toBe('');
     expect(b.guidance).toEqual({ slot1: S1_ROW });
-    // Today's chat chips stay until PANEL T4 is served (DL): the row is added, nothing is taken away.
-    expect(b.suggested_actions.map((a) => a.id)).toEqual(NEXT_STEP_CHIPS.map((c) => c.id));
+    // DL 7 Oct: Paul's 'pills are static' ask supersedes the PANEL-T4 hold
+    expect(b.suggested_actions).toEqual([{ ...NEXT_STEP_CHIPS[2], label: 'Give your estimate' }, NEXT_STEP_CHIPS[0], NEXT_STEP_CHIPS[1]]);
   });
   it('NEGATIVE: a method press with no specific control ("Run a pre-mortem") → no row (the method runs; no other is offered)', async () => {
     const b = await press('agent-next-pre-mortem');
