@@ -1,0 +1,68 @@
+{
+  "v": 1,
+  "state_key": "ae7359c5a36eef84",
+  "revision": {
+    "graph_hash": "1d023b90daeaa01a",
+    "run_key": null
+  },
+  "priority": [],
+  "standard": [
+    {
+      "action_id": "review",
+      "label": "Review",
+      "icon": "ListChecks",
+      "group": "review",
+      "press_id": "agent-next-review-decision",
+      "user_line": "Review this decision: what should I check before relying on it?",
+      "enabled": false,
+      "disabled_reason": "Needs a current analysis.",
+      "offer_key": "ee35fa49fc62ebcf"
+    },
+    {
+      "action_id": "what_changes",
+      "label": "What changes",
+      "icon": "SlidersHorizontal",
+      "group": "method",
+      "press_id": "agent-next-what-would-change",
+      "user_line": "What would most likely change this result?",
+      "enabled": false,
+      "disabled_reason": "Needs a current analysis.",
+      "offer_key": "76ff5064c112a63f"
+    },
+    {
+      "action_id": "strengthen",
+      "label": "Strengthen",
+      "icon": "ShieldCheck",
+      "group": "review",
+      "press_id": "agent-next-strengthen",
+      "user_line": "What would most strengthen this model?",
+      "enabled": false,
+      "disabled_reason": "Needs a current analysis.",
+      "offer_key": "1ba2cbd2508d32a7"
+    },
+    {
+      "action_id": "pre_mortem",
+      "label": "Pre-mortem",
+      "icon": "ClipboardList",
+      "group": "method",
+      "press_id": "agent-next-pre-mortem",
+      "user_line": "Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?",
+      "enabled": true,
+      "why_now": "Imagine this went badly and find the most likely causes.",
+      "offer_key": "25cb467745ed3c8e"
+    }
+  ],
+  "more": [
+    {
+      "action_id": "more_options",
+      "label": "More options",
+      "icon": "GitFork",
+      "group": "gap",
+      "press_id": "agent-next-widen",
+      "user_line": "Suggest options I haven’t considered.",
+      "enabled": true,
+      "why_now": "Find options you haven’t considered yet.",
+      "offer_key": "cfa3036851986af6"
+    }
+  ]
+}

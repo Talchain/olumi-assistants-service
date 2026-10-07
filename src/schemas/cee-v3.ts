@@ -20,6 +20,7 @@ import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS, GoalPeriod, GoalHorizonSchema, GoalStatedAsSchema, OptionStatus, CountNounSchema, InterventionRangeSchema, InterventionRangeMeaning } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
+import { EventRiskV1 } from "./event-risk.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 import { OBSERVED_STATE_STATED_ROLES } from "../cee/context-integrity/stated-role-vocabulary.js";
 
@@ -645,6 +646,18 @@ export const NodeV3 = z.object({
     ])
     .optional()
     .catch(undefined),
+  /**
+   * event_risk.v1 (Science 393023 pilot §4): this risk is an EVENT that may happen within a
+   * horizon. Owner: `./event-risk.ts`.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING (the `scale_frame` warning above): this `NodeV3` STRIPS
+   * undeclared keys, so without it every model writer and the Run loader deleted the block.
+   *
+   * `.catch(undefined)`, as for `nonlinear_identity`: a block that is malformed on READ must not make
+   * the whole stored graph unparseable. It cannot be written malformed, because the write door
+   * (`eventRiskIngressIssues`) refuses it (422). Absent ⇒ today's risk node, byte-identically.
+   */
+  event_risk: EventRiskV1.optional().catch(undefined),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 
