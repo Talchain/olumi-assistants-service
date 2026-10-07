@@ -16,11 +16,12 @@
  * "…on current information:" style lead-in, else as a closing paragraph.
  */
 import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
+import { shortfallNoteLabel } from '../goal-target/goal-chance-licence.js';
 import { RANGE_OPENING, sameWordsIn } from './goal-chance-withheld.js';
 
 export const GOAL_CHANCE_SCREEN_LINES_OWED = 'GOAL_CHANCE_SCREEN_LINES_OWED';
 
-/** One option's line as the screen words it: the chance sentence, then what it rests or depends on most ('' = none). */
+/** One option's line as the screen words it: chance and licensed notes, then what it depends on most ('' = none). */
 export interface GoalChanceScreenLine {
   readonly option_id: string;
   readonly label: string;
@@ -29,6 +30,7 @@ export interface GoalChanceScreenLine {
   readonly chance: string;
   readonly depends: string;
   readonly spread_note?: string;
+  readonly shortfall_note?: string;
 }
 
 type Rec = Record<string, unknown>;
@@ -42,16 +44,22 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
   const labels = new Map((Array.isArray(nodes) ? nodes : []).map(rec)
     .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '')
     .map((n) => [n.id as string, n.label as string]));
-  const line = (optionId: string, figure: string, depends: string, spreadNote?: string): GoalChanceScreenLine[] => {
+  const line = (optionId: string, figure: string, depends: string, spreadNote?: string, shortfallNote?: string): GoalChanceScreenLine[] => {
     const label = labels.get(optionId);
     // An option the graph cannot name has no line (the screen drops it too); never an id.
-    return label === undefined ? [] : [{ option_id: optionId, label, figure, chance: `‘${label}’: ${figure} ${CHANCE_LABEL}.` + (spreadNote === undefined ? '' : ` ${spreadNote}`), depends,
-      ...(spreadNote === undefined ? {} : { spread_note: spreadNote }) }];
+    if (label === undefined) return [];
+    // The licence checks the two exact templates; this reader owns whether their named option is the graph's label.
+    const shortfall = shortfallNoteLabel(shortfallNote) === label ? shortfallNote : undefined;
+    return [{ option_id: optionId, label, figure, chance: `‘${label}’: ${figure} ${CHANCE_LABEL}.`
+      + (spreadNote === undefined ? '' : ` ${spreadNote}`) + (shortfall === undefined ? '' : ` ${shortfall}`), depends,
+      ...(spreadNote === undefined ? {} : { spread_note: spreadNote }),
+      ...(shortfall === undefined ? {} : { shortfall_note: shortfall }) }];
   };
   const points = facts.goal_chance_licence?.form === 'each' && facts.goal_chance_display !== undefined
     ? facts.goal_chance_licence.option_ids.flatMap((id) => {
       const figure = facts.goal_chance_display![id];
-      return figure === undefined ? [] : line(id, figure, facts.goal_chance_driver_display?.[id] ?? '', facts.goal_chance_licence?.spread_note_by_option?.[id]);
+      return figure === undefined ? [] : line(id, figure, facts.goal_chance_driver_display?.[id] ?? '',
+        facts.goal_chance_licence?.spread_note_by_option?.[id], facts.goal_chance_licence?.shortfall_note_by_option?.[id]);
     }) : [];
   const ranges = Object.entries(facts.goal_chance_range_display ?? {}).flatMap(([id, d]) => {
     const lead = d.depends_on.among === 'unsized_links' ? 'Of the links not sized yet, it depends most on' : 'It depends most on';
@@ -65,9 +73,24 @@ export function goalChanceScreenLinesForAgent(result: unknown, graph: unknown, c
 
 /** Whether the reply already gives this option's figure: the screen's sentence, or the option named with its figure. */
 function alreadySaid(text: string, l: GoalChanceScreenLine): boolean {
-  if (sameWordsIn(text, l.chance)) return true;
   // The Agent's own phrasing ("Raise prices 10%: about 46%") gives the same figure: never said twice in two wordings.
   const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').toLowerCase();
+  if (l.shortfall_note !== undefined) {
+    const notes = [l.spread_note, l.shortfall_note].filter((note): note is string => note !== undefined);
+    const suffix = notes.join(' ');
+    // A split or orphaned note is moved beside its chance, including when one complete unit already has a duplicate note.
+    return text.split(l.shortfall_note).length === 2 && text.split('\n').some(row => {
+      const p = plain(row);
+      const labelAt = p.indexOf(plain(l.label));
+      const figureAt = p.indexOf(plain(l.figure), labelAt + plain(l.label).length);
+      const notesAt = p.indexOf(plain(suffix));
+      const figureTail = p.slice(figureAt + plain(l.figure).length, notesAt);
+      const stop = figureTail.indexOf('.');
+      const adjacent = stop < 0 || figureTail.slice(stop + 1).trim() === '';
+      return labelAt >= 0 && labelAt < figureAt && figureAt >= 0 && notesAt > figureAt && adjacent && sameWordsIn(row, suffix);
+    });
+  }
+  if (sameWordsIn(text, l.chance)) return true;
   if (l.spread_note !== undefined) return text.split('\n').some(row =>
     plain(row).includes(plain(l.label)) && plain(row).includes(plain(l.figure)) && sameWordsIn(row, l.spread_note!));
   const p = plain(text);
@@ -81,30 +104,54 @@ const LIST_START = /^\s*(?:[-*•]|\d{1,3}[.)])\s/;
 /**
  * `text` with every chance line it does not already give; `added` counts the sentences added. A driver sentence the reply
  * already carries word for word, apart from its owed figure (the leader gate keeps it and deletes the figure: B5 T1b), is
- * MOVED to follow that figure, never said twice.
+ * MOVED to follow that figure, never said twice. A licensed spread + shortfall pair moves as one unit beside its chance.
  */
 export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScreenLine[]): { text: string; added: number } {
   let body = text;
   const owed: string[] = [];
   let added = 0;
   for (const l of lines) {
-    if (l.spread_note !== undefined && !alreadySaid(body, l)) {
-      const chanceOnly = l.chance.slice(0, l.chance.length - l.spread_note.length).trimEnd();
+    const notes = [l.spread_note, l.shortfall_note].filter((note): note is string => note !== undefined);
+    const suffix = notes.length === 0 ? undefined : notes.join(' ');
+    const chanceOnly = suffix === undefined ? l.chance : l.chance.slice(0, l.chance.length - suffix.length).trimEnd();
+    const withoutNotes = (value: string): string => {
+      if (l.shortfall_note === undefined) return notes.reduce((clean, note) => clean.split(note).join(''), value);
+      let clean = value;
+      if (l.spread_note !== undefined) {
+        // A spread sentence can belong to several options. Move this option's pair without stripping another's unit.
+        clean = clean.split(`${l.spread_note} ${l.shortfall_note}`).join('')
+          .split(`${l.shortfall_note} ${l.spread_note}`).join('');
+      }
+      clean = clean.split(l.shortfall_note).join('');
+      if (l.spread_note === undefined) return clean;
+      clean = clean.split(`${chanceOnly} ${l.spread_note}`).join(chanceOnly);
+      return clean.split('\n').map(row => {
+        const ownFigure = row.includes(l.label) && row.includes(l.figure);
+        const otherFigure = lines.some(other => other.option_id !== l.option_id && row.includes(other.label) && row.includes(other.figure));
+        return row.trim() === l.spread_note || (ownFigure && !otherFigure) ? row.split(l.spread_note!).join('') : row;
+      }).join('\n');
+    };
+    if (suffix !== undefined && !alreadySaid(body, l)) {
       if (body.includes(chanceOnly)) {
-        body = body.split(l.spread_note).join('');
+        body = withoutNotes(body);
         body = body.replace(chanceOnly, l.chance);
         added += 1;
       } else {
-        const rows = body.split('\n');
-        const rowAt = rows.findIndex(row => row.includes(l.label) && row.includes(l.figure));
+        // A shortfall itself names the option. Its orphaned label must not borrow another option's figure on that row.
+        const candidate = l.shortfall_note === undefined ? body : withoutNotes(body);
+        const rows = candidate.split('\n');
+        const rowAt = rows.findIndex(row => l.shortfall_note === undefined
+          ? row.includes(l.label) && row.includes(l.figure)
+          : row.indexOf(l.label) >= 0 && row.indexOf(l.figure, row.indexOf(l.label) + l.label.length) >= 0);
         if (rowAt >= 0) {
-          body = body.split(l.spread_note).join('');
+          body = l.shortfall_note === undefined ? withoutNotes(body) : candidate;
           const cleanRows = body.split('\n');
           const row = cleanRows[rowAt]!;
-          const figureEnd = row.indexOf(l.figure) + l.figure.length;
+          const figureAt = l.shortfall_note === undefined ? row.indexOf(l.figure) : row.indexOf(l.figure, row.indexOf(l.label) + l.label.length);
+          const figureEnd = figureAt + l.figure.length;
           const stop = row.indexOf('.', figureEnd);
           const end = stop < 0 ? row.length : stop + 1;
-          cleanRows[rowAt] = `${row.slice(0, end)} ${l.spread_note}${row.slice(end)}`;
+          cleanRows[rowAt] = `${row.slice(0, end)} ${suffix}${row.slice(end)}`;
           body = cleanRows.join('\n');
           added += 1;
         }
@@ -112,9 +159,8 @@ export function withScreenLinesOwed(text: string, lines: readonly GoalChanceScre
     }
     if (alreadySaid(body, l)) continue;
     // Move any existing note behind its own chance, including when the Agent gave only the figure.
-    if (l.spread_note !== undefined) {
-      body = body.split(l.spread_note).join('');
-      const chanceOnly = l.chance.slice(0, l.chance.length - l.spread_note.length).trimEnd();
+    if (suffix !== undefined) {
+      body = withoutNotes(body);
       body = body.split(chanceOnly).join('');
     }
     owed.push(l.chance);

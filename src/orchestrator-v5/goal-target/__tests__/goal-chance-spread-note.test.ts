@@ -156,13 +156,20 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(l.withheld_option_ids).toContain(SQ);
     expect(l.spread_note_by_option).toEqual({ [B]: SPREAD_NOTE_WITHOUT_DOWNSIDE });
   });
-  it('one licensed option with missing/non-finite figures or inconsistent percentiles silences the Run', () => {
+  it('one option’s invalid spread figures silence spread Run-wide, while another option keeps its licensed shortfall', () => {
     for (const [key, value] of [['mean', undefined], ['p10', NaN], ['p90', Infinity], ['p10', 200000]] as const) {
       const rs = trigger(); rs.find(r => r.option_id === A)!.outcome[key] = value;
-      noRecordedThreshold(licence(rs));
+      const l = licence(rs);
+      noNote(l);
+      // B19 licences shortfall per option; Starter's malformed spread figures do not erase Raise's valid scale map.
+      expect(l.sent_threshold).toEqual(delta);
+      expect(l.shortfall_note_by_option).toHaveProperty(B);
     }
     const rs = trigger(); rs.find(r => r.option_id === A)!.outcome.p10 = 127000;
-    noRecordedThreshold(licence(rs));
+    const l = licence(rs);
+    noNote(l);
+    expect(l.sent_threshold).toEqual(delta);
+    expect(l.shortfall_note_by_option).toHaveProperty(B);
   });
   it('forms hiding per-option point lines never carry a note', () => {
     const g = graph(); g.edges = [];
@@ -193,6 +200,102 @@ describe('spread-driven chance note — recorded scoring frame, point licence on
     expect(orphan).toContain(b.chance);
     expect(goalChanceScreenLinesForAgent(result, g, false)).toEqual([]);
     expect(b.chance).not.toContain(B);
+  });
+  const shortfallScreenFixture = (): { g: Json; result: Json; lines: ReturnType<typeof goalChanceScreenLinesForAgent> } => {
+    const g = graph(); goal(g).goal_threshold = 0.8;
+    const result = withGoalChanceLicence({ option_comparison: trigger() }, g, GOAL, earned, delta) as Json;
+    const label = (id: string): string => g.nodes.find((n: Json) => n.id === id).label;
+    // Authored licence strings isolate the downstream display/movement contract from the producer's numerical rows.
+    result.inference_warnings[0].shortfall_note_by_option = {
+      [B]: `In its worst 1 in 20 runs of this model, ‘${label(B)}’ falls short of your target by £15,000 / month or more.`,
+      [SQ]: `In this model, ‘${label(SQ)}’ falls short of your target in almost every run, typically by about £6,000 / month.`,
+    };
+    return { g, result, lines: goalChanceScreenLinesForAgent(result, g, true) };
+  };
+  it('B19 screen order: chance, spread, then shortfall; the less-than-1% line uses its own exact template', () => {
+    const { lines } = shortfallScreenFixture();
+    const b = lines.find(l => l.option_id === B)!;
+    expect(b.spread_note).toBe(SPREAD_NOTE_WITHOUT_DOWNSIDE);
+    expect(b.shortfall_note).toBe(`In its worst 1 in 20 runs of this model, ‘${b.label}’ falls short of your target by £15,000 / month or more.`);
+    expect(b.chance).toBe(`‘${b.label}’: ${b.figure} chance of meeting your goal, in this model. ${SPREAD_NOTE_WITHOUT_DOWNSIDE} ${b.shortfall_note}`);
+    const sq = lines.find(l => l.option_id === SQ)!;
+    expect(sq.shortfall_note).toBe(`In this model, ‘${sq.label}’ falls short of your target in almost every run, typically by about £6,000 / month.`);
+    expect(sq.chance).toBe(`‘${sq.label}’: less than 1% chance of meeting your goal, in this model. ${sq.shortfall_note}`);
+  });
+  it('B19 owed insertion: an Agent-written figure gains the spread + shortfall unit exactly once', () => {
+    const { lines } = shortfallScreenFixture();
+    const b = lines.find(l => l.option_id === B)!;
+    const phrased = `${b.label}: ${b.figure}.`;
+    const completed = withScreenLinesOwed(phrased, [b]);
+    expect(completed).toEqual({ text: `${phrased} ${b.spread_note} ${b.shortfall_note}`, added: 1 });
+    expect(completed.text.split(b.figure)).toHaveLength(2);
+    expect(completed.text.split(b.spread_note!)).toHaveLength(2);
+    expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
+    expect(withScreenLinesOwed(completed.text, [b])).toEqual({ text: completed.text, added: 0 });
+  });
+  it.each(['split', 'orphan', 'reversed', 'separated', 'duplicate'] as const)('B19 owed movement: %s notes become one complete ordered unit', mode => {
+    const { lines } = shortfallScreenFixture();
+    const b = lines.find(l => l.option_id === B)!;
+    const chanceOnly = `‘${b.label}’: ${b.figure} chance of meeting your goal, in this model.`;
+    const text = mode === 'split' ? `${chanceOnly}\n${b.spread_note}\n${b.shortfall_note}`
+      : mode === 'orphan' ? `${b.shortfall_note}\n${b.spread_note}\n${chanceOnly}`
+        : mode === 'reversed' ? `${chanceOnly} ${b.shortfall_note} ${b.spread_note}`
+          : mode === 'separated' ? `${chanceOnly} Another point. ${b.spread_note} ${b.shortfall_note}`
+            : `${b.chance}\n${b.shortfall_note}`;
+    const completed = withScreenLinesOwed(text, [b]);
+    expect(completed.text).toContain(b.chance);
+    expect(completed.text.split(b.figure)).toHaveLength(2);
+    expect(completed.text.split(b.spread_note!)).toHaveLength(2);
+    expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
+    expect(withScreenLinesOwed(completed.text, [b])).toEqual({ text: completed.text, added: 0 });
+  });
+  it('B19 shared spread words: adding another option’s shortfall never strips the first option’s unit', () => {
+    const { g, lines } = shortfallScreenFixture();
+    const b = lines.find(l => l.option_id === B)!;
+    const label = g.nodes.find((n: Json) => n.id === A).label as string;
+    const other = { ...b, option_id: A, label, chance: b.chance.split(b.label).join(label),
+      shortfall_note: b.shortfall_note!.split(b.label).join(label) };
+    const base = (l: typeof b): string => `‘${l.label}’: ${l.figure} chance of meeting your goal, in this model.`;
+    const completed = withScreenLinesOwed(`${base(b)} ${base(other)}`, [b, other]);
+    expect(completed.text).toBe(`${b.chance} ${other.chance}`);
+    expect(completed.text.split(SPREAD_NOTE_WITHOUT_DOWNSIDE)).toHaveLength(3);
+    expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
+    expect(completed.text.split(other.shortfall_note)).toHaveLength(2);
+    expect(withScreenLinesOwed(completed.text, [b, other])).toEqual({ text: completed.text, added: 0 });
+  });
+  it('B19 orphaned label: another option’s same figure cannot count as this option’s chance', () => {
+    const { g, lines } = shortfallScreenFixture();
+    const b = lines.find(l => l.option_id === B)!;
+    const otherLabel = g.nodes.find((n: Json) => n.id === A).label as string;
+    const otherChance = `${otherLabel}: ${b.figure}.`;
+    const completed = withScreenLinesOwed(`${otherChance} ${b.spread_note} ${b.shortfall_note}`, [{ ...b, depends: '' }]);
+    expect(completed.text).toContain(otherChance);
+    expect(completed.text).toContain(`\n\n${b.chance}`);
+    expect(completed.text.split(b.shortfall_note!)).toHaveLength(2);
+    expect(completed.text.split(b.spread_note!)).toHaveLength(2);
+    expect(withScreenLinesOwed(completed.text, [{ ...b, depends: '' }])).toEqual({ text: completed.text, added: 0 });
+  });
+  it.each([B, SQ])('B19 label guard: %s’s structurally valid shortfall is dropped when its label differs from the graph', id => {
+    const { g, result, lines } = shortfallScreenFixture();
+    const original = lines.find(l => l.option_id === id)!;
+    expect(original.shortfall_note).toBeDefined();
+    result.inference_warnings[0].shortfall_note_by_option[id] = original.shortfall_note!.replace(`‘${original.label}’`, `‘${original.label} stale’`);
+    const guarded = goalChanceScreenLinesForAgent(result, g, true).find(l => l.option_id === id)!;
+    expect(guarded).not.toHaveProperty('shortfall_note');
+    expect(guarded.chance).not.toContain(original.shortfall_note!);
+    expect(guarded.chance).not.toContain(`‘${original.label} stale’`);
+    expect(guarded.spread_note).toBe(original.spread_note);
+  });
+  it('B19 label guard: literal metacharacters in an exact graph label are accepted, and a stale Run stays silent', () => {
+    const { g, result, lines } = shortfallScreenFixture();
+    const b = lines.find(l => l.option_id === B)!;
+    const label = 'Raise (10%)+ [£]';
+    g.nodes.find((n: Json) => n.id === B).label = label;
+    result.inference_warnings[0].shortfall_note_by_option[B] = b.shortfall_note!.replace(`‘${b.label}’`, `‘${label}’`);
+    const changed = goalChanceScreenLinesForAgent(result, g, true).find(l => l.option_id === B)!;
+    expect(changed.shortfall_note).toBe(result.inference_warnings[0].shortfall_note_by_option[B]);
+    expect(changed.chance).toContain(`‘${label}’ falls short of your target`);
+    expect(goalChanceScreenLinesForAgent(result, g, false)).toEqual([]);
   });
   it('licence and Agent result projection keep the recorded frame and note; malformed notes stay silent', () => {
     const g = graph(); const result = withGoalChanceLicence({ option_comparison: trigger() }, g, GOAL, earned, level);
