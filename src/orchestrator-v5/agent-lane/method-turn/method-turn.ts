@@ -11,7 +11,8 @@
  *
  * PURE and TOTAL: no I/O, no model call, never throws. The route makes the call and the card (`routes/agent-v1-turn.ts`).
  *
- * ⛔ The plan is never chosen for the user (PTL 5933036532 #5): the user's own pick, else the licensed leader. Both
+ * ⛔ The plan is never chosen for the user (PTL 5933036532 #5): explicit worksheets use the user's own pick; other
+ * callers prefer the licensed leader. Both
  * writers of the pick (a choose_plan button, and a pre-mortem row whose copy names the user's option) converge on ONE
  * carrier, the chip id `planPickChipId(option_id)`, and ONE reader, `methodPressOf`. The pick lives for its own press
  * only: nothing is stored. A generic press with multiple own options and no licensed leader stresses the decision.
@@ -25,6 +26,7 @@ import type { AnalysisFreshness } from '../../context/freshness.js';
 import { extractGraphOptionIds } from '../../context/option-identity.js';
 import { checkMethodTurn, methodPlanOf, selectGuidance, stateKeyHash } from '../guidance/index.js';
 import { linkTargetOf } from '../guidance/select-strengthen-placeholder.js';
+import { isPremortemWorksheetPress } from '../guidance/plan.js';
 import { linkStrengthsCardArgs, type LinkStrengthsCardArgs } from '../strengthen-press.js';
 import type { GuidanceSignals as SelectorSignals, GuidanceState, MethodInputs, PolicyId } from '../guidance/index.js';
 import type { GuidanceRecord } from '../guidance/types.js';
@@ -226,10 +228,15 @@ export function methodTurnFromSignals(chipId: unknown, s: TurnSignals, graph: un
   if (s['model.goal_present'] !== true) return unavailableTurn('no_goal');
   if (s['model.non_sq_option_ids'].length === 0) return unavailableTurn('no_own_option');
   // An invalid explicit pick never falls through to a licensed plan; retain the existing choose-plan refusal.
-  if (chipId !== PREMORTEM_PRESS_ID && press.pick === null) {
+  const worksheetPressId = isPremortemWorksheetPress(chipId) ? chipId : undefined;
+  if (worksheetPressId !== undefined && press.pick === null) {
     return choosePlan(s['model.non_sq_option_ids'], s['model.option_labels']) ?? unavailableTurn('plan_unconfirmed');
   }
-  const selector = { ...selectorSignalsOf(s, press.pick), 'user.generic_method_press': chipId === PREMORTEM_PRESS_ID };
+  const selector = {
+    ...selectorSignalsOf(s, press.pick),
+    'user.generic_method_press': chipId === PREMORTEM_PRESS_ID,
+    ...(worksheetPressId !== undefined ? { 'user.premortem_worksheet_press_id': worksheetPressId } : {}),
+  };
   const selection = selectGuidance(selector, selector.guidance ?? {});
   if (selection.runs_method !== METHOD) return unavailableTurn('plan_unconfirmed');
   if (selection.mode === 'choose_plan') return choosePlan(selection.choices ?? [], s['model.option_labels']) ?? unavailableTurn('plan_unconfirmed');
@@ -245,6 +252,7 @@ export function methodTurnFromSignals(chipId: unknown, s: TurnSignals, graph: un
     canonical_stage: canonicalStageOf(s['run.kind'], graph),
     signals: s,
     user_selected_option_id: press.pick,
+    ...(worksheetPressId !== undefined ? { premortem_worksheet_press_id: worksheetPressId } : {}),
     ...(mayUseDecision ? { decision_level: true } : {}),
     graph,
   });

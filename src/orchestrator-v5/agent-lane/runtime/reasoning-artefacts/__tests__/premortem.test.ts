@@ -12,7 +12,10 @@ describe('A2 producer and coverage', () => {
     expect(selected?.kind).toBe('run');
     if (selected?.kind !== 'run') throw new Error('must run');
     expect(selected.context.plan).toMatchObject({ option_id: OPTION, basis: 'user_selected' });
-    expect(methodPlanOf({ 'run.leader_licensed': true, 'run.leader_option_id': 'launch_starter_tier', 'user.selected_option_id': OPTION, 'model.non_sq_option_ids': [OPTION, 'launch_starter_tier'] })).toBe(OPTION);
+    const licensedWithPick = { 'run.leader_licensed': true, 'run.leader_option_id': 'launch_starter_tier', 'user.selected_option_id': OPTION, 'model.non_sq_option_ids': [OPTION, 'launch_starter_tier'] } as const;
+    // A2 r2 (DESIGN §2): only this turn's explicit worksheet press lets the pick outrank the licence; without it, base precedence.
+    expect(methodPlanOf({ ...licensedWithPick, 'user.premortem_worksheet_press_id': planPickChipId(OPTION) })).toBe(OPTION);
+    expect(methodPlanOf(licensedWithPick)).toBe('launch_starter_tier');
     expect(worksheet({ turn: selected, candidates: [candidate(), { ...candidate(), option_id: 'launch_starter_tier' }] })?.rows.map(r => r.option_id)).toEqual([OPTION]);
     expect(worksheet()?.coverage.find(c => c.option_id === 'launch_starter_tier')?.status).toBe('not_stress_tested');
   });

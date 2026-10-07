@@ -33,6 +33,7 @@ import { mapStageToDecisionStage } from '../../../dsk/stage-edge.js';
 import type { DecisionStage, DSKProtocol } from '../../../dsk/types.js';
 import { protocolDirectiveLines, literalProtocolSteps } from '../../coaching/typed-intent-directive.js';
 import { loadVerifiedDskBundle } from '../../compose/dsk-bundle-record.js';
+import { isPremortemWorksheetPress } from '../guidance/plan.js';
 
 /**
  * The served run state of a model that was never run, typed against the contract's own kinds (`ANALYSIS_RUN_STATE_KINDS`,
@@ -94,6 +95,8 @@ export interface MethodScienceInput {
    * quo, never an option taken out of the comparison (RC 5937065922 / 5937114487). It never licenses a leader.
    */
   readonly user_selected_option_id?: string | null;
+  /** Explicit worksheet chip for this turn; other science callers retain licensed-plan precedence. */
+  readonly premortem_worksheet_press_id?: string;
   /** Generic multi-option pre-mortem: use the own-path union when no plan has eligible grounding. */
   readonly decision_level?: boolean;
   /** The current graph, read ONLY for the limits on the plan's path. */
@@ -151,7 +154,7 @@ export interface MethodScienceContext {
   readonly dsk: DskCitation | null;
   readonly not_cited: NotCitedReason | null;
   /**
-   * The plan a pre-mortem stresses: the option the user explicitly chose, else the licensed leader, else none. A lone
+   * The plan a pre-mortem stresses: the licensed leader, else the user's pick; explicit worksheets stress only the pick. A lone
    * option is never named on its own: a plan label needs a licence or the user's choice (PTL 5933036532 #5).
    * Decision-level pre-mortems carry null here and use the union of own-option paths for grounding.
    */
@@ -202,22 +205,29 @@ function protocolById(id: string): { protocol: DSKProtocol; bundleHash: string }
 function choosePlan(
   s: MethodScienceSignals,
   userSelected: string | null | undefined,
+  worksheetPressId?: string,
 ): MethodScienceContext['plan'] {
   const labels = s['model.option_labels'];
-  if (
-    typeof userSelected === 'string'
-    && s['model.non_sq_option_ids'].includes(userSelected)
-    && typeof labels[userSelected] === 'string'
-  ) {
-    return { option_id: userSelected, label: labels[userSelected], basis: 'user_selected' };
+  if (isPremortemWorksheetPress(worksheetPressId)) {
+    return typeof userSelected === 'string'
+      && s['model.non_sq_option_ids'].includes(userSelected)
+      && typeof labels[userSelected] === 'string'
+      ? { option_id: userSelected, label: labels[userSelected], basis: 'user_selected' }
+      : null;
   }
-  if (userSelected != null) return null;
   // The leader's identity is read ONLY behind its licence: an unlicensed leader is never read, so it cannot leak.
   if (s['run.leader_licensed'] === true) {
     const leader = s['run.leader_option_id'];
     if (typeof leader === 'string' && typeof labels[leader] === 'string') {
       return { option_id: leader, label: labels[leader], basis: 'licensed_leader' };
     }
+  }
+  if (
+    typeof userSelected === 'string'
+    && s['model.non_sq_option_ids'].includes(userSelected)
+    && typeof labels[userSelected] === 'string'
+  ) {
+    return { option_id: userSelected, label: labels[userSelected], basis: 'user_selected' };
   }
   return null;
 }
@@ -359,7 +369,8 @@ function adjudicate(
 
 export function methodScienceContext(input: MethodScienceInput): MethodScienceContext {
   const s = input.signals;
-  const selectedPlan = input.method === 'pre_mortem' ? choosePlan(s, input.user_selected_option_id) : null;
+  const selectedPlan = input.method === 'pre_mortem'
+    ? choosePlan(s, input.user_selected_option_id, input.premortem_worksheet_press_id) : null;
   const planItems = selectedPlan === null ? [] : premortemItems(s, [selectedPlan.option_id], input.graph);
   // Keep grounded leaders and explicit picks. A generic press with an empty leader path can still stress the
   // decision, without changing the Run's licence, reclassifying provenance, or claiming a winning-plan DSK badge.
