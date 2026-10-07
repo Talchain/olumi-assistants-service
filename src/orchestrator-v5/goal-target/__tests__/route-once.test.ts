@@ -5,8 +5,8 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { performance } from 'node:perf_hooks';
 import { describe, expect, it, vi } from 'vitest';
+import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { endsOfGraph, heldLinkBeforeRouteOnce, heldLinkOf, routeOnceCoveredSources, withHeldUserLinks } from '../held-user-links.js';
 import { goalChanceDriverOf } from '../goal-chance-driver.js';
@@ -244,7 +244,7 @@ describe('rule R route-once', () => {
     expect(endsOfGraph(graph)(null).routeOnce).toBe(false);
   });
 
-  it('Scaling: layered DAG, 2000/500 nodes, min-of-5 timing ratio < 8', () => {
+  it('Scaling: layered DAG, 2000/500 nodes, min of 7 calibrated batches, ratio < 8', () => {
     const layered = (count: number): Graph => {
       const nodes = Array.from({ length: count }, (_, i) => ({ id: `n${i}`, kind: 'chance', label: `n${i}` }));
       const edges: Edge[] = [];
@@ -254,17 +254,13 @@ describe('rule R route-once', () => {
       return { nodes, edges };
     };
     const small = layered(500), large = layered(2000);
-    const time = (graph: Graph): number => {
-      const start = performance.now();
+    const run = (graph: Graph): void => {
       const ends = endsOfGraph(graph);
       for (const edge of graph.edges) ends(edge);
       withHeldUserLinks(graph);
-      return performance.now() - start;
     };
-    time(small); time(large);
-    const smallTimes: number[] = [], largeTimes: number[] = [];
-    for (let i = 0; i < 5; i++) { smallTimes.push(time(small)); largeTimes.push(time(large)); }
-    expect(Math.min(...largeTimes) / Math.min(...smallTimes)).toBeLessThan(8);
+    const m = scalingRatio(() => run(small), () => run(large));
+    expect(m.ratio, m.detail).toBeLessThan(8);
   });
 
   it('History: pre_route_once SHA-256 validates historical analysis, current differs', () => {
