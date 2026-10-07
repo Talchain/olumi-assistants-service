@@ -8,6 +8,7 @@
  * Harness: `result-first-replay.route.test.ts` (live route, the model stubbed, a store double that reads answer rows back
  * as the real store does). The graph is the held-out-shaped replica of `unvalued-root-disclosure.test.ts`.
  */
+import { sentenceMultiset } from '../reply/compose-reply.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -137,7 +138,8 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
       if (restart) { await app.close(); app = await freshApp(); }
       const replay = (await runTurn(turnId)).json() as Body;
       expect(replay.assistant_text, `restart=${restart}`).toContain(SENTENCE);
-      expect(replay.assistant_text, `restart=${restart}`).toBe(first.assistant_text);
+      expect(replay.assistant_text.startsWith(RUN_RESULT_READY_TEXT), '2b-0 positive control: current Run rebuild').toBe(true);
+      expect(sentenceMultiset(replay.assistant_text), `restart=${restart}`).toEqual(sentenceMultiset(first.assistant_text));
     }
   });
 
@@ -151,7 +153,8 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
       const first = (await runTurn(turnId)).json() as Body;
       expect(first.assistant_text, 'precondition: the live turn said the root line whole').toContain(SENTENCE);
       const replay = (await runTurn(turnId)).json() as Body;
-      expect(replay.assistant_text).toBe(first.assistant_text);
+      expect(replay.assistant_text.startsWith(RUN_RESULT_READY_TEXT), '2b-0 positive control: current Run rebuild').toBe(true);
+      expect(sentenceMultiset(replay.assistant_text)).toEqual(sentenceMultiset(first.assistant_text));
     } finally {
       store.readRecent.mockImplementation(async () => []);
     }
@@ -210,7 +213,8 @@ describe('a native Run with an unvalued risk root says it is treated as zero, an
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
       const replay = (await runTurn(turnId)).json() as Body;
-      expect(replay.assistant_text, `restart=${restart}`).toBe(first.assistant_text);
+      expect(replay.assistant_text.startsWith(RUN_RESULT_READY_TEXT), '2b-0 positive control: current Run rebuild').toBe(true);
+      expect(sentenceMultiset(replay.assistant_text), `restart=${restart}`).toEqual(sentenceMultiset(first.assistant_text));
     }
   });
 

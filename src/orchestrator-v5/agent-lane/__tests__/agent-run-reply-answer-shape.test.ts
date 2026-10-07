@@ -32,6 +32,9 @@ import {
   type AnswerShape,
 } from '../../routing/answer-shape.js';
 
+import { RUN_RESULT_READY_TEXT } from '../run-explanation.js';
+import { goalChanceScreenLinesForAgent } from '../goal-chance-screen-lines.js';
+import { sentenceMultiset, sentencesOf } from '../reply/compose-reply.js';
 import { textAtRest } from '../decision-input-ask.js';
 
 type Reply = { id: string; label: string; leak_phrases: string[]; text: string };
@@ -50,6 +53,7 @@ const SERVED_RUN = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fix
 const RESULT_BLOCK = SERVED_RUN.turns.t2.analysis_result;
 const ROBUSTNESS_CAVEAT = 'The result is not yet robust — small changes could flip it.';
 let readbackResult = RESULT_BLOCK;
+let runRequests = 0;
 const GRAPH_HASH = RESULT_BLOCK.computed_against_hash;
 
 const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { ...(FX.state.analysis_state.run_state as Record<string, unknown>), computed_at: '2026-10-01T12:00:00.000Z' } };
@@ -139,10 +143,13 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     // The Run itself: the product's own turn route, as the `run_analysis` capability dispatches it.
-    app.post('/orchestrate/v2/turn', async () => ({
-      response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: GRAPH_HASH, blocks: [readbackResult],
-      analysis_ready: readbackReady, analysis_state: readbackState,
-    }));
+    app.post('/orchestrate/v2/turn', async () => {
+      runRequests += 1;
+      return {
+        response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: GRAPH_HASH, blocks: [readbackResult],
+        analysis_ready: readbackReady, analysis_state: readbackState,
+      };
+    });
     // The final readback — the ONLY source of the response's `analysis_result` block.
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState, analysis_ready: readbackReady,
@@ -152,7 +159,7 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); readbackResult = RESULT_BLOCK; });
+  beforeEach(() => { vi.mocked(fetch).mockClear(); runRequests = 0; rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); readbackResult = RESULT_BLOCK; });
 
   let turnSeq = 0;
   const nextTurnId = () => { turnSeq += 1; return `5d4c3b2a-1f0e-4d9c-8b7a-${String(turnSeq).padStart(12, '0')}`; };
@@ -187,6 +194,85 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     return r.json() as Body;
   };
   const carriesResult = (b: Body) => (b.blocks ?? []).some((x) => x.type === 'analysis_result');
+
+  const runOnlyPayload = (turnId: string) => ({
+    kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.',
+    chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId,
+  });
+  const runOnly = async (turnId = nextTurnId()) => {
+    const payload = runOnlyPayload(turnId);
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload });
+    expect(response.statusCode, response.body).toBe(200);
+    return { b: response.json() as Body & { narration?: { status: string; run_key: string }; _agent: { replayed?: boolean } }, turnId };
+  };
+  const RUN_DISCLOSURE = "How much each of ‘Pro subscriber base’ and ‘MRR per Pro subscriber’ counts towards ‘MRR’ is Olumi's assumption, not your stated priority. Set them to match what matters to you.";
+  const hostRunFixture = () => {
+    // Two licensed screen findings, no interpreter output; the Run's typed methods-note carrier owes a disclosure.
+    readbackResult = { ...RESULT_BLOCK, enrichment: { ...(RESULT_BLOCK.enrichment as Record<string, unknown>), inference_warnings: [
+      { code: 'GOAL_CHANCE_LICENSED', severity: 'info', message: 'Each option’s chance is licensed.', form: 'each',
+        target: { value: 20000, unit: '£ per month', comparator: 'at_least' },
+        option_ids: ['keep_pro_at_49', 'raise_pro_to_59_at_release'],
+        pct_by_option: { keep_pro_at_49: 34, raise_pro_to_59_at_release: 47 },
+        display_rounding_by_option: { keep_pro_at_49: 'whole', raise_pro_to_59_at_release: 'whole' } },
+      { code: 'GOAL_INDEX_WEIGHTS_ASSUMED', severity: 'info', message: RUN_DISCLOSURE, goal_id: 'mrr',
+        links: [{ from: 'pro_subscriber_base', to: 'mrr' }, { from: 'mrr_per_pro_subscriber', to: 'mrr' }] },
+    ] } };
+  };
+
+  it('2b-0 RED on base (P05 W-1): uninterpreted Run composes the whole ready host part, two screen findings on the face and disclosure in More detail', async () => {
+    hostRunFixture();
+    const screen = goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true);
+    expect(screen, 'positive control: two typed screen findings').toHaveLength(2);
+    const { b, turnId } = await runOnly();
+    expect(b._diagnostic_trace.fast_path).toBe('run');
+    expect(carriesResult(b)).toBe(true);
+    expect(fetch, 'the Run has no interpreter output').not.toHaveBeenCalled();
+    expect(b._answer_shape, 'base keeps host_composed whole').toBeDefined();
+    expect(b._answer_shape!.headline).toBe(RUN_RESULT_READY_TEXT);
+    expect(b._answer_shape!.bullets.length).toBeLessThanOrEqual(3);
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+    expect(b._answer_shape!.detail).toContain(RUN_DISCLOSURE);
+    for (const line of screen) {
+      expect(faceOf(b._answer_shape!)).toContain(line.chance);
+      expect(b.assistant_text.split(line.chance)).toHaveLength(2);
+    }
+    for (const part of [RUN_RESULT_READY_TEXT, RUN_DISCLOSURE]) for (const sentence of sentencesOf(part)) {
+      expect(sentenceMultiset(b.assistant_text).filter(s => s === sentence), 'each host sentence exactly once').toHaveLength(1);
+    }
+    const deliveredSentences = sentenceMultiset(b.assistant_text);
+    expect(new Set(deliveredSentences).size, 'all delivered host sentences occur once').toBe(deliveredSentences.length);
+    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
+  });
+
+  it('2b-0 REPLAY: the stored composed derivation still enters the current-Run rebuild, without another Run or interpreter', async () => {
+    hostRunFixture();
+    const { b: first, turnId } = await runOnly();
+    expect(first._answer_shape).toBeDefined();
+    expect(rows.get(turnId)?.assistant_message).toBe(deriveAnswerTextFromShape(first._answer_shape!));
+    expect(rows.get(turnId)?.assistant_message!.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    const { b: replay } = await runOnly(turnId);
+    expect(replay._agent.replayed).toBe(true);
+    expect(runRequests, 'the replay did not run again').toBe(1);
+    expect(replay.narration).toEqual(first.narration);
+    expect(replay.narration!.status).toBe('pending');
+    expect(carriesResult(replay)).toBe(true);
+    expect(replay.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('2b-0 CONTRAST: missing approve card remains host_composed, byte-identical, without a shape', async () => {
+    const { approvalChipIdFor } = await import('../approval-chips.js');
+    const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      kind: 'message', scenario_id: SCENARIO, message: 'Approve', turn_id: nextTurnId(),
+      chip: { id: approvalChipIdFor('prop_2b0000') },
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    const b = response.json() as Body;
+    expect(b._diagnostic_trace.fast_path, 'positive control: typed approve path').toBe('approve');
+    expect(b._answer_shape).toBeUndefined();
+    expect(b.assistant_text).toBe('Not saved: that proposal is no longer available, so nothing was changed — ask me to suggest it again and approve the new one.');
+    expect(fetch).not.toHaveBeenCalled();
+  });
 
   it('1. RUN: a bulleted served reply → `_answer_shape`; the text IS its derivation; headline = first sentence; the robustness caveat opens the face (#2565), then the reply’s own points in order within the 75-word face budget; nothing lost', async () => {
     const { b, turnId } = await typedRun(FOUR_BULLETS.text);

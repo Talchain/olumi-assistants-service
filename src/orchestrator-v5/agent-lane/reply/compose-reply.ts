@@ -39,6 +39,7 @@
  * Regexes: bounded runs only; every unbounded `.*` is a single class over one line (linear). Timing rows:
  * `__tests__/compose-reply.test.ts`.
  */
+import { z } from 'zod';
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
@@ -75,7 +76,7 @@ export const REPLY_SHAPE_INSTRUCTION =
 /**
  * A host line by its exact text. `ask`, `withheld_reason`, `caveat` and `evidence` must be seen without opening "More
  * detail"; `host` (a receipt, a status, CEE's own run words, the arithmetic) is one atomic part that may sit in detail (R1)
- * but is never split. A reply with no model sentence outside host parts ships as the host composed it.
+ * but is never split. In coaching with only typed host parts, the first part is the whole headline.
  */
 export type FaceObligationRole = 'ask' | 'withheld_reason' | 'caveat' | 'evidence' | 'host' | 'detail';
 /** Overlapping obligations are one unit carrying the strongest role among them. */
@@ -87,7 +88,7 @@ export interface FaceObligation { readonly role: FaceObligationRole; readonly te
 export type ReplyProfile = 'coaching' | 'method_step' | 'proposal';
 /**
  * Why a reply ships whole by the turn's identity: its profile is not `coaching`, the egress replaced the body, or no model
- * wrote words this turn (a card press, an uninterpreted Run: the host composed every line, `host_composed`).
+ * wrote words this turn (a card press, an uninterpreted Explain: `host_composed`). Uninterpreted Run uses coaching.
  */
 export type KeepWholeReason = 'method_step' | 'proposal' | 'leader_free_envelope' | 'host_composed';
 
@@ -323,7 +324,11 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const leadIn = beforeRun !== undefined && beforeRun.obligation === undefined && eligible(beforeRun) && beforeRun !== ask
     && (beforeRun.kind === 'heading' || /:["'”’)\]*]{0,4}$/.test(beforeRun.text)) ? beforeRun : undefined;
 
-  const headline = leadIn
+  // ⭐ 2b-0, P05 W-1, DL GO: no narrator units → the first typed host part is the atomic headline.
+  // Evidence/withheld/ask ranks below remain unchanged. No recognition by wording.
+  const hostHeadline = units.every((u) => u.obligation !== undefined) && units[0]!.obligation === 'host'
+    ? units[0] : undefined;
+  const headline = hostHeadline ?? leadIn
     ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u))
     ?? units.find((u) => u.kind === 'heading' && eligible(u))
     ?? (restatements.size > 0 ? units.find((u) => u.obligation !== undefined && u.obligation !== 'host') : undefined)
@@ -382,7 +387,10 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   }
 
   const detail = [renderDetail(detailUnits), split?.segment ?? ''].filter((p) => p.length > 0).join('\n\n');
-  const parsed = AnswerShapeSchema.safeParse({ headline: headline.text, bullets: faceBullets.map((u) => u.text), detail });
+  // A typed host part can contain several sentences; narrator headlines retain the single-sentence contract.
+  const schema = hostHeadline === undefined ? AnswerShapeSchema
+    : AnswerShapeSchema.extend({ headline: z.string().trim().min(1) });
+  const parsed = schema.safeParse({ headline: headline.text, bullets: faceBullets.map((u) => u.text), detail });
   if (!parsed.success) return { text, shape: null, outcome: 'kept_whole', reason: 'no_headline', measure };
   const shaped = deriveAnswerTextFromShape(parsed.data);
   // ⛔ THE INVARIANT: every sentence of the input, and nothing else, is in the derived text.

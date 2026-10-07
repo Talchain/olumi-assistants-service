@@ -4222,10 +4222,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * turn's asks, the leader gate's closing and every no-leader sentence, the Explain caveat, and required evidence (screen
      * chance lines, basis, a root treated as zero) and the withheld goal chance's reason (S-E GOALS #2742). Every other host
      * line (owed disclosures, the status/receipt, CEE's run words, the arithmetic) is ONE typed part, never split, that may
-     * go to detail (R1). The leader-free envelope, and a turn no model wrote words for (`host_composed`), ship whole.
+     * go to detail (R1). The leader-free envelope and other `host_composed` turns ship whole; an uninterpreted Run
+     * uses coaching, with its first host part whole as the headline.
      * ⛔ THE ONE LAST WRITER: nothing below this block writes `assistant_text` (pinned by `reply-composer-last-writer.test.ts`).
      */
     {
+      // ⭐ 2b-0, P05 W-1, DL GO: only the typed uninterpreted Run enters coaching without a narrator.
+      const uninterpretedRun = fastPath === 'run' && !runInterpreted && actionReply === null && !leaderFreeEnvelope;
       const reply = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
       const asks = [...decisionLines, askLine, freshScopeQuestion, ...owed].filter((l): l is string => typeof l === 'string' && l.includes('?'));
       // The withheld reason by its TYPED source, whether or not the gate had to insert it this turn (Codex r1 P1, #2748:
@@ -4260,7 +4263,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // the ask; the rest may sit under More detail (R1).
         // A host line that carries the open-questions segment is typed up to it: the segment has its own place (detail,
         // DGAI's questions toggle), and a part spanning it could not be located as one unit.
-        ...[...owed.filter((l) => l !== goalChanceOwed), narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
+        ...[...(uninterpretedRun ? [RUN_RESULT_READY_TEXT, ...decisionLines] : []), ...owed.filter((l) => l !== goalChanceOwed), narration.status, staleLine, readinessLine, runOutcomeText, breakEvenSaid]
           .map((l) => (typeof l === 'string' ? (openQuestionsSegment(l)?.lead ?? l).trim() : l))
           .filter((l): l is string => typeof l === 'string' && l !== '')
           .map((text) => ({ role: text.includes('?') ? 'ask' as const : 'host' as const, text })),
@@ -4273,7 +4276,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // profile (by identity: `widenAdd` and a made proposal), so the door's words ship whole, never reshaped.
       const profile: ReplyProfile = widenAdd !== null && madeProposal ? 'proposal'
         : fastPath === 'method' ? 'method_step' : madeProposal ? 'proposal' : 'coaching';
-      // No model wrote words this turn (a card press, an uninterpreted Run, the action bar's typed reply: S-B #2751's
+      // No model wrote words this turn (a card press, an uninterpreted Explain, the action bar's typed reply: S-B #2751's
       // can't-yet / already-waiting words): every line is the host's, shipped as composed. The bar's sidecars (`_action`)
       // are attached after this block and never pass the composer.
       const narratorModel = actionReply !== null || fastPath === 'approve' || fastPath === 'strengthen' ? null
@@ -4285,7 +4288,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graph: readbackGraph,
         profile,
         ...(leaderFreeEnvelope ? { keepWhole: 'leader_free_envelope' as const }
-          : narratorModel === null ? { keepWhole: 'host_composed' as const } : {}),
+          : narratorModel === null && !uninterpretedRun ? { keepWhole: 'host_composed' as const } : {}),
       });
       const { _answer_shape: _priorShape, ...unshaped } = wireBody as OlumiResponse & Record<string, unknown> & { _answer_shape?: unknown };
       // Written only when the composer shaped the reply or placed owed detail lines: an unshaped, unchanged reply (or a

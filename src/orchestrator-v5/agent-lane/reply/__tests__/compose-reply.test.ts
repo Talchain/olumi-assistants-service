@@ -14,12 +14,13 @@
  * Quality's 17 real gpt-5.6-terra replies (`compose/__tests__/fixtures/leader-gate-real-replies.json`). Text from outside
  * this author's head.
  */
+import { RUN_RESULT_READY_TEXT } from '../../run-explanation.js';
 import { chanceGoalDeadlineAsk, chanceGoalSentence } from '../../../goal-target/goal-kind.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
-  composeReplyShape, sentencesOf, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
+  composeReplyShape, sentencesOf, sentenceMultiset, REPLY_FACE_MAX_BULLETS, REPLY_SHAPE_INSTRUCTION,
   type ReplyComposition,
 } from '../compose-reply.js';
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
@@ -240,6 +241,24 @@ describe('obligations on a coaching reply (DL R1 + AIE): the headline, the ONE a
     expect(composeReplyShape({ text, obligations: [{ role: 'ask', text: IDENTITY }, { role: 'host', text: ARITHMETIC }] }))
       .toMatchObject({ outcome: 'kept_whole', reason: 'no_headline', text });
     expect(composeReplyShape({ text }).text, 'the control: untyped, the same words are reshaped').not.toBe(text);
+  });
+  it('2b-0: all typed host parts → the first part whole as headline; evidence on the face, other parts in detail; invariant and keepWhole contrast', () => {
+    const evidence = ['‘Keep Pro at £49’: about 34% chance of meeting your goal, in this model.',
+      '‘Raise Pro to £59 at release’: about 47% chance of meeting your goal, in this model.'];
+    const text = [RUN_RESULT_READY_TEXT, ...evidence, RECEIPT, ARITHMETIC].join('\n\n');
+    const obligations = [{ role: 'host' as const, text: RUN_RESULT_READY_TEXT },
+      ...evidence.map(text => ({ role: 'evidence' as const, text })),
+      ...[RECEIPT, ARITHMETIC].map(text => ({ role: 'host' as const, text }))];
+    const c = composeReplyShape({ text, obligations, profile: 'coaching' });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.headline).toBe(RUN_RESULT_READY_TEXT);
+    expect(c.shape!.bullets).toEqual(evidence);
+    expect(c.shape!.detail).toBe(`${RECEIPT}\n\n${ARITHMETIC}`);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    expect(c.text.startsWith(RUN_RESULT_READY_TEXT), 'stored derivation preserves replay recognition').toBe(true);
+    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset(text));
+    expect(composeReplyShape({ text, obligations, keepWhole: 'host_composed' }))
+      .toMatchObject({ text, shape: null, reason: 'host_composed' });
   });
   it('a host part is ONE unit, never split: right after the headline it still sits whole (under More detail, R1)', () => {
     const text = `The figure is recorded in the model now. ${RECEIPT} ${NARRATOR}\n\n${ASK}`;

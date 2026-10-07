@@ -5,6 +5,7 @@
  * offers the same bound control again; a deadlined interpret call is made once. Live route, the model stubbed, and a
  * store double that reads answer rows back as the real store does (snake_case columns).
  */
+import { sentenceMultiset } from '../reply/compose-reply.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -198,7 +199,8 @@ describe('result-first on retry, lost response and failed explanation (live rout
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
       const replay = (await runTurn(r1)).json() as Body;
-      expect(replay.assistant_text, `restart=${restart}`).toBe(live.assistant_text);
+      expect(replay.assistant_text.startsWith(RUN_RESULT_READY_TEXT), '2b-0 positive control: current Run rebuild').toBe(true);
+      expect(sentenceMultiset(replay.assistant_text), `restart=${restart}`).toEqual(sentenceMultiset(live.assistant_text));
       expect(replay.assistant_text).not.toMatch(/1,234,567|4,321/);
       expect(replay.narration?.run_key).not.toBe(runA.narration!.run_key);
     }
