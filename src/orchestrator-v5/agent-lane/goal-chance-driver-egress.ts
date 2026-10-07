@@ -60,12 +60,14 @@ const CONNECTOR = /^\s*(?:and|but|so|yet|while|though|although|because|which\s+m
 const STRONG_LEFT = /;|:(?!\d)|—|\s[–-]\s/g;
 const COMMA_CONNECTOR_LEFT = /,\s*(?:and|but|so|yet|while|though|although|because|which\s+means)\b/gi;
 const BARE_CONNECTOR_LEFT = /\s(?:and|but|while|so|yet)\s/gi;
-const RIGHT_STOP = /;|:(?!\d)|\s*—|\s[–-]\s|,\s*(?:and|but|so|yet|while|though|although|because)\b/i;
+const RIGHT_STOP = /;|:(?!\d)|\s*—|\s[–-]\s|,\s*(?:and|but|so|yet|while|though|although|because|which)\b/i;
 /**
  * ⛔ DL ruling (S2 review r1 #2): the edit NEVER removes a figure, a percentage, the deadline or horizon, an option
  * label or a lead-in's content. Such a span is kept and logged (`kept_unsafe`): a missed removal is the old behaviour.
  */
 const PROTECTED = /\d|%|\b(?:deadline|horizon|within|months?|weeks?|years?|quarters?)\b/i;
+/** S2 review r2 #3: a month named in the span is a date. Case-sensitive, so the modal "may" is never one. */
+const MONTH = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\b/;
 
 const capitalised = (s: string): string => s.replace(/^([^A-Za-z]*)([a-z])/, (_m, lead: string, c: string) => `${lead}${c.toUpperCase()}`);
 const words = (s: string): number => s.trim() === '' ? 0 : s.trim().split(/\s+/).length;
@@ -96,12 +98,19 @@ function cutOnce(body: string, m: RegExpExecArray, labels: readonly string[]): C
   const tailStart = m.index + m[0].length + (stop === null ? post.length : stop.index);
   const removeStart = left?.index ?? 0;
   const removed = body.slice(removeStart, tailStart);
-  if (PROTECTED.test(removed) || labels.some((l) => l !== '' && removed.includes(l))) return { kind: 'unsafe' };
+  const hasLabel = (t: string): boolean => labels.some((l) => l !== '' && t.toLowerCase().includes(l.toLowerCase()));
+  if (PROTECTED.test(removed) || MONTH.test(removed) || hasLabel(removed)) return { kind: 'unsafe' };
+  // ⛔ S2 review r2 #4: a comma-less and/while is a clause start only when a NEW subject follows it ("…not tested and the
+  // run does not …"); "because price and churn do not …" is one noun phrase, so the sentence is kept.
+  if (left !== null && left === bare && subject.trim() !== '' && !/^\s*(?:the|this|that|it|we|i|sensitivity|olumi|there|nothing|no|none)\b/i.test(subject)) return { kind: 'unsafe' };
   const head = body.slice(0, removeStart).replace(/[\s,;:—–-]+$/, '');
   const tail = body.slice(tailStart);
   const colon = left !== null && strong !== null && left.index === strong.index && body[left.index] === ':';
   // "**Sensitivity:** …" / "In short: …": a lead-in left with nothing after it goes with its line.
-  if (colon && tail.trim() === '' && words(head.replace(/\*+/g, ' ')) <= 3) return { kind: 'lead_in_empty' };
+  // ⛔ S2 review r2 #1: a lead-in holding a figure, a deadline/month or an option label is content, never dropped.
+  if (colon && tail.trim() === '' && words(head.replace(/\*+/g, ' ')) <= 3) return PROTECTED.test(head) || MONTH.test(head) || hasLabel(head) ? { kind: 'unsafe' } : { kind: 'lead_in_empty' };
+  // S2 review r2 #5: with nothing before the claim, a ", which …" tail would dangle ("Which limits …"): keep it.
+  if (head.trim() === '' && /^\s*,\s*which\b/i.test(tail)) return { kind: 'unsafe' };
   if (head.trim() === '') return { kind: 'cut', body: capitalised(tail.replace(/^[\s,;:—–-]+/, '').replace(CONNECTOR, '')) };
   return { kind: 'cut', body: `${head}${tail}` };
 }

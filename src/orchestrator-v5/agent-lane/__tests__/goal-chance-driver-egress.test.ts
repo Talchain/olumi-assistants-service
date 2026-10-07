@@ -253,3 +253,33 @@ describe('the provisional view’s reasoning, shown beneath the reply, is held t
     expect(out._agent).toBe(PROD._agent);
   });
 });
+
+describe('S2 review r2 (DL, exact fixes): each probe RED at de8a7f92 is kept + logged, or cut cleanly', () => {
+  const LABELS = ['Raise prices 10%', 'Launch starter tier', 'Keep pricing as it is'];
+  it.each([
+    ['#1 a lead-in naming an option (numbered)', '1. Raise prices 10%: the run does not establish which assumption matters most.'],
+    ['#1 a bold lead-in naming an option', '- **Launch starter tier:** the run does not establish which assumption matters most.'],
+    ['#1 a lead-in holding a month and figure', 'By month 9: the run does not establish which assumption matters most.'],
+    ['#1 a lead-in holding a chance', 'Chance 46%: the run does not establish which assumption matters most.'],
+    ['#1 a quoted option lead-in', '‘Launch starter tier’: the run does not establish which assumption matters most.'],
+    ['#2 an option label in another case', 'The run does not establish which assumption matters most for launch starter tier.'],
+    ['#3 a month name', 'The run does not establish which assumption matters most by March.'],
+    ['#4 noun "and" in the subject', 'The model’s estimates for price and churn have not established which assumption matters most.'],
+    ['#4 "because X and Y"', 'Robustness is low because price and churn do not establish which assumption matters most.'],
+    ['#4 "figures for X and Y"', 'Olumi’s own figures for starter subscribers and starter price do not show which assumption matters most.'],
+    ['#4 "runs on X and Y"', 'The sensitivity runs on price and churn could not identify which factor matters most.'],
+    ['#4 "while" inside the subject', 'The test run while you were away did not establish which assumption matters most.'],
+    ['#5 a ", which" tail with nothing before the claim', 'The run does not establish which assumption matters most, which limits what we can say.'],
+  ])('KEPT + logged: %s', (_name, input) => {
+    const out = removeDriverAbsenceClaims(input, LABELS);
+    expect(out).toEqual({ text: input, removed: 0, keptUnsafe: 1 });
+  });
+  it('#5 ", which" closes the claim when a clause stands before it', () => {
+    const out = removeDriverAbsenceClaims('Sensitivity was not measured, so the run does not establish which assumption matters most, which limits what we can say.');
+    expect(out.text).toBe('Sensitivity was not measured, which limits what we can say.');
+    expectWellFormed(out.text);
+  });
+  it('#3 CONTROL: the modal "may" is not a month (lower case)', () => {
+    expect(removeDriverAbsenceClaims('Prices may rise; the run does not establish which assumption matters most.').text).toBe('Prices may rise.');
+  });
+});
