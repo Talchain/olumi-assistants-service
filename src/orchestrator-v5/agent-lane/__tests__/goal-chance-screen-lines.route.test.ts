@@ -2,22 +2,26 @@
  * S4c THROUGH THE ROUTE: on a Run turn the screen's range line is in the reply (Wave B4: both Run narrations said "only as
  * a range" with no figure). The REAL agent route, a scripted OpenAI `fetch` (no provider is contacted), and the SERVED
  * b3-2 readback (`waveB3-unseen2-7addf05-readback-run1.json`, keys untouched). The expected line is the one the UI drew on
- * that Run (`waveB-screen-range-lines-20261007.json`, source unseen-b3-2). Harness copied from the S2e route test.
+ * that Run (`waveB-screen-chance-lines-20261007.json`, source unseen-b3-2). Harness copied from the S2e route test.
  */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 type Json = Record<string, any>;
-const READ = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
+const READ_B3 = (JSON.parse(readFileSync(new URL('./fixtures/waveB3-unseen2-7addf05-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
+/** B5 T1b on 3fce64f: three point lines on the `each` licence, leader withheld (near tie); the gate deleted the chat's copy. */
+const READ_T1B = (JSON.parse(readFileSync(new URL('./fixtures/waveB5-t1b-3fce64f-readback-run1.json', import.meta.url), 'utf8')) as { j: Json }).j;
+let READ: Json = READ_B3;
 const VIEW = {
   view: 'Before comparing, size how strongly running a fourth shop changes its monthly operating profit.',
   reasoning: 'That relationship remains unsized.',
   confirm_step: 'Tell me roughly how much monthly profit the fourth shop would add, and I can propose it.',
 };
 const SCENARIO = '7a5e4d3c-2b1a-4d0e-9f8a-7b6c5d4e3f2a';
-const SCREEN = (JSON.parse(readFileSync(new URL('./fixtures/waveB-screen-range-lines-20261007.json', import.meta.url), 'utf8')) as { line: string; source: string }[])
-  .filter((s) => s.source.includes('/unseen-b3-2/')).map((s) => s.line);
+const ALL_SCREEN = JSON.parse(readFileSync(new URL('./fixtures/waveB-screen-chance-lines-20261007.json', import.meta.url), 'utf8')) as { line: string; source: string }[];
+const SCREEN = ALL_SCREEN.filter((s) => s.source.includes('/unseen-b3-2/')).map((s) => s.line);
+const SCREEN_T1B = ALL_SCREEN.filter((s) => s.source.includes('/t1b-b5-1/')).map((s) => s.line);
 let analysisResult: Json = READ.analysis_result;
 
 const rows = new Map<string, { id: string; turn_id: string; request_hash: string }>();
@@ -72,7 +76,8 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); });
+  beforeEach(() => { rows.clear(); READ = READ_B3; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); });
+  const useT1b = (): void => { READ = READ_T1B; analysisResult = JSON.parse(JSON.stringify(READ.analysis_result)); };
 
   let seq = 0;
   const turn = async (outputs: Record<string, unknown>[][], message: string): Promise<Body> => {
@@ -112,6 +117,21 @@ describe('S4c through the route: the screen’s range line is in the Run narrati
     analysisResult.enrichment.inference_warnings = analysisResult.enrichment.inference_warnings.filter((w: Json) => w.code !== 'GOAL_CHANCE_RANGE');
     const b = await turn(run('The analysis ran, but it cannot put an option forward yet.'), 'Run it');
     expect(b.assistant_text).not.toContain('between about');
+  });
+
+  it('POINTS, RED at base (B5 T1b readback): a Run reply whose figures are gone ends up with the screen’s three lines, once each', async () => {
+    useT1b();
+    expect(READ.analysis_state.leader_claim.permitted).toBe(false);
+    expect(SCREEN_T1B).toHaveLength(3);
+    const b = await turn(run('No single option can be put forward: the comparison is a near tie.\n\nFor reaching at least £126,000 monthly recurring revenue, on current information:'), 'Run it');
+    for (const line of SCREEN_T1B) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
+    expect(b.assistant_text.indexOf('on current information:')).toBeLessThan(b.assistant_text.indexOf(SCREEN_T1B[0]!));
+  });
+
+  it('POINTS through the REAL leader gate: the Agent writes the screen’s lines, the gate deletes them, and the user still reads each once', async () => {
+    useT1b();
+    const b = await turn(run(`For reaching at least £126,000 monthly recurring revenue, on current information:\n\n${SCREEN_T1B.join(' ')}`), 'Run it');
+    for (const line of SCREEN_T1B) expect(count(b.assistant_text, line), b.assistant_text).toBe(1);
   });
 
   it('CONTROL: a turn that ran nothing adds nothing', async () => {

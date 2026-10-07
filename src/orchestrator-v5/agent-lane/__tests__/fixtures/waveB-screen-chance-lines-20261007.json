@@ -18,5 +18,17 @@
  {
   "line": "‘Wholesale to Offices’: between less than 1% and 5% chance of meeting your goal, in this model. Of the links not sized yet, it depends most on how strongly ‘Wholesale sales effort’ affects ‘Wholesale incremental monthly gross profit’, which isn’t sized in the model yet.",
   "source": "acceptance-pd/output/waveB-s4-20261007/unseen-b4-1/STATE.json"
+ },
+ {
+  "line": "‘Raise prices 10%’: about 47% chance of meeting your goal, in this model. It rests most on how strongly ‘Price rise’ affects ‘monthly recurring revenue’, at the size you set: if that effect is weaker than that, the chance falls. How sure are you of that size?",
+  "source": "acceptance-pd/output/waveB-s4-20261007/t1b-b5-1/STATE.json"
+ },
+ {
+  "line": "‘Launch £49 starter tier’: about 34% chance of meeting your goal, in this model. It rests most on how strongly ‘Starter tier monthly price’ affects ‘New starter subscribers’, at the size you set: if that effect is weaker than that, the chance falls. How sure are you of that size?",
+  "source": "acceptance-pd/output/waveB-s4-20261007/t1b-b5-1/STATE.json"
+ },
+ {
+  "line": "‘Keep pricing as it is’: less than 1% chance of meeting your goal, in this model.",
+  "source": "acceptance-pd/output/waveB-s4-20261007/t1b-b5-1/STATE.json"
  }
 ]
