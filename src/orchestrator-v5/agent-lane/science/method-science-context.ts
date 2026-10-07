@@ -366,7 +366,28 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
     && (selectedPlan !== null || s['run.leader_licensed'] === false) && input.user_selected_option_id == null
     && s['model.non_sq_option_ids'].length >= 2;
   const plan = decision ? null : selectedPlan;
-  const items = decision ? premortemItems(s, s['model.non_sq_option_ids'], input.graph) : planItems;
+  let items = decision ? premortemItems(s, s['model.non_sq_option_ids'], input.graph) : planItems;
+  // A completed decision may have user-sized links but CEE-inferred starting values with missing extraction metadata.
+  // Keep the existing union/priority first; only its empty decision branch can use these stored, unaccepted figures.
+  // Never reinterpret unknown authorship alone as an estimate, or widen a licensed plan / explicit option pick.
+  if (decision && items.length === 0 && s['run.kind'] === 'complete_current') {
+    const pathNodes = new Set(s['model.goal_path_links']
+      .filter(l => l.option_ids.some(id => s['model.non_sq_option_ids'].includes(id)))
+      .flatMap(l => l.link_id.split('->')));
+    const rawNodes = (input.graph as { nodes?: unknown } | null)?.nodes;
+    const nodes = Array.isArray(rawNodes) ? rawNodes : [];
+    items = s['model.goal_path_factors'].filter(f => {
+      if (f.value_authorship !== 'unknown' || !pathNodes.has(f.factor_id)) return false;
+      const node = nodes.find(n => (n as { id?: unknown } | null)?.id === f.factor_id) as {
+        extractionType?: unknown;
+        observed_state?: { source?: unknown; extractionType?: unknown; value?: unknown; reviewed_by_user?: unknown };
+      } | undefined;
+      const os = node?.observed_state;
+      return os?.source === 'cee_inference' && os.extractionType === undefined && node?.extractionType === undefined
+        && os.reviewed_by_user === undefined && typeof os.value === 'number' && Number.isFinite(os.value);
+    }).sort((a, b) => a.goal_distance - b.goal_distance || byCodepoint(a.factor_id, b.factor_id))
+      .map(f => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: 'propose_assumptions' }));
+  }
   const { citation, reason } = adjudicate(input, plan, items);
   return {
     method: input.method,
