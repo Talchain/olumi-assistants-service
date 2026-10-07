@@ -2011,6 +2011,12 @@ export function createAgentCapabilities(
      */
     readonly readLeaderStanding?: (scenarioId: string) => Promise<LeaderStanding | null>;
     /**
+     * Whether a search control quoting this query would survive the final egress gate, read by the ROUTE from its own
+     * readback through the gate's own chip rule (`controlSurvivesLeaderGate`). Absent ⇒ every sendable query is accepted.
+     * Throwing ⇒ the dispatcher refuses the offer (fail closed): a control that may not arrive is never promised.
+     */
+    readonly researchControlShowable?: (scenarioId: string, query: string) => Promise<boolean>;
+    /**
      * ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door, reached in-process (`holdAddRiskInProcess`):
      * ONE `gmh_` hold pinned to the base hash, confirmed by the product's own held resume. Absent ⇒ unavailable.
      */
@@ -8469,6 +8475,13 @@ export function createAgentCapabilities(
       return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
     },
 
+    /**
+     * Whether a search control quoting this query would reach the user: the route's read of the final egress gate's own
+     * chip rule. The dispatcher refuses the offer when this throws (`dispatchTool`, fail closed).
+     */
+    ...(opts.researchControlShowable !== undefined ? {
+      researchControlShowable: (ctx: AgentToolContext, query: string): Promise<boolean> => opts.researchControlShowable!(ctx.scenario_id, query),
+    } : {}),
     /**
      * ⭐ C5 — THE AGENT'S PROVISIONAL VIEW (Paul, DL #70 5855324470). Read-only, and never a claim about the analysis:
      * it is accepted only while the current analysis WITHHOLDS its leader, and the route renders it after the leader
