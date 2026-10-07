@@ -75,7 +75,7 @@ import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js'
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, commitOptionStatusInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
-import { declineChipIdFor, declinedProposalOf, heldChangeName, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
+import { declinedProposalOf, heldChangeName, isHeldProposal, heldProposalId, proposalRecord, agentProposalOf, proposalFieldsWire, type ProposalRecord } from '../orchestrator-v5/agent-lane/proposal-object/record.js';
 import { amendAgentProposal, parseProposalEdits, proposalEditsDigest, readUserEdits } from '../orchestrator-v5/agent-lane/proposal-object/amend.js';
 import { refreshedHold, reconcileHeldProposals } from '../orchestrator-v5/agent-lane/proposal-object/lifecycle.js';
 import { editsRefusedSentence, heldDeclineSentence, heldLapseSentence, userEditsReceipt } from '../orchestrator-v5/agent-lane/proposal-object/reply.js';
@@ -3603,19 +3603,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       approvalCalls,
       (id) => ({ proposal: proposals.get(id), result: result.tool_results.find((r) => r.proposal_id === id) }),
     );
-    /*
-     * ⭐ S-D (DL 7 Oct, Canvas's served capture #2614): the PROPOSING turn offers "Not now" too, beside approve and
-     * "Change something first", so a held proposal can be declined from the first moment, not only from the next reply.
-     * Its exact card words (`decline_action`). Never on a method's terminal turn, whose controls are the method's own.
-     */
-    if (fastPath !== 'method') {
-      const proposedId = approvals.map((a) => typedApprovalOf({ chip: { id: a.id } })).find((id): id is string => id !== undefined);
-      const declineId = proposedId === undefined ? undefined : declineChipIdFor(proposedId);
-      const amendAt = approvals.findIndex((a) => a.id === AMEND_CHIP.id);
-      if (declineId !== undefined && declinedProposalOf(declineId) !== undefined && amendAt >= 0 && !approvals.some((a) => a.id === declineId)) {
-        approvals.splice(amendAt + 1, 0, { id: declineId, label: 'Not now', message: 'Not now.' });
-      }
-    }
     // A first analysis the model could not run offers its repair: the approve chip when the Agent
     // proposed the missing values this turn, otherwise the next-step chip.
     const firstAnalysisBlocked = fa !== undefined && !fa.ran && (fa.reason === 'not_admissible' || fa.reason === 'refused')
@@ -3738,6 +3725,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (r !== undefined) heldRecords.push(r);
     }
     const offeredRecord = heldRecords.find(r => r.approve_action.id === offeredApprove?.id);
+    // ⭐ S-D (DL 7 Oct, Canvas's served capture #2614): the PROPOSING turn offers "Not now" too, so a held proposal can be
+    // declined from the first moment, not only from the next reply (the record's own `decline_action`).
     if (offeredRecord !== undefined) offeredNow.push(offeredRecord.decline_action as OfferedAction);
 
     /**
