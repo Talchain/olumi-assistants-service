@@ -7,7 +7,39 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.79.0.tgz` ← **THE CURRENT PIN** (SD-1 Slice R on the agent lane: READER first; DL ruling #87 option A, 6 Oct)
+### `talchain-schemas-0.81.0.tgz` ← **THE CURRENT PIN** (Compare-chance chain, CEE #2741; DL #87 6035414740, 7 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.81.0/6ca5c614caa32c47f249717f373e5ca75e5616ff`; registry gitHead
+`581a825b9fa8b01a5c77558823e8a041c9ca7683` = tag `v0.81.0` (olumi-schemas `main` after #92, DL merge). **847,240 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  6ca5c614caa32c47f249717f373e5ca75e5616ff   (the registry download id)
+integrity (sha512) sha512-uPDNZyTsfhjhpTo+ertGa7Hg693e2unCY7NNpNV+Hno8QR+61oyZwpmE2ZuGkdyHRWGcljv65kJSAu5mHpVU6w==
+sha256             4e80994aa1b4356b24cba6d17ea11fb7637ac7a7516e051f44c4e197dd074945   (the .sha256 sidecar)
+```
+
+0.81.0 adds the optional strict `run_delta.goal_chances[]` (`{option_id, prior, current}`, each side `point | range | withheld |
+not_recorded`, figures only). ⛔ ORDER: DGAI parses `run_delta` strictly, so DGAI #2597 (0.81 pin) is SERVED before this CEE
+emits `goal_chances` (an old DGAI pin drops the whole block), and a production cut carries both.
+
+### `talchain-schemas-0.80.0.tgz` (historical — no longer vendored as of 0.81.0) (keep-list: `dominant_factor` + `flip_thresholds_status(_reason)`; a8's carry, opened by 0a5c9f per DL 0fd71f, 7 Oct)
+
+**Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
+`https://npm.pkg.github.com/download/@talchain/schemas/0.80.0/d53e6524c5464c7b82b54abc7df3d258c67c65fd`; registry gitHead
+`5a538ef40f8771708ca5d1fc4746ed68c2aada8b` (olumi-schemas `main` after #91, DL merge). **842,252 bytes.** Verified, all exact:
+
+```
+npm shasum (sha1)  d53e6524c5464c7b82b54abc7df3d258c67c65fd   (the registry download id)
+integrity (sha512) sha512-Aql/3HcFITmeJ2vO6sh7Zv7O24mhjX+zIqhB4RmcXnumTdk4un5i6FBmznP9LknrN8dlmBe6TyFIbExZlMvNuQ==
+sha256             bc3fbe9b75fc1a2ba2eb0549a5fe78d9807411f1191cf0f1179d6c0cb74206fa   (the .sha256 sidecar)
+```
+
+0.80.0 adds `dominant_factor`, `flip_thresholds_status` and `flip_thresholds_status_reason` to `CEE_UI_ENRICHMENT_KEEP_LIST`
+(19 → 22 keys); `compose.ts` P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP carries the same three in this PR (the keep-list drift bolt
+in `tests/contract/cee-to-ui.contract.test.ts` pins them equal). Additive and optional: older UI pins carry them unread.
+
+### `talchain-schemas-0.79.0.tgz` (historical — no longer vendored as of 0.80.0) (SD-1 Slice R on the agent lane: READER first; DL ruling #87 option A, 6 Oct)
 
 **Provenance: THE PUBLISHED REGISTRY ARTEFACT ITSELF, not a local re-pack.** Downloaded from
 `https://npm.pkg.github.com/download/@talchain/schemas/0.79.0/fad0e0ad5476e89a56a9a33de7f8adf8c57cb573`; registry gitHead

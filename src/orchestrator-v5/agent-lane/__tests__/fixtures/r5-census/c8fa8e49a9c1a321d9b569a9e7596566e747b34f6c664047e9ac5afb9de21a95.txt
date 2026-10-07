@@ -1,0 +1,9 @@
+From bakery-brief.docx:
+[Paragraph 1] Should we open a second bakery shop in Leeds or expand home delivery from our current York shop?
+[Paragraph 2] We want monthly profit to rise by at least £5,000 within twelve months.
+[Paragraph 3] Our budget is £60,000 and we currently have 12 staff.
+
+From bakery-costs.pdf:
+[Page 1] Delivery orders grew 30% last year; walk-in sales were flat.
+A Leeds lease costs about £45,000 to fit out plus £3,000 rent a month.
+Delivery expansion needs two vans at £18,000 each and four drivers.

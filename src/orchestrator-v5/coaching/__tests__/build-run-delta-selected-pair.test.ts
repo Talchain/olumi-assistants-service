@@ -23,8 +23,18 @@ const run = (selectedPair: SelectedRunPair, priorFacts = facts) =>
 describe('selected pair preserves chronological callers and historical truth', () => {
   it('retains the default present, withheld and refused fixture bytes', () => {
     expect(control.baseline).toBe('d928fbf1ade6c5119618f87478c2da1fb4aec945');
-    expect(buildRunDelta({ priorFacts: PRESENT_PAIR, mayNameLeadingOption: true })).toStrictEqual(control.present);
-    expect(buildRunDelta({ priorFacts: PRESENT_PAIR, mayNameLeadingOption: false })).toStrictEqual(control.withheld);
+    // ⭐ Compare-chance (schemas 0.81.0): the builder now also carries `goal_chances`. The CAPTURED control stays untouched;
+    // every other byte must still equal it, and the added rows are pinned on their own: these fixtures carry no goal-chance
+    // licence, so each option both Runs compared is `not_recorded` on both sides (never re-licensed from a raw figure).
+    const notRecorded = ['opt-a', 'opt-b'].map((option_id) => ({ option_id, prior: { kind: 'not_recorded' }, current: { kind: 'not_recorded' } }));
+    const withoutGoalChances = (built: ReturnType<typeof buildRunDelta>) => {
+      if (built.kind !== 'ok') return built;
+      const { goal_chances: goalChances, ...delta } = built.delta;
+      expect(goalChances).toStrictEqual(notRecorded);
+      return { ...built, delta };
+    };
+    expect(withoutGoalChances(buildRunDelta({ priorFacts: PRESENT_PAIR, mayNameLeadingOption: true }))).toStrictEqual(control.present);
+    expect(withoutGoalChances(buildRunDelta({ priorFacts: PRESENT_PAIR, mayNameLeadingOption: false }))).toStrictEqual(control.withheld);
     expect(buildRunDelta({ priorFacts: REFUSED_PAIR, mayNameLeadingOption: true })).toStrictEqual(control.refused);
   });
 
