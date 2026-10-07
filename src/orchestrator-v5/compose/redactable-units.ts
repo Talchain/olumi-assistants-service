@@ -183,8 +183,7 @@ export function replaceAssertingUnits(
         // The collapsed unit's OWN trailing whitespace has to take over as the
         // pending separator, exactly as the first replaced unit's did — the run
         // is one replacement, so it ends where the LAST collapsed unit ended.
-        const collapsedTrailing = /\s+$/.exec(unit);
-        pendingSeparator = collapsedTrailing !== null ? collapsedTrailing[0] : '';
+        pendingSeparator = unit.slice(unit.trimEnd().length);
         continue;
       }
       out.push(pendingSeparator);
@@ -193,8 +192,7 @@ export function replaceAssertingUnits(
       // The unit's OWN trailing whitespace rides with the replacement: sentence
       // units carry the space that followed their full stop, and losing it
       // would run the replacement straight into the next sentence.
-      const trailing = /\s+$/.exec(unit);
-      if (trailing !== null) pendingSeparator = trailing[0];
+      pendingSeparator = unit.slice(unit.trimEnd().length);
       lastWasReplacement = true;
       continue;
     }

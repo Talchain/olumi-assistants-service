@@ -178,10 +178,10 @@
  * longer ships".
  *
  * ── The seam's own exclusions (structural, not the ceiling above) ──
- *     - `blocks[].{title,body,signal,summary,…}` and every enrichment blob:
- *       PRODUCER-owned (`compose/withheld-claim-projection.ts`). A second,
- *       wire-level structured projection is a second authority over one question
- *       (trap #12). The alarm keeps observing them.
+ *     - Block prose and enrichment use the producer's structured projection
+ *       at this same wire gate (see the BLOCK SURFACE section below).
+ *       Robustness reasons and their review-card/body copies also use the
+ *       shared prose classifier here, including unnamed leader references.
  *     - STRUCTURED key designations (`leading_option_id`, …): no prose "unit" to
  *       be surgical about; the producer already nulls them.
  *     - `_reasoning`: verbatim, ruled to bypass the cage (ROADMAP 1.42).
@@ -643,6 +643,16 @@ function projectBlocksForWithheldClaim(
 ): { blocks: unknown[]; mode: WireEnforcementMode } | null {
   if (!Array.isArray(blocks) || blocks.length === 0) return null;
 
+  // A copied reason may be carried by a different block kind. Read originals
+  // before projection so block order cannot decide whether its copy is covered.
+  const robustnessReasons = new Set<string>();
+  for (const block of blocks) {
+    const reason = (block as {
+      enrichment?: { robustness?: { display_verdict_reason?: unknown } };
+    } | null)?.enrichment?.robustness?.display_verdict_reason;
+    if (typeof reason === 'string') robustnessReasons.add(reason);
+  }
+
   let changed = false;
   // The LOUDEST mode wins the report, same rule as the prose fields.
   let mode: WireEnforcementMode = 'surgical';
@@ -696,9 +706,19 @@ function projectBlocksForWithheldClaim(
     //     producer's own projection, which keeps the fragility science verbatim
     //     and drops only the identities.
     if (source.enrichment !== undefined && source.enrichment !== null) {
-      const enrichment = projectTransportEnrichmentForWithheldClaim(
+      let enrichment = projectTransportEnrichmentForWithheldClaim(
         source.enrichment as Record<string, unknown>,
       );
+      const robustness = enrichment?.robustness;
+      if (robustness !== null && typeof robustness === 'object' && !Array.isArray(robustness)) {
+        const fields = robustness as Record<string, unknown>;
+        if (typeof fields.display_verdict_reason === 'string') {
+          const reason = projectRobustnessProse(fields.display_verdict_reason, roster);
+          if (reason !== null) {
+            enrichment = { ...enrichment, robustness: { ...fields, display_verdict_reason: reason } };
+          }
+        }
+      }
       if (enrichment !== source.enrichment) {
         if (enrichment === undefined) {
           next ??= { ...source };
@@ -710,15 +730,21 @@ function projectBlocksForWithheldClaim(
       }
     }
 
-    // (4) BLOCK PROSE — the same surgical projection, the same name-gate, the
-    //     same escalation ladder as `assistant_text`. Skipped without a roster:
-    //     with no option names there is no designation this reader can
-    //     establish, and deleting prose on a guess is the over-suppression this
-    //     module weights equally with the leak.
+    // (4) BLOCK PROSE — robustness cards and exact reason copies are known
+    //     analytical surfaces, including unnamed leader references. Other
+    //     prose keeps assistant_text's name-gate and escalation ladder;
+    //     without a roster it cannot establish a designation.
+    if (typeof source.body === 'string' && (
+      (source.type === 'review_card' && source.card_kind === 'robustness')
+      || robustnessReasons.has(source.body)
+    )) {
+      const body = projectRobustnessProse(source.body, roster);
+      if (body !== null) write('body', body);
+    }
     if (roster.length > 0) {
       let omitChip = false;
       for (const field of BLOCK_PROSE_FIELDS) {
-        const value = source[field];
+        const value = field === 'body' ? (next ?? source)[field] : source[field];
         if (typeof value !== 'string') continue;
         const result = projectField(value, roster);
         if (result === null) continue;
@@ -737,6 +763,79 @@ function projectBlocksForWithheldClaim(
   });
 
   return changed ? { blocks: projected, mode } : null;
+}
+
+/**
+ * These producer surfaces describe the Run's comparison, so an unnamed
+ * "most-supported option" is already a leader referent. The existing wire
+ * permission (ultimately readMayNameLeadingOptionFromResult) owns the gate;
+ * no roster is needed to establish that this particular prose is analytical.
+ * Keep adjacent science clauses, using the same classifier and sentence
+ * surgery as other wire prose. The punctuation split has no whitespace scan.
+ */
+function projectRobustnessProse(value: string, roster: readonly string[]): string | null {
+  const context = { optionLabels: roster };
+  const asserts = (text: string): boolean => textAssertsLeadingOption(text, context);
+  if (!asserts(value)) return null;
+  const clauses = value.split(/([,;])/);
+  // Bound classifier calls on untyped transport prose. Over-budget fields
+  // fail closed rather than spending one classifier pass per separator.
+  if (Math.ceil(clauses.length / 2) > 128) return WIRE_WITHHELD_LEADER_REPLACEMENT;
+
+  const neutralised = clauses.map((clause, index) => index % 2 === 1 ? clause :
+    splitIntoRedactableUnits(clause).map((unit) => {
+      // PLoT RESULT_CHANGE_PHRASE at cddc7560f3350238685b6561fb0f83295f1fe8cb.
+      // Replace the referent in place, preserving its same-clause science.
+      // A copular designation (including a rosterless named subject) still
+      // needs clause replacement; it is not an unnamed result reference.
+      if (textNamesAnOption(unit, roster)
+        || /\b(?:is|are|was|were|remains?)\s+the\s+most[-\s]+supported\s+option\b/i.test(unit)) return unit;
+      return unit.replace(/\b(?:the\s+)?most[-\s]+supported\s+option\b/gi, 'the result');
+    }).join(''));
+  const borrowsName = textNamesAnOption(value, roster) && neutralised.flatMap(splitIntoRedactableUnits).some(
+    (clause) => asserts(clause) && !assertedLeaderNamesItsOwnSubject(clause, context),
+  );
+  const project = (unit: string): boolean => asserts(unit) || (borrowsName && textNamesAnOption(unit, roster));
+  const out: string[] = [];
+  let previousReplaced = false;
+  for (let index = 0; index < neutralised.length; index += 2) {
+    const clause = neutralised[index];
+    let text = replaceAssertingUnits(clause, project, WIRE_WITHHELD_LEADER_REPLACEMENT);
+    const replaced = text !== clause;
+    const onlyReplacement = replaced && text.trim() === WIRE_WITHHELD_LEADER_REPLACEMENT;
+    if (onlyReplacement && previousReplaced) {
+      // Collapse a contiguous run across comma/semicolon separators as well
+      // as across sentence units. Keep the LAST run's following separator.
+      out.pop();
+      out.pop();
+    }
+    if (replaced) {
+      const leadingSource = out.length === 0 ? value : clause;
+      const leading = leadingSource.slice(0, leadingSource.length - leadingSource.trimStart().length);
+      text = leading + text.trimStart();
+      // A replacement after a surviving comma is part of that sentence.
+      if (out.length > 0 && /^[,;]$/.test(out[out.length - 1])) {
+        text = text.replace(/^\s*No single/, ' no single');
+      }
+      // A substituted clause before a comma/semicolon continues the sentence.
+      // Remove only the replacement's full stop; retain the original separator.
+      if (index + 1 < neutralised.length && text.trimEnd().toLowerCase().endsWith(WIRE_WITHHELD_LEADER_REPLACEMENT.toLowerCase())) {
+        const stop = text.lastIndexOf('.');
+        text = text.slice(0, stop) + text.slice(stop + 1);
+      }
+    }
+    out.push(text);
+    if (index + 1 < neutralised.length) out.push(neutralised[index + 1]);
+    previousReplaced = onlyReplacement;
+  }
+  const projected = out.join('');
+  // Appositive fragments, dangling separators or repeated refusals have no
+  // clean clause surgery. Use one complete, nonempty sentence instead.
+  if (asserts(projected) || /[,;]\s*$|[,;]\s*(?:is|are|was|were)\b/i.test(projected)
+    || (projected.match(/no single option can be put forward yet/gi)?.length ?? 0) > 1) {
+    return WIRE_WITHHELD_LEADER_REPLACEMENT;
+  }
+  return projected;
 }
 
 /**

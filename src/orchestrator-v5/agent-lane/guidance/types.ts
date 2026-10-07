@@ -77,6 +77,8 @@ export interface GuidanceSignals {
   readonly 'user.selected_option_id'?: string | null;
   /** False for an option-naming press whose pick is no longer valid; absent means no option was named. */
   readonly 'user.generic_method_press'?: boolean;
+  /** This turn's explicit worksheet chip; only agent-premortem-plan:<12-hex> changes method plan precedence. */
+  readonly 'user.premortem_worksheet_press_id'?: string;
 }
 
 export interface RenderedCopy { readonly title: string | null; readonly why: string | null; readonly question: string | null }
