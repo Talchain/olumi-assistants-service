@@ -111,7 +111,9 @@ describe('AIQ 5925678816 (B): the words follow the link — direction, money, co
 describe('≤1 ask, and only for the link the user named (CODEX collision class 5925779142)', () => {
   it('anything at rest already asks (the model, or a host line) → no ask; a question behind the toggle does not count', () => {
     expect(linkSizeAsk(FX.graph, at(`${FX.model_text} Which matters more?`))).toBeNull();
-    const folded = `${FX.model_text} The model was saved. Questions this model does not answer yet: Does it arrive in time?`;
+    const folded = `${FX.model_text} Questions this model does not answer yet: Does it arrive in time?`;
+    expect(folded).not.toMatch(/\bsaved\b/i);
+    expect(folded).toContain('Questions this model does not answer yet:');
     expect(textAtRest(folded)).not.toMatch(/\?/);
     expect(linkSizeAsk(FX.graph, at(folded))).toBe(ASK);
   });

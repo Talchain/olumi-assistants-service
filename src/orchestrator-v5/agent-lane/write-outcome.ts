@@ -346,11 +346,14 @@ export function openQuestionsForReply(r: ToolResult | undefined): string[] {
 }
 
 /**
+ * ⛔ THE SAVE INDICATOR OWNS "SAVED" (P50, Paul's audit #14; DGAI #2609): a build line never says the model was saved or
+ * its version. What remains is what approval changes, plus the build's own disclosures.
+ *
  * ⛔ A SAVED BUILD MUST NOT READ AS SAVED FIGURES (Paul's test on served `d5d5839`, #69 5832088673).
  * The reply said "These are starting assumptions, not measurements. Shall I record them?" and Olumi
  * then said "The model was saved as version 1." The build really was saved; the figures were not —
  * but the line read as if they had been recorded before he agreed. So when the SAME turn leaves a
- * proposal awaiting approval after the build, the line says what was saved and what was not.
+ * proposal awaiting approval after the build, the line says what approval changes.
  *
  * Derived from the turn's own tool results by the approve chip's own rule (`proposalsAwaitingApproval`),
  * never from the model's prose. An authorisation refused before it named any proposal (a call withheld
@@ -377,18 +380,13 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
     const vs = typeof v === 'number' ? ` (version ${v})` : '';
     if (r.ok === true && r.replayed === true) return `This model had already been built${vs}; nothing was built twice.`;
     if (r.ok === true && r.mutated === true) {
-      const at = typeof v === 'number' ? ` as version ${v}` : '';
-      const saved = pending === null
-        ? `The model was saved${at}.`
-        // ⛔ MG sweep (#70 5851155478 b, DL 5851162511 item 3): "The figures above are not recorded until you approve
-        // them" was FALSE on Paul's path — Olumi's 300 subscribers and 7% churn were already saved and run on. Say what
-        // is saved (Olumi's estimates, beside the user's own figures) and what approval changes (they become the user's
-        // starting assumptions) — true whether a proposed figure is already in the model or not yet.
-        : `I saved the model I drafted${at}. ${pending === 'figures'
-          // F3 (DL 5851710093): the goal clause outranks this line, so it says the same two truths in fewer words.
-          ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
-          : 'What I proposed above is not made until you approve it.'}`;
-      return `${saved}${leftOutLine(r)}${contextFactorsLine(r)}${openQuestionsLine(r)}`;
+      // MG sweep (#70 5851155478 b; DL 5851162511 item 3): say what approval changes (Olumi's estimates become the user's
+      // starting assumptions), true whether a proposed figure is already in the model or not. F3 (DL 5851710093): short.
+      const approval = pending === null ? '' : pending === 'figures'
+        ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
+        : 'What I proposed above is not made until you approve it.';
+      return [approval, leftOutLine(r), contextFactorsLine(r), openQuestionsLine(r)]
+        .map((line) => line.trim()).filter((line) => line !== '').join(' ');
     }
     const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
     if (unconfirmed !== undefined) return unconfirmed;
@@ -481,7 +479,7 @@ export function narrateWriteOutcome(
   const pending = awaitingApproval(toolCalls, toolResults);
   const lines = writes.map((w) => statusLine(w.name, w.result, pending, opts.versioned ?? true));
   const status = lines.length > 0
-    ? lines.join(' ')
+    ? lines.map((line) => line.trim()).filter((line) => line !== '').join(' ') || null
     : stripped.length > 0 ? 'Nothing was saved this turn.' : null;
   return { text: out, status, stripped };
 }
