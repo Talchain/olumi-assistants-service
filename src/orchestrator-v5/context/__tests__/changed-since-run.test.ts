@@ -121,9 +121,21 @@ describe('buddy r1 rows', () => {
     expect(out.node_ids).toEqual([]);
     expect(out.complete).toBe(false);
   });
-  it('P1 control: the graph IS the analysed one → empty and complete, even with receipts after the Run', () => {
+  it('r2 P2: a rename after the Run is marked even though labels leave the analysis hash unchanged', () => {
     const out = projectChangedSinceRun([at('2026-10-07T20:05:00.000Z', factorValue('fac_price'))], HASHED, false, 'h_run');
-    expect(out).toEqual({ version: 1, since_run_id: 'run_b', node_ids: [], links: [], unattributed_changes: 0, complete: true });
+    expect(out.node_ids).toEqual(['fac_price']);
+    expect(out.complete).toBe(true);
+  });
+  it('r2 P1: an edit made WHILE the Run computed (after its snapshot, before its row) is marked, with a later one', () => {
+    const run = { ...BOUNDARY, snapshot_at: '2026-10-07T19:59:00.000Z' };
+    const out = projectChangedSinceRun([
+      at('2026-10-07T20:05:00.000Z', factorValue('fac_b')),
+      at(RUN_AT, factorValue('fac_same_append')),
+      at('2026-10-07T19:59:30.000Z', factorValue('fac_a')),
+      at('2026-10-07T19:58:00.000Z', factorValue('fac_before')),
+    ], run, false);
+    expect(out.node_ids).toEqual(['fac_b', 'fac_a']);
+    expect(out.complete).toBe(true);
   });
   it('P2: a receipt 100µs after the Run is after it', () => {
     const out = projectChangedSinceRun([at('2026-10-07T20:00:00.000200+00:00', factorValue('fac_price'))],
@@ -156,7 +168,7 @@ describe('newestRunBoundary', () => {
       at('2026-10-07T20:10:00.000Z', runFact()),
       at(RUN_AT, runFact('run_b')),
       at('2026-10-07T19:00:00.000Z', runFact('run_a')),
-    ])).toEqual({ run_id: 'run_b', created_at: RUN_AT, graph_hash_at_run: 'aaaa' });
+    ])).toEqual({ run_id: 'run_b', created_at: RUN_AT, graph_hash_at_run: 'aaaa', snapshot_at: RUN_AT });
   });
 });
 
@@ -180,6 +192,15 @@ describe('readChangedSinceRun', () => {
   it('Runs recorded but none with an id: undefined, never "everything ever changed"', async () => {
     const store = storeWith([at(RUN_AT, runFact())], [at('2026-10-07T19:05:00.000Z', factorValue('fac_price'))]);
     expect(await readChangedSinceRun(store, 's1')).toBeUndefined();
+  });
+
+  it('r2 P2: fifty-five refused attempts after a real Run do not hide its boundary (paged by total_count)', async () => {
+    const refused = Array.from({ length: 55 }, (_, i) => at(`2026-10-07T20:0${Math.floor(i / 10) + 1}:${String(i % 60).padStart(2, '0')}.000Z`, runFact()));
+    refused.reverse();
+    const store = storeWith([...refused, at(RUN_AT, runFact('run_b'))], [at('2026-10-07T20:00:30.000Z', factorValue('fac_price'))]);
+    const out = await readChangedSinceRun(store, 's1');
+    expect(out?.since_run_id).toBe('run_b');
+    expect(out?.node_ids).toEqual(['fac_price']);
   });
 
   it('P2: five refused attempts after a real Run do not hide its boundary', async () => {

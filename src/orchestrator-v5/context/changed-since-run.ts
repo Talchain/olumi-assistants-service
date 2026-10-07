@@ -25,8 +25,9 @@ import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
 import type { IdentifiedHandlerFact } from '../types/handler-fact.js';
 
 export const CHANGED_SINCE_RUN_READ_LIMIT = 50;
-// Wide enough that a run of refused attempts after a real Run cannot hide its boundary (buddy r1 P2-3).
+// First page of Runs; when it holds no Run with an id and the store counts more, one wider read follows (buddy r2 P2).
 const RUN_FACT_LOOKAHEAD = 50;
+const RUN_FACT_MAX = 1000;
 const MAX_NODE_IDS = 200;
 const MAX_EDGES = 400;
 
@@ -50,6 +51,12 @@ export interface RunBoundary {
   readonly created_at: string;
   /** The analysis-affecting hash of the graph the Run analysed (`run_analysis.result.graph_hash_at_run`). */
   readonly graph_hash_at_run?: string;
+  /**
+   * When the Run read its graph: `run_analysis.result.computed_at`, stamped right after the snapshot is hashed and
+   * before PLoT is called (`run-analysis.ts` runComputedAt). A receipt after it and before the Run's own row is an edit
+   * made WHILE the Run computed, which that Run never saw (buddy r1 P1 / r2 P1). Absent → the row time is the bound.
+   */
+  readonly snapshot_at?: string;
 }
 
 type Rec = Record<string, unknown>;
@@ -136,12 +143,11 @@ export function projectChangedSinceRun(
   /** The analysis-affecting hash of the graph as it stands now (the same projection `graph_hash_at_run` uses). */
   currentGraphHash?: string | null,
 ): ChangedSinceRunV1 {
-  // ⭐ The graph IS the one the Run analysed: nothing has changed since it, whatever receipts were written meanwhile
-  // (an edit and its reversal; an edit the Run already included).
-  if (boundary?.graph_hash_at_run !== undefined && typeof currentGraphHash === 'string' && currentGraphHash === boundary.graph_hash_at_run) {
-    return { version: 1, since_run_id: boundary.run_id, node_ids: [], links: [], unattributed_changes: 0, complete: true };
-  }
-  const since = boundary === null ? null : isoToMicros(boundary.created_at);
+  // A receipt is since the Run when it is later than the Run's snapshot and was not written in the Run's own append
+  // (one transaction, one `now()`: an edit made in the Run's turn is in what it analysed or is refused with it).
+  const runRowAt = boundary === null ? null : isoToMicros(boundary.created_at);
+  const snapshotAt = boundary?.snapshot_at === undefined ? null : isoToMicros(boundary.snapshot_at);
+  const since = runRowAt === null ? null : snapshotAt !== null && snapshotAt < runRowAt ? snapshotAt : runRowAt;
   const nodes = new Set<string>();
   const links = new Map<string, ChangedSinceRunLink>();
   let unattributed = 0;
@@ -149,6 +155,7 @@ export function projectChangedSinceRun(
   for (const entry of facts) {
     const at = isoToMicros(entry.fact_created_at);
     if (since !== null && (at === null || at <= since)) { reachedBoundary = true; break; }
+    if (at === runRowAt) continue;
     const fact = entry.fact;
     if (!MUTATION_RECEIPT_FACT_TYPES.has(fact.fact_type) || isNoopFact(fact)) continue;
     const ids = idsOfReceipt(fact);
@@ -158,9 +165,8 @@ export function projectChangedSinceRun(
   }
   const nodeIds = [...nodes];
   const linkList = [...links.values()];
-  // The graph moved since the Run, but no receipt after the Run's persistence names the change (an edit that landed
-  // while the Run was computing, so its receipt is older than the Run's): say the marks are not the whole story
-  // (buddy r1 P1) rather than "nothing changed".
+  // The graph moved since the Run but no receipt names any change (a write that records no receipt, or one between
+  // the graph read and the snapshot stamp): say the marks are not the whole story rather than "nothing changed".
   const hashMovedUnplaced = boundary?.graph_hash_at_run !== undefined && typeof currentGraphHash === 'string'
     && currentGraphHash !== boundary.graph_hash_at_run && nodes.size === 0 && links.size === 0 && unattributed === 0;
   const overCap = nodeIds.length > MAX_NODE_IDS || linkList.length > MAX_EDGES;
@@ -178,10 +184,14 @@ export function projectChangedSinceRun(
 export function newestRunBoundary(runFacts: readonly IdentifiedHandlerFact[]): RunBoundary | null {
   for (const entry of runFacts) {
     if (entry.fact.fact_type !== 'run_analysis') continue;
-    const result = (entry.fact as { result?: { run_id?: unknown; graph_hash_at_run?: unknown } }).result;
+    const result = (entry.fact as { result?: { run_id?: unknown; graph_hash_at_run?: unknown; computed_at?: unknown } }).result;
+    const snapshotAt = typeof result?.computed_at === 'string' && isoToMicros(result.computed_at) !== null ? result.computed_at : undefined;
     const runId = id(result?.run_id);
     const hash = typeof result?.graph_hash_at_run === 'string' && result.graph_hash_at_run.length > 0 ? result.graph_hash_at_run : undefined;
-    if (runId !== null) return { run_id: runId, created_at: entry.fact_created_at, ...(hash !== undefined ? { graph_hash_at_run: hash } : {}) };
+    if (runId !== null) {
+      return { run_id: runId, created_at: entry.fact_created_at, ...(hash !== undefined ? { graph_hash_at_run: hash } : {}),
+        ...(snapshotAt !== undefined ? { snapshot_at: snapshotAt } : {}) };
+    }
   }
   return null;
 }
@@ -191,7 +201,7 @@ export function newestRunBoundary(runFacts: readonly IdentifiedHandlerFact[]): R
  * integration points (`scripts/validate-state-write-invariant.sh`), and the route hands its store in.
  */
 export interface ChangedSinceRunReads {
-  readScenarioRunAnalysisFactsFor?(scenarioId: string, limit: number): Promise<{ readonly facts: readonly IdentifiedHandlerFact[] }>;
+  readScenarioRunAnalysisFactsFor?(scenarioId: string, limit: number): Promise<{ readonly facts: readonly IdentifiedHandlerFact[]; readonly total_count: number }>;
   readRecentAppliedMutationFactsFor?(scenarioId: string, limit: number): Promise<readonly IdentifiedHandlerFact[]>;
 }
 
@@ -205,7 +215,11 @@ export async function readChangedSinceRun(store: ChangedSinceRunReads, scenarioI
       store.readScenarioRunAnalysisFactsFor(scenarioId, RUN_FACT_LOOKAHEAD),
       store.readRecentAppliedMutationFactsFor(scenarioId, CHANGED_SINCE_RUN_READ_LIMIT),
     ]);
-    const boundary = newestRunBoundary(runPage.facts);
+    let boundary = newestRunBoundary(runPage.facts);
+    if (boundary === null && runPage.total_count > runPage.facts.length) {
+      const wider = await store.readScenarioRunAnalysisFactsFor(scenarioId, Math.min(runPage.total_count, RUN_FACT_MAX));
+      boundary = newestRunBoundary(wider.facts);
+    }
     // A Run page that holds Runs but none with an id is an older Run we cannot place: say nothing rather than mark
     // every receipt ever recorded.
     if (boundary === null && runPage.facts.length > 0) return undefined;
