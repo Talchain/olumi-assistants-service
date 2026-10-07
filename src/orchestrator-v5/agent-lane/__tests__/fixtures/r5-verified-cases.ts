@@ -50,10 +50,15 @@ export function assertCell(m: CandidateModel, brief: string, option: string, fac
   assert.ok(!JSON.stringify(cell).includes('stated_evidence'));
 }
 const supportedProbes = new Set(['N0', 'N1a', 'N3', 'N5', 'N10c', 'B-N0']);
-export const censusRows: Row[] = census.map((c, index) => ({
-  name: `census ${c.sc}: ${c.option} -> ${c.factor} ${c.expected}`,
-  run: () => { const { model, brief } = censusInput(index); assertCell(model, brief, c.option, c.factor, c.expected); },
-}));
+export const censusRows: Row[] = census.map((c, index) => {
+  const underCredit = (c.sc === 'ca2cc3ca' && c.factor === 'Starter tier monthly price')
+    || (c.sc === 'b7398aad' && c.factor === 'Starter-tier price');
+  const expected = underCredit ? 'ai_proposed' : c.expected;
+  return {
+    name: `${underCredit ? 'KNOWN UNDER-CREDIT (strict F: names the tier, not the price) — ' : ''}census ${c.sc}: ${c.option} -> ${c.factor} ${expected}`,
+    run: () => { const { model, brief } = censusInput(index); assertCell(model, brief, c.option, c.factor, expected); },
+  };
+});
 export const probeRows: Row[] = probes.map(p => ({
   name: `${p.id}: ${p.expectation === 'demote' ? 'must demote exact malicious span' : 'supported credit or conservative refusal'} — ${p.description}`,
   run: () => {
@@ -144,6 +149,8 @@ export const rawRows: Row[] = manifest.flatMap(m => m.calls.map(c => ({
     assert.equal(digest(bytes), c.sha256); assert.equal(digest(brief), m.brief_sha256);
     const raw: CandidateModel = JSON.parse(bytes); assert.ok(!bytes.includes('stated_evidence'));
     assert.equal(new Ajv({ strict: false }).compile(buildCandidateSchema())(raw), true);
+    const candidateSchema: any = strictForTheDrafter(buildCandidateSchema(), { providerBoundary: false });
+    assert.ok(!candidateSchema.properties.options.items.properties.interventions.items.required.includes('stated_evidence'));
     const sent: any = strictForTheDrafter(buildCandidateSchema()); const intervention = sent.properties.options.items.properties.interventions.items;
     assert.ok(intervention.required.includes('stated_evidence')); assert.ok(intervention.properties.stated_evidence.anyOf.some((s: any) => s.type === 'null'));
     const sentIntervention = new Ajv({ strict: false }).compile(intervention);

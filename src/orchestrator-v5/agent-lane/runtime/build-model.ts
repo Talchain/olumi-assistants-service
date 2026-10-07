@@ -119,9 +119,10 @@ const QUANTITY_FRAME = {
  * ⭐ STRICT ONLY AT THE OPENAI BOUNDARY (DL #75 5916270318, option D). OpenAI's strict json_schema needs every property in
  * `required`. The candidate contract (`buildCandidateSchema`) lets an outcome or a risk omit its frame, so a candidate
  * recorded before the frames existed still validates, and admission reads an absent frame as null (`withQuantityFrames`);
- * what is SENT requires every property, each missing key appended in order. Every other object already requires all of its keys, so only the outcome and risk frames change.
+ * what is SENT requires every property, each missing key appended in order. Candidate-call schemas keep the new
+ * evidence carrier optional; only the actual strict-provider boundary requires it. Existing frame/link handling stays.
  */
-export function strictForTheDrafter(schema: Record<string, unknown>): Record<string, unknown> {
+export function strictForTheDrafter(schema: Record<string, unknown>, { providerBoundary = true } = {}): Record<string, unknown> {
   const walk = (s: unknown): unknown => {
     if (Array.isArray(s)) return s.map(walk);
     if (s === null || typeof s !== 'object') return s;
@@ -134,7 +135,10 @@ export function strictForTheDrafter(schema: Record<string, unknown>): Record<str
     const properties = out['properties'];
     if (out['type'] === 'object' && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
       const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
-      for (const name of Object.keys(properties)) if (!required.includes(name)) required.push(name);
+      for (const name of Object.keys(properties)) {
+        if (!providerBoundary && name === 'stated_evidence') continue;
+        if (!required.includes(name)) required.push(name);
+      }
       out['required'] = required;
     }
     return out;
@@ -1470,7 +1474,7 @@ export async function buildModelFromBrief(
       input: firstConstructInput(brief),
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
-      schema: strictForTheDrafter(buildCandidateSchema()),
+      schema: strictForTheDrafter(buildCandidateSchema(), { providerBoundary: false }),
     });
     if (out.status === 'incomplete') cutOff = out.incomplete_reason ?? 'unspecified';
     if (out.text.length === 0) {
@@ -1677,7 +1681,7 @@ export async function buildModelFromBrief(
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
-        schema: strictForTheDrafter(retrySchemaPinningGoal(candidate.goal, candidate.decision_question)),
+        schema: strictForTheDrafter(retrySchemaPinningGoal(candidate.goal, candidate.decision_question), { providerBoundary: false }),
       });
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
