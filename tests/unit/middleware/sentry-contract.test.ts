@@ -105,6 +105,11 @@ describe('CEE Sentry contract (S-H)', () => {
       expect(cfg.release).toBe(SHA40);
     });
 
+    it('an underivable SHA is reported as unidentified, never another source', async () => {
+      const cfg = await initWith({ ...BASE_ENV, RENDER_GIT_COMMIT: 'unknown', GIT_COMMIT_SHA: 'unknown', SENTRY_RELEASE: '9.9.9' });
+      expect(cfg.release).toBe('unidentified');
+    });
+
     it('every event carries service=cee', async () => {
       const cfg = await initWith({ ...BASE_ENV });
       expect(cfg.initialScope?.tags?.service).toBe('cee');
@@ -199,6 +204,38 @@ describe('CEE Sentry contract (S-H)', () => {
       expect(json).toContain('CONTROL_MODEL');
     });
 
+    it('queries never leave: request url / query_string / referer, span url attributes and span names', async () => {
+      const cfg = await initWith({ ...BASE_ENV });
+      const err = JSON.stringify(
+        cfg.beforeSend!({
+          request: {
+            url: `https://cee.invalid/assist/v1/x?brief=${SENTINEL}`,
+            query_string: `brief=${SENTINEL}`,
+            headers: { referer: `https://olumi.invalid/s/1?q=${SENTINEL}` },
+          },
+        }),
+      );
+      expect(err).not.toContain(SENTINEL);
+      expect(err).toContain('https://cee.invalid/assist/v1/x');
+      expect(err).toContain('https://olumi.invalid/s/1');
+      const txn = JSON.stringify(
+        cfg.beforeSendTransaction!({
+          type: 'transaction',
+          transaction: 'GET /assist/v1/x',
+          contexts: { trace: { data: { 'url.full': `https://cee.invalid/x?brief=${SENTINEL}`, 'url.query': `brief=${SENTINEL}` } } },
+          spans: [
+            {
+              description: `GET https://plot.invalid/v2/run?label=${SENTINEL}`,
+              data: { 'http.url': `https://plot.invalid/v2/run?label=${SENTINEL}`, 'http.query': `label=${SENTINEL}` },
+            },
+          ],
+        }),
+      );
+      expect(txn).not.toContain(SENTINEL);
+      expect(txn).toContain('https://plot.invalid/v2/run');
+      expect(txn).toContain('GET /assist/v1/x');
+    });
+
     it('breadcrumbs already on an error event are scrubbed the same way', async () => {
       const cfg = await initWith({ ...BASE_ENV });
       const out = cfg.beforeSend!({
@@ -227,5 +264,26 @@ describe('trace sample rate from env', () => {
     expect(resolveTracesSampleRate(' ')).toBe(0.5);
     expect(resolveTracesSampleRate('2')).toBe(0.5);
     expect(resolveTracesSampleRate('abc')).toBe(0.5);
+  });
+});
+
+describe('query-stripping regex scales linearly (regex budget)', () => {
+  it.each([
+    ['no query', (n: number) => 'GET https://plot.invalid/' + 'a'.repeat(n)],
+    ['one long query', (n: number) => 'GET https://plot.invalid/x?' + 'b'.repeat(n)],
+    ['many short queries', (n: number) => '?a '.repeat(Math.ceil(n / 3)).slice(0, n)],
+  ])('%s: 20k costs < 8x of 5k', async (_shape, make) => {
+    const { stripQueriesInText } = await import('../../../src/middleware/sentry.js');
+    const time = (n: number) => {
+      const text = make(n);
+      let best = Infinity;
+      for (let i = 0; i < 5; i += 1) {
+        const t0 = performance.now();
+        for (let j = 0; j < 50; j += 1) stripQueriesInText(text);
+        best = Math.min(best, performance.now() - t0);
+      }
+      return Math.max(best, 0.05);
+    };
+    expect(time(20_000) / time(5_000)).toBeLessThan(8);
   });
 });

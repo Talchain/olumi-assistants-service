@@ -100,6 +100,32 @@ function stripQuery(url: unknown): unknown {
   return cut === -1 ? url : url.slice(0, cut);
 }
 
+/** Remove every `?query` / `#fragment` run inside free text (span names). */
+export function stripQueriesInText(text: string): string {
+  return text.replace(/[?#]\S*/g, '');
+}
+
+/** Span / trace attribute keys that ARE a query or fragment: dropped. */
+const QUERY_ATTRIBUTE_KEYS = new Set(['http.query', 'url.query', 'http.fragment', 'url.fragment']);
+
+/** Span / trace attribute keys holding a URL: kept with the query stripped. */
+function isUrlAttributeKey(key: string): boolean {
+  return key === 'url' || key === 'http.url' || key === 'url.full' || key === 'http.target' || key.endsWith('referer');
+}
+
+/**
+ * Span / trace `data`: the decision-content key class is redacted (as for
+ * extra), query attributes are dropped and URL attributes lose their query.
+ */
+function scrubSpanData(data: Record<string, unknown>): Record<string, unknown> {
+  const out = deepRedact(data);
+  for (const key of Object.keys(out)) {
+    if (QUERY_ATTRIBUTE_KEYS.has(key)) delete out[key];
+    else if (isUrlAttributeKey(key)) out[key] = stripQuery(out[key]);
+  }
+  return out;
+}
+
 /**
  * Breadcrumb rule (applied when a crumb is recorded AND again on every
  * outgoing event). A breadcrumb keeps only its SHAPE, never free text:
@@ -148,7 +174,16 @@ export function scrubSentryEvent<E extends SentryEvent>(input: E): E {
   if (event.request) {
     event.request.data = undefined;
     event.request.cookies = undefined;
+    event.request.query_string = undefined;
+    if (typeof event.request.url === 'string') event.request.url = stripQuery(event.request.url) as string;
+    const headers = event.request.headers;
+    if (headers) {
+      for (const name of Object.keys(headers)) {
+        if (name.toLowerCase() === 'referer') headers[name] = stripQuery(headers[name]) as string;
+      }
+    }
   }
+  if (typeof event.transaction === 'string') event.transaction = stripQueriesInText(event.transaction);
 
   // Recursively redact extra values containing prompt content or LLM payloads
   if (event.extra) {
@@ -174,13 +209,15 @@ export function scrubSentryEvent<E extends SentryEvent>(input: E): E {
       .filter((b): b is Breadcrumb => b !== null);
   }
 
-  // Span attributes (transactions): same key-class redaction as extra.
+  // Span attributes (transactions): key-class redaction as for extra, plus
+  // query attributes dropped, URL attributes and span names query-stripped.
   if (event.contexts?.trace?.data) {
-    event.contexts.trace.data = deepRedact(event.contexts.trace.data as Record<string, unknown>);
+    event.contexts.trace.data = scrubSpanData(event.contexts.trace.data as Record<string, unknown>);
   }
   if (Array.isArray(event.spans)) {
     for (const span of event.spans) {
-      if (span.data) span.data = deepRedact(span.data as Record<string, unknown>) as typeof span.data;
+      if (span.data) span.data = scrubSpanData(span.data as Record<string, unknown>) as typeof span.data;
+      if (typeof span.description === 'string') span.description = stripQueriesInText(span.description);
     }
   }
 
@@ -198,14 +235,18 @@ export function resolveSentryEnvironment(env: NodeJS.ProcessEnv): string {
   return env.NODE_ENV || 'development';
 }
 
+/** The honest release when no build SHA is derivable (same word as the UI's build id). */
+export const UNIDENTIFIED_RELEASE = 'unidentified';
+
 /**
  * Release = the full build SHA from the ONE build-identity owner
  * (src/version.ts: GIT_COMMIT_SHA env → RENDER_GIT_COMMIT → git). No other
- * override: CEE_BUILD_HASH (set nowhere on Render) and the package version
- * named no build. Unknown → undefined, so the SDK's own detection can run.
+ * source: CEE_BUILD_HASH (set nowhere on Render), the package version and the
+ * SDK's own env detection (e.g. SENTRY_RELEASE) all name something other than
+ * this build. Underivable → 'unidentified', never a fallback.
  */
-function resolveSentryRelease(): string | undefined {
-  return /^[0-9a-f]{40}$/i.test(GIT_COMMIT_SHA) ? GIT_COMMIT_SHA : undefined;
+function resolveSentryRelease(): string {
+  return /^[0-9a-f]{40}$/i.test(GIT_COMMIT_SHA) ? GIT_COMMIT_SHA : UNIDENTIFIED_RELEASE;
 }
 
 /**
@@ -240,6 +281,8 @@ export function initSentry(testOverrides: Pick<Sentry.NodeOptions, 'transport'> 
     // Pinned, not defaulted: with PII off the SDK filters IP / user headers
     // and the AI integrations do not record prompts or responses.
     sendDefaultPii: false,
+    // Pinned, not defaulted: frame locals hold briefs and graphs.
+    includeLocalVariables: false,
     initialScope: { tags: { service: 'cee' } },
     // Replaces the default Http integration (same name) so incoming request
     // bodies are never read into the scope — they would otherwise ride on
