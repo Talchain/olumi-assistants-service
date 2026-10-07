@@ -146,7 +146,7 @@ describe('buddy r1 rows', () => {
   it('P2: a limit moved from one node to another marks both', () => {
     const moved = { fact_type: 'add_constraint', fact_version: 1, noop: false, result: { target_id: 'con_1', status: 'applied',
       before: { constraint_id: 'con_1', node_id: 'fac_old' }, after: { constraint_id: 'con_1', node_id: 'fac_new' } } } as unknown as HandlerFact;
-    expect(projectChangedSinceRun([at('2026-10-07T20:05:00.000Z', moved)], BOUNDARY, false).node_ids.sort()).toEqual(['fac_new', 'fac_old']);
+    expect([...projectChangedSinceRun([at('2026-10-07T20:05:00.000Z', moved)], BOUNDARY, false).node_ids].sort()).toEqual(['fac_new', 'fac_old']);
   });
   it('P2: the gauge a link answer sized (after.also_changed_links) is marked', () => {
     const f = linkStrength('fac_price', 'fac_strain') as unknown as { result: { after: Record<string, unknown> } };
