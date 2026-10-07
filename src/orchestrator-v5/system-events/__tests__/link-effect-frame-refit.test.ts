@@ -462,6 +462,8 @@ describe('S5t × hold-at-1.0: a refit keeps a held user sibling held, its spread
     const sibAfter = edge2(r.mutatedGraph as Rec, 'integration_step_abandonment_rate', 'quarterly_revenue');
     const after = heldLinkOf(sibAfter, endsOfGraph(r.mutatedGraph)(sibAfter));
     expect(after).not.toBeNull();
-    expect(after!.std).toBeCloseTo(before!.std * (3500000 / 5000000), 12);
+    // Rule R adds a `route_once` hold whose std may be absent; this sibling is held by its own RANGE, before and after.
+    expect([before?.reason, after?.reason]).toEqual(['user_range', 'user_range']);
+    expect(after!.std).toBeCloseTo(before!.std! * (3500000 / 5000000), 12);
   });
 });
