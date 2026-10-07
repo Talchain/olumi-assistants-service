@@ -215,8 +215,10 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   // 6008917488): the ADJECTIVE is the trigger, not a noun or verb list — fail closed. See MOST_SUPPORTED_LEADER_RE.
   { code: 'most_supported_option', re: MOST_SUPPORTED_LEADER_RE },
   // DL 0fd71f (7 Oct): "The lead time on hiring doubled." read as a leader claim. Only the noun "lead time(s)" is
-  // excluded (W9c's bounded suffix); any other leader word in the sentence still fires.
+  // excluded (W9c's bounded suffix); any other leader word in the sentence still fires. Complement bound (r1 review):
+  // after a possession verb ("holds / has taken / is in the lead time …") it is the leader idiom, so it still fires.
   { code: 'the_lead', re: /\bthe\s+lead\b(?![ -]{1,2}times?\b)/i },
+  { code: 'the_lead', re: /\b(?:take|takes|took|taken|taking|has|have|had|having|hold|holds|held|holding|keep|keeps|kept|keeping|retain\w{0,3}|regain\w{0,3}|seiz\w{0,3}|grab\w{0,4}|in)\s{1,4}the\s{1,4}lead\b/i },
   { code: 'which_option_leads', re: /\bwhich\s+option\s+leads\b/i },
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
   { code: 'best_option', re: /\bbest\s+option\b/i },

@@ -16,6 +16,8 @@ const NOUN_ONLY = [
   'The lead  time doubled.',
   'Supplier lead times are about 6 weeks.',
   'A longer lead time would delay the launch.',
+  'If the lead time doubles, the launch slips.',
+  'Cutting the lead time helps both options.',
 ];
 
 // Each positive control was measured true on the unmodified real exports.
@@ -27,12 +29,27 @@ const LEADER_CLAIMS = [
   'Option A has the lead.',
   'The starter tier is the leading option.',
   'Option A leads, despite its lead time.',
+  // r1 review (complement bound): after a possession verb, "the lead time(s)" is the leader idiom.
+  'Raise prices takes the lead time and again.',
+  'Raise prices has held the lead time after time.',
+  'Raise prices takes the lead times two to one.',
+  'It has held the lead -times are good.',
+  'Option A holds the lead time on every run.',
+  'Raise prices will take the lead times over.',
+  'Starter has the lead time and time again across runs.',
+  'Hire now has the lead-time advantage in most runs.',
+  'Option B took the lead  times three.',
+  'Hire now is in the lead time and again.',
+  'Raise prices has taken the lead time.',
 ];
 
 const TIMING_SHAPES = [
-  ['20k spaces', 'The lead' + ' '.repeat(20_000) + 'time'],
-  ['2000 noun phrases', 'lead time '.repeat(2000)],
-  ['20k newlines', 'The lead' + '\n'.repeat(20_000)],
+  ['20k spaces', 'The lead' + ' '.repeat(20_000) + 'time', true],
+  ['2000 noun phrases', 'lead time '.repeat(2000), false],
+  ['20k newlines', 'The lead' + '\n'.repeat(20_000), true],
+  ['2000 possession phrases', 'holds the lead time '.repeat(2000), true],
+  // Beyond the possession limb's bounded gap (\s{1,4}) the phrase reads as the noun.
+  ['possession + 20k spaces', 'holds' + ' '.repeat(20_000) + 'the lead time', false],
 ] as const;
 
 describe.each([
@@ -47,12 +64,12 @@ describe.each([
     expect(classify(text)).toBe(true);
   });
 
-  it.each(TIMING_SHAPES)('scans %s in under 50 ms', (_shape, text) => {
+  it.each(TIMING_SHAPES)('scans %s in under 50 ms', (_shape, text, expected) => {
     const start = performance.now();
     const result = classify(text);
     const elapsed = performance.now() - start;
     // Only one/two spaces or hyphens directly before time(s) denote the noun.
-    expect(result).toBe(_shape !== '2000 noun phrases');
+    expect(result).toBe(expected);
     expect(elapsed).toBeLessThan(50);
   });
 
