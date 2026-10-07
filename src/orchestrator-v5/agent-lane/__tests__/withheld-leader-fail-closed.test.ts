@@ -126,6 +126,20 @@ describe('c6: an appointed lead is a staffing role, with option labels still gua
     expect(view('First, appoint one lead for the route merge.')).toMatchObject({ ok: true });
   });
 
+  // DL #2711 r2 BLOCKER: two adjacent unbounded whitespace runs in the staffing patterns were quadratic (806 ms at 20,000
+  // spaces vs base 2 ms). Every run is bounded; each shape stays linear (< 50 ms at 20,000).
+  it.each([
+    ['"Appoint one lead" + 20,000 spaces + "x"', `Appoint one lead${' '.repeat(20000)}x`],
+    ['"First" + 20,000 spaces + "x"', `First${' '.repeat(20000)}x`],
+    ['"Pick a lead" + 20,000 spaces + "." + 20,000 spaces + "x"', `Pick a lead${' '.repeat(20000)}.${' '.repeat(20000)}x`],
+    ['"First," + 20,000 spaces + "pick a lead"', `First,${' '.repeat(20000)}pick a lead`],
+  ])('LINEAR TIME (classifier): %s', (_name, text) => {
+    const t0 = performance.now();
+    rankingCodesIn(text, labels);
+    dropRankingSentences(text, labels);
+    expect(performance.now() - t0).toBeLessThan(50);
+  });
+
   it('the staffing exemption does not blank another shared ranking claim', () => {
     expect(rankingCodesIn('Make Sam the lead; this is the best option.', labels)).toContain('shared_leader_vocabulary');
   });
@@ -188,6 +202,15 @@ describe('c6: the closing states a refused unsized link without re-inviting it',
   ])('REVIEW r1 #4 NOT A REFUSAL (negated / question / other clause): invitation stays byte-identical: %s', userText => {
     expect(enforceAgentLaneLeaderClaimsAtWire(response(false), opts(userText)).response.assistant_text)
       .toBe(`First, appoint one lead for the route merge.\n\n${unsizedLinkSentence([link])}`);
+  });
+
+  it.each([
+    ['"not" + 20,000 spaces + "move on return rates"', `not${' '.repeat(20000)}move on return rates`],
+    ['"Return rates," + 20,000 spaces + "but move on"', `Return rates,${' '.repeat(20000)}but move on`],
+  ])('LINEAR TIME (refusal): %s', (_name, userText) => {
+    const t0 = performance.now();
+    enforceAgentLaneLeaderClaimsAtWire(response(false), opts(userText));
+    expect(performance.now() - t0).toBeLessThan(50);
   });
 
   it('CONTROL a label inside another word is not the named link', () => {

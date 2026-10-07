@@ -962,8 +962,9 @@ const POSITION_WORD = /\b(?:trails?|trailing|trailed|lags?|lagging|lagged|follow
  * "Name one lead and it is hiring", "Choose a lead-option now" (r0 probe + r1 review: 26 must-fire rows).
  */
 const STAFFING_ROLE = String.raw`(?:project|operations|ops|delivery|site|depot|team|programme|program|product|technical|tech|engineering|sales|marketing|finance|pilot|implementation|change|integration|workstream|launch|migration|account|customer|clinical|design|data|commercial|regional|store|shift|route|named|dedicated|senior|interim|overall|single)`;
-const STAFFING_NOUN = String.raw`(?:a|an|one|single|each)[ \t]+(?:${STAFFING_ROLE}[ \t]+)?leads?\b(?=[ \t]*[.!]?[ \t]*(?:$|\n)|[ \t]+(?:for|per|to|who)\b|['’]s\b)`;
-const STAFFING_LEAD = new RegExp(String.raw`\b(?:appoint|assign|nominate|hire|designate|name)[ \t]+${STAFFING_NOUN}|^[ \t*_]*(?:(?:first|then|next|now)[ \t]*,?[ \t]+)?(?:pick|choose|select|need)[ \t]+${STAFFING_NOUN}`, 'giu');
+/** Every whitespace run is BOUNDED (DL #2711 r2: two adjacent unbounded runs were quadratic, 806 ms at 20k spaces). */
+const STAFFING_NOUN = String.raw`(?:a|an|one|single|each)[ \t]{1,4}(?:${STAFFING_ROLE}[ \t]{1,4})?leads?\b(?=[ \t]{0,4}[.!]?[ \t]{0,4}(?:$|\n)|[ \t]{1,4}(?:for|per|to|who)\b|['’]s\b)`;
+const STAFFING_LEAD = new RegExp(String.raw`\b(?:appoint|assign|nominate|hire|designate|name)[ \t]{1,4}${STAFFING_NOUN}|^[ \t*_]{0,6}(?:(?:first|then|next|now)[ \t]{0,4},?[ \t]{1,4})?(?:pick|choose|select|need)[ \t]{1,4}${STAFFING_NOUN}`, 'giu');
 
 /** Blank only the appointed role noun; any other ranking words in the sentence still fire. */
 function blankStaffingLead(text: string, labels: RankingLabelContext): string {
@@ -1113,9 +1114,9 @@ export type GoalFigureCoHold = { readonly why: string; readonly action?: string;
 
 const DECLINES_LINK = /\b(?:not checking|not adding|won't add|don't add|leave (?:it|that|them) out|skip (?:it|that)|move on|not going to size|don't want to size|no need to size|not modelling)\b/i;
 /** A positive decline ("move on", "skip it", "leave it out") negated right before it is NOT a refusal ("let's not move on"). */
-const NEGATED_BEFORE = /(?:\bnot|n't|\bnever|\bno)[ \t]*$/i;
+const NEGATED_BEFORE = /(?:\bnot|n't|\bnever|\bno)[ \t]{0,4}$/i;
 /** Clause ends: sentence punctuation, ";", a spaced dash, or ", but/and/so". A "?" marks its clause as a question. */
-const CLAUSE_SPLIT = /(?<=[.!?;])|[ \t][-–—][ \t]|,[ \t]*(?:but|and|so)\b/i;
+const CLAUSE_SPLIT = /(?<=[.!?;])|[ \t][-–—][ \t]|,[ \t]{0,4}(?:but|and|so)\b/i;
 
 /**
  * c6 (D-b), review r1 #4: a refusal of a co-held link is a decline phrase and that link's label in the SAME clause, in a
