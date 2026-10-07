@@ -19,6 +19,8 @@ const PREFIX_SYMBOL: ReadonlyMap<string, string> = new Map(Object.entries(CURREN
  * ("GBP" → "£30,000", DL copy nit on #2205 5864058391), never "30,000 GBP".
  */
 export function sayFigure(value: number, unit: string): string {
+  const state = twoStateLevelWords(value, unit);
+  if (state !== null) return state;
   // Money with pence says both digits (Panel ROOT 5870330356: "£58.8" beside the card's "£58.80").
   const pence = currencyOf(unit) !== undefined && !Number.isInteger(value) && Math.round(value * 100) / 100 === value;
   return place(value.toLocaleString('en-GB', { maximumFractionDigits: 2, minimumFractionDigits: pence ? 2 : 0 }), unit);
@@ -152,6 +154,12 @@ export function isTwoStateSource(nodes: readonly unknown[], id: unknown, unit: u
     if (v !== undefined) set.push(v);
   }
   return set.length > 0 && set.every((v) => v === 0 || v === 1);
+}
+
+/** A factor's actual 0/1 level, using the lane's existing two-state classification. */
+export function twoStateLevelWords(value: number, unit: unknown, nodes: readonly unknown[] = [], id?: unknown): string | null {
+  if ((value !== 0 && value !== 1) || !isTwoStateSource(nodes, id, unit)) return null;
+  return value === 1 ? 'on' : 'off';
 }
 
 /**

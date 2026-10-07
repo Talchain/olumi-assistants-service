@@ -26,8 +26,8 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
   it('pins amended source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    // Re-pinned for the decision-level pre-mortem amendment; historical capture and checker fixtures stay intact.
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('35877a85b704285d016de0fffe1f74b56b53774642e81dbea00adc582a95ef14');
+    // R2 re-pin: claim predicates, duration exemption, kind-correct fallback and licensed control; historical fixtures stay intact.
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('87a29cb488501604302cb522f55304755cd9313aed58f0321ae5607c7661b1d5');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('0ed74500de3ebb72683ba212e1a48db0c080896c6ae7044256f96d4b72156df2');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));

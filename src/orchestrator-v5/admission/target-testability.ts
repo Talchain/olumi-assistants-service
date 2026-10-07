@@ -1,5 +1,5 @@
 import { linkList } from '../agent-lane/unsized-path-cause.js';
-import { evaluatedIdentityCarriers } from './identity-evaluations.js';
+import { evaluatedIdentityCarriers, exactIdentityOperandLinks } from './identity-evaluations.js';
 /**
  * ⭐ IS THE GOAL'S TARGET TESTABLE, BEFORE ANY RUN (DECISION-REPRESENTATION-v1 row 4; PTL A #77 5912737934).
  *
@@ -162,14 +162,8 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
       toGoal.add(e.from); grew = true;
     }
   }
-  const evaluated = evaluatedIdentityCarriers(nodes, identityEvaluations);
-  const exactLinks = new Set(edges.filter(e => {
-    if (isRec(e.provenance) && e.provenance.definitional === true) return true;
-    const to = byId.get(e.to);
-    const identity = isRec(to?.nonlinear_identity) ? to.nonlinear_identity : undefined;
-    return identity !== undefined && (identity.stated_in_brief !== false || evaluated.has(to?.id))
-      && Array.isArray(identity.factor_ids) && identity.factor_ids.includes(e.from);
-  }));
+  const operands = exactIdentityOperandLinks(nodes, edges, identityEvaluations);
+  const exactLinks = new Set(edges.filter(e => (isRec(e.provenance) && e.provenance.definitional === true) || operands.has(e)));
   const reached = new Set<unknown>();
   const paths = ids.map(option_id => {
     const seen = new Set<unknown>(seeds.get(option_id) ?? []);
@@ -463,11 +457,16 @@ export function targetWarningSentence(graph: unknown, verdict: TargetTestability
  * "…: Olumi can't yet test a '{op} {X}' target." with no question; beside needs, "…: I need {A}. Olumi also can't yet
  * test a '{op} {X}' target. {question for A}".
  */
-export function untestableTargetTail(graph: unknown, verdict: TargetTestability): string | null {
+export function untestableTargetTail(graph: unknown, verdict: TargetTestability, optionLabels?: readonly string[]): string | null {
   const parts = untestableTargetParts(graph, verdict);
   if (parts === null || parts.tailTarget === null) return null;
+  // Science R3: a scoped spoken sentence must retain a reason and an ask; the panel keeps the original reason.
+  if (optionLabels !== undefined && (parts.needs.length === 0 || parts.question === null)) return null;
   const { needs, untestableComparator } = parts;
-  const opening = `I can't yet say how likely any option is to keep ${parts.name} ${parts.tailTarget}:`;
+  const names = optionLabels?.map(label => `‘${label}’`);
+  const named = names === undefined ? 'any option' : names.length < 3 ? names.join(' or ')
+    : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+  const opening = `I can't yet say how likely ${named} is to keep ${parts.name} ${parts.tailTarget}:`;
   const question = parts.question !== null ? ` ${parts.question}` : '';
   if (needs.length === 0) {
     return untestableComparator === null ? null : `${opening} Olumi can't yet test a ${untestableComparator} target.`;

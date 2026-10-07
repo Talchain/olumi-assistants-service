@@ -1,0 +1,139 @@
+TAP version 13
+# Subtest: W9b: near-tie completed decision pre-mortem
+    # Subtest: A: RED at base — runs the decision on both paths without mutating captured keys or naming a leader
+    ok 1 - A: RED at base — runs the decision on both paths without mutating captured keys or naming a leader
+      ---
+      duration_ms: 11.811916
+      ...
+    # Subtest: A: prepares no keep/assumption card for either passed stories or the fallback at the route seam
+    ok 2 - A: prepares no keep/assumption card for either passed stories or the fallback at the route seam
+      ---
+      duration_ms: 25.27425
+      ...
+    # Subtest: the review’s Monthly churn 4% probe is on an own-option path but is not an own lever
+    ok 3 - the review’s Monthly churn 4% probe is on an own-option path but is not an own lever
+      ---
+      duration_ms: 5.950791
+      ...
+    # Subtest: B: entire grounded licensed-plan output is byte-equivalent to the base replay
+    ok 4 - B: entire grounded licensed-plan output is byte-equivalent to the base replay
+      ---
+      duration_ms: 1.522584
+      ...
+    # Subtest: C: whole decision turn and exact fallback are pinned with the grounding union intact
+    ok 5 - C: whole decision turn and exact fallback are pinned with the grounding union intact
+      ---
+      duration_ms: 26.133125
+      ...
+    # Subtest: W9 all-user-sized links/values still refuse
+    ok 6 - W9 all-user-sized links/values still refuse
+      ---
+      duration_ms: 2.79925
+      ...
+    # Subtest: explicit unlicensed A pick retains the base empty-path refusal
+    ok 7 - explicit unlicensed A pick retains the base empty-path refusal
+      ---
+      duration_ms: 1.085042
+      ...
+    # Subtest: a status-quo-only lever on a real goal path cannot rescue the own-option union
+    ok 8 - a status-quo-only lever on a real goal path cannot rescue the own-option union
+      ---
+      duration_ms: 1.545083
+      ...
+    # Subtest: empty union stays conservative: user_source
+    ok 9 - empty union stays conservative: user_source
+      ---
+      duration_ms: 1.251042
+      ...
+    # Subtest: empty union stays conservative: brief_source
+    ok 10 - empty union stays conservative: brief_source
+      ---
+      duration_ms: 1.016917
+      ...
+    # Subtest: empty union stays conservative: explicit_type
+    ok 11 - empty union stays conservative: explicit_type
+      ---
+      duration_ms: 1.126416
+      ...
+    # Subtest: empty union stays conservative: node_explicit_type
+    ok 12 - empty union stays conservative: node_explicit_type
+      ---
+      duration_ms: 1.324
+      ...
+    # Subtest: empty union stays conservative: accepted
+    ok 13 - empty union stays conservative: accepted
+      ---
+      duration_ms: 1.106292
+      ...
+    # Subtest: empty union stays conservative: no_value
+    ok 14 - empty union stays conservative: no_value
+      ---
+      duration_ms: 0.641291
+      ...
+    # Subtest: empty union stays conservative: no_source
+    ok 15 - empty union stays conservative: no_source
+      ---
+      duration_ms: 0.514625
+      ...
+    # Subtest: empty union stays conservative: stale
+    ok 16 - empty union stays conservative: stale
+      ---
+      duration_ms: 0.578125
+      ...
+    1..16
+ok 1 - W9b: near-tie completed decision pre-mortem
+  ---
+  duration_ms: 85.066875
+  type: 'suite'
+  ...
+1..1
+# tests 16
+# suites 1
+# pass 16
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 96.034542
+TAP version 13
+# Subtest: W9: empty licensed-leader path on a generic pre-mortem press
+    # Subtest: RED at base: captured draw 1 keeps the original licensed decision byte for byte
+    ok 1 - RED at base: captured draw 1 keeps the original licensed decision byte for byte
+      ---
+      duration_ms: 13.034583
+      ...
+    # Subtest: CONTROL: captured draw 2 uses story-only own levers
+    ok 2 - CONTROL: captured draw 2 uses story-only own levers
+      ---
+      duration_ms: 3.5915
+      ...
+    # Subtest: CONTROL: a whole model with only user-sized links and values still refuses without denying estimates
+    ok 3 - CONTROL: a whole model with only user-sized links and values still refuses without denying estimates
+      ---
+      duration_ms: 2.556375
+      ...
+    # Subtest: CONTROL: an explicit own-option press stays on that plan and its path
+    ok 4 - CONTROL: an explicit own-option press stays on that plan and its path
+      ---
+      duration_ms: 1.004208
+      ...
+    # Subtest: CONTROL: a grounded licensed leader retains the existing option-plan method
+    ok 5 - CONTROL: a grounded licensed leader retains the existing option-plan method
+      ---
+      duration_ms: 1.775959
+      ...
+    1..5
+ok 1 - W9: empty licensed-leader path on a generic pre-mortem press
+  ---
+  duration_ms: 22.811375
+  type: 'suite'
+  ...
+1..1
+# tests 5
+# suites 1
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 33.965208

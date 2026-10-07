@@ -36,6 +36,7 @@ import { mapStageToDecisionStage } from '../../../dsk/stage-edge.js';
 import type { DecisionStage, DSKProtocol } from '../../../dsk/types.js';
 import { protocolDirectiveLines, literalProtocolSteps } from '../../coaching/typed-intent-directive.js';
 import { loadVerifiedDskBundle } from '../../compose/dsk-bundle-record.js';
+import { isPremortemWorksheetPress } from '../guidance/plan.js';
 
 /**
  * The served run state of a model that was never run, typed against the contract's own kinds (`ANALYSIS_RUN_STATE_KINDS`,
@@ -97,6 +98,8 @@ export interface MethodScienceInput {
    * quo, never an option taken out of the comparison (RC 5937065922 / 5937114487). It never licenses a leader.
    */
   readonly user_selected_option_id?: string | null;
+  /** Explicit worksheet chip for this turn; other science callers retain licensed-plan precedence. */
+  readonly premortem_worksheet_press_id?: string;
   /** Generic multi-option pre-mortem: use the own-path union when no plan has eligible grounding. */
   readonly decision_level?: boolean;
   /** The graph for path limits; the empty current decision branch also reads own lever targets and stored metadata. */
@@ -119,7 +122,7 @@ export interface SuppliedItem {
   readonly id: string;
   readonly kind: 'link' | 'factor' | 'risk' | 'limit';
   readonly labels: readonly string[];
-  /** Null for own levers selected by the empty decision branch: story grounding, with no estimate approval. */
+  /** Null for decision-level story grounding, with no estimate approval. */
   readonly card: ItemCard | null;
   /** Present only for those levers, to name the options that set them without asserting value authorship. */
   readonly lever_option_labels?: readonly string[];
@@ -157,12 +160,14 @@ export interface MethodScienceContext {
   readonly dsk: DskCitation | null;
   readonly not_cited: NotCitedReason | null;
   /**
-   * The plan a pre-mortem stresses: the licensed leader, else the option the user explicitly chose, else none. A lone
+   * The plan a pre-mortem stresses: the licensed leader, else the user's pick; explicit worksheets stress only the pick. A lone
    * option is never named on its own: a plan label needs a licence or the user's choice (PTL 5933036532 #5).
    * Decision-level pre-mortems carry null here and use the union of own-option paths for grounding.
    */
   readonly plan: { readonly option_id: string; readonly label: string; readonly basis: PlanBasis } | null;
   readonly decision_level?: boolean;
+  /** Unlicensed decision stories; absent on the original W9 licensed-leader control. */
+  readonly decision_story_only?: true;
   readonly goal_label: string | null;
   readonly current_option_labels: readonly string[];
   readonly supplied_items: readonly SuppliedItem[];
@@ -208,8 +213,16 @@ function protocolById(id: string): { protocol: DSKProtocol; bundleHash: string }
 function choosePlan(
   s: MethodScienceSignals,
   userSelected: string | null | undefined,
+  worksheetPressId?: string,
 ): MethodScienceContext['plan'] {
   const labels = s['model.option_labels'];
+  if (isPremortemWorksheetPress(worksheetPressId)) {
+    return typeof userSelected === 'string'
+      && s['model.non_sq_option_ids'].includes(userSelected)
+      && typeof labels[userSelected] === 'string'
+      ? { option_id: userSelected, label: labels[userSelected], basis: 'user_selected' }
+      : null;
+  }
   // The leader's identity is read ONLY behind its licence: an unlicensed leader is never read, so it cannot leak.
   if (s['run.leader_licensed'] === true) {
     const leader = s['run.leader_option_id'];
@@ -234,7 +247,7 @@ function choosePlan(
  *   (2) factors on the plan's path (an end of one of those links) whose value is Olumi's estimate;
  *   (3) risks at either end of a link on the plan's path;
  *   (4) limits whose quantity sits on the plan's path.
- * A decision-level pre-mortem uses the union of own-option paths, with the same ordering and item eligibility.
+ * A decision-level exercise uses this own-path union for eligibility, then projects story-only own levers below.
  * Ties break by id, in codepoint order.
  */
 function premortemItems(s: MethodScienceSignals, planIds: readonly string[], graph: unknown): SuppliedItem[] {
@@ -364,7 +377,8 @@ function adjudicate(
 
 export function methodScienceContext(input: MethodScienceInput): MethodScienceContext {
   const s = input.signals;
-  const selectedPlan = input.method === 'pre_mortem' ? choosePlan(s, input.user_selected_option_id) : null;
+  const selectedPlan = input.method === 'pre_mortem'
+    ? choosePlan(s, input.user_selected_option_id, input.premortem_worksheet_press_id) : null;
   const planItems = selectedPlan === null ? [] : premortemItems(s, [selectedPlan.option_id], input.graph);
   // Keep grounded leaders and explicit picks. A generic press with an empty leader path can still stress the
   // decision, without changing the Run's licence, reclassifying provenance, or claiming a winning-plan DSK badge.
@@ -408,6 +422,34 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
       .map(f => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: null,
         lever_option_labels: ownLevers.get(f.factor_id)! }));
   }
+  // A nonempty union licenses the exercise, not authorship of its lever values. Ground a current decision in
+  // the own options' intervention targets on real goal paths, including user-stated levers. The empty-union
+  // eligibility above stays conservative: an entirely user-sized model still refuses as before.
+  if (decision && !s['run.leader_licensed'] && items.length > 0 && s['run.kind'] === 'complete_current') {
+    const pathNodes = new Set(s['model.goal_path_links']
+      .filter(l => l.option_ids.some(id => s['model.non_sq_option_ids'].includes(id)))
+      .flatMap(l => l.link_id.split('->')));
+    const rawNodes = (input.graph as { nodes?: unknown } | null)?.nodes;
+    const ownLevers = new Map<string, string[]>();
+    for (const node of Array.isArray(rawNodes) ? rawNodes : []) {
+      const option = node as { id?: unknown; kind?: unknown; interventions?: unknown } | null;
+      if (option?.kind !== 'option' || typeof option.id !== 'string' || !s['model.non_sq_option_ids'].includes(option.id)) continue;
+      if (option.interventions === null || typeof option.interventions !== 'object' || Array.isArray(option.interventions)) continue;
+      for (const id of Object.keys(option.interventions)) {
+        const labels = ownLevers.get(id) ?? [];
+        labels.push(s['model.option_labels'][option.id]);
+        ownLevers.set(id, labels);
+      }
+    }
+    const levers = s['model.goal_path_factors'].filter(f => pathNodes.has(f.factor_id) && ownLevers.has(f.factor_id))
+      .sort((a, b) => a.goal_distance - b.goal_distance || byCodepoint(a.factor_id, b.factor_id))
+      .map((f): SuppliedItem => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: null,
+        lever_option_labels: ownLevers.get(f.factor_id)! }));
+    const leverIds = new Set(levers.map(item => item.id));
+    items = [...levers, ...items.filter(item => !leverIds.has(item.id))];
+  }
+  // Unlicensed decision stories never offer an approval. Preserve the original W9 licensed-leader control.
+  if (decision && !s['run.leader_licensed']) items = items.map(item => ({ ...item, card: null }));
   const { citation, reason } = adjudicate(input, plan, items);
   return {
     method: input.method,
@@ -415,6 +457,7 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
     not_cited: reason,
     plan,
     ...(decision ? { decision_level: true } : {}),
+    ...(decision && !s['run.leader_licensed'] ? { decision_story_only: true as const } : {}),
     goal_label: typeof s['model.goal_label'] === 'string' ? s['model.goal_label'] : null,
     current_option_labels: Object.values(s['model.option_labels']),
     supplied_items: items,

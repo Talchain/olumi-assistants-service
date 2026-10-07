@@ -18,9 +18,12 @@ export function nextStepsFromGuidance(
   const row = selection?.slot1;
   const pool = nextStepsWithWiden(steps, widen);
   if (row === undefined) return pool;
-  if (row.policy_id === 'RC-WIDEN' && row.target === 'options') return nextStepsWithWiden(steps, widen);
   let primary: SuggestedAction | undefined;
-  if (row.policy_id === 'RC-WIDEN') {
+  if (row.policy_id === 'RC-WIDEN' && row.target === 'options') {
+    // DL 7 Oct (cut 7 R3 pills FAIL 6/6): the guidance's own press leads, as every other policy's does. Not offered → base pool.
+    if (!widen) return pool;
+    primary = pool.find(step => step.id === WIDEN_CHIP.id);
+  } else if (row.policy_id === 'RC-WIDEN') {
     if (row.target === 'risks') primary = SUGGEST_RISKS_CHIP;
   } else {
     const id = row.policy_id === 'RC-PREMORTEM' ? 'agent-next-pre-mortem'

@@ -1,0 +1,28 @@
+[
+  {
+    "shape": "leading whitespace",
+    "whitespace": 20000,
+    "ms": 12.432457999999997,
+    "passed": true,
+    "failed": []
+  },
+  {
+    "shape": "currency then whitespace",
+    "whitespace": 20000,
+    "ms": 0.8682499999999891,
+    "passed": false,
+    "failed": [
+      "PM-NO-FIGURES"
+    ]
+  },
+  {
+    "shape": "percentage separated by whitespace",
+    "whitespace": 20000,
+    "ms": 2.9445420000000695,
+    "passed": false,
+    "failed": [
+      "PM-NO-PROB",
+      "PM-NO-FIGURES"
+    ]
+  }
+]

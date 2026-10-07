@@ -1,0 +1,18 @@
+{
+  "j3-user-confirmed.json": {
+    "source": "/Users/paulslee/Documents/GitHub/output/acceptance-successor-20261005/final/cut5-preflight-dl/wire/read-003-J3-1791259732836.json",
+    "sha256": "10554ee393bac978c6ef364cceb79bd8b3c4d981706c3dbed30e5d5d3804daa1"
+  },
+  "certainty-two-children.json": {
+    "source": "/Users/paulslee/Documents/GitHub/output/acceptance-successor-20261005/final/cut5-g1-t1b-prod/wire/read-001-S2-1791263400627.json",
+    "sha256": "989d7ebd472462c48b72bef7dc25120e8128f8896dc84a50db1de0c88c6ccae8"
+  },
+  "read-end-1791348570452.json": {
+    "source": "/Users/paulslee/olumi-work/acceptance-pd/output/cut7-PROD-20261007/t1b-2/wire/read-end-1791348570452.json",
+    "sha256": "50de1c83925ec2417fef6725bf3ffe76e06bb7035cbe1b477a57ddab5f910547"
+  },
+  "d1w-1-read.json": {
+    "source": "/Users/paulslee/Documents/GitHub/output/canvas-20261007/d1w-1/wire/read-after-run1-1791334493876.json",
+    "sha256": "a3f3531213f87086020999f448a6a582443efdf359a1e45f82ac22553f75efb5"
+  }
+}

@@ -1,0 +1,64 @@
+[
+  {
+    "limb": "own-lever catalogue",
+    "exit_code": 1,
+    "red_rows": [
+      "FAIL w9b-2: real selector and adapter choose own-lever stories, with no card or mutation AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:",
+      "FAIL w9b-3: real selector and adapter choose own-lever stories, with no card or mutation AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:",
+      "FAIL class guard: leaders, rankings and withheld figures remain rejected; user-label digits pass AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:",
+      "FAIL timing: existing number parser on three 20k-whitespace shapes stays below 50 ms AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:"
+    ]
+  },
+  {
+    "limb": "story-only cards",
+    "exit_code": 1,
+    "red_rows": [
+      "FAIL decision items without intervention metadata still prepare no approval card AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:"
+    ]
+  },
+  {
+    "limb": "two-story decision fallback",
+    "exit_code": 1,
+    "red_rows": [
+      "FAIL w9b-2: rejection and empty draft still send two qualitative stories without approval AssertionError [ERR_ASSERTION]: [\"PM-COUNT\",\"PM-GROUNDED\",\"PM-WATCH-MITIGATE\",\"PM-BLINDSPOT\"]",
+      "FAIL w9b-3: rejection and empty draft still send two qualitative stories without approval AssertionError [ERR_ASSERTION]: [\"PM-COUNT\",\"PM-GROUNDED\",\"PM-WATCH-MITIGATE\",\"PM-BLINDSPOT\"]"
+    ]
+  },
+  {
+    "limb": "no-figure class guard",
+    "exit_code": 1,
+    "red_rows": [
+      "FAIL class guard: leaders, rankings and withheld figures remain rejected; user-label digits pass AssertionError [ERR_ASSERTION]: The outcome was \u00a3126,000.",
+      "FAIL timing: existing number parser on three 20k-whitespace shapes stays below 50 ms AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:"
+    ]
+  },
+  {
+    "limb": "leader/ranking class guard",
+    "exit_code": 1,
+    "red_rows": [
+      "FAIL class guard: leaders, rankings and withheld figures remain rejected; user-label digits pass AssertionError [ERR_ASSERTION]: Raise prices 10% is the leader."
+    ]
+  },
+  {
+    "limb": "nonempty-union eligibility",
+    "exit_code": 1,
+    "red_rows": [
+      "FAIL W9: all-user-sized model retains the entire refusal AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:"
+    ]
+  },
+  {
+    "limb": "decision directive",
+    "exit_code": 1,
+    "red_rows": [
+      "FAIL w9b-2: real selector and adapter choose own-lever stories, with no card or mutation AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:",
+      "FAIL w9b-3: real selector and adapter choose own-lever stories, with no card or mutation AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:"
+    ]
+  },
+  {
+    "limb": "figure-check registration",
+    "exit_code": 1,
+    "red_rows": [
+      "FAIL class guard: leaders, rankings and withheld figures remain rejected; user-label digits pass AssertionError [ERR_ASSERTION]: The outcome was \u00a3126,000.: CHECKER_UNAVAILABLE"
+    ]
+  }
+]

@@ -1,0 +1,51 @@
+PASS w9b-2: real selector and adapter choose own-lever stories, with no card or mutation
+PASS w9b-2: rejection and empty draft still send two qualitative stories without approval
+PASS w9b-3: real selector and adapter choose own-lever stories, with no card or mutation
+PASS w9b-3: rejection and empty draft still send two qualitative stories without approval
+PASS licensed-leader B: whole adapter, fallback and settlement remain byte-identical
+PASS must-not-fire: Run with no option paths retains the entire refusal
+PASS W9: all-user-sized model retains the entire refusal
+PASS decision items without intervention metadata still prepare no approval card
+PASS class guard: leaders, rankings and withheld figures remain rejected; user-label digits pass
+PASS timing: existing number parser on three 20k-whitespace shapes stays below 50 ms
+PASS P1-1: all 29 historical checker fixtures keep exact matches, failures and targets
+PASS P1-1 timing: 20k spaces <50ms
+PASS P1-1 timing: 20k newlines <50ms
+PASS P1-1 timing: 20k newlines + marker <50ms
+PASS P1-1 timing: 20k newlines + failing tail <50ms
+PASS P1-2 PASS exact: leading to lower renewals
+PASS P1-2 PASS exact: a leading indicator
+PASS P1-2 PASS exact: market-leading
+PASS P1-2 PASS exact: team leader
+PASS P1-2 PASS exact: ranked price above features
+PASS P1-2 PASS exact: 2 weeks
+PASS P1-2 PASS exact: first 30 days
+PASS P1-2 REJECT exact: came out on top
+PASS P1-2 REJECT exact: the stronger option
+PASS P1-2 REJECT exact: X beats Y
+PASS P1-2 REJECT exact: X is the best option
+PASS P1-2 REJECT exact: the winner
+PASS P1-2 REJECT exact: 47%
+PASS P1-2 REJECT exact: about half
+PASS P1-2 REJECT exact: forty-seven percent
+PASS P1-2 REJECT exact: is the leader
+PASS P1-2 REJECT exact: ranks first
+PASS P1-2 REJECT exact: top-ranked
+PASS P1-2 REJECT exact: outperformed the other option
+PASS P2-6: the whole-ban label Leader cannot mask a leader assertion
+PASS P1-3 exact fallback: lever
+PASS P1-3 exact fallback: link
+PASS P1-3 exact fallback: risk
+PASS P1-3 exact fallback: limit
+PASS P1-3 exact fallback: factor
+PASS P1-3 served A-STALE-SILENT: exact kind-correct link fallback without levers or cards
+PASS P1-4 union + A2 option-grounding intersection: w9b-2
+PASS P1-4 union + A2 option-grounding intersection: w9b-3
+PASS P1-4 union + A2 option-grounding intersection: C
+PASS P1-4 union + A2 option-grounding intersection: A-Q-D1-BUILD
+PASS P1-4 union + A2 option-grounding intersection: draw2
+PASS P1-4 R1: the ORIGINAL served D1 GOOD draft passes verbatim with no card
+PASS P2: near-tie C WHOLE turn, check_inputs, directive and exact fallback/settlement pin
+PASS P2 scope: licensed W9 draw1 WHOLE adapter, fallback and settlement stay byte-identical
+PASS P2 scope: non-near-tie D1 and stale decision changes are whole-object pinned
+PASS P2-5: one own lever uses a surviving union item for the second story

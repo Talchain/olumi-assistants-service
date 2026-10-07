@@ -1,0 +1,66 @@
+BASELINE GREEN
+MUTANT RED: agreement check off
+AssertionError [ERR_ASSERTION]: agreement control: orders cannot establish customers
+
+true !== false
+RESTORED src/orchestrator/context/placeholder-parts.ts sha256=3d9ef7015126a3fdd9a704f77efa19c9a49ebd628c69fafff5c6d13d383d6624
+RESTORED GREEN
+MUTANT RED: estimate exclusion off
+AssertionError [ERR_ASSERTION]: estimate exclusion: an Olumi/projected figure is not unit authority
+
+true !== false
+RESTORED src/orchestrator/context/placeholder-parts.ts sha256=3d9ef7015126a3fdd9a704f77efa19c9a49ebd628c69fafff5c6d13d383d6624
+RESTORED GREEN
+MUTANT RED: identity pass-through off in limit reader
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ '‘monthly recurring revenue’ was checked against the figures in your model. For ‘Launch Starter Tier’ it couldn’t be checked: that option moves it through a link Olumi hasn’t sized in this limit’s units.'
+- '‘monthly recurring revenue’ was checked against the figures in your model.'
+RESTORED src/orchestrator-v5/agent-lane/limit-checks.ts sha256=8eae7a76090593805177f6b1c99e8bd3e082f53b3ae2a945088e5f7baaa6c148
+RESTORED GREEN
+MUTANT RED: identity pass-through off in saved/Explain carrier
+AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+
+  [
+    {
++     ask: 'How much does ‘Starter-tier availability’ change ‘monthly recurring revenue’?',
++     constraint_id: 'agent-lane:monthly_recurring_revenue:>=',
++     limit: 'monthly recurring revenue',
++     say: '‘monthly recurring revenue’ was checked against the figures in your model. For ‘Launch Starter Tier’ it couldn’t be checked: that option moves it through a link Olumi hasn’t sized in this limit’s units.',
++     state: 'scored',
++     withheld_for: [
++       'Launch Starter Tier'
++     ]
+-     constraint_id: 'agent-lane:monthly_recurring_revenue:>=',
+-     limit: 'monthly recurring revenue',
+-     say: '‘monthly recurring revenue’ was checked against the figures in your model.',
+-     state: 'scored'
+    }
+  ]
+RESTORED src/orchestrator-v5/agent-lane/saved-run-context-facts.ts sha256=6fe5a52a6d597ccd3c41a4c8b00eb755807ed57b893793e2d56cb0ead347c9c5
+RESTORED GREEN
+MUTANT RED: identity pass-through off in runAnalysis carrier
+AssertionError [ERR_ASSERTION]: runtime carrier must pass THIS Run evaluation
++ actual - expected
+
+  [
+    {
++     ask: 'How much does ‘Starter-tier availability’ change ‘monthly recurring revenue’?',
++     constraint_id: 'agent-lane:monthly_recurring_revenue:>=',
++     limit: 'monthly recurring revenue',
++     say: '‘monthly recurring revenue’ was checked against the figures in your model. For ‘Launch Starter Tier’ it couldn’t be checked: that option moves it through a link Olumi hasn’t sized in this limit’s units.',
++     state: 'scored',
++     withheld_for: [
++       'Launch Starter Tier'
++     ]
+-     constraint_id: 'agent-lane:monthly_recurring_revenue:>=',
+-     limit: 'monthly recurring revenue',
+-     say: '‘monthly recurring revenue’ was checked against the figures in your model.',
+-     state: 'scored'
+    }
+  ]
+RESTORED src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts sha256=70a662d5c917cb3f9a54afa95714e7e36e4723b3a3ffb39ca34096fd70e569b5
+RESTORED GREEN
+ALL FIVE PRODUCTION MUTANTS RED; ALL BACKUPS RESTORED BYTE-FOR-BYTE

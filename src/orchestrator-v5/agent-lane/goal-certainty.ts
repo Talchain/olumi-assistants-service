@@ -151,7 +151,7 @@ export function goalCertaintyDecisions(
             : extraParent !== undefined ? 'extra_goal_parent'
               : undefined;
   // #2473 CR P2 (CODEX_CLI_OVERFLOW 5937437431): the same unit-less-limit-node reading as every other sized reader.
-  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints));
+  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints), edges);
   // ⭐ T1b (Science d5, 6 Oct; Codex r1 on #2648): the user's sizes on both sides of a level-less mediator size that path
   // here too, by the ONE reader P5 uses, so a certainty through it is never called "isn't sized".
   const userChain = userSizedLevelLessLinks(graph);
