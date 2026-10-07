@@ -54,7 +54,7 @@ describe('S-C press identity: ONE door, a target per press', () => {
     expect(widenTargetOf(WIDEN_PRESS_ID, 'x')).toBe('options');
     expect(widenTargetOf(CANVAS_OPTIONS_PRESS_ID, 'What other options could answer this?')).toBe('options');
     expect(widenTargetOf('agent-next-pre-mortem', SUGGEST_RISKS_CHIP.message)).toBeNull();
-    expect(widenTargetOf('ask:missing-factor', 'x')).toBeNull();
+    expect(widenTargetOf('ask:missing-factor', 'x')).toBe('factors');
   });
 });
 
