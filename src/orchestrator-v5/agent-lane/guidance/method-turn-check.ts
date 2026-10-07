@@ -126,7 +126,8 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
       : !labelMatches(reply, otherOptions));
     // Use the shared assertion classifier; per-ban masking cannot let a label called 'Leader' hide a claim.
     // Collapse whitespace before the shared scanner: its multiline top-claim pattern otherwise rescans newline runs.
-    const claimText = maskedFor(reply, LEADER_WORDS, labels).replace(/\s+/gu, ' ');
+    // The noun "lead time" is never a leader claim (the shared classifier reads "The lead time … doubled" as one).
+    const claimText = maskedFor(reply, LEADER_WORDS, labels).replace(/\s+/gu, ' ').replace(/\blead(?=[ -]{1,2}times?\b)/giu, 'lag');
     const unlicensedClaim = decisionStories && inputs.decision_level === true
       && (textAssertsLeadingOption(claimText) || DECISION_CLAIM.test(claimText));
     check('PM-NO-WINNER', inputs.decision_level !== true
