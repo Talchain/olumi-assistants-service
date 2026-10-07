@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { hopOnlyHeldProposals, NARRATE_LABEL_LINE, runAgentTurn, type ModelCallRequest } from '../runtime/agent-loop.js';
 import type { AgentCapabilities } from '../runtime/agent-tools.js';
 import { budgetFor, callEffortFor, conversationBudgetFor } from '../model-budgets.js';
+import { conversationPromptAlias } from '../runtime/prompt-identity.js';
 
 /** agent-capabilities.ts `proposeNewRisk`, held (its success shape). */
 const HELD = {
@@ -55,6 +56,10 @@ describe('the loop: the narrating call is tagged and carries the label line', ()
     expect(first!.reasoning_role).toBeUndefined();
     expect(lastText(first!)).not.toContain(NARRATE_LABEL_LINE);
     expect(second!.reasoning_role).toBe('narrate');
+    // Narration only (Codex r1 P1): the lowered call may make no tool decision; its tools stay declared (same prefix).
+    expect(second!.tool_choice).toBe('none');
+    expect(second!.tools).toEqual(first!.tools);
+    expect(first!.tool_choice).toBeUndefined();
     expect(lastText(second!)).toContain(NARRATE_LABEL_LINE);
     expect(JSON.stringify(r.items)).not.toContain(NARRATE_LABEL_LINE);
     expect(r.assistant_text).toBe('Shall I add it?');
@@ -66,7 +71,18 @@ describe('the loop: the narrating call is tagged and carries the label line', ()
     await runAgentTurn({ ...base, composeReply: () => null } as never, caps, callModel as never);
     const second = callModel.mock.calls[1]![0] as ModelCallRequest;
     expect(second.reasoning_role).toBeUndefined();
+    expect(second.tool_choice).toBeUndefined();
     expect(JSON.stringify(second.input)).not.toContain(NARRATE_LABEL_LINE);
+  });
+});
+
+describe('conversationPromptAlias: a narrating call is still the converse prompt', () => {
+  it('RED: tool_choice none + narrate → agent.converse (keeps the developer-breakpoint cache carrier)', () => {
+    expect(conversationPromptAlias('none', 'narrate')).toBe('agent.converse');
+  });
+  it('CONTROL: the Run\'s interpreting call is still agent.interpret; an ordinary call agent.converse', () => {
+    expect(conversationPromptAlias('none')).toBe('agent.interpret');
+    expect(conversationPromptAlias(undefined)).toBe('agent.converse');
   });
 });
 

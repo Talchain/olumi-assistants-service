@@ -35,7 +35,7 @@ export interface ModelCallRequest {
   readonly tools: readonly unknown[];
   readonly max_output_tokens: number;
   /** The ONE tool this call must make (`AgentTurnInput.firstCallTool`), sent only on the turn's first call. */
-  readonly tool_choice?: { readonly type: 'function'; readonly name: string };
+  readonly tool_choice?: { readonly type: 'function'; readonly name: string } | 'none';
   /** A caller-set deadline: the call aborts at it and is never retried (`withTransportRetry`). */
   readonly deadline_ms?: number;
   /** T1 (b): the ledger's purpose for a cache prewarm (`PREWARM_OUTPUT_TOKENS`); never sent to the provider. */
@@ -475,7 +475,9 @@ export async function runAgentTurn(
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
-      ...(narrateNext ? { reasoning_role: 'narrate' as const } : {}),
+      // Narration only (Codex buddy r1 P1, #2781): a lowered call makes no tool decision, so it may call none. The tools
+      // stay declared, so the cached prefix is the same bytes.
+      ...(narrateNext ? { reasoning_role: 'narrate' as const, tool_choice: 'none' as const } : {}),
     };
     if (hostCall !== undefined) {
       void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
