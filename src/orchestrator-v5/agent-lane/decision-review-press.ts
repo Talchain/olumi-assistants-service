@@ -154,12 +154,38 @@ function withoutWarningWords(result: unknown): unknown {
     ...(enrichment !== undefined ? { enrichment: { ...enrichment, inference_warnings: wordless(enrichment.inference_warnings) } } : {}) };
 }
 
+/** F5's link: the most sensitive link of the stored graph the Run carries (the first `fragile_edges` row the graph holds). */
+function fragileLinkOf(graph: unknown, analysisResult: unknown): { from: string; to: string } | undefined {
+  const robustness = recordOf(recordOf(recordOf(analysisResult)?.enrichment)?.robustness);
+  return (Array.isArray(robustness?.fragile_edges) ? robustness!.fragile_edges : []).map(recordOf)
+    .map((e) => ({ from: str(e?.from_id), to: str(e?.to_id) }))
+    .find((e): e is { from: string; to: string } => e.from !== null && e.to !== null && graphHasLink(graph, e.from, e.to));
+}
+
+/** Nothing SCI-DEEP checks first already refuses the test: the link's removal eligibility and the Run's licence. */
+function fragileLinkNotRefusedFirst(graph: unknown, link: { from: string; to: string }, analysisState: unknown, analysisReady: unknown): boolean {
+  const permissions = claimPermissionsFrom(analysisState, analysisReady);
+  const mode = PERMITTED_ANALYSIS_MODES.find((m) => m === permissions.permitted_analysis_mode);
+  return structuralChallengeEligibility(graph, { from_id: link.from, to_id: link.to }).eligible
+    && mode !== undefined && modePermitsAtLeast(mode, 'quantified_provisional')
+    && permissions.total_goal_claims_allowed !== false;
+}
+
+/**
+ * ⭐ S-B: the ONE rule for "this Run offers Test link" — the review's own F5 step (above), shared with the action bar so
+ * the bar and the review never disagree. The caller binds the Run (the bar asks only on a bound current Run).
+ */
+export function testableFragileLinkOf(graph: unknown, analysisState: unknown, analysisReady: unknown, analysisResult: unknown): { from_id: string; to_id: string } | undefined {
+  const fragile = fragileLinkOf(graph, analysisResult);
+  return fragile !== undefined && fragileLinkNotRefusedFirst(graph, fragile, analysisState, analysisReady)
+    ? { from_id: fragile.from, to_id: fragile.to } : undefined;
+}
+
 export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead): DecisionReviewTurn {
   if (runExplanationChip(scenarioId, read) === null) {
     return { bound: false, reply: RUN_EXPLANATION_UNAVAILABLE_TEXT, lines: [], steps: [] };
   }
   const { graph, analysisReady, analysisState, analysisResult } = read;
-  const enrichment = recordOf(recordOf(analysisResult)?.enrichment);
   const nodes = graphNodes(graph);
   const licence = leaderLicenceFromState(analysisState, analysisReady);
   const lines: string[] = [];
@@ -204,21 +230,13 @@ export function decisionReviewFor(scenarioId: string, read: DecisionReviewRead):
   // its own words. Its press is offered only where nothing SCI-DEEP checks first already refuses it: the link's removal
   // eligibility on this graph, and the Run's licence for the comparison (at least `quantified_provisional`, goal claims
   // allowed), as its dispatch reads them. Both are necessary, not sufficient (Codex r2 P2).
-  const robustness = recordOf(enrichment?.robustness);
-  const fragile = (Array.isArray(robustness?.fragile_edges) ? robustness!.fragile_edges : []).map(recordOf)
-    .map((e) => ({ from: str(e?.from_id), to: str(e?.to_id) }))
-    .find((e): e is { from: string; to: string } => e.from !== null && e.to !== null && graphHasLink(graph, e.from, e.to));
+  const fragile = fragileLinkOf(graph, analysisResult);
   if (fragile !== undefined) {
     const from = nodes.get(fragile.from)?.label ?? null;
     const to = nodes.get(fragile.to)?.label ?? null;
     const named = from !== null && to !== null ? fragileLinkLine(from, to) : null;
     lines.push(named !== null && survivesReplyEditors(named, graph, analysisReady) ? named : FRAGILE_LINK_UNNAMED);
-    const permissions = claimPermissionsFrom(analysisState, analysisReady);
-    const mode = PERMITTED_ANALYSIS_MODES.find((m) => m === permissions.permitted_analysis_mode);
-    const notRefusedFirst = structuralChallengeEligibility(graph, { from_id: fragile.from, to_id: fragile.to }).eligible
-      && mode !== undefined && modePermitsAtLeast(mode, 'quantified_provisional')
-      && permissions.total_goal_claims_allowed !== false;
-    if (notRefusedFirst) steps.push({ kind: 'test_without_link', from_id: fragile.from, to_id: fragile.to });
+    if (fragileLinkNotRefusedFirst(graph, fragile, analysisState, analysisReady)) steps.push({ kind: 'test_without_link', from_id: fragile.from, to_id: fragile.to });
   }
 
   // F6: "What would change this?" where SCI-CHANGE answers it: this bound, current Run with a leader the licence names

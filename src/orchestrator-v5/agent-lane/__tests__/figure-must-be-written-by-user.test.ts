@@ -240,6 +240,10 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     // S-D slice 2: the approve site names it twice: an approve-with-edits of an Agent proposal binds the user's own
     // Submit to the EDITED proposal's id (same context, `typed_approval_of` re-bound by the server).
     expect(route).toContain('edited?.ok ? { ...toolCtx, typed_approval_of: target, proposal_edits: undefined } : toolCtx, capabilities, mode);');
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the eight dispatch sites (the approve site twice) and the state read').toBe(11);
+    // S-C (#2744): the widen Add press's ONE card (a dispatch site), and two reads of the SAME typed-words carrier
+    // (`toolCtx.user_text`: the risks turn's and the wire's gap signal) — never the history.
+    expect(route).toContain('await dispatchTool(call.tool, JSON.stringify(call.args), toolCtx, capabilities, mode)');
+    expect(route.match(/toolCtx\.user_text \?\? ''/g)?.length, 'the gap signal reads the typed-words carrier only').toBe(2);
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the nine dispatch sites (the approve site twice), the state read and two typed-words reads').toBe(14);
   });
 });

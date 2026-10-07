@@ -622,6 +622,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "description",
       "display_value",
       "encoding_map",
+      // event_risk.v1, 7 Oct (Science 393023 pilot) — THE VALUE-BEARING DECISION: `event_risk` IS value-bearing. It carries
+      // a stated magnitude (the occurrence range p_low..p_high, attested by its REQUIRED `basis`), so it JOINS `carriesValue`
+      // (schema-v3.ts): label binding must not stamp a provenance over a range that names its own. It does NOT join
+      // `NODE_QUANTITY_FIELDS`: a probability that the event happens is not a level of the node's own metric.
+      "event_risk",
       "extractionType",
       "factor_type",
       "full_label",
