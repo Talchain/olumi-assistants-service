@@ -137,11 +137,13 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     // 14 CEE-owned smuggle names (6 + A6e's `exists_defaulted` + A5's three saved-example stamps
     // + A6f's `std_defaulted` + G1's `goal_direction` / `goal_horizon_months` + E-A2's `goal_deadline_as_stated`
     // + #2306's `goal_sense_reading` + AIQ (b)'s `goal_level_reading` + F1 T6's option lifecycle `proposed_by` /
-    // `option_status` / `analysis_participation`) + the 5 J2 names.
-    expect(all.length).toBe(25);
+    // `option_status` / `analysis_participation`) + the 5 J2 names + event_risk.v1 slice 2a's `event_risk` (added to the
+    // union directly: only CEE's validated hold stamp may author the block).
+    expect(all.length).toBe(26);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',
+      'event_risk',
       'strengthstdsource',
       'threshold_source',
       'weightsource',
