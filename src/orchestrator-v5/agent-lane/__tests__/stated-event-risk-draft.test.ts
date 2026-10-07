@@ -8,13 +8,15 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 
 import { holdStatedEventRisks } from '../stated-event-risk-draft.js';
 import { readStatedEventRisk } from '../../routing/stated-event-risk.js';
-import { slugId, type CandidateModel } from '../admit-model.js';
+import { slugId } from '../admit-model.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 
 type Json = Record<string, any>;
-type Graph = { nodes: Json[]; edges: Json[] };
+type Node = Json & { id: string };
+type Edge = Json & { from: string; to: string; id?: string };
+type Graph = { nodes: Node[]; edges: Edge[] };
 const PREFIX = "We're deciding between hiring contractors and training in-house. ";
 const STATED = 'Our key developer might leave, maybe 10–30% in the next 6 months.';
 const BRIEF = PREFIX + STATED;
@@ -50,7 +52,8 @@ async function build(brief: string, cause = false): Promise<{ graph: Graph; out:
     from, to, direction, provenance: 'inferred', effect_amount: null,
     effect_per_source_change: null, effect_provenance: null,
   });
-  const candidate: CandidateModel = {
+  // The drafter's raw JSON (nulls as a drafter writes them); the builder parses it, so it is not typed here.
+  const candidate = {
     goal: { metric: 'Delivery', operator: '>=', target_stated: false, value: null, unit: null,
       horizon_months: null, provenance: 'inferred', baseline_known: false, baseline_value: null,
       baseline_provenance: null, scope: null },
