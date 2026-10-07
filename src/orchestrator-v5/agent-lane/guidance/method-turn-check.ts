@@ -117,8 +117,13 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('PM-PLAN-ONLY', inputs.decision_level === true
       ? items.every(item => new Set((inputs.current_option_labels ?? []).filter(label => labelMatches(item, [label])).map(normalise)).size <= 1)
       : !labelMatches(reply, otherOptions));
+    const unlicensedClaim = inputs.decision_level === true && normalise(masked(reply, labels)).split(' ')
+      .some(word => ['leader', 'leaders', 'leading', 'ranking', 'rankings', 'ranked'].includes(word));
     check('PM-NO-WINNER', inputs.decision_level !== true
-      || !banned(reply, /\b(?:(?<!\b(?:quick|small|early|easy)\s)wins?(?![\s-]+(?:back|over)\b)(?!\s+(?:(?:new|more)\s+)?(?:customers?|clients?|deals?|business|subscribers?|users?)\b)|winners?|winning|recommend\w*|(?<!\b(?:at|our|your|their|its)\s)best(?![\s-]+(?:case|practice|effort)\b)|(?:comes?|came|is|are|was|pulls?|stays?|moves?)(?:\s+out)?\s+ahead(?!\s+of\b)|leads?(?!\s+(?:to|time)\b))\b/iu, labels));
+      || !banned(reply, /\b(?:(?<!\b(?:quick|small|early|easy)\s)wins?(?![\s-]+(?:back|over)\b)(?!\s+(?:(?:new|more)\s+)?(?:customers?|clients?|deals?|business|subscribers?|users?)\b)|winners?|winning|recommend\w*|(?<!\b(?:at|our|your|their|its)\s)best(?![\s-]+(?:case|practice|effort)\b)|(?:comes?|came|is|are|was|pulls?|stays?|moves?)(?:\s+out)?\s+ahead(?!\s+of\b)|leads?(?!\s+(?:to|time)\b))\b/iu, labels) && !unlicensedClaim);
+    // Decision stories are qualitative. Numbered story markers and digits in the user's own labels are exempt;
+    // no Run figures (withheld or otherwise) are licensed here. Reuse the existing parser, with no new regex.
+    check('PM-NO-FIGURES', inputs.decision_level !== true || numberTokens(masked(reply, labels)).length === 0);
     check('PM-BLINDSPOT', blindspotOk(reply));
   } else if (policy_id === 'RERUN-EXPLANATION') {
     check('RX-NAMES-CHANGES', (inputs.change_labels ?? []).slice(0, 3).every(label => labelMatches(reply, [label])));

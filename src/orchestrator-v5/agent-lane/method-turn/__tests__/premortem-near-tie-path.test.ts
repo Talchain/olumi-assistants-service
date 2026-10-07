@@ -100,12 +100,15 @@ describe('W9b: near-tie completed decision pre-mortem', () => {
     assert.equal(JSON.stringify(turn(captured('B'))), JSON.stringify(base.B));
   });
 
-  it('C: entire decision-union output and first-link fallback/card are unchanged', () => {
+  it('C: W9c replaces the decision-union first-link fallback/card with own-lever stories', () => {
     const c = captured('C');
     const out = run(turn(c));
-    assert.equal(JSON.stringify(out), JSON.stringify(base.C));
-    assert.equal(fallbackReply(out.context), 'Imagine this decision has gone badly. Start with how ‘Support capacity strain’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?');
-    assert.equal(cardCallFor(out.context.supplied_items[0], c.graph)?.tool, 'propose_link_strengths');
+    // W9c deliberately replaces this historical nonempty-union link/card behaviour; B stays byte-pinned.
+    assert.deepEqual(out.context.supplied_items.map(i => i.id), ['price_rise', 'starter_tier_subscribers']);
+    const fallback = settleMethodTurn(out, '');
+    assert.equal(settleMethodTurn(out, fallback.reply).passed, true);
+    assert.equal(fallback.reply.split('Watch for:').length - 1, 2);
+    assert.equal(cardCallFor(fallback.target, c.graph), null);
   });
 
   it('W9 all-user-sized links/values still refuse', () => {

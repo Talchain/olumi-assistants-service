@@ -317,7 +317,8 @@ describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared
       const failed = settleMethodTurn(out, draft);
       expect(failed.passed, gate).toBe(false);
       expect(failed.failed, gate).toContain(gate);
-      expect(failed.reply).toContain('Imagine this decision has gone badly. Start with');
+      // W9c: decision rejection keeps the exercise's two-story shape, with no one-link question.
+      expect(failed.reply).toContain('Imagine this decision has gone badly. Two failure stories to test:');
       expect(failed.target).toEqual(a);
     }
   });

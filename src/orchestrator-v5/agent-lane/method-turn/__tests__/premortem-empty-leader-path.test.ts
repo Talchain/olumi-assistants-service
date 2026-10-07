@@ -36,7 +36,7 @@ const requireRun = (turn: ReturnType<typeof turnFor>): RunMethodTurn => {
 };
 
 describe('W9: empty licensed-leader path on a generic pre-mortem press', () => {
-  it('RED at base: captured draw 1 runs the decision with an existing grounded link card', () => {
+  it('RED at base: captured draw 1 runs the decision with story-only own levers', () => {
     const c = captures.draw1;
     const signals = signalsOf(c);
     assert.equal(signals['run.leader_licensed'], true);
@@ -51,9 +51,10 @@ describe('W9: empty licensed-leader path on a generic pre-mortem press', () => {
     assert.equal(out.check_inputs.plan_label, undefined);
     assert.equal(out.check_inputs.decision_level, true);
     assert.deepEqual(out.context.supplied_items.map(i => i.id), [
-      'price_rise_mrr_uplift->monthly_recurring_revenue', 'customer_losses_from_price_rise',
+      'starter_tier_subscribers', 'price_rise',
     ]);
-    assert.equal(cardCallFor(out.context.supplied_items[0], c.graph)?.tool, 'propose_link_strengths');
+    // W9c: a decision story never offers an authorship/estimate approval.
+    assert.equal(cardCallFor(out.context.supplied_items[0], c.graph), null);
     assert.equal(out.context.dsk, null);
     assert.equal(out.context.not_cited, 'no_identified_plan');
     assert.ok(out.directive.includes('Stress-test the whole decision.'));
@@ -61,17 +62,17 @@ describe('W9: empty licensed-leader path on a generic pre-mortem press', () => {
     assert.equal(JSON.stringify(c), before);
   });
 
-  it('CONTROL: captured draw 2 retains the existing decision-level union and link card', () => {
+  it('CONTROL: captured draw 2 uses story-only own levers', () => {
     const c = captures.draw2;
     assert.equal(signalsOf(c)['run.leader_licensed'], false);
     const out = requireRun(turnFor(c));
     assert.equal(out.context.plan, null);
     assert.equal(out.context.decision_level, true);
     assert.deepEqual(out.context.supplied_items.map(i => i.id), [
-      'monthly_recurring_revenue_lost_to_price_driven_churn->monthly_recurring_revenue',
-      'monthly_recurring_revenue_lost_to_price_driven_churn',
+      'price_change_from_today', 'starter_tier_availability',
     ]);
-    assert.equal(cardCallFor(out.context.supplied_items[0], c.graph)?.tool, 'propose_link_strengths');
+    // W9c: a decision story never offers an authorship/estimate approval.
+    assert.equal(cardCallFor(out.context.supplied_items[0], c.graph), null);
     assert.equal(out.context.dsk, null);
     assert.equal(out.context.not_cited, 'no_identified_plan');
   });

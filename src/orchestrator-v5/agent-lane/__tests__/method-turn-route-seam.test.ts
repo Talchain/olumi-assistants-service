@@ -43,6 +43,8 @@ const GOOD = [
   `2. ${label('integration_step_bug_resolution')} was left undone and ${label('trial_profile_abandonment_rate')} kept rising. Watch for: trial sign-ups going quiet. Mitigate: fix the worst step first.`,
   'Outside the model: what could blindside this that none of these figures covers?',
 ].join('\n');
+/** W9c: the generic decision exercise is grounded in intervention levers, rather than estimate approval links. */
+const DECISION_GOOD = GOOD.replace(label('integration_step_bug_resolution'), label('sprint_capacity_for_integration_fix'));
 const BAD = 'This plan will fail. There is a 40% chance the sprint slips.';
 /** A passing draft whose words trip the WRITE narrator (CODEX_CLI_OVERFLOW 5940698000 P1 #2, reproduced on D1's labels). */
 const GOOD_ADDED = GOOD.replace(`stayed thin, so`, `was added too late, so`);
@@ -131,12 +133,15 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
   });
 
   it('ROW R1 RED (2 own options, leader withheld): the generic press runs a decision-level pre-mortem with ONE model call', async () => {
+    reply = DECISION_GOOD;
     const b = await generic();
     expect(sent).toHaveLength(1);
     expect(sent[0].instructions).toContain('Stress-test the whole decision.');
     expect(sent[0].instructions).not.toContain('The plan to stress-test is');
     expect(sent[0].tools).toEqual([]);
-    expect(b.assistant_text).toBe(GOOD);
+    expect(b.assistant_text).toBe(DECISION_GOOD);
+    expect(b._agent.tool_calls).toEqual([]);
+    expect(b.suggested_actions.some(c => c.id.startsWith('agent-approve-proposal:'))).toBe(false);
     expect(b.suggested_actions.map(c => c.id)).toContain('agent-talk-it-through');
     expect(b.suggested_actions.some(c => c.id.startsWith('agent-premortem-plan:'))).toBe(false);
   });
@@ -282,10 +287,11 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(c.assistant_text).toContain('Imagine this decision has gone badly.'); // D1 draft is ungrounded on this model
     expect(c._agent.tool_calls.map((x) => x.name)).not.toContain('propose_identity');
     const ids = c.suggested_actions.map((x) => x.id);
-    expect(c._agent.tool_calls.map((x) => x.name), 'only the method\'s own card, never the waiting identity reading').toEqual(['propose_link_strengths']);
+    // W9c: decision stories carry no estimate approval, including after a draft rejection.
+    expect(c._agent.tool_calls.map((x) => x.name), 'decision stories carry no approval or identity card').toEqual([]);
     expect(ids.some(id => id.startsWith('agent-premortem-plan:'))).toBe(false);
     expect(ids.at(-1)).toBe('agent-talk-it-through');
-    expect(ids.length, 'the method card (approve + amend) and Talk it through').toBeLessThanOrEqual(3);
+    expect(ids, 'the decision exercise offers Talk it through only').toEqual(['agent-talk-it-through']);
     nextScenario();
     reply = 'In the current model, the link matters.';
     const o = await ask('What do you make of this?');

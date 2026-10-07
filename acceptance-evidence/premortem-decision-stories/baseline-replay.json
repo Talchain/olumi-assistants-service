@@ -1,0 +1,291 @@
+[
+  {
+    "capture": "w9b-2",
+    "selector": {
+      "suppressed": [
+        {
+          "policy_id": "RC-WIDEN",
+          "reason": "not_eligible"
+        },
+        {
+          "policy_id": "RC-WHAT-CHANGES",
+          "reason": "not_eligible"
+        },
+        {
+          "policy_id": "RC-STRENGTHEN-ITEM",
+          "reason": "not_eligible"
+        },
+        {
+          "policy_id": "RC-PREMORTEM",
+          "reason": "not_eligible"
+        },
+        {
+          "policy_id": "RC-COACH-EDITS",
+          "reason": "not_eligible"
+        }
+      ],
+      "runs_method": "RC-PREMORTEM",
+      "mode": "decision_plan"
+    },
+    "adapter": {
+      "kind": "run",
+      "context": {
+        "method": "pre_mortem",
+        "dsk": null,
+        "not_cited": "no_identified_plan",
+        "plan": null,
+        "decision_level": true,
+        "goal_label": "monthly recurring revenue",
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Starter-tier monthly recurring revenue",
+              "monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "starter_tier_monthly_price->starter_tier_monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Starter-tier monthly price",
+              "Starter-tier monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "starter_tier_monthly_price",
+            "kind": "factor",
+            "labels": [
+              "Starter-tier monthly price"
+            ],
+            "card": "propose_assumptions"
+          },
+          {
+            "id": "starter_tier_launched",
+            "kind": "factor",
+            "labels": [
+              "Starter tier launched"
+            ],
+            "card": "propose_assumptions"
+          },
+          {
+            "id": "customers_lost_after_price_rise",
+            "kind": "risk",
+            "labels": [
+              "Customers lost after price rise"
+            ],
+            "card": "propose_new_risk"
+          }
+        ],
+        "supplied_figures": []
+      },
+      "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘monthly recurring revenue’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘Raise prices 10%’, ‘Launch starter tier’, ‘Keep pricing as it is’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- how ‘Starter-tier monthly price’ affects ‘Starter-tier monthly recurring revenue’ (nobody has sized this yet)\n- ‘Starter-tier monthly price’ (a figure Olumi estimated)\n- ‘Starter tier launched’ (a figure Olumi estimated)\n- ‘Customers lost after price rise’ (a risk on an option’s path)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+      "check_inputs": {
+        "decision_level": true,
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+            "labels": [
+              "Starter-tier monthly recurring revenue",
+              "monthly recurring revenue"
+            ]
+          },
+          {
+            "id": "starter_tier_monthly_price->starter_tier_monthly_recurring_revenue",
+            "labels": [
+              "Starter-tier monthly price",
+              "Starter-tier monthly recurring revenue"
+            ]
+          },
+          {
+            "id": "starter_tier_monthly_price",
+            "labels": [
+              "Starter-tier monthly price"
+            ]
+          },
+          {
+            "id": "starter_tier_launched",
+            "labels": [
+              "Starter tier launched"
+            ]
+          },
+          {
+            "id": "customers_lost_after_price_rise",
+            "labels": [
+              "Customers lost after price rise"
+            ]
+          }
+        ],
+        "model_labels": [
+          "Decision: monthly recurring revenue",
+          "monthly recurring revenue",
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is",
+          "Price rise",
+          "Starter tier launched",
+          "Starter-tier monthly price",
+          "Customers lost after price rise",
+          "Starter-tier subscribers",
+          "Starter-tier monthly recurring revenue"
+        ]
+      }
+    },
+    "probe_draft": "Imagine this decision has gone badly. Two failure stories to test:\n1. Raise prices 10%: Price rise drove customers away before the extra revenue could help monthly recurring revenue. Watch for: renewal objections and cancellations. Mitigate: test the change with a small customer group and review retention before expanding.\n2. Launch starter tier: Starter tier launched fell short of the uptake the launch depended on. Watch for: slow signups and stalled activation. Mitigate: test demand with a small launch and adjust the offer before committing further.\nOutside the model: what else could have blindsided this decision?",
+    "probe_failed": [
+      "PM-GROUNDED"
+    ],
+    "fallback": "Imagine this decision has gone badly. Start with how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+    "equals_served_reply": true,
+    "card": {
+      "tool": "propose_link_strengths",
+      "args": {
+        "links": [
+          {
+            "from_label": "Starter-tier monthly recurring revenue",
+            "to_label": "monthly recurring revenue",
+            "strength": "strong"
+          }
+        ],
+        "rationale": "Olumi’s current band for a link this pre-mortem rests on, for you to apply as it stands or edit."
+      }
+    },
+    "raw_model_draft_retained": false
+  },
+  {
+    "capture": "w9b-3",
+    "selector": {
+      "suppressed": [
+        {
+          "policy_id": "RC-WIDEN",
+          "reason": "not_eligible"
+        },
+        {
+          "policy_id": "RC-WHAT-CHANGES",
+          "reason": "not_eligible"
+        },
+        {
+          "policy_id": "RC-STRENGTHEN-ITEM",
+          "reason": "not_eligible"
+        },
+        {
+          "policy_id": "RC-PREMORTEM",
+          "reason": "not_eligible"
+        },
+        {
+          "policy_id": "RC-COACH-EDITS",
+          "reason": "not_eligible"
+        }
+      ],
+      "runs_method": "RC-PREMORTEM",
+      "mode": "decision_plan"
+    },
+    "adapter": {
+      "kind": "run",
+      "context": {
+        "method": "pre_mortem",
+        "dsk": null,
+        "not_cited": "no_identified_plan",
+        "plan": null,
+        "decision_level": true,
+        "goal_label": "monthly recurring revenue",
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Starter-tier monthly recurring revenue",
+              "monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          },
+          {
+            "id": "starter_monthly_price->starter_tier_monthly_recurring_revenue",
+            "kind": "link",
+            "labels": [
+              "Starter monthly price",
+              "Starter-tier monthly recurring revenue"
+            ],
+            "card": "propose_link_strengths"
+          }
+        ],
+        "supplied_figures": []
+      },
+      "directive": "METHOD TURN: the user asked for a pre-mortem. This reply follows the method below exactly, and calls no tools.\nStress-test the whole decision. The goal is ‘monthly recurring revenue’.\nStress-test the whole decision, with no single option id. Each story names at most one option; grounded items are the union of own (non-status-quo) option paths in the existing action-priority order. Never name a winner, best option or recommendation. Keep every existing pre-mortem gate and the Watch for: / Mitigate: / Outside the model: ...? shape.\nThe current option labels are: ‘Raise prices 10%’, ‘Launch starter tier’, ‘Keep pricing as it is’.\nShape: 2 failure stories (at most 3) told in the past tense ('It is a year later and this decision went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.\nFormat: Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.\nEach story rests on at least one of these items from the user’s model, highest priority first. Name the item in its own words; for a link, name both ends:\n- how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’ (nobody has sized this yet)\n- how ‘Starter monthly price’ affects ‘Starter-tier monthly recurring revenue’ (nobody has sized this yet)\nEach story names at most one option. Never name a winner, best option or recommendation. Outside an item's own name, use no percentage and none of these words: likely, likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.\nNever: a probability, percentage or win share unless the user stated it.\nNever: a leading option when run.leader_licensed is false.\nNever: 'the model was saved', implementation detail, internal ids.\nNever: EVPI, elasticity, sensitivity score, placeholder, edge, node.\nAt most 180 words.",
+      "check_inputs": {
+        "decision_level": true,
+        "current_option_labels": [
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is"
+        ],
+        "supplied_items": [
+          {
+            "id": "starter_tier_monthly_recurring_revenue->monthly_recurring_revenue",
+            "labels": [
+              "Starter-tier monthly recurring revenue",
+              "monthly recurring revenue"
+            ]
+          },
+          {
+            "id": "starter_monthly_price->starter_tier_monthly_recurring_revenue",
+            "labels": [
+              "Starter monthly price",
+              "Starter-tier monthly recurring revenue"
+            ]
+          }
+        ],
+        "model_labels": [
+          "Decision: monthly recurring revenue",
+          "monthly recurring revenue",
+          "Raise prices 10%",
+          "Launch starter tier",
+          "Keep pricing as it is",
+          "Existing-customer price rise",
+          "Starter subscribers",
+          "Starter monthly price",
+          "Customers lost to price rise",
+          "Starter-tier monthly recurring revenue"
+        ]
+      }
+    },
+    "probe_draft": "Imagine this decision has gone badly. Two failure stories to test:\n1. Raise prices 10%: Existing customer price rise drove customers away before the extra revenue could help monthly recurring revenue. Watch for: renewal objections and cancellations. Mitigate: test the change with a small customer group and review retention before expanding.\n2. Launch starter tier: Starter subscribers fell short of the uptake the launch depended on. Watch for: slow signups and stalled activation. Mitigate: test demand with a small launch and adjust the offer before committing further.\nOutside the model: what else could have blindsided this decision?",
+    "probe_failed": [
+      "PM-GROUNDED"
+    ],
+    "fallback": "Imagine this decision has gone badly. Start with how ‘Starter-tier monthly recurring revenue’ affects ‘monthly recurring revenue’: how would you notice it early, and what would you do?",
+    "equals_served_reply": true,
+    "card": {
+      "tool": "propose_link_strengths",
+      "args": {
+        "links": [
+          {
+            "from_label": "Starter-tier monthly recurring revenue",
+            "to_label": "monthly recurring revenue",
+            "strength": "strong"
+          }
+        ],
+        "rationale": "Olumi’s current band for a link this pre-mortem rests on, for you to apply as it stands or edit."
+      }
+    },
+    "raw_model_draft_retained": false
+  }
+]

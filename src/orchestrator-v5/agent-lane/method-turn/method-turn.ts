@@ -309,6 +309,7 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
       : `- ${itemPhrase(item)} (${decision ? ITEM_CLASS[item.kind].replaceAll('this plan', 'an option') : ITEM_CLASS[item.kind]})`),
     `${decision ? 'Each story names at most one option. Never name a winner, best option or recommendation.' : `Name no option other than ${plan}.`} Outside an item's own name, use no percentage and none of these words: likely, `
       + 'likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.',
+    ...(decision ? ['Outside the model’s own labels, give no figures, leader or ranking claims. This exercise prepares no model change or approval card.'] : []),
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
     `At most ${POLICY.method_turns.shared.max_words} words.`,
   ].join('\n');
@@ -334,6 +335,19 @@ function checkInputsOf(ctx: RunMethodTurn['context'], graph: unknown): MethodInp
 }
 
 export function fallbackReply(ctx: RunMethodTurn['context']): string {
+  if (ctx.decision_level === true) {
+    const first = ctx.supplied_items[0];
+    // Prefer a different option's lever for the second story; never infer a leader from the item order.
+    const second = ctx.supplied_items.find(item => item !== first && item.lever_option_labels?.some(label =>
+      !first.lever_option_labels?.includes(label))) ?? ctx.supplied_items[1] ?? first;
+    const goal = ctx.goal_label === null ? 'the goal' : quote(ctx.goal_label);
+    return [
+      'Imagine this decision has gone badly. Two failure stories to test:',
+      `1. The effect of ${itemPhrase(first)} fell short of what ${goal} needed. Watch for: early results diverging from the expected effect. Mitigate: test this lever with a small group before expanding.`,
+      `2. The effect of ${itemPhrase(second)} arrived too late to help ${goal}. Watch for: delays between the intervention and its effect. Mitigate: stage the rollout and review the effect before committing further.`,
+      'Outside the model: what else could have blindsided this decision?',
+    ].join('\n');
+  }
   return FALLBACK_TEMPLATE
     .replace('‘{plan}’', ctx.plan === null ? 'this decision' : quote(ctx.plan.label))
     .replace('{first supplied item}', itemPhrase(ctx.supplied_items[0]));
@@ -392,7 +406,7 @@ export type CardCall =
  * the writer resolves.
  *
  * Null = no card, and the turn offers 'Talk it through' only: a risk or a limit (its card would need a label drawn from
- * the story, i.e. model text: not in v1), a story-only own lever from the empty decision branch, or a target the graph
+ * the story, i.e. model text: not in v1), a decision story item, or a target the graph
  * no longer holds as it was read.
  */
 export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: string = PREMORTEM_CARD_RATIONALE): CardCall | null {

@@ -830,7 +830,7 @@ export const POLICY = {
         "figures the user stated (label + value)"
       ],
       "body": "2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Switch to GCP’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.",
-      "action": "ONE change card on action_target, the story target with the lowest supplied index, using that item's card: propose_link_strengths (Olumi's current band to accept or edit, the same door as M1's S1 card) for a link, propose_assumptions (the S3V card) for a factor, propose_new_risk ('Add this as a risk': a new risk linked into the target, label proposed from the story and editable on the card) for a risk or limit. Secondary: 'Talk it through'. Nothing is added without Apply.",
+      "action": "ONE change card on action_target, the story target with the lowest supplied index, using that item's card: propose_link_strengths (Olumi's current band to accept or edit, the same door as M1's S1 card) for a link, propose_assumptions (the S3V card) for a factor, propose_new_risk ('Add this as a risk': a new risk linked into the target, label proposed from the story and editable on the card) for a risk or limit. Secondary: 'Talk it through'. Nothing is added without Apply. Decision_plan story items carry card null and offer Talk it through only.",
       "post_checks": [
         {
           "id": "PM-COUNT",
@@ -858,14 +858,18 @@ export const POLICY = {
         },
         {
           "id": "PM-NO-WINNER",
-          "rule": "decision_plan only: no winner, winning, recommend (including inflections), 'best option/choice/bet/path/plan', 'comes out ahead' or bare 'lead(s)' (not 'leads to') claim in Olumi's own text; ordinary prose such as quick wins, in the best case or the months ahead is allowed (shared.label_masking)"
+          "rule": "decision_plan only: no winner, winning, recommend (including inflections), 'best option/choice/bet/path/plan', 'comes out ahead' or bare 'lead(s)' (not 'leads to') claim, nor leader/leading/ranking/ranked in Olumi's own text; ordinary prose such as quick wins, in the best case or the months ahead is allowed (shared.label_masking)"
+        },
+        {
+          "id": "PM-NO-FIGURES",
+          "rule": "decision_plan only: no figures outside supplied model labels; numbered story markers are exempt"
         },
         {
           "id": "PM-BLINDSPOT",
           "rule": "exactly one blindspot_line; it ends with '?'; every numbered line comes before it"
         }
       ],
-      "fallback": "Deterministic, no LLM: 'Imagine ‘{plan}’ has gone badly. Start with {first supplied item}: how would you notice it early, and what would you do?' with that item's card, plus 'Talk it through'.",
+      "fallback": "Deterministic, no LLM: 'Imagine ‘{plan}’ has gone badly. Start with {first supplied item}: how would you notice it early, and what would you do?' with that item's card, plus 'Talk it through'. In decision_plan mode, give two qualitative failure stories on supplied own levers, each with Watch for / Mitigate, followed by the outside-model question; no change card.",
       "science": "Prospective hindsight (Mitchell, Russo & Pennington 1989; Klein 2007). DSK-P-001 provenance only through MethodScienceContext (shared.dsk_provenance).",
       "format": "Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.",
       "targets": "checkMethodTurn returns targets[]: one per numbered item (parsing.target). The harness picks action_target from them.",

@@ -119,7 +119,7 @@ export interface SuppliedItem {
   readonly id: string;
   readonly kind: 'link' | 'factor' | 'risk' | 'limit';
   readonly labels: readonly string[];
-  /** Null for own levers selected by the empty decision branch: story grounding, with no estimate approval. */
+  /** Null for decision-level story grounding, with no estimate approval. */
   readonly card: ItemCard | null;
   /** Present only for those levers, to name the options that set them without asserting value authorship. */
   readonly lever_option_labels?: readonly string[];
@@ -234,7 +234,7 @@ function choosePlan(
  *   (2) factors on the plan's path (an end of one of those links) whose value is Olumi's estimate;
  *   (3) risks at either end of a link on the plan's path;
  *   (4) limits whose quantity sits on the plan's path.
- * A decision-level pre-mortem uses the union of own-option paths, with the same ordering and item eligibility.
+ * A decision-level exercise uses this own-path union for eligibility, then projects story-only own levers below.
  * Ties break by id, in codepoint order.
  */
 function premortemItems(s: MethodScienceSignals, planIds: readonly string[], graph: unknown): SuppliedItem[] {
@@ -408,6 +408,33 @@ export function methodScienceContext(input: MethodScienceInput): MethodScienceCo
       .map(f => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: null,
         lever_option_labels: ownLevers.get(f.factor_id)! }));
   }
+  // A nonempty union licenses the exercise, not authorship of its lever values. Ground a current decision in
+  // the own options' intervention targets on real goal paths, including user-stated levers. The empty-union
+  // eligibility above stays conservative: an entirely user-sized model still refuses as before.
+  if (decision && items.length > 0 && s['run.kind'] === 'complete_current') {
+    const pathNodes = new Set(s['model.goal_path_links']
+      .filter(l => l.option_ids.some(id => s['model.non_sq_option_ids'].includes(id)))
+      .flatMap(l => l.link_id.split('->')));
+    const rawNodes = (input.graph as { nodes?: unknown } | null)?.nodes;
+    const ownLevers = new Map<string, string[]>();
+    for (const node of Array.isArray(rawNodes) ? rawNodes : []) {
+      const option = node as { id?: unknown; kind?: unknown; interventions?: unknown } | null;
+      if (option?.kind !== 'option' || typeof option.id !== 'string' || !s['model.non_sq_option_ids'].includes(option.id)) continue;
+      if (option.interventions === null || typeof option.interventions !== 'object' || Array.isArray(option.interventions)) continue;
+      for (const id of Object.keys(option.interventions)) {
+        const labels = ownLevers.get(id) ?? [];
+        labels.push(s['model.option_labels'][option.id]);
+        ownLevers.set(id, labels);
+      }
+    }
+    const levers = s['model.goal_path_factors'].filter(f => pathNodes.has(f.factor_id) && ownLevers.has(f.factor_id))
+      .sort((a, b) => a.goal_distance - b.goal_distance || byCodepoint(a.factor_id, b.factor_id))
+      .map((f): SuppliedItem => ({ id: f.factor_id, kind: 'factor', labels: [f.label], card: null,
+        lever_option_labels: ownLevers.get(f.factor_id)! }));
+    if (levers.length > 0) items = levers;
+  }
+  // A decision exercise never offers an estimate/keep approval, including on rejection of the model's draft.
+  if (decision) items = items.map(item => ({ ...item, card: null }));
   const { citation, reason } = adjudicate(input, plan, items);
   return {
     method: input.method,
