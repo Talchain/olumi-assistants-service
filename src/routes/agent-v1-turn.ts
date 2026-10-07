@@ -3873,7 +3873,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offeredRecord = heldRecords.find(r => r.approve_action.id === offeredApprove?.id);
     // ⭐ S-D (DL 7 Oct, Canvas's served capture #2614): the PROPOSING turn offers "Not now" too, so a held proposal can be
     // declined from the first moment, not only from the next reply (the record's own `decline_action`).
-    if (offeredRecord !== undefined && !offeredNow.some(a => a.id === offeredRecord.decline_action.id)) {
+    // One decline per card: a door that already offers its own decline for this proposal (#2776's drawn-link "Decline",
+    // a withdraw the lifecycle counts as declined) keeps it, and "Not now" is not added beside it.
+    if (offeredRecord !== undefined && !offeredNow.some(a => a.id === offeredRecord.decline_action.id
+      || (a.id.startsWith('agent-decline-') && a.id.endsWith(`:${offeredRecord.proposal_id}`)))) {
       const amendIndex = offeredNow.findIndex(a => a.id === AMEND_CHIP.id);
       offeredNow.splice(amendIndex >= 0 ? amendIndex + 1 : offeredNow.length, 0, offeredRecord.decline_action as OfferedAction);
     }
