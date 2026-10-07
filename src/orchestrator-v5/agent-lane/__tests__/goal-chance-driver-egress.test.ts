@@ -907,11 +907,12 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
   it.each([
     ['the verb-object limb', (n: number) => 'prevents goal chances for '.repeat(n)],
     ['the passive limb', (n: number) => 'chances are withheld for '.repeat(n)],
-  ])('LINEAR TIME: doubling %s costs under 3× (quadratic would be 4×)', (_name, make) => {
+  // 4× the input, min of 5 timings: linear ≈ 4×, quadratic ≈ 16× (the #2728 pattern; a 2× step flaked at 3.5× on CI).
+  ])('LINEAR TIME: 4× %s costs under 8× (quadratic would be 16×)', (_name, make) => {
     const cost = (n: number): number => {
       const text = make(n);
       removeAllWithheldClaims(text);
-      return Math.min(...[0, 1, 2].map(() => {
+      return Math.min(...[0, 1, 2, 3, 4].map(() => {
         const t0 = performance.now();
         ALL_WITHHELD_CLAIM.test(text);
         removeAllWithheldClaims(text);
@@ -919,6 +920,6 @@ describe('Wave B4, keys untouched: no "withheld for every option" beside a shown
         return performance.now() - t0;
       }));
     };
-    expect(cost(4000) / cost(2000)).toBeLessThan(3);
+    expect(cost(4000) / cost(1000)).toBeLessThan(8);
   });
 });
