@@ -16,7 +16,7 @@ import { evaluatedIdentityCarriers } from './identity-evaluations.js';
  * checked here yet. Words: AIQ #77 5912882031. Pure and total.
  */
 import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
-import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
+import { resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from '../agent-lane/say-figure.js';
@@ -24,7 +24,7 @@ import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../format/edge-strength
 import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 import { userSizedLevelLessLinks } from '../agent-lane/mediator-reading.js';
 import { goalOwnLimitRow, goalTargetRow, statedGoalTargetOf } from '../goal-target/stated-goal-target.js';
-import { sayGoalChange } from '../agent-lane/limit-frame.js';
+import { limitNeedsTodaysLevel, sayGoalChange } from '../agent-lane/limit-frame.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -95,11 +95,6 @@ const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFi
 
 /** The goal's own limit row (DECISION-REPRESENTATION row 1): the ONE reader's (`stated-goal-target.ts`). */
 const ownLimitRow = goalOwnLimitRow;
-
-/** The goal's stated target figure, read by the ONE target reader every surface shares (RT-10 B′ R3). */
-function statedTarget(graph: Rec, goal: Rec): number | null {
-  return statedGoalTargetOf(graph, goal)?.value ?? null;
-}
 
 const PRECONDITION_ORDER: readonly TargetPrecondition[] = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
 
@@ -224,30 +219,32 @@ export function targetTestabilityOf(
   const goal = graph.nodes.filter(isRec).find((n) => n.kind === 'goal' && typeof n.id === 'string');
   if (goal === undefined) return { kind: 'no_goal' };
   const goalId = goal.id as string;
-  if (statedTarget(graph, goal) === null) return { kind: 'no_target', goal_id: goalId };
+  const stated = statedGoalTargetOf(graph, goal);
+  if (stated === null) return { kind: 'no_target', goal_id: goalId };
+  const levelFrame = (stated.frame ?? 'level') === 'level';
 
   const failures: TargetTestabilityFailure[] = [];
   const today = isRec(goal.observed_state) ? goal.observed_state : undefined;
-  // P1 — today's level on the goal, as science reads it (`observed_state.baseline`, the schema-v3 goal limb's
-  // condition). Never derived from the target.
+  // P1 — today's level where the frame requires it (`limitNeedsTodaysLevel`), as science reads it
+  // (`observed_state.baseline`, the schema-v3 goal limb's condition). Never derived from the target.
   const hasToday = today !== undefined && finite(today.baseline);
-  if (!hasToday) failures.push({ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' });
+  if (limitNeedsTodaysLevel(stated.frame) && !hasToday) failures.push({ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' });
   // P2 — a level target normalises strictly inside (0, 1) (ISL clips at the edges). Change frames normalise elsewhere.
-  if ((goal.goal_threshold_frame ?? 'level') === 'level' && finite(goal.goal_threshold) && !(goal.goal_threshold > 0 && goal.goal_threshold < 1)) {
+  if (levelFrame && finite(goal.goal_threshold) && !(goal.goal_threshold > 0 && goal.goal_threshold < 1)) {
     failures.push({ precondition: 'P2', case: 'd', code: 'threshold_off_scale' });
   }
   // P3 — a comparator science can score: `>=` / `<=`, and a strict `>` (it travels as `goal_threshold_strict`).
-  // The comparator the node HOLDS, else the one its own target row STATES (one reader, Codex r1 #2606).
+  // The comparator of the stated target, read through `statedGoalTargetOf` (W6b, 7 Oct): the row's own comparator when
+  // the target is held only on the goal's row, else the node's: the same reader as the words and `goal-chance-gate.ts`.
   // ⭐ D3 step 1 (Science #87 6006079049 (2); Codex buddy r1 F4 on #2618): a strict `<` is scorable exactly where the run
   // sends it strictly — held on the node, minimised, beside its threshold (`resolveGoalThresholdStrict`). Anywhere else
   // (a `<` only the row states, or no threshold to score) it stays unscorable.
-  const heldComparator = readHeldGoalComparator(graph, goalId) ?? statedGoalTargetOf(graph, goal)?.held;
+  const heldComparator = stated.held;
   if (heldComparator === '<' && !resolveGoalThresholdStrict(graph, goalId)) failures.push({ precondition: 'P3', case: 'b', code: 'comparator_unscorable' });
   // P5 — the goal's samples arrive in its own unit (see `linkSized`). LEVEL goals only (R3 #75 5914084339): the ruler
   // artefact is `raw / (raw × 1.25) = 0.8` on a level frame; a change frame ("cut by 20%") is left as it was.
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
   const identityForwarded = identity !== undefined && identity.stated_in_brief !== false;
-  const levelFrame = (goal.goal_threshold_frame ?? 'level') === 'level';
   if (levelFrame) {
     const nodes = (graph.nodes as unknown[]).filter(isRec);
     const kindOf = new Map(nodes.map((n) => [n.id, n.kind] as const));
@@ -344,15 +341,16 @@ export interface UntestableTargetParts {
 export function untestableTargetParts(graph: unknown, verdict: TargetTestability, namedLinkCount = 3): UntestableTargetParts | null {
   if (verdict.kind !== 'not_testable' || !isRec(graph) || !Array.isArray(graph.nodes)) return null;
   const goal = graph.nodes.filter(isRec).find((n) => n.id === verdict.goal_id);
-  const raw = goal === undefined ? null : statedTarget(graph, goal);
-  if (goal === undefined || raw === null) return null;
+  const stated = goal === undefined ? null : statedGoalTargetOf(graph, goal);
+  if (goal === undefined || stated === null) return null;
+  const raw = stated.value;
   const name = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'your goal';
   const unit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit
     : typeof ownLimitRow(graph, goal)?.unit === 'string' ? ownLimitRow(graph, goal)!.unit as string : '';
-  const comparator = readHeldGoalComparator(graph, verdict.goal_id) ?? statedGoalTargetOf(graph, goal)?.held;
+  const comparator = stated.held;
   const figure = unit !== '' ? sayFigure(raw, unit) : raw.toLocaleString('en-GB');
   // W6: the level card's formatter says a change target, never its raw fraction as a level. Level words stay verbatim.
-  const change = sayGoalChange(statedGoalTargetOf(graph, goal)?.frame, raw, unit, (value, u) => sayFigure(value, u ?? ''), comparator);
+  const change = sayGoalChange(stated.frame, raw, unit, (value, u) => sayFigure(value, u ?? ''), comparator);
   const target = change ?? [typeof comparator === 'string' ? COMPARATOR_WORDS[comparator] : undefined, figure].filter(Boolean).join(' ');
   const tailWords = typeof comparator === 'string' ? TAIL_COMPARATOR_WORDS[comparator] : undefined;
   const comparatorTarget = change ?? `${typeof comparator === 'string' ? comparator : ''} ${figure}`;
@@ -399,7 +397,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
     return userBand && typeof mean === 'number' && Number.isFinite(mean) ? CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(mean))] : null;
   })();
   const askedAfterTheBand = (question: string): string => bandTheUserSet === null ? question
-    : `You set this link as ${bandTheUserSet}. To test your ${change ?? figure} target I need it in ${unit || 'the goal unit'}: `
+    : `You set this link as ${bandTheUserSet}. To test your ${change === undefined ? `${figure} target` : `target (${change})`} I need it in ${unit || 'the goal unit'}: `
       + `${question[0]!.toLowerCase()}${question.slice(1)}`;
   // [readiness clause, tail noun phrase (null: nothing the user can supply), question]
   const said = (c: TargetCase): readonly [string, string | null, string | null] => c === 'a'
