@@ -335,8 +335,9 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
   const hostHeadline = units.every((u) => u.obligation !== undefined) && units[0]!.obligation === 'host'
     ? units[0] : undefined;
   // B15 (DL, 7 Oct): the first PRESENT screen goal-chance finding in text order leads, by identity alone.
-  // `present` retains the marker even when overlapping obligations bind as one larger atomic unit.
-  const goalChanceHeadline = units.find((u) => present.some((o) => o.lead === true && u.text.includes(o.text)));
+  // `present` retains the marker even when overlapping obligations bind as one larger atomic unit. The unit must BE that
+  // finding (exact text): a bullet that carries it beside other sentences (a run share) never leads (Codex r1 P1 #2783).
+  const goalChanceHeadline = units.find((u) => present.some((o) => o.lead === true && u.text === o.text));
   const headline = goalChanceHeadline ?? hostHeadline ?? leadIn
     ?? units.find((u) => u.kind === 'sentence' && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u))
     ?? units.find((u) => u.kind === 'heading' && eligible(u))

@@ -288,6 +288,20 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('2b-0 REPLAY PARITY GUARD: stored words the rebuild does not reproduce → the rebuilt text ships whole, no shape', async () => {
+    hostRunFixture();
+    const { b: first, turnId } = await runOnly();
+    expect(first._answer_shape, 'control: the live Run was shaped').toBeDefined();
+    // A live branch the rebuild does not mirror changed the words the user saw (e.g. the leader gate's closing).
+    const row = rows.get(turnId)!;
+    rows.set(turnId, { ...row, assistant_message: `${row.assistant_message}\n\nA live-only closing sentence.` });
+    const { b: replay } = await runOnly(turnId);
+    expect(replay._agent.replayed).toBe(true);
+    expect(replay._answer_shape, 'no shape the stored words do not prove').toBeUndefined();
+    expect(replay.assistant_text).not.toBe(first.assistant_text);
+    for (const line of goalChanceScreenLinesForAgent(readbackResult, readbackGraph, true)) expect(replay.assistant_text).toContain(line.chance);
+  });
+
   it('2b-0 CONTRAST: missing approve card remains host_composed, byte-identical, without a shape', async () => {
     const { approvalChipIdFor } = await import('../approval-chips.js');
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {

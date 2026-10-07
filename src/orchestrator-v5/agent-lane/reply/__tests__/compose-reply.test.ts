@@ -493,6 +493,15 @@ describe('B15: a present typed goal-chance finding is the headline, by identity'
     assertDerivation(reordered, c);
   });
 
+  it('R8 (Codex r1 P1 #2783): a bullet carrying the share AND a chance never leads; its own-unit control does', () => {
+    const mixed = [`- ${share} ${chances[1]}`, '- Check the assumptions.', '- Keep the evidence visible.', chances[0]].join('\n');
+    const c = composeReplyShape({ text: mixed, obligations });
+    expect(c.shape?.headline ?? '', 'the share-led bullet is not the headline').not.toContain(share);
+    expect(c.shape?.headline, 'the chance standing as its own unit leads').toBe(chances[0]);
+    const alone = [`- ${chances[1]}`, '- Check the assumptions.', '- Keep the evidence visible.'].join('\n');
+    expect(composeReplyShape({ text: alone, obligations }).shape?.headline, 'control: a bullet that IS the chance leads').toBe(chances[1]);
+  });
+
   it('R7: all-host Run → chance outranks the atomic ready headline; ready goes to detail', () => {
     const hostText = [RUN_RESULT_READY_TEXT, ...chances.slice(0, 2)].join('\n\n');
     const c = composeReplyShape({ text: hostText, obligations: [

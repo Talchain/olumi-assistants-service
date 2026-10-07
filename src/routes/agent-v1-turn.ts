@@ -2176,8 +2176,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // `draft_graph` is read back only when the graph has content.
           modelExists: state.draftGraph !== undefined,
         });
-      const replayComposed = replayObligations === undefined ? null
+      // ⛔ RELOAD = SAME, PROVED AT RUNTIME (Codex r1 on #2783): the rebuild re-derives the live turn's lines, and every
+      // live branch it does not mirror (leader gate, a proposal card's profile, a link ask, a held lapse…) would compose a
+      // different shape. So the shape rides only when the composed replay IS the stored words the user first saw; any
+      // other replay ships the rebuilt text whole, as before 2b-0 (the structural-challenge replay's rule).
+      const composedCandidate = replayObligations === undefined ? null
         : composeReplyShape({ text: withoutProposalIds(replayText), obligations: replayObligations, graph: state.graph ?? null, profile: 'coaching' });
+      const replayComposed = composedCandidate !== null && composedCandidate.shape !== null
+        && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       const composedReplay = composeDirectAnswerResponse({
         assistant_text: replayComposed !== null ? replayComposed.text : withoutProposalIds(replayText),
         stage: 'frame',
