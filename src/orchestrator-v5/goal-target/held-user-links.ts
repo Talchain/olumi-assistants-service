@@ -18,8 +18,10 @@
  * one) holds at existence 1.0 on the Run's input; its strength is untouched. The route's FIRST default link is never held,
  * so every route that carried Olumi's doubt still carries exactly one (I1). Relational, so `endsOfGraph` computes it once
  * per graph (`LinkEnds.routeOnce`) and every reader of `heldLinkOf` sees it. `reason` says WHICH hold: only `user_range`
- * is the user's; `route_once` is Olumi's bookkeeping. Fail-closed: a cycle anywhere holds nothing by this rule, and an
- * identity operand (fixed by ISL, never drawn) or a bidirected link is never default, so it never gives cover.
+ * is the user's; `route_once` is Olumi's bookkeeping. Fail-closed: a cycle anywhere holds nothing by this rule; a link
+ * ISL FIXES rather than draws (an identity operand, an event risk's mitigation) is never default, so it never gives cover;
+ * a bidirected link, or one touching a node kept out of the calculation, is not in the route structure at all. An event
+ * risk's OCCURRENCE is never a route's doubt for this rule (occurrence is not existence): only drawn link existence covers.
  */
 import { linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { nodeUnitOf } from '../../orchestrator/context/placeholder-parts.js';
@@ -71,8 +73,12 @@ export interface LinkEnds {
   readonly fromUnit: string | undefined;
   readonly toUnit: string | undefined;
   readonly routeOnce: boolean;
-  /** Target identity operands are arithmetic, never default existence doubt. */
-  readonly identityOperand?: boolean;
+  /**
+   * ISL FIXES this link, never draws it (Science 393023): an IDENTITY operand (the target's `nonlinear_identity` lists the
+   * source) or an event risk's MITIGATION (the target's `event_risk.mitigations` names the source; ISL applies −p̄·m at
+   * existence 1). Neither is a doubt ISL draws, so it is never default and never gives cover.
+   */
+  readonly fixedByIsl?: boolean;
 }
 
 /** Ends with no labels and no units: nothing validates against them (a non-record edge). */
@@ -114,8 +120,13 @@ export function routeOnceCoveredSources(links: readonly { from: string; to: stri
 export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
-  const operands = new Map(nodes.map((n) => [n.id, new Set(isRec(n.nonlinear_identity) && Array.isArray(n.nonlinear_identity.factor_ids)
-    ? n.nonlinear_identity.factor_ids : [])] as const));
+  // Per target node, the sources ISL FIXES rather than draws: identity operands, and an event risk's mitigations (read
+  // loosely, fail-closed: any `factor_id` named there is excluded, whether or not the block would pass the write door).
+  const fixedSources = new Map(nodes.map((n) => [n.id, new Set<unknown>([
+    ...(isRec(n.nonlinear_identity) && Array.isArray(n.nonlinear_identity.factor_ids) ? n.nonlinear_identity.factor_ids : []),
+    ...(isRec(n.event_risk) && Array.isArray(n.event_risk.mitigations)
+      ? n.event_risk.mitigations.filter(isRec).map((m) => m.factor_id) : []),
+  ])] as const));
   const text = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
   const unitOf = nodeUnitOf(nodes);
   // The route structure is the graph the Run is SENT (Codex buddy r1 P1): `guardAnalysisParticipation` withholds a node the
@@ -129,7 +140,7 @@ export function endsOfGraph(graph: unknown): (e: unknown) => LinkEnds {
   const baseEnds = (e: Rec): LinkEnds => ({
     fromLabel: text(byId.get(e.from)?.label), toLabel: text(byId.get(e.to)?.label),
     fromUnit: unitOf(e.from), toUnit: unitOf(e.to), routeOnce: false,
-    ...(operands.get(e.to)?.has(e.from) ? { identityOperand: true } : {}),
+    ...(fixedSources.get(e.to)?.has(e.from) ? { fixedByIsl: true } : {}),
   });
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const covered = routeOnceCoveredSources(edges.filter(structural).map((e) => ({
@@ -215,7 +226,7 @@ export function heldLinkBeforeRouteOnce(e: unknown, ends: LinkEnds): BaseHold | 
 
 function defaultExistence(e: Rec, ends: LinkEnds): boolean {
   return finite(e.exists_probability) && e.exists_probability > 0 && e.exists_probability < 1
-    && ends.identityOperand !== true && heldLinkBeforeRouteOnce(e, ends) === null;
+    && ends.fixedByIsl !== true && heldLinkBeforeRouteOnce(e, ends) === null;
 }
 
 export function heldLinkOf(e: unknown, ends: LinkEnds): LinkHold | null {

@@ -24,7 +24,7 @@ type Rec = Record<string, any>;
 type Edge = Rec & { from: string; to: string; exists_probability?: number; strength?: { mean: number; std?: number } };
 type Graph = { nodes: Rec[]; edges: Edge[] };
 type Fixture = { name: string; graph: Graph; held: string[] };
-const PARITY_SHA256 = '7c050df497ef7ead9d145d8d38b14c92eb216d67a7b186fb57322b73d2d1ec51';
+const PARITY_SHA256 = '2af884c37d767cdd68a53aa6cf9b1e5ee7cf78f003204afdc57428f61ef51331';
 const bytes = readFileSync(new URL('./fixtures/route-once-parity.json', import.meta.url));
 const parity = JSON.parse(bytes.toString('utf8')) as Fixture[];
 const graphOf = (name: string): Graph => structuredClone(parity.find((row) => row.name === name)!.graph);
@@ -53,6 +53,7 @@ const defaultIds = (graph: Graph): Set<string> => {
   return new Set(structural(graph).filter((e) => typeof e.exists_probability === 'number' && Number.isFinite(e.exists_probability)
     && e.exists_probability > 0 && e.exists_probability < 1 && e.edge_type !== 'bidirected'
     && !nodes.get(e.to)?.nonlinear_identity?.factor_ids?.includes(e.from)
+    && !nodes.get(e.to)?.event_risk?.mitigations?.some((m: Rec) => m.factor_id === e.from)
     && heldLinkBeforeRouteOnce(e, ends(e)) === null).map(id));
 };
 const rootRoutes = (graph: Graph): Edge[][] => {
@@ -194,6 +195,18 @@ describe('rule R route-once', () => {
       edgeOf(graph, 'hire->capacity').exists_probability = value;
       expect(heldIds(graph, true)).toEqual([]);
     }
+  });
+
+  it('Event risk (DL ruling; Science 393023): a MITIGATION is fixed by ISL, never doubt or cover; OCCURRENCE is never cover', () => {
+    // The legacy case a writer can still produce: risk->child left at 0.8 under a mitigated event risk.
+    const mitigated = graphOf('Event-risk mitigation');
+    expect(endsOfGraph(mitigated)(edgeOf(mitigated, 'preventer->risk')).fixedByIsl).toBe(true);
+    expect(heldIds(mitigated)).toEqual([]);
+    expect(withHeldUserLinks(mitigated)).toBe(mitigated);
+    // CONTROL: the same graph without event_risk is today's rule R — preventer->risk is a default doubt, so risk->child holds.
+    expect(heldIds(graphOf('Event-risk mitigation control'))).toEqual(['risk->child']);
+    // Q7 shape (risk->child at 1.0 under event_risk): the risk's occurrence never covers, so child->goal keeps its doubt.
+    expect(heldIds(graphOf('Event-risk occurrence is not cover'))).toEqual([]);
   });
 
   it('I5: no covered default returns the same object', () => {

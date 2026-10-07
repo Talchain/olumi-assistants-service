@@ -1206,5 +1206,164 @@
     "held": [
       "M->Y"
     ]
+  },
+  {
+    "name": "Event-risk mitigation",
+    "graph": {
+      "nodes": [
+        {
+          "id": "preventer",
+          "kind": "factor",
+          "label": "preventer"
+        },
+        {
+          "id": "risk",
+          "kind": "risk",
+          "label": "risk",
+          "event_risk": {
+            "version": 1,
+            "occurrence": {
+              "p_low": 0.05,
+              "p_high": 0.15,
+              "basis": "olumi"
+            },
+            "horizon": {
+              "months": 12
+            },
+            "mitigations": [
+              {
+                "factor_id": "preventer",
+                "occurrence_reduction": 0.5
+              }
+            ]
+          }
+        },
+        {
+          "id": "child",
+          "kind": "goal",
+          "label": "child"
+        }
+      ],
+      "edges": [
+        {
+          "from": "preventer",
+          "to": "risk",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": -1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "risk",
+          "to": "child",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": []
+  },
+  {
+    "name": "Event-risk mitigation control",
+    "graph": {
+      "nodes": [
+        {
+          "id": "preventer",
+          "kind": "factor",
+          "label": "preventer"
+        },
+        {
+          "id": "risk",
+          "kind": "risk",
+          "label": "risk"
+        },
+        {
+          "id": "child",
+          "kind": "goal",
+          "label": "child"
+        }
+      ],
+      "edges": [
+        {
+          "from": "preventer",
+          "to": "risk",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": -1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "risk",
+          "to": "child",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": [
+      "risk->child"
+    ]
+  },
+  {
+    "name": "Event-risk occurrence is not cover",
+    "graph": {
+      "nodes": [
+        {
+          "id": "risk",
+          "kind": "risk",
+          "label": "risk",
+          "event_risk": {
+            "version": 1,
+            "occurrence": {
+              "p_low": 0.05,
+              "p_high": 0.15,
+              "basis": "olumi"
+            },
+            "horizon": {
+              "months": 12
+            }
+          }
+        },
+        {
+          "id": "child",
+          "kind": "outcome",
+          "label": "child"
+        },
+        {
+          "id": "goal",
+          "kind": "goal",
+          "label": "goal"
+        }
+      ],
+      "edges": [
+        {
+          "from": "risk",
+          "to": "child",
+          "exists_probability": 1,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        },
+        {
+          "from": "child",
+          "to": "goal",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 1,
+            "std": 0.05
+          }
+        }
+      ]
+    },
+    "held": []
   }
 ]
