@@ -1206,3 +1206,52 @@ describe('Cut 9 PROD, keys untouched: two wordings that passed prod cut 8 and cu
     expect(egressCostRatio(head)).toBeLessThan(8);
   });
 });
+
+/**
+ * Wave B8 (7 Oct 08:46–08:48Z, guest, CEE f2c8477 = S2i), keys untouched: `waveB8-unseen2-f2c8477-challenge-turn001.json`.
+ * The S2i source gate held (Render: 0 egress removals in 9 turns); the Challenge said a new wording beside a range driver.
+ */
+const B8_CH = JSON.parse(fixture('waveB8-unseen2-f2c8477-challenge-turn001.json')) as Json;
+const B8_CLAIM = 'That does not establish the biggest driver across all options.';
+
+describe('Wave B8, keys untouched: "the biggest driver" (S2j, a superlative noun)', () => {
+  it('the gate is the screen’s: the Run behind this Challenge names a range driver', () => {
+    expect(screenNamesADriver(blockOf(B8_CH), B8_CH.draft_graph)).toBe(true);
+  });
+
+  it('RED at base: the Challenge loses only its claim; the driver sentence before it stays', () => {
+    const driver = 'The recorded fourth-shop range depends most on whether ‘Fourth-shop fit-out cost’ affects ‘Monthly fit-out financing cost’ at all, which Olumi assumed.';
+    expect(B8_CH.assistant_text).toContain(`${driver} ${B8_CLAIM}`);
+    const out = withoutDriverAbsenceClaimsAtEgress(B8_CH, opts(B8_CH)) as Json;
+    expect(out.assistant_text).toBe(B8_CH.assistant_text.replace(` ${B8_CLAIM}`, ''));
+  });
+
+  it.each([
+    B8_CLAIM,
+    'This run doesn’t identify the main drivers across the options.',
+    'The biggest driver is not established.',
+    'Across all options, the biggest driver isn’t established.',
+    'It has not established the key factor behind these chances.',
+    'The analysis cannot tell the strongest lever.',
+  ])('MUST FIRE (served + paraphrase: singular, plural, predicative, fronted): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text)).toBe(true);
+  });
+
+  it.each([
+    'It doesn’t establish the biggest driver across all options?',
+    'This analysis does not establish the biggest driver for you.',
+    'The biggest driver for you is not established.',
+    'The biggest driver is the fit-out financing link.',
+    'The model does not show the main driver of churn.',
+  ])('MUST NOT FIRE (twin: a question, for you, affirming, another quantity): %s', (text) => {
+    expect(DRIVER_ABSENCE_CLAIM.test(text) || SENS_CLAIM.test(text) || ALL_WITHHELD_CLAIM.test(text)).toBe(false);
+  });
+
+  it.each([
+    ['"does not establish the biggest" + whitespace', 'does not establish the biggest'],
+    ['"the biggest driver" + whitespace (predicative)', 'the biggest driver'],
+    ['"does not establish the main driver of" + whitespace (another-quantity guard)', 'does not establish the main driver of'],
+  ])('LINEAR TIME: %s, 4× the input costs under 8×', (_name, head) => {
+    expect(egressCostRatio(head)).toBeLessThan(8);
+  });
+});

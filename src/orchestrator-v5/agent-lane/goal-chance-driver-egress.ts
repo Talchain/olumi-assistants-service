@@ -34,6 +34,10 @@ const ABSENT = R`(?:\s*(?:not|n[’']t)\s*(?:yet\s+)?(?:been\s+)?(?:established|
 /** "which assumption" · "which of the assumptions" · "what of these factors". */
 const WHICH_ITEM = R`${WHICH}\s+(?:of\s+(?:the|these|those|your)\s+)?${ITEM}`;
 const MOST_ADJ = R`most[-\s](?:sensitive|important|influential|consequential|decisive)`;
+/** ⭐ Wave B8: a superlative noun phrase ("the biggest driver"); "key" was already the predicative form's. */
+const SUPERLATIVE = R`(?:biggest|main|key|largest|strongest|dominant|primary)`;
+/** Never "the biggest driver for you / of churn / behind costs": unless what follows is the chances, the result or the comparison. */
+const NOT_ANOTHER_QUANTITY = R`(?![ \t]{1,3}(?:of|for|behind)[ \t]{1,3}(?!(?:the|these|its|your|each|every)[ \t]{1,3}(?:options?['’]?[ \t]{1,3})?(?:chances?|results?|comparison|outcomes?|goal|options?)\b))`;
 
 /** S2d: 1–6 plain words, none a person who would own a preference (bounded: no `.*`, linear time). */
 const GEN_GAP = R`(?:\s+(?!(?:you|we|they|i|team|users?|people|customers?)\b)[\w’'-]+){1,6}?`;
@@ -89,6 +93,10 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // ⭐ Cut 9 PROD (7 Oct, CEE 7e3f8fb, Challenge, beside 2 drivers): "…the supplied analysis does not establish a single most
   // consequential change across options." (a change or lever, as the what-form's "which change"). Never a question.
   R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:(?:overall|single|clear)\s+)?[“"‘']?${MOST_ADJ}[”"’']?\s+(?:${ITEM}|changes?|levers?)\b(?![^.!?\n]{0,120}\?)`,
+  // ⭐ Wave B8 (7 Oct, CEE f2c8477, Challenge, beside a range driver): "That does not establish the biggest driver across all
+  // options." A superlative NOUN phrase ("the biggest / main / key … driver"). Never a question; never "… for you / of churn"
+  // (a person's preference or another quantity's cause), unless it is the chances, the result or the comparison.
+  R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:(?:overall|single|clear)\s+)?[“"‘']?${SUPERLATIVE}[”"’']?\s+(?:${ITEM}|changes?|levers?)\b${NOT_ANOTHER_QUANTITY}(?![^.!?\n]{0,120}\?)`,
   // Wave B (7 Oct, unseen-2 provisional view): "it has not established an investigation priority"
   R`${NEG}${VERB}\s+(?:(?:an?|the|any)\s+)?(?:clear\s+)?investigation\s+priorit(?:y|ies)\b`,
   // "there is no investigation priority yet"
@@ -96,7 +104,9 @@ export const DRIVER_ABSENCE_CLAIM = new RegExp([
   // "no single assumption stands out" · "none of the assumptions stands out"
   R`\b(?:no\s+(?:single\s+)?|none\s+of\s+the\s+)${ITEM}\s+(?:stands?|stood)\s+out`,
   // predicative: "investigation priority is not established" · "the most important assumption is unknown"
-  R`\b(?:investigation\s+priority|(?:the\s+)?${MOST_ADJ}\s+${ITEM}|(?:the\s+)?${ITEM}\s+(?:that|which)\s+matters?\s+most|(?:the\s+)?key\s+${ITEM})\s+(?:is|was|has|remains?)${ABSENT}`,
+  // ⭐ Wave B8: the superlative nouns ("the biggest driver is not established"; fronted "Across all options, the biggest
+  // driver isn't established"), as the B4 "key" form already was.
+  R`\b(?:investigation\s+priority|(?:the\s+)?${MOST_ADJ}\s+${ITEM}|(?:the\s+)?${ITEM}\s+(?:that|which)\s+matters?\s+most|(?:the\s+)?${SUPERLATIVE}\s+(?:${ITEM}|changes?|levers?)${NOT_ANOTHER_QUANTITY})\s+(?:is|was|has|remains?)${ABSENT}`,
 ].join('|'), 'i');
 
 /**
