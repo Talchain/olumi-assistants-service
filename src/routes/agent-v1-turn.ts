@@ -113,7 +113,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
+import { chipSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
@@ -2419,6 +2419,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ C5: the provisional view is accepted only while the analysis withholds its leader — read from THIS route's
         // readback through the wire gate's own predicate, so the capability and the gate below cannot disagree.
         readLeaderStanding: async (sid: string) => leaderStandingOf(await readBackState(readingDispatch, sid)),
+        // ⭐ An accepted search offer has its control on the wire: the offer reads the final egress gate's own chip rule
+        // from THIS route's readback, so the tool's "the user now sees a control" and the gate below cannot disagree.
+        researchControlShowable: async (sid: string, query: string) => {
+          const chip = researchChipFor(query);
+          if (chip === null) return false;
+          const rb = await readBackState(readingDispatch, sid);
+          return chipSurvivesLeaderGate(chip, { licence: leaderLicenceFromState(rb.analysisState, rb.analysisReady), graph: rb.graph ?? null, analysisReady: rb.analysisReady });
+        },
         // ⭐ SLICE C2 (Canonical #70 5855234599): the product's add-risk door (ONE held change) and limit door (ONE commit),
         // in-process. Each commits a turn row, so each counts as a write.
         holdAddRisk: async (input) => {

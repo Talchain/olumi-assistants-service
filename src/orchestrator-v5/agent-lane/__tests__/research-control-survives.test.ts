@@ -13,6 +13,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { researchChipFor } from '../runtime/public-research.js';
+import { dispatchTool, type AgentCapabilities, type AgentToolContext } from '../runtime/agent-tools.js';
+import { chipSurvivesLeaderGate } from '../leader-final-egress.js';
 import { textAssertsLeadingOption } from '../../compose/leading-option-egress-guard.js';
 
 const SCENARIO = '8b3e4d5c-6f7a-4b8c-9d0e-1f2a3b4c5d70';
@@ -129,5 +131,58 @@ describe('an accepted search offer has its control on the wire', () => {
     const b = await turn();
     const accepted = offers(b).filter((c) => c.ok).length;
     expect(controls(b)).toHaveLength(accepted);
+  });
+});
+
+describe('the offer itself: accepted only when the control will be shown', () => {
+  const ctx: AgentToolContext = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'research-offer' };
+  const offer = (caps: Partial<AgentCapabilities>) => dispatchTool('offer_public_research', JSON.stringify({ query: NEUTRAL }), ctx, caps as AgentCapabilities);
+  const ACCEPTED = {
+    ok: true, mutated: false, offered_query: NEUTRAL,
+    detail: 'The user now sees a control that searches the web for exactly this query. Nothing has been searched yet: '
+      + 'tell them what the search would look for and that it runs only if they press it.',
+  };
+
+  it('CONTROL: with no showable read wired, a sendable query is accepted exactly as before (same bytes)', async () => {
+    expect(await offer({})).toEqual(ACCEPTED);
+  });
+
+  it('accepted when the control will be shown', async () => {
+    expect(await offer({ researchControlShowable: async () => true })).toEqual(ACCEPTED);
+  });
+
+  it.each([
+    ['the gate would remove the control', async () => false],
+    ['the read throws (fail closed)', async () => { throw new Error('readback failed'); }],
+    ['the read answers something that is not true', async () => 'yes' as unknown as boolean],
+  ] as const)('refused when %s: no accepted offer, and the model is told there is no control', async (_why, showable) => {
+    const r = await offer({ researchControlShowable: showable });
+    expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'query_cannot_be_shown' });
+    expect(r).not.toHaveProperty('offered_query');
+    expect(String(r.detail)).toContain('The user sees NO control');
+  });
+
+  it('a query that cannot be sent at all keeps its own refusal, and the showable read is never asked', async () => {
+    let asked = 0;
+    const r = await dispatchTool('offer_public_research', JSON.stringify({ query: 'x'.repeat(201) }), ctx,
+      { researchControlShowable: async () => { asked += 1; return true; } } as Partial<AgentCapabilities> as AgentCapabilities);
+    expect(r).toMatchObject({ ok: false, refusal: 'query_not_sendable' });
+    expect(asked).toBe(0);
+  });
+});
+
+describe('the gate\u2019s chip rule, asked before the promise', () => {
+  const graph = { nodes: [{ id: 'o1', kind: 'option', label: OPTIONS[0] }, { id: 'o2', kind: 'option', label: OPTIONS[1] }] };
+  it.each([
+    ['withheld', RANKING, false],
+    ['withheld', NEUTRAL, true],
+  ] as const)('licence %s, %j: survives = %s', (licence, q, survives) => {
+    expect(chipSurvivesLeaderGate(researchChipFor(q), { licence, graph, analysisReady: undefined })).toBe(survives);
+  });
+
+  it('⛔ CONTRAST: the same ranking control survives when the Run licenses naming a leader (the gate does not run)', () => {
+    for (const licence of ['permitted', 'permitted_with_caveat'] as const) {
+      expect(chipSurvivesLeaderGate(researchChipFor(RANKING), { licence, graph, analysisReady: undefined })).toBe(true);
+    }
   });
 });

@@ -172,6 +172,21 @@ function chipAssertsLeader(chip: unknown, labels: readonly string[]): boolean {
 }
 
 /**
+ * ⭐ WOULD THIS CONTROL REACH THE USER? The chip rule of the final egress below ("3: chips"), asked BEFORE a control is
+ * promised. A tool that tells the model "the user now sees a control" reads this first, so an accepted offer and the
+ * gate cannot disagree: the gate removed a search control whose query compared the options while the reply still said
+ * "it runs only if you press the control" (staging 7 Oct 2026, `removed_paths: ["suggested_actions[0]"]`).
+ * Same licence, same roster, same predicate; it decides nothing the gate does not.
+ */
+export function chipSurvivesLeaderGate(
+  chip: unknown, opts: { readonly licence: LeaderFinalEgressOpts['licence']; readonly graph: unknown; readonly analysisReady: unknown },
+): boolean {
+  if (opts.licence !== 'withheld') return true;
+  const labels = [...new Set([...optionRosterFromGraph(opts.graph), ...optionRosterFromAnalysisReady(opts.analysisReady)])];
+  return !chipAssertsLeader(chip, labels);
+}
+
+/**
  * The prose a reply is replaced by when the final egress itself fails: the shared gate's fixed withheld line (DL 380e54
  * 5932098302 item 1). Leader-free by that module's own build-time probe.
  */
