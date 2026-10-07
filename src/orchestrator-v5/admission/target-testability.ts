@@ -16,7 +16,7 @@ import { evaluatedIdentityCarriers } from './identity-evaluations.js';
  * checked here yet. Words: AIQ #77 5912882031. Pure and total.
  */
 import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
-import { resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
+import { readHeldGoalComparator, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { linkEffectEndUnits, POINTS_STATED, statedInOneOf } from '../system-events/link-effect-edit.js';
 import { isTwoStateSource, sayFigure, sourceChangeWords } from '../agent-lane/say-figure.js';
@@ -234,12 +234,13 @@ export function targetTestabilityOf(
     failures.push({ precondition: 'P2', case: 'd', code: 'threshold_off_scale' });
   }
   // P3 — a comparator science can score: `>=` / `<=`, and a strict `>` (it travels as `goal_threshold_strict`).
-  // The comparator of the stated target, read through `statedGoalTargetOf` (W6b, 7 Oct): the row's own comparator when
-  // the target is held only on the goal's row, else the node's: the same reader as the words and `goal-chance-gate.ts`.
+  // A LEVEL goal: the comparator the node HOLDS, else the one its own target row STATES (one reader, Codex r1 #2606;
+  // unchanged by W6b: B′ (b) pins a node-held strict `<` as untestable). A CHANGE goal: the stated target's own
+  // comparator through `statedGoalTargetOf` (W6b, 7 Oct), the same reader as the words.
   // ⭐ D3 step 1 (Science #87 6006079049 (2); Codex buddy r1 F4 on #2618): a strict `<` is scorable exactly where the run
   // sends it strictly — held on the node, minimised, beside its threshold (`resolveGoalThresholdStrict`). Anywhere else
   // (a `<` only the row states, or no threshold to score) it stays unscorable.
-  const heldComparator = stated.held;
+  const heldComparator = levelFrame ? readHeldGoalComparator(graph, goalId) ?? stated.held : stated.held;
   if (heldComparator === '<' && !resolveGoalThresholdStrict(graph, goalId)) failures.push({ precondition: 'P3', case: 'b', code: 'comparator_unscorable' });
   // P5 — the goal's samples arrive in its own unit (see `linkSized`). LEVEL goals only (R3 #75 5914084339): the ruler
   // artefact is `raw / (raw × 1.25) = 0.8` on a level frame; a change frame ("cut by 20%") is left as it was.
@@ -347,7 +348,7 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
   const name = typeof goal.label === 'string' && goal.label.trim() !== '' ? goal.label.trim() : 'your goal';
   const unit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit
     : typeof ownLimitRow(graph, goal)?.unit === 'string' ? ownLimitRow(graph, goal)!.unit as string : '';
-  const comparator = stated.held;
+  const comparator = (stated.frame ?? 'level') === 'level' ? readHeldGoalComparator(graph, verdict.goal_id) ?? stated.held : stated.held;
   const figure = unit !== '' ? sayFigure(raw, unit) : raw.toLocaleString('en-GB');
   // W6: the level card's formatter says a change target, never its raw fraction as a level. Level words stay verbatim.
   const change = sayGoalChange(stated.frame, raw, unit, (value, u) => sayFigure(value, u ?? ''), comparator);
