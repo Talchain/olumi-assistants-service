@@ -1,9 +1,9 @@
 {
   "v": 1,
-  "state_key": "246750257b0d04bd",
+  "state_key": "38fce91a207b9b22",
   "revision": {
-    "graph_hash": "1d023b90daeaa01a",
-    "run_key": "87612dcc45f1e092"
+    "graph_hash": "ac171f2efd1ba664",
+    "run_key": "d75a23626c88c51b"
   },
   "priority": [],
   "standard": [
@@ -16,7 +16,7 @@
       "user_line": "Review this decision: what should I check before relying on it?",
       "enabled": true,
       "why_now": "Lists what this result rests on before you rely on it.",
-      "offer_key": "bce8916745da60e3"
+      "offer_key": "8605105606f9ac2b"
     },
     {
       "action_id": "what_changes",
@@ -27,7 +27,7 @@
       "user_line": "What would most likely change this result?",
       "enabled": true,
       "why_now": "Shows what would have to change for this result to change.",
-      "offer_key": "cb09e29041ec20c5"
+      "offer_key": "0afd2308c2470394"
     },
     {
       "action_id": "strengthen",
@@ -38,7 +38,7 @@
       "user_line": "What would most strengthen this model?",
       "enabled": true,
       "why_now": "A link on your goal’s path has no size yet.",
-      "offer_key": "bb00cf5863a7af0e"
+      "offer_key": "bdfdcefcb4eb8499"
     },
     {
       "action_id": "pre_mortem",
@@ -49,7 +49,7 @@
       "user_line": "Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?",
       "enabled": true,
       "why_now": "Imagine this went badly and find the most likely causes.",
-      "offer_key": "25cb467745ed3c8e"
+      "offer_key": "2daa6b030f955ad9"
     }
   ],
   "more": [
@@ -62,7 +62,7 @@
       "user_line": "Suggest options I haven’t considered.",
       "enabled": true,
       "why_now": "Find options you haven’t considered yet.",
-      "offer_key": "cfa3036851986af6"
+      "offer_key": "9889f0f24bab6388"
     }
   ]
 }
