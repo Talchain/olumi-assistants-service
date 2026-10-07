@@ -2,7 +2,9 @@
 import { z } from 'zod';
 import { validateAnalysisRunFactIdentity } from '../../../context/analysis-interpretation-identity.js';
 import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.js';
+import { extractAnalysedOptionIds } from '../../../context/option-identity.js';
 import { methodTurnForReadback, planPickChipId, type RunMethodTurn } from '../../method-turn/method-turn.js';
+import { assembleGuidanceSignals } from '../../turn-context/guidance-signals.js';
 import { binding, contentHash, dependency, provenance } from './common.js';
 
 export const PREMORTEM_COPY = {
@@ -153,12 +155,18 @@ function stamp(read: PremortemRead, scenarioId: string): PremortemWorksheetV1['r
 }
 
 export type PremortemDropReason =
-  | 'schema' | 'scoped_not_run' | 'plan_mismatch' | 'destination' | 'risk_label'
+  | 'schema' | 'scoped_not_run' | 'decision_option_ineligible' | 'plan_mismatch' | 'destination' | 'risk_label'
   | 'outside_invalid' | 'story_missing' | 'story_parts_mismatch' | 'named_options'
   | 'dup_ids' | 'supplied_mismatch' | 'grounding_invalid' | 'final_label_drift'
   | 'duplicate_key' | 'risk_request_schema' | 'authored_ban';
+export type PremortemExit =
+  | 'not_passed' | 'no_turn' | 'no_initial' | 'no_turn_id' | 'candidates_invalid'
+  | 'stamp_missing' | 'run_changed' | 'graph_changed' | 'no_blindspot'
+  | 'worksheet_invalid' | 'exception';
 export interface PremortemWorksheetDiagnostics {
   worksheet: PremortemWorksheetV1 | undefined;
+  /** Coded boundary failures only; never reply or candidate prose. */
+  exit?: PremortemExit;
   dropped: { story_index: number | null; option_id: string | null; reason: PremortemDropReason }[];
   stories: number;
   /** Validated rows before the all-or-nothing emission gate, including an optional outside row. */
@@ -171,14 +179,21 @@ export function premortemWorksheetDiagnosticsFor(input: {
   passed: boolean; reply: string; candidates: unknown; initial: PremortemRead | undefined; final: PremortemRead;
 }): PremortemWorksheetDiagnostics {
   const diagnostics: PremortemWorksheetDiagnostics = { worksheet: undefined, dropped: [], stories: 0, rows: 0 };
+  const exit = (code: PremortemExit): PremortemWorksheetDiagnostics => { diagnostics.exit = code; return diagnostics; };
   try {
     // Markers may arrive bolded (served a2-2, 7 Oct: "   **Watch for:** …"); `(?:\*\*)?` around each marker, nothing else.
     const stories = [...input.reply.matchAll(/^[ \t]{0,8}[1-9]\.[ \t]{1,4}([\s\S]*?)(?=^[ \t]{0,8}[1-9]\.[ \t]|^[ \t]{0,8}(?:\*\*)?Outside the model:|$(?![\s\S]))/gmu)].map(m => m[1].trim());
     diagnostics.stories = stories.length;
     const { turn, initial, final, scenarioId } = input;
-    if (!input.passed || turn === null || initial === undefined || input.turnId === undefined || !Array.isArray(input.candidates) || input.candidates.length > 4) return diagnostics;
+    if (!input.passed) return exit('not_passed');
+    if (turn === null) return exit('no_turn');
+    if (initial === undefined) return exit('no_initial');
+    if (input.turnId === undefined) return exit('no_turn_id');
+    if (!Array.isArray(input.candidates) || input.candidates.length > 4) return exit('candidates_invalid');
     const run = stamp(initial, scenarioId), finalRun = stamp(final, scenarioId);
-    if (run === null || finalRun === null || contentHash(run) !== contentHash(finalRun) || contentHash(initial.graph) !== contentHash(final.graph)) return diagnostics;
+    if (run === null || finalRun === null) return exit('stamp_missing');
+    if (contentHash(run) !== contentHash(finalRun)) return exit('run_changed');
+    if (contentHash(initial.graph) !== contentHash(final.graph)) return exit('graph_changed');
     const nodes = records(rec(final.graph)?.nodes), edges = records(rec(final.graph)?.edges);
     const nodeLabels = nodes.flatMap(n => typeof n.label === 'string' ? [n.label] : []);
     const uniqueNode = (nodeId: string, kind?: string): Rec | undefined => {
@@ -189,7 +204,24 @@ export function premortemWorksheetDiagnosticsFor(input: {
     };
     // Whitespace runs bounded (DL 7 Oct): the unbounded `\s*` forms took 0.35–0.8 s on 20k newlines.
     const blindspot = /^[ \t]{0,8}(?:\*\*)?Outside the model:(?:\*\*)?[ \t]{0,8}(.+\?)[ \t]{0,8}$/mu.exec(input.reply)?.[1];
-    if (!blindspot) return diagnostics;
+    if (!blindspot) return exit('no_blindspot');
+    // A2-ELIG (DL 7 Oct, served B9 req 388cefba): a decision-level story is judged by the eligibility its producer ran
+    // under, never by whether a SCOPED press for that option would run. A user-sized option has no scoped item, yet the
+    // decision union supplies its own lever for stories ('Raise prices by 10%' sets 'Price rise from current price').
+    const decision = turn.context.decision_level === true && turn.context.plan === null;
+    // The ONE signal derivation the producer read: own options (status quo and Run exclusions out) and goal paths.
+    // Neither signal reads the leader licence, so none is passed.
+    const signals = decision ? assembleGuidanceSignals({
+      request: 'method', offeredSpecific: [], graph: final.graph, analysisState: final.analysisState,
+      analysisResult: final.analysisResult, optionParticipation: final.optionParticipation, leaderLicensed: false,
+    }) : null;
+    const runOptionIds = decision ? extractAnalysedOptionIds({
+      fact_type: 'run_analysis', result: final.analysisResult,
+    } as Parameters<typeof extractAnalysedOptionIds>[0]) : null;
+    // Per-option path membership, as the scoped gate kept it: an item grounds a story only on that option's own path.
+    const onOptionPath = (optionId: string, item: { id: string; kind: string }) =>
+      signals?.['model.goal_path_links'].some(l => l.option_ids.includes(optionId)
+        && (item.kind === 'link' ? l.link_id === item.id : l.link_id.split('->').includes(item.id))) === true;
     const rows: PremortemWorksheetV1['rows'] = [];
     const seen = new Set<string>();
     const representedStories = new Set<number>();
@@ -206,9 +238,17 @@ export function premortemWorksheetDiagnosticsFor(input: {
       if (!parsed.success) { drop('schema'); continue; }
       const c = parsed.data;
       const option = uniqueNode(c.option_id, 'option');
-      const scoped = methodTurnForReadback(planPickChipId(c.option_id), final);
-      // The existing selectors own eligibility and per-option path membership. No second path authority.
-      if (scoped?.kind !== 'run') { drop('scoped_not_run'); continue; }
+      // Decision: an own option, unique by label, that this Run analysed. Otherwise the existing scoped selectors own
+      // eligibility and per-option path membership. Either way, no second path authority.
+      let eligible: RunMethodTurn['context']['supplied_items'];
+      if (decision) {
+        if (!option || !signals?.['model.non_sq_option_ids'].includes(c.option_id) || !runOptionIds?.includes(c.option_id)) { drop('decision_option_ineligible'); continue; }
+        eligible = turn.context.supplied_items.filter(item => onOptionPath(c.option_id, item));
+      } else {
+        const scoped = methodTurnForReadback(planPickChipId(c.option_id), final);
+        if (scoped?.kind !== 'run') { drop('scoped_not_run'); continue; }
+        eligible = scoped.context.supplied_items;
+      }
       if (!option || (turn.context.plan !== null && c.option_id !== turn.context.plan.option_id)) { drop('plan_mismatch'); continue; }
       const destination = uniqueNode(c.risk.affected_node_id);
       if (!destination || (destination.kind !== 'goal' && destination.kind !== 'outcome')) { drop('destination'); continue; }
@@ -226,7 +266,7 @@ export function premortemWorksheetDiagnosticsFor(input: {
         const namedOptions = nodes.filter(n => n.kind === 'option' && typeof n.label === 'string' && contains(story, n.label));
         if (namedOptions.some(n => n.id !== c.option_id) || (turn.context.plan === null && namedOptions.length !== 1)) { drop('named_options'); continue; }
         if (new Set(c.grounding.ids).size !== c.grounding.ids.length) { drop('dup_ids'); continue; }
-        const supplied = c.grounding.ids.map(id => scoped.context.supplied_items.find(i => i.id === id && i.kind === c.grounding.kind));
+        const supplied = c.grounding.ids.map(id => eligible.find(i => i.id === id && i.kind === c.grounding.kind));
         if (supplied.some(i => !i || !i.labels.every(l => contains(story, l))
           || !turn.context.supplied_items.some(initialItem => initialItem.id === i.id && initialItem.kind === i.kind && JSON.stringify(initialItem.labels) === JSON.stringify(i.labels)))) { drop('supplied_mismatch'); continue; }
         const valid = c.grounding.ids.every(id => c.grounding.kind === 'factor' || c.grounding.kind === 'risk'
@@ -275,8 +315,9 @@ export function premortemWorksheetDiagnosticsFor(input: {
     };
     const checked = PremortemWorksheetV1Schema.safeParse(envelope);
     diagnostics.worksheet = checked.success ? checked.data : undefined;
+    if (!checked.success) return exit('worksheet_invalid');
     return diagnostics;
-  } catch { return diagnostics; }
+  } catch { return exit('exception'); }
 }
 
 /** Existing callers retain the worksheet-only API. */
