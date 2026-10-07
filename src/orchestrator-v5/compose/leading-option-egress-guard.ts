@@ -214,7 +214,9 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   // presupposes a leader exactly as "the leading option" did, so the withheld gate must SEE it. DL 0df0e1 (#2639
   // 6008917488): the ADJECTIVE is the trigger, not a noun or verb list — fail closed. See MOST_SUPPORTED_LEADER_RE.
   { code: 'most_supported_option', re: MOST_SUPPORTED_LEADER_RE },
-  { code: 'the_lead', re: /\bthe\s+lead\b/i },
+  // DL 0fd71f (7 Oct): "The lead time on hiring doubled." read as a leader claim. Only the noun "lead time(s)" is
+  // excluded (W9c's bounded suffix); any other leader word in the sentence still fires.
+  { code: 'the_lead', re: /\bthe\s+lead\b(?![ -]{1,2}times?\b)/i },
   { code: 'which_option_leads', re: /\bwhich\s+option\s+leads\b/i },
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
   { code: 'best_option', re: /\bbest\s+option\b/i },
