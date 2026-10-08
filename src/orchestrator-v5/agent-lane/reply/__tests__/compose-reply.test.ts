@@ -455,6 +455,29 @@ describe('RC6 said once', () => {
   const context = 'Current estimates need evidence before anyone relies on this comparison for planning across teams. Recruitment takes time, and new starters may need the existing team to stop and help them. Capacity is only one part of the path from hiring to timely delivery of a release. The evidence should show how the new people affect work already planned for this quarter.';
 
   it.each([
+    ['explain_00_24_38', served.explain_00_24_38],
+    ['explain_00_30_46', served.explain_00_30_46],
+  ])('P1 %s with the ROUTE’s typing (Codex r4: the gate types coHold.why WITHOUT its period): the standalone copy still goes', (_id, text) => {
+    const why = served.withhold_sentence.replace(/\.$/, '');
+    const c = composeReplyShape({ text, obligations: [
+      { role: 'withheld_reason', text: served.no_leader_with_reason },
+      { role: 'withheld_reason', text: why },
+    ] });
+    expect(count(c.text, served.withhold_sentence)).toBe(1);
+    expect(c.measure!.said_once_dropped).toEqual([served.withhold_sentence]);
+    everySentenceExceptReportedKept(text, c);
+  });
+
+  it('repeated headings stay (Codex r4): a finding is never re-parented under another option', () => {
+    const text = ['Option A:', '- Revenue may dip in month one.', 'Option B:', '- Churn may rise above 4%.', 'Option A:', '- Cash runs short in month three.', context].join('\n');
+    const c = composeReplyShape({ text });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(count(c.text, 'Option A:')).toBe(2);
+    const cash = c.text.indexOf('Cash runs short');
+    expect(c.text.lastIndexOf('Option A:', cash)).toBeGreaterThan(c.text.lastIndexOf('Option B:', cash));
+  });
+
+  it.each([
     ['explain_00_24_38', served.explain_00_24_38, 'What is ‘Monthly churn rate’ today?'],
     ['explain_00_30_46', served.explain_00_30_46, 'How much does ‘Pro plan price’ change ‘Monthly churn rate’?'],
   ])('P1 %s: the contained withhold sentence is said only inside the face bullet; removing the standalone copy by hand is today’s byte-identical control', (_id, text, ask) => {

@@ -326,6 +326,8 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
       cursor = end - lineAt;
       // Neither a drop candidate nor a containment witness may touch the questions toggle.
       if (protectedAt !== -1 && start < protectedEnd && end > protectedAt) continue;
+      // A heading ("Option A:") frames what follows it: removing a repeat would re-parent findings (Codex r4 on #2801).
+      if (/:["'”’)\]*_]{0,4}$/.test(sentence.trim())) continue;
       const span = { text: sentence, start, end };
       spans.push(span);
       lineSpans.push(span);
@@ -362,8 +364,12 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
     for (let at = text.indexOf(o.text); at !== -1; at = text.indexOf(o.text, at + o.text.length)) ranges.push({ start: at, end: at + o.text.length, rank: SAID_ONCE_ROLE_RANK[o.role] ?? 0 });
     return ranges;
   });
+  // A typed text may stop short of the sentence's own terminal punctuation (the route types `coHold.why` without its
+  // period; Codex r4 on #2801): it still covers that sentence.
+  const coreEnd = (span: SentenceSpan): number => span.start + span.text.replace(/[.!?]+["'”’)\]*_]{0,4}$/, '').length;
+  const covers = (r: { start: number; end: number }, span: SentenceSpan): boolean => r.start <= span.start && coreEnd(span) <= r.end;
   const rankOf = (span: SentenceSpan): number => Math.max(-1, ...typedRanges
-    .filter((r) => r.start <= span.start && span.end <= r.end).map((r) => r.rank));
+    .filter((r) => covers(r, span)).map((r) => r.rank));
   // The strongest typed copy stays (an ask's question stays the ask), ties to the first; else the first.
   for (const group of groups) {
     const best = Math.max(...group.copies.map(rankOf));
@@ -373,7 +379,7 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
   // A typed copy may be contained away only when it IS a whole obligation (its role moves to the container whole); a
   // sentence inside a larger typed unit never is (Codex r3 on #2801: the unit's other part would keep the role alone).
   const wholeWhereTyped = (idx: number): boolean => groups[idx]!.copies.every((c) => rankOf(c) < 0
-    || typedRanges.some((r) => r.start === c.start && r.end === c.end));
+    || typedRanges.some((r) => r.start === c.start && (r.end === c.end || r.end === coreEnd(c))));
 
   // Aho-Corasick: all complete sentence keys are patterns; output links avoid copying suffix-match arrays.
   const trie: { next: Map<string, number>; fail: number; output: number; group?: number }[] = [
