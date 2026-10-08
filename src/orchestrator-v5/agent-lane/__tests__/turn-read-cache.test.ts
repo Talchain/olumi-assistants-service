@@ -65,23 +65,24 @@ describe('turnReadCache: one read per write epoch', () => {
     // A capability seeds the cache before the final reply reads it.
     await cache.dispatch(READ, {});
     const view = (read: { json: Record<string, unknown> }) => read.json.canonical_analysis_view as {
-      run: { run_id: string }; staleness: { revision: number }; options: { cell: { kind: string; display: string } }[];
+      run: { run_id: string }; staleness: { revision: number }; options: { cell: { kind: string; display: string; face: string } }[];
     };
     const first = await cache.dispatch(READ, {});
     expect(view(first).staleness.revision).toBe(1);
-    expect(view(first).options[0]?.cell).toEqual({ kind: 'figure', display: 'about 10%' });
+    expect(view(first).options[0]?.cell).toEqual({ kind: 'figure', display: 'about 10%', face: 'about 10% chance of meeting your goal, in this model.' });
     (first.json.graph as { nodes: { label: string }[] }).nodes[0]!.label = 'Caller mutation';
     view(first).options[0]!.cell.display = 'Caller mutation';
+    view(first).options[0]!.cell.face = 'Caller mutation';
     const repeat = await cache.dispatch(READ, {});
     expect(view(repeat)).not.toBe(view(first));
-    expect(view(repeat).options[0]?.cell).toEqual({ kind: 'figure', display: 'about 10%' });
+    expect(view(repeat).options[0]?.cell).toEqual({ kind: 'figure', display: 'about 10%', face: 'about 10% chance of meeting your goal, in this model.' });
     expect((repeat.json.graph as { nodes: { label: string }[] }).nodes[0]!.label).toBe('Goal 1');
     expect(graphReads).toBe(1);
     await cache.dispatch('/assist/v1/scenarios/s1/graph/register', {});
     const next = await cache.dispatch(READ, {});
     expect(view(next).staleness.revision).toBe(2);
     expect(view(next).run.run_id).toBe('run-2');
-    expect(view(next).options[0]?.cell).toEqual({ kind: 'figure', display: 'about 20%' });
+    expect(view(next).options[0]?.cell).toEqual({ kind: 'figure', display: 'about 20%', face: 'about 20% chance of meeting your goal, in this model.' });
     expect(graphReads).toBe(2);
   });
 

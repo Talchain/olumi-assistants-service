@@ -88,7 +88,7 @@ const face = (shape: AnswerShape) => [shape.headline, ...shape.bullets].join('\n
 const count = (text: string, phrase: string) => text.split(phrase).length - 1;
 const words = (text: string) => text.trim().split(/\s+/u).filter(Boolean).length;
 const withheldCells = (code: string, message: string | null = null): readonly CanonicalAnalysisCell[] => [
-  { kind: 'withheld', reasons: [{ code, message }] },
+  { kind: 'withheld', face: message ?? 'Why this figure is withheld is not recorded.', reasons: [{ code, message }] },
 ];
 
 describe('ONE reply contract through the build route', () => {

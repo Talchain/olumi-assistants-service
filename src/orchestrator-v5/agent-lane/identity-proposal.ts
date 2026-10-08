@@ -21,11 +21,18 @@ import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
  *  · the units compose as a money rate × a count into the goal's money per period (`unitsCompose`, one source with the
  *    mint), with or without the per-item denominator: the drafter's typed unit licenses nothing (AIQ 5891286280).
  */
-import { GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoneyTotal, sameUnit, unitsCompose } from './reconciling-product.js';
+import { accumulationStockFor, GAP_ROUNDING, RECONCILIATION_TOLERANCE, readMoneyTotal, sameUnit, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
 import { readUnitParts } from './same-unit.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
+
+/** The figure just typed for an asked product part, carried inside its one confirmation. */
+export interface IdentityPartLevel {
+  readonly part_id: string;
+  readonly raw_value: number;
+  readonly unit: string;
+}
 
 export interface IdentityProposal {
   readonly outcome_id: string;
@@ -34,6 +41,7 @@ export interface IdentityProposal {
   readonly factor_ids: readonly [string, string];
   /** The card's exact reading; legacy cards also show the user's stored arithmetic. */
   readonly words: string;
+  readonly part_levels?: readonly IdentityPartLevel[];
 }
 
 /** The approved-card door's limit on the displayed words (Canonical #2292). */
@@ -160,7 +168,7 @@ const NOT_A_COUNT_WORDS = new Set(['revenue', 'income', 'sale', 'price', 'cost',
   // subscribers" is ONE count (DL pre-read).
   'plus', 'minus', 'times', 'vs', 'versus', 'excluding', 'excl', 'both', 'either', 'between']);
 const singularWord = (w: string): string => w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.endsWith('ses') ? w.slice(0, -2) : w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
-function labelCountUnit(n: Rec): string | undefined {
+export function labelCountUnit(n: Rec): string | undefined {
   if (n.kind !== 'outcome' || (isRec(n.observed_state) && n.observed_state.unit !== undefined)) return undefined;
   // The drafter names a count AT A TIME ("Paying subscribers at month 12", "12-month paying subscribers", "Month-12 Pro
   // paying subscribers", truncated "… at month…": 34 of 55 stored outcome operands, staging all-time, 8 Oct). A time POINT
@@ -244,7 +252,12 @@ function proposeOnStoredReading(graph: unknown): IdentityProposal | null {
     const cm = readMoneyTotal(current.unit, goalLabel); const gm = readMoneyTotal(goalUnit, goalLabel);
     if (cm === null || gm === null || cm.code !== gm.code || cm.period !== gm.period) return null;
     const operands = [a, b].map(n => {
-      const os = isRec(n.observed_state) ? n.observed_state : undefined;
+      // The product is month-N MRR; reconcile today's MRR with price × S₀, never price × S_N.
+      const stock = accumulationStockFor(n, byId);
+      // Without S₀ this reader cannot reconcile today's MRR; the projected operand is never its substitute.
+      if (isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation' && stock === null) return null;
+      const today = stock ?? n;
+      const os = isRec(today.observed_state) ? today.observed_state : undefined;
       return typeof os?.raw_value === 'number' && Number.isFinite(os.raw_value) && text(os.unit) !== undefined
         ? { id: String(n.id), label: text(n.label) ?? String(n.id), value: os.raw_value, unit: text(os.unit)! } : null;
     });
@@ -317,7 +330,13 @@ function todaysOperand(id: string, byId: Map<string, Rec2>, edges: readonly Rec2
 /** The ONE user-levelled cause `todaysOperand` reads an operand through (the node, the cause, its level), or null. */
 function todaysCause(id: string, byId: Map<string, Rec2>, edges: readonly Rec2[]): { n: Rec2; f: Rec2; level: { value: number; unit: string } } | null {
   const n = byId.get(id);
-  if (n === undefined || (n.kind !== 'outcome' && n.kind !== 'factor') || carriesIdentity(n)) return null;
+  if (n === undefined || (n.kind !== 'outcome' && n.kind !== 'factor')) return null;
+  const stock = accumulationStockFor(n, byId);
+  if (stock !== null) {
+    const level = usersLevel(stock);
+    return stock.kind === 'factor' && !carriesIdentity(stock) && level !== null ? { n, f: stock, level } : null;
+  }
+  if (carriesIdentity(n)) return null;
   const os = isRec(n.observed_state) ? n.observed_state : undefined;
   const causes = [...new Set(edges.filter((e) => e.to === id && typeof e.from === 'string').map((e) => e.from as string))]
     .filter((c) => { const k = byId.get(c)?.kind; return k !== 'option' && k !== 'decision'; });

@@ -3,6 +3,8 @@ import { readOptionResultSources, GOAL_FIGURES_CHANCE_AS_GOAL, GOAL_FIGURES_PLAC
 import { isPlaceholderLink, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { convertingOlumiEstimate, goalOrderedLinks, scoredGoalIdOf, targetTestabilityOf, untestableTargetTail, type TargetTestability } from '../admission/target-testability.js';
 import { GOAL_CHANCE_RANGE, goalChanceRangeOf } from '../goal-target/goal-chance-range.js';
+import { goalChanceFactsForAgent } from '../goal-target/goal-chance-range-agent.js';
+import { optionPathsOf } from '../goal-target/target-testability-per-option.js';
 import { linkEffectEndUnits } from '../system-events/link-effect-edit.js';
 import type { SuggestedAction } from '../compose/types.js';
 import { placeholderGoalWarning, unsizedLeaderGoalPaths } from './goal-certainty.js';
@@ -25,6 +27,8 @@ export interface GuidedSizingDraft {
   readonly scored_goal_id?: string;
   /** Same scoped target verdict as this draft; internal only, never transported in the hook. */
   readonly target_verdict?: TargetTestability;
+  /** RANGE WINS: internal sentence scope only. null means no guided words; controls retain this draft. */
+  readonly sentence_draft?: GuidedSizingDraft | null;
   readonly links: readonly {
     readonly id?: string;
     readonly from: string; readonly to: string;
@@ -39,7 +43,7 @@ export interface GuidedSizingDraft {
 export type GuidedSizingAction = SuggestedAction & {
   readonly parameters: { readonly from: string; readonly to: string; readonly edge_id?: string };
 };
-export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recovery_line' | 'scored_goal_id' | 'target_verdict'> {
+export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recovery_line' | 'scored_goal_id' | 'target_verdict' | 'sentence_draft'> {
   readonly graph_hash: string;
   readonly run_key: string;
   readonly links: readonly (GuidedSizingDraft['links'][number] & {
@@ -49,8 +53,10 @@ export interface GuidedSizing extends Omit<GuidedSizingDraft, 'links' | 'recover
   readonly progress_line?: string;
 }
 
-/** DL r14: ONE word producer, naming the same ordered placeholder pairs as the offers. */
-export function guidedSizingSentence(draft: Pick<GuidedSizingDraft, 'total' | 'links'>, invite = true): string {
+/** DL r14: ONE word producer; RANGE WINS narrows only the spoken placeholder pairs. */
+export function guidedSizingSentence(draft: Pick<GuidedSizingDraft, 'total' | 'links' | 'sentence_draft'>, invite = true): string {
+  if (draft.sentence_draft === null) return '';
+  draft = draft.sentence_draft ?? draft;
   const names = draft.links.filter(l => l.nonconverting !== true).slice(0, 3)
     .map(l => `how strongly ‘${l.from_label}’ affects ‘${l.to_label}’`);
   const named = names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
@@ -58,8 +64,14 @@ export function guidedSizingSentence(draft: Pick<GuidedSizingDraft, 'total' | 'l
     ? ` Give a rough strength for ${draft.total === 1 ? 'it' : 'each'} to see the chance.` : ''}`;
 }
 
+/** Consume the producer's sentence scope without changing the size-link controls or reading ranges again. */
+export function guidedSizingWordDraft(draft: GuidedSizingDraft | undefined): GuidedSizingDraft | undefined {
+  return draft?.sentence_draft === null ? undefined : draft?.sentence_draft ?? draft;
+}
+
 /** The warning reader alone establishes a legacy Run's sole-placeholder cause set before calling this helper. */
 export function legacyGuidedSizingReplyText(draft: GuidedSizingDraft | undefined): string | null {
+  draft = guidedSizingWordDraft(draft);
   return draft !== undefined && draft.total >= 1 ? guidedSizingSentence(draft) : null;
 }
 
@@ -72,6 +84,7 @@ export function withoutStaleGuidedSizingWords(words: string, draft: GuidedSizing
 
 /** The promise requires exactly this draft's placeholders to be the target's only remaining blockers. */
 export function guidedSizingOnlyPlaceholders(draft: GuidedSizingDraft | undefined): boolean {
+  draft = guidedSizingWordDraft(draft);
   const verdict = draft?.target_verdict;
   if (draft === undefined || draft.total < 1 || draft.links.some(l => l.nonconverting === true)
     || verdict?.kind !== 'not_testable' || verdict.failures.length === 0
@@ -85,6 +98,7 @@ export function guidedSizingOnlyPlaceholders(draft: GuidedSizingDraft | undefine
 /** The exact GP words for this reply, from its one scoped draft and fresh progress read. */
 export function guidedSizingReplyText(draft: GuidedSizingDraft | undefined,
   progress?: { readonly progress_line: string }, invite = guidedSizingOnlyPlaceholders(draft)): { progress: string | null; guided: string | null } {
+  draft = guidedSizingWordDraft(draft);
   return {
     progress: progress?.progress_line ?? null,
     guided: draft !== undefined && draft.total >= 1 && draft.links.some(l => l.nonconverting !== true)
@@ -183,8 +197,37 @@ export function guidedSizingForRun(result: unknown, graph: unknown, wordsOnly = 
   const evaluations = r?.identity_evaluations ?? record(r?.enrichment)?.identity_evaluations;
   const warning = warnings.find(w => record(w)?.code === GOAL_FIGURES_PLACEHOLDER_PATH)
     ?? warnings.find(w => record(w)?.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
-  return guidedSizingFromWarning(warning, graph, Array.isArray(evaluations) ? evaluations : undefined,
-    scoredOptionIdsForRun(result, warning), scoredGoalIdForRun(result, graph), wordsOnly);
+  const evals = Array.isArray(evaluations) ? evaluations : undefined;
+  const optionIds = scoredOptionIdsForRun(result, warning);
+  const goalId = scoredGoalIdForRun(result, graph);
+  const draft = guidedSizingFromWarning(warning, graph, evals, optionIds, goalId, wordsOnly);
+  if (draft === undefined) return undefined;
+  // DL + a1, 8 Oct: the SAME display reader as S4b/RANGE_OPENING owns this sentence's scope, at its producer.
+  const ranged = new Set(Object.keys(goalChanceFactsForAgent(result, graph, true).goal_chance_range_display ?? {}));
+  if (ranged.size === 0) return draft;
+  const nodes = record(graph)?.nodes;
+  const w = record(warning);
+  // As in S4b, the warning owns W; an unrelated scored option cannot revive an all-ranged withhold sentence.
+  const withheld = Array.isArray(w?.option_ids) ? new Set(w.option_ids.filter((id): id is string => typeof id === 'string')) : undefined;
+  const unRanged = (optionIds ?? (Array.isArray(nodes) ? nodes.map(record) : [])
+    .flatMap(n => n?.kind === 'option' && typeof n.id === 'string' ? [n.id] : []))
+    .filter(id => !ranged.has(id));
+  const remaining = unRanged.filter(id => withheld === undefined || withheld.has(id));
+  const paths = optionPathsOf(graph, remaining, evals, goalId);
+  const pairs = new Set([...paths.values()].flat().map(l => JSON.stringify([l.from, l.to])));
+  const scopedWarning = { ...w, option_ids: remaining,
+    acceptable_links: (Array.isArray(w?.acceptable_links) ? w.acceptable_links : [])
+      .filter(l => pairs.has(JSON.stringify([record(l)?.from, record(l)?.to]))) };
+  const sentence = remaining.length === 0 ? undefined
+    : guidedSizingFromWarning(scopedWarning, graph, evals, remaining, goalId, true);
+  // The sentence's pairs belong to W, but independent target causes on other un-ranged scored options must survive.
+  const heldGraph = record(graph);
+  const targetScope = new Set(unRanged);
+  const targetGraph = heldGraph !== undefined && Array.isArray(nodes)
+    ? { ...heldGraph, nodes: nodes.filter(n => record(n)?.kind !== 'option' || targetScope.has(String(record(n)?.id))) }
+    : graph;
+  return { ...draft, sentence_draft: sentence === undefined ? null
+    : { ...sentence, target_verdict: targetTestabilityOf(targetGraph, evals, goalId) } };
 }
 
 const PRESS_PREFIX = 'agent-size-link:';

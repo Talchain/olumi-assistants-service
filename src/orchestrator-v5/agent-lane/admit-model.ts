@@ -35,7 +35,7 @@ import { admitGoalBaseline } from '../../cee/factor-extraction/goal-baseline-adm
 import { ceilingTargetUnitMayBeALevel, heldComparatorSense, heldStrictFloorIsScoredStrictly } from '../goal-target/goal-direction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
-import type { InterventionV3T } from '../../schemas/cee-v3.js';
+import type { DraftOptionWideningT, DraftRiskWideningT, DraftWideningT, InterventionV3T } from '../../schemas/cee-v3.js';
 import { admitInterventionRange } from '../intervention-range.js';
 import { DEFAULT_EXISTS_PROBABILITY, STRENGTH_DEFAULT_SIGNATURE } from '@talchain/schemas';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
@@ -162,6 +162,8 @@ export interface CandidateModel {
     added_capacity?: { monthly_share_pct: number; lead_months_low: number; lead_months_high: number } | null;
     label: string;
     provenance: string;
+    /** Server-authored automatic draft widening; absent from the drafter's contract. */
+    draft_widening?: DraftOptionWideningT;
     /**
      * What this option DOES — the factor levels it sets. Optional because the
      * original banked contract has no such field; when it is absent the model
@@ -172,6 +174,8 @@ export interface CandidateModel {
       value: number;
       unit?: string;
       provenance: string;
+      estimate?: true;
+      basis?: string;
       stated_evidence?: StatedOptionEvidence | null;
       /** Internal construction receipt, populated from the user brief, never requested from the drafter. */
       range?: InterventionV3T['range'];
@@ -205,9 +209,10 @@ export interface CandidateModel {
    * has nothing to read), so a goal fed by an outcome or a risk could never be sized in its own unit. Optional here: the
    * banked contract has neither field.
    * `analysis_participation` is never the drafter's (the strict schema has no such key): only
-   * `rerouteExtraParentsOfProductGoal` writes it, on Olumi's risk whose effect the model already carries (DL 5916217417).
+   * `rerouteExtraParentsOfProductGoal` writes it on a duplicate effect, and automatic draft widening writes it on
+   * a server-authored, zero-edge suggestion whose attachment is retained as metadata.
    */
-  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded' }[];
+  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded'; draft_widening?: DraftRiskWideningT }[];
   readonly outcomes: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
   readonly links: readonly CandidateLink[];
   /**
@@ -380,6 +385,8 @@ export interface ConstructedLevel {
    */
   value_confidence?: 'medium';
   range?: InterventionV3T['range'];
+  estimate?: true;
+  basis?: string;
 }
 
 const levelSourceFor = (provenance: string): ConstructedLevelSource =>
@@ -503,6 +510,9 @@ export interface AdmittedNode {
    * scenario returned 500 until this was fixed.
    */
   provenance?: 'from_brief' | 'ai_inferred' | 'user_set';
+  draft_widening?: DraftWideningT;
+  proposed_by?: 'olumi';
+  analysis_participation?: 'included' | 'retained_excluded';
   /**
    * `cee-v3.ts` option field. Written ONLY on the option the drafter DECLARED as the
    * status quo (`is_status_quo`) and that was wired as held — readiness's own first
@@ -1375,7 +1385,7 @@ const quotedList = (items: readonly string[]): string => {
  * still an addend (item c), and so is a cause that drives a factor (finding 3 of 1047641f).
  */
 function markProductIdentities(
-  declared: readonly CandidateIdentity[],
+  allDeclared: readonly CandidateIdentity[],
   resolve: (label: string) => string | undefined,
   nodes: readonly AdmittedNode[],
   edges: readonly { from: string; to: string; effect_direction?: string; origin?: string }[],
@@ -1387,6 +1397,9 @@ function markProductIdentities(
   const accepted: AcceptedProductIdentity[] = [];
   const analyses: ProductIdentityAnalysis[] = [];
   const unlevelled: string[] = [];
+  // ⭐ CEE #4: an `accumulation` is admitted by its own writer (`accumulation-identity.ts`, which needs the held deadline),
+  // never refused here as "not a relationship Olumi can check".
+  const declared = allDeclared.filter((d) => d?.operation !== 'accumulation');
   if (declared.length === 0) return { marks, loss, accepted, analyses, unlevelled };
   const kindOf = new Map(nodes.map((n) => [n.id, n.kind]));
   const nodeOf = new Map(nodes.map((n) => [n.id, n]));
@@ -1539,6 +1552,8 @@ function markProductIdentities(
     if (goalId === undefined || (outcomeId !== goalId && !reaches(outcomeId, goalId))) continue;
     // The DECLARATION holds and bears on the goal: it is persisted as the node's carrier whatever the
     // options do today, so a Run re-judges it on the graph it analyses (an option added later included).
+    // No 5% current-level reconciliation here: accumulation carriers are attached later, so this reader cannot see S₀.
+    // The card/coherence readers compare price × S₀; price × the month-N operand is not today's goal level.
     accepted.push({ outcome_id: outcomeId, factor_ids: [...factorIds], stated_in_brief: d.provenance === 'explicit' });
 
     /**
@@ -1832,6 +1847,11 @@ export interface NonlinearIdentityLeaderWithhold {
 
 type GraphNodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown } & Record<string, unknown>;
 
+function isAccumulationCarrier(n: GraphNodeLike): boolean {
+  const c = n.nonlinear_identity as { operation?: unknown } | null | undefined;
+  return c !== null && typeof c === 'object' && c.operation === 'accumulation';
+}
+
 function readCarrier(n: GraphNodeLike): NonlinearIdentityCarrier | null {
   const c = n.nonlinear_identity as { operation?: unknown; factor_ids?: unknown; stated_in_brief?: unknown } | undefined;
   if (c === null || typeof c !== 'object' || c.operation !== 'product' || typeof c.stated_in_brief !== 'boolean') return null;
@@ -1848,7 +1868,11 @@ export function nodesUnderANonlinearIdentity(graph: unknown): ReadonlySet<string
   const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   if (!Array.isArray(rawNodes)) return new Set();
   const nodes = rawNodes.filter((n): n is GraphNodeLike => n !== null && typeof n === 'object' && typeof (n as GraphNodeLike).id === 'string');
-  const carried = nodes.filter((n) => readCarrier(n) !== null).map((n) => n.id as string);
+  // ⭐ CEE #3: an accumulation carrier's value is worked out by ISL too, never additively, so a limit on it is distrusted
+  // like a product's (the conservative direction: an over-withheld limit sentence, never a false one). C46's sign test
+  // (`readCarrier`) stays product-only: S_T rises with the stock and the inflow and falls with the churn rate, so its sign
+  // in each input is fixed, which is what the sign test exists to prove.
+  const carried = nodes.filter((n) => readCarrier(n) !== null || isAccumulationCarrier(n)).map((n) => n.id as string);
   if (carried.length === 0) return new Set();
   return new Set([...carried, ...nodes.filter((n) => n.kind === 'goal').map((n) => n.id as string)]);
 }
@@ -3497,7 +3521,9 @@ function admitOnce(
         };
       })(),
     },
-    ...model.options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance })),
+    ...model.options.map((o) => ({ label: o.label, kind: 'option' as const, provenance: o.provenance,
+      ...(o.draft_widening !== undefined ? { node: { draft_widening: o.draft_widening } } : {}),
+    })),
     ...model.factors.map((f) => ({
       label: f.label,
       kind: 'factor' as const,
@@ -3575,6 +3601,8 @@ function admitOnce(
       const node = {
         ...((framedByRange(r) as { node?: Partial<AdmittedNode> }).node ?? {}),
         ...(r.analysis_participation === 'retained_excluded' ? { analysis_participation: 'retained_excluded' as const } : {}),
+        ...(r.draft_widening !== undefined ? { draft_widening: r.draft_widening, proposed_by: 'olumi' as const,
+          analysis_participation: 'retained_excluded' as const } : {}),
       };
       return { label: r.label, kind: 'risk' as const, provenance: r.provenance, ...(Object.keys(node).length > 0 ? { node } : {}) };
     }),
@@ -3934,6 +3962,8 @@ function admitOnce(
       const cap = capByFactorId.get(factorId);
       bundle[factorId] = constructedLevel(factorId, iv.value, cap, levelSourceFor(iv.provenance), nodes.find((n) => n.id === factorId), unitById.get(factorId),
         (iv as { derived_total?: unknown }).derived_total === true);
+      if (iv.estimate === true) bundle[factorId]!.estimate = true;
+      if (iv.basis !== undefined) bundle[factorId]!.basis = iv.basis;
       const ranged = admitInterventionRange({ ...bundle[factorId], range: iv.range });
       if (ranged !== undefined && 'range' in ranged) bundle[factorId]!.range = ranged.range;
     }
@@ -4824,7 +4854,11 @@ function admitOnce(
   };
 
   const riskRepairs: AdmittedEdge[] = [];
-  const brokenEdges = acyclic(allEdges, true);
+  // Widening risks are retained hypotheses, never unsized causal effects. Keep their attachments as metadata only.
+  const wideningRiskIds = new Set(nodes.filter((n) => n.kind === 'risk'
+    && n.draft_widening?.provenance === 'ai_suggested_widen').map((n) => n.id));
+  const brokenEdges = acyclic(wideningRiskIds.size === 0 ? allEdges
+    : allEdges.filter((e) => !wideningRiskIds.has(e.from) && !wideningRiskIds.has(e.to)), true);
   // The level a withheld self-link carried goes with it, as a withheld link's projection entries do: left on the
   // node it reached the Run as a level on an option (`advertising_investment: 0.2`). The node's bundle is the one
   // `interventionsByOption` holds, so both read the same. A repair (the second pass) never closes a self-link.
@@ -4840,12 +4874,13 @@ function admitOnce(
   if (goalForReach !== undefined) {
     // RC3 a′'s `relies_on` stamp is SERVER-authored by the More-risks hold/apply door on a stored GraphV3. This fresh
     // drafter CandidateModel path accepts no stamp and never re-admits that stored graph; neither register nor the
-    // Run loader calls it. Do not carry a model-provided stamp into these risk entities or exempt it from this repair.
+    // Run loader calls it. Only server-authored draft widening metadata exempts a new zero-edge suggestion here.
     const hasOutgoingNow = new Set(brokenEdges.map((e) => e.from));
     // A risk whose own link was withheld as direction-unknown was answered
     // "I cannot say which way" — not left unconnected.
     const directionDeclined = new Set(linkResult.withheld.map((w) => w.from));
-    for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id) && !directionDeclined.has(n.id))) {
+    for (const r of nodes.filter((n) => n.kind === 'risk' && !hasOutgoingNow.has(n.id) && !directionDeclined.has(n.id)
+      && !wideningRiskIds.has(n.id))) {
       const lostToLoop = loopWithheld.filter((w) => w.from === r.id).map((w) => `"${labelById.get(w.to) ?? w.to}"`);
       riskRepairs.push({
         from: r.id,

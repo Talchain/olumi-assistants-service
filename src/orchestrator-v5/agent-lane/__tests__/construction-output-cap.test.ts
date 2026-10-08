@@ -22,6 +22,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { isDraftWideningRequest } from '../runtime/widen-draft.js';
 import { narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
 
 /**
@@ -76,7 +77,8 @@ describe('(a) the construction call has room for the reasoning the served corpus
   it('RED: the ceiling SENT on the real construction call exceeds the served need (reasoning 4896 + answer 2040)', async () => {
     const seen: number[] = [];
     const capture: CallStructuredModel = async (r) => {
-      seen.push(r.max_output_tokens);
+      // P05b #2854: a thin draft may add Olumi's widening passes; this row is about the construction call.
+      if (!isDraftWideningRequest(r)) seen.push(r.max_output_tokens);
       return { text: JSON.stringify(CANDIDATE) };
     };
     const { d } = dispatcher();
