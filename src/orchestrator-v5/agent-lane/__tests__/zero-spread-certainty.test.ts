@@ -35,6 +35,26 @@ describe('B1 Keep £49 at month 12, the user\'s rates held fixed', () => {
     expect(licence!.withheld_option_ids).toEqual(['keep_pro_price_at_49']);
     expect(Object.keys(licence!.pct_by_option)).toEqual(['raise_pro_price_to_59', 'raise_pro_price_to_54']);
     expect(Object.values(licence!.pct_by_option)).not.toContain(100);
+    // The typed reason the face renders instead of a % (a1 #7 keys on it); words per Science §(ab)(2).
+    expect(licence!.withheld_reason_by_option).toEqual({
+      keep_pro_price_at_49: { reason: 'zero_spread', side: 'meets', line: 'Meets £20,000 / month by month 12 if today’s figures hold.' },
+    });
+  });
+
+  it('the face line: falls short at an exact 0; "rates" where the goal is projected from monthly rates; no reason on other withholds', () => {
+    const short = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 0, 0, 18500) : r));
+    expect(goalChanceLicenceOf({ option_comparison: short }, graph, 'mrr', earnedBy(short))!.withheld_reason_by_option)
+      .toEqual({ keep_pro_price_at_49: { reason: 'zero_spread', side: 'falls_short', line: 'Falls short of £20,000 / month if today’s figures hold.' } });
+    const acc = structuredClone(graph);
+    acc.nodes.find((n: Rec) => n.id === 'pro_paying_subscribers').nonlinear_identity = { operation: 'accumulation',
+      factor_ids: ['s0', 'monthly_churn', 'new_pro_subscribers_per_month'], horizon_months: 12, rate_scale: 0.01, stated_in_brief: true };
+    expect(goalChanceLicenceOf({ option_comparison: fixedRates }, acc, 'mrr', earnedBy(fixedRates))!.withheld_reason_by_option!.keep_pro_price_at_49.line)
+      .toBe('Meets £20,000 / month by month 12 if today’s rates hold.');
+    // CONTRAST: an exact 1 withheld for an UNSIZED path (spread present, not earned) carries no zero-spread reason.
+    const spread = fixedRates.map(r => (r.option_id === 'keep_pro_price_at_49' ? record('keep_pro_price_at_49', 1, 400, 22500) : r));
+    const licence = goalChanceLicenceOf({ option_comparison: spread }, graph, 'mrr', () => false)!;
+    expect(licence.withheld_option_ids).toEqual(['keep_pro_price_at_49']);
+    expect(licence.withheld_reason_by_option).toBeUndefined();
   });
 
   it('CONTRAST: the same exact 1 WITH spread (a rounding-free 1 over varied draws) stays earned and quoted, as today', () => {

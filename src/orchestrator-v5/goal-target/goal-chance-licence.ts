@@ -32,6 +32,7 @@ import {
   readOptionResultSources,
 } from '../../orchestrator/context/option-result-source.js';
 import { sayFigureAsWritten } from '../agent-lane/say-figure.js';
+import { zeroSpread } from '../agent-lane/goal-certainty.js';
 import { statedGoalTargetOf } from './stated-goal-target.js';
 import { goalChanceTargetCause } from './goal-chance-gate.js';
 import { goalChanceHorizonOf } from './goal-chance-range.js';
@@ -97,6 +98,12 @@ export function floorSig2(value: number): number {
   return Number(`${digits}e${Number(exponent) - 1}`);
 }
 
+export interface GoalChanceZeroSpread {
+  readonly reason: 'zero_spread';
+  readonly side: 'meets' | 'falls_short';
+  readonly line: string;
+}
+
 export interface GoalChanceLicence {
   readonly code: typeof GOAL_CHANCE_LICENSED;
   readonly severity: 'info';
@@ -152,11 +159,38 @@ export interface GoalChanceLicence {
    */
   readonly driver_by_option?: Readonly<Record<string, GoalChanceDriver>>;
   readonly no_driver_by_option?: Readonly<Record<string, GoalChanceNoDriverReason>>;
+  /**
+   * ⛔ Science §(ab)(2): a WITHHELD option whose every draw gave the same result (`zeroSpread`, the goal-certainty
+   * producer's own predicate): which side of the target that fixed result falls on, and the face line saying it is
+   * conditional. The UI places `line` instead of a %; absent for any other withhold.
+   */
+  readonly withheld_reason_by_option?: Readonly<Record<string, GoalChanceZeroSpread>>;
 }
 
 const COMPARATOR: Readonly<Record<string, GoalChanceComparator>> = { '>=': 'at_least', '>': 'above', '<=': 'at_most', '<': 'below' };
 
 /** The DISPLAYED whole percentage of a chance: the figure the user reads, and the one Science's gap is tested on. */
+/**
+ * Science §(ab)(2) face words for a zero-spread option, verbatim in shape: "Meets £20k by month 12 if today's rates
+ * hold." / "Falls short of £20k if today's rates hold." "rates" only where the goal's level is projected from monthly rates (an accumulation
+ * carrier in the model); any other fixed result holds "today's figures". The month only where the goal states its horizon.
+ */
+function zeroSpreadReasons(
+  sides: Readonly<Record<string, 'meets' | 'falls_short'>>, value: number, unit: string, goal: Rec | undefined, graph: unknown,
+): Record<string, GoalChanceZeroSpread> {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const rates = nodes.some((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.operation === 'accumulation');
+  const horizon = goal?.goal_horizon_months;
+  const by = typeof horizon === 'number' && Number.isInteger(horizon) && horizon > 0 ? ` by month ${horizon}` : '';
+  const hold = `if today’s ${rates ? 'rates' : 'figures'} hold.`;
+  const figure = sayFigureAsWritten(value, unit);
+  const out: Record<string, GoalChanceZeroSpread> = {};
+  for (const [id, side] of Object.entries(sides)) {
+    out[id] = { reason: 'zero_spread', side, line: side === 'meets' ? `Meets ${figure}${by} ${hold}` : `Falls short of ${figure} ${hold}` };
+  }
+  return out;
+}
+
 export function displayedGoalPct(p: number): number {
   return displayedPctAt(p, 'whole');
 }
@@ -192,6 +226,7 @@ export function goalChanceLicenceOf(
   const precisionOf = new Map<string, GoalChancePrecision>();
   const rounding: Record<string, GoalChanceDisplayRounding> = {};
   const exactExtremes = new Set<string>();
+  const zeroSpreadSide: Record<string, 'meets' | 'falls_short'> = {};
   for (const r of records) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
     if (id === undefined || option_ids.includes(id)) continue;
@@ -204,7 +239,11 @@ export function goalChanceLicenceOf(
       ? shareGateForOption(graph, id, typeof p === 'number' ? p : undefined, step) : undefined;
     if (shareGate !== undefined && shareGate?.form !== 'point') { withheld.push(id); continue; }
     // Withheld for its own path: no figure on its record, or an exact 0/1 the Run did not earn (the transport strips it).
-    if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) { withheld.push(id); continue; }
+    if (typeof p !== 'number' || ((p === 0 || p === 1) && !earned(id, p))) {
+      withheld.push(id);
+      if ((p === 0 || p === 1) && zeroSpread(r)) zeroSpreadSide[id] = p === 1 ? 'meets' : 'falls_short';
+      continue;
+    }
     // An unusable figure here means a withhold did not run: fail closed, say nothing.
     if (!Number.isFinite(p) || p < 0 || p > 1) return null;
     licensed.push(id);
@@ -279,6 +318,8 @@ export function goalChanceLicenceOf(
     ...(spread === undefined || Object.keys(spread).length === 0 ? {} : { spread_note_by_option: spread }),
     ...(Object.keys(shortfall).length === 0 ? {} : { shortfall_note_by_option: shortfall }),
     ...(withheld.length > 0 ? { withheld_option_ids: withheld } : {}),
+    ...(Object.keys(zeroSpreadSide).length > 0
+      ? { withheld_reason_by_option: zeroSpreadReasons(zeroSpreadSide, target.value, target.unit, goal, graph) } : {}),
     ...(form === 'similar' ? { similar_option_ids: same } : {}),
     ...(form === 'highest' || form === 'highest_all_likely_to_miss' ? { leader_option_id: leader, next_option_id: next } : {}),
     target: { comparator, value: target.value, unit: target.unit,

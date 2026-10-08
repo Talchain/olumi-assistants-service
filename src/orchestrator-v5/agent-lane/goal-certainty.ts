@@ -311,7 +311,7 @@ function sayMismatch(
  * B1 £59, std 0.0045 on a 0–1 frame).
  */
 const ZERO_SPREAD_RELATIVE = 1e-9;
-function zeroSpread(r: Rec): boolean {
+export function zeroSpread(r: Rec): boolean {
   const o = isRec(r.outcome) ? r.outcome : undefined;
   if (o === undefined) return false;
   const p10 = num(o.p10);
