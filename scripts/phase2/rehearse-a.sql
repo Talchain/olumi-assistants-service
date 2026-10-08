@@ -940,6 +940,10 @@ $round4$;
 -- trigger remains installed. The savepoint restores the exact function body.
 -- Sequence advancement survives a savepoint rollback, proving the timeout
 -- reached the derivation body rather than firing during planning or locking.
+-- Allow 400ms for pre-derivation planning/locking on a loaded local host:
+-- 25ms could cancel before nextval. The injected 3s sleep is well beyond that
+-- budget, so cancellation can occur inside derivation. The sequence conjunct
+-- remains mandatory: an earlier cancellation must still fail this probe.
 CREATE TEMP TABLE phase2_a_cancel_before ON COMMIT DROP AS
 SELECT (SELECT count(*) FROM public.v5_handler_facts) AS facts,
        (SELECT count(*) FROM public.analysis_runs) AS runs,
@@ -954,10 +958,10 @@ BEGIN
   SELECT derivation INTO v_definition FROM phase2_a_cancel_before;
   IF strpos(v_definition, v_anchor) = 0 THEN RAISE EXCEPTION 'Derivation sleep injection anchor missing'; END IF;
   EXECUTE replace(v_definition, v_anchor,
-    E'  BEGIN\n    PERFORM nextval(''pg_temp.phase2_a_cancel_entered''::regclass);\n    PERFORM pg_sleep(1); -- test-only cancellation probe\n    IF p_fact.action_type');
+    E'  BEGIN\n    PERFORM nextval(''pg_temp.phase2_a_cancel_entered''::regclass);\n    PERFORM pg_sleep(3); -- test-only cancellation probe\n    IF p_fact.action_type');
 END;
 $inject_slow_derivation$;
-SET LOCAL statement_timeout = '25ms';
+SET LOCAL statement_timeout = '400ms';
 \set phase2_a_cancel_sqlstate 00000
 \set ON_ERROR_STOP off
 INSERT INTO public.v5_handler_facts (v5_conversation_turn_id, scenario_id, user_id, handler_id, action_type, noop, payload)
