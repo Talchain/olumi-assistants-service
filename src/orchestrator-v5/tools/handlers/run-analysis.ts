@@ -124,7 +124,7 @@ import { emit, log, TelemetryEvents } from '../../../utils/telemetry.js';
 import { leaderLicenceShadow, summaryNamesLeader } from '../../compose/leader-licence-shadow.js';
 import { type RunAnalysisTimings, PLOT_SLOW_LIKELY_MS } from '../../telemetry/turn-timings.js';
 import { config } from '../../../config/index.js';
-import { hasReducedSamplesDisclosure, withoutDirectionUnattestedOnHeldFloor } from '../../compose/claim-safety-cage.js';
+import { hasReducedSamplesDisclosure, isOlumiSideThreshold, thresholdReasonOf, withoutDirectionUnattestedOnHeldFloor } from '../../compose/claim-safety-cage.js';
 // P0 (analysis-500 diagnosis §8 FIX A) — DERIVED from the composer's copy table,
 // so a code added there stops tripping the unknown-code wire with nothing else
 // to update (trap 12: derive, never mirror).
@@ -2981,6 +2981,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Record the caller's internal cause before the single owned projection/validation boundary.
     if (withheldBecauseUnsizedPath !== undefined) {
       response = { ...response, [UNSIZED_PATH_LEADER_CAUSE_KEY]: withheldBecauseUnsizedPath };
+    }
+    // GOAL-REACH 3b (Science §(g) carve-out): a goal-chance refusal with no user action is an Olumi defect, logged by its
+    // closed reason (no labels, no figures) so it can be counted and fixed; it is never offered a control.
+    const thresholdReason = thresholdReasonOf(response);
+    if (thresholdReason !== null) {
+      log.info(
+        { event: 'run_analysis.goal_threshold_reason', request_id: invocation.requestId, scenario_id: args.scenario_id,
+          reason: thresholdReason.reason, root_case: thresholdReason.root_case },
+        'PLoT refused the goal chance; its carried reason (closed code), counted per Run',
+      );
+    }
+    if (thresholdReason !== null && isOlumiSideThreshold(thresholdReason)) {
+      log.warn(
+        { event: 'run_analysis.goal_threshold_olumi_side', request_id: invocation.requestId, scenario_id: args.scenario_id,
+          reason: thresholdReason.reason, root_case: thresholdReason.root_case },
+        'PLoT refused the goal chance for an Olumi-side reason (Science §(g) defect row)',
+      );
     }
     // Option C: compute in-process before the existing fact commit; no callback and no brief carry.
     const factorEnrichments = await agentFactorEnrichments(snapshot.rawPersistedGraph ?? snapshot.graph,

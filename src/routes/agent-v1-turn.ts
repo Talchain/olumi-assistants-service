@@ -39,14 +39,14 @@ import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-s
 const fenceRefused = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
 import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
-import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
+import { readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
 import { OPENAI_ONLY, assertProviderAllowed, providerCallsMade, providerLedgerTruncated, recordProviderUsage, recordedProviderCalls, runWithProviderPolicy } from '../adapters/llm/provider-policy.js';
 import { RESEARCH_CHIP_PREFIX, RESEARCH_NOT_ON_OFFER_TEXT, RESEARCH_ONLY_SHOWN_TEXT, RESEARCH_WORDING_REASON_TEXT, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, withResearchControlTruth, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
-import { composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
+import { composeHeldResultReply, composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
 import { firstAnalysisResultReply } from '../orchestrator-v5/agent-lane/first-analysis-result-reply.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
@@ -65,7 +65,7 @@ import { asVerdictState, readLimitVerdicts, type StoredLimitVerdicts } from '../
 import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { drawnLinkPress, isDrawnLinkPress } from '../orchestrator-v5/agent-lane/drawn-link-press.js';
-import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
+import { answerIsIncomplete, heldChangeSentence, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import { parseSelectedElements } from '../orchestrator-v5/boundary/request-extensions.js';
 import { agentSelectionContext, type AgentSelectionContext } from '../orchestrator-v5/agent-lane/selection-context.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
@@ -124,6 +124,7 @@ import { AGENT_NO_LEADER_SENTENCES, enforceAgentLaneLeaderClaimsAtWire, goalFigu
 import { composeReplyShape, REPLY_SHAPE_INSTRUCTION, sentencesOf, type FaceObligation, type ReplyProfile, withShapeOnlyIfItDerives } from '../orchestrator-v5/agent-lane/reply/compose-reply.js';
 import { controlSurvivesLeaderGate, enforceLeaderLicenceAtFinalEgress, leaderGateInputsOf } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { withoutDriverAbsenceClaimsAtEgress } from '../orchestrator-v5/agent-lane/goal-chance-driver-egress.js';
+import { withLeftOutOptionCorrectionAtEgress } from '../orchestrator-v5/agent-lane/left-out-option-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { NOT_ROBUST_NO_FLIP_SENTENCE, NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
 import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
@@ -163,7 +164,7 @@ import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
-import { breakEvenFor, breakEvenLine, goalNotCheckedLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
+import { breakEvenFor, breakEvenLine, goalNotCheckedLine, thresholdReasonLine, withBreakEvenAnswer } from '../orchestrator-v5/agent-lane/break-even.js';
 import { readEvaluatedIdentityNodeIds } from '../orchestrator-v5/agent-lane/admit-model.js';
 import {
   leaderStandingOf,
@@ -1020,7 +1021,7 @@ export const RUN_FAILED_TEXT = 'I couldn\u2019t run the analysis: something went
 /** Request 1 ran, but the readback cannot confirm a current result: Olumi's own line, live and on replay (#2470). */
 export const RUN_RESULT_UNVERIFIED_TEXT = 'The analysis finished, but I can’t verify a current result. Check the current results before asking again.';
 
-export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }): string {
+export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }, modelChangedThisTurn = false): string {
   if (ran.ran === true) {
     return 'The analysis finished, but I couldn’t explain it this time. You can ask me to explain the result.';
   }
@@ -1032,7 +1033,42 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
     ? ran.refusal
     : typeof ran.status === 'string' && ran.status !== '' && ran.status !== 'unknown' ? ran.status : '';
   const why = code !== '' ? ` (${code.replace(/_/g, ' ')})` : '';
-  return `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+  return modelChangedThisTurn
+    ? `The analysis didn’t run this time${why}. Your model was updated this turn — ask me what changed and what the analysis still needs.`
+    : `The analysis didn’t run this time${why}. Nothing in the model was changed — ask me what it still needs.`;
+}
+
+/**
+ * A withheld call consumed no proposal and moved nothing: it is not an authorisation, and counting one (it has no proposal
+ * id) would strand the proposal it named without its chip. ONE filter for the chip and for the fallback words that describe
+ * it (Codex r1 on #2820: unfiltered, the fallback said "could not settle" beside the chip it offered).
+ */
+function callsThatCanConsumeProposals<C extends { readonly refusal?: string }>(calls: readonly C[]): C[] {
+  return calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
+}
+
+/** The turn fields the hop-limit and cut-short answers read (`AgentTurnResult`'s own shape). */
+type FallbackTurn = {
+  readonly tool_calls: readonly { readonly name: string; readonly ok?: boolean; readonly mutated?: boolean; readonly proposal_id?: string; readonly refusal?: string }[];
+  readonly tool_results: readonly unknown[];
+  readonly mutated: boolean;
+};
+
+/**
+ * ⛔ A FALLBACK NEVER CONTRADICTS THE CARD IT SHIPS WITH (DL 58e392, 8 Oct; EDIT-UX served be7a896f, turn 3a5a1258): the
+ * hop limit answered "I could not settle that within this turn, and nothing in your model was changed" while the SAME turn
+ * offered a held change ("Yes, use those." then saved it). When the turn offers exactly the one card `approvalChipsFor`
+ * shows (same predicate, `proposalsAwaitingApproval`), the answer is that held change's own typed reply, else the one
+ * held-change sentence. A model change is still said.
+ */
+function heldCardText(result: FallbackTurn): string | null {
+  const offered = proposalsAwaitingApproval(callsThatCanConsumeProposals(result.tool_calls).map((c) => ({ name: c.name, ok: c.ok === true, mutated: c.mutated === true,
+    ...(c.proposal_id !== undefined ? { proposal_id: c.proposal_id } : {}), ...(c.refusal !== undefined ? { refusal: c.refusal } : {}) })));
+  if (offered.size !== 1) return null;
+  const [proposalId, tool] = [...offered.entries()][0]!;
+  const held = result.tool_results.find((r) => r !== null && typeof r === 'object' && (r as { proposal_id?: unknown }).proposal_id === proposalId);
+  if (held === undefined) return null;
+  return composeHeldResultReply(tool, held) ?? heldChangeSentence((held as { public_label?: unknown }).public_label);
 }
 
 /**
@@ -1040,16 +1076,17 @@ export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown
  * turn's own outcome, never from the partial text (which is not shown and not kept, so nothing can "continue").
  * After a run: the run's own sentence. A turn that changed the model says so. Otherwise: shorter questions.
  */
-export function unfinishedAnswerText(result: {
-  readonly tool_calls: readonly { readonly name: string }[];
-  readonly tool_results: readonly unknown[];
-  readonly mutated: boolean;
-}): string {
+export function unfinishedAnswerText(result: FallbackTurn): string {
   for (let i = result.tool_calls.length - 1; i >= 0; i -= 1) {
     if (result.tool_calls[i]!.name === 'run_analysis') {
-      return interpretationUnavailableText((result.tool_results[i] ?? {}) as Record<string, unknown>);
+      // Codex r1 on #2820: a turn that saved something before its run never says "Nothing in the model was changed".
+      const ran = interpretationUnavailableText((result.tool_results[i] ?? {}) as Record<string, unknown>, result.mutated);
+      const heldAfterRun = heldCardText(result);
+      return heldAfterRun === null ? ran : `${ran}\n\n${heldAfterRun}`;
     }
   }
+  const held = heldCardText(result);
+  if (held !== null) return result.mutated ? `Your model was updated. ${held}` : held;
   return result.mutated
     ? 'Your model was updated, but my reply ran too long and was cut short, so I have not shown it. Ask me what changed.'
     : 'My answer ran too long and was cut short, so I have not shown it. Try asking about one part at a time.';
@@ -1061,11 +1098,9 @@ export function unfinishedAnswerText(result: {
  * asking again replays the same refusals, and the typed reason was thrown away. Composed from the LAST refusal's typed
  * fields only (a refusal's `detail`, `reason` and notes address the Agent, never the user); a changed model says so.
  */
-export function hopLimitText(result: {
-  readonly tool_calls: readonly { readonly name: string }[];
-  readonly tool_results: readonly unknown[];
-  readonly mutated: boolean;
-}): string {
+export function hopLimitText(result: FallbackTurn): string {
+  const held = heldCardText(result);
+  if (held !== null) return result.mutated ? `Your model was updated. ${held}` : held;
   if (result.mutated) return 'Your model was updated, but I could not finish the rest within this turn. Ask me what changed.';
   const last = [...result.tool_results].reverse().find((r): r is Record<string, unknown> =>
     r !== null && typeof r === 'object' && (r as Record<string, unknown>).ok === false);
@@ -1197,7 +1232,7 @@ export async function researchControlShowableNow(dispatch: InternalDispatch, sce
   return readOk && controlSurvivesLeaderGate(chip, leaderGateInputsOf(read));
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runOptionSet?: RecordedRunOptionSet; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1233,6 +1268,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let goalCertainty: StoredGoalCertainty | undefined;
   /** 52f8cd: the selected run's `analysis_option_participation`, same fact and gates as `analysisResult`. */
   let optionParticipation: StoredOptionParticipation | undefined;
+  /** Q6: the SAME selected fact's complete snapshot/participation projection, produced by the graph reader. */
+  let runOptionSet: RecordedRunOptionSet | undefined;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the selected run's engine evaluated
    * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
@@ -1290,6 +1327,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       goalCertainty = readStoredGoalCertainty(after.json.analysis_goal_certainty);
       // 52f8cd: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
       optionParticipation = readStoredOptionParticipation(after.json.analysis_option_participation);
+      runOptionSet = after.json.analysis_run_option_set as RecordedRunOptionSet | undefined;
       // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
       identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
       /**
@@ -1418,7 +1456,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, scopeOpen };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2181,6 +2219,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // turn's own stage: before the root line and the basis, which the live turn adds after it (Codex r1 on #2664 P2).
           askEachOnce(owedNow, await repliesToCheckAsks(owedNow, store, scenarioId, turnId));
           // Gate 2 consumer: the live Run turn's unvalued-root sentence, in its place (after the goal chance, before the basis).
+          const reasonNow = thresholdReasonLine(state.graph, state.analysisResult);
+          if (reasonNow !== null) owedNow.push(reasonNow);
           const rootNow = treatedAsZeroReplyLine(state.graph, state.analysisReady);
           if (rootNow !== null) owedNow.push(rootNow);
           if (claimPermissionsFrom(state.analysisState, state.analysisReady, { requested: true }).leader_may_be_named) {
@@ -2305,7 +2345,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
       const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       // ⭐ PR-S2 r5: a replayed reply never denies the driver the screen shows (`goal-chance-driver-egress.ts`).
-      const gatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
+      const driverGatedReplay = withoutDriverAbsenceClaimsAtEgress(enforceLeaderLicenceAtFinalEgress(replayBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_replay',
         scopeAuthorityUnavailable: state.scopeAuthorityUnavailable,
@@ -2318,6 +2358,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }).response, {
         analysisResult: state.analysisResult, graph: state.graph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_replay',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      const gatedReplay = withLeftOutOptionCorrectionAtEgress(driverGatedReplay, {
+        runOptionSet: state.runOptionSet, optionParticipation: state.optionParticipation, graph: state.graph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_replay', ...(turnId !== undefined ? { turnId } : {}),
       });
       // ⛔ The shape rides only while it still derives the words that ship, AFTER the final gates (Codex r2 on #2783: the
       // leader egress can edit `_answer_shape` alone). Otherwise the replay ships its text whole.
@@ -2848,6 +2892,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ? withNonlinearIdentity(permissionsNow, st.graph, st.identityEvaluated) : permissionsNow;
       const factsNow = savedRunContextFacts(scenarioId, {
         graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
+        option_participation: st.optionParticipation, run_option_set: st.runOptionSet,
         identity_evaluated: st.identityEvaluated, limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
       }, selectedPermissions);
       // ⭐ NEVER RE-ASK (G1b d4): the interpreter says `say` as written, so a question already asked is taken out of it here.
@@ -3674,7 +3719,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null || decisionReviewRequested || premortemInitialRead !== undefined
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
-    const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
+    const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, runOptionSet } = finalRead;
     let liveHolds: readonly PendingAction[] = [];
     let heldLapseLines: string[] = [];
     let heldRecords: ProposalRecord[] = [];
@@ -3851,9 +3896,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === id);
       return chip !== undefined ? [chip, AMEND_CHIP] : [];
     })();
-    // A withheld call consumed no proposal and moved nothing: it is not an authorisation, and
-    // counting one (it has no proposal id) would strand the proposal it named without its chip.
-    const approvalCalls = result.tool_calls.filter((c) => c.refusal !== WITHHELD_ON_CHIP_TURN);
+    const approvalCalls = callsThatCanConsumeProposals(result.tool_calls);
     // The chip's words come from the STORED proposal it approves and its proposer's own result, never the Agent's prose.
     const approvals = approvalChipsFor(
       approvalCalls,
@@ -4111,7 +4154,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // arithmetic below already states the target. Pure reads of this turn's readback; the same inputs AX1 uses.
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && retainedScopeIssues.length === 0 && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
-    const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
+    // GOAL-REACH 3b: the arithmetic dedupe is for the legacy copy only; a carried reason (Science §(g)) is always said.
+    const goalLine = fa?.ran === true && fastPath !== 'run'
+      && (!targetStatedByArithmetic || thresholdReasonLine(readbackGraph, analysisResult) !== null) ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
     // ⭐ S5t-W (e7 #87 6011176086): an approval's text is the capability's OWN receipt (server-authored, already through
     // `withoutAgentDirections` above), never model prose, so the completion-claim stripper — which exists for the model's
     // words — never runs over it. It dropped "Recorded your figure … as you confirmed: "…" Olumi rescaled ‘…’ so your
@@ -4187,6 +4232,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const rootLine = fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       ? treatedAsZeroReplyLine(readbackGraph, analysisReady) : null;
+    // GOAL-REACH 3b (DL CHANGES_REQUIRED #2816): an explicit Run says why the goal chance was refused (§(g)), on the same
+    // binding as the root line; its replay says the same in the same place.
+    const reasonLine = fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true
+      && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
+      ? thresholdReasonLine(readbackGraph, analysisResult) : null;
+    if (reasonLine !== null && !narrationText.includes(reasonLine)) owed.push(reasonLine);
     if (rootLine !== null && !narrationText.includes(rootLine)) owed.push(rootLine);
     if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
     const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
@@ -4389,9 +4440,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // shipped beside a range line. The SAME function and gate clean the view here, where it is built.
     const provisionalViewShown = provisionalView === null ? null : ((): typeof provisionalView => {
       const viewBody: { assistant_text?: unknown; _agent: { provisional_view: typeof provisionalView } } = { _agent: { provisional_view: provisionalView } };
-      return withoutDriverAbsenceClaimsAtEgress(viewBody, {
+      const driverEditedView = withoutDriverAbsenceClaimsAtEgress(viewBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      return withLeftOutOptionCorrectionAtEgress(driverEditedView, {
+        runOptionSet, optionParticipation, graph: readbackGraph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_provisional_view', ...(turnId !== undefined ? { turnId } : {}),
       })._agent.provisional_view;
     })();
     // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
@@ -4456,9 +4511,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * never says no assumption is established or most worth investigating; only that clause goes, logged by code.
      */
     {
-      const edited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
+      const driverEdited = withoutDriverAbsenceClaimsAtEgress(wireBody, {
         analysisResult, graph: readbackGraph ?? null, requestId: String(req.id), exitPath: 'agent_lane_v1_final',
         ...(turnId !== undefined ? { turnId } : {}),
+      });
+      const edited = withLeftOutOptionCorrectionAtEgress(driverEdited, {
+        runOptionSet, optionParticipation, graph: readbackGraph ?? null,
+        requestId: String(req.id), exitPath: 'agent_lane_v1_final', ...(turnId !== undefined ? { turnId } : {}),
       });
       if (edited !== wireBody) {
         const { _answer_shape: _stale, ...withoutShape } = edited as OlumiResponse & { _answer_shape?: unknown };
@@ -4605,7 +4664,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const sentText = String(wireBody.assistant_text ?? text);
     // Persist the producer's exact delivered question or its qualified clarification, after every egress gate.
     const levelAskAnswered = levelAnswerTool !== undefined || result.tool_calls.some(call => call.name === CURRENT_LEVEL_TOOL);
-    const deliveredLevelAsk = mode === 'full' && fastPath !== 'method' ? currentLevelAskOnAnswer({
+    // GOAL-REACH 3b (COPY-SHAPE patch): the bar's set_current_level press is a typed reply ('method'), and its words ARE
+    // the current-level ask, so it is persisted like the producer's own (otherwise the answer could not force the card).
+    // Never while a held change waits for its yes (Codex r1 P1-3 on #2816): that change is answered first.
+    const levelPress = actionPress?.action === 'set_current_level' && liveHolds.length === 0;
+    const deliveredLevelAsk = mode === 'full' && (fastPath !== 'method' || levelPress) ? currentLevelAskOnAnswer({
       graph: readbackGraph, analysisResult, sentText, scenarioId, userId, emittedAtIso,
       prior: levelAsk, answered: levelAskAnswered, message,
       awaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),

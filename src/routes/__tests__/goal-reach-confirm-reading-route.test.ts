@@ -19,6 +19,9 @@ import { createRunAnalysisHandler } from '../../orchestrator-v5/tools/handlers/r
 import { makeMessagePayload } from '../../orchestrator-v5/__tests__/fixtures.js';
 import * as identityCard from '../../orchestrator-v5/agent-lane/identity-card.js';
 import * as systemEvents from '../../orchestrator-v5/system-events/dispatch.js';
+import { readFileSync } from 'node:fs';
+import * as currentLevel from '../../orchestrator-v5/agent-lane/current-level-answer.js';
+import { CURRENT_LEVEL_TOOL, goalLevelAskOf } from '../../orchestrator-v5/agent-lane/current-level-answer.js';
 
 const { port, source } = vi.hoisted(() => ({
   port: { append: vi.fn(), readRecent: vi.fn(), readLatestAnswerOffers: vi.fn(), readCommittedTurn: vi.fn(), readGuidanceHistory: vi.fn(),
@@ -265,5 +268,78 @@ describe('GOAL-REACH row 2 through the real doors', () => {
     setWithheld(graph);
     expect(offersOf((await reload()).action_bar).filter(o => o.action_id === 'confirm_reading')).toEqual([]);
     expect(graphWrites).toBe(0); expect(modelCalls).toBe(0);
+  });
+});
+
+/** GOAL-REACH 3b: a Run refused for want of the goal's current level (CAPTURED PLoT #444 body). */
+function setThresholdRefused(name: string, graph: Record<string, any> = structuredClone(paul)): void {
+  const captured = JSON.parse(readFileSync(new URL(`../../orchestrator-v5/agent-lane/__tests__/fixtures/plot-threshold-444/${name}.json`, import.meta.url), 'utf8'));
+  source.graph = graph;
+  const result = { type: 'analysis_result', computed_against_hash: hashOf(graph), data: {}, enrichment: {
+    inference_warnings: captured.inference_warnings, decision_brief: captured.decision_brief } };
+  source.analysis = { analysis_state: { run_state: { kind: 'complete_current', computed_at: AT }, usable_for_chips: true,
+    leader_claim: { permitted: false, withheld_reason: 'goal_figures_withheld' } },
+    analysis_result: result, current_read: { analysis_ready: READY, result }, analysis_constraint_verdict_state: null };
+}
+const elicitAsks = () => table.flatMap(row => (row.pending_actions ?? []) as Record<string, any>[]).filter(pa => pa.action?.kind === 'elicit_goal_current_level');
+
+describe('GOAL-REACH 3b set_current_level through the real doors', () => {
+  it('RED: missing_goal_baseline → one enabled set_current_level; press → the ask, PERSISTED, 0 LLM; the typed figure then forces the existing card', async () => {
+    setThresholdRefused('missing_goal_baseline');
+    const asked = goalLevelAskOf(source.graph, source.analysis.analysis_result)!;
+    expect(asked.question).toBe('To show each option\'s chance of reaching your MRR target, I first need today\u2019s level of \u2018MRR\u2019. What is it, in £/month?');
+    const offers = offersOf((await reload()).action_bar).filter(o => o.action_id === 'set_current_level');
+    expect(offers).toHaveLength(1); expect(offers[0]!.enabled).toBe(true);
+    const reply = await press(offers[0]!.press_id, offers[0]!.user_line, { offer_key: offers[0]!.offer_key });
+    expect(reply._action).toMatchObject({ action_id: 'set_current_level', outcome: 'ran' });
+    expect(reply.assistant_text).toBe(asked.question);
+    const persisted = elicitAsks();
+    expect(persisted, 'the press must persist the ask (route patch), or the answer cannot force the card').toHaveLength(1);
+    expect(persisted[0]).toMatchObject({ action: { goal_id: 'mrr', question: asked.question } });
+    expect(graphWrites).toBe(0); expect(modelCalls, 'the press itself is 0 LLM').toBe(0);
+    // The user's typed figure, through the real route: the persisted ask forces the EXISTING card's tool as the first call
+    // (the model then fills it; this harness has no model, so only the routing decision is witnessed).
+    const forced = vi.spyOn(currentLevel, 'currentLevelAnswerFirstCall');
+    try {
+      turnSerial += 1;
+      await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario, source: 'composer',
+        turn_id: `aaaaaaa1-aaaa-4aaa-8aaa-${String(turnSerial).padStart(12, '0')}`, message: '£14,700' } });
+      expect(forced).toHaveBeenCalled();
+      expect(forced.mock.results.map(r => r.value)).toContain(CURRENT_LEVEL_TOOL);
+    } finally { forced.mockRestore(); }
+  });
+  it('DL CHANGES_REQUIRED (#2816): an EXPLICIT Run reply says the carried reason\'s §(g) sentence, by identity; CONTROL: no reason → not said', async () => {
+    const SENTENCE = "Olumi can't show the chance of reaching your MRR target in this Run because of a fault on Olumi's side. The rest of this Run's results still stand.";
+    const run = async () => {
+      turnSerial += 1;
+      const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenario,
+        turn_id: `aaaaaaa1-aaaa-4aaa-8aaa-${String(turnSerial).padStart(12, '0')}`, message: 'Run analysis.', source: 'chip',
+        chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
+      expect(response.statusCode, response.body).toBe(200);
+      const body = response.json();
+      expect(body._diagnostic_trace?.fast_path).toBe('run');
+      return String(body.assistant_text);
+    };
+    setThresholdRefused('non_finite_conversion_input');
+    expect(await run()).toContain(SENTENCE);
+    setWithheld();
+    expect(await run()).not.toContain("because of a fault on Olumi's side");
+  });
+  it('Codex r1 P1-3: while a held change waits (the identity card), a set_current_level press persists NO ask', async () => {
+    setThresholdRefused('missing_goal_baseline');
+    const card = await press('act:confirm_reading', 'Check how Olumi works out the goal.');
+    expect(card.suggested_actions.some((a: { id: string }) => a.id.startsWith('agent-approve-proposal:')), 'a live held card first').toBe(true);
+    await press('act:set_current_level', 'Tell Olumi where the goal stands today.');
+    expect(elicitAsks()).toEqual([]); expect(modelCalls).toBe(0);
+  });
+  it('CONTROL: an Olumi-side reason (outside the normalised domain) offers no set_current_level and persists no ask', async () => {
+    setThresholdRefused('goal_values_outside_normalised_domain');
+    expect(offersOf((await reload()).action_bar).filter(o => o.action_id === 'set_current_level')).toEqual([]);
+    expect(elicitAsks()).toEqual([]); expect(modelCalls).toBe(0);
+  });
+  it('CONTROL: another typed-reply press (frame_brief) on the same refused Run persists no ask', async () => {
+    setThresholdRefused('missing_goal_baseline');
+    await press('act:frame_brief', 'Help me frame my brief: what is missing from it?');
+    expect(elicitAsks()).toEqual([]); expect(modelCalls).toBe(0);
   });
 });

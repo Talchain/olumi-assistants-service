@@ -22,7 +22,8 @@ const REGISTRATION = "app.post('/agent/v1/turn'";
 const TEXT_WRITERS = [
   'withDisclosures(', 'withWriteOutcome(', 'withB3LinesAtRest(', 'withBreakEvenAnswer(', 'withScreenLinesOwed(',
   'withA7AfterGate(', 'enforceAgentLaneLeaderClaimsAtWire(', 'enforceLeaderLicenceAtFinalEgress(',
-  'withoutDriverAbsenceClaimsAtEgress(', 'withoutProposalIds(', 'composeDirectAnswerResponse(', 'textAtRest(',
+  'withoutDriverAbsenceClaimsAtEgress(', 'withLeftOutOptionCorrectionAtEgress(',
+  'withoutProposalIds(', 'composeDirectAnswerResponse(', 'textAtRest(',
 ];
 
 const afterComposer = (src: string): string => {
