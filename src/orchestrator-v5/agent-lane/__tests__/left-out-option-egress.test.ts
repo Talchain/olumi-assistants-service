@@ -2,8 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { describe, expect, it } from 'vitest';
-import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
-import { runOptionSetForCopy, type LeftOutRunOption, type RecordedRunOption } from '../../tools/handlers/option-participation.js';
+import { type LeftOutRunOption, type RecordedRunOption } from '../../tools/handlers/option-participation.js';
 import {
   LEFT_OUT_COPY_REGEXES, leftOutOptionSentence, removeLeftOutOptionInclusionClaims,
   withoutLeftOutOptionInclusionClaimsAtEgress,
@@ -42,14 +41,22 @@ describe('Q6 narrator inclusion about an option the Run left out', () => {
     'We also compared the £54 test.',
     'The analysis covers Keep £49, Raise to £59 and Test £54 Pro price.',
     '‘Test £54 Pro price’ was analysed alongside the others.',
-    '£54 is in this run too.',
-    'Included for comparison: £59 and £54.',
+    'The £54 test is in this run too.',
   ])('must fire: %s, with its £54-sent byte-identical twin', text => {
     expect(edit(text).text).toBe(LINE);
     expect(edit(text, [], [...SENT, TEST]).text).toBe(text);
   });
 
+  it.each(['option', 'test', 'variant', 'plan', 'tier', 'price', 'offer'])('option noun %s beside an exclusive figure refers', noun => {
+    const text = `The £54 ${noun} was assessed.`;
+    expect(edit(text).text).toBe(LINE);
+    expect(edit(text, [], [...SENT, TEST]).text).toBe(text);
+  });
+
   it.each([
+    // r1 referent class: a bare figure without an adjacent label word or option noun is not a referent.
+    '£54 is in this run too.',
+    'Included for comparison: £59 and £54.',
     'The £54 test wasn’t included.',
     '£54 was left out of this run.',
     'At 54 £/subscriber/month (Olumi’s estimate), MRR stays at least that…',
@@ -70,10 +77,137 @@ describe('Q6 narrator inclusion about an option the Run left out', () => {
   });
 
   it('a different clause’s negation does not hide a positive £54 inclusion', () => {
-    expect(edit('£59 was not included, but £54 was compared.').text).toBe(LINE);
+    expect(edit('£59 was not included, but the £54 test was compared.').text).toBe(LINE);
     expect(edit('We haven’t tested the £59 change, and we compared the £54 test.').text).toBe(LINE);
     const trueTwin = 'We compared £59, and we didn’t include £54.';
     expect(edit(trueTwin).text).toBe(trueTwin);
+  });
+
+  it.each([
+    ['P1-2 review verbatim, superseded by the bare-figure referent rule', '£54 was included for comparison, and £49 was not changed.', false],
+    ['P1-2 RED-before: currency subject in the next clause', 'The £54 test was included for comparison, and £49 was not changed.', true],
+    ['P1-2 negative first clause with the review’s currency subjects', '£54 was not included, and £59 was compared.', false],
+    ['P1-2 negative first clause with an adjacent referent', 'The £54 test was not included, and £59 was compared.', false],
+    ['P1-2 RED-before: quoted subject in the next clause', 'The £54 test was included for comparison, and “Keep £49” was not changed.', true],
+    ['P1-2 RED-before: numeric subject in the next clause', 'The £54 test was included for comparison, and 49 was not changed.', true],
+  ] as const)('%s', (_name, text, mustFire) => {
+    expect(edit(text).text).toBe(mustFire ? LINE : text);
+    expect(edit(text, [], [...SENT, TEST]).text, '£54-sent twin').toBe(text);
+  });
+
+  it.each([';', ':', ', and', ', but', ', while', ', whereas', ', although', ', though', ', yet', ' but', ' whereas'])
+    ('P1-2 clause boundary %j keeps another clause’s negation local', boundary => {
+      const text = `The £54 test was assessed${boundary} £49 was not changed.`;
+      expect(edit(text).text).toBe(LINE);
+      expect(edit(text, [], [...SENT, TEST]).text).toBe(text);
+      const negative = `The £54 test was not assessed${boundary} £59 was compared.`;
+      expect(edit(negative).text).toBe(negative);
+      expect(edit(negative, [], [...SENT, TEST]).text).toBe(negative);
+    });
+
+  it('P1-3 RED-before: the review’s longer sent label is masked before the excluded-label search', () => {
+    const sent = [...SENT, { option_id: 'packaging_54', label: 'Test £54 Pro price with revised packaging' }];
+    const text = '‘Test £54 Pro price with revised packaging’ was analysed.';
+    expect(edit(text, [TEST], sent).text).toBe(text);
+    expect(edit(text, [], [...sent, TEST]).text, '£54-sent twin').toBe(text);
+    const repeated = `${text} “TEST £54 PRO PRICE WITH REVISED PACKAGING” was assessed.`;
+    expect(edit(repeated, [TEST], sent).text).toBe(repeated);
+  });
+
+  it('P1-3 masking is longest-first and quote-folded for every sent-label occurrence', () => {
+    const option = { option_id: 'quoted', label: 'Test “Pro” plan', reason: 'removed' };
+    const sent = [
+      { option_id: 'shorter', label: 'Test “Pro”' },
+      { option_id: 'longer', label: 'Test “Pro” plan with revised packaging' },
+    ];
+    const text = '‘Test "Pro" plan with revised packaging’ was analysed. ‘TEST “PRO” PLAN WITH REVISED PACKAGING’ was assessed.';
+    expect(edit(text, [option], sent).text).toBe(text);
+    expect(edit(text, [], [...sent, option]).text).toBe(text);
+  });
+
+  it.each([
+    'Raise Pro price to £59 was assessed with acquisition costs of £54 per customer.',
+    'Raise Pro price to £59 was assessed with £54 acquisition cost.',
+  ])('P1-4 RED-before: unrelated acquisition arithmetic is not an excluded-option referent: %s', text => {
+    expect(edit(text).text).toBe(text);
+    expect(edit(text, [], [...SENT, TEST]).text, '£54-sent twin').toBe(text);
+  });
+
+  it('P1-4 RED-before: the review’s date is not an excluded-option referent', () => {
+    const option = { option_id: 'launch_2026', label: 'Launch in 2026', reason: 'removed' };
+    const text = 'Keep £49 was assessed using 2026 market data.';
+    expect(edit(text, [option]).text).toBe(text);
+    expect(edit(text, [], [...SENT, option]).text, '2026-sent twin').toBe(text);
+  });
+
+  it.each([
+    'The £54 test was included.',
+    'An Olumi-suggested £54 test was included.',
+    'The £54 Pro price was analysed.',
+    'Test £54 was evaluated.',
+    'The £54 carefully-scoped test was assessed.',
+    'The £54 regional test was compared.',
+  ])('an exclusive figure within two word tokens of a label word or option noun refers: %s', text => {
+    expect(edit(text).text).toBe(LINE);
+    expect(edit(text, [], [...SENT, TEST]).text).toBe(text);
+  });
+
+  it.each([
+    'The analysis assessed £54 per customer.',
+    'The analysis assessed £54 acquisition cost.',
+    'The analysis assessed £54 regional customer test costs.',
+    'The analysis assessed an Olumi-suggested £54 figure.',
+  ])('a figure without an adjacent option noun or label word is not a referent: %s', text => {
+    expect(edit(text).text).toBe(text);
+    expect(edit(text, [], [...SENT, TEST]).text).toBe(text);
+  });
+
+  it.each([
+    'The run includes an Olumi-suggested £54 test.',
+    'The analysis covered the £54 test.',
+  ])('P1-5 RED-before review verbatim, with sent twin: %s', text => {
+    expect(edit(text).text).toBe(LINE);
+    expect(edit(text, [], [...SENT, TEST]).text).toBe(text);
+  });
+
+  it.each([
+    'The run included the £54 test.',
+    'The run is including the £54 test.',
+    'The run compares the £54 test.',
+    'The run is comparing the £54 test.',
+    'The run analyses the £54 test.',
+    'The run analyzes the £54 test.',
+    'The run is analysing the £54 test.',
+    'The run is analyzing the £54 test.',
+    'The run evaluates the £54 test.',
+    'The run is evaluating the £54 test.',
+    'The run assesses the £54 test.',
+    'The run is assessing the £54 test.',
+    'The run covers the £54 test.',
+    'The run is covering the £54 test.',
+    'The £54 test was considered in this run.',
+    'The £54 test was considered as part of the comparison.',
+    'The £54 test is part of the analysis.',
+    'The £54 test is in this analysis.',
+    'The £54 test is in this comparison.',
+    'The £54 test was alongside the sent options.',
+    'The analysis runs with the £54 test.',
+    'The analysis run with the £54 test is complete.',
+  ])('inclusion vocabulary and inflections: %s', text => {
+    expect(edit(text).text).toBe(LINE);
+    expect(edit(text, [], [...SENT, TEST]).text).toBe(text);
+  });
+
+  it.each([
+    'The £54 test was considered.',
+    'The £54 test was considered an interesting suggestion.',
+    'Test £54 Pro price could improve retention.',
+    'Test £54 Pro price.',
+    'The analysis recommends the £54 test.',
+    'This comparison needs the £54 test.',
+  ])('label words and unrestricted consider* do not supply an inclusion verb: %s', text => {
+    expect(edit(text).text).toBe(text);
+    expect(edit(text, [], [...SENT, TEST]).text).toBe(text);
   });
 
   it('a figure shared with a sent label is ambiguous; an exact excluded label still refers to its option', () => {
@@ -81,16 +215,21 @@ describe('Q6 narrator inclusion about an option the Run left out', () => {
     const ambiguous = '£54 was included for comparison.';
     expect(edit(ambiguous, [TEST], sent).text).toBe(ambiguous);
     expect(edit('Test £54 Pro price was evaluated.', [TEST], sent).text).toBe(LINE);
-    expect(edit('We tested £54.', [TEST], [...SENT, { option_id: 'short', label: 'Test' }]).text).toBe(LINE);
+    // A sent label that would supply the only adjacent option noun is masked before referent search.
+    expect(edit('We assessed the £54 Test.', [TEST], [...SENT, { option_id: 'short', label: 'Test' }]).removed).toBe(0);
+    // A genuine inclusion verb is not itself an option noun: “tested” is distinct from the label word “Test”.
+    expect(edit('We tested £54.').removed).toBe(0);
   });
 
-  it('bare number and percentage referents are exclusive too; larger numbers and decimals are distinct', () => {
+  it('number and percentage aliases need adjacency and exclusivity; larger numbers and decimals are distinct', () => {
     const percent = { option_id: 'percent', label: 'Test 54% retention', reason: 'removed' };
-    expect(edit('54% was assessed.', [percent]).text).toBe(leftOutOptionSentence(percent));
-    expect(edit('54% was assessed.', [percent], [{ option_id: 'shared', label: 'Keep 54% retention' }]).removed).toBe(0);
+    expect(edit('The 54% retention test was assessed.', [percent]).text).toBe(leftOutOptionSentence(percent));
+    expect(edit('The 54% retention test was assessed.', [percent], [{ option_id: 'shared', label: 'Keep 54% retention' }]).removed).toBe(0);
     const number = { option_id: 'number', label: 'Test 54 seats', reason: 'infeasible' };
-    expect(edit('54 was tested.', [number]).text).toBe(leftOutOptionSentence(number));
-    for (const text of ['£154 was compared.', '£54.5 was tested.', '£540 was included.']) expect(edit(text).text).toBe(text);
+    expect(edit('The 54 seats test was tested.', [number]).text).toBe(leftOutOptionSentence(number));
+    expect(edit('54% was assessed.', [percent]).removed).toBe(0);
+    expect(edit('54 was tested.', [number]).removed).toBe(0);
+    for (const text of ['54% was assessed.', '54 was tested.', '£154 test was compared.', '£54.5 test was tested.', '£540 test was included.']) expect(edit(text).text).toBe(text);
   });
 
   it('quote-folded, case-insensitive exact labels work without a numeric alias', () => {
@@ -107,15 +246,34 @@ describe('Q6 narrator inclusion about an option the Run left out', () => {
     expect(edit(negative, [option]).text).toBe(negative);
   });
 
+  it.each(['Plan: Expand', 'Expand, and retain customers', 'Expand but preserve jobs'])
+    ('exact labels retain their referent across clause words inside the label: %s', label => {
+      const option = { option_id: 'clause_label', label, reason: 'removed' };
+      const text = `‘${label}’ was analysed.`;
+      expect(edit(text, [option]).text).toBe(leftOutOptionSentence(option));
+      expect(edit(text, [], [...SENT, option]).text).toBe(text);
+    });
+
+  it.each(['Plan: not analysed', 'Expand, and never compare', 'Test assessed alternatives'])
+    ('a referent’s own negation/inclusion words are masked before assertion testing: %s', label => {
+      const option = { option_id: 'assertion_label', label, reason: 'removed' };
+      const included = `‘${label}’ was assessed.`;
+      const neutral = `‘${label}’ remains a suggestion.`;
+      expect(edit(included, [option]).text).toBe(leftOutOptionSentence(option));
+      expect(edit(neutral, [option]).text).toBe(neutral);
+      expect(edit(included, [], [...SENT, option]).text).toBe(included);
+      expect(edit(neutral, [], [...SENT, option]).text).toBe(neutral);
+    });
+
   it('drops a whole bullet, retains other bullets, and appends each named option’s reason once', () => {
     const other = { option_id: 'test_64', label: 'Test £64 price', reason: 'removed' };
-    const text = `Today’s prices.\n- £54 and £64 were included.\n- £59 was tested.\nWe also compared £54.`;
+    const text = `Today’s prices.\n- The £54 test and £64 price were included.\n- £59 was tested.\nWe also compared the £54 test.`;
     const out = edit(text, [TEST, other]);
     expect(out.text).toContain('- £59 was tested.');
-    expect(out.text).not.toContain('- £54');
+    expect(out.text).not.toContain('- The £54 test');
     expect(out.text.split(LINE).length - 1).toBe(1);
     expect(out.text.split(leftOutOptionSentence(other)).length - 1).toBe(1);
-    const mixed = edit('- £54 was included; £64 was left out.', [TEST, other]).text;
+    const mixed = edit('- The £54 test was included; the £64 price was left out.', [TEST, other]).text;
     expect(mixed).toContain(LINE);
     expect(mixed).toContain(leftOutOptionSentence(other));
   });
@@ -160,13 +318,21 @@ describe('Q6 recorded-set reader and final egress carriers', () => {
     }, optionParticipation: [{ option_id: TEST.option_id, state: 'kept_olumi_provisional', unanalysable_user_option_ids: ['missing'] }] })).toBe(body);
   });
 
-  it('the existing snapshot schema supplies the Run’s complete exclusions and sent-label collision control', () => {
-    const snapshot = RunInputSnapshotSchema.parse({ snapshot_version: 1, sent_digest: 'a'.repeat(64), goal: null,
-      options: SENT.map(o => ({ ...o, settings: [] })), options_not_sent: [TEST], factors: [], constraints: [], links: [] });
-    const set = runOptionSetForCopy({ input_snapshot: snapshot }, undefined, GRAPH);
-    expect(set).toEqual({ leftOut: [TEST], sent: SENT });
-    expect(withoutLeftOutOptionInclusionClaimsAtEgress({ assistant_text: PAUL }, { ...opts,
-      analysisResult: { input_snapshot: snapshot }, optionParticipation: undefined }).assistant_text).toBe(LINE);
+  // Production analysis_result has no input_snapshot. Real stored-fact reader coverage lives in the
+  // read-freshness / saved-Explain / runAnalysis rows; do not reintroduce a fixture-only result field here.
+
+  it('P1-1 RED-before: the same-fact recorded-set carrier handles the review’s not_analysable wording', () => {
+    const option = { ...TEST, reason: 'not_analysable' };
+    const text = 'Test £54 Pro price was analysed';
+    const runOptionSet = { leftOut: [option], sent: SENT };
+    const out = withoutLeftOutOptionInclusionClaimsAtEgress({ assistant_text: text }, {
+      ...opts, analysisResult: {}, optionParticipation: [], runOptionSet,
+    });
+    expect(out.assistant_text).toBe(leftOutOptionSentence(option));
+    const twin = { assistant_text: text };
+    expect(withoutLeftOutOptionInclusionClaimsAtEgress(twin, {
+      ...opts, analysisResult: {}, optionParticipation: [], runOptionSet: { leftOut: [], sent: [...SENT, TEST] },
+    })).toBe(twin);
   });
 
   it.each(['excluded_infeasible', 'excluded_removed'])('%s uses the generic deterministic exclusion line', state => {
@@ -189,6 +355,31 @@ describe('Q6 recorded-set reader and final egress carriers', () => {
     expect(out.assistant_text).toBe(body.assistant_text);
     expect(out._agent.provisional_view).toEqual({ reasoning: LINE, view: 'Size the price effect.' });
   });
+
+  it.each(['view', 'confirm_step'] as const)('P1-6 review verbatim in %s follows the superseding bare-figure rule', field => {
+    // The r1 referent class intentionally no longer fires on the review’s bare £54 figure.
+    const text = '£54 is in this run too, so test the churn assumption.';
+    const body = { assistant_text: 'Today’s figures.', _agent: { provisional_view: { [field]: text } } };
+    expect(withoutLeftOutOptionInclusionClaimsAtEgress(body, opts)).toBe(body);
+    expect(withoutLeftOutOptionInclusionClaimsAtEgress(body, { ...opts, optionParticipation: [] })).toBe(body);
+  });
+
+  it.each(['heading', 'view', 'reasoning', 'confirm_step', 'because'] as const)
+    ('P1-6 RED-before: every displayed provisional-view string is edited, including %s', field => {
+      // provisional-view.ts:161-169 and its sidecar reader enumerate all five displayed strings.
+      const text = 'The £54 test is in this run too, so test the churn assumption.';
+      const provisional = {
+        heading: 'Provisional view', view: 'Size the price effect.', reasoning: 'The churn link is uncertain.',
+        confirm_step: 'Check the churn assumption.', because: 'It needs a user figure.', [field]: text,
+      };
+      const body = { assistant_text: 'Today’s figures.', _agent: { provisional_view: provisional, session_id: 'q6' } };
+      const out = withoutLeftOutOptionInclusionClaimsAtEgress(body, opts);
+      expect(out.assistant_text).toBe(body.assistant_text);
+      expect(out._agent.provisional_view).toEqual({ ...provisional, [field]: LINE });
+      expect(out._agent.session_id).toBe('q6');
+      expect(withoutLeftOutOptionInclusionClaimsAtEgress(body, { ...opts, optionParticipation: [] }), '£54-sent twin').toBe(body);
+      expect(withoutLeftOutOptionInclusionClaimsAtEgress(out, opts), 'sidecar idempotence').toBe(out);
+    });
 
   it('a stale answer shape drops after the strike; a sent option’s deriving shape is retained', () => {
     const shape = { headline: 'Current prices.', bullets: [PAUL.slice(2)], detail: '' };

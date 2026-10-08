@@ -35,17 +35,19 @@ export interface RecordedRunOption {
 export interface LeftOutRunOption extends RecordedRunOption {
   readonly reason: string;
 }
-
-/**
- * Q6: ONE projection of the Run's recorded sent/left-out set, for limit words and final reply egress. The snapshot's
- * contract reader owns its complete sent roster; otherwise the existing participation reader owns the exclusion.
- * Graph labels only name recorded ids: today's authorship/status never decides whether the Run left an option out.
- * Unknown/refused records mean no exclusions. A recorded empty snapshot/participation stays empty.
- */
-export function runOptionSetForCopy(analysisResult: unknown, participation: unknown, graph: unknown): {
+export interface RecordedRunOptionSet {
   readonly leftOut: readonly LeftOutRunOption[];
   readonly sent: readonly RecordedRunOption[];
-} {
+}
+
+/**
+ * Q6: ONE projection of the STORED Run fact's sent/left-out set, for limit words and final reply egress. The snapshot's
+ * contract reader owns its complete sent roster; otherwise the existing participation reader owns the exclusion.
+ * Graph labels only name recorded ids: today's authorship/status never decides whether the Run left an option out.
+ * Unknown/refused records mean no exclusions. A recorded empty snapshot/participation stays empty. The transport
+ * analysis_result block omits input_snapshot; the canonical graph reader projects THIS fact into its sidecar once.
+ */
+export function runOptionSetForCopy(storedRunResult: unknown, participation: unknown, graph: unknown): RecordedRunOptionSet {
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const options: RecordedRunOption[] = Array.isArray(nodes) ? nodes.flatMap((value) => {
     const n = value as { id?: unknown; kind?: unknown; label?: unknown } | null;
@@ -58,7 +60,7 @@ export function runOptionSetForCopy(analysisResult: unknown, participation: unkn
     const label = typeof o.label === 'string' && o.label.trim() !== '' ? o.label.trim() : labels.get(o.option_id);
     return { option_id: o.option_id, ...(label !== undefined ? { label } : {}) };
   };
-  const snapshot = RunInputSnapshotSchema.safeParse((analysisResult as { input_snapshot?: unknown } | null | undefined)?.input_snapshot);
+  const snapshot = RunInputSnapshotSchema.safeParse((storedRunResult as { input_snapshot?: unknown } | null | undefined)?.input_snapshot);
   if (snapshot.success) {
     return {
       leftOut: snapshot.data.options_not_sent.map((o) => ({ ...named(o), reason: o.reason })),
@@ -80,6 +82,6 @@ export function runOptionSetForCopy(analysisResult: unknown, participation: unkn
 }
 
 /** The same projection's ids/reasons; limit copy consumes no separate exclusion predicate. */
-export function optionsLeftOutOfRun(analysisResult: unknown, participation: unknown, graph: unknown): readonly LeftOutRunOption[] {
-  return runOptionSetForCopy(analysisResult, participation, graph).leftOut;
+export function optionsLeftOutOfRun(storedRunResult: unknown, participation: unknown, graph: unknown): readonly LeftOutRunOption[] {
+  return runOptionSetForCopy(storedRunResult, participation, graph).leftOut;
 }

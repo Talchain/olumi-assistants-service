@@ -1,5 +1,6 @@
 /** Q6: per-option limit words and asks name only options this Run recorded as sent. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import Fastify from 'fastify';
 import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
 import { limitChecksForAgent, type LimitCheck } from '../limit-checks.js';
 import { savedRunContextFacts } from '../saved-run-context-facts.js';
@@ -8,6 +9,25 @@ import { ProposalStore } from '../proposal.js';
 import { readStoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import type { StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
 import { OLUMI_GUESS_LIMIT_REASON } from '../../../orchestrator/context/placeholder-parts.js';
+import scenarioGraphRoute from '../../../routes/assist.v1.scenario-graph.js';
+import { deriveDecisionContextGraphHash } from '../../build-turn-context.js';
+import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
+import type { RecordedRunOptionSet } from '../../tools/handlers/option-participation.js';
+
+const { readStore } = vi.hoisted(() => ({ readStore: {
+  scenarioExists: vi.fn(async () => true),
+  ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
+  getScenarioOwner: vi.fn(async () => null),
+  loadGraphAndBriefText: vi.fn(),
+  readMostRecentPendingActions: vi.fn(async () => []),
+  readRecent: vi.fn(async () => [{ id: 'q6-run-row' }]),
+  readFactsFor: vi.fn(),
+  readAnalysisInvalidatedAt: vi.fn(async () => null),
+} }));
+vi.mock('../../session/index.js', () => ({ getSessionStore: () => readStore }));
+vi.mock('../../../orchestrator/user-identity.js', async importOriginal => ({
+  ...await importOriginal<Record<string, unknown>>(), resolveUserIdentity: async () => ({ mode: 'off' }),
+}));
 
 const RAISE = 'raise_pro_price_to_59';
 const TEST = 'test_54_pro_price';
@@ -45,16 +65,56 @@ const graph = {
 const verdicts: StoredLimitVerdicts = { per_limit: [{ constraint_id: LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' }],
   joint: { state: 'estimate_only' } };
 const state = { run_state: { kind: 'complete_current', computed_at: AT }, leader_claim: { permitted: false } };
-const result = (leftOut?: readonly string[]) => ({ type: 'analysis_result', computed_against_hash: HASH, enrichment: {},
-  ...(leftOut !== undefined ? { input_snapshot: RunInputSnapshotSchema.parse({ snapshot_version: 1, sent_digest: 'b'.repeat(64),
-    goal: null, options: [KEEP, RAISE, TEST].filter(id => !leftOut.includes(id))
-      .map(option_id => ({ option_id, label: labels.get(option_id), settings: [] })),
-    options_not_sent: leftOut.map(option_id => ({ option_id, label: labels.get(option_id), reason: 'olumi_proposed' })),
-    factors: [], constraints: [], links: [],
-  }) } : {}),
-});
+const result = () => ({ type: 'analysis_result', computed_against_hash: HASH, enrichment: {} });
 const first = (g = graph, rows = verdicts, leftOut?: ReadonlySet<string>): LimitCheck =>
   limitChecksForAgent(g, rows, undefined, leftOut)![0]!;
+
+const carriers = [
+  ['olumi_proposed', 'excluded_olumi_proposed'],
+  ['infeasible', 'excluded_infeasible'],
+  ['removed', 'excluded_removed'],
+  ['not_analysable', null],
+] as const;
+
+/** Read the production graph route, projecting the stored fact; never inject a snapshot into its display block. */
+async function storedRunRead(reason: typeof carriers[number][0] | undefined, sent = false): Promise<Record<string, unknown>> {
+  const carrier = carriers.find(([r]) => r === reason);
+  const hash = deriveDecisionContextGraphHash(graph)!;
+  const snapshot = reason === 'not_analysable' ? RunInputSnapshotSchema.parse({
+    snapshot_version: 1, sent_digest: 'b'.repeat(64), goal: null,
+    options: [KEEP, RAISE, TEST].filter(id => sent || id !== TEST)
+      .map(option_id => ({ option_id, label: labels.get(option_id), settings: [] })),
+    options_not_sent: sent ? [] : [{ option_id: TEST, label: labels.get(TEST), reason }],
+    factors: [], constraints: [], links: [],
+  }) : undefined;
+  const participation = carrier === undefined ? undefined
+    : sent || carrier[1] === null ? [] : [{ option_id: TEST, state: carrier[1] }];
+  const storedResult = { scenario_id: CTX.scenario_id, leading_option_id: null, summary: 'The model was analysed.',
+    graph_hash_at_run: hash, computed_at: AT,
+    constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'unevaluated', ...verdicts },
+    enrichment: stampRunAnalysisProjection({ analysis_status: 'computed' }),
+    ...(snapshot === undefined ? {} : { input_snapshot: snapshot }),
+    ...(participation === undefined ? {} : { option_participation: participation }),
+  };
+  readStore.loadGraphAndBriefText.mockResolvedValue({ graph, briefText: 'Compare Pro pricing.' });
+  readStore.readFactsFor.mockResolvedValue([{ fact_type: 'run_analysis', fact_version: 1, noop: false, result: storedResult }]);
+  const app = Fastify({ logger: false });
+  await app.register(scenarioGraphRoute);
+  await app.ready();
+  try {
+    const reply = await app.inject({ method: 'POST', url: `/assist/v1/scenarios/${CTX.scenario_id}/graph`, payload: {} });
+    expect(reply.statusCode).toBe(200);
+    const body = reply.json() as Record<string, unknown>;
+    expect(body.analysis_result, 'control: the canonical reader delivered THIS selected Run').not.toBeNull();
+    expect(body.analysis_result).not.toHaveProperty('input_snapshot');
+    expect(body.analysis_run_option_set).toMatchObject({
+      leftOut: reason === undefined || sent ? [] : [{ option_id: TEST, label: labels.get(TEST), reason }],
+    });
+    if (reason === 'not_analysable') expect(body.analysis_option_participation).toEqual([]);
+    else if (participation !== undefined) expect(body.analysis_option_participation).toEqual(participation);
+    return body;
+  } finally { await app.close(); }
+}
 
 describe('Q6 limit checks use the Run’s recorded sent option set', () => {
   it('RED: Paul’s exact Explain clause loses test_54 when this Run left it out', () => {
@@ -95,12 +155,17 @@ describe('Q6 limit checks use the Run’s recorded sent option set', () => {
       state: 'scored', say: ownSentence });
   });
 
-  it.each(['snapshot', 'participation'] as const)('saved/Explain caller carries %s exclusions through the one reader', carrier => {
-    const read = { graph_hash: HASH, analysis_state: state, analysis_result: result(carrier === 'snapshot' ? [TEST] : undefined), raw: graph,
-      limit_verdicts: verdicts,
-      ...(carrier === 'participation' ? { option_participation: readStoredOptionParticipation([{ option_id: TEST, state: 'excluded_olumi_proposed' }]) } : {}) };
-    const facts = savedRunContextFacts(CTX.scenario_id, read, { leader_may_be_named: false });
-    expect((facts.limit_checks as { limits: LimitCheck[] }).limits[0]!.say).toBe(SENT_ONLY);
+  it.each(carriers)('saved/Explain reads production %s carrier from the SAME stored fact, with its sent twin', async reason => {
+    for (const sent of [false, true]) {
+      const body = await storedRunRead(reason, sent);
+      const facts = savedRunContextFacts(CTX.scenario_id, {
+        graph_hash: body.graph_hash as string, analysis_state: body.analysis_state, analysis_result: body.analysis_result,
+        raw: body.graph, limit_verdicts: verdicts,
+        option_participation: readStoredOptionParticipation(body.analysis_option_participation),
+        run_option_set: body.analysis_run_option_set as RecordedRunOptionSet,
+      }, { leader_may_be_named: false });
+      expect((facts.limit_checks as { limits: LimitCheck[] }).limits[0]!.say).toBe(sent ? BOTH : SENT_ONLY);
+    }
   });
 
   it('saved/Explain caller does not infer exclusion from graph authorship or a missing record', () => {
@@ -110,17 +175,25 @@ describe('Q6 limit checks use the Run’s recorded sent option set', () => {
     expect((facts.limit_checks as { limits: LimitCheck[] }).limits[0]!.say).toBe(BOTH);
   });
 
-  it.each(['snapshot', 'participation', 'unrecorded'] as const)('runAnalysis caller carries %s from its canonical post-Run read', async carrier => {
-    const block = result(carrier === 'snapshot' ? [TEST] : undefined);
-    const dispatch: InternalDispatch = async path => {
-      if (path.endsWith('/graph')) return { status: 200, json: { graph, graph_hash: HASH, analysis_state: state,
-        analysis_result: block, analysis_limit_verdicts: verdicts,
-        ...(carrier === 'participation' ? { analysis_option_participation: [{ option_id: TEST, state: 'excluded_olumi_proposed' }] } : {}) } };
-      if (path === '/orchestrate/v2/turn') return { status: 200, json: { assistant_text: '', analysis_state: state,
-        analysis_ready: { status: 'ready', may_run: true }, blocks: [block] } };
-      throw new Error(`unexpected dispatch ${path}`);
-    };
+  it.each(carriers)('runAnalysis reads production %s carrier from its canonical post-Run read, with its sent twin', async reason => {
+    for (const sent of [false, true]) {
+      const body = await storedRunRead(reason, sent);
+      const dispatch: InternalDispatch = async path => {
+        if (path.endsWith('/graph')) return { status: 200, json: body };
+        if (path === '/orchestrate/v2/turn') return { status: 200, json: { assistant_text: '', analysis_state: body.analysis_state,
+          analysis_ready: { status: 'ready', may_run: true }, blocks: [body.analysis_result] } };
+        throw new Error(`unexpected dispatch ${path}`);
+      };
+      const reply = await createAgentCapabilities(dispatch, new ProposalStore()).runAnalysis(CTX, { reason: 'Run it.' });
+      expect((reply.limit_checks as { limits: LimitCheck[] }).limits[0]!.say).toBe(sent ? BOTH : SENT_ONLY);
+    }
+  });
+
+  it('runAnalysis preserves every option when the selected production fact records no exclusion', async () => {
+    const body = await storedRunRead(undefined);
+    const dispatch: InternalDispatch = async path => path.endsWith('/graph') ? { status: 200, json: body }
+      : { status: 200, json: { assistant_text: '', analysis_state: body.analysis_state, blocks: [body.analysis_result] } };
     const reply = await createAgentCapabilities(dispatch, new ProposalStore()).runAnalysis(CTX, { reason: 'Run it.' });
-    expect((reply.limit_checks as { limits: LimitCheck[] }).limits[0]!.say).toBe(carrier === 'unrecorded' ? BOTH : SENT_ONLY);
+    expect((reply.limit_checks as { limits: LimitCheck[] }).limits[0]!.say).toBe(BOTH);
   });
 });
