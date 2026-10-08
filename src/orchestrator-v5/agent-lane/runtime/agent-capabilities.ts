@@ -16,7 +16,7 @@
 
 import { withDrawnLinkAdoption } from '../drawn-link-adoption-context.js';
 import { parseDrawnLinkPress } from '../drawn-link-press.js';
-import { readStatedEventRisk, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
+import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow, GM_HELD_USER_EVENT_RISK_KEY } from '../../routing/stated-event-risk.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
@@ -8125,7 +8125,19 @@ export function createAgentCapabilities(
         }
         links.push({ to_id: res.node.id, effect_direction: dir });
       }
-      for (const c of causedBy as { factor_label?: unknown; direction?: unknown }[]) {
+      // Only the user's turn may author the likelihood or name its drivers.
+      const userText = ctx.user_turn_text ?? ctx.user_text ?? '';
+      const stated = readStatedEventRisk(userText);
+      const driverLabels = stated === undefined ? [] : causedBy.map((c) => {
+        const asked = String(c?.factor_label ?? '');
+        const resolved = resolveNamed(g, asked, (node) => node.kind === 'factor');
+        return resolved.kind === 'one' ? resolved.node.label : asked;
+      });
+      const droppedDrivers = stated !== undefined && causedBy.length > 0
+        && !driverLabels.some((driver) => isFactorNamedByUser(driver, userText)) ? driverLabels : [];
+      const riskCauses = droppedDrivers.length > 0 ? [] : causedBy;
+      const eventRisk = riskCauses.length === 0 ? stated : undefined;
+      for (const c of riskCauses as { factor_label?: unknown; direction?: unknown }[]) {
         const asked = String(c?.factor_label ?? '');
         const dir = direction(c?.direction);
         const res = resolveNamed(g, asked, (n) => n.kind === 'factor');
@@ -8155,9 +8167,6 @@ export function createAgentCapabilities(
           detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
       }
       const riskId = built.proposal.riskId;
-      // event_risk.v1 slice 2a: whole_request is a boolean; only trusted turn words author a figure.
-      const stated = readStatedEventRisk(ctx.user_turn_text ?? ctx.user_text ?? '');
-      const eventRisk = causedBy.length === 0 ? stated : undefined;
       const res = await opts.holdAddRisk({
         scenario_id: ctx.scenario_id,
         // A fresh row per offer (see `HoldAddRiskInput.turn_id`): a lapsed hold never blocks offering the same risk again.
@@ -8206,9 +8215,12 @@ export function createAgentCapabilities(
           driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
           how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
         },
+        ...(droppedDrivers.length > 0 ? { dropped_drivers: droppedDrivers } : {}),
         note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.'
-          + (stated !== undefined && causedBy.length > 0 ? " I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen." : ''),
+          + (stated !== undefined && riskCauses.length > 0 ? " I've added it as an ordinary risk: a risk with a stated cause can't yet be modelled as an event that may happen." : '')
+          + (droppedDrivers.length > 0 ? ` I left out ${droppedDrivers.map((driver) => `'${driver}'`).join(' and ')} as ${droppedDrivers.length === 1 ? 'a driver' : 'drivers'}: a risk with a stated likelihood can't have a driver in the model yet. Say if you'd rather keep the driver as an ordinary risk instead.` : '')
+          + (stated === undefined && readStatedLikelihoodWithoutWindow(userText) ? ' You gave a likelihood but no time window, so I\'ve added it as an ordinary risk. Say how soon (for example "within 6 months") and I\'ll add it as an event that may happen.' : ''),
       };
     },
 

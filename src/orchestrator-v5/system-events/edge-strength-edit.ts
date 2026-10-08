@@ -276,7 +276,8 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
         && isDeepStrictEqual(afterProvenance.mean_projected, approved.mean_projected))) return false;
       if ('magnitude' in beforeProvenance) afterProvenance.magnitude = beforeProvenance.magnitude;
       else delete afterProvenance.magnitude;
-      // R7: a non-user projected placeholder's canonical magnitude transition also removes its old projection carrier.
+      // P03 #2797 + R7: the approved transition drops a projected mean's marker (`sizedByApproval`); only here, and only
+      // exactly as checked above. R7: a non-user projected placeholder's canonical magnitude transition also removes its old projection carrier.
       // Admit exactly that paired transition, then restore it for the full-graph check; carrier deletion alone refuses.
       if ('mean_projected' in beforeProvenance) afterProvenance.mean_projected = structuredClone(beforeProvenance.mean_projected);
       else delete afterProvenance.mean_projected;
