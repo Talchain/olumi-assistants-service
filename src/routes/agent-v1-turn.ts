@@ -2358,6 +2358,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(resultFirstReplay && state.limitVerdicts !== undefined ? { limit_verdicts: state.limitVerdicts } : {}),
         ...(resultFirstReplay && state.goalCertainty !== undefined ? { goal_certainty: state.goalCertainty } : {}),
         ...(resultFirstReplay && state.optionParticipation !== undefined ? { option_participation: state.optionParticipation } : {}),
+        ...(resultFirstReplay && state.identityEvaluated !== undefined ? { identity_evaluated_node_ids: [...state.identityEvaluated].sort() } : {}),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
         ...(state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
         ...(state.analysisState !== undefined ? { analysis_state: state.analysisState } : {}),
@@ -4937,6 +4938,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * nothing left out; absent = not recorded.
        */
       ...(optionParticipation !== undefined ? { option_participation: optionParticipation } : {}),
+      /**
+       * ⭐ IDENTITY-EXACT (DL 8 Oct; design lane-placeholder-licence.md): the identities THIS Run evaluated, the read's
+       * \`analysis_identity_evaluated_node_ids\` (same fact, same gates as \`analysis_result\`), as a SIDECAR root key (the
+       * \`option_participation\` pattern). goal-certainty's \`exact\` rule treats an operand → evaluated identity link as exact,
+       * so DGAI stops marking those links "strength not set". Sorted; [] = recorded, none; absent = not attested.
+       */
+      ...(identityEvaluated !== undefined ? { identity_evaluated_node_ids: [...identityEvaluated].sort() } : {}),
       /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *
