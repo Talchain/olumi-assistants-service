@@ -26,6 +26,8 @@ import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWi
 import { chatRiskPreconditionFor } from '../../routing/chat-risk-precondition.js';
 import { endsOfGraph, heldLinkOf } from '../../goal-target/held-user-links.js';
 import { goalChanceWithheldForAgent, identityAskLineFor, type GoalChanceWithheld } from '../goal-chance-withheld.js';
+import { guidedSizingProgressLine } from '../guided-sizing.js';
+import { runExplanationKeyForRecord } from '../run-explanation.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { runOptionSetForCopy, readStoredOptionParticipation, type RecordedRunOptionSet, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
@@ -997,6 +999,7 @@ interface GraphRead {
   }[];
   /** `origin` is read only to recognise a repair-authored edge (`isRepairAuthoredOptionFactorEdge`). */
   readonly edges: {
+    id?: unknown;
     from: string;
     to: string;
     origin?: unknown;
@@ -1394,8 +1397,10 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;
     const fixed = (st === undefined || (st.mean === 1 && (st.std === undefined || st.std === 0.01)))
       && (e.exists_probability === undefined || e.exists_probability === 1) && e.effect_direction !== 'negative';
-    if (structuralFrom.has(e.from) && fixed) return { from: e.from, to: e.to };
+    const identity = str(e.id) ? { id: e.id } : {};
+    if (structuralFrom.has(e.from) && fixed) return { ...identity, from: e.from, to: e.to };
     return {
+      ...identity,
       from: e.from,
       to: e.to,
       // ⛔ A link that HOLDS BY DEFINITION (checked: `holdsByDefinition`) is arithmetic, not "an assumption Olumi made":
@@ -1851,6 +1856,19 @@ function resolveNamed(
   if (acceptable.length > 1) return { kind: 'ambiguous', candidates: acceptable };
   if (acceptable.length === 1) return { kind: 'one', node: acceptable[0] };
   return candidates.length > 0 ? { kind: 'other', node: candidates[0] } : { kind: 'none' };
+}
+
+/** A canonical request-selected directed edge disambiguates its ends; labels are only display/statement data. */
+function resolveLinkEffectEnds(g: GraphRead, ctx: AgentToolContext, fromName: string, toName: string): readonly [Resolution, Resolution] {
+  const matches = ctx.grounded_selection?.unresolved === 'none' ? (ctx.grounded_links ?? []).flatMap(link => {
+    const from = g.nodes.find(n => n.id === link.from);
+    const to = g.nodes.find(n => n.id === link.to);
+    const names = (node: GraphRead['nodes'][number], requested: string): boolean => node.id === requested || norm(node.label) === norm(requested);
+    return from !== undefined && to !== undefined && names(from, fromName) && names(to, toName)
+      && linkEffectTargetOf(g.raw, from.id, to.id).kind === 'one' ? [{ from, to }] : [];
+  }) : [];
+  if (matches.length === 1) return [{ kind: 'one', node: matches[0]!.from }, { kind: 'one', node: matches[0]!.to }];
+  return [resolveNamed(g, fromName, () => true), resolveNamed(g, toName, () => true)];
 }
 
 /** One name that matched more than one acceptable entity, with every candidate. */
@@ -2988,12 +3006,16 @@ export function createAgentCapabilities(
     // ⭐ S5t (Science d5 #87 6009444385, DL adopted): a frame the refit widened is said ONCE, in Science's words — read off
     // the model before approval and the read-back above, never the writer's own account. Only the one-link door refits.
     const reframed = approvedEffects.length === 1 ? reframedNodeIds(approvedRead.raw, check?.raw) : [];
+    const progress = guidedSizingProgressLine(check!.raw);
+    const receipt = approvedEffects.length === 1
+      ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'}${reframed.length > 0 ? ` ${frameRefitReceipt(reframed.map(labelOf))}` : ''} Any earlier result is now out of date.`
+      : `Recorded your figures for ${approvedEffects.length} links, from your words, as you confirmed. Any earlier result is now out of date.`;
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
+      guided_sizing_commit: true,
+      guided_sizing_run_key: runExplanationKeyForRecord(ctx.scenario_id, approvedRead.analysis_state, approvedRead.analysis_result),
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
-      follow_up: approvedEffects.length === 1
-        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", from your words, as you confirmed: "${approvedEffects[0]!.quote}"${/[.!?]$/.test(approvedEffects[0]!.quote) ? '' : '.'}${reframed.length > 0 ? ` ${frameRefitReceipt(reframed.map(labelOf))}` : ''} Any earlier result is now out of date.`
-        : `Recorded your figures for ${approvedEffects.length} links, from your words, as you confirmed. Any earlier result is now out of date.`,
+      follow_up: progress === null ? receipt : `${receipt} ${progress}`,
     };
   };
 
@@ -3721,8 +3743,7 @@ export function createAgentCapabilities(
             fail('unreadable_effect', 'Nothing was prepared: this effect needs the change in the target and the change in the source it is per, each with its unit.');
             continue;
           }
-          const fromRes = resolveNamed(g, fromLabel, () => true);
-          const toRes = resolveNamed(g, toLabel, () => true);
+          const [fromRes, toRes] = resolveLinkEffectEnds(g, ctx, fromLabel, toLabel);
           const ambiguousEnds = [
             ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, fromLabel, fromRes.candidates)] : []),
             ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, toLabel, toRes.candidates)] : []),
@@ -3854,8 +3875,7 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
-      const toRes = resolveNamed(g, String(args.to_label ?? ''), () => true);
+      const [fromRes, toRes] = resolveLinkEffectEnds(g, ctx, String(args.from_label ?? ''), String(args.to_label ?? ''));
       const ambiguousEnds = [
         ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.from_label ?? ''), fromRes.candidates)] : []),
         ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.to_label ?? ''), toRes.candidates)] : []),

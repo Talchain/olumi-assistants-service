@@ -133,6 +133,7 @@ import { contextSummaryFromFrame } from '../orchestrator-v5/context/context-summ
 import type { CanonicalContextFrame } from '../orchestrator-v5/context/frame/index.js';
 import { computeResponseHash } from '../utils/response-hash.js';
 import { validateEgress } from '../validators/b1.js';
+import { parseGuidedSizingPress, guidedSizingWireAction, guidedSizingOnWire, type GuidedSizing } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { handleReplacementTurn } from '../orchestrator-v5/replacement/turn-entry.js';
 import { shapeRunResult } from '../orchestrator-v5/replacement/to-run-result.js';
@@ -1204,6 +1205,20 @@ async function sendFinalised200(
     candidateForFinalise,
     finaliserContext,
   );
+  // Display-only guided data follows the existing post-validation sidecar
+  // transport. The published Action schema has no parameters member yet.
+  const guidedSizingForWire = (candidateFinalised as typeof candidateFinalised & { guided_sizing?: GuidedSizing }).guided_sizing;
+  const guidedActionsForWire = new Set<string>();
+  if (guidedSizingForWire?.v === 1 && guidedSizingForWire.graph_hash && guidedSizingForWire.run_key
+    && Array.isArray(guidedSizingForWire.links)) {
+    for (const link of guidedSizingForWire.links) {
+      const action = candidateFinalised.suggested_actions.find(a => a.id === link.press?.id);
+      const selected = parseGuidedSizingPress(link.press);
+      if (action !== undefined && selected !== null
+        && selected.from === link.from && selected.to === link.to
+        && (link.id === undefined || selected.edge_id === link.id)) guidedActionsForWire.add(action.id);
+    }
+  }
   // Fix 4 (observability) + V5 diagnostic trace (Phase A): pluck out the
   // optional `_timings` and `_diagnostic_trace` blocks before egress
   // validation. OlumiResponseSchema is `.strict()` — unknown keys would
@@ -1259,6 +1274,7 @@ async function sendFinalised200(
     // `_context_summary`): the re-attach gate is the sole authority, and the
     // strict `OlumiResponseSchema` must not see an unknown key.
     const hasPromptCapture = '_prompt_capture' in asRecord;
+    const hasGuidedSizing = 'guided_sizing' in asRecord;
     if (
       !hasTimings &&
       !hasTrace &&
@@ -1266,7 +1282,9 @@ async function sendFinalised200(
       !hasReasoning &&
       !hasAnswerShape &&
       !hasGroundedSelection &&
-      !hasPromptCapture
+      !hasPromptCapture &&
+      !hasGuidedSizing &&
+      guidedActionsForWire.size === 0
     ) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
@@ -1280,6 +1298,8 @@ async function sendFinalised200(
     delete cloned._answer_shape;
     delete cloned._grounded_selection;
     delete cloned._prompt_capture;
+    delete cloned.guided_sizing;
+    cloned.suggested_actions = candidateFinalised.suggested_actions.map(guidedSizingWireAction);
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -2172,6 +2192,17 @@ async function sendFinalised200(
       refusal_source: refusal.source,
       refusal_code: refusal.refusal_code,
     });
+  }
+  if (egress.ok && !analysisAuthorityUnavailable && guidedSizingForWire !== undefined
+    && (guidedSizingForWire.progress_line === undefined || wireBody.assistant_text.includes(guidedSizingForWire.progress_line))) {
+    const offered = new Set(wireBody.suggested_actions.filter(action => guidedActionsForWire.has(action.id)).map(action => action.id));
+    const boundGuidedSizing = guidedSizingOnWire(guidedSizingForWire, wireBody.graph_hash);
+    if (boundGuidedSizing !== undefined && guidedSizingForWire.links.every(link => offered.has(link.press.id))) {
+      const augmented: import('@talchain/schemas/boundary').OlumiResponse & { guided_sizing: GuidedSizing } = {
+        ...wireBody, guided_sizing: boundGuidedSizing,
+      };
+      wireBody = finaliseV5Response(augmented, finaliserContext);
+    }
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);

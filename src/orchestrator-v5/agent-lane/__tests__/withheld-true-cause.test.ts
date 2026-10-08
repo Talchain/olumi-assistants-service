@@ -222,6 +222,8 @@ describe('(c) WIRING: both Run replies owe the ask (the live turn and its replay
 describe('(f) a placeholder path beside an untestable target: the chat discloses the target\'s complete requirement (g1-b501 draft 1)', () => {
   const D1 = JSON.parse(readFileSync(new URL('./fixtures/served-g1b501-draft1-placeholder-target.json', import.meta.url), 'utf8')) as Rec;
   const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
+  // This historical warning predates acceptable_links: today's composition reads that same list carrier.
+  placeholder.acceptable_links = placeholder.links;
 
   it('PRECONDITION: the served Run carried both withholds, and the target one KEPT the shares', () => {
     const codes = (D1.analysis_result.enrichment.inference_warnings as Rec[]).map((w) => w.code);
@@ -229,10 +231,23 @@ describe('(f) a placeholder path beside an untestable target: the chat discloses
     expect(placeholder.message).toMatch(/Set (it|them) to see how much (it|they) matters?\.$/);
   });
 
-  it('W5 DL re-pin: the say carries the target\'s complete ask, including links beyond the placeholder subset', () => {
+  it('Science §(i) 4: captured case (c) has no missing level, so its 2-placeholder path speaks alone', () => {
     const say = goalChanceWithheldForAgent(D1.analysis_result)!.say;
-    const target = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!;
-    expect(say).toBe(`This run doesn’t show how often each option reaches the goal’s target. ${target.say}`);
+    expect(placeholder.links).toHaveLength(2);
+    expect(say).toBe("Not shown yet: 2 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.");
+  });
+
+  it('R2 RED: draw-2 has a missing level → its existing level-only ask FIRST, then the 2-link guided words', () => {
+    const draw2 = JSON.parse(readFileSync(new URL('./fixtures/guided-sizing-draw2.json', import.meta.url), 'utf8')) as Rec;
+    const warnings = (draw2.analysis_result.enrichment.inference_warnings as Rec[])
+      .filter(w => ['GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_TARGET_NOT_TESTABLE'].includes(w.code));
+    expect(warnings.map(w => w.code)).toEqual(['GOAL_FIGURES_PLACEHOLDER_PATH', 'GOAL_FIGURES_TARGET_NOT_TESTABLE']);
+    const target = warnings.find(w => w.code === 'GOAL_FIGURES_TARGET_NOT_TESTABLE')!;
+    expect(target.say).toContain("What's today's level of MRR?");
+    expect(target.say).toContain('from Pro plan price to Monthly churn');
+    const say = goalChanceWithheldForAgent({ enrichment: { inference_warnings: warnings } }, draw2.graph)!.say;
+    expect(say).toBe("What's today's level of MRR? Not shown yet: 2 links on the way to your goal have no size, so any figure would come from Olumi's stand-ins, not your model. Size them to see the chance.");
+    expect(say).not.toContain('a size for the links from');
   });
 
   it('CONTROL: a target-only withhold that kept the shares keeps its own tail (no placeholder words appear)', () => {
@@ -250,6 +265,8 @@ describe('Codex buddy r2', () => {
 
   it('W5 DL re-pin: quoting only the placeholder subset still owes the complete target requirement', () => {
     const D1 = JSON.parse(readFileSync(new URL('./fixtures/served-g1b501-draft1-placeholder-target.json', import.meta.url), 'utf8')) as Rec;
+    const p = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find(w => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
+    p.acceptable_links = p.links;
     const chance = goalChanceWithheldForAgent(D1.analysis_result)!;
     const placeholder = (D1.analysis_result.enrichment.inference_warnings as Rec[]).find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH')!;
     const run = { ran: true, goal_chance: chance };

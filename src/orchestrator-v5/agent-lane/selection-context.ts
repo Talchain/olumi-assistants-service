@@ -10,8 +10,9 @@
  *   · CONTEXT, NEVER AUTHORITY. The note says what is selected; it grants no write and withholds no tool. Every change
  *     still goes through its own door and approval.
  *   · HONEST ABOUT MISSES, never a stand-in. A selected id the model does not hold is `not_in_model`; a turn whose
- *     state could not be read, or a link reference that cannot be read as `from→to`, is `could_not_check`. The two are
- *     never collapsed (the same closed enum route-v2 puts on the wire, `grounded-selection.ts`).
+ *     state could not be read, or a link reference that cannot resolve to a unique stored id or `from→to`, is
+ *     `could_not_check`. The two are never collapsed (the same closed enum route-v2 puts on the wire,
+ *     `grounded-selection.ts`).
  *   · Pure: no I/O, no store. The route reads; this decides.
  */
 import type { SelectedElementsIngress } from '../boundary/request-extensions.js';
@@ -87,13 +88,21 @@ export function agentSelectionContext(
     selected.push(entity);
     elementIds.push(id);
   }
-  // The state's own link list (`projectModelContext`): a selected link is named ONLY when that exact directed pair is in
-  // it (Codex buddy P2 on #2584: two present ends do not make a deleted or reversed link real). No list ⇒ unchecked.
+  // The state's own link list (`projectModelContext`): prefer its unique stored id, then the legacy directed pair.
+  // Two present ends do not make a deleted or reversed link real (Codex buddy P2 on #2584). No list ⇒ unchecked.
   const links = isRec(state) && Array.isArray(state.links) ? (state.links as unknown[]).filter(isRec) : null;
   for (const ref of linkRefs.slice(0, Math.max(0, SELECTION_MAX_ELEMENTS - selected.length))) {
-    const ends = linkEndsOf(ref);
-    if (ends === null || links === null) { unreadable += 1; continue; }
-    const link = links.find((l) => l.from === ends.from && l.to === ends.to);
+    if (links === null) { unreadable += 1; continue; }
+    const idMatches = links.filter((l) => l.id === ref);
+    // An ambiguous stored id cannot fall through to endpoint parsing, even when it contains an arrow.
+    if (idMatches.length > 1) { unreadable += 1; continue; }
+    const identified = idMatches[0];
+    const ends = identified === undefined ? linkEndsOf(ref)
+      : typeof identified.from === 'string' && identified.from.length > 0
+        && typeof identified.to === 'string' && identified.to.length > 0
+        ? { from: identified.from, to: identified.to } : null;
+    if (ends === null) { unreadable += 1; continue; }
+    const link = identified ?? links.find((l) => l.from === ends.from && l.to === ends.to);
     if (link === undefined) { missing += 1; continue; }
     const end = (id: string): Json => ({ id, ...(typeof byId.get(id)?.label === 'string' ? { label: byId.get(id)!.label } : {}) });
     selected.push({ kind: 'link', ...link, from: end(ends.from), to: end(ends.to) });

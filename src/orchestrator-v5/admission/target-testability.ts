@@ -203,8 +203,9 @@ export function reachedGoalPaths(graph: unknown, optionIds: readonly string[], s
   return { reached, paths, exactLinks };
 }
 
-/** Stable endpoint de-duplication, ordered by shortest distance of the target from the goal. */
-export function goalOrderedLinks(graph: unknown, links: readonly { from: string; to: string }[]): Array<{ from: string; to: string }> {
+/** Stable endpoint de-duplication, ordered by shortest distance of the target from the goal.
+ * Guided replies retain the warning's input order for ties; other callers keep their existing graph-edge tie rule. */
+export function goalOrderedLinks(graph: unknown, links: readonly { from: string; to: string }[], warningOrderTies = false): Array<{ from: string; to: string }> {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const distance = new Map<unknown, number>(nodes.filter(n => n.kind === 'goal').map(n => [n.id, 0]));
@@ -219,7 +220,7 @@ export function goalOrderedLinks(graph: unknown, links: readonly { from: string;
   }
   return [...new Map(links.map(l => [JSON.stringify([l.from, l.to]), { from: l.from, to: l.to }])).values()]
     .sort((a, b) => (distance.get(a.to) ?? Infinity) - (distance.get(b.to) ?? Infinity)
-      || edges.findIndex(e => e.from === a.from && e.to === a.to) - edges.findIndex(e => e.from === b.from && e.to === b.to));
+      || (warningOrderTies ? 0 : edges.findIndex(e => e.from === a.from && e.to === a.to) - edges.findIndex(e => e.from === b.from && e.to === b.to)));
 }
 
 export function targetTestabilityOf(
@@ -448,6 +449,18 @@ export function untestableTargetParts(graph: unknown, verdict: TargetTestability
 }
 
 /**
+ * DL guided-path composition: a multi-placeholder reply asks ONLY the missing level before its ONE sizing list.
+ * Read the level cases through the existing word producer, so both the ordinary and unit-qualified questions stay
+ * byte-identical; case (c)'s separate link clause/question never enters this carrier.
+ */
+export function targetLevelOnlyQuestion(graph: unknown, verdict: TargetTestability): string | null {
+  if (verdict.kind !== 'not_testable') return null;
+  const failures = verdict.failures.filter(f => f.case === 'a' || f.case === 'd');
+  if (failures.length === 0) return null;
+  return untestableTargetParts(graph, { ...verdict, failures })?.question ?? null;
+}
+
+/**
  * AIQ's words (#77 5912882031) for a `not_testable` verdict, composed from {@link untestableTargetParts}. `null` otherwise.
  */
 const TARGET_TESTABLE_SENTENCE_CAP = 388;
@@ -515,12 +528,13 @@ export function untestableTargetTail(graph: unknown, verdict: TargetTestability,
  */
 export function targetNotTestableWarning(
   graph: unknown, verdict: TargetTestability, optionIds: readonly string[], code: string,
-): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string; first_ask?: { kind: 'link'; from: string; to: string } } | null {
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; say?: string; level_only_say?: string; first_ask?: { kind: 'link'; from: string; to: string } } | null {
   if (!targetVerdictWithholdsTargetClaims(verdict) || verdict.kind !== 'not_testable') return null;
   const said = targetWarningSentence(graph, verdict);
   const message = said !== null && said.length <= TARGET_TESTABLE_SENTENCE_CAP ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
   // RT-10 B′ R2: what the reply says about the target, from the same parts (`untestableTargetTail`).
   const tail = untestableTargetTail(graph, verdict);
+  const levelOnly = targetLevelOnlyQuestion(graph, verdict);
   // ⭐ Near tie (DL #87, 6 Oct): the link the `say` asks for, typed by id, so the panel names the SAME next step as the chat
   // (as `GOAL_FIGURES_PLACEHOLDER_PATH`'s `first_ask`). Only when the words ask exactly that link; never otherwise.
   const parts = tail === null ? null : untestableTargetParts(graph, verdict);
@@ -531,5 +545,6 @@ export function targetNotTestableWarning(
   const ends = sayAsks === null || parts?.askedIn == null ? null : linkEffectEndUnits(graph, sayAsks.from, sayAsks.to);
   const asked = sayAsks !== null && ends !== null && statedInOneOf(parts!.askedIn, [...ends.target.own, ends.target.adopted]) ? sayAsks : null;
   return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds], ...(tail !== null ? { say: tail } : {}),
+    ...(levelOnly !== null ? { level_only_say: levelOnly } : {}),
     ...(asked !== null ? { first_ask: { kind: 'link' as const, from: asked.from, to: asked.to } } : {}) };
 }

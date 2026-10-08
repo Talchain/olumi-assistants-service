@@ -3,6 +3,8 @@ import { applyLimitAdd, type LimitAddRequest } from './limit-add.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
 import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
+import { bindGuidedSizing, guidedSizingActions, guidedSizingProgress } from '../agent-lane/guided-sizing.js';
+import { runExplanationKeyForRecord } from '../agent-lane/run-explanation.js';
 
 /**
  * V5 deterministic system-event dispatch.
@@ -1491,6 +1493,36 @@ async function readPriorPendingsForMutation(
  * graph to the existing atomic commit chokepoint. No branch below writes a
  * graph directly or carries pending JSONB around the canonical lifecycle.
  */
+async function withInspectorSizingProgress(
+  payload: SystemEventTurnPayload,
+  response: OlumiResponse,
+  storedGraph: unknown,
+  storedGraphHash: string,
+  freshness: FreshnessDerivation,
+): Promise<OlumiResponse> {
+  const progress = guidedSizingProgress(storedGraph);
+  const runKey = runExplanationKeyForRecord(payload.scenario_id,
+    { run_state: { computed_at: freshness.computed_at } },
+    { type: 'analysis_result', computed_against_hash: freshness.graph_hash_at_run });
+  // No stored Run means no guided-path offer exists to advance. Never invent a key.
+  if (progress === undefined || runKey === null) return response;
+  let recentReplies: string[] = [];
+  try {
+    const rows = await getSessionStore()?.readRecent(payload.scenario_id, 20);
+    recentReplies = (rows ?? []).flatMap(row => typeof row.assistant_message === 'string' ? [row.assistant_message] : []);
+  } catch { /* Observational history cannot invalidate a successful write. */ }
+  const sizingActions = guidedSizingActions(progress.draft, storedGraph, recentReplies);
+  const guidedSizing = bindGuidedSizing(progress.draft, sizingActions,
+    { graph_hash: storedGraphHash, run_key: runKey },
+    { remaining: progress.remaining, progress_line: progress.progress_line });
+  return {
+    ...response,
+    assistant_text: `${response.assistant_text}\n\n${progress.progress_line}`,
+    suggested_actions: [...response.suggested_actions, ...sizingActions],
+    ...(guidedSizing !== undefined ? { guided_sizing: guidedSizing } : {}),
+  };
+}
+
 async function dispatchEdgeStrengthEdit(
   payload: SystemEventTurnPayload,
   event: Extract<SystemEventTurnPayload['event'], { kind: 'edge_strength_edit' }>,
@@ -1774,7 +1806,7 @@ async function dispatchEdgeStrengthEdit(
   // readback below would compare a reread snapshot, not this attempt's bytes.
   // See `replyForAttemptThatWroteNothing`.
   if (thisAttemptWrote === false) {
-    return replyForAttemptThatWroteNothing({
+    const replay = replyForAttemptThatWroteNothing({
       writer: 'edge_strength_edit',
       payload,
       requestId,
@@ -1807,6 +1839,10 @@ async function dispatchEdgeStrengthEdit(
       },
       logFields: { intent: event.intent },
     });
+    return replay.graph !== null && replay.freshness !== undefined && persistedAnalysisGraphHash !== null
+      ? { ...replay, response: await withInspectorSizingProgress(payload, replay.response,
+        persistedGraphBytes, persistedAnalysisGraphHash, replay.freshness) }
+      : replay;
   }
 
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
@@ -1856,21 +1892,21 @@ async function dispatchEdgeStrengthEdit(
     return { response: result.response, commitPerformed: false, graph: null };
   }
   const graphForReadiness = committedParse.data;
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
   // The exact graph this commit projected and handed to the atomic store is
   // the UI's authoritative readback. It is load-bearing for confirm_current:
   // graph_patch honestly stays `noop` for the unchanged scientific tuple,
   // while this receipt proves provenance was durably stamped.
-  const response: OlumiResponse = {
+  const response = await withInspectorSizingProgress(payload, {
     ...committedResponse,
     ...(persistedAnalysisGraphHash !== null
       ? { graph_hash: persistedAnalysisGraphHash }
       : {}),
     draft_graph: buildAppliedGraphWireField(committedParse.data),
-  };
+  }, persistedGraphBytes, persistedAnalysisGraphHash, freshness);
   // Fact history is observational only: it never authorises or blocks the
   // write. A healthy empty read means canonical `none`; a degraded read must
   // not fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
   emitFreshnessTelemetry(
     freshness,
     {

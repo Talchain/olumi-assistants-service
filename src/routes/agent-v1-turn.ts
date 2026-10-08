@@ -29,7 +29,7 @@ import { parseAnswerOffers } from '../orchestrator-v5/agent-lane/answer-offers-e
  */
 
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
-import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
+import { isRunExplanationChip, runExplanationKeyForRecord, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { rerunPairReadForRunDelta } from '../orchestrator-v5/agent-lane/rerun-within-band.js';
@@ -103,6 +103,7 @@ import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-b
 import { disclosuresFor, eventRiskDisclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { indexGoalWeightsMessages } from '../orchestrator-v5/goal-target/index-goal-weights-note.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent, identityAskLineFor, identityAskLineOwed, withoutAskedQuestion } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { bindGuidedSizing, guidedSizingActions, guidedSizingForRun, guidedSizingProgress, guidedSizingWireAction, guidedSizingOnWire, parseGuidedSizingPress } from '../orchestrator-v5/agent-lane/guided-sizing.js';
 import { GOAL_CHANCE_SCREEN_LINES_OWED, ownWordsLeadTexts, goalChanceScreenLinesForAgent, withScreenLinesOwed } from '../orchestrator-v5/agent-lane/goal-chance-screen-lines.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
@@ -1879,7 +1880,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const scenarioId = typeof body.scenario_id === 'string' ? body.scenario_id : '';
     const message = typeof body.message === 'string' ? body.message : '';
     /** RT-1: what the user had selected on the canvas (`selection-context.ts`); resolved below against the turn's state. */
-    const selectedElements = parseSelectedElements(body['selected_elements']);
+    const guidedPress = parseGuidedSizingPress(body['chip']);
+    // Stored edge id, else endpoints: resolve through the canonical selection reader. No graph or write enters here.
+    const selectedElements = guidedPress === null ? parseSelectedElements(body['selected_elements'])
+      : { node_ids: [], edge_ids: [guidedPress.edge_id ?? `${guidedPress.from}->${guidedPress.to}`] };
     const sessionId = typeof body.agent_session_id === 'string' && body.agent_session_id.length > 0
       ? body.agent_session_id
       : `sess_${scenarioId}`;
@@ -2334,6 +2338,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         && composedCandidate.text === prior.assistant_message ? composedCandidate : null;
       const replayCard = replayRecords[0];
       const replayActions = firstOfEachId([...stillValid, ...boundControl]);
+      const replayGuidedDraft = replayNarration?.status === 'pending' || replayNarration?.status === 'ready'
+        ? guidedSizingForRun(state.analysisResult, state.graph) : undefined;
+      const replayGuidedActions = guidedSizingActions(replayGuidedDraft, state.graph,
+        await repliesToCheckAsks(replayGuidedDraft?.links.map(l => `How strongly does ‘${l.from_label}’ affect ‘${l.to_label}’?`) ?? [], store, scenarioId, turnId));
+      replayActions.push(...replayGuidedActions);
+      const replayGuided = bindGuidedSizing(replayGuidedDraft, replayGuidedActions, {
+        graph_hash: state.graphHash ?? '', run_key: replayNarration?.run_key ?? '',
+      });
       const methodTerminalReplay = approvedProposal === undefined && (whatChangesReplay || isMethodPress(explanationId)
         || widenTargetOf(explanationId, message) !== null || isWidenAddPressId(explanationId) || pressedChipIsStructural
         || actionPressOf(body['chip']) !== null
@@ -2346,10 +2358,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stage: 'frame',
         answerKind: 'substantive',
         // The bound Explain control is re-derived from the canonical readback above, so it is valid by construction.
-        suggested_actions: firstOfEachId(replayActions),
+        suggested_actions: firstOfEachId(replayActions).map(guidedSizingWireAction),
       });
       const replayBody = {
         ...finaliseV5Response(composedReplay, { scenarioId, runDeltaBoundByCaller: true }),
+        ...(guidedSizingOnWire(replayGuided, state.graphHash) !== undefined
+          ? { guided_sizing: guidedSizingOnWire(replayGuided, state.graphHash) } : {}),
         ...(replayFields !== undefined ? { _proposal_fields: replayFields } : {}),
         ...(replayNarration !== undefined ? { narration: replayNarration } : {}),
         ...(replayComposed?.shape != null ? { _answer_shape: replayComposed.shape } : {}),
@@ -4041,6 +4055,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Its "Not now" too: words alone never set a held proposal aside (Codex r1 P1), so the press must be on offer.
       ? [heldCard!.approve_action as OfferedAction, AMEND_CHIP, heldCard!.decline_action as OfferedAction] : [];
     const offeredNow: OfferedAction[] = firstOfEachId([...heldCardOffer, ...nextStepOffers.offered]);
+    // The same selected Run as the words; the warning owns N. Re-check present sizing and never-reask before offering.
+    const guidedDraftForRun = ((resultFirstRunCompleted && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null)
+      || (fastPath === 'explain' && narrationStatus === 'ready'))
+      ? guidedSizingForRun(analysisResult, readbackGraph) : undefined;
+    const sizingCommit = result.tool_results.find(r => r.guided_sizing_commit === true);
+    const sizingProgress = sizingCommit !== undefined ? guidedSizingProgress(readbackGraph) : undefined;
+    // Reconcile the commit receipt's words to the FINAL stored read, including a concurrent second sizing.
+    if (sizingCommit !== undefined) {
+      text = text.replace(/\s*\d+ more to go; with 1 left, Olumi can show a range\./gu, '').trim();
+      if (sizingProgress !== undefined) text = `${text} ${sizingProgress.progress_line}`;
+    }
+    const guidedDraft = sizingProgress?.draft ?? guidedDraftForRun;
+    const guidedActions = guidedSizingActions(guidedDraft, readbackGraph,
+      await repliesToCheckAsks(guidedDraft?.links.map(l => `How strongly does ‘${l.from_label}’ affect ‘${l.to_label}’?`) ?? [], store, scenarioId, undefined));
+    offeredNow.push(...guidedActions);
+    const guidedSizing = bindGuidedSizing(guidedDraft, guidedActions, {
+      graph_hash: graphHash ?? '',
+      run_key: runExplanationKeyForRecord(scenarioId, analysisState, analysisResult)
+        ?? (typeof sizingCommit?.guided_sizing_run_key === 'string' ? sizingCommit.guided_sizing_run_key : ''),
+    }, sizingProgress);
     // What this answer row persists: the Run offer, and the exact proposal behind the approve chip it offers
     // — or, on a turn that offers none, the one still outstanding (a question between the offer and the "yes"
     // must not drop what a restart needs to find it).
@@ -4888,6 +4922,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const issuedTurnIds = await proposalIssuers(heldRecords, [...reconciledPending, ...durablePending, ...liveHolds]);
     return reply.code(200).send({
       ...wireBody,
+      suggested_actions: wireBody.suggested_actions.map(guidedSizingWireAction),
+      ...(guidedSizingOnWire(guidedSizing, wireBody.graph_hash) !== undefined
+        ? { guided_sizing: guidedSizingOnWire(guidedSizing, wireBody.graph_hash) } : {}),
       ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),
       /**
        * ⭐ S-B: the action bar (a root key DGAI keeps in `__additive__`, as it does `guidance`), and on an action press its
