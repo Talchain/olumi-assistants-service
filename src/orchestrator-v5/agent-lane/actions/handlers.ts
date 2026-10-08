@@ -17,7 +17,7 @@ import { ACTION_PRESS_PREFIX, ACTION_REGISTRY, actionOfPress, isUnknownActionPre
 import { actionBarOf, currentOfferFor, DISABLED, type ActionBarV1, type ActionOffer, type ItemRef } from './rank.js';
 import { estimatePointsOf, type ActionFacts, type ActionRevision } from './state.js';
 import { mapStageToDecisionStage } from '../../../dsk/stage-edge.js';
-import { biasBadgeApplies } from './bias-triggers.js';
+import { biasBadgeApplies, biasCheckReply } from './bias-triggers.js';
 import { resolveDskClaimProvenance, type DskClaimProvenance } from '../../compose/dsk-claim-record.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { composeGoalTargetQuestion } from '../../goal-target/decide-goal-target-ask.js';
@@ -43,6 +43,7 @@ export const HANDLERS: Readonly<Record<ActionId, ActionHandler>> = {
   more_risks: { route: 'widen_turn', gate: 'own' },
   bias_anchoring: { route: 'typed_reply', gate: 'offer' },
   check_estimates: { route: 'typed_reply', gate: 'offer' },
+  bias_check: { route: 'typed_reply', gate: 'offer' },
 };
 
 /** A working way on from a "can't yet": another current offer, the Run, or the existing "what it still needs" turn. */
@@ -111,6 +112,7 @@ const CANT_YET: Record<ActionId, string> = {
   more_risks: 'I can’t suggest risks yet',
   bias_anchoring: 'I can’t check anchoring yet',
   check_estimates: 'I can’t show the estimates yet',
+  bias_check: 'I can’t run a bias check yet',
 };
 const BECAUSE: Record<keyof typeof DISABLED, string> = {
   needs_current_analysis: 'it needs a current analysis first.',
@@ -196,7 +198,13 @@ export function decidePress(chip: unknown, f: ActionFacts, bar: ActionBarV1 = ac
   }
   const handler = HANDLERS[press.action];
   const offer = currentOfferFor(bar, press.action, press.target);
-  if (handler.route === 'typed_reply' && offer?.enabled === true) return { kind: 'reply', press, reply: press.action === 'bias_anchoring' || press.action === 'check_estimates' ? estimateReply(press.action, f) : gapReply(press.action, f, bar) };
+  if (handler.route === 'typed_reply' && offer?.enabled === true) {
+    if (press.action === 'bias_check') {
+      const reply = biasCheckReply(f, [...bar.priority, ...bar.standard, ...bar.more]);
+      return { kind: 'reply', press, reply: { text: reply.text, exits: reply.exits.map(offer => ({ kind: 'offer' as const, offer })), outcome: 'ran' } };
+    }
+    return { kind: 'reply', press, reply: press.action === 'bias_anchoring' || press.action === 'check_estimates' ? estimateReply(press.action, f) : gapReply(press.action, f, bar) };
+  }
   if (handler.gate === 'own' || offer?.enabled === true) return { kind: 'route', press, handler, offer };
   return { kind: 'reply', press, reply: cantYet(press.action, offer, f, bar) };
 }
