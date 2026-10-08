@@ -93,10 +93,45 @@ describe('RC4: the one census of Olumi estimates feeding this result', () => {
     expect(wrongCount).toBe(4);
   });
 
-  it('an Olumi-filled option setting represented by a goal-path factor is counted', () => {
-    const e = olumiEstimatesFeedingResult({ goalPathFactors: [factor('option-setting')], goalPathLinks: [] });
-    expect(e.values.map(item => item.id)).toEqual(['option-setting']);
+  it('user price £49 + supplied Olumi option price £59 + user-sized link counts the distinct setting', () => {
+    const graph = {
+      nodes: [
+        { id: 'goal', kind: 'goal', label: 'MRR' },
+        { id: 'price', kind: 'factor', label: 'Pro plan price', observed_state: { value: 49, extractionType: 'explicit' } },
+        { id: 'raise-price', kind: 'option', label: 'Raise price', interventions: { price: 59 } },
+      ],
+      edges: [{ from: 'price', to: 'goal', provenance: { magnitude: 'user_stated' } }],
+    };
+    const signals = assembleGuidanceSignals({
+      request: 'run_result', offeredSpecific: [], graph, analysisState: undefined,
+      analysisResult: undefined, leaderLicensed: false,
+    });
+    const projected = {
+      goalPathFactors: signals['model.goal_path_factors'], goalPathLinks: signals['model.goal_path_links'],
+    };
+    expect(projected.goalPathFactors[0]?.value_authorship).toBe('yours');
+    expect(projected.goalPathLinks[0]?.link_sizing).toBe('user');
+    expect(olumiEstimatesFeedingResult(projected).count).toBe(0);
+    const e = olumiEstimatesFeedingResult({
+      ...projected,
+      optionSettings: [{ id: 'raise-price:price', label: 'Raise price: £59', authorship: 'olumi_estimate', goal_distance: 1 }],
+    });
+    expect(e.values).toEqual([{ kind: 'value', id: 'raise-price:price', label: 'Raise price: £59', goal_distance: 1 }]);
     expect(e.count).toBe(1);
+  });
+
+  it('option settings count estimates once, separate accepted, and exclude other authorship', () => {
+    const setting = { id: 'option:price', label: 'Option price', authorship: 'olumi_estimate' };
+    const e = olumiEstimatesFeedingResult({
+      goalPathFactors: [factor('price')], goalPathLinks: [],
+      optionSettings: [setting, setting, { ...setting, id: 'accepted', authorship: 'olumi_accepted' },
+        ...['user', 'placeholder', 'unknown'].map(authorship => ({ ...setting, id: authorship, authorship }))],
+    });
+    expect(e.count).toBe(2);
+    expect(e.values.map(item => item.id)).toEqual(['price', 'option:price']);
+    expect(e.values[1]?.goal_distance).toBe(99);
+    expect(e.accepted).toBe(1);
+    expect(e.placeholderLinks).toBe(0);
   });
 
   it('accepted links join accepted values; user/unknown/unmarked figures stay outside N', () => {
@@ -121,11 +156,26 @@ describe('RC4: the one census of Olumi estimates feeding this result', () => {
 
 describe('RC4: licensed top-three order and exact shared words', () => {
   it('the 3 that matter most only with matching measured driverIds, including a link ID', () => {
-    const e = olumiEstimatesFeedingResult({ ...paul(), driverIds: ['price', 'driver-7->mrr'] });
+    const e = olumiEstimatesFeedingResult({ ...paul(), driverIds: ['price', 'driver-7->mrr', 'driver-0->mrr'] });
     expect(e.top.map(item => item.id)).toEqual(['price', 'driver-7->mrr', 'driver-0->mrr']);
     expect(e.ordered).toBe(true);
     expect(sayOlumiEstimates(e)).toContain('The 3 that matter most:');
     expect(sayOlumiEstimates(e)).not.toContain('For example:');
+  });
+
+  it.each([{ driverIds: ['price'] }, { driverIds: ['price', 'driver-7->mrr'] }])('partial measured order $driverIds leaves top three as examples', ({ driverIds }) => {
+    const e = olumiEstimatesFeedingResult({ ...paul(), driverIds });
+    expect(e.top).toHaveLength(3);
+    expect(e.top[0]?.id).toBe('price');
+    expect(e.ordered).toBe(false);
+    expect(sayOlumiEstimates(e)).toContain('For example:');
+    expect(sayOlumiEstimates(e)).not.toContain('The 3 that matter most:');
+  });
+
+  it('a measured order covering fewer than three total figures is still complete', () => {
+    const e = olumiEstimatesFeedingResult({ goalPathFactors: [factor('price')], goalPathLinks: [], driverIds: ['price'] });
+    expect(e.ordered).toBe(true);
+    expect(sayOlumiEstimates(e)).toContain('The one that matters most:');
   });
 
   it.each([undefined, [], ['not-on-this-goal-path']])('for example when driverIds supplies no top item (%j)', driverIds => {
@@ -163,12 +213,23 @@ describe('RC4: licensed top-three order and exact shared words', () => {
     expect(sayOlumiEstimates(e)[0]).toBe(words);
   });
 
-  it('UNVERIFIED AIQ zero-count words are a single line, including an accepted/placeholder-only model', () => {
-    const e = olumiEstimatesFeedingResult({ goalPathFactors: [factor('accepted', 'olumi_accepted')], goalPathLinks: [link('empty->mrr', 'placeholder')] });
+  it('UNVERIFIED AIQ zero-count words retain separate accepted and placeholder disclosures', () => {
+    const e = olumiEstimatesFeedingResult({
+      goalPathFactors: [factor('accepted', 'olumi_accepted')],
+      goalPathLinks: [link('empty-1->mrr', 'placeholder'), link('empty-2->mrr', 'placeholder')],
+    });
     expect(e.count).toBe(0);
     expect(e.accepted).toBe(1);
-    expect(e.placeholderLinks).toBe(1);
-    expect(sayOlumiEstimates(e)).toEqual(["None of the figures behind this result are Olumi's estimates."]);
+    expect(e.placeholderLinks).toBe(2);
+    expect(sayOlumiEstimates(e)).toEqual([
+      "None of the figures behind this result are Olumi's estimates.",
+      "1 you accepted from Olumi's suggestions.",
+      '2 links have no size yet.',
+    ]);
+  });
+
+  it('zero estimates with no accepted figures or placeholders has only the None line', () => {
+    expect(sayOlumiEstimates(census(0))).toEqual(["None of the figures behind this result are Olumi's estimates."]);
   });
 });
 
@@ -178,9 +239,9 @@ describe('RC4: narrator count egress guard', () => {
     expect(narratorCountGuard(sentence, census(1))).toEqual({ text: '', removed: [sentence] });
   });
 
-  it('Nine is retained byte-for-byte when the producer count is 9', () => {
-    const text = "  Nine underlying values are Olumi's assumptions.  ";
-    expect(narratorCountGuard(text, census(9))).toEqual({ text, removed: [] });
+  it('Nine underlying values is removed for Paul’s N=9 of one value and eight links too', () => {
+    const sentence = "Nine underlying values are Olumi's assumptions.";
+    expect(narratorCountGuard(`  ${sentence}  `, olumiEstimatesFeedingResult(paul()))).toEqual({ text: '', removed: [sentence] });
   });
 
   it('without a producer removes Six underlying values were supplied by Olumi, not you', () => {
@@ -193,7 +254,10 @@ describe('RC4: narrator count egress guard', () => {
     expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
   });
 
-  it.each(['values', 'figures', 'inputs', 'assumptions', 'value', 'figure', 'input', 'assumption'])('digits and %s work with Olumi before or after the count', noun => {
+  it.each([
+    'values', 'figures', 'inputs', 'assumptions', 'estimates', 'numbers', 'links', 'sizes', 'strengths',
+    'value', 'figure', 'input', 'assumption', 'estimate', 'number', 'link', 'size', 'strength', 'link sizes',
+  ])('digits and %s work with Olumi before or after the count', noun => {
     for (const sentence of [`Olumi supplied 6 ${noun}.`, `6 ${noun} came from Olumi.`]) {
       expect(narratorCountGuard(sentence, census(9))).toEqual({ text: '', removed: [sentence] });
     }
@@ -201,7 +265,9 @@ describe('RC4: narrator count egress guard', () => {
 
   it.each([
     'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
-    'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+    'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen',
+    'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
+    'hundred', 'hundreds', 'dozen', 'dozens', 'twenty-one', 'thirty-five', 'ninety-nine',
   ])('number word %s is recognised in both directions', word => {
     const sentences = [`${word} underlying figures are Olumi’s estimates.`, `Olumi supplied ${word} assumptions.`];
     for (const sentence of sentences) expect(narratorCountGuard(sentence, null).removed).toEqual([sentence]);
@@ -215,13 +281,14 @@ describe('RC4: narrator count egress guard', () => {
     ]) expect(narratorCountGuard(sentence, census(1))).toEqual({ text: '', removed: [sentence] });
   });
 
-  it('removes every mismatched sentence but retains a correct count and ordinary text', () => {
+  it('removes every attributed count sentence, including matching counts, but keeps ordinary text', () => {
     const first = "Nine underlying values are Olumi's assumptions.";
     const second = 'Olumi supplied 8 figures!';
     const last = 'Four assumptions were supplied by Olumi';
+    const matching = 'Olumi supplied 1 value.';
     const text = `Olumi estimated the price. ${first} Olumi supplied 1 value. ${second} ${last}`;
     expect(narratorCountGuard(text, census(1))).toEqual({
-      text: 'Olumi estimated the price. Olumi supplied 1 value.', removed: [first, second, last],
+      text: 'Olumi estimated the price.', removed: [first, matching, second, last],
     });
   });
 
@@ -230,8 +297,61 @@ describe('RC4: narrator count egress guard', () => {
     expect(narratorCountGuard(sentence, census(9))).toEqual({ text: '', removed: [sentence] });
   });
 
-  it('compound/decimal/grouped fragments do not masquerade as a supported integer count', () => {
-    for (const text of ['Twenty-one values were supplied by Olumi.', 'Olumi supplied 9.0 values.', 'Olumi supplied 1,000 values.']) {
+  it.each([
+    'Olumi supplied thirty values.', "Twenty-one values were Olumi's estimates.",
+    "Nine of Olumi's values feed this result.", 'Nine of Olumi’s values feed this result.',
+    'Olumi supplied 99 link sizes.', 'Olumi supplied dozens of link strengths.',
+    'Olumi supplied nine of its own values.', 'Olumi supplied nine of their own values.',
+    'Olumi supplied nine of these starting values.', 'Olumi supplied nine of those estimated values.',
+  ])('expanded count attribution is removed: %s', sentence => {
+    expect(narratorCountGuard(sentence, census(1))).toEqual({ text: '', removed: [sentence] });
+  });
+
+  it.each([', and', ';', ':', '—', 'and', 'but', 'while', 'whereas'])('scopes unrelated user counts across %s', separator => {
+    for (const text of [
+      `You supplied 6 values ${separator} Olumi estimated the price.`,
+      `Olumi estimated the price ${separator} you supplied six values.`,
+    ]) expect(narratorCountGuard(text, olumiEstimatesFeedingResult(paul()))).toEqual({ text, removed: [] });
+  });
+
+  it('keeps the exact buddy unrelated-count sentence byte-for-byte', () => {
+    const text = 'You supplied 6 values, and Olumi estimated the price.';
+    expect(narratorCountGuard(text, olumiEstimatesFeedingResult(paul()))).toEqual({ text, removed: [] });
+  });
+
+  it.each([
+    'You supplied six values and Olumi suggests the price.',
+    'You supplied six values and Olumi’s estimate was useful.',
+    'You wrote six values while Olumi estimated the price.',
+    'Olumi likes the price and you wrote six values.',
+    'Olumi and you supplied six values.',
+  ])('explicit subjects distinguish clauses from coordinated subjects: %s', text => {
+    const out = narratorCountGuard(text, null);
+    if (text.startsWith('Olumi and')) expect(out).toEqual({ text: '', removed: [text] });
+    else expect(out).toEqual({ text, removed: [] });
+  });
+
+  it.each([
+    'Six underlying values were supplied by Olumi, not you.',
+    'You supplied 6 values, and Olumi supplied thirty links.',
+    'Olumi supplied values and 6 link sizes.',
+    'Olumi-generated six values feed this result.',
+  ])('one attributed clause removes the entire sentence: %s', sentence => {
+    expect(narratorCountGuard(sentence, census(6))).toEqual({ text: '', removed: [sentence] });
+  });
+
+  it('splits coordinated clauses beginning with count+noun+predicate', () => {
+    const text = "Olumi estimated the price and six values were yours.";
+    expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
+  });
+
+  it('limits filler skipping to three tokens', () => {
+    const text = 'Olumi supplied nine of the underlying estimated values.';
+    expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
+  });
+
+  it('decimal/grouped fragments do not masquerade as standalone integer counts', () => {
+    for (const text of ['Olumi supplied 9.0 values.', 'Olumi supplied 1,000 values.']) {
       expect(narratorCountGuard(text, null)).toEqual({ text, removed: [] });
     }
   });
@@ -242,6 +362,16 @@ describe('RC4: narrator count egress guard', () => {
     const out = narratorCountGuard(text, null);
     const elapsed = performance.now() - start;
     process.stdout.write(`20,000-char whitespace timing: ${elapsed.toFixed(3)} ms\n`);
+    expect(out).toEqual({ text, removed: [] });
+    expect(elapsed).toBeLessThan(50);
+  });
+
+  it('20,000-char repeated Olumi nine of the input runs in less than 50 ms', () => {
+    const text = 'Olumi nine of the '.repeat(Math.ceil(20_000 / 'Olumi nine of the '.length)).slice(0, 20_000);
+    const start = performance.now();
+    const out = narratorCountGuard(text, null);
+    const elapsed = performance.now() - start;
+    process.stdout.write(`20,000-char repeated Olumi nine of the timing: ${elapsed.toFixed(3)} ms\n`);
     expect(out).toEqual({ text, removed: [] });
     expect(elapsed).toBeLessThan(50);
   });

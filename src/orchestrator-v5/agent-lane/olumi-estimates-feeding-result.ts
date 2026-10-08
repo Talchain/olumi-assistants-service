@@ -23,6 +23,14 @@ export interface OlumiEstimates {
 export function olumiEstimatesFeedingResult(input: {
   goalPathFactors: readonly GoalPathFactor[];
   goalPathLinks: readonly GoalPathLink[];
+  /** Distinct, on-goal-path option settings; observed-state authorship cannot stand in for these. */
+  optionSettings?: readonly {
+    id: string;
+    label: string;
+    authorship: 'olumi_estimate' | 'olumi_accepted' | 'user' | 'placeholder' | string;
+    goal_distance?: number;
+  }[];
+  /** This bound Run's global significance order across all supplied figure kinds. */
   driverIds?: readonly string[];
 }): OlumiEstimates {
   const values: Item[] = [];
@@ -30,6 +38,7 @@ export function olumiEstimatesFeedingResult(input: {
   let accepted = 0;
   let placeholderLinks = 0;
   const factorIds = new Set<string>();
+  const settingIds = new Set<string>();
   const linkIds = new Set<string>();
   for (const f of input.goalPathFactors) {
     if (factorIds.has(f.factor_id)) continue;
@@ -37,6 +46,14 @@ export function olumiEstimatesFeedingResult(input: {
     if (f.value_authorship === 'olumi_accepted') accepted += 1;
     if (f.value_authorship === 'olumi_estimate') {
       values.push({ kind: 'value', id: f.factor_id, label: f.label, goal_distance: f.goal_distance });
+    }
+  }
+  for (const setting of input.optionSettings ?? []) {
+    if (settingIds.has(setting.id)) continue;
+    settingIds.add(setting.id);
+    if (setting.authorship === 'olumi_accepted') accepted += 1;
+    if (setting.authorship === 'olumi_estimate') {
+      values.push({ kind: 'value', id: setting.id, label: setting.label, goal_distance: setting.goal_distance ?? 99 });
     }
   }
   for (const l of input.goalPathLinks) {
@@ -60,17 +77,18 @@ export function olumiEstimatesFeedingResult(input: {
   ).slice(0, 3);
   return {
     count: values.length + links.length, values, links, accepted, placeholderLinks,
-    ordered: driverRank.size > 0 && top.some(item => driverRank.has(item.id)), top,
+    ordered: top.length > 0 && top.every(item => driverRank.has(item.id)), top,
   };
 }
 
 /** RC4's shared words. UNVERIFIED for AIQ: the zero-count sentence and item-list presentation. */
 export function sayOlumiEstimates(e: OlumiEstimates): string[] {
-  if (e.count === 0) return ["None of the figures behind this result are Olumi's estimates."];
   const kinds: string[] = [];
   if (e.values.length > 0) kinds.push(`${e.values.length} ${e.values.length === 1 ? 'value' : 'values'}`);
   if (e.links.length > 0) kinds.push(`${e.links.length} ${e.links.length === 1 ? 'link size' : 'link sizes'}`);
-  const lines = [`Olumi supplied ${e.count} of the figures behind this result: ${kinds.join(' and ')}.`];
+  const lines = [e.count === 0
+    ? "None of the figures behind this result are Olumi's estimates."
+    : `Olumi supplied ${e.count} of the figures behind this result: ${kinds.join(' and ')}.`];
   if (e.count > 3) lines.push(`${e.count} in total; here are 3.`);
   if (e.top.length > 0) {
     lines.push(e.ordered ? (e.top.length === 1 ? 'The one that matters most:' : `The ${e.top.length} that matter most:`) : 'For example:');
@@ -81,80 +99,144 @@ export function sayOlumiEstimates(e: OlumiEstimates): string[] {
   return lines;
 }
 
-const NUMBER_WORDS = new Map([
+const NUMBER_WORDS = new Set([
   'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
-  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
-].map((word, index) => [word, index + 1] as const));
-const COUNT_KINDS = new Set(['value', 'values', 'figure', 'figures', 'input', 'inputs', 'assumption', 'assumptions']);
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen',
+  'hundred', 'hundreds', 'dozen', 'dozens',
+]);
+const TENS = new Set(['twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']);
+const UNITS = new Set(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']);
+const COUNT_KINDS = new Set([
+  'value', 'values', 'figure', 'figures', 'input', 'inputs', 'assumption', 'assumptions',
+  'estimate', 'estimates', 'number', 'numbers', 'link', 'links', 'size', 'sizes', 'strength', 'strengths',
+]);
+const FILLERS = new Set(['of', 'the', 'olumi', 's', 'its', 'their', 'own', 'underlying', 'estimated', 'starting', 'these', 'those']);
+const CONJUNCTIONS = new Set(['and', 'but', 'while', 'whereas']);
+const SUBJECTS = new Set(['olumi', 'you', 'we', 'i', 'they', 'he', 'she', 'it']);
+const VERBS = new Set([
+  'am', 'is', 'are', 'was', 'were', 'has', 'have', 'had', 'do', 'does', 'did',
+  'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might', 'must',
+  'come', 'comes', 'came', 'give', 'gives', 'gave', 'feed', 'feeds', 'supply', 'supplies',
+  'estimate', 'estimates', 'provide', 'provides', 'count', 'counts', 'belong', 'belongs',
+  'choose', 'chooses', 'chose', 'think', 'thinks', 'thought', 'suggest', 'suggests',
+]);
 const isDigit = (code: number): boolean => code >= 48 && code <= 57;
 const isWord = (code: number): boolean => isDigit(code) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
 const isSpace = (code: number): boolean => (code >= 9 && code <= 13) || code === 32 || code === 160 || code === 0x2028 || code === 0x2029;
+const isVerb = (word: string): boolean => VERBS.has(word) || word.endsWith('ed');
 
-interface Token { readonly word: string; readonly start: number; readonly end: number }
+interface Token { readonly word: string; readonly start: number; readonly end: number; readonly clause: number }
 
-function countOf(word: string): number | undefined {
-  const named = NUMBER_WORDS.get(word);
-  if (named !== undefined) return named;
-  for (let i = 0; i < word.length; i += 1) if (!isDigit(word.charCodeAt(i))) return undefined;
-  return Number(word);
+function isCount(word: string): boolean {
+  if (NUMBER_WORDS.has(word) || TENS.has(word)) return true;
+  const hyphen = word.indexOf('-');
+  if (hyphen !== -1) return TENS.has(word.slice(0, hyphen)) && UNITS.has(word.slice(hyphen + 1));
+  for (let i = 0; i < word.length; i += 1) if (!isDigit(word.charCodeAt(i))) return false;
+  return word.length > 0;
 }
 
 /** One linear token scan: no regex repetitions or backtracking on arbitrary narrator text. */
-function unsupportedCount(sentence: string, e: OlumiEstimates | null): boolean {
+function attributedCount(sentence: string): boolean {
   const tokens: Token[] = [];
-  let olumi = false;
+  let clause = 0;
   for (let i = 0; i < sentence.length;) {
-    if (!isWord(sentence.charCodeAt(i))) { i += 1; continue; }
+    if (!isWord(sentence.charCodeAt(i))) {
+      if ([',', ';', ':', '—'].includes(sentence[i]!)
+        && !(sentence[i] === ',' && isDigit(sentence.charCodeAt(i - 1)) && isDigit(sentence.charCodeAt(i + 1)))) clause += 1;
+      i += 1;
+      continue;
+    }
     const start = i;
     while (i < sentence.length && isWord(sentence.charCodeAt(i))) i += 1;
+    // Keep number compounds together, but retain the Olumi token in e.g. Olumi-generated.
+    if (TENS.has(sentence.slice(start, i).toLowerCase())) {
+      while (i < sentence.length && (isWord(sentence.charCodeAt(i))
+        || (sentence[i] === '-' && isWord(sentence.charCodeAt(i + 1))))) i += 1;
+    }
     const word = sentence.slice(start, i).toLowerCase();
-    if (word === 'olumi') olumi = true;
-    tokens.push({ word, start, end: i });
+    tokens.push({ word, start, end: i, clause });
   }
-  if (!olumi) return false;
-  const spaced = (a: Token, b: Token): boolean => {
+  const joined = (a: Token, b: Token): boolean => {
+    if (a.clause !== b.clause) return false;
     if (a.end === b.start) return false;
-    for (let i = a.end; i < b.start; i += 1) if (!isSpace(sentence.charCodeAt(i))) return false;
+    for (let i = a.end; i < b.start; i += 1) {
+      const char = sentence[i];
+      if (!isSpace(sentence.charCodeAt(i)) && char !== "'" && char !== '’') return false;
+    }
     return true;
   };
-  for (let i = 0; i < tokens.length - 1; i += 1) {
+  // Bounded lookahead distinguishes a new subject/predicate from a coordinated noun list.
+  const startsClause = (i: number): boolean => {
+    const first = tokens[i];
+    const second = tokens[i + 1];
+    if (first === undefined || second === undefined || !joined(first, second)) return false;
+    if (SUBJECTS.has(first.word)) {
+      // An explicit new subject plus its predicate need not use a closed verb vocabulary.
+      if (second.word !== 's' && !CONJUNCTIONS.has(second.word)
+        && !SUBJECTS.has(second.word) && !isCount(second.word)) return true;
+      // Possessive subjects: "Olumi's estimate was useful" is also an independent clause.
+      if (second.word === 's') {
+        const noun = tokens[i + 2];
+        const verb = tokens[i + 3];
+        return noun !== undefined && verb !== undefined && joined(second, noun)
+          && joined(noun, verb) && isVerb(verb.word);
+      }
+    }
+    if (!isCount(first.word)) return false;
+    let j = i + 1;
+    for (let skipped = 0; skipped < 3 && FILLERS.has(tokens[j]?.word ?? ''); skipped += 1) j += 1;
+    const noun = tokens[j];
+    const verb = tokens[j + 1];
+    return noun !== undefined && verb !== undefined && first.clause === noun.clause
+      && COUNT_KINDS.has(noun.word) && joined(noun, verb) && isVerb(verb.word);
+  };
+  let currentClause = -1;
+  let hasOlumi = false;
+  let hasCount = false;
+  let hasPredicate = false;
+  for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i]!;
-    const count = countOf(token.word);
-    if (count === undefined) continue;
-    // Do not treat a fragment of twenty-one, 9.0, or 1,000 as a standalone integer count.
+    if (token.clause !== currentClause
+      || (CONJUNCTIONS.has(token.word) && hasPredicate && startsClause(i + 1))) {
+      if (hasOlumi && hasCount) return true;
+      currentClause = token.clause;
+      hasOlumi = false;
+      hasCount = false;
+      hasPredicate = false;
+    }
+    if (token.word === 'olumi') hasOlumi = true;
+    const previousToken = tokens[i - 1];
+    if (isVerb(token.word) || (previousToken !== undefined && previousToken.clause === token.clause
+      && SUBJECTS.has(previousToken.word) && token.word !== 's'
+      && !CONJUNCTIONS.has(token.word) && !SUBJECTS.has(token.word) && !isCount(token.word))) hasPredicate = true;
+    if (!isCount(token.word)) continue;
+    // Decimal/grouped fragments are not standalone integer counts.
     const before = sentence[token.start - 1];
     const after = sentence[token.end];
     if (before === '-' || ((before === '.' || before === ',') && isDigit(sentence.charCodeAt(token.start - 2)))) continue;
     if ((after === '.' || after === ',') && isDigit(sentence.charCodeAt(token.end + 1))) continue;
-    let nounIndex = i + 1;
-    let noun = tokens[nounIndex]!;
-    if (!spaced(token, noun)) continue;
-    if (noun.word === 'of') {
-      const article = tokens[i + 2];
-      const next = tokens[i + 3];
-      if (article?.word !== 'the' || next === undefined || !spaced(noun, article) || !spaced(article, next)) continue;
-      nounIndex += 2;
-      noun = next;
+    let previous = token;
+    for (let j = i + 1, skipped = 0; j < tokens.length; j += 1) {
+      const next = tokens[j]!;
+      if (!joined(previous, next)) break;
+      if (COUNT_KINDS.has(next.word)) { hasCount = true; break; }
+      if (skipped === 3 || !FILLERS.has(next.word)) break;
+      previous = next;
+      skipped += 1;
     }
-    if (noun.word === 'underlying') {
-      const next = tokens[nounIndex + 1];
-      if (next === undefined || !spaced(noun, next)) continue;
-      noun = next;
-    }
-    if (COUNT_KINDS.has(noun.word) && (e === null || count !== e.count)) return true;
   }
-  return false;
+  return hasOlumi && hasCount;
 }
 
-/** Remove unsupported count sentences before composing/serving the agent.interpret answer. */
-export function narratorCountGuard(text: string, e: OlumiEstimates | null): { text: string; removed: string[] } {
+/** Science §(f): only the deterministic producer may state counts, even when narration matches N. */
+export function narratorCountGuard(text: string, _e: OlumiEstimates | null): { text: string; removed: string[] } {
   const removed: string[] = [];
   // Also preserves all whitespace and bytes of the common no-count case.
   if (!text.toLowerCase().includes('olumi')) return { text, removed };
   const kept: string[] = [];
   const append = (end: number): void => {
     const sentence = text.slice(start, end);
-    if (unsupportedCount(sentence, e)) removed.push(sentence.trim());
+    if (attributedCount(sentence)) removed.push(sentence.trim());
     else kept.push(sentence);
     start = end;
   };
