@@ -82,6 +82,9 @@ async function runSavedOnce() {
   return { payload: (run.mock.calls as unknown as [Json][])[0]![0], inputs: fact.result.input_snapshot as RunInputSnapshot };
 }
 
+const sortedJson = (v: unknown): string => JSON.stringify(v, (_k, x) => (x !== null && typeof x === 'object' && !Array.isArray(x)
+  ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x));
+
 async function approveRisk(label: string, turnId: string) {
   const held = dispatchAddRiskTransaction({
     scenarioId: SCENARIO, turnId: `${turnId}-hold`, requestId: `${turnId}-hold`, params: { risk: { label }, links: [] }, reliesOn: { option_id: OPTION_ID },
@@ -127,7 +130,8 @@ describe('RC3 FIX-r1 real approval/commit Run invariance', () => {
     expect(savedGraph.edges.filter((e: Json) => e.from === RISK_ID || e.to === RISK_ID)).toEqual([]);
     expect(savedGraph.nodes.filter((n: Json) => n.kind === 'option').map((n: Json) => [n.id, n.ref])).toEqual(optionRefs);
     const after = await runSaved();
-    expect(JSON.stringify(after.payload), 'RED at HEAD: real commit leaves ref_high_water.R on the outbound graph').toBe(JSON.stringify(before.payload));
+    // Key ORDER is not content: the real commit rewrites the allocator's key order (D last); the digests below are the bar.
+    expect(sortedJson(after.payload), 'RED at HEAD: real commit leaves ref_high_water.R on the outbound graph').toBe(sortedJson(before.payload));
     expect(sentDigest(after.payload)).toBe(sentDigest(before.payload));
     expect(after.inputs.residual_digest).toBe(before.inputs.residual_digest);
     expect(diffRunInputs(before.inputs, after.inputs), 'the complete wire difference is empty').toEqual({ rows: [], complete: true });
@@ -138,20 +142,36 @@ describe('RC3 FIX-r1 real approval/commit Run invariance', () => {
     expect(savedGraph.nodes.find((n: Json) => n.id === second)?.ref).toBe('R2');
     expect(savedGraph.ref_high_water.R).toBe(2);
     const again = await runSaved();
-    expect(JSON.stringify(again.payload)).toBe(JSON.stringify(before.payload));
+    expect(sortedJson(again.payload)).toBe(sortedJson(before.payload));
+    expect(sentDigest(again.payload)).toBe(sentDigest(before.payload));
     expect(diffRunInputs(before.inputs, again.inputs)).toEqual({ rows: [], complete: true });
   }, 120_000);
 
-  it('rc3-compute-counter-only: drop allocator metadata uniformly while retaining active risk/option refs and saved retired counters', () => {
+  it('rc3-compute-allocator-compat: no left-out risk → the compute copy IS the graph, allocator kept (stored Runs still compare, Codex r2 P2)', () => {
     const g: Json = {
       nodes: [{ id: 'opt_raise', kind: 'option', label: 'Raise', ref: 'O2' }, { id: 'risk_churn', kind: 'risk', label: 'Churn', ref: 'R3' }],
       edges: [{ from: 'risk_churn', to: 'opt_raise' }], ref_high_water: { O: 4, R: 7 },
     };
     const before = structuredClone(g);
-    const compute = withoutPreconditionRisks(g);
-    expect(compute).not.toHaveProperty('ref_high_water');
-    expect(compute.nodes).toEqual(g.nodes);
-    expect(compute.edges).toEqual(g.edges);
+    expect(withoutPreconditionRisks(g)).toBe(g);
     expect(g).toEqual(before);
+  });
+
+  it.each([
+    ['top', 'R5', { O: 2, R: 5 }, { O: 2, R: 4 }],
+    ['only', 'R1', { O: 2, R: 1 }, { O: 2 }],
+    ['not-top', 'R2', { O: 2, R: 5 }, { O: 2, R: 5 }],
+  ] as const)('rc3-compute-allocator-step-back-%s: the R counter steps back only past refs the left-out risks took at the top', (_id, ref, hw, expected) => {
+    const g: Json = {
+      nodes: [
+        { id: 'opt_raise', kind: 'option', label: 'Raise', ref: 'O2' },
+        { id: 'risk_slip', kind: 'risk', label: 'Slip', ref, relies_on: { option_id: 'opt_raise' } },
+      ],
+      edges: [], ref_high_water: hw,
+    };
+    const compute = withoutPreconditionRisks(g);
+    expect(compute.ref_high_water).toEqual(expected);
+    expect(compute.nodes.map((n: Json) => n.id)).toEqual(['opt_raise']);
+    expect(g.ref_high_water).toEqual(hw);
   });
 });

@@ -9,7 +9,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { asSent } from './helpers/as-sent.js';
 
 let n = 0;
 let SCENARIO = '';

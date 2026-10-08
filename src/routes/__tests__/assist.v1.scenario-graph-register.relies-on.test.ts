@@ -142,7 +142,18 @@ describe('RC3 (a′) — stamp carriage', () => {
     expect(JSON.stringify(saved)).toBe(before);
   });
 
+  it.each(['unstamped-stored', 'no-stored-graph'])('rc3-register-new-stamp-%s: a registration can never introduce a stamp (Codex r2 P1)', async (shape) => {
+    const saved = shape === 'unstamped-stored' ? graphWith() : null;
+    loadGraph.mockResolvedValue(saved);
+    const res = await register(graphWith(STAMP));
+    expect(res.statusCode, res.body).toBe(422);
+    expect(res.json().details.code).toBe('PRECONDITION_STAMP_SERVER_OWNED');
+    expect(append).not.toHaveBeenCalled();
+  });
+
   it('rc3-stamp-persisted: register → projection → ingress/Run-loader re-parse keeps the identity stamp with zero edges', async () => {
+    // The stamp was written by the server door (stored); a re-registration carries it.
+    loadGraph.mockResolvedValue(graphWith(STAMP));
     const res = await register(graphWith(STAMP));
     expect(res.statusCode, res.body).toBe(200);
     const written = (append.mock.calls[0]![0] as Rec).graph as Rec;

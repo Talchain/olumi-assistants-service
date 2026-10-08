@@ -67,9 +67,23 @@ export function withoutPreconditionRisks<T>(graph: T, identityGraph: unknown = g
   if (!Array.isArray(g.nodes) || !Array.isArray(identity.nodes) || !Array.isArray(identity.edges)) return graph;
   const limits = (identity.goal_constraints ?? []).flatMap((c) => typeof c.node_id === 'string' ? [c.node_id] : []);
   const leftOut = preconditionRiskIds(identity.nodes, identity.edges, limits);
-  if (leftOut.size === 0 && !Object.hasOwn(graph, 'ref_high_water')) return graph;
-  const { ref_high_water: _allocator, ...computeGraph } = graph as T & { ref_high_water?: unknown };
-  return { ...computeGraph, nodes: leftOut.size === 0 ? g.nodes : g.nodes.filter((n) => !leftOut.has(n.id)) } as T;
+  if (leftOut.size === 0) return graph;
+  // The display-ref allocator stays (stored Runs digest it, Codex r2 P2). Only the risk counter steps back past refs
+  // that the left-out risks themselves took at the top, so approving one never changes the next Run's inputs.
+  const removedR = new Set(g.nodes.flatMap((n) => {
+    const m = leftOut.has(n.id) && typeof (n as { ref?: unknown }).ref === 'string' ? /^R(\d+)$/.exec((n as { ref: string }).ref) : null;
+    return m === null ? [] : [Number(m[1])];
+  }));
+  const allocator = (graph as { ref_high_water?: unknown }).ref_high_water;
+  let refHighWater = allocator;
+  if (allocator !== null && typeof allocator === 'object' && !Array.isArray(allocator) && typeof (allocator as { R?: unknown }).R === 'number') {
+    let r = (allocator as { R: number }).R;
+    while (r > 0 && removedR.has(r)) r -= 1;
+    const { R: _r, ...rest } = allocator as Record<string, unknown>;
+    refHighWater = r > 0 ? { ...rest, R: r } : rest;
+  }
+  const nodes = g.nodes.filter((n) => !leftOut.has(n.id));
+  return (refHighWater === allocator ? { ...graph, nodes } : { ...graph, nodes, ref_high_water: refHighWater }) as T;
 }
 
 export function inertRiskBranch(

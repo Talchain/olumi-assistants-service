@@ -226,7 +226,11 @@ function withStoredPreconditionRiskStamps<T extends { nodes: ReadonlyArray<{ id?
   const nodes = graph.nodes.map((node) => {
     const previous = prior.find((old) => old.id === node.id);
     const stamp = readReliesOnRisk(previous?.relies_on);
-    if (stamp === undefined) return node;
+    // A stamp is server-owned: a registration may carry a stored one, never introduce one (Codex r2 P1 on #2803).
+    if (stamp === undefined) {
+      if (readReliesOnRisk(node.relies_on) !== undefined) throw new PreconditionStampApprovalRequiredError();
+      return node;
+    }
     const submitted = readReliesOnRisk(node.relies_on);
     if (node.kind !== previous?.kind || (submitted !== undefined && submitted.option_id !== stamp.option_id)) {
       throw new PreconditionStampApprovalRequiredError();
