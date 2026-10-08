@@ -381,6 +381,28 @@ describe('RC6 said once', () => {
     expect(c.measure!.said_once_dropped).toEqual(['How sure are you of that size?']);
     expect(faceOf(c)).toContain(typed);
   });
+  it('Codex r2 P1: a colon frame never contains a typed finding away ("The following claim is false: …")', () => {
+    const finding = 'The link is sized.';
+    const text = [finding, longContext, 'The following claim is false: the link is sized.'].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: finding }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(faceOf(c)).toContain(finding);
+  });
+  it('Codex r2 P1: an untyped container never carries part of a typed unit away; the typed unit stays whole on the face', () => {
+    const typed = 'Revenue is £100. Churn is 5%.';
+    const text = ['The baseline needs confirmation because revenue is £100.', longContext, typed].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'evidence', text: typed }] });
+    expect(c.measure!.said_once_dropped).toEqual([]);
+    expect(faceOf(c)).toContain(typed);
+  });
+  it('Codex r2 P1: an earlier typed HOST copy of a question never takes it from the typed ask (strongest role stays)', () => {
+    const q = 'Which figure should we check first?';
+    const askUnit = `The baseline is unconfirmed. ${q}`;
+    const text = [`Ready. ${q}`, longContext, askUnit].join('\n\n');
+    const c = composeReplyShape({ text, obligations: [{ role: 'host', text: `Ready. ${q}` }, { role: 'ask', text: askUnit }] });
+    expect(faceOf(c).trimEnd().endsWith(q), faceOf(c)).toBe(true);
+    expect(c.text.split(q)).toHaveLength(2);
+  });
   it('idempotent (Codex r1 P1-3): composing twice keeps the same face, the typed closing ask last both times', () => {
     const closing = 'HOW sure are you?';
     const text = [longContext, 'How sure are you?', 'Which assumption matters most?', closing].join('\n\n');
@@ -528,13 +550,12 @@ describe('RC6 said once', () => {
   it.each([
     ['container first', [largest, middle, smallest, equalSmallest]],
     ['container last', [middle, smallest, equalSmallest, largest]],
-  ])('never-both + normalisation chain, %s: the explanatory tail and equal copies go; a fragment inside another frame stays', (_order, lines) => {
+  ])('never-both + normalisation chain, %s: untyped prose loses only the equal copy; nothing is contained away', (_order, lines) => {
     const text = (lines as string[]).join('\n');
     const c = composeReplyShape({ text });
-    // The middle sentence is the largest's tail after "because": said again, dropped. The smallest sits inside a "depends on"
-    // frame, not a gloss, so it stays (once: its equal copy goes).
-    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset([largest, smallest].join(' ')));
-    expect(c.measure!.said_once_dropped).toEqual([middle, equalSmallest]);
+    // Untyped (Agent) prose loses only EXACT copies: the equal copy goes; containment never applies to it (Codex r2).
+    expect(sentenceMultiset(c.text)).toEqual(sentenceMultiset([largest, middle, smallest].join(' ')));
+    expect(c.measure!.said_once_dropped).toEqual([equalSmallest]);
     everySentenceExceptReportedKept(text, c);
   });
 
@@ -549,6 +570,8 @@ describe('RC6 said once', () => {
     const c = composeReplyShape({ text, graph, obligations: [
       { role: 'evidence', text: contained, lead: true },
       { role: 'withheld_reason', text: contained, subjects: ['support→loss'] },
+      // The leader gate's own closing (typed by the route): containment applies only between typed sentences.
+      { role: 'withheld_reason', text: containing },
     ] });
     expect(c.outcome).toBe('shaped');
     expect(c.reason).not.toBe('obligation_unlocated');
@@ -604,22 +627,22 @@ describe('RC6 said once', () => {
   });
 
   it('a protected later Open Questions copy cannot steal the dropped face sentence’s obligation identity', () => {
-    const containing = 'Note: The cost is uncertain.';
+    const containing = 'No option can be put forward yet, because the cost is uncertain.';
     const contained = 'The cost is uncertain.';
     const segment = `Questions this model does not answer yet:\n- ${contained}`;
     const text = [containing, context, contained, segment].join('\n\n');
-    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: contained, lead: true }] });
+    const c = composeReplyShape({ text, obligations: [{ role: 'withheld_reason', text: contained, lead: true }, { role: 'withheld_reason', text: containing }] });
     expect(c.outcome).toBe('shaped');
     expect(c.reason).not.toBe('obligation_unlocated');
     expect(c.shape!.headline).toBe(containing);
     expect(c.measure!.obligations_on_face).toBe(1);
     expect(openQuestionsSegment(c.text)?.segment).toBe(segment);
-    expect(count(c.text, contained), 'only the containing finding and protected segment carry the shorter copy').toBe(2);
+    expect(count(c.text.toLowerCase(), contained.toLowerCase()), 'only the containing finding and protected segment carry the shorter copy').toBe(2);
     expect(c.measure!.said_once_dropped).toEqual([contained]);
     everySentenceExceptReportedKept(text, c);
   });
 
-  it('Open Questions keeps its original protected identity when the only original lead sentence is dropped into its after-segment carrier', () => {
+  it('Open Questions keeps its protected identity; an untyped "Saved:" frame never absorbs the lead (containment is typed-only)', () => {
     const lead = 'Revenue may fall.';
     const question = 'How sure are you?';
     const segment = `Questions this model does not answer yet: We need evidence. ${question}`;
@@ -627,16 +650,12 @@ describe('RC6 said once', () => {
     const text = [lead, segment, after].join('\n\n');
     expect(openQuestionsSegment(text)?.segment, 'the input has a recognised protected segment').toBe(segment);
     const c = composeReplyShape({ text });
-    expect(c.outcome).toBe('shaped');
-    expect(c.shape!.headline).toBe(`Saved: ${lead}`);
-    expect(face(c).join('\n')).not.toContain(question);
-    expect(c.shape!.detail.endsWith(segment)).toBe(true);
+    expect(c.measure!.said_once_dropped).toEqual([]);
     expect(openQuestionsSegment(c.text)?.segment).toBe(segment);
-    expect(c.measure!.open_questions_segment).toBe(true);
-    expect(c.measure!.said_once_dropped).toEqual([lead]);
     expect(count(c.text, question)).toBe(1);
     everySentenceExceptReportedKept(text, c);
   });
+
 
   it('a protected later copy of the typed closing ask never causes the unique outside ask to drop or lose its face identity', () => {
     const earlier = 'Before we rerun, which input should we check first?';

@@ -271,8 +271,10 @@ interface SaidOnce {
   readonly obligations: FaceObligation[];
   readonly questions: ReturnType<typeof openQuestionsSegment>;
 }
-/** The frame before a contained sentence that restates it as the container's reason or gloss (keys are normalised). */
-const SAID_AGAIN_AFTER = /(?:\bbecause|\bsince|[:;])\s*$/;
+/** The frame before a contained sentence that restates it as the container's reason (keys are normalised). */
+const SAID_AGAIN_AFTER = /(?:\bbecause|\bsince)\s*$/;
+/** Which typed copy of a repeated sentence stays: the strongest role (ask closes the face), then the first. */
+const SAID_ONCE_ROLE_RANK: Partial<Record<FaceObligationRole, number>> = { ask: 5, withheld_reason: 4, caveat: 3, evidence: 2, host: 1 };
 
 function saidOnceKey(text: string): string {
   const key = text.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -356,12 +358,18 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
   // surviving untyped copy, and composing twice is stable (the typed text is still there the second time). A contained
   // sentence re-binds to its container as before (one whole sentence carries it).
   const typedRanges = obligations.filter((o) => o.role !== 'detail' && o.text.trim() !== '').flatMap((o) => {
-    const ranges: { start: number; end: number }[] = [];
-    for (let at = text.indexOf(o.text); at !== -1; at = text.indexOf(o.text, at + o.text.length)) ranges.push({ start: at, end: at + o.text.length });
+    const ranges: { start: number; end: number; rank: number }[] = [];
+    for (let at = text.indexOf(o.text); at !== -1; at = text.indexOf(o.text, at + o.text.length)) ranges.push({ start: at, end: at + o.text.length, rank: SAID_ONCE_ROLE_RANK[o.role] ?? 0 });
     return ranges;
   });
-  const isTyped = (span: SentenceSpan): boolean => typedRanges.some((r) => r.start <= span.start && span.end <= r.end);
-  for (const group of groups) group.first = group.copies.find(isTyped) ?? group.copies[0]!;
+  const rankOf = (span: SentenceSpan): number => Math.max(-1, ...typedRanges
+    .filter((r) => r.start <= span.start && span.end <= r.end).map((r) => r.rank));
+  // The strongest typed copy stays (an ask's question stays the ask), ties to the first; else the first.
+  for (const group of groups) {
+    const best = Math.max(...group.copies.map(rankOf));
+    group.first = group.copies.find((c) => rankOf(c) === best)!;
+  }
+  const groupTyped = (idx: number): boolean => groups[idx]!.copies.some((c) => rankOf(c) >= 0);
 
   // Aho-Corasick: all complete sentence keys are patterns; output links avoid copying suffix-match arrays.
   const trie: { next: Map<string, number>; fail: number; output: number; group?: number }[] = [
@@ -409,6 +417,10 @@ function sayOnce(text: string, obligations: readonly FaceObligation[]): SaidOnce
         const found = trie[match]!.group;
         if (found !== undefined && groups[found]!.key.length < containerKey.length
           && SAID_AGAIN_AFTER.test(containerKey.slice(0, containerKey.length - groups[found]!.key.length))
+          // Containment only between Olumi's OWN typed sentences (their meaning is known: the leader gate's "…, because
+          // <the withheld reason>"). Agent prose loses only exact copies (Codex r2 on #2801: a colon or untyped frame can
+          // invert or partially carry a finding).
+          && groupTyped(found) && groupTyped(idx)
           && !askKeys.has(groups[found]!.key) && !carrier.has(found)) carrier.set(found, idx);
       }
     }
