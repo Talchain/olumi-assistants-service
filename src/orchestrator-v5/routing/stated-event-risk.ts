@@ -28,7 +28,7 @@ const LIKELIHOOD_WORD = String.raw`(?:chances?|likely|probable|probability|likel
 const HORIZON_HEAD = String.raw`(?:within|in|over|during)${GAP}(?:(?:the${GAP})?(?:next|coming|following)${GAP})?(?:\d{1,6}(?:\.\d{1,6})?|a|an|one)?${SPACE}(?:months?|years?|weeks?)\b`;
 const TAIL_WORD = String.raw`(?:$|[,;:.!?)]|${HORIZON_HEAD}|(?:of${GAP}(?:it|this|that|happening)|that|it|this|and|or|if|before|by|for|the${GAP}(?:next|coming))\b)`;
 // Every percent needs a supported right-hand attachment; an unknown noun is not a likelihood.
-const FIGURE_TAIL = new RegExp(String.raw`^${SPACE}(?:${TAIL_WORD}|(?:${MODIFIER}){0,3}${LIKELIHOOD_WORD}\b(?![-–—])${SPACE}(?:${TAIL_WORD}|(?:the|a|an|we|they|our|to|in|on|of|for)\b))`, 'i');
+const FIGURE_TAIL = new RegExp(String.raw`^${SPACE}(?:${TAIL_WORD}|(?:${MODIFIER}){0,3}${LIKELIHOOD_WORD}\b(?![-–—])${SPACE}(?:${TAIL_WORD}|(?:the|a|an|we|they|he|she|it|our|to|in|on|of|for)\b))`, 'i');
 // DL ruling 8 Oct: explicit likelihood words only; a hedge or an estimate never supplies the cue.
 const DIRECT_LIKELIHOOD_AFTER = new RegExp(String.raw`^${SPACE}(?:${MODIFIER}){0,3}(?:chances?|likely|probability|likelihood|odds|risk${GAP}(?:of|that))\b(?![-–—])`, 'i');
 const DIRECT_LIKELIHOOD_BEFORE = new RegExp(String.raw`\b(?:chances?|probability|likelihood|odds)(?:${GAP}(?:of|is|are|at)${GAP}|${SPACE}[=:]${SPACE})(?:${MODIFIER}){0,3}$`, 'i');

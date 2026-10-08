@@ -1,0 +1,30 @@
+[
+  {
+    "name": "basis-gate-off",
+    "test_pattern": "basis-less Olumi occurrence",
+    "exit_code": 1,
+    "killed_by_assertion": true,
+    "evidence": "mutant-basis-gate-off.log"
+  },
+  {
+    "name": "relative-half-spread",
+    "test_pattern": "90.*widens",
+    "exit_code": 1,
+    "killed_by_assertion": true,
+    "evidence": "mutant-relative-half-spread.log"
+  },
+  {
+    "name": "user-wins-off",
+    "test_pattern": "user likelihood and",
+    "exit_code": 1,
+    "killed_by_assertion": true,
+    "evidence": "mutant-user-wins-off.log"
+  },
+  {
+    "name": "probability-whitespace-off",
+    "test_pattern": "trailing whitespace",
+    "exit_code": 1,
+    "killed_by_assertion": true,
+    "evidence": "mutant-probability-whitespace-off.log"
+  }
+]

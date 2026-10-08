@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (27 tests | 1 failed | 26 skipped) 32ms
+     × a probability suffix with trailing whitespace is still refused 30ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > a probability suffix with trailing whitespace is still refused
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:96:74
+     94|   it('a probability suffix with trailing whitespace is still refused',…
+     95|     const result = admit(probability(candidate(), `${LABEL} probabilit…
+     96|     expect(result.nodes.some(n => /probability$/i.test(n.label.trim())…
+       |                                                                          ^
+     97|   });
+     98|   it('invalid probability percentages never survive as continuous fact…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 26 skipped (27)
+   Start at  14:24:57
+   Duration  1.67s (transform 1.15s, setup 103ms, import 1.42s, tests 32ms, environment 0ms)
+

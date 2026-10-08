@@ -1,0 +1,35 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts (11 tests | 1 failed | 10 skipped) 24ms
+     × Check estimates shows the same likelihood count and its card basis 22ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts > EVENT-BRANCH Science occurrence words and separate RC4 kinds > Check estimates shows the same likelihood count and its card basis
+AssertionError: expected { count: +0, values: [], …(5) } to have property "count" with value 1
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts:142:34
+    140|     });
+    141|     expect(facts.runBound).toBe(true);
+    142|     expect(facts.olumiEstimates).toHaveProperty('count', 1);
+       |                                  ^
+    143|     const bar = actionBarOf(facts);
+    144|     expect([...bar.priority, ...bar.standard, ...bar.more]).toContainE…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  14:07:02
+   Duration  6.50s (transform 4.71s, setup 117ms, import 6.23s, tests 24ms, environment 0ms)
+

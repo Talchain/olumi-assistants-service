@@ -1,0 +1,46 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (27 tests | 2 failed | 25 skipped) 45ms
+     × basis-less Olumi occurrence "" stays a placeholder 31ms
+     × basis-less Olumi occurrence "  " stays a placeholder 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > basis-less Olumi occurrence "" stays a placeholder
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > basis-less Olumi occurrence "  " stays a placeholder
+AssertionError: expected { version: 1, …(2) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "horizon": {
+    "months": 12,
+  },
+  "occurrence": {
+    "basis": "olumi",
+    "meaning": "at_least_once_within_horizon",
+    "p_high": 0.18181818181818182,
+    "p_low": 0.052631578947368425,
+  },
+  "version": 1,
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:49:39
+     47|     const c = candidate();
+     48|     (c.risks[0] as any).occurrence.basis_text = basis;
+     49|     expect(risk(admit(c)).event_risk).toBeUndefined();
+       |                                       ^
+     50|   });
+     51|   it('requires its own horizon, never silently fills the goal horizon'…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 25 skipped (27)
+   Start at  14:24:50
+   Duration  1.88s (transform 1.29s, setup 122ms, import 1.59s, tests 45ms, environment 0ms)
+

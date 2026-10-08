@@ -37,6 +37,7 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { scopeIssueBlocks } from '../goal-scope.js';
 import { goalLevelAskOf } from '../current-level-answer.js';
 import { olumiEstimatesFeedingResult, type OlumiEstimates } from '../olumi-estimates-feeding-result.js';
+import { goalChanceEstimateLikelihoods } from '../goal-chance-estimate-attribution.js';
 import { validatedDefinitionForGraph } from '../../goal-target/held-user-links.js';
 import { InterventionV3 } from '../../../schemas/cee-v3.js';
 import { readOptionResultSources } from '../../../orchestrator/context/option-result-source.js';
@@ -238,6 +239,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
         validatedDefinitionForLink: validatedDefinitionForGraph(read.graph),
         goalPathFactors: signals['model.goal_path_factors'],
         goalPathLinks: signals['model.goal_path_links'],
+        goalPathLikelihoods: goalChanceEstimateLikelihoods(read.graph, goal?.id),
         optionSettings: optionSettingsOf(read, signals['model.goal_path_factors']),
         driverIds: [],
       }),

@@ -1,0 +1,33 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts (27 tests | 1 failed | 26 skipped) 33ms
+     × 90% 82 widens by odds ÷2…×2 31ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts > Science event branch admission, 8 October > 90% 82 widens by odds ÷2…×2
+AssertionError: expected 45 to be 82 // Object.is equality
+
+- Expected
++ Received
+
+- 82
++ 45
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/olumi-event-risk-admission.test.ts:35:65
+     33|     const node = risk(admit(candidate(p)));
+     34|     expect(node.event_risk?.occurrence.basis).toBe('olumi');
+     35|     expect(Math.round(node.event_risk!.occurrence.p_low * 100)).toBe(l…
+       |                                                                 ^
+     36|     expect(Math.round(node.event_risk!.occurrence.p_high * 100)).toBe(…
+     37|     expect(node.event_risk!.occurrence.meaning).toBe('at_least_once_wi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 26 skipped (27)
+   Start at  14:24:53
+   Duration  1.84s (transform 1.25s, setup 129ms, import 1.52s, tests 33ms, environment 0ms)
+

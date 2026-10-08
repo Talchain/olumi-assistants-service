@@ -1,0 +1,55 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts (14 tests | 2 failed) 55ms
+     × card never turns an interior Olumi range 0.001–0.004 into certain 0% undefined or 100% undefined 4ms
+     × card never turns an interior Olumi range 0.996–0.999 into certain 0% undefined or 100% undefined 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts > EVENT-BRANCH Science occurrence words and separate RC4 kinds > card never turns an interior Olumi range 0.001–0.004 into certain 0% undefined or 100% undefined
+AssertionError: expected 'May happen: about 0% within 12 months…' not to match /(?<![\d.])(?:0|100)%/
+
+- Expected:
+/(?<![\d.])(?:0|100)%/
+
++ Received:
+"May happen: about 0% within 12 months (Olumi's estimate, based on typical annual key-staff turnover in small software teams)."
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts:57:40
+     55|     block.occurrence.p_high = high;
+     56|     const cardLine = eventRiskCardLine as (block: EventRiskV1T, basisT…
+     57|     expect(cardLine(block, basis)).not.toMatch(/(?<![\d.])(?:0|100)%/);
+       |                                        ^
+     58|   });
+     59|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts > EVENT-BRANCH Science occurrence words and separate RC4 kinds > card never turns an interior Olumi range 0.996–0.999 into certain 0% undefined or 100% undefined
+AssertionError: expected 'May happen: about 100% within 12 mont…' not to match /(?<![\d.])(?:0|100)%/
+
+- Expected:
+/(?<![\d.])(?:0|100)%/
+
++ Received:
+"May happen: about 100% within 12 months (Olumi's estimate, based on typical annual key-staff turnover in small software teams)."
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts:57:40
+     55|     block.occurrence.p_high = high;
+     56|     const cardLine = eventRiskCardLine as (block: EventRiskV1T, basisT…
+     57|     expect(cardLine(block, basis)).not.toMatch(/(?<![\d.])(?:0|100)%/);
+       |                                        ^
+     58|   });
+     59|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 54 passed (56)
+   Start at  14:15:51
+   Duration  9.32s (transform 6.16s, setup 183ms, import 8.74s, tests 87ms, environment 0ms)
+

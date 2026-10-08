@@ -1,0 +1,118 @@
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/accel-er-event-cee/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/accel-er-event-cee
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts (6 tests | 5 failed) 27ms
+     × card shows the Science 10% log-odds range, horizon and readable estimate basis 7ms
+     × k stays 2 relationships; the root event reaching this goal adds 1 likelihood 10ms
+     × likelihood-only licence omits the zero relationship kind and still owes the labelled point 3ms
+     × the stored Run counts survive graph changes for reply/reload attribution 3ms
+     × the narrator cannot supply its own likelihood count 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts > EVENT-BRANCH Science occurrence words and separate RC4 kinds > card shows the Science 10% log-odds range, horizon and readable estimate basis
+AssertionError: expected 'It may happen: about 5.263158–18.1818…' to be 'May happen: about 5–18% within 12 mon…' // Object.is equality
+
+Expected: "May happen: about 5–18% within 12 months (Olumi's estimate, based on typical annual key-staff turnover in small software teams)."
+Received: "It may happen: about 5.263158–18.181818% within 12 months, as you said."
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts:43:43
+     41|   it('card shows the Science 10% log-odds range, horizon and readable …
+     42|     const cardLine = eventRiskCardLine as (block: EventRiskV1T, basisT…
+     43|     expect(cardLine(occurrence(), basis)).toBe(`May happen: about 5–18…
+       |                                           ^
+     44|     expect(cardLine(occurrence('user'))).toContain('as you said');
+     45|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts > EVENT-BRANCH Science occurrence words and separate RC4 kinds > k stays 2 relationships; the root event reaching this goal adds 1 likelihood
+AssertionError: expected { code: 'GOAL_CHANCE_LICENSED', …(11) } to match object { olumi_estimate_link_count: 2, …(1) }
+(17 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "olumi_estimate_likelihood_count": 1,
+    "olumi_estimate_link_count": 2,
+  }
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts:50:21
+     48|     const model = graph();
+     49|     const licence = goalChanceLicenceOf(envelope, model, 'goal');
+     50|     expect(licence).toMatchObject({ olumi_estimate_link_count: 2, olum…
+       |                     ^
+     51|     expect(goalChanceLicenceForAgent(licensed(model))).toMatchObject({…
+     52|     expect(firstLine(model).chance).toBe(labelledChance);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts > EVENT-BRANCH Science occurrence words and separate RC4 kinds > likelihood-only licence omits the zero relationship kind and still owes the labelled point
+AssertionError: expected { code: 'GOAL_CHANCE_LICENSED', …(10) } to have property "olumi_estimate_likelihood_count" with value 1
+
+- Expected:
+1
+
++ Received:
+undefined
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts:59:21
+     57|     const licence = goalChanceLicenceOf(envelope, model, 'goal');
+     58|     expect(licence).not.toHaveProperty('olumi_estimate_link_count');
+     59|     expect(licence).toHaveProperty('olumi_estimate_likelihood_count', …
+       |                     ^
+     60|     const lines = goalChanceScreenLinesForAgent(licensed(model), model…
+     61|     expect(lines).toHaveLength(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts > EVENT-BRANCH Science occurrence words and separate RC4 kinds > the stored Run counts survive graph changes for reply/reload attribution
+AssertionError: expected '‘Raise price’: about 67% chance of me…' to be '‘Raise price’: about 67% chance of me…' // Object.is equality
+
+Expected: "‘Raise price’: about 67% chance of meeting your goal, in this model, on Olumi's estimates (2 relationships, 1 likelihood) (see Check estimates)."
+Received: "‘Raise price’: about 67% chance of meeting your goal, in this model, using Olumi's estimates for 2 relationships (see Check estimates)."
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts:79:74
+     77|     const run = licensed(model);
+     78|     const changed = graph('user', false);
+     79|     expect(goalChanceScreenLinesForAgent(run, changed, true)[0]!.chanc…
+       |                                                                          ^
+     80|   });
+     81|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts > EVENT-BRANCH Science occurrence words and separate RC4 kinds > the narrator cannot supply its own likelihood count
+AssertionError: expected { …(2) } to deeply equal { …(2) }
+
+- Expected
++ Received
+
+  {
+-   "removed": [
+-     "Olumi supplied 9 likelihoods.",
+-   ],
+-   "text": "Keep the basis visible.",
++   "removed": [],
++   "text": "Olumi supplied 9 likelihoods. Keep the basis visible.",
+  }
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/event-branch-copy-count.test.ts:83:95
+     81|
+     82|   it('the narrator cannot supply its own likelihood count', () => {
+     83|     expect(narratorCountGuard('Olumi supplied 9 likelihoods. Keep the …
+       |                                                                                               ^
+     84|       text: 'Keep the basis visible.', removed: ['Olumi supplied 9 lik…
+     85|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 1 passed (6)
+   Start at  13:59:09
+   Duration  2.73s (transform 1.84s, setup 116ms, import 2.45s, tests 27ms, environment 0ms)
+

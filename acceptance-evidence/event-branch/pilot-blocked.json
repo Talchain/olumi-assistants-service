@@ -1,0 +1,30 @@
+{
+  "status": "BLOCKED_NOT_RUN",
+  "authorized_draws": 2,
+  "maximum_provider_attempts": 4,
+  "actual_provider_attempts": 0,
+  "actual_completed_draws": 0,
+  "occurrence_rate": null,
+  "probability_factor_rate": null,
+  "reason": "The execution environment cannot resolve api.render.com, and the independent enabled Node REPL network probe also failed. No existing OPENAI_API_KEY was available in the process or inspected standard local environment files. Credential values were never emitted or persisted.",
+  "probes": [
+    {
+      "route": "sandbox shell Python urllib",
+      "target": "https://api.render.com",
+      "error_class": "URLError",
+      "underlying_error_class": "gaierror",
+      "errno": 8
+    },
+    {
+      "route": "enabled mcp__node_repl__js fetch",
+      "target": "https://api.render.com",
+      "error_class": "TypeError"
+    }
+  ],
+  "prepared_harness": "acceptance-evidence/event-branch/pilot.test.ts",
+  "prepared_runner": "scripts/census/event-branch-pilot-runner.py",
+  "prepared_brief": "acceptance-evidence/event-branch/pilot-brief.txt",
+  "brief_source": "/private/tmp/accel-p44/lab/b1.txt",
+  "brief_source_sha256": "a587f2ad55c1d946a3db9e631ac8668df5aba33c1e34305b9e07de43c82ed553",
+  "next_action": "When a network-enabled authorized executor is available, run the prepared runner on the source-hashed brief after the exact load gate and current deterministic checks. Maximum two draws and four provider attempts. REVIEW-READY remains gated on the live pilot."
+}
