@@ -96,6 +96,22 @@ describe('the narrating call may withdraw, never approve (Codex r1 P1 / r2 P2; D
     expect(status).not.toMatch(/Not saved|try again/i);
   });
 
+  // ⛔ ...AND NEVER POINTS AT A CARD THAT IS GONE (Codex #2781 r4 P2): refused on the narrating call, then withdrawn.
+  it('RED P2 withdrawn: refused then withdrawn → no approve card and no "waiting for your approval"', async () => {
+    const withdrawProposal = vi.fn(async () => ({ ok: true, mutated: false, proposal_id: HELD.proposal_id }));
+    const caps = { proposeNewRisk: vi.fn(async () => HELD), withdrawProposal } as unknown as AgentCapabilities;
+    const callModel = vi.fn()
+      .mockResolvedValueOnce({ output: [call] })
+      .mockResolvedValueOnce({ output: [fc('authorise_change', { proposal_id: HELD.proposal_id }, 'c2')] })
+      .mockResolvedValueOnce({ output: [fc('withdraw_proposal', { proposal_id: HELD.proposal_id }, 'c3')] })
+      .mockResolvedValueOnce(answer);
+    const r = await runAgentTurn({ ...base, composeReply: () => null } as never, caps, callModel as never);
+    expect(r.tool_calls.map((c) => [c.name, c.refusal ?? null])).toEqual([['propose_new_risk', null], ['authorise_change', NOT_ON_NARRATION], ['withdraw_proposal', null]]);
+    expect(approvalChipsFor(r.tool_calls).find((c) => c.id === `agent-approve-proposal:${HELD.proposal_id}`)).toBeUndefined();
+    const status = narrateWriteOutcome(r.assistant_text, r.tool_calls, r.tool_results).status;
+    expect(status).toBe('Nothing was approved or changed.');
+  });
+
   it('RED: authorise_change on the narrating call is refused before dispatch, and the held change keeps its approve card', async () => {
     const authoriseChange = vi.fn(async () => ({ ok: true, mutated: true }));
     const caps = { proposeNewRisk: vi.fn(async () => HELD), authoriseChange } as unknown as AgentCapabilities;

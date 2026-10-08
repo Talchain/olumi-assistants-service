@@ -378,9 +378,12 @@ function awaitingApproval(toolCalls: readonly { name: string }[], toolResults: r
 /** One authoritative line per write the turn attempted. */
 function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = null, versioned = true): string {
   // ⛔ A LIVE APPROVAL CARD NEVER ASKS FOR A RETRY (Codex #2781 r3 / DL 6049608420, P2).
-  // The narrating call's approval never reached the store, so the held change still awaits the user's yes.
+  // The narrating call's approval never reached the store, so the held change still awaits the user's yes — unless the
+  // turn then withdrew it (Codex #2781 r4 P2): the words follow the approve chip's own rule (`pending`), never the refusal.
   if (name === 'authorise_change' && r.ok === false && r.refusal === NOT_ON_NARRATION) {
-    return 'The change above is waiting for your approval; nothing has been changed yet.';
+    return pending !== null
+      ? 'The change above is waiting for your approval; nothing has been changed yet.'
+      : 'Nothing was approved or changed.';
   }
   if (name === 'build_model_from_brief') {
     const v = (r.model_version as { version_number?: unknown } | undefined)?.version_number;
