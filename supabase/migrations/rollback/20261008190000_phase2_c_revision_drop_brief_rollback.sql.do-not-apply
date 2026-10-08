@@ -1,0 +1,18 @@
+-- ROLLBACK: restore the deployed 20261008160000 trigger body (bumps on brief too).
+SET LOCAL lock_timeout = '3s';
+CREATE OR REPLACE FUNCTION public.scenarios_bump_revision()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF NEW.graph IS DISTINCT FROM OLD.graph OR NEW.brief IS DISTINCT FROM OLD.brief OR NEW.brief_text IS DISTINCT FROM OLD.brief_text
+     OR NEW.framing IS DISTINCT FROM OLD.framing OR NEW.stage IS DISTINCT FROM OLD.stage
+     OR NEW.current_model_version_id IS DISTINCT FROM OLD.current_model_version_id THEN
+    NEW.revision := OLD.revision + 1;
+  ELSE
+    NEW.revision := OLD.revision;   -- pins revision: no writer can set it directly
+  END IF;
+  RETURN NEW;
+END;
+$$;
