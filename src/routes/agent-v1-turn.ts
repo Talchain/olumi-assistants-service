@@ -3640,6 +3640,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let liveHolds: readonly PendingAction[] = [];
     let heldLapseLines: string[] = [];
     let heldRecords: ProposalRecord[] = [];
+    /** What the persistence floor reconciled into the answer row: the held actions `heldRecords` was rebuilt from. */
+    let reconciledPending: readonly PendingAction[] = [];
     /** Every held proposal this turn read (at its start and at its end): the floor never re-adds one it settled itself. */
     const heldSeenThisTurn = new Set<string>(heldAtStart.map((h) => h.chip_id));
     let liveScopeIssues: readonly PendingAction[] = [];
@@ -4623,6 +4625,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           heldProposals: { isHeld: isHeldProposal, seenByThisRequest: heldSeenThisTurn,
             offeredChipIds: new Set(offeredNow.filter(a => typedApprovalOf({ chip: { id: a.id } }) !== undefined).map(a => a.id)),
             onReconciled: (write, overCap) => {
+              reconciledPending = write.pending_actions ?? [];
               heldRecords = (write.pending_actions ?? []).flatMap(p => {
                 const r = proposalRecord(p, readbackGraph); return r && r.base_graph_hash === graphHash ? [r] : [];
               });
@@ -4748,7 +4751,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         rows: premortemDiagnostics.rows, dropped: premortemDiagnostics.dropped.map(({ story_index, reason }) => ({ story_index, reason })) },
       'PREMORTEM_WORKSHEET_WITHHELD');
     }
-    const issuedTurnIds = await proposalIssuers(heldRecords, [...durablePending, ...liveHolds]);
+    const issuedTurnIds = await proposalIssuers(heldRecords, [...reconciledPending, ...durablePending, ...liveHolds]);
     return reply.code(200).send({
       ...wireBody,
       ...(premortemWorksheet !== undefined ? { _premortem_worksheet: premortemWorksheet } : {}),
