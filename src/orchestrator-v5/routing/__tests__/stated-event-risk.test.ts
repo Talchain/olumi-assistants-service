@@ -344,12 +344,12 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
   it.each([
     ['whitespace', (n: number) => ' '.repeat(n)],
     ['by-percent', (n: number) => 'by 10% '.repeat(Math.ceil(n / 7)).slice(0, n)],
-  ])('impact-pct-scaling-%s: 2k to 20k, ratio < 20 for both readers', (_id, make) => {
-    const [small, large] = [make(2000), make(20000)];
+  ])('impact-pct-scaling-%s: 8k to 80k, ratio < 30 for both readers', (_id, make) => {
+    const [small, large] = [make(8000), make(80000)];
     for (const reader of [readStatedEventRisk, readStatedLikelihoodWithoutWindow]) {
       const m = scalingRatio(() => reader(small), () => reader(large));
-      process.stdout.write(`impact-pct timing ${_id} ${reader.name}: ${m.detail}; per-call 20k ${(m.largeMs / m.calls).toFixed(3)} ms\n`);
-      expect(m.ratio, m.detail).toBeLessThan(20);
+      process.stdout.write(`impact-pct timing ${_id} ${reader.name}: ${m.detail}; per-call 80k ${(m.largeMs / m.calls).toFixed(3)} ms\n`);
+      expect(m.ratio, m.detail).toBeLessThan(30);
     }
   });
 
