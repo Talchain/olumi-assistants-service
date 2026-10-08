@@ -312,7 +312,11 @@ function sum(storedIdentity: boolean): Graph {
 }
 
 describe('RC5 deterministic sum of parents in the goal\'s own units', () => {
-  it.each([true, false])('sum fires with a stored sum identity = %s', (storedIdentity) => {
+  it('without a definitional sum identity, same-unit parents on causal links are NOT a sum (buddy r1 P1)', () => {
+    expect(ask(sum(false))).toBeNull();
+  });
+
+  it.each([true])('sum fires with a stored sum identity = %s', (storedIdentity) => {
     const result = ask(sum(storedIdentity));
     expect(result).toMatchObject({ implied: 392_000, ratio: 19.6, target: 20_000 });
     expect(result?.text).toContain('MRR today would be about £390,000, about 20 times your £20,000 target, so the goal would already be met.');
@@ -343,3 +347,29 @@ describe('RC5 deterministic sum of parents in the goal\'s own units', () => {
     expect(ask(graph)).toBeNull();
   });
 });
+
+describe('RC5 buddy r1 fixes', () => {
+  it('re-entering the same figure asks nothing (asked once per value, Science §(f))', () => {
+    expect(goalCoherenceAsk(product(8_000), { nodeId: SUBSCRIBERS, previousRaw: 8_000 })).toBeNull();
+    expect(goalCoherenceAsk(product(8_000), { nodeId: SUBSCRIBERS, previousRaw: 300 })?.text).toBe(Q4);
+  });
+
+  it('the today-level fallback never reads a retained_excluded cause', () => {
+    const graph = product(8_000);
+    const subs = node(graph, SUBSCRIBERS);
+    delete subs.observed_state;
+    subs.kind = 'outcome';
+    graph.nodes.push({ id: 'cause_subs', kind: 'factor', label: 'Signed-up subscribers', analysis_participation: 'retained_excluded',
+      observed_state: { raw_value: 8_000, value: 0.5, unit: 'subscribers', source: 'user_edited' } } as unknown as Node);
+    graph.edges.push({ from: 'cause_subs', to: SUBSCRIBERS });
+    expect(ask(graph, PRICE)).toBeNull();
+  });
+
+  it('a tiny implied level keeps two significant figures instead of "£0"', () => {
+    const graph = product(1);
+    node(graph, GOAL).goal_direction = '<=';
+    level(graph, PRICE).raw_value = 0.0025;
+    expect(ask(graph)?.text).toContain('about £0.0025,');
+  });
+});
+

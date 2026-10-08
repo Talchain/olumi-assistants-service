@@ -94,12 +94,14 @@ function productFor(graph: unknown, node: Rec, parents: readonly string[], byId:
   };
 }
 
-export function goalCoherenceAsk(graph: unknown, edited: { nodeId: string }): CoherenceAsk | null {
-  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return null;
-  const nodes = graph.nodes.filter(isRec).filter((n) => n.analysis_participation !== 'retained_excluded');
+export function goalCoherenceAsk(input: unknown, edited: { nodeId: string; previousRaw?: number }): CoherenceAsk | null {
+  if (!isRec(input) || !Array.isArray(input.nodes) || !Array.isArray(input.edges)) return null;
+  const nodes = input.nodes.filter(isRec).filter((n) => n.analysis_participation !== 'retained_excluded');
   const byId = new Map(nodes.flatMap((n) => typeof n.id === 'string' ? [[n.id, n] as const] : []));
   if (byId.size !== nodes.length) return null;
-  const edges = graph.edges.filter(isRec).filter((e) => byId.has(String(e.from)) && byId.has(String(e.to)));
+  const edges = input.edges.filter(isRec).filter((e) => byId.has(String(e.from)) && byId.has(String(e.to)));
+  // ⛔ ONE VIEW (buddy r1 P1): every reader below, including the today-level fallback, sees only participating nodes.
+  const graph: Rec = { ...input, nodes, edges };
   const parentsOf = (id: unknown): string[] => [...new Set(edges.filter((e) => e.to === id).map((e) => String(e.from)))]
     .filter((p) => !['option', 'decision'].includes(String(byId.get(p)?.kind)));
   const goals = nodes.filter((n) => n.kind === 'goal');
@@ -125,6 +127,8 @@ export function goalCoherenceAsk(graph: unknown, edited: { nodeId: string }): Co
   const editedLevel = editedNode !== undefined ? levelFor(graph, editedNode) : null;
   const editedLabel = words(editedNode?.label);
   if (goalUnit === null || editedLevel === null || editedLabel === null) return null;
+  // Asked once per value: re-entering the same figure (e.g. after answering Yes) asks nothing (Science §(f); buddy r1 P1).
+  if (edited.previousRaw !== undefined && edited.previousRaw === editedLevel.raw) return null;
   const parents = parentsOf(goal.id);
   if (parents.length === 0) return null;
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
@@ -145,6 +149,9 @@ export function goalCoherenceAsk(graph: unknown, edited: { nodeId: string }): Co
     const carriers = parents.filter((id) => isRec(byId.get(id)?.nonlinear_identity)
       && (byId.get(id)!.nonlinear_identity as Rec).operation === 'product');
     if (carriers.length > 1) return null;
+    // ⛔ Same units are not a sum (buddy r1 P1): parents on ordinary causal links carry weighted effects. Add only under a
+    // definitional `sum` identity, or read a sole product-carrier parent as the goal's own reading.
+    if (identity?.operation !== 'sum' && !(parents.length === 1 && carriers.length === 1)) return null;
     const levels: Level[] = [];
     const expressions: string[] = [];
     for (const id of parents) {
@@ -187,6 +194,8 @@ export function goalCoherenceAsk(graph: unknown, edited: { nodeId: string }): Co
   const ratio = implied / target.value;
   if (!finite(ratio) || (floor ? ratio < GOAL_COHERENCE_RATIO : ratio > 1 / GOAL_COHERENCE_RATIO)) return null;
   const money = readMoney(goalUnit, goalLabel)?.code ?? goalUnit;
+  // Two significant figures, never collapsed to "£0" by the two-decimal cap (buddy r1 P2).
+  const sayTwo = (n: number): string => { const t = twoFigures(n); return t !== 0 && Math.abs(t) < 0.01 ? sayFigureAsWritten(t, money) : sayFigure(t, money); };
   const value = figure(editedLevel);
   const suffix = product?.unconfirmed ? `, if ${product.clause}` : '';
   // Science §(f) Q4 + addendum (8 Oct): a count asks about scope; money against a per-period goal may be a yearly figure;
@@ -197,10 +206,10 @@ export function goalCoherenceAsk(graph: unknown, edited: { nodeId: string }): Co
       : 'or a different figure?';
   // The at_most mirror says "less than a tenth" (always true at the trigger), never a fraction (addendum (1)).
   const comparison = floor
-    ? `about ${ratio.toLocaleString('en-GB', { maximumSignificantDigits: 2 })} times your ${sayFigure(twoFigures(target.value), money)} target, so the goal would already be met${suffix}`
-    : `less than a tenth of your ${sayFigure(twoFigures(target.value), money)} limit, so you'd already be well under it${suffix}`;
+    ? `about ${ratio.toLocaleString('en-GB', { maximumSignificantDigits: 2 })} times your ${sayTwo(target.value)} target, so the goal would already be met${suffix}`
+    : `less than a tenth of your ${sayTwo(target.value)} limit, so you'd already be well under it${suffix}`;
   return {
-    text: `At ${expression}, ${goalLabel} today would be about ${sayFigure(twoFigures(implied), money)}, ${comparison}. `
+    text: `At ${expression}, ${goalLabel} today would be about ${sayTwo(implied)}, ${comparison}. `
       + `Is ${value} your ${editedLabel}, ${scopeQuestion}`,
     controls: [
       { id: `coherence-keep:${edited.nodeId}`, label: `Yes, ${value} ${editedLabel}`, message: `Yes, ${value} is right for '${editedLabel}'.` },

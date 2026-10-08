@@ -933,7 +933,10 @@ export async function applyFactorValueEdit(
     stage: payload.stage,
     handlerFacts: outcome.handler_facts,
   });
-  const coherenceAsk = goalCoherenceAsk(mergedParse.data, { nodeId: event.target_id });
+  // Asked only when the figure changed: the persisted figure before this edit (RC5, Science §(f): not re-asked for the same value).
+  const before = (persistedGraph as { nodes?: Array<{ id?: unknown; observed_state?: { raw_value?: unknown } }> } | null)?.nodes
+    ?.find((n) => n?.id === event.target_id)?.observed_state?.raw_value;
+  const coherenceAsk = goalCoherenceAsk(mergedParse.data, { nodeId: event.target_id, ...(typeof before === 'number' ? { previousRaw: before } : {}) });
   const response: OlumiResponse = coherenceAsk === null ? composedResponse : {
     ...composedResponse,
     assistant_text: `${composedResponse.assistant_text}\n\n${coherenceAsk.text}`,
