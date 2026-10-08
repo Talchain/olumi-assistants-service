@@ -15,7 +15,7 @@ const REQUEST_ID = 'req-accumulation-rate-spread-wire';
 function persistedGraph() {
   return GraphV3.parse({
     nodes: [
-      { id: 'goal_mrr', kind: 'goal', label: 'MRR', nonlinear_identity: { operation: 'product', factor_ids: ['price', 'subs_m12'], stated_in_brief: true } },
+      { id: 'goal_mrr', kind: 'goal', label: 'MRR', goal_horizon_months: 12, nonlinear_identity: { operation: 'product', factor_ids: ['price', 'subs_m12'], stated_in_brief: true } },
       { id: 'keep', kind: 'option', label: 'Keep £49', interventions: { price: 0.245 } },
       { id: 'raise', kind: 'option', label: 'Raise to £59', interventions: { price: 0.295 } },
       { id: 'price', kind: 'factor', label: 'Price', observed_state: { value: 0.245, raw_value: 49, cap: 200, unit: 'GBP per month', source: 'user_override' } },

@@ -1,103 +1,13 @@
-/**
- * THE EXPLICIT USER STOP — one handler, two ingresses.
- *
- * Until this shipped there was NO cancel surface anywhere in CEE. Pressing Stop
- * aborted the browser's own fetch and nothing else, and
- * `streamed-turn-sse.ts:71-78` deliberately does not cancel a turn when the
- * client hangs up. Live-reproduced consequence
- * (`PHASE0-EVIDENCE-2026-07-28/fix-stop-fence.md`): a draft stopped at +4.0s ran
- * its full 52.7s, committed, and overwrote the graph of a later turn the user had
- * sent in the meantime.
- *
- * ⚠ THIS DOES NOT CANCEL THE TURN, AND THAT IS THE DESIGN. It records a
- *   tombstone in `v5_turn_fence`; the turn keeps running and its WRITE is refused
- *   at the commit chokepoint (`turn-fence.ts`). Destroying the in-flight pipeline
- *   is what the #751 arc rejected — a turn killed mid-flight can leave a scenario
- *   half-applied. So the ONE observable difference between an explicit Stop and
- *   an incidental disconnect is whether a tombstone exists: a disconnect sends
- *   nothing, has no tombstone, and still commits.
- *
- * ── WHY TWO INGRESSES AND ONE IMPLEMENTATION ────────────────────────────────
- * The UI's endpoint ladder (`v5Adapter.resolveEndpoint`) resolves to EITHER the
- * browser proxy (`…/proxy/v5/turn`, what staging bakes) or the Netlify edge
- * rung (`/bff/orchestrate/v2/turn`, which the edge function rewrites onto CEE's
- * `/orchestrate/*` with the service key injected). The stop URL is derived as
- * `<buffered endpoint>/stop` — the same derivation the streamed transport uses —
- * so BOTH rungs must exist or one of them 404s and the UI can never confirm a
- * Stop on it.
- *
- * They differ ONLY in ingress (who may call, and how they are authenticated).
- * Everything after that is this module, once — the same reasoning
- * `streamed-turn-sse.ts` gives for the two streamed turn routes. Two copies of
- * the stop handler would be CLAUDE.md trap 12 with a persistence-integrity
- * blast radius, and the drift would be silent: a divergent copy still answers
- * 200.
- *
- * ── ROADMAP 2.236 — THE STOP ROUTE NOW AUTHORIZES (Codex audit C, C-1) ──────
- * Until this landed, this handler checked UUID SYNTAX and SCENARIO EXISTENCE
- * and NOTHING ELSE. It read no identity at all. The public rung's only other
- * defences were a forgeable `Origin` allowlist and a 30/min per-IP limit, and
- * the module header above argued that was acceptable because "a caller who can
- * stop a turn on a scenario is already a caller who can APPEND turns to it".
- *
- * ⚠ THAT ARGUMENT WAS FALSE, AND IT IS THE WHOLE DEFECT. Appending is gated by
- *   the turn route's scenario-ownership pre-flight, which REFUSES an anonymous
- *   caller on an OWNED scenario (`scenario_requires_authenticated_owner`).
- *   Stopping was gated by nothing. So on an owned scenario the Stop rung
- *   granted strictly MORE authority than the turn rung, not less — the exact
- *   inverse of the claim. The harm is not a nuisance tombstone: `generation` is
- *   a `BIGSERIAL` and the Stop RPC UPSERTS, so an INVENTED `turn_id` inserted a
- *   row with a HIGHER generation than every in-flight turn, and a legitimate
- *   graph-bearing turn admitted at G then hit `OLTF2` at its commit and LOST
- *   ITS GRAPH WRITE. No JWT and no knowledge of the victim's turn id required.
- *
- * The fix, in the order the checks run below:
- *   1. bound `turn_id` LENGTH — an unbounded caller-chosen string went
- *      straight into a permanent TEXT column;
- *   2. scenario UUID syntax, then scenario EXISTENCE (2.174, unchanged, and
- *      deliberately BEFORE the ownership pre-flight, whose `ensureScenarioExists`
- *      UPSERTS — checking existence first is what stops a Stop from CREATING
- *      the scenario it claims to stop);
- *   3. the SAME verified-identity + scenario-ownership pre-flight the turn
- *      route runs — literally the same two functions, `resolveVerifiedIdentityOrRefuse`
- *      and `authorizeScenarioOwnership` from route-v2-preflight.ts, NOT a second
- *      ownership rule written here (that would be trap 12 with an authorization
- *      blast radius);
- *   4. the turn must have been ADMITTED — a fence row must already exist for
- *      (scenario, turn). This is what makes a caller-INVENTED `turn_id`
- *      unable to allocate a new generation, and therefore unable to supersede
- *      anything.
- *
- * ⚠ EVERY REFUSAL ABOVE ANSWERS THE SAME BYTES. "no such scenario", "not your
- *   scenario", "no such turn" and "turn id too long" are INDISTINGUISHABLE:
- *   one status, one code, one message. The pre-fix route answered 200 with
- *   `claimed` / `already_committed` for ANY guessed turn id, which was a free
- *   oracle over another user's turn state; a refusal that named its reason
- *   would rebuild that oracle one bit at a time.
- *
- * ⚠ WHAT THIS DOES NOT DO. Guest (unowned) scenarios stay addressable by
- *   anyone holding the UUID — `preflightEnsureScenario` carves them out BY
- *   DESIGN and the turn route does the same, so closing that here would fork
- *   the two rungs' authorization models rather than align them. That posture is
- *   the accepted PoC one, announced in the proxy's boot log. What changed is
- *   that Stop no longer grants MORE than a turn does.
- *
- * ── WHY THIS CANNOT REGRESS THE OWNER'S STOP ────────────────────────────────
- * The authorization inputs are identical to the turn route's — the same
- * identity resolver over the same headers, the same `user_id` extension parse,
- * the same ownership function. So the guarantee is structural: ANY TURN THAT
- * COULD BE ADMITTED ON A SCENARIO CAN BE STOPPED ON THAT SCENARIO. A refused
- * Stop is a Stop for a turn that could never have been admitted.
- */
+/** Explicit turn Stop.
+ * HTTP identity and scenario ownership are admitted by the single global hook.
+ * This helper retains body validation, admitted-turn checks and recording.
+ * Scenario existence is checked in the hook before ownership. Unknown scenario/non-owner/unknown-turn refusals stay identical.
+ * Clean missing rows refuse; the existing existence/admitted-turn outage
+ * hardening remains fail-open; ownership reads still fail closed in the hook. */
 
 import type { FastifyRequest } from "fastify";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
-import { resolveOwnershipAuthority } from "../orchestrator/ownership-authority.js";
-import {
-  authorizeScenarioOwnership,
-  resolveVerifiedIdentityOrRefuse,
-} from "../orchestrator/route-v2-preflight.js";
 import { readIngressTurnIdentity } from "../orchestrator/turn-fence-prehandler.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { errMessage } from "../orchestrator-v5/session/turn-fence.js";
@@ -179,29 +89,7 @@ export async function recordExplicitTurnStop(
 ): Promise<TurnStopReply> {
   const body = req.body;
 
-  // ── 2.236 STEP 0, AND IT IS FIRST FOR A REASON ──────────────────────────
-  // `runPreFlight` resolves identity BEFORE body validation so that an
-  // unauthenticated caller learns nothing about the request it sent or the
-  // state of the service. This rung must match that ordering EXACTLY, because
-  // ordering is the whole of the alignment claim between the two rungs.
-  //
-  // ⚠ AN EARLIER REVISION OF THIS FIX PUT THIS CALL AFTER THE SCENARIO-EXISTENCE
-  //   READ, and wrote a comment claiming identity ran "strictly before anything
-  //   that reads the scenario". It did not, and the comment made the gap look
-  //   reviewed — the exact defect shape this whole PR exists to correct, in the
-  //   correction. Measured on the un-hoisted code with the JWT flag on and a
-  //   junk token: an EXISTING scenario answered 401 while an ABSENT one
-  //   answered 404, so the refusal status was a free scenario-existence oracle
-  //   for any caller willing to present a deliberately bad token. Hoisted here,
-  //   both answer 401 and `scenarioExists` is never reached.
-  //
-  // Hoisting is free: this call reads only `req.headers`, writes nothing, and
-  // touches no store — so the "existence before the ownership upsert" ordering
-  // that keeps a Stop from CREATING a scenario is untouched.
-  const resolved = await resolveVerifiedIdentityOrRefuse(req, requestId);
-  if (!resolved.ok) {
-    return { status: resolved.status, body: resolved.error };
-  }
+  // The global hook resolves identity before any scenario read.
 
   // R-12/R-8: the SAME parse as the ingress claim (`readIngressTurnIdentity`)
   // — the tombstone this records and the claim the turn made key one
@@ -240,18 +128,9 @@ export async function recordExplicitTurnStop(
     return stopRefusedReply(requestId);
   }
 
-  // ── 2.174 fix a: the scenario must EXIST before anything is written ──────
-  // The public rung is reachable with any UUID and fence rows are never
-  // deleted, so an unchecked upsert let outsiders grow the table without
-  // bound and tombstone-spray guessed scenarios. A non-UUID id cannot exist
-  // (column type) — refused without a read. An unknown UUID is refused on a
-  // clean no-row read. A FAILED read fails OPEN and records the Stop anyway:
-  // the P0 protection (a legitimate user's Stop must land) outranks the
-  // hardening, and the pre-existing turn on that scenario proves the row
-  // existed moments ago. Priced residual, documented: a Stop that arrives
-  // before the turn's own pre-flight scenario upsert commits (sub-100 ms
-  // into the turn, vs ≥1 s for a human Stop click) would be refused — the
-  // UI's non-200 copy ("we could not confirm") is the honest surface there.
+  // Non-UUID ids still refuse without a scenario read. The global hook
+  // handles existence (clean absence refuses, a throw proceeds to ownership)
+  // before admitting this handler; do not repeat that read here.
   if (!UUID_PATTERN.test(scenarioId)) {
     log.warn(
       {
@@ -265,52 +144,6 @@ export async function recordExplicitTurnStop(
   }
   try {
     const store = getSessionStore();
-    if (typeof store.scenarioExists === "function") {
-      let exists = true;
-      try {
-        exists = await store.scenarioExists(scenarioId);
-      } catch (err) {
-        log.warn(
-          {
-            event: "v5.turn_fence.stop_existence_read_failed",
-            request_id: requestId,
-            scenario_id: scenarioId,
-            err: errMessage(err),
-          },
-          "V5 turn fence — scenario existence read failed; failing OPEN and recording the Stop",
-        );
-      }
-      if (!exists) {
-        log.warn(
-          {
-            event: "v5.turn_fence.stop_refused_unknown_scenario",
-            request_id: requestId,
-            scenario_id: scenarioId,
-            reason: "scenario_not_found",
-          },
-          "V5 turn fence — Stop refused: no scenario exists with that id; nothing was written",
-        );
-        return stopRefusedReply(requestId);
-      }
-    }
-
-    // ── 2.236 step 3: THE SAME PRE-FLIGHT THE TURN ROUTE RUNS ──────────────
-    // Two calls, both into route-v2-preflight.ts, both shared verbatim with
-    // `runPreFlight`. Nothing about ownership is decided in this file. Step 0
-    // (`resolveVerifiedIdentityOrRefuse`) already ran at the top of the handler,
-    // before ANY read of server state — see the ordering note there.
-    //
-    // The caller-supplied `user_id`, read by the SAME parser the turn route
-    // uses — not a hand-rolled `body.user_id` read, which would drift the day
-    // the extension contract moves. With `CEE_REQUIRE_USER_JWT` on, the
-    // verified `sub` overrides it inside `authorizeScenarioOwnership`.
-    //
-    // ⚠ WITH THE FLAG OFF (staging today) IT IS NO LONGER AUTOMATICALLY THE
-    //   IDENTITY. This comment used to end "it IS the identity, exactly as on
-    //   a turn", which was true and was the IDOR: a shared-assist-key caller
-    //   named whoever it liked. `resolveOwnershipAuthority` now gates it on
-    //   VERIFIED HMAC auth at both rungs, so on the flag-off path a shared-key
-    //   caller's claim is discarded and it is treated as anonymous.
     const extensions = parseRequestExtensions(body, requestId);
     if (!extensions.ok) {
       log.warn(
@@ -324,36 +157,6 @@ export async function recordExplicitTurnStop(
       return stopRefusedReply(requestId);
     }
 
-    // Same canonical rule as the turn rung, from the same module — the two
-    // rungs must not drift on WHO MAY CLAIM an identity any more than they may
-    // drift on who owns a scenario. The raw claim rides along as an
-    // observation so the misrepresentation alarm survives the discard.
-    const authority = resolveOwnershipAuthority(req, extensions.value.userId, resolved.identity);
-    const owned = await authorizeScenarioOwnership(
-      scenarioId,
-      authority.claimAdmitted ? authority.userId : null,
-      resolved.identity,
-      requestId,
-      authority.observedClaim,
-    );
-    if (!owned.ok) {
-      // Every ownership reason collapses to the ONE refusal — including
-      // `scenario_ownership_unverifiable`, which is the oracle-down case. That
-      // is fail-CLOSED and it matches the turn route: when the oracle is down
-      // the turn cannot be admitted either, so no admissible turn loses its
-      // Stop. The reason is logged, never returned.
-      log.warn(
-        {
-          event: "v5.turn_fence.stop_refused_not_owner",
-          request_id: requestId,
-          scenario_id: scenarioId,
-          reason: owned.reason,
-        },
-        "V5 turn fence — Stop refused: caller is not authorized for this scenario; nothing was written",
-      );
-      return stopRefusedReply(requestId);
-    }
-
     // ── 2.236 step 4: the turn must have been ADMITTED ─────────────────────
     // This is the check that removes the DAMAGE. `v5_mark_turn_stopped` upserts
     // and `generation` is a BIGSERIAL, so an INVENTED turn id INSERTS a row at a
@@ -363,7 +166,7 @@ export async function recordExplicitTurnStop(
     // that can only tombstone its own turn and one that can destroy a
     // stranger's graph write.
     //
-    // Same error discipline as the existence check above, and for the same
+    // Same error discipline as the existence check in the hook, and for the same
     // reason: a clean `false` is a FACT and refuses; a THROWN read is an
     // UNKNOWN and fails OPEN, because a DB blip must not cost a legitimate
     // user their Stop. A store double without the method skips the check.

@@ -17,7 +17,7 @@ import {
 import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
 
 export default async function route(app: FastifyInstance) {
-  app.post("/assist/clarify-brief", async (req, reply) => {
+  app.post("/assist/clarify-brief", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const parsed = ClarifyBriefInput.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);

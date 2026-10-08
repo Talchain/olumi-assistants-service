@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /** R2: the opt-in /graph read serves only CEE-authorised original held offers. */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
@@ -100,6 +101,7 @@ const GRAPH_NO_LAYOUT = {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
   await scenarioGraphRoute(app);
   await app.ready();
   return app;
@@ -129,6 +131,7 @@ beforeEach(() => {
   // override this explicitly — see the note on the mock.
   resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
   ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
   getScenarioOwner.mockResolvedValue(null);
   loadGraphAndBriefText.mockResolvedValue({
     graph: GRAPH_NO_LAYOUT,
@@ -349,9 +352,10 @@ async function runTurn(sid = SCENARIO, approveId?: string) {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message',
     content: [{ type: 'output_text', text: 'The run is provisional.' }] }] }), { status: 200 })))
   const app = Fastify()
-  app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH_NO_LAYOUT,
+  await installOwnershipHarness(app, () => resolveUserIdentity())
+  app.post('/assist/v1/scenarios/:id/graph', { config: { scenarioId: { from: 'params', key: 'id' } } }, async () => ({ graph: GRAPH_NO_LAYOUT,
     graph_hash: computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT) }))
-  app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran',
+  app.post('/orchestrate/v2/turn', { config: { scenarioId: { from: 'body', key: 'scenario_id' } } }, async () => ({ response_version: 2, assistant_text: 'ran',
     suggested_actions: [], insights: [], graph_hash: computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT),
     blocks: [{ type: 'analysis_result', data: { marker: 'local-run' } }],
     analysis_ready: { status: 'ready', options: [], blockers: [] } }))
@@ -536,3 +540,8 @@ describe('S-D reload: proposal_fields on the opt-in graph read', () => {
     } finally { await app.close(); latest = []; }
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));

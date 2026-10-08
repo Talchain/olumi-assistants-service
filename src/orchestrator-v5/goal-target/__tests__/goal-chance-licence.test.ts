@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { goalChanceLicenceOf, withGoalChanceLicence, GOAL_CHANCE_LICENSED } from '../goal-chance-licence.js';
+import { goalChanceLicenceOf, withGoalChanceLicence, GOAL_CHANCE_LICENSED, olumiExistenceOnGoalPath } from '../goal-chance-licence.js';
 import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 
 type Json = Record<string, any>;
@@ -17,6 +17,45 @@ const G = RT10B.graph_with_target; // "at most 400 cancellations/month": held "<
 const env = (...ps: Array<[string, unknown]>): Json => ({
   option_comparison: ps.map(([id, p]) => ({ option_id: id, id, probability_of_goal: p, win_probability: 0.5 })),
   inference_warnings: [],
+});
+
+describe('accumulation participant links keep the existing identity exemption', () => {
+  const accumulation = (): Json => ({
+    nodes: [
+      { id: 'mrr', kind: 'goal', label: 'MRR', goal_direction: '>=', goal_threshold: 0.8,
+        goal_threshold_raw: 85000, goal_threshold_cap: 106250, goal_threshold_unit: '£/month', goal_threshold_frame: 'level',
+        nonlinear_identity: { operation: 'product', factor_ids: ['price', 'subscribers_at_12'], stated_in_brief: true } },
+      { id: 'subscribers_at_12', kind: 'outcome', label: 'Subscribers at month 12', scale_frame: 5000,
+        nonlinear_identity: { operation: 'accumulation', factor_ids: ['stock_today', 'churn', 'inflow'],
+          horizon_months: 12, rate_scale: 0.01, stated_in_brief: true } },
+      { id: 'price', kind: 'factor' },
+      ...['stock_today', 'churn', 'inflow'].map(id => ({ id, kind: 'factor', observed_state: { raw_value: 3, value: 0.03, cap: 100 } })),
+      ...['a', 'b'].map(id => ({ id, kind: 'option', interventions: { stock_today: 250, churn: 3, inflow: 30 } })),
+    ],
+    edges: [
+      ...['stock_today', 'churn', 'inflow'].map(from => ({ from, to: 'subscribers_at_12', exists_probability: 0.5 })),
+      ...['price', 'subscribers_at_12'].map(from => ({ from, to: 'mrr', exists_probability: 0.5 })),
+    ],
+  });
+
+  it('all three named parts into subscribers_at_12 are exact identity links, so the chance summary is licensed', () => {
+    const g = accumulation();
+    expect(olumiExistenceOnGoalPath(g, 'mrr', ['a', 'b'])).toBe(false);
+    expect(goalChanceLicenceOf(env(['a', 0.62], ['b', 0.41]), g, 'mrr')).toMatchObject({
+      goal_node_id: 'mrr', form: 'highest', leader_option_id: 'a', next_option_id: 'b',
+    });
+  });
+
+  it('CONTROL: an additional non-part into subscribers_at_12 still carries the Bernoulli prior and withholds the summary', () => {
+    const g = accumulation();
+    g.nodes.push({ id: 'extra_uptake', kind: 'factor' });
+    g.nodes.find((n: Json) => n.id === 'a').interventions.extra_uptake = 1;
+    g.edges.push({ from: 'extra_uptake', to: 'subscribers_at_12', exists_probability: 0.5 });
+    expect(olumiExistenceOnGoalPath(g, 'mrr', ['a', 'b'])).toBe(true);
+    expect(goalChanceLicenceOf(env(['a', 0.62], ['b', 0.41]), g, 'mrr')).toMatchObject({
+      goal_node_id: 'mrr', form: 'each', summary_withheld: { cause: 'olumi_existence_assumption', form: 'highest' },
+    });
+  });
 });
 
 describe('D3 step 2 — goalChanceLicenceOf', () => {

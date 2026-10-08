@@ -81,7 +81,7 @@ export default async function route(app: FastifyInstance) {
   const OPTIONS_RATE_LIMIT_RPM = resolveCeeRateLimit("CEE_OPTIONS_RATE_LIMIT_RPM");
   const FEATURE_VERSION = config.cee.optionsFeatureVersion || "options-1.0.0";
 
-  app.post("/assist/v1/options", async (req, reply) => {
+  app.post("/assist/v1/options", { config: { scenarioId: 'none' } }, async (req, reply) => {
     const start = Date.now();
     const requestId = getRequestId(req);
 

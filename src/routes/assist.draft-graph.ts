@@ -666,15 +666,15 @@ export default async function route(app: FastifyInstance) {
     message: "This endpoint has been removed. Use /assist/v1/draft-graph instead.",
   };
 
-  app.post("/assist/draft-graph/stream", async (_req, reply) => {
+  app.post("/assist/draft-graph/stream", { config: { scenarioId: 'none' } }, async (_req, reply) => {
     return reply.code(410).send(goneResponse);
   });
 
-  app.post("/assist/draft-graph/resume", async (_req, reply) => {
+  app.post("/assist/draft-graph/resume", { config: { scenarioId: 'none' } }, async (_req, reply) => {
     return reply.code(410).send(goneResponse);
   });
 
-  app.post("/assist/draft-graph", async (_req, reply) => {
+  app.post("/assist/draft-graph", { config: { scenarioId: 'none' } }, async (_req, reply) => {
     return reply.code(410).send(goneResponse);
   });
 }

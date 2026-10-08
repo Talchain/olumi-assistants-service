@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
 /**
  * ⭐ "THE CHAT SURVIVES A RELOAD" — THE CEE READ (DL lease #75 5907582591; Canvas boundary 5907308286; AIQ 5907360564).
  *
@@ -114,6 +115,7 @@ const GRAPH_NO_LAYOUT = {
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
+  await installOwnershipHarness(app, () => resolveUserIdentity());
   await scenarioGraphRoute(app);
   await app.ready();
   return app;
@@ -144,6 +146,7 @@ beforeEach(() => {
   // override this explicitly — see the note on the mock.
   resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
   ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
   getScenarioOwner.mockResolvedValue(null);
   loadGraphAndBriefText.mockResolvedValue({
     graph: GRAPH_NO_LAYOUT,
@@ -252,6 +255,7 @@ describe("the conversation, when asked", () => {
     resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OTHER_USER });
     getScenarioOwner.mockResolvedValue(OWNER);
     ensureScenarioExists.mockResolvedValue({ user_id: OWNER });
+    getScenarioOwner.mockResolvedValue(OWNER);
     const app = await buildApp();
     const res = await read(app, SCENARIO, { include_conversation_turns: true });
     expect(res.statusCode).not.toBe(200);
@@ -353,3 +357,8 @@ describe("the restore returns only the Agent's answer rows — what the user saw
     expect(src).toContain(`return \`${AGENT_ANSWER_REQUEST_HASH_PREFIX}\${digest}\`;`);
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({
+  looksLikeJwt: () => true,
+  verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity,
+}));

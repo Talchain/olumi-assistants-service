@@ -43,7 +43,7 @@ export async function adminRoutingLogRoutes(app: FastifyInstance): Promise<void>
    *   404 -- turn_id not present in the JSONL file
    *   410 -- JSONL file absent (not yet written, or rotated/deleted)
    */
-  app.get('/admin/v1/routing-log/:turn_id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/admin/v1/routing-log/:turn_id', { config: { scenarioId: 'none' } }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     const params = TurnIdParamsSchema.safeParse(request.params);

@@ -1,3 +1,4 @@
+import { installOwnershipHarness } from '../utils/ownership-route-harness.js';
 /**
  * V5 upsert-on-append pre-flight (replaces 2026-04-20 existence-only check).
  *
@@ -89,6 +90,12 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
     ...original,
     getSessionStore: () =>
       createMockSessionStore({
+        scenarioExists: async scenarioId => storeState.rows.has(scenarioId),
+        readExistingScenario: async scenarioId => {
+          if (storeState.throwOnEnsure) throw storeState.throwOnEnsure;
+          const owner = storeState.rows.get(scenarioId);
+          return owner === undefined ? null : { userId: owner, graph: null, briefText: null, analysisInvalidatedAt: null };
+        },
         append: async () => {
           if (storeState.throwOnAppend) throw storeState.throwOnAppend;
           return { id: 'mock-row-id' };
@@ -209,6 +216,7 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
     app.addHook('onRequest', async (req) => {
       attachCallerContext(req, { keyId: 'preflight-suite', hmacAuth: true });
     });
+    await installOwnershipHarness(app);
     await ceeOrchestratorRouteV2(app);
     await app.ready();
     setTestSink((eventName, data) => events.push({ event: eventName, data }));

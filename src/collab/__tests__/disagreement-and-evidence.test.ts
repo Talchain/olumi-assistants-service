@@ -1,3 +1,7 @@
+import Fastify from "fastify";
+import { installOwnershipHarness } from "../../../tests/utils/ownership-route-harness.js";
+import ownerRoutes from "../../routes/collab.v1.rounds.js";
+import { CollabRefusal } from "../types.js";
 /**
  * COLLAB — evidence attach, and the disagreement read model.
  *
@@ -25,7 +29,7 @@
  * read it should not be making.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   DISSENT_SURVIVES_APPLY,
@@ -1007,6 +1011,29 @@ describe('summariseDisagreementForPrompt', () => {
  *    round_id could read that round's beliefs.
  * ══════════════════════════════════════════════════════════════════════════ */
 
+type OwnerViewKind = 'reveal' | 'disagreement';
+type OwnerViewProjection<K extends OwnerViewKind> = Awaited<ReturnType<
+  K extends 'reveal' ? typeof assembleRevealView : typeof assembleDisagreementView
+>>;
+async function ownerView<K extends OwnerViewKind>(kind: K, store: CollabStore, args: Parameters<typeof assembleRevealView>[1]): Promise<OwnerViewProjection<K>> {
+  if (args.requested_by.kind !== 'owner') {
+    // Each assembler's result is bound to the same kind as the caller.
+    const view = await (kind === 'reveal' ? assembleRevealView(store, args) : assembleDisagreementView(store, args));
+    return view as OwnerViewProjection<K>;
+  }
+  const userId = args.requested_by.user_id;
+  const app = Fastify(); await installOwnershipHarness(app, () => ({ mode: 'verified', userId }));
+  await ownerRoutes(app, { store: { ...store, getScenarioOwnerUserId: async () => 'owner-user' } });
+  try {
+    const response = await app.inject({ method: 'GET', url: `/collab/v1/rounds/${args.round_id}/${kind}` });
+    if (response.statusCode !== 200) {
+      const refusal = response.json<{ code: ConstructorParameters<typeof CollabRefusal>[0]; message: string }>();
+      throw new CollabRefusal(refusal.code, refusal.message);
+    }
+    return response.json<OwnerViewProjection<K>>();
+  } finally { await app.close(); }
+}
+
 describe('the reveal projection is bound to the round OWNER', () => {
   const OWNER = 'owner-user';
   const STRANGER = 'some-other-signed-in-user';
@@ -1028,7 +1055,7 @@ describe('the reveal projection is bound to the round OWNER', () => {
    */
   it('REFUSES a signed-in stranger who is not the round owner', async () => {
     const code = await refusalCodeOf(() =>
-      assembleRevealView(storeWithAnswers(), {
+      ownerView('reveal', storeWithAnswers(), {
         round_id: ROUND_ID,
         requested_by: { kind: 'owner', user_id: STRANGER },
       }),
@@ -1037,7 +1064,7 @@ describe('the reveal projection is bound to the round OWNER', () => {
   });
 
   it('ADMITS the round owner (the other half of the pair)', async () => {
-    const view = await assembleRevealView(storeWithAnswers(), {
+    const view = await ownerView('reveal', storeWithAnswers(), {
       round_id: ROUND_ID,
       requested_by: { kind: 'owner', user_id: OWNER },
     });
@@ -1051,7 +1078,7 @@ describe('the reveal projection is bound to the round OWNER', () => {
 
   it('REFUSES the stranger on the DISAGREEMENT view too (one inherited gate)', async () => {
     const code = await refusalCodeOf(() =>
-      assembleDisagreementView(storeWithAnswers(), {
+      ownerView('disagreement', storeWithAnswers(), {
         round_id: ROUND_ID,
         requested_by: { kind: 'owner', user_id: STRANGER },
       }),
@@ -1060,7 +1087,7 @@ describe('the reveal projection is bound to the round OWNER', () => {
   });
 
   it('ADMITS the owner on the disagreement view, with the stated basis verbatim', async () => {
-    const view = await assembleDisagreementView(storeWithAnswers(), {
+    const view = await ownerView('disagreement', storeWithAnswers(), {
       round_id: ROUND_ID,
       requested_by: { kind: 'owner', user_id: OWNER },
     });
@@ -1078,7 +1105,7 @@ describe('the reveal projection is bound to the round OWNER', () => {
    */
   it('refuses the stranger BEFORE disclosing the round status', async () => {
     const code = await refusalCodeOf(() =>
-      assembleRevealView(storeWithAnswers({ status: 'open' }), {
+      ownerView('reveal', storeWithAnswers({ status: 'open' }), {
         round_id: ROUND_ID,
         requested_by: { kind: 'owner', user_id: STRANGER },
       }),
@@ -1089,13 +1116,13 @@ describe('the reveal projection is bound to the round OWNER', () => {
 
   it('answers a MISSING round exactly as it answers someone else’s (no existence oracle)', async () => {
     const missing = await refusalCodeOf(() =>
-      assembleRevealView(storeWithAnswers(), {
+      ownerView('reveal', storeWithAnswers(), {
         round_id: '99999999-9999-4999-8999-999999999999',
         requested_by: { kind: 'owner', user_id: OWNER },
       }),
     );
     const notMine = await refusalCodeOf(() =>
-      assembleRevealView(storeWithAnswers(), {
+      ownerView('reveal', storeWithAnswers(), {
         round_id: ROUND_ID,
         requested_by: { kind: 'owner', user_id: STRANGER },
       }),
@@ -1105,7 +1132,7 @@ describe('the reveal projection is bound to the round OWNER', () => {
   });
 
   it('leaves the PARTICIPANT path untouched', async () => {
-    const view = await assembleRevealView(storeWithAnswers(), {
+    const view = await ownerView('reveal', storeWithAnswers(), {
       round_id: ROUND_ID,
       requested_by: { kind: 'participant', participant_id: GRACE_ID },
     });
@@ -1114,7 +1141,7 @@ describe('the reveal projection is bound to the round OWNER', () => {
 
   it('still refuses a participant who is not on the round', async () => {
     const code = await refusalCodeOf(() =>
-      assembleRevealView(storeWithAnswers(), {
+      ownerView('reveal', storeWithAnswers(), {
         round_id: ROUND_ID,
         requested_by: { kind: 'participant', participant_id: STRANGER_ID },
       }),
@@ -1181,3 +1208,5 @@ describe('the standing disagreement copy has exactly one author', () => {
     expect(view.standing_note).toBe(POSITIONS_NOT_COMBINED);
   });
 });
+
+vi.mock('../../utils/supabase-user-jwt.js', async () => ({ looksLikeJwt: () => true, verifySupabaseUserJwt: (await import('../../../tests/utils/ownership-route-harness.js')).verifyFixtureIdentity }));

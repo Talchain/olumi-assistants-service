@@ -31,7 +31,7 @@ export async function limitsRoute(app: FastifyInstance) {
   /**
    * GET /v1/limits - Get current quota status for authenticated key
    */
-  app.get("/v1/limits", async (request, reply) => {
+  app.get("/v1/limits", { config: { scenarioId: 'none' } }, async (request, reply) => {
     // Get key ID from auth (will be null if not authenticated)
     const keyId = getRequestKeyId(request);
 

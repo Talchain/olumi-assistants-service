@@ -1511,7 +1511,8 @@ export function chancesWithheldByAGuess(drafted: { readonly nodes: readonly unkn
   const options = nodes.filter((n) => n.kind === 'option' && typeof n.id === 'string').map((n) => n.id as string);
   const evaluations = nodes.filter((n) => n.nonlinear_identity !== null && typeof n.nonlinear_identity === 'object').map((n) => {
     const i = n.nonlinear_identity as Record<string, unknown>;
-    return { node_id: n.id, evaluated: true, operation: i.operation, factor_ids: i.factor_ids };
+    return { node_id: n.id, evaluated: true, operation: i.operation, factor_ids: i.factor_ids,
+      ...(i.operation === 'accumulation' ? { horizon_months: i.horizon_months } : {}) };
   });
   if (unsizedLeaderGoalPaths(graph, options, evaluations).length > 0) return true;
   const verdict = targetTestabilityOf(graph, evaluations) as { failures?: readonly { code?: unknown }[] };
