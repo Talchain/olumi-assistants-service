@@ -59,6 +59,15 @@ describe('no Yes over a part with no level (stored 828d87ac)', () => {
     expect(r.kind === 'refused' ? r.detail : r.kind).not.toMatch(/250/);
   });
 
+  it('⭐ RED (#4b): a card CARRYING the user\'s typed figure for the missing part is offerable; an unasked or partial one is not', () => {
+    const count = { part_id: 'pro_paying_subscribers', raw_value: 300, unit: 'Pro paying subscribers' };
+    expect(identityCardOfferable(beforeYes(), [count])).toBe(true);
+    expect(identityCardOfferable(inferred, [count])).toBe(true);
+    // CONTRAST: a figure for a part that was not missing is not the asked figure, so no card.
+    expect(identityCardOfferable(beforeYes(), [{ part_id: 'pro_plan_price', raw_value: 49, unit: '£ per Pro subscriber per month' }])).toBe(false);
+    expect(identityCardOfferable(beforeYes(), [])).toBe(false);
+  });
+
   it('CONTRAST: the same count as the USER\'s figure is a level: the card is offered, the Yes writes, and their figure is untouched', () => {
     const users = { ...inferred, nodes: inferred.nodes.map((n: Rec) => (n.id === 'pro_paying_subscribers'
       ? { ...n, observed_state: { unit: 'subscribers', value: 0.15, raw_value: 300, source: 'user_override' } } : n)) };

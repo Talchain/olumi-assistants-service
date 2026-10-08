@@ -240,7 +240,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { keptFigureFor } from '../kept-figure.js';
-import { sayFigure, sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
+import { sayFigureExactly, sayFigureRead, sayFigureWithoutRounding } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import { quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';

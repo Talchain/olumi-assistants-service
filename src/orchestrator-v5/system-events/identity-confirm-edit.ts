@@ -222,9 +222,22 @@ export function identityPartLevelAsk(goalLabel: string, formula: readonly string
  * Whether the STORED model holds a reading whose card may be offered: one to confirm, a base its writer can record, and
  * every part with a level (`identityPartsWithoutLevel`). The re-offer's predicate (`readingWaiting`), the same as the Run hint's.
  */
-export function identityCardOfferable(storedGraph: unknown): boolean {
+export function identityCardOfferable(storedGraph: unknown, partLevels?: readonly IdentityPartLevel[]): boolean {
   const card = proposeProductIdentity(storedGraph);
-  return card !== null && identityConfirmBaseIsWritable(storedGraph) && identityPartsWithoutLevel(storedGraph, card.factor_ids).length === 0;
+  if (card === null || !identityConfirmBaseIsWritable(storedGraph)) return false;
+  // A card CARRYING the user's typed figures (#4b) is offerable when its Yes would write them: the writer's own
+  // asked-check, then the same part-level write on a copy, then the same no-missing-part predicate the writer applies.
+  if (partLevels === undefined || partLevels.length === 0) return identityPartsWithoutLevel(storedGraph, card.factor_ids).length === 0;
+  if (!isRec(storedGraph) || !Array.isArray(storedGraph.nodes) || !partLevelsWereAsked(storedGraph, card.factor_ids, partLevels)) return false;
+  const withLevels = structuredClone(storedGraph) as Rec & { nodes: unknown[] };
+  for (const level of partLevels) {
+    const part = withLevels.nodes.find((n): n is Rec => isRec(n) && n.id === level.part_id);
+    if (part === undefined) return false;
+    const expected = partLevelWrite(part, level);
+    if (expected.scale_frame !== undefined) part.scale_frame = expected.scale_frame;
+    part.observed_state = expected.observed_state;
+  }
+  return identityPartsWithoutLevel(withLevels, card.factor_ids).length === 0;
 }
 
 const refuse = (reason: IdentityConfirmRefusal, detail?: string): IdentityConfirmEditResult =>
