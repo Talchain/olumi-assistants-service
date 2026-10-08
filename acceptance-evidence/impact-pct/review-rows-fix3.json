@@ -1,0 +1,1004 @@
+{
+  "sourceReview": "review-2828-r2-independent.md",
+  "sourceSha": "8436239ff7829a83ccd6d43c6b8855c6e2053c8a",
+  "countNote": "The review prose says 75 battery rows, but its eight reader paraphrase tables contain exactly 74 rows. All 74 are preserved here; two explicit P2-2 findings are additional clause-boundary rows. Table annotations are separate from input text.",
+  "readerRows": [
+    {
+      "id": "review-01",
+      "input": "There will be a 20% hit to revenue within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-02",
+      "input": "Revenue could fall 15% within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-03",
+      "input": "There's maybe a 10% dip in MRR within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-04",
+      "input": "The outage is likely to cut revenue 10% within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-05",
+      "input": "Odds are it drops 10% within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-06",
+      "input": "There is a one-in-five chance of a 10% fall within 6 months.",
+      "expected": null,
+      "label": "AMBIGUOUS",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "none, or 0.2",
+      "refusalReason": "Accepted fail closed: word-form one-in-five is not supported; 10% is the impact."
+    },
+    {
+      "id": "review-07",
+      "input": "There is a 1 in 5 chance of a 10% fall within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "0.2 / 6"
+    },
+    {
+      "id": "review-08",
+      "input": "There is a 20% chance of a 10% fall within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "0.2 / 6"
+    },
+    {
+      "id": "review-09",
+      "input": "There is a 20% chance of a 10% dip within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "0.2 / 6"
+    },
+    {
+      "id": "review-10",
+      "input": "There is a 1 in 5 chance of a 10% dip within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Reviewer-named rows",
+      "reviewExpected": "0.2 / 6"
+    },
+    {
+      "id": "review-11",
+      "input": "Probably a 10% dip in MRR within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Impact nouns outside the list, after a hedge",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-12",
+      "input": "Maybe a 10% decrease in revenue within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Impact nouns outside the list, after a hedge",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-13",
+      "input": "Perhaps a 10% shortfall against plan within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Impact nouns outside the list, after a hedge",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-14",
+      "input": "MRR will probably be 10% down within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Impact nouns outside the list, after a hedge",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-15",
+      "input": "MRR is probably 10% below forecast within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Impact nouns outside the list, after a hedge",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-16",
+      "input": "Revenue is probably 10% under target within a year.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Impact nouns outside the list, after a hedge",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-17",
+      "input": "Possibly a 15% slump in sales over the next 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Impact nouns outside the list, after a hedge",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-18",
+      "input": "There's a chance 10% of our customers cancel within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Share of a population",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-19",
+      "input": "Maybe 10% of users churn within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Share of a population",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-20",
+      "input": "I reckon 10% of our customers will leave within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Share of a population",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-21",
+      "input": "I'd say 20% of the team quits within a year.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Share of a population",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-22",
+      "input": "Probably 10% of accounts downgrade in the next 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Share of a population",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-23",
+      "input": "It might happen: 10% of our customers cancel within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Share of a population",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-24",
+      "input": "There's a chance of a fall of 10% within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Event form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-25",
+      "input": "There is a real chance of a drop of 10% in MRR within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Event form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-26",
+      "input": "The odds of a price cut of 15% within 3 months are high.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Event form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-27",
+      "input": "There is a chance that revenue is 10% below plan within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Event form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-28",
+      "input": "There's a chance that MRR is 10% down within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Event form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-29",
+      "input": "There is a chance that churn is 10% within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Event form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-30",
+      "input": "There is a chance that MRR will be down 10% within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Event form",
+      "reviewExpected": "none",
+      "annotation": "r2 row"
+    },
+    {
+      "id": "review-31",
+      "input": "The risk of 10% customer churn within 6 months worries me.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Rate and compound forms",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-32",
+      "input": "There is a risk of 10% attrition within a year.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Rate and compound forms",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-33",
+      "input": "We face a risk of 10% budget overrun within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Rate and compound forms",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-34",
+      "input": "The risk of 7% user churn over 3 months is the issue.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Rate and compound forms",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-35",
+      "input": "The mitigation gives a 20% risk reduction within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Rate and compound forms",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-36",
+      "input": "Lenders will charge a 10% risk premium within a year.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Rate and compound forms",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-37",
+      "input": "Add a risk: a 10% chance-free drop in MRR within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Rate and compound forms",
+      "reviewExpected": "none",
+      "annotation": "r2 row"
+    },
+    {
+      "id": "review-38",
+      "input": "Add a risk: a 10% chance–free drop in MRR within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Rate and compound forms",
+      "reviewExpected": "none",
+      "annotation": "en dash"
+    },
+    {
+      "id": "review-39",
+      "input": "The delay raises our churn risk 10% within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Change in likelihood, and the happen form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-40",
+      "input": "The new competitor increases the chance 10% within a year.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Change in likelihood, and the happen form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-41",
+      "input": "It may happen: 10% in lost revenue within 6 months.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Change in likelihood, and the happen form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-42",
+      "input": "It could happen, 10% over budget, within a year.",
+      "expected": null,
+      "label": "IMPACT",
+      "group": "Change in likelihood, and the happen form",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "review-43",
+      "input": "There is a 30% chance the supplier fails within 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-44",
+      "input": "I'd say 30% within a year.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 12"
+    },
+    {
+      "id": "review-45",
+      "input": "Probably 20% within a year.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 12"
+    },
+    {
+      "id": "review-46",
+      "input": "It's 20% likely to happen within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 6"
+    },
+    {
+      "id": "review-47",
+      "input": "Odds are about 20% within a year.",
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 12",
+      "semanticExpected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12.0
+      },
+      "refusalReason": "Accepted genuine likelihood refusal required by BRIEF-FIX3; unsupported phrase remains fail closed."
+    },
+    {
+      "id": "review-48",
+      "input": "a 1 in 5 chance within 6 months",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 6"
+    },
+    {
+      "id": "review-49",
+      "input": "There is a one in five chance within 6 months.",
+      "expected": null,
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 6",
+      "semanticExpected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "refusalReason": "Accepted genuine likelihood refusal required by BRIEF-FIX3; unsupported phrase remains fail closed."
+    },
+    {
+      "id": "review-50",
+      "input": "20–30% chance within 6 months",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2–0.3 / 6"
+    },
+    {
+      "id": "review-51",
+      "input": "There's a 25% probability that the supplier fails within 6 months.",
+      "expected": {
+        "pLow": 0.25,
+        "pHigh": 0.25,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.25 / 6"
+    },
+    {
+      "id": "review-52",
+      "input": "The likelihood is about 20% within a year.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 12"
+    },
+    {
+      "id": "review-53",
+      "input": "I think there's a 20% chance within a year.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 12"
+    },
+    {
+      "id": "review-54",
+      "input": "Chance of supplier failure: 20% within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 6"
+    },
+    {
+      "id": "review-55",
+      "input": "Probability of a supplier failure: 20% within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 6"
+    },
+    {
+      "id": "review-56",
+      "input": "Likelihood of an outage = 20% within 6 months.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 6"
+    },
+    {
+      "id": "review-57",
+      "input": "The chance of an outage is about 20% within a year.",
+      "expected": {
+        "pLow": 0.2,
+        "pHigh": 0.2,
+        "months": 12.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.2 / 12"
+    },
+    {
+      "id": "review-58",
+      "input": "Roughly 10% likely within a year.",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.1 / 12"
+    },
+    {
+      "id": "review-59",
+      "input": "Supplier failure is 15% probable within 6 months.",
+      "expected": {
+        "pLow": 0.15,
+        "pHigh": 0.15,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.15 / 6"
+    },
+    {
+      "id": "review-60",
+      "input": "The probability that the supplier fails is 30% within 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-61",
+      "input": "There's a 30% chance the release slips within 6 months, which would cut MRR by 10%.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-62",
+      "input": "A 30% chance the release slips within 6 months; it would cut MRR by 10%.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-63",
+      "input": "The release might slip, maybe 30% within 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-64",
+      "input": "I estimate 30% within 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-65",
+      "input": "I guess about 30% within 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "Must-fire likelihoods",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-66",
+      "input": "Add a risk: our key developer might leave, maybe 10–30% in the next 6 months.",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.1–0.3 / 6"
+    },
+    {
+      "id": "review-67",
+      "input": "I'd put it at about 15–25% within 3 months",
+      "expected": {
+        "pLow": 0.15,
+        "pHigh": 0.25,
+        "months": 3.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.15–0.25 / 3"
+    },
+    {
+      "id": "review-68",
+      "input": "10% chance it happens within 6 months",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.1 / 6"
+    },
+    {
+      "id": "review-69",
+      "input": "1 in 10 chance within a year",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.1,
+        "months": 12.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.1 / 12"
+    },
+    {
+      "id": "review-70",
+      "input": "30% chance within 6 months",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-71",
+      "input": "30% likely within 6 months",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-72",
+      "input": "Supplier failure is 30% probable within 6 months.",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.3 / 6"
+    },
+    {
+      "id": "review-73",
+      "input": "odds of 30% within a year",
+      "expected": {
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 12.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.3 / 12"
+    },
+    {
+      "id": "review-74",
+      "input": "It may happen 10–30% in the next 6 months.",
+      "expected": {
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6.0
+      },
+      "label": "LIKELIHOOD",
+      "group": "PR-body must-fire set",
+      "reviewExpected": "0.1–0.3 / 6"
+    }
+  ],
+  "clauseBoundaryRows": [
+    {
+      "id": "finding-etc-window",
+      "input": "There is a 30% chance of supplier issues, delays etc. We need the launch done within 6 months.",
+      "expected": null,
+      "label": "AMBIGUOUS",
+      "group": "P2-2 clause boundaries",
+      "reviewExpected": "none"
+    },
+    {
+      "id": "finding-vs-window",
+      "input": "There is a 30% chance of an outage, vs. a competitor launch within 6 months.",
+      "expected": null,
+      "label": "AMBIGUOUS",
+      "group": "P2-2 clause boundaries",
+      "reviewExpected": "none"
+    }
+  ],
+  "noWindowRows": [
+    {
+      "id": "no-window-01",
+      "input": "Add a risk: key customers leave. I reckon 10% of our customers will leave.",
+      "expected": false,
+      "label": "IMPACT"
+    },
+    {
+      "id": "no-window-02",
+      "input": "Add a risk: staff turnover. I'd say 20% of the team quits.",
+      "expected": false,
+      "label": "IMPACT"
+    },
+    {
+      "id": "no-window-03",
+      "input": "Add a risk: the risk of 10% customer churn worries me.",
+      "expected": false,
+      "label": "IMPACT"
+    },
+    {
+      "id": "no-window-04",
+      "input": "Add a risk: dual sourcing gives a 20% risk reduction.",
+      "expected": false,
+      "label": "IMPACT"
+    },
+    {
+      "id": "no-window-05",
+      "input": "Add a risk: lenders will charge a 10% risk premium.",
+      "expected": false,
+      "label": "IMPACT"
+    },
+    {
+      "id": "no-window-06",
+      "input": "Add a risk: the delay raises our churn risk 10%.",
+      "expected": false,
+      "label": "IMPACT"
+    },
+    {
+      "id": "no-window-07",
+      "input": "Add a risk: it may happen: 10% in lost revenue.",
+      "expected": false,
+      "label": "IMPACT"
+    },
+    {
+      "id": "no-window-08",
+      "input": "Add a risk: a price war. I estimate 15% of deals will be lost.",
+      "expected": false,
+      "label": "IMPACT"
+    },
+    {
+      "id": "no-window-09",
+      "input": "Add a risk: supplier fails. Maybe 30%.",
+      "expected": true,
+      "label": "LIKELIHOOD"
+    },
+    {
+      "id": "no-window-10",
+      "input": "Add a risk: supplier fails, 30% chance.",
+      "expected": true,
+      "label": "LIKELIHOOD",
+      "annotation": "Review shorthand \"…, 30% chance.\" expanded with its supplier-fails prefix."
+    }
+  ],
+  "draftRows": [
+    {
+      "id": "two-names-comma",
+      "input": "Supplier fails, unlike Release slips, has a 30% chance within 6 months.",
+      "riskLabels": [
+        "Supplier fails",
+        "Release slips"
+      ],
+      "expected": null,
+      "reviewCase": "r2 row: two names around commas"
+    },
+    {
+      "id": "fronted-other-risk",
+      "input": "Unlike Release slips, Supplier fails has a 30% chance within 6 months.",
+      "riskLabels": [
+        "Supplier fails",
+        "Release slips"
+      ],
+      "expected": null,
+      "reviewCase": "\"Unlike Release slips, Supplier fails has…\"; review abbreviated the remainder"
+    },
+    {
+      "id": "parenthetical-other-risk",
+      "input": "Supplier fails (more than Release slips) has a 30% chance within 6 months.",
+      "riskLabels": [
+        "Supplier fails",
+        "Release slips"
+      ],
+      "expected": null,
+      "reviewCase": "\"Supplier fails (more than Release slips) has…\"; review abbreviated the remainder"
+    },
+    {
+      "id": "semicolon-control",
+      "input": "Release slips would cut MRR by 10%; there's a 30% chance the supplier fails within 6 months.",
+      "riskLabels": [
+        "Supplier fails",
+        "Release slips"
+      ],
+      "expected": {
+        "riskLabel": "Supplier fails",
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "reviewCase": "Semicolon control"
+    },
+    {
+      "id": "separate-sentence-control",
+      "input": "Release slips would cut MRR by 10%. There's a 30% chance the supplier fails within 6 months.",
+      "riskLabels": [
+        "Supplier fails",
+        "Release slips"
+      ],
+      "expected": {
+        "riskLabel": "Supplier fails",
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "reviewCase": "Separate-sentence control"
+    },
+    {
+      "id": "conditional-other-event",
+      "input": "If the supplier fails, there is a 30% chance the release slips within 6 months.",
+      "riskLabels": [
+        "Supplier fails"
+      ],
+      "expected": null,
+      "reviewCase": "Conditional, other event (P2-4 first exact finding)"
+    },
+    {
+      "id": "preceding-comma-other-event",
+      "input": "Supplier fails would delay launch, and then maybe 30% within 6 months we lose the anchor client.",
+      "riskLabels": [
+        "Supplier fails"
+      ],
+      "expected": null,
+      "reviewCase": "Conditional, other event (P2-4 second exact finding)"
+    },
+    {
+      "id": "eg-held",
+      "input": "There is a 30% chance the supplier fails (e.g. insolvency) within 6 months.",
+      "riskLabels": [
+        "Supplier fails"
+      ],
+      "expected": {
+        "riskLabel": "Supplier fails",
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "reviewCase": "e.g. held"
+    },
+    {
+      "id": "ie-held",
+      "input": "There is a 30% chance of a key loss, i.e. a senior engineer leaving, within 6 months.",
+      "riskLabels": [
+        "Key loss"
+      ],
+      "expected": {
+        "riskLabel": "Key loss",
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "reviewCase": "i.e. held: exact reader abbreviation row"
+    },
+    {
+      "id": "impact-dip",
+      "input": "Release slips: maybe a 10% dip in MRR within 6 months.",
+      "riskLabels": [
+        "Release slips"
+      ],
+      "expected": null,
+      "reviewCase": "impact-dip"
+    },
+    {
+      "id": "impact-share",
+      "input": "Customers churn: I reckon 10% of our customers will leave within 6 months.",
+      "riskLabels": [
+        "Customers churn"
+      ],
+      "expected": null,
+      "reviewCase": "impact-share"
+    },
+    {
+      "id": "event-form",
+      "input": "Price war: there is a chance of a price cut of 15% within 3 months.",
+      "riskLabels": [
+        "Price war"
+      ],
+      "expected": null,
+      "reviewCase": "event-form"
+    },
+    {
+      "id": "risk-reduction",
+      "input": "Dual sourcing gives Supplier fails a 20% risk reduction within 6 months.",
+      "riskLabels": [
+        "Supplier fails"
+      ],
+      "expected": null,
+      "reviewCase": "risk-reduction"
+    },
+    {
+      "id": "must-fire-key-developer",
+      "input": "Our key developer might leave, maybe 10–30% in the next 6 months.",
+      "riskLabels": [
+        "Key developer leaves"
+      ],
+      "expected": {
+        "riskLabel": "Key developer leaves",
+        "pLow": 0.1,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "reviewCase": "Must-fire: comma fragment carries only the likelihood"
+    },
+    {
+      "id": "must-fire-supplier-probable",
+      "input": "Supplier failure is 30% probable within 6 months.",
+      "riskLabels": [
+        "Supplier failure"
+      ],
+      "expected": {
+        "riskLabel": "Supplier failure",
+        "pLow": 0.3,
+        "pHigh": 0.3,
+        "months": 6
+      },
+      "reviewCase": "Must-fire: probable row"
+    }
+  ]
+}

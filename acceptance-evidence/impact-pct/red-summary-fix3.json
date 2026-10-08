@@ -1,0 +1,224 @@
+{
+  "source_git_sha": "8436239ff7829a83ccd6d43c6b8855c6e2053c8a",
+  "source_state": "r2 production files unchanged; new regression tests only",
+  "source_sha256": {
+    "src/orchestrator-v5/routing/stated-event-risk.ts": "3a1c229adf3de819512ace20fdc92abaaf464affcfc6555d30dd1d3f9b31bc3f",
+    "src/orchestrator-v5/agent-lane/stated-event-risk-draft.ts": "bd134e1596ab4bcc4410f43dce82ee46cf7f76d706c00d3f129fb1cc089b19bc"
+  },
+  "command": "node -e \"process.exit(require('os').loadavg()[0] < 25 ? 0 : 1)\" && node_modules/.bin/vitest run src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts --configLoader=runner --cache=false --maxWorkers=1 --no-file-parallelism -t fix3 --reporter=json --outputFile=/private/tmp/impact-pct-fix3-red.json < /dev/null",
+  "raw_json": "/private/tmp/impact-pct-fix3-red.json",
+  "raw_log": "/private/tmp/impact-pct-fix3-red.log",
+  "passed": 52,
+  "failed": 52,
+  "skipped": 277,
+  "failed_tests": [
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+      "title": "fix3-draft-'conditional-other-event': 'If the supplier fails, there is a 30%\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+      "title": "fix3-draft-'preceding-comma-other-event': 'Supplier fails would delay launch, an\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+      "title": "fix3-draft-'eg-held': 'There is a 30% chance the supplier fa\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+      "title": "fix3-draft-'ie-held': 'There is a 30% chance of a key loss, \u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+      "title": "fix3-draft-'impact-dip': 'Release slips: maybe a 10% dip in MRR\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+      "title": "fix3-draft-'impact-share': 'Customers churn: I reckon 10% of our \u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+      "title": "fix3-draft-'event-form': 'Price war: there is a chance of a pri\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/agent-lane/__tests__/stated-event-risk-draft.test.ts",
+      "title": "fix3-draft-'risk-reduction': 'Dual sourcing gives Supplier fails a \u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-03': 'There\\'s maybe a 10% dip in MRR withi\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-09': 'There is a 20% chance of a 10% dip wi\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-10': 'There is a 1 in 5 chance of a 10% dip\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-11': 'Probably a 10% dip in MRR within 6 mo\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-12': 'Maybe a 10% decrease in revenue withi\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-13': 'Perhaps a 10% shortfall against plan \u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-15': 'MRR is probably 10% below forecast wi\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-16': 'Revenue is probably 10% under target \u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-17': 'Possibly a 15% slump in sales over th\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-18': 'There\\'s a chance 10% of our customer\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-19': 'Maybe 10% of users churn within 6 mon\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-20': 'I reckon 10% of our customers will le\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-21': 'I\\'d say 20% of the team quits within\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-22': 'Probably 10% of accounts downgrade in\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-24': 'There\\'s a chance of a fall of 10% wi\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-25': 'There is a real chance of a drop of 1\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-26': 'The odds of a price cut of 15% within\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-27': 'There is a chance that revenue is 10%\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-28': 'There\\'s a chance that MRR is 10% dow\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-29': 'There is a chance that churn is 10% w\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-31': 'The risk of 10% customer churn within\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-32': 'There is a risk of 10% attrition with\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-33': 'We face a risk of 10% budget overrun \u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-34': 'The risk of 7% user churn over 3 mont\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-35': 'The mitigation gives a 20% risk reduc\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-36': 'Lenders will charge a 10% risk premiu\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-38': 'Add a risk: a 10% chance\u2013free drop in\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-39': 'The delay raises our churn risk 10% w\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-40': 'The new competitor increases the chan\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-41': 'It may happen: 10% in lost revenue wi\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-42': 'It could happen, 10% over budget, wit\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-54': 'Chance of supplier failure: 20% withi\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-review-'review-55': 'Probability of a supplier failure: 20\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-clause-boundary-'finding-etc-window': 'There is a 30% chance of supplier iss\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-clause-boundary-'finding-vs-window': 'There is a 30% chance of an outage, v\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-no-window-'no-window-01': 'Add a risk: key customers leave. I re\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-no-window-'no-window-02': 'Add a risk: staff turnover. I\\'d say \u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-no-window-'no-window-03': 'Add a risk: the risk of 10% customer \u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-no-window-'no-window-04': 'Add a risk: dual sourcing gives a 20%\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-no-window-'no-window-05': 'Add a risk: lenders will charge a 10%\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-no-window-'no-window-06': 'Add a risk: the delay raises our chur\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-no-window-'no-window-07': 'Add a risk: it may happen: 10% in los\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-no-window-'no-window-08': 'Add a risk: a price war. I estimate 1\u2026'"
+    },
+    {
+      "file": "src/orchestrator-v5/routing/__tests__/stated-event-risk.test.ts",
+      "title": "fix3-compound-em-dash: a likelihood word modifying an impact is refused"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 /** event_risk.v1 slice 2c — DRAFT door. */
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 
 vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
@@ -18,6 +19,11 @@ type Json = Record<string, any>;
 type Node = Json & { id: string };
 type Edge = Json & { from: string; to: string; id?: string };
 type Graph = { nodes: Node[]; edges: Edge[] };
+type ReviewDraftRow = {
+  id: string; input: string; riskLabels: string[];
+  expected: { riskLabel: string; pLow: number; pHigh: number; months: number } | null;
+};
+const fix3Review = JSON.parse(readFileSync(new URL('../../../../acceptance-evidence/impact-pct/review-rows-fix3.json', import.meta.url), 'utf8')) as { draftRows: ReviewDraftRow[] };
 const PREFIX = "We're deciding between hiring contractors and training in-house. ";
 const STATED = 'Our key developer might leave, maybe 10–30% in the next 6 months.';
 const BRIEF = PREFIX + STATED;
@@ -88,6 +94,82 @@ async function build(brief: string, cause = false): Promise<{ graph: Graph; out:
 }
 
 describe('event_risk.v1 slice 2c', () => {
+  it('fix3-late-failure-fragment: a long scaffold prefix never binds the preceding supplier to release slips', () => {
+    const input = graph();
+    input.nodes = input.nodes.filter((node) => node.id !== 'risk_dev');
+    input.edges = input.edges.filter((edge) => edge.from !== 'risk_dev');
+    const before = structuredClone(input);
+    const brief = `Supplier fails, ${'maybe '.repeat(23)}30% within 6 months release slips.`;
+    const result = holdStatedEventRisks(input.nodes, input.edges, brief);
+    expect(result.held).toEqual([]);
+    expect(result.refused).toEqual([]);
+    expect({ nodes: result.nodes, edges: result.edges }).toEqual(before);
+    expect(result.nodes).toBe(input.nodes);
+    expect(result.edges).toBe(input.edges);
+    expect(input).toEqual(before);
+  });
+
+  it('fix3-late-failure-fragments-scaling: 2k to 20k, ratio < 20 for the drafter', () => {
+    const input = graph();
+    input.nodes = input.nodes.filter((node) => node.id !== 'risk_dev');
+    input.edges = input.edges.filter((edge) => edge.from !== 'risk_dev');
+    const fragment = `Supplier fails, ${'maybe '.repeat(23)}30% within 6 months release slips. `;
+    const make = (n: number) => fragment.repeat(Math.ceil(n / fragment.length)).slice(0, n);
+    const [small, large] = [make(2000), make(20000)];
+    for (const brief of [small, large]) {
+      const result = holdStatedEventRisks(input.nodes, input.edges, brief);
+      expect(result.held).toEqual([]);
+      expect(result.refused).toEqual([]);
+      expect(result.nodes).toBe(input.nodes);
+      expect(result.edges).toBe(input.edges);
+    }
+    const m = scalingRatio(() => holdStatedEventRisks(input.nodes, input.edges, small),
+      () => holdStatedEventRisks(input.nodes, input.edges, large));
+    expect(m.ratio, m.detail).toBeLessThan(20);
+  });
+
+  it.each(fix3Review.draftRows)('fix3-draft-$id: $input', (row) => {
+    const input: Graph = {
+      nodes: [
+        ...row.riskLabels.map((label, i) => ({ id: `risk_${i}`, kind: 'risk', label,
+          provenance: { source: 'brief' } })),
+        { id: 'outcome_mrr', kind: 'outcome', label: 'MRR' },
+      ],
+      edges: row.riskLabels.map((_label, i) => ({ id: `impact_${i}`, from: `risk_${i}`, to: 'outcome_mrr',
+        exists_probability: 0.7, defaulted: true, strength: { mean: -0.3, std: 0.15 },
+        provenance: { magnitude: 'olumi_placeholder' } })),
+    };
+    const before = structuredClone(input);
+    const result = holdStatedEventRisks(input.nodes, input.edges, row.input);
+    expect(input).toEqual(before);
+    expect(result.refused).toEqual([]);
+    if (row.expected === null) {
+      expect(result.held).toEqual([]);
+      expect({ nodes: result.nodes, edges: result.edges }).toEqual(before);
+      expect(result.nodes).toBe(input.nodes);
+      expect(result.edges).toBe(input.edges);
+      for (const node of result.nodes) expect(node.event_risk).toBeUndefined();
+    } else {
+      const expected = row.expected;
+      const risk = result.nodes.find((node) => node.label === expected.riskLabel)!;
+      expect(risk.event_risk).toEqual({ version: 1, occurrence: {
+        p_low: expected.pLow, p_high: expected.pHigh, basis: 'user',
+        meaning: 'at_least_once_within_horizon',
+      }, horizon: { months: expected.months } });
+      expect(result.held).toHaveLength(1);
+      expect(result.held[0].risk_id).toBe(risk.id);
+      expect(row.input).toContain(result.held[0].quote);
+      for (const node of result.nodes) {
+        if (node.id !== risk.id) expect(node).toBe(input.nodes.find((original) => original.id === node.id));
+      }
+      for (const edge of result.edges) {
+        const original = input.edges.find((candidate) => candidate.id === edge.id)!;
+        if (edge.from === risk.id) expect(edge).toEqual({ ...original, exists_probability: 1 });
+        else expect(edge).toBe(original);
+      }
+    }
+  });
+
   it('2c-POSITIVE: stated range and horizon held; impact keeps its placeholder', () => {
     const input = graph();
     input.nodes = input.nodes.filter((n) => n.id !== 'risk_supplier');

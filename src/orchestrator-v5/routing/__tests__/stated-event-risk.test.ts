@@ -4,10 +4,58 @@ import { readFileSync } from 'node:fs';
 
 type CorpusRow = { id: string; message: string; label: string; reason: string; expectedOccurrence?: { p_low: number; p_high: number }; expectedHorizonMonths?: number; expectedReaderEventRisk?: null };
 const corpus = JSON.parse(readFileSync(new URL('../../../../acceptance-evidence/impact-pct/corpus-labels.json', import.meta.url), 'utf8')) as CorpusRow[];
+type ReviewReaderRow = {
+  id: string; input: string; expected: { pLow: number; pHigh: number; months: number } | null;
+  reviewExpected: string; refusalReason?: string;
+};
+type ReviewBattery = {
+  readerRows: ReviewReaderRow[]; clauseBoundaryRows: ReviewReaderRow[];
+  noWindowRows: { id: string; input: string; expected: boolean }[];
+};
+const fix3Review = JSON.parse(readFileSync(new URL('../../../../acceptance-evidence/impact-pct/review-rows-fix3.json', import.meta.url), 'utf8')) as ReviewBattery;
 import { scalingRatio } from '../../../../tests/helpers/scaling-ratio.js';
 import { isFactorNamedByUser, readStatedEventRisk, readStatedLikelihoodWithoutWindow } from '../stated-event-risk.js';
 
 describe('event_risk.v1 slice 2a — stated occurrence', () => {
+  // FIX-3 RED at 8436239f: every exact input in the review's eight reader tables.
+  // The review prose says 75; the rendered tables contain 74. P2-2 adds two findings.
+  // Review-only annotations such as "(r2 row)" are stored outside the input text.
+  // "Odds are about" and word-form "one in five" deliberately remain fail closed.
+  it.each(fix3Review.readerRows)('fix3-review-$id: $input', (row) => {
+    const result = readStatedEventRisk(row.input);
+    if (row.expected === null) {
+      expect(result, row.refusalReason ?? row.reviewExpected).toBeUndefined();
+    } else {
+      expect(result?.event_risk).toEqual({ version: 1, occurrence: {
+        p_low: row.expected.pLow, p_high: row.expected.pHigh, basis: 'user',
+        meaning: 'at_least_once_within_horizon',
+      }, horizon: { months: row.expected.months } });
+    }
+  });
+
+  it.each(fix3Review.clauseBoundaryRows)('fix3-clause-boundary-$id: $input', (row) => {
+    expect(readStatedEventRisk(row.input)).toBeUndefined();
+  });
+
+  it.each(fix3Review.noWindowRows)('fix3-no-window-$id: $input', (row) => {
+    expect(readStatedLikelihoodWithoutWindow(row.input)).toBe(row.expected);
+  });
+
+  it('fix3-compound-em-dash: a likelihood word modifying an impact is refused', () => {
+    const input = 'Add a risk: a 10% chance—free drop in MRR within 6 months.';
+    expect(readStatedEventRisk(input)).toBeUndefined();
+    expect(readStatedLikelihoodWithoutWindow(input.replace(' within 6 months', ''))).toBe(false);
+  });
+
+  it.each([
+    ['with-probability', 'A competitor might cut its prices with probability 10% within 6 months'],
+    ['with-chance', 'A competitor might cut its prices with a 10% chance within 6 months'],
+  ])('fix3-impact-event-likelihood-control-%s', (_id, input) => {
+    expect(readStatedEventRisk(input)?.event_risk).toEqual({ version: 1, occurrence: {
+      p_low: 0.1, p_high: 0.1, basis: 'user', meaning: 'at_least_once_within_horizon',
+    }, horizon: { months: 6 } });
+  });
+
   it.each([
     ['range', 'key developer might leave, maybe 10–30% in the next 6 months', 0.1, 0.3, 6],
     ['single', 'maybe about 20% within a year', 0.2, 0.2, 12],
@@ -277,6 +325,22 @@ describe('event_risk.v1 slice 2a — stated occurrence', () => {
       const m = scalingRatio(() => reader(small), () => reader(large));
       process.stdout.write(`impact-pct timing ${_id} ${reader.name}: ${m.detail}; per-call 20k ${(m.largeMs / m.calls).toFixed(3)} ms\n`);
       expect(m.ratio, m.detail).toBeLessThan(20);
+    }
+  });
+
+  it('fix3-late-failure-fragments-scaling: 2k to 20k, ratio < 20 for both readers', () => {
+    // A long valid scaffold prefix reaches its non-scaffold event only at the end.
+    // Repeated figures force the shared classifier to examine every comma fragment.
+    const fragment = `Supplier fails, ${'maybe '.repeat(23)}30% within 6 months release slips. `;
+    const make = (n: number) => fragment.repeat(Math.ceil(n / fragment.length)).slice(0, n);
+    const [small, large] = [make(2000), make(20000)];
+    for (const text of [small, large]) {
+      expect(readStatedEventRisk(text)).toBeUndefined();
+      expect(readStatedLikelihoodWithoutWindow(text)).toBe(false);
+    }
+    for (const reader of [readStatedEventRisk, readStatedLikelihoodWithoutWindow]) {
+      const m = scalingRatio(() => reader(small), () => reader(large));
+      expect(m.ratio, `${reader.name}: ${m.detail}`).toBeLessThan(20);
     }
   });
 

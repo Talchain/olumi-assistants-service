@@ -1,10 +1,7 @@
 /** event_risk.v1 slice 2c: hold only an unambiguous occurrence stated in the brief. */
-import { readStatedEventRiskWithBindingSpan } from '../routing/stated-event-risk.js';
+import { readStatedEventRiskWithBindingSpan, splitStatedLikelihoodClauses } from '../routing/stated-event-risk.js';
 import type { EventRiskV1T } from '../../schemas/event-risk.js';
 
-// Single-character sentence boundaries; a decimal point is not a boundary. Both regexes
-// have bounded lookarounds/tokens and no nested repetition or overlapping alternatives.
-const SENTENCE_END = /[.!?](?=\s|$)|[\r\n]/u;
 const WORD = /(?<![\p{L}\p{N}])[\p{L}\p{N}]{1,100}(?![\p{L}\p{N}])/gu;
 const words = (text: string): string[] => [...text.toLowerCase().matchAll(WORD)]
   .map((m) => m[0].replace(/s$/, ''));
@@ -21,8 +18,8 @@ export function holdStatedEventRisks<
   const risks = nodes.filter((n) => n.kind === 'risk' && typeof n.label === 'string')
     .map((node) => ({ node, names: words(node.label as string) }));
   const claims = new Map<string, Array<NonNullable<ReturnType<typeof readStatedEventRiskWithBindingSpan>>>>();
-  for (const sentence of brief.split(SENTENCE_END)) {
-    const stated = readStatedEventRiskWithBindingSpan(sentence);
+  for (const clause of splitStatedLikelihoodClauses(brief)) {
+    const stated = readStatedEventRiskWithBindingSpan(clause);
     if (stated === undefined) continue;
     const named = new Set(words(stated.binding_span));
     // Stricter than nearest-word binding: EVERY label word must be written in this
