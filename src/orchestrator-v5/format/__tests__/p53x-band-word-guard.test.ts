@@ -134,7 +134,7 @@ function bandMeanCalls(file: string, text: string): string[] {
   return found;
 }
 
-const CONVERTERS = new Set(['edgeBandFromMagnitude', 'strengthBand', 'CANVAS_BAND_WORD', 'relationshipPhrase', 'bidirectedRelationshipPhrase', 'formatEdgeStrengthMagnitude']);
+const CONVERTERS = new Set(['edgeBandFromMagnitude', 'strengthBand', 'CANVAS_BAND_WORD', 'linkBandWord', 'relationshipPhrase', 'bidirectedRelationshipPhrase', 'formatEdgeStrengthMagnitude']);
 const isConverter = (name: string): boolean => CONVERTERS.has(name) || /^describeBand[A-Za-z]*$/.test(name);
 const CONVERTER_MODULE = /edge-strength-bands|edge-strength-words|influence-bands|format-confirmation|format-graph-for-context|comparison/;
 
@@ -234,7 +234,7 @@ it('P53x AST: band-from-mean calls exist only in the sizing-aware helper or name
       if (!/\.tsx?$/.test(path) || /\.(test|spec)\.tsx?$/.test(path)) continue;
       const text = readFileSync(path, 'utf8');
       // Prefilter (speed only): a file that names no converter cannot call or alias one.
-      if (!/edgeBandFromMagnitude|strengthBand|CANVAS_BAND_WORD|relationshipPhrase|formatEdgeStrengthMagnitude|describeBand|edge-strength-bands|format-graph-for-context|explanation-fallback/.test(text)) continue;
+      if (!/edgeBandFromMagnitude|strengthBand|CANVAS_BAND_WORD|linkBandWord|relationshipPhrase|formatEdgeStrengthMagnitude|describeBand|edge-strength-bands|format-graph-for-context|explanation-fallback/.test(text)) continue;
       forbidden.push(...forbiddenCalls(path, text, used), ...converterIndirections(path, text));
     }
   }
@@ -288,4 +288,12 @@ it('P53x AST firing control (Codex #2819 r4 P2): a NEW mean-derived linkBandWord
 it('P53x AST firing control (Codex #2819 r4 P2): an alias INSIDE a declaring module is refused', () => {
   expect(converterIndirections('src/orchestrator-v5/format/format-graph-for-context.ts', "export function relationshipPhrase(m: number) { return String(m); }\nconst say = relationshipPhrase;\nexport const v = (edge: any) => say(edge.strength.mean);")
     .some((f) => f.includes('indirect:relationshipPhrase'))).toBe(true);
+});
+
+it('P53x AST firing control (Codex #2819 r5 P2): a linkBandWord ALIAS is refused', () => {
+  const file = 'src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts';
+  const text = "const linkBandWord = (band: InfluenceBand): string => CANVAS_BAND_WORD[band];\nfunction proposeLinkStrength() { const sayBand = linkBandWord; return { current_strength: sayBand(currentBand) }; }";
+  expect(converterIndirections(file, text).some((f) => f.includes('indirect:linkBandWord'))).toBe(true);
+  // CONTROL: the declaration and a direct call are not indirections.
+  expect(converterIndirections(file, "const linkBandWord = (band: InfluenceBand): string => CANVAS_BAND_WORD[band];\nconst w = linkBandWord(band);")).toEqual([]);
 });

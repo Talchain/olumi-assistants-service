@@ -25,11 +25,13 @@ export function edgeStrengthWords(edge: unknown, form: Form = 'band'): string {
   const strength = e?.strength;
   // The formatter's usable-mean order (Codex #2819 r3 P2): a finite object mean, else a finite legacy strength_mean.
   const objectMean = record(strength)?.mean;
-  const rawMean = typeof strength === 'number' && Number.isFinite(strength) ? strength
+  const compact = typeof strength === 'number' && Number.isFinite(strength);
+  const rawMean = compact ? strength
     : typeof objectMean === 'number' && Number.isFinite(objectMean) ? objectMean : e?.strength_mean;
   const mean = typeof rawMean === 'number' ? rawMean : Number.NaN;
-  // Compact numeric strength is already signed; only canonical/legacy object forms carry a sign override.
-  const signed = (form === 'relationship' || form === 'bidirected') && typeof strength !== 'number'
+  // A USABLE compact numeric strength is already signed; any other selected source (object or legacy mean, incl. after a
+  // rejected non-finite compact value: Codex #2819 r5 P2) takes the effect_direction sign override, as the formatter does.
+  const signed = (form === 'relationship' || form === 'bidirected') && !compact
     && e?.effect_direction === 'negative' && mean >= 0 ? -mean : mean;
   const abs = Math.abs(signed);
   // The compactor's established adverbs use its historical cuts, independently of canvas band nouns.

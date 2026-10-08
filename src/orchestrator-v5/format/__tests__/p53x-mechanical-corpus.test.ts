@@ -45,4 +45,11 @@ describe('P53x helper: a non-finite compact strength falls back like the formatt
     const edge = { from: 'a', to: 'b', provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' }, strength: Number.POSITIVE_INFINITY, strength_mean: 0.5 };
     expect(edgeStrengthWords(edge, 'relationship')).toBe('strong positive link');
   });
+  it('(r5 P2) the same link marked negative keeps its sign after the fallback: strong negative', () => {
+    const edge = { from: 'a', to: 'b', provenance: { magnitude: 'olumi_estimate' }, strength: Number.POSITIVE_INFINITY, strength_mean: 0.5, effect_direction: 'negative' };
+    expect(edgeStrengthWords(edge, 'relationship')).toBe('strong negative link');
+    expect(edgeStrengthWords(edge, 'bidirected')).toBe('strong negative co-movement, unmeasured common cause (not a causal route)');
+    // CONTROL: a usable compact number is already signed; effect_direction does not flip it.
+    expect(edgeStrengthWords({ ...edge, strength: 0.5 }, 'relationship')).toBe('strong positive link');
+  });
 });
