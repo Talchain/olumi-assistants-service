@@ -33,7 +33,12 @@ import type { CanonicalAnalysisCell } from '../../../routes/canonical-analysis-v
 import { AnswerShapeSchema, deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
 import { openQuestionsSegment } from '../decision-input-ask.js';
 import { withoutProposalIds } from '../display-ids.js';
+import { WIDENED_RISK_MARKER_DOWN as WIDENED_RISK_MARKER_TOO_HIGH,
+  WIDENED_RISK_MARKER_MOVE as WIDENED_RISK_MARKER_MAY_MOVE } from '../runtime/widen-draft.js';
 import { namedUnsizedLinks, UNSIZED_CAUSE } from './named-unsized-links.js';
+
+export { WIDENED_RISK_MARKER_TOO_HIGH, WIDENED_RISK_MARKER_MAY_MOVE };
+export { REPLY_SHAPE_INSTRUCTION } from './reply-shape-instruction.js';
 
 /** Straight and curly quotes as one glyph each, length-preserving (offsets in the folded text are offsets in the original). */
 export function foldQuotes(text: string): string {
@@ -59,8 +64,6 @@ export const FACE_DEMOTION_ORDER = ['estimates', 'what_changes'] as const;
 export const HORIZON_MARKER = "At today's numbers; not projected forward yet";
 /** Science 93 amendments (8 Oct): exact user-facing wording. */
 export const ROBUSTNESS_MARKER = 'Small changes could change the comparison';
-export const WIDENED_RISK_MARKER_TOO_HIGH = "Leaves out Olumi's added risks; may be too high";
-export const WIDENED_RISK_MARKER_MAY_MOVE = "Leaves out Olumi's added risks; may move";
 export const WITHHOLD_FALLBACK_MARKER = 'Not shown yet; why is under More detail';
 export const FIRMNESS_MARKER_PREFIX = "May look firmer: uses Olumi's ";
 
@@ -102,18 +105,6 @@ export function withholdDisclosureForCells(graph: unknown, cells: readonly Canon
   return { kind: 'withhold', cause: causes.size === 1 ? [...causes][0]! : 'other',
     ...(goalLabel === undefined || goalLabel === '' ? {} : { goalLabel }) };
 }
-
-/**
- * ⭐ THE PRODUCER HALF: one sentence every chat-writing model is given (joined into `AGENT_INSTRUCTIONS`, and appended to
- * `RESEARCH_INSTRUCTIONS`). Code only: it ships in the CEE build and is never written to a prompt store. No dash a user
- * could see quoted back, and no figure other than the two budgets.
- */
-export const REPLY_SHAPE_INSTRUCTION =
-  'Shape: begin with one short sentence that answers. Then give at most three bullets, each on its own line starting '
-  + 'with "- " and under 20 words: concise, action-oriented points grounded in this model (two bullets if you also ask a '
-  + 'question). Keep that part under 75 words, with one reasoning move and at most one question or next action; no '
-  + 'generic advice. Put any further explanation after the bullets, after a blank line: Olumi shows it under More '
-  + 'detail, so never repeat it in the bullets. If you ask a question, it stays your last sentence.';
 
 /**
  * A host line by exact typed identity. Lead evidence carries the screen finding; matching subjects bind a withheld
@@ -905,12 +896,15 @@ export function composeReplyShape(input: ReplyComposeInput): ReplyComposition {
     const robustnessPool = robustness === undefined || present.some(o => o.lead === true) || faceRun === undefined ? []
       : units.filter(u => u.run === faceRun && u.obligation === undefined && eligible(u) && u !== ask && !isQuestionUnit(u));
     let pointWords = wordCount(headlineText) + (robustness === undefined ? 0 : wordCount(robustness.text)) + (ask === undefined ? 0 : wordCount(ask.text));
-    const robustnessPoints = robustnessPool.length > REPLY_FACE_MAX_BULLETS ? [] : robustnessPool
-      .slice(0, Math.max(0, REPLY_FACE_MAX_BULLETS - 1 - (ask === undefined ? 0 : 1))).filter(u => {
-        if (pointWords + wordCount(u.text) > REPLY_FACE_WORD_BUDGET) return false;
-        pointWords += wordCount(u.text);
-        return true;
-      });
+    const robustnessPoints: Unit[] = [];
+    const pointSlots = Math.max(0, REPLY_FACE_MAX_BULLETS - 1 - (ask === undefined ? 0 : 1));
+    for (const u of robustnessPool.length > REPLY_FACE_MAX_BULLETS ? [] : robustnessPool) {
+      if (robustnessPoints.length >= pointSlots) break;
+      const w = wordCount(u.text);
+      if (robustnessPoints.length > 0 && pointWords + w > REPLY_FACE_WORD_BUDGET) break;
+      robustnessPoints.push(u);
+      pointWords += w;
+    }
     const whatChanges = input.whatChanges === undefined ? undefined : units.find((u) => u.text === asWritten(input.whatChanges!.trim()));
     const estimates = input.estimatesLine === undefined ? undefined : units.find((u) => u.text === asWritten(input.estimatesLine!.trim()));
     faceSet = new Set<Unit>([...findingUnits, ...companions, ...exceptions, ...robustnessPoints, ...[widened, widenedRisk, robustness, withhold].filter((u): u is Unit => u !== undefined), ...(horizon === undefined ? [] : [horizon]),

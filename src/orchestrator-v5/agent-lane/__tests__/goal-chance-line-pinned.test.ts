@@ -102,6 +102,8 @@ describe('goalChanceLineOwed', () => {
     expect(src).toContain('assistant_text: withDisclosures(wireBody.assistant_text, goalLines)');
     expect(src).toContain('...[identityAskLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),');
     expect(src).toContain('const goalChanceResults = finalGoalChance === undefined ? result.tool_results : [{ goal_chance: finalGoalChance }];');
+    expect(src).toContain('identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, \'\') !== null, graph: readbackGraph });');
+    expect(src).toContain('}], RUN_RESULT_READY_TEXT, { graph: state.graph });');
     // Exact host-copy display normalisation preserves the narrator and the same owed lines.
     expect(src).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
     expect(src).toContain('withDisclosures(narrationText, owed)');
@@ -118,7 +120,7 @@ describe('goalChanceLineOwed', () => {
 });
 
 
-describe('DL bounded chance-opening reader keeps owed-once behaviour', () => {
+describe('DL exact constructed chance-opening reader keeps owed-once behaviour', () => {
   const targetGraph = { nodes: [{ id: 'goal', kind: 'goal', label: 'Monthly recurring revenue',
     goal_threshold_raw: 20000, goal_threshold_unit: '£/month' }], edges: [] };
   const reason = SUM_WORDS.replace(/^Not shown\.\s*/, '');
@@ -130,12 +132,28 @@ describe('DL bounded chance-opening reader keeps owed-once behaviour', () => {
     const chance = goalChanceWithheldForAgent(block(SUM_WORDS), graph)!;
     expect(chance.say).toBe(`${opening} ${reason}`);
     const run = { ran: true, goal_chance: chance };
-    expect(goalChanceLineOwed([run], reason)).toBe(opening);
-    expect(goalChanceLineOwed([run], `${reason} ${opening}`)).toBeNull();
-    expect(goalChanceLineOwed([run], chance.say)).toBeNull();
+    expect(goalChanceLineOwed([run], reason, { graph })).toBe(opening);
+    expect(goalChanceLineOwed([run], `${reason} ${opening}`, { graph })).toBeNull();
+    expect(goalChanceLineOwed([run], chance.say, { graph })).toBeNull();
   });
 
-  it('a 20,000-character target cannot be parsed as a bounded opening and finishes within 50 ms', () => {
+  it('a target clause longer than 80 characters says the constructed opening once, including a build first pass', () => {
+    const unit = 'qualified customer accounts with independently validated recurring demand across every international operating region';
+    const graph = { nodes: [{ id: 'goal', kind: 'goal', label: 'Validated accounts',
+      goal_threshold_raw: 20000, goal_threshold_unit: unit }], edges: [] };
+    const targetClause = `reaching 20,000 ${unit}`;
+    expect(targetClause.length).toBeGreaterThan(80);
+    const opening = `This run doesn’t yet show each option’s chance of ${targetClause}.`;
+    const chance = goalChanceWithheldForAgent(block(SUM_WORDS), graph)!;
+    expect(chance.say).toBe(`${opening} ${reason}`);
+    const run = { ran: true, goal_chance: chance };
+    expect(goalChanceLineOwed([run], reason, { graph })).toBe(opening);
+    expect(goalChanceLineOwed([run], `${opening} Other observations. ${reason}`, { graph })).toBeNull();
+    expect(goalChanceLineOwed([{ first_analysis: run }], reason, { graph })).toBe(opening);
+    expect(goalChanceLineOwed([run, runShown], reason, { graph })).toBeNull();
+  });
+
+  it('a 20,000-character unbound target owes its full sentence and finishes within 50 ms', () => {
     const say = `This run doesn’t yet show each option’s chance of reaching ${'x'.repeat(20000)}. ${reason}`;
     const run = { ran: true, goal_chance: { withheld: true, say } };
     const started = performance.now();

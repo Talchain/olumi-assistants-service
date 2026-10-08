@@ -2364,7 +2364,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           let say = goalChanceLineOwed([{ ok: true, ran: true,
             goal_chance: goalChanceWithheldForAgent(state.analysisResult, state.graph, replayScopedDraftForRun, replayGuidedText),
             ...(askNow === null ? {} : { identity_ask_say: askNow }),
-          }], RUN_RESULT_READY_TEXT);
+          }], RUN_RESULT_READY_TEXT, { graph: state.graph });
           // The live Run turn's methods note (`disclosuresFor`, a Run on this turn) comes first in its owed lines.
           const indexNow = indexGoalWeightsMessages(state.analysisResult);
           const owedNow = [...indexNow, ...(typeof say === 'string' && say.trim() !== '' ? [say] : [])];
@@ -4673,7 +4673,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     });
     goalChanceOwed = stateFacts.current_state_unknown === true ? null
       : goalChanceLineOwed(goalChanceResults, String(wireBody.assistant_text ?? ''), { gateReasonOwed: gateOwnsGoalChance,
-        identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null });
+        identityAskOwed: identityAskOwnedByCard || identityAskLineOwed(result.tool_results, '') !== null, graph: readbackGraph });
     if (goalChanceOwed !== null && typeof wireBody.assistant_text === 'string') {
       const goalLines = [goalChanceOwed];
       askEachOnce(goalLines, await repliesToCheckAsks(goalLines, historyReader, scenarioId, undefined));

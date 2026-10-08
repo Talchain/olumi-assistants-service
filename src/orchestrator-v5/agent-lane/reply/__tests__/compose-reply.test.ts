@@ -28,6 +28,7 @@ import {
 } from '../compose-reply.js';
 import { deriveAnswerTextFromShape } from '../../../routing/answer-shape.js';
 import { openQuestionsSegment, textAtRest, untestedHorizonLine } from '../../decision-input-ask.js';
+import { WIDENED_RISK_MARKER_DOWN, WIDENED_RISK_MARKER_MOVE } from '../../runtime/widen-draft.js';
 
 const face = (c: ReplyComposition): string[] => (c.shape === null ? [] : [c.shape.headline, ...c.shape.bullets]);
 /** Every sentence of `original` is in `shipped`, verbatim (bullet markers aside). */
@@ -1526,6 +1527,28 @@ describe('r5 progressive disclosure: typed markers stay beside their figures and
     assertDisclosure(c, ROBUSTNESS_MARKER, note);
   });
 
+  it.each([false, true])('r16 robustness keeps its oversized first point and a contiguous prefix (ask = %s)', withAsk => {
+    const headline = 'Check the reasoning behind the comparison:';
+    const first = 'Check the evidence for subscriber retention before relying on the comparison, including the different customer groups, the period covered by the evidence, the assumptions about how pricing changes affect renewal, and the uncertainty in each relationship between the proposed changes and the goal, while retaining the team’s competing interpretations, unresolved disagreements, and expectations about later outcomes so that everyone can challenge the model and decide which evidence would most improve the shared reasoning before relying on any result from this run.';
+    const second = 'Review the hiring assumptions.';
+    const note = 'The result is not yet robust — small changes could flip it.';
+    const text = [headline, `- ${first}`, `- ${second}`, '', context, note, ...(withAsk ? [ask] : [])].join('\n');
+    expect(first.split(/\s+/u).length).toBeGreaterThan(80);
+    const c = composeReplyShape({ faceContract: 'run', text, obligations: [
+      { role: 'caveat', text: note, disclosure: { kind: 'robustness' } },
+      ...(withAsk ? [{ role: 'ask' as const, text: ask }] : []),
+    ] });
+    expect(c.outcome).toBe('shaped');
+    expect(c.shape!.headline).toBe(headline);
+    expect(c.shape!.bullets).toEqual([ROBUSTNESS_MARKER, first, ...(withAsk ? [ask] : [])]);
+    expect(c.shape!.detail).toContain(second);
+    expect(c.shape!.detail).not.toContain(first);
+    expect(c.measure!.face_over_word_budget).toBe(true);
+    expect(c.measure!.face_words).toBeGreaterThan(80);
+    expect(c.text).toBe(deriveAnswerTextFromShape(c.shape!));
+    everySentenceKept(text, c.text);
+  });
+
   it('quote-restyled typed disclosure still supplies its marker and retains the note glyphs as written', () => {
     const typed = 'The chance is withheld because ‘MRR’ has no recorded current level.';
     const written = typed.replace(/[‘’]/g, "'");
@@ -1646,6 +1669,13 @@ describe('r5 P05b widening inputs use the typed Draft/Run contract', () => {
   const widenedLine = 'Olumi added 3 risks and 2 ideas to widen the model.';
   const widenedRiskNote = 'The 3 risks Olumi added are not included in this chance of meeting your goal.';
   const count = (text: string, sentence: string) => text.split(sentence).length - 1;
+
+  it('r16 widened marker aliases use the producer exports without declaring copied strings', () => {
+    expect(WIDENED_RISK_MARKER_TOO_HIGH).toBe(WIDENED_RISK_MARKER_DOWN);
+    expect(WIDENED_RISK_MARKER_MAY_MOVE).toBe(WIDENED_RISK_MARKER_MOVE);
+    const source = readFileSync(new URL('../compose-reply.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/\b(?:const|let|var)\s+WIDENED_RISK_MARKER_[A-Z_]+\s*=\s*['"`]/u);
+  });
 
   it('draft: widenedLine is mandatory immediately after H; widenedRiskNote is once in detail', () => {
     const c = composeReplyShape({ faceContract: 'draft', text: [headline, context].join('\n\n'), widenedLine, widenedRiskNote,
