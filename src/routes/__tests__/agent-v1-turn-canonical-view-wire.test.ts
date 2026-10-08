@@ -4,11 +4,13 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
-import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
+import { RunAnalysisHandlerFactSchema, type RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import type { ConversationContent } from '../../orchestrator-v5/session/conversation-content.js';
+import type { LeaderFinalEgressOpts } from '../../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE } from '../../orchestrator-v5/agent-lane/run-explanation.js';
 
 const SCENARIO = '4d2c1b0a-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
-const FACT = JSON.parse(readFileSync(new URL('../../orchestrator-v5/agent-lane/__tests__/fixtures/served-run-analysis-fact-for-binding.json', import.meta.url), 'utf8'));
+const FACT = JSON.parse(readFileSync(new URL('../../orchestrator-v5/agent-lane/__tests__/fixtures/served-run-analysis-fact-for-binding.json', import.meta.url), 'utf8')) as RunAnalysisHandlerFact;
 const GRAPH = { nodes: [{ id: 'g', kind: 'goal', label: 'MRR', goal_threshold_raw: 100 },
   { id: 'f', kind: 'factor', label: 'Price' }],
   edges: [{ from: 'f', to: 'g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' }] };
@@ -18,14 +20,14 @@ const PRODUCER_CAPTURES = [
 ] as const;
 const WHY = 'UI-only why bytes: canonical-view-wire-1e';
 type Json = Record<string, any>;
-let fact: Json | null = null;
+let fact: RunAnalysisHandlerFact | null = null;
 let finalRead: Json;
 let runRead: Json;
 let viewChange: (view: Json) => unknown = view => view;
 let graphReads = 0;
 let scopeRecomposition = false;
 let producerCapture: Json | null = null;
-const rows: Json[] = [];
+const rows: (Json & Partial<ConversationContent>)[] = [];
 const modelBodies: Json[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -283,7 +285,7 @@ describe('canonical view on the same-page turn wire', () => {
     const egress = enforceLeaderLicenceAtFinalEgress({ ...turn, canonical_analysis_view: view }, {
       requestId: 'real-view-egress', exitPath: 'agent_lane_v1_final',
       ...leaderGateInputsOf({ analysisState: read.analysis_state, analysisReady: read.current_read.analysis_ready, graph: read.graph }),
-    });
+    } as LeaderFinalEgressOpts);
     // Stop on any producer-view alteration: a removed leader path on a withheld view would also leak on reload.
     expect(egress.removedPaths.filter(path => path.startsWith('canonical_analysis_view'))).toEqual([]);
     expect(JSON.stringify(egress.response.canonical_analysis_view)).toBe(producerBytes);
