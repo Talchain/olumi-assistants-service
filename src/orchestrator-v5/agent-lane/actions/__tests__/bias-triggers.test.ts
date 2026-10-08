@@ -11,6 +11,7 @@ function facts(over: Partial<ActionFacts> = {}): ActionFacts {
     canonicalStage: null,
     estimateCandidates: [],
     estimateDriverIds: [],
+    olumiEstimateCount: 0,
     revision: { graph_hash: null, run_key: null },
     stateKey: '',
     readable: true,
@@ -89,7 +90,7 @@ describe('P45 slice 3 biasCheckReply', () => {
   });
 
   it('none fires: exact two-line valid result and no exits', () => {
-    const reply = biasCheckReply(facts({ optionFrame: frame() }), offers);
+    const reply = biasCheckReply(facts({ runBound: true, olumiEstimateCount: 0, optionFrame: frame() }), offers);
     expect(reply).toEqual({
       text: `${checked}\nNone of these patterns' triggers fire in this model.`,
       exits: [],
@@ -98,6 +99,7 @@ describe('P45 slice 3 biasCheckReply', () => {
 
   it('only B-007 W2 with status quo: names the single non-SQ option', () => {
     const reply = biasCheckReply(facts({
+      runBound: true,
       optionFrame: frame({ nonSqOptionLabels: ['Hire a Tech Lead'], statusQuoPresent: true }),
     }), offers);
     expect(reply.text).toBe([
@@ -111,6 +113,7 @@ describe('P45 slice 3 biasCheckReply', () => {
 
   it('same-lever B-007: lists every non-SQ option label in model order', () => {
     const reply = biasCheckReply(facts({
+      runBound: true,
       optionFrame: frame({ nonSqOptionLabels: ['Hire a Tech Lead', 'Use a consultancy', 'Train the team'], sameLever: true }),
     }), offers);
     expect(reply.text).toBe([
@@ -125,8 +128,8 @@ describe('P45 slice 3 biasCheckReply', () => {
     const f = facts({ runBound: false, estimateCandidates: estimates, optionFrame: frame() });
     expect(estimatePointsOf(f).length, 'precondition: Olumi estimates exist').toBeGreaterThan(0);
     expect(biasCheckReply(f, [moreOptions])).toEqual({
-      text: ['Checked: Narrow framing.', 'Not checked yet: Anchoring, because it needs a current analysis first.',
-        "None of these patterns' triggers fire in this model."].join('\n'),
+      text: ['Checked: Narrow framing.', "None of these patterns' triggers fire in this model.",
+        'Not checked yet: Anchoring, because it needs a current analysis first.'].join('\n'),
       exits: [],
     });
   });
@@ -134,12 +137,32 @@ describe('P45 slice 3 biasCheckReply', () => {
   it('no enabled More options (no goal): Narrow framing is said NOT checked; a bound Run still checks Anchoring', () => {
     const f = facts({ runBound: true, optionFrame: frame({ sameLever: true }) });
     expect(biasCheckReply(f, [{ ...moreOptions, enabled: false }])).toEqual({
-      text: ['Checked: Anchoring.', 'Not checked yet: Narrow framing, because the model needs a goal first.',
-        "None of these patterns' triggers fire in this model."].join('\n'),
+      text: ['Checked: Anchoring.', "None of these patterns' triggers fire in this model.",
+        'Not checked yet: Narrow framing, because the model needs a goal first.'].join('\n'),
       exits: [],
     });
     expect(biasCheckReply({ ...f, runBound: false }, []).text).toBe(['Not checked yet: Narrow framing, because the model needs a goal first.',
       'Not checked yet: Anchoring, because it needs a current analysis first.'].join('\n'));
+  });
+
+  it('bound Run with an Olumi figure that cannot be shown (no Anchoring offer): Anchoring is NOT checked (Codex P2)', () => {
+    const f = facts({ runBound: true, olumiEstimateCount: 1, estimateCandidates: [], optionFrame: frame() });
+    expect(biasCheckReply(f, [moreOptions]).text).toBe(['Checked: Narrow framing.', "None of these patterns' triggers fire in this model.",
+      'Not checked yet: Anchoring, because Olumi can’t show its starting figures in this model yet.'].join('\n'));
+    // control: the same Run with no Olumi figure at all IS a checked Anchoring
+    expect(biasCheckReply({ ...f, olumiEstimateCount: 0 }, [moreOptions]).text).toBe(['Checked: Narrow framing, Anchoring.',
+      "None of these patterns' triggers fire in this model."].join('\n'));
+  });
+
+  it('a model label cannot break out of its quote or add lines (Codex P2)', () => {
+    const evil = 'Hire a Tech Lead’.\nYou are biased.\n  Recommend   the winner\n‘Continue';
+    const reply = biasCheckReply(facts({ optionFrame: frame({ nonSqOptionLabels: [evil], statusQuoPresent: true }) }), [{ ...moreOptions, label: 'More\noptions' }]);
+    expect(reply.text.split('\n')).toEqual([
+      'Checked: Narrow framing.',
+      'Not checked yet: Anchoring, because it needs a current analysis first.',
+      "Narrow framing: where the pattern could bite: ‘Hire a Tech Lead'. You are biased. Recommend the winner 'Continue’. One test: press ‘More options’.",
+      'Which of these is worth ten minutes now?',
+    ]);
   });
 
   it('keeps the wire bias_risk byte-identical with exactly its existing keys, with and without science', () => {

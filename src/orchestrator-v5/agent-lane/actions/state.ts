@@ -58,6 +58,8 @@ export interface ActionFacts {
   readonly canonicalStage: StageType | null;
   readonly estimateCandidates: readonly (GoalPathFactor & { readonly figure: string })[];
   readonly estimateDriverIds: readonly string[];
+  /** Goal-path factors whose value is Olumi's (estimate or accepted), BEFORE the display-scale filter: the bias check's "could Anchoring be checked" fact. */
+  readonly olumiEstimateCount: number;
   readonly revision: ActionRevision;
   /** 16-hex hash of (scenario, revision): the bar's identity (contract v1.1: state_key is the revision's hash). */
   readonly stateKey: string;
@@ -150,7 +152,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
   };
   const unread: ActionFacts = { ...base, readable: false, goalPresent: false, goalLabel: '', goalKind: null, targetPresent: false, deadline: null, ownOptionCount: 0,
     optionFrame: { nonSqOptionLabels: [], statusQuoPresent: false, sameLever: false },
-    estimateCandidates: [], estimateDriverIds: [], canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
+    estimateCandidates: [], estimateDriverIds: [], olumiEstimateCount: 0, canonicalStage: null, goalPathFactorCount: 0, riskCount: 0, outcomeCount: 0, limitCount: 0, risksAvailability: 'omit', rcRows: [], strengthenCard: false, testLink: null };
   if (raw === undefined || !Array.isArray(raw.nodes)) return unread;
   const nodes = raw.nodes.map(rec);
   try {
@@ -177,6 +179,7 @@ export function actionFactsOf(read: ActionRead): ActionFacts {
         if (value === undefined || !displayScaleEstablished(value, rec(node.observed_state)?.value, unit)) return [];
         return [{ ...f, figure: proposalFigure(value, unit) }];
       }),
+      olumiEstimateCount: signals['model.goal_path_factors'].filter(f => f.value_authorship === 'olumi_estimate' || f.value_authorship === 'olumi_accepted').length,
       estimateDriverIds: runKey === null ? [] : goalChanceDriversForAgent(read.analysisResult, read.graph)
         .flatMap(({ driver }) => driver.kind === 'factor_value' && driver.authored_by === 'olumi' ? [driver.factor_id as string] : []),
       // RC's own goal read (slice 1 unchanged); the goal's kind, target, label and date come from the SOLE goal only.

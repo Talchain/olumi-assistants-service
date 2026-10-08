@@ -88,7 +88,7 @@ function firedBiasesOf(f: ActionFacts, offers: readonly ActionOffer[], frame: Op
       : frame.statusQuoPresent
         ? `The only choice on the table is ‘${o}’ or carrying on as now, which can hide other routes.`
         : `‘${o}’ is the only option on the table, which can hide other routes.`,
-      frame.sameLever ? frame.nonSqOptionLabels.join('’, ‘') : o!, moreOptions);
+      frame.sameLever ? frame.nonSqOptionLabels.map(oneLine).join('’, ‘') : oneLine(o!), moreOptions);
   }
   // DSK-B-006 waits for a per-option risk fact (Science 393023, 7 Oct): W4 is a missing baseline, not status quo bias.
 
@@ -97,7 +97,7 @@ function firedBiasesOf(f: ActionFacts, offers: readonly ActionOffer[], frame: Op
     if (anchoring !== undefined) {
       const point = estimatePointsOf(f)[0];
       if (point !== undefined) {
-        add('DSK-B-001', 'Anchoring', `Olumi’s starting figure for ‘${point.label}’ could pull later estimates towards it.`, point.label, anchoring);
+        add('DSK-B-001', 'Anchoring', `Olumi’s starting figure for ‘${point.label}’ could pull later estimates towards it.`, oneLine(point.label), anchoring);
       }
     }
   }
@@ -120,20 +120,28 @@ export function biasRiskOf(f: ActionFacts, offers: readonly ActionOffer[], frame
 export function biasCheckReply(f: ActionFacts, offers: readonly ActionOffer[]): { text: string; exits: ActionOffer[] } {
   const fired = firedBiasesOf(f, offers, f.optionFrame);
   const narrowChecked = enabledOfferOf(offers, 'more_options') !== undefined;
-  const anchoringChecked = f.runBound || enabledOfferOf(offers, 'bias_anchoring') !== undefined;
+  const anchoringFired = fired.some(b => b.wire.claim_id === 'DSK-B-001');
+  // Anchoring is checked when it fired, or on a bound Run whose model holds no Olumi figure at all. An Olumi figure that
+  // cannot be shown (display-scale filter) is "not checked yet", never "none fire".
+  const anchoringChecked = anchoringFired || (f.runBound && f.olumiEstimateCount === 0);
+  const anchoringWhy = f.runBound ? 'Olumi can’t show its starting figures in this model yet' : 'it needs a current analysis first';
   const checked = [...(narrowChecked ? ['Narrow framing'] : []), ...(anchoringChecked ? ['Anchoring'] : [])];
   const lines = [
     ...(checked.length > 0 ? [`Checked: ${checked.join(', ')}.`] : []),
+    // Science's verbatim sentence sits right under "Checked", so "these" is only the checked patterns.
+    ...(checked.length > 0 && fired.length === 0 ? ["None of these patterns' triggers fire in this model."] : []),
     ...(narrowChecked ? [] : ['Not checked yet: Narrow framing, because the model needs a goal first.']),
-    ...(anchoringChecked ? [] : ['Not checked yet: Anchoring, because it needs a current analysis first.']),
+    ...(anchoringChecked ? [] : [`Not checked yet: Anchoring, because ${anchoringWhy}.`]),
   ];
   for (const b of fired) {
-    lines.push(`${b.wire.name}: where the pattern could bite: ‘${b.item}’. One test: press ‘${b.offer.label}’.`);
+    lines.push(`${b.wire.name}: where the pattern could bite: ‘${b.item}’. One test: press ‘${oneLine(b.offer.label)}’.`);
     if (b.wire.science !== undefined) {
       lines.push(`Decision-science claim: ${b.wire.science.claim_title} · ${b.wire.science.evidence_strength} evidence`);
     }
   }
   if (fired.length > 0) lines.push('Which of these is worth ten minutes now?');
-  else if (checked.length > 0) lines.push("None of these patterns' triggers fire in this model.");
   return { text: lines.join('\n'), exits: fired.map(b => b.offer) };
 }
+
+/** A model label quoted inside one line: whitespace runs (incl. newlines) collapse, and quote marks cannot close the quote. */
+const oneLine = (label: string): string => label.replace(/\s+/g, ' ').trim().replace(/[‘’]/g, "'");
