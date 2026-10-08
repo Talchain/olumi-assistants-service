@@ -383,3 +383,59 @@ describe('RC5 buddy r2 fixes', () => {
   });
 });
 
+/** Paul's served 8 Oct graph shape (guest 41efe2fc): MRR's identity parents plus two CAUSAL parents. */
+function paulsShape(subscribers: number, confirmed = false): Graph {
+  const graph = product(subscribers, confirmed);
+  graph.nodes.push(
+    { id: 'release', kind: 'factor', label: 'Next Pro feature release timing', observed_state: { raw_value: 3, value: 0.25, unit: 'months from now', source: 'cee_inference' } } as unknown as Node,
+    { id: 'backlash', kind: 'factor', label: 'MRR lost to pricing backlash', observed_state: { raw_value: 0, value: 0, unit: '£/month', source: 'cee_inference' } } as unknown as Node,
+  );
+  graph.edges.push({ from: 'release', to: GOAL, effect_direction: 'negative', strength: { mean: -0.5, std: 0.1 } } as never,
+    { from: 'backlash', to: GOAL, effect_direction: 'negative', strength: { mean: -0.8, std: 0.1 } } as never);
+  return graph;
+}
+
+describe('Science §(f) addendum 2: definitional addends count, causal parents are ignored (served 8 Oct finding)', () => {
+  it("Paul's 200 → 8,000 on his served shape asks (£392,000, 19.6×), with Olumi's-reading suffix", () => {
+    const result = goalCoherenceAsk(paulsShape(8_000), { nodeId: SUBSCRIBERS, previousRaw: 200 });
+    expect(result).toMatchObject({ implied: 392_000, ratio: 19.6 });
+    expect(result?.text).toBe(Q4.replace('already be met.', `already be met${READING}.`));
+  });
+
+  it("Paul's 200 → 400 is silent", () => {
+    expect(goalCoherenceAsk(paulsShape(400), { nodeId: SUBSCRIBERS, previousRaw: 200 })).toBeNull();
+  });
+
+  it('a levelled definitional addend is applied (signed) and said after the product', () => {
+    const graph = paulsShape(8_000, true);
+    (node(graph, GOAL).nonlinear_identity as unknown as Record<string, unknown>).addends = ['backlash'];
+    level(graph, 'backlash').raw_value = -2_000;
+    const result = goalCoherenceAsk(graph, { nodeId: SUBSCRIBERS, previousRaw: 200 });
+    expect(result).toMatchObject({ implied: 390_000 });
+    expect(result?.text).toContain('At £49 × 8,000 − £2,000, MRR today would be about £390,000');
+  });
+
+  it('a causal parent never enters today\'s level, whatever its figure', () => {
+    const graph = paulsShape(8_000, true);
+    level(graph, 'backlash').raw_value = -390_000;
+    expect(goalCoherenceAsk(graph, { nodeId: SUBSCRIBERS, previousRaw: 200 })).toMatchObject({ implied: 392_000 });
+  });
+
+  it('a levelless definitional addend is skipped: the ask fires only if A × B alone crosses 10×', () => {
+    const graph = paulsShape(8_000, true);
+    (node(graph, GOAL).nonlinear_identity as unknown as Record<string, unknown>).addends = ['backlash'];
+    delete node(graph, 'backlash').observed_state;
+    expect(goalCoherenceAsk(graph, { nodeId: SUBSCRIBERS, previousRaw: 200 })).toMatchObject({ implied: 392_000 });
+    const small = paulsShape(4_000, true);
+    (node(small, GOAL).nonlinear_identity as unknown as Record<string, unknown>).addends = ['backlash'];
+    delete node(small, 'backlash').observed_state;
+    expect(goalCoherenceAsk(small, { nodeId: SUBSCRIBERS, previousRaw: 200 })).toBeNull();
+  });
+
+  it('an addend that is not one of the goal\'s parents fails closed', () => {
+    const graph = product(8_000, true);
+    (node(graph, GOAL).nonlinear_identity as unknown as Record<string, unknown>).addends = ['nowhere'];
+    expect(ask(graph)).toBeNull();
+  });
+});
+
