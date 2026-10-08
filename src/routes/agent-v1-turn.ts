@@ -111,8 +111,7 @@ import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { identityAutoIssueAllowed, identityCardToIssue, identityCardToReoffer, identityIssuedText } from '../orchestrator-v5/agent-lane/identity-card.js';
-import { proposeProductIdentity } from '../orchestrator-v5/agent-lane/identity-proposal.js';
-import { identityConfirmBaseIsWritable } from '../orchestrator-v5/system-events/editable-graph.js';
+import { identityCardOfferable } from '../orchestrator-v5/system-events/identity-confirm-edit.js';
 import { CarriedProposals, withApprovalOfferedOnRow, proposalPendingAction, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
@@ -3954,7 +3953,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const reoffer = identityCardToReoffer({
       toolCalls: result.tool_calls, mutated: result.mutated, fastPath,
       proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
-      readingWaiting: readbackGraph != null && proposeProductIdentity(readbackGraph) !== null && identityConfirmBaseIsWritable(readbackGraph),
+      readingWaiting: readbackGraph != null && identityCardOfferable(readbackGraph),
     });
     if (identityAutoIssueAllowed({ issue: identityCardToIssue(result.tool_calls, result.tool_results), reoffer, heldWaiting: liveHolds.length > 0 })) {
       const issued = await dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode);
