@@ -1,0 +1,87 @@
+[
+  {
+    "path": "src/orchestrator-v5/admission/__tests__/accumulation-chance-credit.test.ts",
+    "blob": "32b023567df4982b9d0f70f87d2f8babd9d9d410",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/admission/identity-evaluations.ts",
+    "blob": "a8a7a9547d992c3afab7d697e2d8f5b4590bd344",
+    "present": true
+  },
+  {
+    "path": "src/orchestrator-v5/admission/target-testability.ts",
+    "blob": "d9ef5e36272fc3cbecb430095db55df8c4e9642f",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/__tests__/accumulation-identity-build.test.ts",
+    "blob": "126f2890d322f85f26bf9ba0fc6d2808bfa34019",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/__tests__/accumulation-product-reconciliation.test.ts",
+    "blob": "ee5d0d578b8fdde1c3b1f33a38787b3dfc035300",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/__tests__/fixtures/accumulation-live2-head.json",
+    "blob": "86acc51afba474265143b035840c4f87d157db2b",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/__tests__/fixtures/accumulation-pilot-head.json",
+    "blob": "38808dd78f72d60065a56091531a7cda1ace1033",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/__tests__/zero-spread-certainty.test.ts",
+    "blob": "6f577591614ba42ba5379a8f3d26c4f075b1a14a",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/accumulation-identity.ts",
+    "blob": "9c2cd4e9ccb0eac1d026f7a2fa55de22c84a02f2",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/admit-model.ts",
+    "blob": "6748ff8fe065dc3d7efa1b74a22fe066042b729b",
+    "present": true
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/goal-certainty.ts",
+    "blob": "167d1c8c0211545ac66042fc838ecc92197a56f4",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/goal-coherence.ts",
+    "blob": "88dbe45c0105dfc2b76a9e2ae4ab6af13d18e1ac",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/identity-proposal.ts",
+    "blob": "9c519a1f67c70eccf256e68f68b121bba6a3bd80",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/reconciling-product.ts",
+    "blob": "b05ad9ef2a657ff08942f23106d0a4c64bc753a2",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/runtime/build-model.ts",
+    "blob": "fc4b3ce163965fece15b021de73b283de017032a",
+    "present": false
+  },
+  {
+    "path": "src/orchestrator-v5/goal-target/goal-chance-licence.ts",
+    "blob": "fe082285046c72f0dbfd90909762cbe23104b522",
+    "present": false
+  },
+  {
+    "path": "tests/unit/agent-lane/accumulation-identity.test.ts",
+    "blob": "c65155454ef196ed75dca02060fbeb55c6f750de",
+    "present": false
+  }
+]

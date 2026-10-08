@@ -42,6 +42,39 @@ const failures = (g: Rec, e: Rec = envelope()) => {
   if (v.kind !== 'not_testable') throw new Error(`fixture must fail P5: ${v.kind}`);
   return v;
 };
+const accumulationFixture = (): { g: Rec; body: Rec } => {
+  const factor_ids = ['stock_today', 'churn_per_month', 'inflow_per_month'];
+  const g: Rec = {
+    nodes: [
+      { id: 'goal', kind: 'goal', label: 'Goal', goal_direction: '>=', goal_threshold: 0.8, goal_threshold_raw: 800,
+        goal_threshold_cap: 1000, goal_threshold_unit: 'subscribers', goal_threshold_frame: 'level', threshold_source: 'user',
+        observed_state: level(500, 'subscribers', 1000) },
+      { id: 'x', kind: 'option', label: 'X', interventions: { inflow_per_month: { value: 0.7 } } },
+      { id: 'y', kind: 'option', label: 'Y', is_baseline: true, interventions: {} },
+      // P5's graph-wide census sees this feed; X reaches it only through the identity's other operand.
+      { id: 'feed', kind: 'option', label: 'Feed', interventions: { u: { value: 0.6 } } },
+      { id: 'u', kind: 'factor', label: 'Unrelated A', observed_state: level() },
+      { id: 'churn_per_month', kind: 'factor', label: 'Unrelated B', observed_state: level(4, '% / month') },
+      { id: 'stock_today', kind: 'factor', label: 'Unrelated C', observed_state: level(500, 'subscribers', 1000) },
+      { id: 'inflow_per_month', kind: 'factor', label: 'Unrelated D', observed_state: level(20, 'subscribers / month') },
+      { id: 'accumulated', kind: 'factor', label: 'Unrelated E', observed_state: level(450, 'subscribers', 1000),
+        nonlinear_identity: { operation: 'accumulation', factor_ids, horizon_months: 12, rate_scale: 0.01, stated_in_brief: false } },
+    ],
+    edges: [edge('x', 'inflow_per_month'), edge('feed', 'u'), edge('u', 'churn_per_month', true),
+      ...factor_ids.map(id => edge(id, 'accumulated')), edge('accumulated', 'goal')],
+  };
+  // Every ordinary link is user-sized in its own ends' units; removing only the carrier yields the linear control.
+  for (const e of g.edges) if (e.provenance.natural_effect !== undefined) {
+    const units = (id: string) => g.nodes.find((n: Rec) => n.id === id)?.observed_state?.unit ?? 'subscribers';
+    e.provenance.natural_effect.amount_unit = units(e.to);
+    e.provenance.natural_effect.per_source_change_unit = units(e.from);
+  }
+  return { g, body: { option_comparison: [
+    { option_id: 'x', probability_of_goal: 0.7, win_probability: 0.5 },
+    { option_id: 'y', probability_of_goal: 0.6, win_probability: 0.5 },
+  ], inference_warnings: [], identity_evaluations: [{ node_id: 'accumulated', evaluated: true, operation: 'accumulation',
+    factor_ids, horizon_months: 12, rate_scale: 0.01, level_source: 'stated_level' }] } };
+};
 
 describe('B2 Gate A: target withholding follows each option and typed dependencies', () => {
   it('B2: three Starter links keep its 40–51% range; Raise and Keep keep their own point chances', () => {
@@ -98,6 +131,33 @@ describe('B2 Gate A: target withholding follows each option and typed dependenci
     expect(chances(out)).toEqual(['keep']);
     expect(warning(out)?.option_ids).toEqual(['raise', 'starter']);
     expect(warning(out)?.per_option.raise.message).toContain('from u to a');
+  });
+
+  it('class 3: an unsized churn feed withholds X moving inflow, while Y keeps its own chance', () => {
+    const { g, body } = accumulationFixture(), v = failures(g, body);
+    expect(v.failures).toHaveLength(1);
+    expect(v.failures).toMatchObject([{ precondition: 'P5', case: 'c', code: 'goal_path_placeholder',
+      links: [{ from: 'u', to: 'churn_per_month' }] }]);
+    const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal');
+    expect(chances(out)).toEqual(['y']);
+    expect(out.option_comparison.find((r: Rec) => r.option_id === 'y').probability_of_goal).toBe(0.6);
+    expect(warning(out)?.option_ids).toEqual(['x']);
+    expect(warning(out)?.per_option).toEqual({ x: { message:
+      "Not shown. It can't yet be tested against your target (at least 800 subscribers), because it needs a size for the link "
+      + 'from Unrelated A to Unrelated B. Roughly how much does Unrelated B change, in percentage points, when Unrelated A rises by £1?',
+    } });
+    expect(out.option_comparison.map((r: Rec) => r.win_probability)).toEqual([0.5, 0.5]);
+  });
+
+  it('class 3 control: the same unsized feed on a linear path leaves X and Y their own chances', () => {
+    const { g, body } = accumulationFixture();
+    delete g.nodes.find((n: Rec) => n.id === 'accumulated').nonlinear_identity;
+    delete body.identity_evaluations;
+    expect(failures(g, body).failures.flatMap(f => f.links ?? [])).toEqual([{ from: 'u', to: 'churn_per_month' }]);
+    const out = withholdGoalFiguresForUntestableTarget(body, g, 'goal');
+    expect(chances(out)).toEqual(['x', 'y']);
+    expect(out.option_comparison.map((r: Rec) => r.probability_of_goal)).toEqual([0.7, 0.6]);
+    expect(warning(out)).toBeUndefined();
   });
 
   it('class 2: a self-attested identity_inputs evaluation withholds everyone fed by its unsized input', () => {

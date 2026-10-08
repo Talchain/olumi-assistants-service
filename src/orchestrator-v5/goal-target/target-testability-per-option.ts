@@ -9,10 +9,11 @@
  * ONE scoping, read by BOTH surfaces: the chat's spoken `say` (`scope-target-not-testable.ts`) and the panel's
  * `per_option[option_id].message` (this module) come from the same per-option failures (`scopedFailuresFor`):
  *  · a failure about the goal itself (its level, its comparator, its unit: cases a, b, d) is every option's;
- *  · a link that is not sized (case c) belongs to its own path and typed product/derived-baseline dependencies.
+ *  · a link that is not sized (case c) belongs to its own path and typed product/accumulation/derived-baseline dependencies.
  * Gate A (Science §(aa), 8 Oct): no own failure means no target withhold and no invented waiting reason.
  */
 import { asAnalysed } from '../../orchestrator/context/placeholder-parts.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 import { exactIdentityOperandLinks, goalBaselineFromIdentityInputs, readProductIdentityCarrier } from '../admission/identity-evaluations.js';
 import {
   reachedGoalPaths,
@@ -67,7 +68,7 @@ function ownSentence(graph: unknown, verdict: Extract<TargetTestability, { kind:
 
 /**
  * Each option's target dependencies: the admission walk over the ANALYSED graph, seeded with its interventions.
- * Linear common paths cancel. A feed into operand A of a product on the goal path affects an option reaching operand B;
+ * Linear common paths cancel. A feed into operand A of a product or accumulation on the goal path affects an option reaching operand B;
  * a feed into a derived goal baseline affects every option. These typed dependencies augment the same path read used by
  * withholding, chat and panel, so `scopedFailuresFor` remains the only failure scoping.
  */
@@ -93,8 +94,13 @@ export function optionPathsOf(
     }
     return reached;
   };
-  const products = nodes.flatMap(n => {
-    const carrier = readProductIdentityCarrier(n);
+  const identities = nodes.flatMap(n => {
+    const product = readProductIdentityCarrier(n);
+    // Science §(aa), class 3: an accumulation operand (inflow/churn/level) → treat as 1.
+    // Read the same typed carrier the Run preserves; an accumulation is declared on a derived node, never the goal.
+    const accumulation = product === null && n.kind !== 'goal'
+      ? NodeV3.shape.nonlinear_identity.safeParse(n.nonlinear_identity).data : undefined;
+    const carrier = product ?? (accumulation?.operation === 'accumulation' ? accumulation : null);
     return carrier !== null && typeof n.id === 'string' && reachFrom(n.id).has(selectedGoal) ? [carrier] : [];
   });
   const baselineOperands = goalBaselineFromIdentityInputs(nodes, selectedGoal, identityEvaluations)
@@ -106,7 +112,7 @@ export function optionPathsOf(
       if (typeof e.from !== 'string' || typeof e.to !== 'string' || kindOf.get(e.from) === 'option'
         || kindOf.get(e.from) === 'decision' || kindOf.get(e.to) === 'option' || kindOf.get(e.to) === 'decision') return false;
       const feed = reachFrom(e.to);
-      return baselineOperands.some(id => feed.has(id)) || products.some(c => c.factor_ids.some(a => feed.has(a)
+      return baselineOperands.some(id => feed.has(id)) || identities.some(c => c.factor_ids.some(a => feed.has(a)
         && c.factor_ids.some(b => b !== a && ownReach.has(b))));
     });
     const links = [...p.links, ...dependencies].flatMap(l =>
