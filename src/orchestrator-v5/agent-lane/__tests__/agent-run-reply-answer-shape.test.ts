@@ -328,6 +328,11 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     const bareFace = [bare.shape?.headline ?? bare.text, ...(bare.shape?.bullets ?? [])].join('\n');
     expect(bare.shape, 'control shapes').not.toBeNull();
     expect(bareFace.includes(ownA) && !bareFace.includes(SPREAD), 'control reproduces the split').toBe(true);
+    // Codex r4 P1: spacing and the Agent's emphasis inside the note still bind the note as it stands
+    for (const variant of [`${ownA}  ${SPREAD}`, `${ownA} ${SPREAD.replace('wider spread', 'wider **spread**')}`]) {
+      const t = text.replace(`${ownA} ${SPREAD}`, variant);
+      expect(ownWordsLeadTexts(t, raise, split), variant).toEqual([variant, ownA]);
+    }
     // control: without the note sentence in the reply, only the sentence is lead
     expect(ownWordsLeadTexts([ownA, ownC].join('\n'), raise, split)).toEqual([ownA]);
   });

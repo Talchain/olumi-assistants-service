@@ -88,8 +88,18 @@ export function ownWordsLeadTexts(reply: string, l: GoalChanceScreenLine, senten
   const said = reply.split('\n').map((row) => row.replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, ''))
     .flatMap((row) => sentencesOf(row)).find((sentence) => chanceInOwnWords(sentence, l));
   if (said === undefined) return [];
-  const withNote = l.spread_note !== undefined ? `${said} ${l.spread_note}` : undefined;
-  return withNote !== undefined && reply.includes(withNote) ? [withNote, said] : [said];
+  if (l.spread_note === undefined) return [said];
+  // The note as it actually stands right after the sentence (spacing and the Agent's emphasis aside), bound as said.
+  const plain = (t: string): string => t.replace(/['"‘’“”`*_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const at = reply.indexOf(said);
+  const after = reply.slice(at + said.length);
+  const lead = /^[ \t]+/.exec(after)?.[0] ?? '';
+  const want = plain(l.spread_note);
+  for (let end = lead.length + 1; end <= Math.min(after.length, lead.length + l.spread_note.length * 2); end += 1) {
+    if (after[end - 1] === '\n') break;
+    if (plain(after.slice(lead.length, end)) === want) return [`${said}${after.slice(0, end)}`, said];
+  }
+  return [said];
 }
 
 /** Whether the reply already gives this option's figure: the screen's sentence, or the option named with its figure. */
