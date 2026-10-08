@@ -329,7 +329,8 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(bare.shape, 'control shapes').not.toBeNull();
     expect(bareFace.includes(ownA) && !bareFace.includes(SPREAD), 'control reproduces the split').toBe(true);
     // Codex r4 P1: spacing and the Agent's emphasis inside the note still bind the note as it stands
-    for (const variant of [`${ownA}  ${SPREAD}`, `${ownA} ${SPREAD.replace('wider spread', 'wider **spread**')}`]) {
+    for (const variant of [`${ownA}  ${SPREAD}`, `${ownA} ${SPREAD.replace('wider spread', 'wider **spread**')}`,
+      `${ownA} ${SPREAD.replace('further short.', 'further **short.**')}`]) {
       const t = text.replace(`${ownA} ${SPREAD}`, variant);
       expect(ownWordsLeadTexts(t, raise, split), variant).toEqual([variant, ownA]);
     }

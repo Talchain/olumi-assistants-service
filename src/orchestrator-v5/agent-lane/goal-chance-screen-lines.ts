@@ -97,7 +97,10 @@ export function ownWordsLeadTexts(reply: string, l: GoalChanceScreenLine, senten
   const want = plain(l.spread_note);
   for (let end = lead.length + 1; end <= Math.min(after.length, lead.length + l.spread_note.length * 2); end += 1) {
     if (after[end - 1] === '\n') break;
-    if (plain(after.slice(lead.length, end)) === want) return [`${said}${after.slice(0, end)}`, said];
+    if (plain(after.slice(lead.length, end)) !== want) continue;
+    // Closing emphasis/quotes after the note's stop belong to it ("…further **short.**": Codex r5 on #2783).
+    const close = /^["'”’`*_]{0,4}/.exec(after.slice(end))![0];
+    return [`${said}${after.slice(0, end + close.length)}`, said];
   }
   return [said];
 }
