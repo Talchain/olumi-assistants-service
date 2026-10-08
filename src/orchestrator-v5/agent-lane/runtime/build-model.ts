@@ -1,4 +1,4 @@
-import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate } from '../../goal-target/event-by-date-model.js';
+import { briefAttestsEventByDate, draftedTeamPartOf, isQuantityGoalCandidate, eventByDateRefusalOf } from '../../goal-target/event-by-date-model.js';
 import { chanceGoalDeadlineAsk } from '../../goal-target/goal-kind.js';
 import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure } from '../goal-scope.js';
 /**
@@ -37,6 +37,7 @@ import { reconciliationPending, untypedScopeComponents, untypedScopeDisclosure }
  */
 
 import { createHash } from 'node:crypto';
+import { reachableNodeIds, optionsWithoutGoalPath } from '../../../orchestrator/graph-structure-validator.js';
 import { verifiedOptionSetting } from '../verified-option-setting.js';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { collapsedChainIssue, collapsedChains, costOffRevenueLine, costsAgainst, droppedStatedCostLines, drawsChainAsTheUsers, unmodelledMechanismChallenge, withoutUnsupportedMechanisms, type CostOffRevenue, type UnmodelledMechanism } from '../unsupported-mechanism.js';
@@ -47,7 +48,7 @@ import { holdAcrossRetry, keepOptionsAndQuantitiesApart, keptApartLine, notToldA
 import { markOlumiOptions } from '../olumi-option-marker.js';
 import { widenDraft } from './widen-draft.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
-import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
+import { admitCandidateModel, admitOrdinaryCandidateModel, admittedReachesGoal, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, metricReadsAsPlainTotal, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type ConstructionAdmission, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
   COMPACT_LIMITS,
@@ -460,8 +461,8 @@ export const BUILD_INSTRUCTIONS = [
 ].join(' ');
 
 /** Only a brief attested by the deterministic reader may delegate its empty event forecast to admission. */
-export function buildInstructionsForBrief(brief: string): string {
-  return briefAttestsEventByDate(brief)
+export function buildInstructionsForBrief(brief: string, construction?: ConstructionAdmission): string {
+  return (construction?.event_by_date_prompted ?? briefAttestsEventByDate(brief))
     ? `${BUILD_INSTRUCTIONS} The deterministic reader attests an event by a date. The event-share parts replace ordinary causal goal links. When no stated facts belong in these collections, leave its factors, risks, outcomes, links and identities empty for this slice. Keep every stated limit, factor, risk, option setting and link; admission will disclose any link the deadline forecast cannot use.`
     : BUILD_INSTRUCTIONS;
 }
@@ -953,6 +954,48 @@ export function firstConstructInput(brief: string): string {
   const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
     .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
   return notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
+}
+
+/** A missing option-to-goal mechanism, read from what admission actually kept. */
+export interface OutcomePathIssue {
+  readonly option_id: string;
+  readonly option: string;
+  readonly factors: readonly string[];
+  readonly dead_end_ids: readonly string[];
+  readonly dead_ends: readonly string[];
+  readonly issue: string;
+}
+
+export interface ConstructionGaps {
+  readonly path_missing: readonly { readonly option_id: string; readonly option: string; readonly dead_end_ids: readonly string[]; readonly dead_ends: readonly string[] }[];
+}
+
+export function pathIssues(admitted: Pick<AdmittedModel, 'nodes' | 'edges' | 'goal_constraints'>): OutcomePathIssue[] {
+  const goals = admitted.nodes.filter((n) => n.kind === 'goal');
+  if (goals.length === 0) return []; // The existing no-goal refusal owns this case.
+  const refusedOptions = optionsWithoutGoalPath(admitted);
+  const nodeOf = new Map(admitted.nodes.map((n) => [n.id, n]));
+  const directed = admitted.edges.filter((e) => (e as { edge_type?: string }).edge_type !== 'bidirected');
+  const outgoing = new Map<string, string[]>();
+  for (const edge of directed) outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge.to]);
+  const quoted = (s: string): string => JSON.stringify(s);
+  const goal = goals.map((n) => quoted(n.label)).join(', ');
+  return admitted.nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && refusedOptions.has(n.id)).map((option) => {
+    const factors = (outgoing.get(option.id) ?? []).map((id) => nodeOf.get(id)).filter((n) => n?.kind === 'factor').map((n) => n!.label);
+    const branch = reachableNodeIds(directed, [option.id]);
+    const terminals = [...branch].filter((id) => (outgoing.get(id) ?? []).length === 0);
+    // Admission normally breaks loops. A closed cycle still needs an honest name, not an empty dead-end list.
+    const dead_end_ids = terminals.length > 0 ? terminals : [...branch];
+    const dead_ends = dead_end_ids.map((id) => nodeOf.get(id)?.label ?? id);
+    // The structured gap preserves identities; the drafter's existing words stay label-only and deduplicated.
+    const deadEndLabels = [...new Set(dead_ends)];
+    const actsOn = factors.length > 0 ? factors.map(quoted).join(', ') : 'no connected factor';
+    return {
+      option_id: option.id, option: option.label, factors, dead_end_ids, dead_ends,
+      issue: `${quoted(option.label)} acts on ${actsOn}, whose links end at ${deadEndLabels.map(quoted).join(', ')}; nothing it changes reaches ${goal}. `
+        + `Link what it changes, through a mechanism you can state in one line, to ${goal}, or say in unknowns which mechanism is missing.`,
+    };
+  });
 }
 
 export function loopIssues(admitted: Pick<AdmittedModel, 'withheld'>): string[] {
@@ -1504,7 +1547,8 @@ export async function buildModelFromBrief(
   wideningCallStructured?: CallStructuredModel,
 ): Promise<ToolResult> {
   const budget = budgetFor('gpt-5.6-terra', 'whole');
-  const buildInstructions = buildInstructionsForBrief(brief);
+  const construction: ConstructionAdmission = { event_by_date_prompted: briefAttestsEventByDate(brief) };
+  const buildInstructions = buildInstructionsForBrief(brief, construction);
   let candidate: CandidateModel;
   // ⛔ A CUT-OFF ANSWER IS SAID AS ONE, NEVER AS THE PARSE ERROR IT CAUSES (served 770a477: 2/14 first briefs stopped
   // at output_tokens 6000 exactly and the refusal carried a SyntaxError). Same user words (`construction_failed`).
@@ -1530,10 +1574,10 @@ export async function buildModelFromBrief(
     }
     // A4u: a drafted count × constant money-per-one product is read as the per-one link it is (`per-one-product.ts`).
     candidate = perOneLinksForConstantProducts(JSON.parse(out.text) as CandidateModel);
-    if (candidate.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidate.goal)) {
+    if (!construction.event_by_date_prompted && candidate.goal.kind === 'event_by_date' && isQuantityGoalCandidate(candidate.goal)) {
       candidate = { ...candidate, goal: { ...candidate.goal, kind: null } };
     }
-    if (candidate.goal.kind === 'event_by_date' && !briefAttestsEventByDate(brief, candidate.goal)
+    if (!construction.event_by_date_prompted && candidate.goal.kind === 'event_by_date' && !briefAttestsEventByDate(brief, candidate.goal)
       && candidate.factors.length === 0 && candidate.risks.length === 0 && candidate.outcomes.length === 0 && candidate.links.length === 0) {
       return { ok: false, mutated: false, refusal: 'construction_needs_redraft',
         detail: 'That draft has no usable model for this brief. Ask me to draft it again with the factors and links that explain the outcome.' };
@@ -1594,8 +1638,39 @@ export async function buildModelFromBrief(
    * throughout, so a cut there would only take a risk the user can see (DL #75 5916217417, Paul 30 Sep: "new models have
    * fewer risks"; `construction-keeps-drafted-risks.test.ts`) and change no result.
    */
+  // Keep the existing repair route available to an ordinary draft before deciding that a failed event
+  // admission must refuse. These intermediate graphs are never registered without the final structural gate.
+  const eventFallbackRefusals = new WeakMap<AdmittedModel, string>();
+  const admitForBuild = (model: CandidateModel, levelCandidate = model): AdmittedModel => {
+    const args = [model, {}, brief, goalLevelTheUserWrote(levelCandidate, brief), writtenAgain,
+      (c: CandidateModel) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd] as const;
+    const result = admitCandidateModel(...args, construction);
+    const refusal = eventByDateRefusalOf(result);
+    if (refusal === null) {
+      // An event construction over the size cap keeps the ordinary model when that reaches the goal: the same rule as a
+      // failed slice. The cap is met by Olumi's own option x capacity scaffolding, not the draft (census r3 B3-d2: 36 links).
+      if (draftedTeamPartOf(result) === null) return result;
+      const size = assessConstructionSize(result);
+      if (size.within || size.user_material_exceeds_limit) return result;
+      try {
+        const ordinary = admitOrdinaryCandidateModel(...args);
+        if (admittedReachesGoal(ordinary)) return ordinary;
+      } catch {
+        // No ordinary model: the size gate below decides, as before.
+      }
+      return result;
+    }
+    try {
+      const ordinary = admitOrdinaryCandidateModel(...args);
+      eventFallbackRefusals.set(ordinary, refusal);
+      return ordinary;
+    } catch {
+      eventFallbackRefusals.set(result, refusal);
+      return result;
+    }
+  };
   const trialGraph = (c: CandidateModel) => {
-    const a = admitCandidateModel(mintOrFold(prepareProvisionalCandidate(c, brief).candidate).model, {}, brief, goalLevelTheUserWrote(c, brief), writtenAgain, (x) => briefGoalLevel(x, brief), sizeWritten, sizeRangeEnd);
+    const a = admitForBuild(mintOrFold(prepareProvisionalCandidate(c, brief).candidate).model, c);
     return { nodes: a.nodes, edges: a.edges };
   };
   const unsupported = withoutUnsupportedMechanisms(candidate, brief, mintedLater(candidate));
@@ -1617,7 +1692,7 @@ export async function buildModelFromBrief(
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
   let gapResidual = firstIdentity.residual;
-  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
+  let admitted = admitForBuild(firstIdentity.model, candidate);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1693,12 +1768,18 @@ export async function buildModelFromBrief(
    */
   const loops = loopIssues(admitted);
   const loopsAsked = needsSizeRetry ? [] : loops;
+  // Like loops, a path issue never moves an oversized draft onto the repair route.
+  const pathsAsked = needsSizeRetry ? [] : pathIssues(admitted);
+  const reachedOptions = (a: Pick<AdmittedModel, 'nodes' | 'edges' | 'goal_constraints'>): number => {
+    const refused = optionsWithoutGoalPath(a);
+    return a.nodes.filter((n) => n.kind === 'option' && n.is_baseline !== true && !refused.has(n.id)).length;
+  };
   // A4: a written money range no link carries (never on the size route, where the retry only sheds).
   const rangesAsked = needsSizeRetry ? [] : uncarriedRangeIssues(brief, admitted, candidate);
   // ⭐ d4 (Science d5 (2), DL 6 Oct): the user's two statements collapsed into one Olumi figure are asked of the retry, drawn
   // as the user wrote them. Adopted ONLY when both bind as the user's and the product is gone; otherwise the first stands.
   const chainsAsked = needsSizeRetry ? [] : collapsedChains(candidate, brief);
-  const asked = [...repairIssues(preparation), ...loopsAsked, ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
+  const asked = [...repairIssues(preparation), ...loopsAsked, ...pathsAsked.map((p) => p.issue), ...rangesAsked, ...chainsAsked.map(collapsedChainIssue)];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -1748,7 +1829,7 @@ export async function buildModelFromBrief(
         const retryPrepared = prepareProvisionalCandidate(retryRaw, brief);
         const retryCandidate = retryPrepared.candidate;
         const retryIdentity = mintOrFold(retryCandidate);
-        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
+        const retryAdmitted = admitForBuild(retryIdentity.model, retryCandidate);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1785,10 +1866,13 @@ export async function buildModelFromBrief(
           // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
           retryOpen <= gapCount(preparation) &&
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
+            || (pathsAsked.length > 0 && keepsEveryRegisteredOption && reachedOptions(retryAdmitted) > reachedOptions(admitted))
             || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)
             // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
             || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)
             || (chainsAsked.length > 0 && keepsEveryRegisteredOption)) &&
+          // Every asked path retry retains options and never reduces reachability; a path-only reason above needs strict progress.
+          (pathsAsked.length === 0 || (keepsEveryRegisteredOption && reachedOptions(retryAdmitted) >= reachedOptions(admitted))) &&
           // A chain asked is drawn as the user's, or nothing is adopted (DL: never the product as well, never half).
           chainsAsked.every((c) => drawsChainAsTheUsers(c, retryCandidate, retryAdmitted, firstCandidate)) &&
           // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
@@ -1805,6 +1889,7 @@ export async function buildModelFromBrief(
           candidate = retryCandidate;
           admissionCandidate = retryIdentity.model;
           admitted = retryAdmitted;
+          // #2854 sets admissionCandidate here
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
           gapResidual = retryIdentity.residual;
@@ -1833,7 +1918,13 @@ export async function buildModelFromBrief(
       trace = { retried: true, reasons, outcome: 'retry_failed' };
     }
   }
+  // Separate from projection losses: a missing path must not change existing disclosure counts or readers.
+  const constructionGaps: ConstructionGaps = {
+    path_missing: pathIssues(admitted).map(({ option_id, option, dead_end_ids, dead_ends }) => ({ option_id, option, dead_end_ids, dead_ends })),
+  };
   try { observeConstruction?.(trace); } catch { /* an observer never costs the build */ }
+  // Read before the later steps replace `admitted`; judged on the graph that would be registered (below).
+  const eventFallbackRefusal = eventFallbackRefusals.get(admitted);
 
   if (!size.within && !size.user_material_exceeds_limit) {
     return {
@@ -2194,6 +2285,11 @@ export async function buildModelFromBrief(
       issues: parsed.error.issues.slice(0, 5).map((i) => i.path.join('.')),
     };
   }
+  // A flagged draft whose event slice failed keeps its ordinary graph unless that graph, as registered, cannot reach
+  // the goal (B3 086e4624). Reachability only: base registers kept user loops (construction-acyclic-verified-arms P-M10).
+  if (eventFallbackRefusal !== undefined && draftedTeamPartOf(parsed.data) === null && !admittedReachesGoal(parsed.data as never)) {
+    return { ok: false, mutated: false, refusal: 'event_goal_unadmitted', detail: eventFallbackRefusal };
+  }
 
   /**
    * ⛔⛔ THE CALLER'S EMPTY-GRAPH GUARD WENT STALE WHILE THIS WAS THINKING.
@@ -2321,6 +2417,7 @@ export async function buildModelFromBrief(
     // What the projection could not carry — the Agent is expected to say this.
     withheld: admitted.withheld.map((w) => ({ from: w.from, to: w.to, reason: w.reason })),
     projected_field_count: admitted.loss.length,
+    ...(constructionGaps.path_missing.length > 0 ? { construction_gaps: constructionGaps } : {}),
     ...(admitted.treated_as_context !== undefined ? { treated_as_context: admitted.treated_as_context } : {}),
     // Options that say what they DO, versus options that are inert. An inert
     // option can never be compared, whatever values arrive later.

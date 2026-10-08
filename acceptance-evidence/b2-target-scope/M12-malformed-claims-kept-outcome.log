@@ -1,0 +1,32 @@
+
+ RUN  v4.1.10 /private/tmp/accel-er-b2scope-cee
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts (14 tests | 2 failed | 12 skipped) 19ms
+     × a legacy partial warning with claims undefined grants no share or outcome permission 14ms
+     × a legacy partial warning with claims malformed grants no share or outcome permission 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a legacy partial warning with claims undefined grants no share or outcome permission
+ FAIL  src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts > B2 Gate A: target withholding follows each option and typed dependencies > a legacy partial warning with claims malformed grants no share or outcome permission
+AssertionError: expected 'This run withheld a target chance for…' not to contain 'outcomes appear on the panel'
+
+Expected: "outcomes appear on the panel"
+Received: "This run withheld a target chance for the options in `option_ids`. Never state or estimate those points. Their outcomes appear on the panel; never quote, estimate or compare those outcomes. Other options’ licensed points and ranges may be said as written, subject to the run’s other withhold rules. The share of runs that supported any option and any leader are withheld; never state them. Say `say` once, as written, when you describe the run."
+
+ ❯ src/orchestrator-v5/goal-target/__tests__/b2-target-scope.test.ts:178:28
+    176|     expect(agent.option_ids).toEqual(['starter']);
+    177|     expect(agent.note).not.toContain('Shares may be said');
+    178|     expect(agent.note).not.toContain('outcomes appear on the panel');
+       |                            ^
+    179|     expect(agent.note).toContain('any leader are withheld');
+    180|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 12 skipped (14)
+   Start at  16:46:15
+   Duration  7.35s (transform 5.42s, setup 194ms, import 6.96s, tests 19ms, environment 0ms)
+

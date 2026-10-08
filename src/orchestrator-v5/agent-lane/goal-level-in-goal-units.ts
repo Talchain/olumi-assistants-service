@@ -12,8 +12,9 @@ import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { readMoneyTotal, readUnitParts } from './same-unit.js';
 import { sayFigure } from './say-figure.js';
 import { levelBeforeTermsTail } from './identity-proposal.js';
+import { GOAL_LEVEL_FROM_IDENTITY_INPUTS } from '../admission/identity-evaluations.js';
 
-export const GOAL_LEVEL_FROM_IDENTITY_INPUTS = 'GOAL_LEVEL_FROM_IDENTITY_INPUTS';
+export { GOAL_LEVEL_FROM_IDENTITY_INPUTS } from '../admission/identity-evaluations.js';
 /** ISL's template (robustness_analyzer_v2.py): `{level:,.2f} in its own units;`. Bounded: no backtracking run. */
 const OWN_UNITS = /: (-?\d{1,3}(?:,\d{3}){0,6}(?:\.\d{1,6})?) in its own units;/;
 
